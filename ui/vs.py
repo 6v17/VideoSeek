@@ -33,6 +33,7 @@ class SearchWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.table = None
         self.lbl_folder = None
         self.btn_search = None
         self.btn_clear = None
@@ -329,12 +330,12 @@ class MainWindow(QMainWindow):
             btn_layout.setContentsMargins(0, 0, 0, 0)
             btn_layout.setSpacing(10)
 
-            p_btn = QPushButton("预览")
-            p_btn.setFixedSize(60, 30)  # 固定大小更好看
+            p_btn = QPushButton("预览片段")
+            p_btn.setFixedSize(60, 60)  # 固定大小更好看
             p_btn.clicked.connect(lambda _, p=video_path, t=sec: self.handle_play(p, t))
 
-            l_btn = QPushButton("定位")
-            l_btn.setFixedSize(60, 30)
+            l_btn = QPushButton("文件夹中定位")
+            l_btn.setFixedSize(80, 60)
             l_btn.clicked.connect(lambda _, p=video_path: open_in_explorer(p))
 
             btn_layout.addWidget(p_btn)
