@@ -2,7 +2,6 @@ import os
 import time
 import json
 import hashlib
-import torch
 import sys
 import subprocess
 import subprocess
@@ -18,9 +17,19 @@ def measure_time(message=""):
         return wrapper
     return decorator
 
+
+import gc
+
+
 def free_memory():
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    """
+    【ONNX 瘦身版】不再依赖 torch。
+    主要通过 Python 自带的垃圾回收来清理内存。
+    """
+    # 强制进行 Python 层的垃圾回收
+    gc.collect()
+
+    print("已清理系统内存残留。")
 
 def ensure_folder_exists(file_path):
     folder = os.path.dirname(file_path)
