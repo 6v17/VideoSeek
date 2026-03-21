@@ -6,11 +6,12 @@ import numpy as np
 import os
 from src.extract_frames import extract_frames_with_ffmpeg
 from src.faiss_index import save_vectors, create_clip_index
-from src.utils import free_memory, ensure_folder_exists, measure_time
+from src.utils import free_memory, ensure_folder_exists, measure_time, get_resource_path
 
 # 加载模型
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model, preprocess = clip.load("ViT-B/32", device=device)
+model_path = get_resource_path(os.path.join("models", "ViT-B-32.pt"))
+model, preprocess = clip.load(model_path, device=device)
 
 
 def get_clip_embeddings_batch(frames, batch_size=32):

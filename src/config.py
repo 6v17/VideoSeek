@@ -1,7 +1,9 @@
 import json
 import os
 
-CONFIG_FILE = "config.json"  # 配置文件路径
+from src.utils import get_resource_path
+
+CONFIG_FILE = get_resource_path("config.json") # 配置文件路径
 
 def load_config():
     """

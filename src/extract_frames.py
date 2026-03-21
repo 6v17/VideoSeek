@@ -2,6 +2,8 @@ import subprocess
 import numpy as np
 import cv2
 
+from src.utils import get_resource_path
+
 
 def extract_frames_with_ffmpeg(video_path):
     """
@@ -18,8 +20,11 @@ def extract_frames_with_ffmpeg(video_path):
     if width == 0 or height == 0:
         return [], []
 
+    ffmpeg_bin = get_resource_path("ffmpeg.exe")
+
+    # 【核心改动 2】：第一个参数用 ffmpeg_bin，而不是字符串 "ffmpeg"
     command = [
-        "ffmpeg", "-i", video_path,
+        ffmpeg_bin, "-i", video_path,
         "-vf", f"fps={fps}",
         "-f", "image2pipe",
         "-pix_fmt", "bgr24",
@@ -27,7 +32,7 @@ def extract_frames_with_ffmpeg(video_path):
     ]
 
     # 启动异步管道
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,creationflags=0x08000000)
 
     frames = []
     timestamps = []
