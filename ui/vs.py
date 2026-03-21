@@ -1,177 +1,362 @@
-from PySide6.QtWidgets import QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout, \
-    QWidget, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QUrl, Qt,Signal,Slot
+import os
 import sys
-from PySide6.QtGui import QPixmap
-from PySide6.QtMultimedia import QMediaPlayer
-from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import QSplitter
+import time
+
+import cv2
+from PySide6.QtWidgets import *
+from PySide6.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtMultimedia import *
+from PySide6.QtMultimediaWidgets import *
+
+from src.config import load_config
+# 确保这些 import 路径与你的项目结构一致
+from src.core import run_search
+from src.utils import create_preview_clip, open_in_explorer, get_single_thumbnail
+
+
+class SearchWorker(QThread):
+    result_ready = Signal(list)
+    finished = Signal()
+
+    def __init__(self, folder, query, is_text):
+        super().__init__()
+        self.folder, self.query, self.is_text = folder, query, is_text
+
+    def run(self):
+        # 执行后台搜索
+        results = run_search(self.folder, self.query, self.is_text)
+        self.result_ready.emit(results)
+        self.finished.emit()
+
 
 class MainWindow(QMainWindow):
-    upload_signal = Signal(str)
-    clear_signal = Signal()
-    search_signal = Signal()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VideoSeek")
-        self.resize(1080, 600)
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        self.lbl_folder = None
+        self.btn_search = None
+        self.btn_clear = None
+        self.btn_upload = None
+        self.text_search = None
+        self.img_label = None
+        self.btn_select_folder = None
+        self.worker = None
+        self.setWindowTitle("VideoSeek Pro - 智能视频检索")
+        self.resize(1240, 850)
+
+        # 1. 初始化目录和路径
+        self.cache_dir = os.path.abspath("data/cache")
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_path = os.path.join(self.cache_dir, "preview.mp4")
+        self.current_img_path = None
+
+        # 2. 构建界面
+        self.setup_ui()
+
+        # 3. 启用拖拽
         self.setAcceptDrops(True)
-        #主布局
-        main_layout = QHBoxLayout(self.central_widget)
 
-        #左侧布局
-        self.left_layout = QVBoxLayout()
-        self.upload_btn = QPushButton("上传")
-        self.clear_btn = QPushButton("清空")
-        self.search_btn = QPushButton("开始检索")
-        # 2. 创建 QLabel 用于显示图片
-        self.img_label = QLabel("暂无图片")
-        self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.img_label.setMinimumSize(400, 200)
-        self.img_label.setStyleSheet("border: 1px solid gray;")
-
-        self.upload_btn.clicked.connect(self.upload_file)
-        self.clear_btn.clicked.connect(self.clear_file)
-        self.search_btn.clicked.connect(self.start_search)
-
-
-        self.btn_layout = QVBoxLayout()
-        self.btn_layout.addWidget(self.upload_btn)
-        self.btn_layout.addWidget(self.clear_btn)
-        self.btn_layout.addWidget(self.search_btn)
-        self.left_layout.addWidget(self.img_label)
-        self.left_layout.addLayout(self.btn_layout)
-
-         # 创建右侧垂直布局并添加示例控件
-        self.right_layout = QVBoxLayout()
-        # 创建控件
-        self.video_widget = QVideoWidget()
+        # 4. 初始化播放器
         self.media_player = QMediaPlayer()
         self.media_player.setVideoOutput(self.video_widget)
+        # 自动加载上次保存的路径
+        saved_config = load_config()
+        last_path = saved_config.get("video_folder", "")
+        if last_path and os.path.exists(last_path):
+            self.lbl_folder.setText(last_path)
+            self.video_library_path = last_path
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([
-            "序号", "视频名", "时间", "相似度", "操作"
-        ])
+    def setup_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QHBoxLayout(central)
 
-        # ⭐ 关键：只用 splitter 管理 video + table
+        # --- 左侧面板 ---
+        left_panel = QVBoxLayout()
+
+        # 图片预览区
+        self.img_label = QLabel("将图片拖入此处\n或点击下方上传")
+        self.img_label.setAlignment(Qt.AlignCenter)
+        self.img_label.setFixedSize(300, 300)
+        self.img_label.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #555; 
+                border-radius: 10px;
+                background: #1e1e1e; 
+                color: #888;
+                font-size: 14px;
+            }
+        """)
+
+        # 文字搜索框
+        self.text_search = QLineEdit()
+        self.text_search.setPlaceholderText("或者输入文字描述搜索...")
+        self.text_search.setStyleSheet("height: 35px; padding-left: 10px; font-size: 13px;")
+
+        # 按钮组
+        self.btn_upload = QPushButton("选择图片")
+        self.btn_clear = QPushButton("清空所有内容")  # 补回清空按钮
+        self.btn_search = QPushButton("开始检索")
+
+        # 设置按钮样式
+        self.btn_upload.setFixedHeight(35)
+        self.btn_clear.setFixedHeight(35)
+        self.btn_search.setFixedHeight(45)
+        self.btn_search.setStyleSheet("""
+            QPushButton {
+                background-color: #2E7D32; 
+                color: white; 
+                font-weight: bold; 
+                font-size: 15px;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #388E3C; }
+            QPushButton:disabled { background-color: #555; }
+        """)
+
+        # 信号连接
+        self.btn_upload.clicked.connect(self.upload_file)
+        self.btn_clear.clicked.connect(self.clear_all)
+        self.btn_search.clicked.connect(self.start_search)
+
+        # --- 视频库选择区 ---
+        folder_layout = QHBoxLayout()
+        self.lbl_folder = QLineEdit()
+        self.lbl_folder.setPlaceholderText("请选择视频库文件夹...")
+        self.lbl_folder.setReadOnly(True)  # 只读，防止乱打字
+        self.lbl_folder.setStyleSheet("height: 25px; background: #333; color: #ccc;")
+
+        self.btn_select_folder = QPushButton("选择视频库")
+        self.btn_select_folder.setFixedWidth(80)
+        self.btn_select_folder.clicked.connect(self.select_video_folder)
+
+        folder_layout.addWidget(self.lbl_folder)
+        folder_layout.addWidget(self.btn_select_folder)
+
+        # 将它插入到左侧布局的最顶部
+        left_panel.insertLayout(0, folder_layout)
+
+        left_panel.addWidget(self.img_label)
+        left_panel.addWidget(self.text_search)
+        left_panel.addWidget(self.btn_upload)
+        left_panel.addWidget(self.btn_clear)  # 加入布局
+        left_panel.addWidget(self.btn_search)
+        left_panel.addStretch()
+
+        # --- 右侧面板 ---
+        right_panel = QVBoxLayout()
+
+        # 视频播放器区域
+        self.video_widget = QVideoWidget()
+        self.video_widget.setMinimumHeight(400)
+        self.video_widget.setStyleSheet("background-color: black;")
+
+        # 结果表格
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["预览图", "视频名称", "匹配时间", "相似度评分", "操作"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)  # 不可编辑
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)  # 整行选择
+        # 让表头文字居中
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
+        # 设置表头字体加粗（好康+1）
+        font = self.table.horizontalHeader().font()
+        font.setBold(True)
+        self.table.horizontalHeader().setFont(font)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                background-color: #2b2b2b;
+                color: #dcdcdc;
+                gridline-color: #444;
+                border: none;
+                font-size: 13px;
+            }
+            QHeaderView::section {
+                background-color: #3c3f41;
+                padding: 4px;
+                border: 1px solid #222;
+                color: #aaa;
+            }
+            QTableWidget::item:selected {
+                background-color: #2E7D32; /* 选中颜色和检索按钮呼应 */
+            }
+        """)
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.video_widget)
         splitter.addWidget(self.table)
+        splitter.setStretchFactor(0, 1)  # 播放器和表格比例平衡
+        splitter.setStretchFactor(1, 1)
 
-        # ⭐ 布局顺序
-        self.right_layout.addWidget(splitter)
+        right_panel.addWidget(splitter)
 
-        self.add_result(1,r"C:\Users\LiuWei\Desktop\12月30日.mp4",2,0.99)
+        layout.addLayout(left_panel, 1)
+        layout.addLayout(right_panel, 3)
 
-        # 5. 将左右布局添加到主布局，设置拉伸因子（两者宽度比例相等）
-        main_layout.addLayout(self.left_layout, 1)   # 拉伸因子为1
-        main_layout.addLayout(self.right_layout, 1)  # 拉伸因子为1
-    #播放视频
-    def play_result(self, video, time_sec):
-        print(f"播放: {video} @ {time_sec}")
-        self.media_player.setSource(QUrl.fromLocalFile(video))
-        self.media_player.setVideoOutput(self.video_widget)
-        self.media_player.play()
+    def select_video_folder(self):
+        """弹出文件夹选择框"""
+        selected_dir = QFileDialog.getExistingDirectory(self, "选择视频库文件夹", "")
+        if selected_dir:
+            self.lbl_folder.setText(selected_dir)
+            self.video_library_path = selected_dir
+            # 可选：立即保存到配置文件
+            self.save_folder_to_config(selected_dir)
 
-    #添加一条匹配数据
-    def add_result(self, index, video, time_sec, score):
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        # 序号
-        item0 = QTableWidgetItem(str(index))
-        item0.setTextAlignment(Qt.AlignCenter)
-        self.table.setItem(row, 0, item0)
-        # 视频名（一般左对齐更好看，也可以居中）
-        item1 = QTableWidgetItem(video)
-        item1.setTextAlignment(Qt.AlignCenter)  # 想左对齐就删掉这行
-        self.table.setItem(row, 1, item1)
-        # 时间
-        m = int(time_sec // 60)
-        s = int(time_sec % 60)
-        time_str = f"{m:02d}:{s:02d}"
-        item2 = QTableWidgetItem(time_str)
-        item2.setTextAlignment(Qt.AlignCenter)
-        self.table.setItem(row, 2, item2)
-        # 相似度
-        item3 = QTableWidgetItem(f"{score:.2f}")
-        item3.setTextAlignment(Qt.AlignCenter)
-        self.table.setItem(row, 3, item3)
+    def save_folder_to_config(self, path):
+        """将路径存入 config.json (假设你导入了 src.config 里的函数)"""
+        from src.config import load_config, save_config
+        config = load_config()
+        config["video_folder"] = path
+        save_config(config)
+    # --- 功能函数 ---
 
-        # 播放按钮（默认就是居中的）
-        btn = QPushButton("播放")
-        btn.clicked.connect(lambda _, v=video, t=time_sec: self.play_result(v, t))
-        self.table.setCellWidget(row, 4, btn)
-
-    @Slot()
     def upload_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片", "",
-            "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)"
+            self, "选择查询图片", "", "图片 (*.png *.jpg *.jpeg *.bmp *.gif)"
         )
         if file_path:
             self.load_image(file_path)
-    @Slot()
-    def clear_file(self):
-        self.clear_signal.emit()
-    @Slot()
-    def start_search(self):
-        self.search_signal.emit()
-    
+
     def load_image(self, file_path):
+        self.current_img_path = file_path
         pixmap = QPixmap(file_path)
         if not pixmap.isNull():
-            scaled_pixmap = pixmap.scaled(self.img_label.size(),
-                                        Qt.KeepAspectRatio,
-                                        Qt.SmoothTransformation)
-            self.img_label.setPixmap(scaled_pixmap)
-            print(f"加载图片: {file_path}")
-            self.upload_signal.emit(file_path)
+            self.img_label.setPixmap(pixmap.scaled(
+                self.img_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            ))
+            # 清除文字框，因为我们现在有了图
+            self.text_search.clear()
         else:
-            self.img_label.setText("无法加载图片")
+            self.img_label.setText("图片加载失败")
+
+    def clear_all(self):
+        """清空所有状态的逻辑"""
+        # 1. 停止播放
+        self.media_player.stop()
+        self.media_player.setSource(QUrl(""))
+
+        # 2. 清空 UI
+        self.table.setRowCount(0)
+        self.text_search.clear()
+        self.img_label.clear()
+        self.img_label.setText("将图片拖入此处\n或点击下方上传")
+        self.current_img_path = None
+
+        # 3. 尝试物理删除缓存文件
+        try:
+            if os.path.exists(self.cache_path):
+                os.remove(self.cache_path)
+        except:
+            pass
+        print("已清空所有检索结果和状态")
+
     def dragEnterEvent(self, event):
-    # 检查拖拽数据中是否有 URL（即文件路径）
         if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if urls:
-                file_path = urls[0].toLocalFile()
-                # 检查文件扩展名是否为图片格式
-                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                    event.acceptProposedAction()
-                    return
-        event.ignore()
+            event.acceptProposedAction()
 
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
-            # 调用已有的加载图片逻辑（复用 upload_file 中的代码）
-            self.load_image(file_path)
+            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                self.load_image(file_path)
 
-class SearchController:
-    def __init__(self,ui):
-        self.ui = ui
-        self.ui.search_signal.connect(self.handle_search)
-        self.ui.clear_signal.connect(self.handle_clear)
-        self.ui.upload_signal.connect(self.handle_upload)
-        self.file_path = None
-    def handle_upload(self,file_path):
-        self.file_path = file_path
-    def handle_clear(self):
-        self.file_path = None
-        self.ui.img_label.clear()
-    def handle_search(self):
-        if self.file_path:
-            print(f"开始检索图片: {self.file_path}")
+    def start_search(self):
+        folder = getattr(self, 'video_library_path', self.lbl_folder.text())  # 你的视频存放路径
+        if not folder or not os.path.exists(folder):
+            QMessageBox.warning(self, "提醒", "请先选择一个有效的视频库文件夹！")
+            return
+        text = self.text_search.text().strip()
+        query = text if text else self.current_img_path
+
+        if not query:
+            QMessageBox.information(self, "提示", "请先输入搜索文字或上传一张图片")
+            return
+
+        # 锁定 UI
+        self.btn_search.setEnabled(False)
+        self.btn_search.setText("检索中...")
+        self.table.setRowCount(0)
+
+        # 启动工作线程
+        self.worker = SearchWorker(folder, query, bool(text))
+        self.worker.result_ready.connect(self.display_results)
+        self.worker.finished.connect(self.on_search_finished)
+        self.worker.start()
+
+    def on_search_finished(self):
+        self.btn_search.setEnabled(True)
+        self.btn_search.setText("开始检索")
+
+    def display_results(self, results):
+        self.table.setRowCount(0)
+        self.table.verticalHeader().setDefaultSectionSize(90)  # 行高稍微大点，舒服
+
+        for res in results:
+            timestamp, sec, score, video_path = res
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            # --- 1. 预览图列 (第 0 列) ---
+            thumb_label = QLabel()
+            thumb_label.setAlignment(Qt.AlignCenter)  # 图片在 Label 里居中
+            frame_bgr = get_single_thumbnail(video_path, sec)
+            if frame_bgr is not None:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                h, w, ch = frame_rgb.shape
+                qt_img = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+                thumb_label.setPixmap(
+                    QPixmap.fromImage(qt_img).scaled(120, 75, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.table.setCellWidget(row, 0, thumb_label)
+
+            # --- 2. 文字信息列 (第 1, 2, 3 列) ---
+            # 定义一个快速创建居中 Item 的方法
+            def create_center_item(text):
+                item = QTableWidgetItem(str(text))
+                item.setTextAlignment(Qt.AlignCenter)  # 核心：文字居中
+                return item
+
+            self.table.setItem(row, 1, create_center_item(os.path.basename(video_path)))
+
+            m, s = divmod(int(sec), 60)
+            self.table.setItem(row, 2, create_center_item(f"{m:02d}:{s:02d}"))
+
+            self.table.setItem(row, 3, create_center_item(f"{score:.2f}"))
+
+            # --- 3. 操作按钮列 (第 4 列) ---
+            btn_box = QWidget()
+            btn_layout = QHBoxLayout(btn_box)
+            btn_layout.setAlignment(Qt.AlignCenter)  # 核心：让布局里的按钮整体居中
+            btn_layout.setContentsMargins(0, 0, 0, 0)
+            btn_layout.setSpacing(10)
+
+            p_btn = QPushButton("预览")
+            p_btn.setFixedSize(60, 30)  # 固定大小更好看
+            p_btn.clicked.connect(lambda _, p=video_path, t=sec: self.handle_play(p, t))
+
+            l_btn = QPushButton("定位")
+            l_btn.setFixedSize(60, 30)
+            l_btn.clicked.connect(lambda _, p=video_path: open_in_explorer(p))
+
+            btn_layout.addWidget(p_btn)
+            btn_layout.addWidget(l_btn)
+            self.table.setCellWidget(row, 4, btn_box)
+
+    def handle_play(self, path, time_sec):
+        # 1. 释放文件
+        self.media_player.stop()
+        self.media_player.setSource(QUrl(""))
+
+        # 给 Windows 磁盘一点点反应时间
+        QThread.msleep(150)
+
+        # 2. 调用 FFmpeg 生成切片
+        result = create_preview_clip(path, time_sec, self.cache_path)
+
+        if result.returncode == 0:
+            # 3. 播放
+            self.media_player.setSource(QUrl.fromLocalFile(self.cache_path))
+            self.media_player.play()
+            print(f"播放成功: {self.cache_path}")
         else:
-            print("请先上传图片")
-    
-    
-class SearchService:
-    def __init__(self):
-        pass
-        
+            QMessageBox.critical(self, "错误", "预览生成失败！请检查 FFmpeg 路径及视频权限。")
 

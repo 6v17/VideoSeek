@@ -1,12 +1,13 @@
 import sys
 
+import qdarktheme
 from PySide6.QtWidgets import QApplication
 
-from ui.vs import MainWindow, SearchController
+from ui.vs import MainWindow
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    main_window = MainWindow()
-    search_controller = SearchController(main_window)
-    main_window.show()
-    app.exec()
+    qdarktheme.setup_theme()
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
