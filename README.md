@@ -74,7 +74,7 @@ main.py
 ### 📦 直接使用
 下载地址：
 ```
-https://github.com/liuvgg/VideoSeek/releases/download/VideoSeekSetup.exe
+https://github.com/liuvgg/VideoSeek/releases/download/VideoSeekSetup.exe](https://github.com/liuvgg/VideoSeek/releases/download/v1.0.1/VideoSeekSetup.exe
 ```
 ### 📸 界面预览 | Screenshots
 <img width="106" height="104" alt="image" src="https://github.com/user-attachments/assets/7d4daaf9-de4a-4bfd-8b79-041fb7e58c5d" />
