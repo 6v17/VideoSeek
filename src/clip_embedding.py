@@ -33,21 +33,39 @@ class CLIPOnnxEngine:
         return img[np.newaxis, :].astype(np.float32)
 
         # encode_images 里面如果还有精度问题，也可以在 run 之前加一句
+
+    def imread_chinese(self, path):
+        with open(path, 'rb') as f:
+            data = f.read()
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        return img
     def encode_images(self, frames):
+        # 确定特征维度（只在第一次调用时获取，可以缓存为实例变量）
+        if not hasattr(self, '_feature_dim'):
+            # 用一张假图跑一次推理获取维度
+            dummy = np.zeros((1, 3, 224, 224), dtype=np.float32)  # 根据你的模型输入调整
+            dummy_feat = self.visual_session.run(None, {'input': dummy})[0]
+            self._feature_dim = dummy_feat.shape[1] if dummy_feat.ndim > 1 else dummy_feat.shape[0]
+
         embeddings = []
         for f in frames:
-            if isinstance(f, str): f = cv2.imread(f)
-            if f is None: continue
-
-            blob = self._preprocess(f)  # 此时 blob 已经是 float32 了
-
-            # ONNX 推理
+            # 读取图像（支持中文路径）
+            if isinstance(f, str):
+                img = self.imread_chinese(f)  # 自定义函数
+            else:
+                img = f
+            if img is None:
+                continue
+            blob = self._preprocess(img)
             feat = self.visual_session.run(None, {'input': blob})[0]
-            # 同样转换为 float32 处理
             feat = feat.astype(np.float32)
             feat /= (np.linalg.norm(feat, axis=-1, keepdims=True) + 1e-10)
             embeddings.append(feat)
-        return np.vstack(embeddings) if embeddings else np.array([], dtype=np.float32)
+
+        if not embeddings:
+            return np.empty((0, self._feature_dim), dtype=np.float32)
+
+        return np.vstack(embeddings)
 
     def encode_text(self, text):
         """文字特征提取：同样确保输入类型正确"""

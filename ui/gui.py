@@ -240,6 +240,7 @@ class MainWindow(QMainWindow):
         self.img_label.clear()
         self.img_label.setText("📷\n拖入图片检索")
         self.media_player.stop()
+        self.lbl_status.clear()
 
     def start_search(self):
         if not self.video_library_path: return QMessageBox.warning(self, "提示", "请先选择库")
@@ -295,10 +296,26 @@ class MainWindow(QMainWindow):
             lay.addWidget(l_btn)
             self.table.setCellWidget(r, 4, btn_box)
 
-    def handle_play(self, p, s):
-        if create_preview_clip(p, s, self.cache_path).returncode == 0:
+    def handle_play(self, path, sec):
+        # 1. 彻底断开播放器对文件的占用
+        self.media_player.stop()
+        self.media_player.setSource(QUrl(""))
+
+        # 2. 确保缓存目录在用户可写路径（防止 C:\Program Files 无法写入）
+        # 建议把 cache_path 改为用户目录
+        app_data = os.path.join(os.environ["LOCALAPPDATA"], "VideoSeek")
+        os.makedirs(app_data, exist_ok=True)
+        self.cache_path = os.path.join(app_data, "preview.mp4")
+
+        # 3. 生成新剪辑
+        res = create_preview_clip(path, sec, self.cache_path)
+
+        if res.returncode == 0 and os.path.exists(self.cache_path) and os.path.getsize(self.cache_path) > 0:
             self.media_player.setSource(QUrl.fromLocalFile(self.cache_path))
             self.media_player.play()
+        else:
+            print(f"FFmpeg Error: {res.stderr.decode()}")
+            self.lbl_status.setText("预览生成失败，可能是视频编码不支持")
 
     def on_update_progress(self, val, text):
         self.progress_bar.setValue(val)

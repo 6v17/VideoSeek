@@ -21,6 +21,29 @@ def measure_time(message=""):
 import gc
 
 
+def get_ffmpeg_path():
+    # 获取 exe 所在的根目录
+    base_path = os.path.dirname(sys.executable)
+    # 源码运行时 base_path 可能是 python.exe 所在的目录，所以要做个兼容
+    ffmpeg_exe = os.path.join(base_path, "ffmpeg.exe")
+
+    if not os.path.exists(ffmpeg_exe):
+        # 兼容源码调试环境
+        ffmpeg_exe = "ffmpeg"
+    return ffmpeg_exe
+
+def create_preview_clip(input_path, start_sec, output_path):
+    ffmpeg = get_ffmpeg_path()
+    # 增加 -y 强制覆盖，增加 -v quiet 减少日志干扰
+    # 使用更兼容的编码参数
+    cmd = [
+        ffmpeg, "-y", "-ss", str(start_sec), "-t", "5",
+        "-i", input_path,
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+        "-c:a", "aac", "-y", output_path
+    ]
+    # 执行命令并捕获错误
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 def free_memory():
     """
     【ONNX 瘦身版】不再依赖 torch。
