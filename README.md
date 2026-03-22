@@ -71,7 +71,7 @@ python -m nuitka --standalone `
 --include-data-file=ffmpeg.exe=ffmpeg.exe `
 main.py
 ```
-### 📦 直接使用
+### 📦 直接安装使用
 github下载地址：
 ```
 https://github.com/liuvgg/VideoSeek/releases/download/v1.0.1/VideoSeekSetup.exe
