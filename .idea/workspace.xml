@@ -1,23 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="抽帧优化">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="拆分同步、搜索功能">
       <change afterPath="$PROJECT_DIR$/config.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ffmpeg.exe" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/img/img.png" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/img/img_1.png" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/img/img_2.png" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/img/img_3.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/config.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/core.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/update_video.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/core.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/clip_embedding.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/extract_frames.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/faiss_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/faiss_index.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/vs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/vs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -35,9 +28,17 @@
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
+  &quot;history&quot;: [
+    {
+      &quot;state&quot;: &quot;OPEN&quot;,
+      &quot;assignee&quot;: &quot;liuvgg&quot;,
+      &quot;author&quot;: &quot;liuvgg&quot;
+    }
+  ],
   &quot;lastFilter&quot;: {
     &quot;state&quot;: &quot;OPEN&quot;,
-    &quot;assignee&quot;: &quot;liuvgg&quot;
+    &quot;assignee&quot;: &quot;liuvgg&quot;,
+    &quot;author&quot;: &quot;liuvgg&quot;
   }
 }</component>
   <component name="GithubPullRequestsUISettings">{
@@ -77,16 +78,17 @@
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek" />
+      <recent name="D:\PycharmProjects\VideoSeek\models" />
       <recent name="D:\PycharmProjects\VideoSeek\img" />
       <recent name="D:\PycharmProjects\VideoSeek\ui" />
       <recent name="D:\PycharmProjects\VideoSeek\videos" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="D:\PycharmProjects\VideoSeek" />
+      <recent name="D:\PycharmProjects\VideoSeek\ui" />
       <recent name="D:\PycharmProjects\VideoSeek\src" />
+      <recent name="D:\PycharmProjects\VideoSeek" />
       <recent name="D:\PycharmProjects\VideoSeek\data\vector" />
       <recent name="D:\PycharmProjects\VideoSeek\data\index" />
-      <recent name="D:\PycharmProjects\VideoSeek\data\vectors" />
     </key>
   </component>
   <component name="RunManager">
@@ -138,7 +140,10 @@
       <workItem from="1773475582808" duration="14213000" />
       <workItem from="1773744077425" duration="91000" />
       <workItem from="1774015118126" duration="14401000" />
-      <workItem from="1774067121802" duration="25896000" />
+      <workItem from="1774067121802" duration="33616000" />
+      <workItem from="1774118657764" duration="2419000" />
+      <workItem from="1774121332139" duration="25000" />
+      <workItem from="1774145998104" duration="4743000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -180,7 +185,63 @@
       <option name="project" value="LOCAL" />
       <updated>1774072640345</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="抽帧优化">
+      <option name="closed" value="true" />
+      <created>1774106813232</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1774106813232</updated>
+    </task>
+    <task id="LOCAL-00007" summary="重构">
+      <option name="closed" value="true" />
+      <created>1774107203598</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1774107203598</updated>
+    </task>
+    <task id="LOCAL-00008" summary="打包路径修复">
+      <option name="closed" value="true" />
+      <created>1774110046744</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1774110046744</updated>
+    </task>
+    <task id="LOCAL-00009" summary="拆分同步、搜索功能">
+      <option name="closed" value="true" />
+      <created>1774120893153</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1774120893153</updated>
+    </task>
+    <task id="LOCAL-00010" summary="拆分同步、搜索功能">
+      <option name="closed" value="true" />
+      <created>1774150451234</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1774150451234</updated>
+    </task>
+    <task id="LOCAL-00011" summary="拆分同步、搜索功能">
+      <option name="closed" value="true" />
+      <created>1774150469569</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1774150469569</updated>
+    </task>
+    <task id="LOCAL-00012" summary="拆分同步、搜索功能">
+      <option name="closed" value="true" />
+      <created>1774150497787</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1774150497787</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -197,7 +258,7 @@
                   <entry key="branch">
                     <value>
                       <list>
-                        <option value="master" />
+                        <option value="origin/master" />
                       </list>
                     </value>
                   </entry>
@@ -212,7 +273,11 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="最小案例" />
     <MESSAGE value="抽帧优化" />
-    <option name="LAST_COMMIT_MESSAGE" value="抽帧优化" />
+    <MESSAGE value="重构" />
+    <MESSAGE value="打包路径修复" />
+    <MESSAGE value="界面优化" />
+    <MESSAGE value="拆分同步、搜索功能" />
+    <option name="LAST_COMMIT_MESSAGE" value="拆分同步、搜索功能" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/VideoSeek$main.coverage" NAME="main 覆盖结果" MODIFIED="1773485649708" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
