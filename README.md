@@ -71,10 +71,17 @@ python -m nuitka --standalone `
 --include-data-file=ffmpeg.exe=ffmpeg.exe `
 main.py
 ```
+### 📦 直接使用
+下载地址：
+```
+https://github.com/liuvgg/VideoSeek/releases/download/
+```
 ### 📸 界面预览 | Screenshots
-[主界面截图]
-[检索结果截图]
-[同步进度条截图]
+<img width="106" height="104" alt="image" src="https://github.com/user-attachments/assets/7d4daaf9-de4a-4bfd-8b79-041fb7e58c5d" />
+<img width="1829" height="1256" alt="image" src="https://github.com/user-attachments/assets/f5a16ffe-5243-4df6-a109-3086eec021f3" />
+<img width="1816" height="1268" alt="image" src="https://github.com/user-attachments/assets/81224961-d511-484a-bcc7-7004e061e4dd" />
+<img width="1924" height="1336" alt="image" src="https://github.com/user-attachments/assets/bd893de5-f825-4906-9d0c-4d0fc1d217ee" />
+
 ### 🤝 贡献与感谢 | Credits
 感谢 OpenAI 提供的 CLIP 模型!
 感谢 FFmpeg 强大的音视频处理能力!
