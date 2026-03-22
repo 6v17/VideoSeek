@@ -22,28 +22,45 @@ import gc
 
 
 def get_ffmpeg_path():
-    # 获取 exe 所在的根目录
-    base_path = os.path.dirname(sys.executable)
-    # 源码运行时 base_path 可能是 python.exe 所在的目录，所以要做个兼容
-    ffmpeg_exe = os.path.join(base_path, "ffmpeg.exe")
+    # 获取 VideoSeek.exe 所在的文件夹
+    if getattr(sys, 'frozen', False) or "__file__" not in globals():
+        # 打包环境 (Nuitka / PyInstaller)
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        # 源码环境
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+    ffmpeg_exe = os.path.join(base_dir, "ffmpeg.exe")
+
+    # 如果根目录找不到，就尝试找默认环境（保底）
     if not os.path.exists(ffmpeg_exe):
-        # 兼容源码调试环境
         ffmpeg_exe = "ffmpeg"
+
     return ffmpeg_exe
+
 
 def create_preview_clip(input_path, start_sec, output_path):
     ffmpeg = get_ffmpeg_path()
-    # 增加 -y 强制覆盖，增加 -v quiet 减少日志干扰
-    # 使用更兼容的编码参数
+
+    # 强制加上引号处理路径（防止视频路径有空格）
+    # 使用最快参数，提高成功率
     cmd = [
-        ffmpeg, "-y", "-ss", str(start_sec), "-t", "5",
+        ffmpeg, "-y",
+        "-ss", str(start_sec),
+        "-t", "5",
         "-i", input_path,
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-        "-c:a", "aac", "-y", output_path
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-an",  # 建议先禁用音频测试，提高兼容性
+        output_path
     ]
-    # 执行命令并捕获错误
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # startupinfo 可以防止打包后弹出黑窗口
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.START_FLAGS_USESHOWWINDOW
+
+    return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
 def free_memory():
     """
     【ONNX 瘦身版】不再依赖 torch。

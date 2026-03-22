@@ -1,5 +1,7 @@
 # src/gui.py
 import os, cv2
+import tempfile
+
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -65,7 +67,7 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         # 1. 顶部菜单栏
         menu_bar = self.menuBar()
-        help_menu = menu_bar.addMenu("帮助")
+        help_menu = menu_bar.addMenu("关于")
         about_act = QAction("关于 VideoSeek", self)
         about_act.triggered.connect(self.show_about)
         help_menu.addAction(about_act)
@@ -296,26 +298,33 @@ class MainWindow(QMainWindow):
             lay.addWidget(l_btn)
             self.table.setCellWidget(r, 4, btn_box)
 
+    # 在 MainWindow 的 __init__ 或者 handle_play 里修改
+
     def handle_play(self, path, sec):
-        # 1. 彻底断开播放器对文件的占用
         self.media_player.stop()
         self.media_player.setSource(QUrl(""))
+        QThread.msleep(100)
 
-        # 2. 确保缓存目录在用户可写路径（防止 C:\Program Files 无法写入）
-        # 建议把 cache_path 改为用户目录
-        app_data = os.path.join(os.environ["LOCALAPPDATA"], "VideoSeek")
-        os.makedirs(app_data, exist_ok=True)
-        self.cache_path = os.path.join(app_data, "preview.mp4")
+        # 【核心修改】将缓存路径设为系统临时文件夹或 AppData
+        # 这样无论软件装在哪，都有权写入
+        cache_dir = os.path.join(os.environ["LOCALAPPDATA"], "VideoSeek", "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        self.cache_path = os.path.join(cache_dir, "preview.mp4")
 
-        # 3. 生成新剪辑
+        # 生成剪辑
         res = create_preview_clip(path, sec, self.cache_path)
 
-        if res.returncode == 0 and os.path.exists(self.cache_path) and os.path.getsize(self.cache_path) > 0:
+        # --- 调试大法：如果还是不行，把报错写进日志 ---
+        if res.returncode != 0:
+            log_path = os.path.join(os.path.dirname(self.cache_path), "error.log")
+            with open(log_path, "w") as f:
+                f.write(res.stderr.decode(errors='ignore'))
+            self.lbl_status.setText(f"预览失败，日志已生成在: {log_path}")
+            return
+
+        if os.path.exists(self.cache_path) and os.path.getsize(self.cache_path) > 0:
             self.media_player.setSource(QUrl.fromLocalFile(self.cache_path))
             self.media_player.play()
-        else:
-            print(f"FFmpeg Error: {res.stderr.decode()}")
-            self.lbl_status.setText("预览生成失败，可能是视频编码不支持")
 
     def on_update_progress(self, val, text):
         self.progress_bar.setValue(val)
