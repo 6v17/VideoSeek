@@ -1,13 +1,17 @@
+# main.py
 import sys
-
-import qdarktheme
 from PySide6.QtWidgets import QApplication
-
-from ui.vs import MainWindow
+from ui.gui import MainWindow
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    qdarktheme.setup_theme()
+
+    # 设置全局字体
+    font = app.font()
+    font.setFamily("Microsoft YaHei UI")
+    app.setFont(font)
+
     window = MainWindow()
     window.show()
+
     sys.exit(app.exec())
