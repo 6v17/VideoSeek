@@ -18,7 +18,7 @@
 -   **⚡ ONNX 加速 (High Performance)**: 核心 AI 引擎已从 PyTorch 迁移至 ONNX Runtime，启动更快，内存占用降低 80%，支持 CPU/GPU 自动切换。
 -   **🖼️ 实时预览图 (Instant Thumbnails)**: 搜索结果实时从原视频中提取缩略图，无需提前存储预览图。
 -   **🎬 精准预览 (Smart Clip)**: 点击结果即可秒级切出前后 4 秒的片段进行快速预览。
--   **📂 库管理 (Library Management)**: 支持自定义视频库路径，具备增量更新功能，仅处理新加入的视频。
+-   **📂 库管理 (Library Management)**: 支持自定义本地视频库路径，具备增量更新功能，仅处理新加入的视频。
 
 ---
 
@@ -65,6 +65,6 @@ pyinstaller --noconfirm --onedir --windowed --name "VideoSeek" --icon="icon.ico"
 [检索结果截图]
 [同步进度条截图]
 ### 🤝 贡献与感谢 | Credits
-感谢 OpenAI 提供的 CLIP 模型。
-感谢 FFmpeg 强大的音视频处理能力。
-感谢 Gemini 提供的全流程调优建议。
+感谢 OpenAI 提供的 CLIP 模型!
+感谢 FFmpeg 强大的音视频处理能力!
+感谢 Gemini 提供的调优建议!
