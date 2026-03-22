@@ -55,10 +55,20 @@ bpe_simple_vocab_16e6.txt.gz
 python main.py
 ```
 ### 📦 打包与发布 | Packaging
-项目支持使用 PyInstaller 进行打包，并使用 Inno Setup 制作安装包。
+项目支持使用 nuitka 进行打包，并使用 Inno Setup 制作安装包。
 ```Bash
 # 示例打包命令 | Example Build Command
-pyinstaller --noconfirm --onedir --windowed --name "VideoSeek" --icon="icon.ico" --add-binary "ffmpeg.exe;." --add-data "models;models" --add-data "config.json;." --add-data "C:\path\to\clip\bpe_simple_vocab_16e6.txt.gz;clip" --hidden-import "onnxruntime" --hidden-import "cv2" --hidden-import "regex" --hidden-import "ftfy" --hidden-import "faiss" main.py
+python -m nuitka --standalone `
+--plugin-enable=pyside6 `
+--include-qt-plugins=multimedia `
+--windows-console-mode=disable `
+--output-dir=dist `
+--output-filename=VideoSeek `
+--windows-icon-from-ico=icon.ico `
+--include-data-dir=models=models `
+--include-data-file=config.json=config.json `
+--include-data-file=ffmpeg.exe=ffmpeg.exe `
+main.py
 ```
 ### 📸 界面预览 | Screenshots
 [主界面截图]
