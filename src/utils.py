@@ -98,10 +98,20 @@ def get_single_thumbnail(video_path, time_sec):
     return None
 
 
+
 def get_resource_path(relative_path):
-    """获取资源绝对路径，兼容开发和打包环境"""
+    """获取资源绝对路径，兼容 PyInstaller 和 Nuitka"""
+    # PyInstaller 打包后，资源在 _MEIPASS 中
     if hasattr(sys, '_MEIPASS'):
-        # 打包后的路径
         return os.path.join(sys._MEIPASS, relative_path)
-    # 开发环境的路径
-    return os.path.join(os.path.abspath("."), relative_path)
+
+    # Nuitka 打包后，可执行文件可能位于 dist 目录中
+    # 获取可执行文件所在目录
+    if getattr(sys, 'frozen', False) and hasattr(sys, 'executable'):
+        # Nuitka 在打包后会设置 sys.frozen 为 True，sys.executable 为可执行文件路径
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # 开发环境
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
