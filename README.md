@@ -72,9 +72,14 @@ python -m nuitka --standalone `
 main.py
 ```
 ### 📦 直接使用
-下载地址：
+github下载地址：
 ```
 https://github.com/liuvgg/VideoSeek/releases/download/v1.0.1/VideoSeekSetup.exe
+```
+百度网盘下载：
+```
+通过网盘分享的知识：VideoSeek
+链接: https://pan.baidu.com/s/5cNSC3yrS9e85_FfTtyZhlg
 ```
 ### 📸 界面预览 | Screenshots
 <img width="106" height="104" alt="image" src="https://github.com/user-attachments/assets/7d4daaf9-de4a-4bfd-8b79-041fb7e58c5d" />
