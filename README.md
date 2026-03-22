@@ -37,13 +37,11 @@
 ### 1. 克隆项目 | Clone the Repo
 ```bash
 git clone https://github.com/liuvgg/VideoSeek.git
-cd VideoSeek
 ```
 
 ### 2. 安装依赖 | Install Dependencies
 ```Bash
 pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy regex
-Note: If no NVIDIA GPU, install onnxruntime instead.
 ```
 ### 3. 准备模型 | Prepare Models
 下载模型：
