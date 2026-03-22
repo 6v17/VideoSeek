@@ -40,10 +40,10 @@ class AboutDialog(QDialog):
         desc_text = (
             "<b>智能视频内容检索工具</b><br><br>"
             "• 支持自然语言描述搜索<br>"
-            "• 支持以图搜图（视频帧）<br>"
+            "• 支持以图搜影（视频帧）<br>"
             "• 本地化向量数据库，隐私安全<br>"
             "• 毫秒级片段定位<br><br>"
-            "源码地址：<a href='https://github.com/liuvgg/VideoSeek' style='color: #0078D4;'>GitHub Repository</a>"
+            "项目源码地址：<a href='https://github.com/liuvgg/VideoSeek' style='color: #0078D4;'>GitHub Repository</a>"
         )
 
         desc = QLabel(desc_text)

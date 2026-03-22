@@ -220,8 +220,8 @@ class MainWindow(QMainWindow):
         if p:
             self.lbl_folder.setText(p);
             self.video_library_path = p
-            c = load_config();
-            c["video_folder"] = p;
+            c = load_config()
+            c["video_folder"] = p
             save_config(c)
 
     def upload_file(self):
@@ -234,10 +234,10 @@ class MainWindow(QMainWindow):
         self.text_search.clear()
 
     def clear_all(self):
-        self.table.setRowCount(0);
-        self.text_search.clear();
+        self.table.setRowCount(0)
+        self.text_search.clear()
         self.current_img_path = None
-        self.img_label.clear();
+        self.img_label.clear()
         self.img_label.setText("📷\n拖入图片检索")
         self.media_player.stop()
 
@@ -246,9 +246,9 @@ class MainWindow(QMainWindow):
         query = self.text_search.text().strip() or self.current_img_path
         if not query: return
 
-        self.btn_search.setEnabled(False);
+        self.btn_search.setEnabled(False)
         self.btn_search.setText("正在搜索向量空间...")
-        self.progress_bar.setVisible(True);
+        self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
 
         self.worker = SearchWorker(self.video_library_path, query, bool(self.text_search.text().strip()))
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def on_search_done(self):
-        self.btn_search.setEnabled(True);
+        self.btn_search.setEnabled(True)
         self.btn_search.setText("开始智能检索")
         self.progress_bar.setVisible(False)
 
@@ -270,11 +270,11 @@ class MainWindow(QMainWindow):
             r = self.table.rowCount();
             self.table.insertRow(r)
 
-            thumb = QLabel();
+            thumb = QLabel()
             thumb.setAlignment(Qt.AlignCenter)
             f = get_single_thumbnail(v_path, sec)
             if f is not None:
-                rgb = cv2.cvtColor(f, cv2.COLOR_BGR2RGB);
+                rgb = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
                 h, w, _ = rgb.shape
                 qimg = QImage(rgb.data, w, h, w * 3, QImage.Format_RGB888)
                 thumb.setPixmap(QPixmap.fromImage(qimg).scaled(120, 80, Qt.KeepAspectRatio))
@@ -284,14 +284,14 @@ class MainWindow(QMainWindow):
             self.table.setItem(r, 2, QTableWidgetItem(f"{int(sec // 60):02d}:{int(sec % 60):02d}"))
             self.table.setItem(r, 3, QTableWidgetItem(f"{score:.2f}"))
 
-            btn_box = QWidget();
-            lay = QHBoxLayout(btn_box);
+            btn_box = QWidget()
+            lay = QHBoxLayout(btn_box)
             lay.setContentsMargins(5, 5, 5, 5)
-            p_btn = QPushButton("预览");
+            p_btn = QPushButton("预览")
             l_btn = QPushButton("定位")
             p_btn.clicked.connect(lambda _, p=v_path, s=sec: self.handle_play(p, s))
             l_btn.clicked.connect(lambda _, p=v_path: open_in_explorer(p))
-            lay.addWidget(p_btn);
+            lay.addWidget(p_btn)
             lay.addWidget(l_btn)
             self.table.setCellWidget(r, 4, btn_box)
 
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
             self.lbl_status.setText("✅ 索引更新成功！")
             self.progress_bar.setValue(100)
         else:
-            self.lbl_status.setText("❌ 更新失败，请检查后台日志")
+            self.lbl_status.setText("❌ 索引更新失败，请检查视频库是否存在！")
 
         # 3秒后隐藏进度条
         QTimer.singleShot(3000, lambda: self.progress_bar.setVisible(False))
