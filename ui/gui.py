@@ -32,7 +32,6 @@ class UpdateChecker(QThread):
 
             res = requests.get(url, timeout=5)
             print(f"[检查更新] 状态码: {res.status_code}")
-
             if res.status_code == 200:
                 data = res.json()
                 remote_v = data.get("latest_version", "0.0.0")
@@ -54,13 +53,11 @@ class UpdateChecker(QThread):
 
 
 
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VideoSeek v1.0.2")
-        self.resize(1280, 850)
+        self.setWindowTitle(f"VideoSeek v{CURRENT_VERSION}")
+        self.resize(1200, 800)
         # --- 修改这里：从配置加载主题偏好 ---
         cfg = load_config()
         # 如果配置里没有 theme 字段，默认设为 "dark"
