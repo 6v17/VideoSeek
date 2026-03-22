@@ -46,6 +46,10 @@ pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy re
 Note: If no NVIDIA GPU, install onnxruntime instead.
 ```
 ### 3. 准备模型 | Prepare Models
+下载模型：
+```
+https://github.com/liuvgg/VideoSeek/archive/refs/tags/models.zip
+```
 #### a. 将转换好的模型文件放入 models/ 文件夹：
 clip_visual.onnx、
 clip_text.onnx、
