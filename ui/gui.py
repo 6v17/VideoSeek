@@ -13,12 +13,53 @@ from ui.dialogs import AboutDialog
 from ui.workers import SearchWorker, IndexUpdateWorker
 from src.config import load_config, save_config
 from src.utils import create_preview_clip, open_in_explorer, get_single_thumbnail
+# src/gui.py 顶部导入
+import requests
+from packaging import version  # 如果没装，执行 pip install packaging
+
+CURRENT_VERSION = "1.0.1"  # 每次发新版记得改这里！
+
+
+class UpdateChecker(QThread):
+    finished = Signal(dict)
+
+    def run(self):
+        try:
+            # ！！！请务必更换为 Raw 地址 ！！！
+            url = "https://gist.githubusercontent.com/liuvgg/2433f9121e2439ca5efc5e402ee695b9/raw/version.json"
+
+            print(f"[检查更新] 正在请求: {url}")
+
+            res = requests.get(url, timeout=5)
+            print(f"[检查更新] 状态码: {res.status_code}")
+
+            if res.status_code == 200:
+                data = res.json()
+                remote_v = data.get("latest_version", "0.0.0")
+                print(f"[检查更新] 本地: {CURRENT_VERSION}, 远程: {remote_v}")
+
+                if version.parse(remote_v) > version.parse(CURRENT_VERSION):
+                    print("[检查更新] 发现新版本！触发弹窗")
+                    self.finished.emit(data)
+                else:
+                    print("[检查更新] 当前已是最新版")
+            else:
+                print(f"[检查更新] 服务器响应异常: {res.status_code}")
+        except Exception as e:
+            # 调试期间不要用 pass，要把错误打出来
+            print(f"[检查更新] 发生错误: {e}")
+
+
+# 在 MainWindow 的 __init__ 末尾启动检查
+
+
+
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VideoSeek Pro")
+        self.setWindowTitle("VideoSeek v1.0.2")
         self.resize(1280, 850)
         # --- 修改这里：从配置加载主题偏好 ---
         cfg = load_config()
@@ -43,7 +84,25 @@ class MainWindow(QMainWindow):
         if cfg.get("video_folder"):
             self.video_library_path = cfg["video_folder"]
             self.lbl_folder.setText(self.video_library_path)
+        self.checker = UpdateChecker()
+        self.checker.finished.connect(self.prompt_update)
+        self.checker.start()
 
+    # 弹窗提示函数
+    def prompt_update(self, data):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("发现新版本 " + data["latest_version"])
+        msg.setText(f"<b>发现轻量化更新补丁！</b><br><br>更新内容：<br>{data['update_notes']}")
+        msg.setInformativeText("是否立即下载并更新？")
+
+        btn_yes = msg.addButton("立即更新", QMessageBox.AcceptRole)
+        msg.addButton("下次再说", QMessageBox.RejectRole)
+
+        msg.exec()
+        if msg.clickedButton() == btn_yes:
+            # 直接调用浏览器下载补丁包
+            QDesktopServices.openUrl(QUrl(data["patch_url"]))
+            self.close()  # 关闭主程序，方便安装包覆盖文件
     def apply_theme(self):
         self.setStyleSheet(DARK_STYLE if self.is_dark_mode else LIGHT_STYLE)
 
