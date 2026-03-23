@@ -13,8 +13,8 @@ https://b23.tv/b1OlUUf
 💡 Tip: Watch the demo to see VideoSeek in action! / 观看演示视频了解 VideoSeek 实时效果
 
 ### Screenshots / 界面截图 
-<img width="500" alt="image3" src="https://github.com/user-attachments/assets/81224961-d511-484a-bcc7-7004e061e4dd" />  
-<img width="500" alt="image4" src="https://github.com/user-attachments/assets/bd893de5-f825-4906-9d0c-4d0fc1d217ee" />  
+<img width="300" alt="image3" src="https://github.com/user-attachments/assets/81224961-d511-484a-bcc7-7004e061e4dd" />  
+<img width="300" alt="image4" src="https://github.com/user-attachments/assets/bd893de5-f825-4906-9d0c-4d0fc1d217ee" />  
 
 ---
 
