@@ -27,6 +27,7 @@
 -   **Frontend**: PySide6 (Qt for Python)
 -   **AI Engine**: ONNX Runtime (CLIP ViT-B/32)
 -   **Vector DB**: FAISS (Facebook AI Similarity Search)
+-   **Semantic Retrieval**：CLIP embedding
 -   **Video Engine**: FFmpeg (via Memory Pipes)
 -   **Language**: Python 3.10+
 
