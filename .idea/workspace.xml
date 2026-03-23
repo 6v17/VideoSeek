@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新功能实现">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="无">
       <change afterPath="$PROJECT_DIR$/config.json" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/ffmpeg.exe" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/extract_frames.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/update_video.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -27,9 +35,16 @@
       &quot;state&quot;: &quot;OPEN&quot;,
       &quot;assignee&quot;: &quot;liuvgg&quot;,
       &quot;author&quot;: &quot;liuvgg&quot;
+    },
+    {
+      &quot;searchQuery&quot;: &quot;git@github.com:liuvgg/VideoSeek.git&quot;,
+      &quot;state&quot;: &quot;OPEN&quot;,
+      &quot;assignee&quot;: &quot;liuvgg&quot;,
+      &quot;author&quot;: &quot;liuvgg&quot;
     }
   ],
   &quot;lastFilter&quot;: {
+    &quot;searchQuery&quot;: &quot;git@github.com:liuvgg/VideoSeek.git&quot;,
     &quot;state&quot;: &quot;OPEN&quot;,
     &quot;assignee&quot;: &quot;liuvgg&quot;,
     &quot;author&quot;: &quot;liuvgg&quot;
@@ -165,6 +180,8 @@
       <workItem from="1774145998104" duration="12070000" />
       <workItem from="1774159541324" duration="1243000" />
       <workItem from="1774165430179" duration="12686000" />
+      <workItem from="1774241656827" duration="884000" />
+      <workItem from="1774259726447" duration="6452000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -334,7 +351,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774181691873</updated>
     </task>
-    <option name="localTasksCounter" value="22" />
+    <task id="LOCAL-00022" summary="无">
+      <option name="closed" value="true" />
+      <created>1774241780475</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1774241780475</updated>
+    </task>
+    <option name="localTasksCounter" value="23" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -351,7 +376,7 @@
                   <entry key="branch">
                     <value>
                       <list>
-                        <option value="origin/master" />
+                        <option value="master" />
                       </list>
                     </value>
                   </entry>
@@ -375,7 +400,8 @@
     <MESSAGE value="修改nuitka打包路径问题" />
     <MESSAGE value="readme修改" />
     <MESSAGE value="更新功能实现" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新功能实现" />
+    <MESSAGE value="无" />
+    <option name="LAST_COMMIT_MESSAGE" value="无" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/VideoSeek$main.coverage" NAME="main 覆盖结果" MODIFIED="1773485649708" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

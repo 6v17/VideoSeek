@@ -4,10 +4,10 @@ import cv2
 
 from src.utils import get_resource_path
 
-
+#视频抽帧
 def extract_frames_with_ffmpeg(video_path):
     """
-    【进化版】直接从内存读取视频帧进行向量化，不产生任何临时图片
+    直接从内存读取视频帧进行向量化，不产生任何临时图片
     """
     fps = 1  # 依然每秒抽1帧
 

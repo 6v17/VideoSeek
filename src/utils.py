@@ -4,7 +4,6 @@ import json
 import hashlib
 import sys
 import subprocess
-import subprocess
 import cv2
 import numpy as np
 def measure_time(message=""):
@@ -20,7 +19,7 @@ def measure_time(message=""):
 
 import gc
 
-
+#获取ffmpeg路径
 def get_ffmpeg_path():
     # 获取 VideoSeek.exe 所在的文件夹
     if getattr(sys, 'frozen', False) or "__file__" not in globals():
@@ -39,28 +38,7 @@ def get_ffmpeg_path():
     return ffmpeg_exe
 
 
-def create_preview_clip(input_path, start_sec, output_path):
-    ffmpeg = get_ffmpeg_path()
-
-    # 强制加上引号处理路径（防止视频路径有空格）
-    # 使用最快参数，提高成功率
-    cmd = [
-        ffmpeg, "-y",
-        "-ss", str(start_sec),
-        "-t", "5",
-        "-i", input_path,
-        "-c:v", "libx264", "-preset", "ultrafast",
-        "-an",  # 建议先禁用音频测试，提高兼容性
-        output_path
-    ]
-
-    # startupinfo 可以防止打包后弹出黑窗口
-    startupinfo = None
-    if sys.platform == "win32":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.START_FLAGS_USESHOWWINDOW
-
-    return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
+#内存清理
 def free_memory():
     """
     【ONNX 瘦身版】不再依赖 torch。
@@ -70,51 +48,90 @@ def free_memory():
     gc.collect()
 
     print("已清理系统内存残留。")
-
+#检查路径是否存在
 def ensure_folder_exists(file_path):
     folder = os.path.dirname(file_path)
     if folder and not os.path.exists(folder):
         os.makedirs(folder)
-
+#获取视频hash
 def get_video_hash(video_path):
     h = hashlib.sha256()
     with open(video_path, "rb") as f:
         h.update(f.read(10 * 1024 * 1024)) # 只读前10MB
     return h.hexdigest()
-
+#保存mata文件
 def save_meta(meta, meta_file):
     ensure_folder_exists(meta_file)
     with open(meta_file, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=4, ensure_ascii=False)
-
+#加载mata文件（用于校验库视频是否发生变化）
 def load_meta(meta_file):
     if os.path.exists(meta_file):
         with open(meta_file, "r", encoding="utf-8") as f:
             return json.load(f)
     return {}
+#生成预览视频
+def create_preview_clip(input_path, start_sec, output_path):
+    ffmpeg = get_ffmpeg_path()
 
-def create_preview_clip(video_path, time_sec, output_path):
-    """生成4秒短片预览"""
-    start_time = max(time_sec - 2, 0)
-    ffmpeg_bin = get_resource_path("ffmpeg.exe")
+    # 注意：使用 subprocess 的列表形式时，不要手动给路径加引号
+    # subprocess 会自动处理路径中的空格
     cmd = [
-        ffmpeg_bin, "-y", "-ss", str(start_time), "-t", "4",
-        "-i", video_path, "-c:v", libx264_param(), "-preset", "superfast", "-an", output_path
+        ffmpeg, "-y",
+        "-ss", str(start_sec),
+        "-t", "5",
+        "-i", input_path,
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-an",
+        output_path
     ]
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,creationflags=0x08000000)
+
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        # 修复此处的常量名：STARTF_USESHOWWINDOW
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        # 配合使用 SW_HIDE (值为 0)，确保窗口完全隐藏
+        startupinfo.wShowWindow = 0
+
+    # 记得 startupinfo 必须作为关键字参数传递
+    return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
 
 def libx264_param():
     return "libx264" # 默认编码器
 
+#文件资源管理器打开并选择该视频
 def open_in_explorer(video_path):
-    """资源管理器定位"""
-    path = os.path.abspath(video_path)
+    """资源管理器定位：增强版"""
+    if not os.path.exists(video_path):
+        print(f"错误：文件不存在 {video_path}")
+        return
+
+    # 1. 路径标准化（关键：将 / 转为 Windows 的 \）
+    # 使用 normpath 可以确保路径格式符合当前系统要求
+    path = os.path.normpath(os.path.abspath(video_path))
+
     if sys.platform == 'win32':
-        subprocess.run(['explorer', '/select,', path])
-    elif sys.platform == 'darwin':
+        # 2. Windows 这里的逗号后面【不要加空格】
+        # 很多时候失败是因为写成了 '/select, ', path
+        # 这种写法在处理带空格的路径时最稳妥
+        try:
+            # 使用 shell=False 配合列表传参，由 Python 处理引号转义
+            subprocess.run(['explorer', f'/select,{path}'], check=False)
+        except Exception as e:
+            print(f"Windows 定位失败: {e}")
+            # 备选方案：如果上面的失败，尝试直接打开文件夹
+            os.startfile(os.path.dirname(path))
+
+    elif sys.platform == 'darwin':  # macOS
         subprocess.run(['open', '-R', path])
 
+    else:  # Linux (通常是 open 或 xdg-open)
+        # Linux 并没有通用的“选择并定位”命令，通常只能打开所在目录
+        folder = os.path.dirname(path)
+        subprocess.run(['xdg-open', folder])
 
+#预览图生成
 def get_single_thumbnail(video_path, time_sec):
     """
     【内存流版】实时从视频扣一张图，不产生任何临时文件

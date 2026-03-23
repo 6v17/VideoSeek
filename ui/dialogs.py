@@ -2,6 +2,10 @@
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QFrame
 from PySide6.QtCore import Qt
 
+from src.config import load_config
+
+CONFIG = load_config()
+
 
 class AboutDialog(QDialog):
     def __init__(self, parent=None, is_dark=True):
@@ -26,7 +30,7 @@ class AboutDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        version = QLabel("Version 1.0.0")
+        version = QLabel(f"Version {CONFIG['version']}")
         version.setStyleSheet("color: #888; font-size: 12px;")
         version.setAlignment(Qt.AlignCenter)
         layout.addWidget(version)
@@ -42,8 +46,9 @@ class AboutDialog(QDialog):
             "• 支持自然语言描述搜索<br>"
             "• 支持以图搜影（视频帧）<br>"
             "• 本地化向量数据库，隐私安全<br>"
+            "• 本地向量动态更新<br>"
             "• 毫秒级片段定位<br><br>"
-            "项目源码地址：<a href='https://github.com/liuvgg/VideoSeek' style='color: #0078D4;'>GitHub Repository</a>"
+            "项目源码地址：<a href='https://github.com/liuvgg/VideoSeek' style='color: #0078D4;'>https://github.com/liuvgg/VideoSeek</a>"
         )
 
         desc = QLabel(desc_text)

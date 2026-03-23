@@ -16,8 +16,8 @@ from src.utils import create_preview_clip, open_in_explorer, get_single_thumbnai
 # src/gui.py 顶部导入
 import requests
 from packaging import version  # 如果没装，执行 pip install packaging
-
-CURRENT_VERSION = "1.0.1"  # 每次发新版记得改这里！
+CONFIG = load_config()
+CURRENT_VERSION = CONFIG["version"]  # 每次发新版记得改这里！
 
 
 class UpdateChecker(QThread):
@@ -56,6 +56,7 @@ class UpdateChecker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.table = None
         self.setWindowTitle(f"VideoSeek v{CURRENT_VERSION}")
         self.resize(1200, 800)
         # --- 修改这里：从配置加载主题偏好 ---

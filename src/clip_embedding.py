@@ -86,6 +86,8 @@ def get_clip_embeddings_batch(frames):
 def get_text_embedding(text):
     return engine.encode_text(text)
 
+
+#生成向量
 @measure_time("生成向量与索引耗时：")
 def generate_vectors_and_index_for_video(video_path, video_name, index_dir, vector_dir):
     frames, timestamps = extract_frames_with_ffmpeg(video_path)

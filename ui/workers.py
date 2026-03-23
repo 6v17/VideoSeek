@@ -1,4 +1,5 @@
 # src/workers.py
+import numpy as np
 from PySide6.QtCore import QThread, Signal, QCoreApplication
 from src.core import run_search
 
@@ -13,10 +14,21 @@ class SearchWorker(QThread):
     def run(self):
         try:
             results = run_search(self.folder, self.query, self.is_text)
-            self.result_ready.emit(results)
+
+            # 修复：确保发射的是 list 类型，避免 NumPy 歧义
+            if results is None:
+                self.result_ready.emit([])
+            elif isinstance(results, np.ndarray):
+                self.result_ready.emit(results.tolist())
+            else:
+                self.result_ready.emit(list(results))
+
         except Exception as e:
-            print(f"Search Error: {e}")
-        self.finished.emit()
+            import traceback
+            traceback.print_exc()  # 打印完整堆栈，方便调试
+            print(f"Search Error Details: {e}")
+        finally:
+            self.finished.emit()
 
 
 class IndexUpdateWorker(QThread):

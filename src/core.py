@@ -3,7 +3,7 @@ from src.update_video import update_videos
 from src.clip_embedding import get_clip_embeddings_batch, get_text_embedding
 from src.faiss_index import search_vector
 
-
+#进行查帧
 def run_search(video_folder, query_data, is_text=False):
     # 1. 更新/加载 视频库索引
     all_vectors, all_timestamps, all_video_paths, cross_index = update_videos(video_folder)
