@@ -12,7 +12,20 @@ def load_config():
     """
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            cfg = json.load(f)
+            # 确保一些关键路径存在，防止代码报错
+            # 如果没有这些 key，给个默认值
+            defaults = {
+                "fps": 1,
+                "meta_file": "data/meta.json",
+                "vector_dir": "data/vector",
+                "index_dir": "data/index",
+                "cross_index_file": "data/global/cross_video_index.faiss",
+                "cross_vector_file": "data/global/cross_video_vectors.npy"
+            }
+            for k, v in defaults.items():
+                if k not in cfg: cfg[k] = v
+            return cfg
     else:
         print(f"Config file {CONFIG_FILE} not found, using default values.")
         return {

@@ -64,7 +64,7 @@ class CLIPOnnxEngine:
 
         if not embeddings:
             return np.empty((0, self._feature_dim), dtype=np.float32)
-
+        free_memory()
         return np.vstack(embeddings)
 
     def encode_text(self, text):
@@ -89,16 +89,34 @@ def get_text_embedding(text):
 
 #生成向量
 @measure_time("生成向量与索引耗时：")
-def generate_vectors_and_index_for_video(video_path, video_name, index_dir, vector_dir):
+# --- src/clip_embedding.py ---
+
+def generate_vectors_and_index_for_video(video_path, video_id, index_dir, vector_dir):
+    """
+    video_id: 必须是该视频的哈希值（通过 get_video_hash 得到）
+    """
     frames, timestamps = extract_frames_with_ffmpeg(video_path)
     if not frames: return [], [], None
+
     vectors = engine.encode_images(frames)
     free_memory()
-    safe_video_name = base64.urlsafe_b64encode(video_name.encode()).decode()
-    vector_file = os.path.join(vector_dir, f"{safe_video_name}_vectors.npy")
+
+    # --- 关键修复：使用 video_id (哈希串) 作为文件名，彻底避开中文路径问题 ---
+    # 向量文件：data/vector/a1b2c3d4e5f6..._vectors.npy
+    vector_file = os.path.join(vector_dir, f"{video_id}_vectors.npy")
+    # 索引文件：data/index/a1b2c3d4e5f6..._index.faiss
+    index_file = os.path.join(index_dir, f"{video_id}_index.faiss")
+
+    # 规范化路径（处理 Windows 下的斜杠问题）
+    vector_file = os.path.normpath(vector_file)
+    index_file = os.path.normpath(index_file)
+
     ensure_folder_exists(vector_file)
     save_vectors(vectors, timestamps, vector_file)
-    index_file = os.path.join(index_dir, f"{safe_video_name}_index.faiss")
+
     ensure_folder_exists(index_file)
+    # 此时 index_file 不再包含中文，faiss 就能正常写入了
+    from src.faiss_index import create_clip_index
     index = create_clip_index(vectors, index_file)
+
     return vectors, timestamps, index

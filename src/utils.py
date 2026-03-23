@@ -64,26 +64,27 @@ def save_meta(meta, meta_file):
     ensure_folder_exists(meta_file)
     with open(meta_file, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=4, ensure_ascii=False)
-#加载mata文件（用于校验库视频是否发生变化）
-def load_meta(meta_file):
-    if os.path.exists(meta_file):
-        with open(meta_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+
 #生成预览视频
 def create_preview_clip(input_path, start_sec, output_path):
     ffmpeg = get_ffmpeg_path()
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except:
+            pass
 
-    # 注意：使用 subprocess 的列表形式时，不要手动给路径加引号
-    # subprocess 会自动处理路径中的空格
     cmd = [
         ffmpeg, "-y",
-        "-ss", str(start_sec),
-        "-t", "5",
+        "-ss", str(max(0, start_sec - 1)),
+        "-t", "6",  # 预览没必要太长，6秒足够
         "-i", input_path,
-        "-c:v", "libx264", "-preset", "ultrafast",
-        "-an",
-        output_path
+        "-s", "640x360",  # 【关键】强制缩小预览分辨率，极大地减轻播放卡顿
+        "-c:v", "libx264",
+        "-preset", "ultrafast",  # 最快编码
+        "-tune", "zerolatency",  # 零延迟优化
+        "-crf", "32",  # 降低画质提高速度
+        "-an", output_path
     ]
 
     startupinfo = None
@@ -154,7 +155,19 @@ def get_single_thumbnail(video_path, time_sec):
         print(f"截取缩略图失败: {e}")
     return None
 
-
+# --- src/utils.py ---
+def load_meta(meta_file):
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # 强制初始化库结构
+                if "libraries" not in data:
+                    data["libraries"] = {}
+                return data
+        except:
+            return {"libraries": {}}
+    return {"libraries": {}}
 
 def get_resource_path(relative_path):
     """获取资源绝对路径，兼容 PyInstaller 和 Nuitka"""

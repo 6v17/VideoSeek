@@ -1,23 +1,51 @@
+# src/core.py
+import cv2
+import faiss
 import numpy as np
-from src.update_video import update_videos
+import os  # 新增
+from src.config import load_config  # 新增：修复报错的关键
 from src.clip_embedding import get_clip_embeddings_batch, get_text_embedding
-from src.faiss_index import search_vector
 
-#进行查帧
-def run_search(video_folder, query_data, is_text=False):
-    # 1. 更新/加载 视频库索引
-    all_vectors, all_timestamps, all_video_paths, cross_index = update_videos(video_folder)
+
+# 进行查帧
+def run_search(query_data, is_text=False):
+    config = load_config()
+
+    # 路径检查：如果全局索引文件不存在，说明还没同步过
+    if not os.path.exists(config["cross_index_file"]) or not os.path.exists(config["cross_vector_file"]):
+        print("错误：全局索引文件不存在，请先点击“更新全量索引”")
+        return []
+
+    # 加载已有的全局索引
+    from src.faiss_index import load_clip_index
+    cross_index = load_clip_index(config["cross_index_file"])
+
+    # 加载全局向量数据
+    try:
+        data = np.load(config["cross_vector_file"], allow_pickle=True).item()
+        all_timestamps = data['timestamps']
+        all_video_paths = data['paths']
+    except Exception as e:
+        print(f"加载向量文件失败: {e}")
+        return []
+
     if cross_index is None:
         return []
 
-    # 2. 生成搜索向量
+    # 推理逻辑
     if is_text:
         query_vec = get_text_embedding(query_data)
     else:
-        query_vec = get_clip_embeddings_batch([query_data])
+        if isinstance(query_data, str):
+            # 支持中文路径读取图片
+            img = cv2.imdecode(np.fromfile(query_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            query_vec = get_clip_embeddings_batch([img])
+        else:
+            query_vec = get_clip_embeddings_batch([query_data])
 
-        # 【修复】确保搜索向量是标准长度，否则相似度会乱跳
-    query_vec = query_vec / (np.linalg.norm(query_vec, axis=1, keepdims=True) + 1e-10)
+    query_vec = query_vec.astype("float32")
+    faiss.normalize_L2(query_vec)
 
-    matched = search_vector(query_vec, cross_index, all_timestamps, all_video_paths, top_k=10)
-    return matched
+    from src.faiss_index import search_vector
+    # 搜索 Top 100 结果
+    return search_vector(query_vec, cross_index, all_timestamps, all_video_paths, top_k=20)

@@ -18,7 +18,6 @@ def default_bpe():
     return get_resource_path("models/bpe_simple_vocab_16e6.txt.gz")
 
 
-from functools import lru_cache
 
 
 class SimpleTokenizer(object):

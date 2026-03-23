@@ -32,28 +32,21 @@ def load_clip_index(index_file):
     return None
 
 
-def search_vector(query_vector, index, timestamps, video_paths, top_k=5):
-    """
-    基于查询向量从索引中搜索相似项
-    :param query_vector: 查询向量
-    :param index: Faiss索引对象
-    :param timestamps: 时间戳列表
-    :param video_paths: 视频路径列表
-    :param top_k: 返回的最相似结果数量
-    :return: 匹配的结果列表
-    """
-    D, I = index.search(query_vector, top_k)  # D: 距离，I: 索引
+def search_vector(query_vector, index, timestamps, video_paths, top_k=10):
+    # 增加防御：如果库里总帧数还没 top_k 多，就搜全部
+    actual_k = min(top_k, index.ntotal)
+    if actual_k <= 0: return []
 
-    # 计算匹配的时间戳
+    D, I = index.search(query_vector, actual_k)
+
     matched_results = []
     for j, i in enumerate(I[0]):
-        timestamp = timestamps[i]  # 获取原始时间戳
+        if i == -1 or i >= len(video_paths):  # 关键修复：过滤无效索引
+            continue
+        timestamp = timestamps[i]
         video_path = video_paths[i]
-        matched_results.append((timestamp, timestamp, D[0][j], video_path))  # (timestamp, sec, similarity, video_path)
-
-
+        matched_results.append((timestamp, timestamp, D[0][j], video_path))
     return matched_results
-
 
 # 保存向量
 def save_vectors(vectors_list, timestamps, output_file):

@@ -25,7 +25,7 @@ def extract_frames_with_ffmpeg(video_path):
     # 【核心改动 2】：第一个参数用 ffmpeg_bin，而不是字符串 "ffmpeg"
     command = [
         ffmpeg_bin, "-i", video_path,
-        "-vf", f"fps={fps}",
+        "-vf", f"fps={fps}","-sn",
         "-f", "image2pipe",
         "-pix_fmt", "bgr24",
         "-vcodec", "rawvideo", "-"
