@@ -1,8 +1,8 @@
 # 🔍 VideoSeek
 
 ![Banner](./assets/banner_demo.gif)  
-> 🔥 Search inside videos using natural language — no manual tagging required.  
-> 🔥 用一句话搜索视频画面 —— 无需人工打标签
+> 🔥 Search video footage with a sentence or an image — no manual tagging required.  
+> 🔥 用一句话、一张图搜索视频画面 —— 无需人工打标签
 
 ---
 
