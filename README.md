@@ -3,10 +3,6 @@
 ![Banner](./assets/banner_demo.gif)  
 > 🔥 Search video footage with a sentence or an image — no manual tagging required.  
 > 🔥 用一句话、一张图搜索视频画面 —— 无需人工打标签
-> 
-> ⚠️ Notice / 版权说明  
-> VideoSeek is released under the MIT License. Please retain the copyright notice when using or redistributing this software.  
-> VideoSeek 由 **liuvgg** 开发并原创维护，请在使用或转载时注明作者。
 ---
 
 ## 🎬 Demo | 演示
