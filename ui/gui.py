@@ -1,19 +1,24 @@
-# src/gui.py
-import os, cv2, time
-from PySide6.QtWidgets import *
-from PySide6.QtCore import *
-from PySide6.QtGui import *
-from PySide6.QtMultimedia import *
+import os
+import time
+
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QPixmap
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QLabel, QMainWindow, QMessageBox, QScrollArea, QStackedWidget, QVBoxLayout, QWidget, QHBoxLayout
 
+from src.app.config import DEFAULT_CONFIG, get_app_version, load_config, save_config
+from src.app.i18n import get_texts
+from src.services.library_service import add_library, list_libraries, remove_library as remove_library_entry
+from src.services.notice_service import get_local_notice_payload
+from src.workflows.update_video import delete_physical_video_data
+from src.utils import build_preview_cache_path, create_preview_clip, open_folder_in_explorer, open_in_explorer
+from src.services.version_service import get_local_version_status
+from ui.components import LibraryPage, NavigationSidebar, SearchPage, SettingsPage
+from ui.dialogs import AboutDialog, AppMessageDialog, NoticeDialog
 from ui.styles import DARK_STYLE, LIGHT_STYLE
-from ui.dialogs import AboutDialog, NoticeDialog
-from ui.components import SidePanel, ResultTable
-from ui.workers import SearchWorker, IndexUpdateWorker, ThumbLoader
-from src.config import load_config, save_config
-from src.utils import *
-
-CONFIG = load_config()
+from ui.table_views import populate_library_table, populate_result_table
+from ui.workers import IndexUpdateWorker, NoticeFetchWorker, SearchWorker, ThumbLoader, VersionCheckWorker
 
 
 class MainWindow(QMainWindow):
@@ -23,314 +28,501 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.up_worker = None
         self.thumb_thread = None
-        self.current_search_id = 0
+        self.start_time = 0.0
+        self.current_preview_path = None
+        self.current_update_target = None
+        self.version_info = None
+        self.version_worker = None
+        self.notice_payload = None
+        self.notice_worker = None
 
         cfg = load_config()
-        self.is_dark_mode = (cfg.get("theme", "dark") == "dark")
+        self.is_dark_mode = cfg.get("theme", "dark") == "dark"
+        self.language = cfg.get("language", "zh")
+        self.texts = get_texts(self.language)
+        self.version_info = get_local_version_status(self.language)
+        self.notice_payload = get_local_notice_payload(self.language)
 
         self.init_ui()
         self.media_player = QMediaPlayer()
         self.media_player.setVideoOutput(self.video_widget)
+        self.load_settings_values()
+        self.apply_texts()
         self.refresh_library_table()
         self.apply_theme()
+        self.start_version_check()
+        self.start_notice_fetch()
 
     def init_ui(self):
-        self.setWindowTitle(f"VideoSeek v{CONFIG.get('version', '1.0.0')}")
-        self.resize(1200, 750)  # 更大窗口
+        config = load_config()
+        self.setWindowTitle(f"VideoSeek v{get_app_version()}")
+        self.resize(1280, 820)
+        self.setMinimumSize(1080, 700)
+
         central = QWidget()
+        central.setObjectName("AppRoot")
         self.setCentralWidget(central)
+
         main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
 
-        self.side = SidePanel()
-        main_layout.addWidget(self.side)
+        self.sidebar = NavigationSidebar()
+        main_layout.addWidget(self.sidebar)
 
-        right_container = QWidget()
-        right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(15, 15, 15, 15)
+        self.content = QWidget()
+        self.content.setObjectName("ContentArea")
+        content_layout = QVBoxLayout(self.content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.video_container = QWidget(objectName="VideoContainer")
-        self.video_container.setMinimumHeight(380)
-        v_lay = QVBoxLayout(self.video_container)
-        v_lay.setContentsMargins(2, 2, 2, 2)
+        self.pages = QStackedWidget()
+        self.search_page = SearchPage()
+        self.library_page = LibraryPage()
+        self.settings_page = SettingsPage()
+        self.pages.addWidget(self._build_scroll_page(self.search_page))
+        self.pages.addWidget(self._build_scroll_page(self.library_page))
+        self.pages.addWidget(self._build_scroll_page(self.settings_page))
+        content_layout.addWidget(self.pages)
+        main_layout.addWidget(self.content, 1)
+
+        self.search_page.preview_placeholder.hide()
         self.video_widget = QVideoWidget()
-        v_lay.addWidget(self.video_widget)
+        self.search_page.preview_host_layout.addWidget(self.video_widget)
 
-        self.result_table = ResultTable()
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self.video_container)
-        splitter.addWidget(self.result_table)
-        splitter.setStretchFactor(0, 2)  # 视频区稍微高一点
-        splitter.setStretchFactor(1, 3)  # 表格区
-        right_layout.addWidget(splitter)
-        main_layout.addWidget(right_container, 1)
+        self.result_table = self.search_page.result_table
 
-        # 信号绑定
-        self.side.btn_theme.clicked.connect(self.toggle_theme)
-        self.side.btn_about.clicked.connect(self.show_about)
-        self.side.btn_notice.clicked.connect(self.show_notice)
-        self.side.btn_add_lib.clicked.connect(self.select_video_folder)
-        self.side.btn_search.clicked.connect(self.start_search)
-        self.side.btn_clear.clicked.connect(self.clear_all_content)
-        self.side.btn_sync_db.clicked.connect(self.start_update_index)
-        self.side.img_label.mousePressEvent = lambda e: self.upload_file()
+        self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
+        self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
+        self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
+        self.sidebar.btn_theme.clicked.connect(self.toggle_theme)
+        self.sidebar.btn_language.clicked.connect(self.toggle_language)
+        self.sidebar.btn_about.clicked.connect(self.show_about)
+        self.sidebar.btn_notice.clicked.connect(self.show_notice)
+
+        self.search_page.btn_browse.clicked.connect(self.upload_file)
+        self.search_page.btn_search.clicked.connect(self.start_search)
+        self.search_page.btn_clear.clicked.connect(self.clear_all_content)
+        self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
+
+        self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
+        self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
+
+        self.settings_page.btn_save.clicked.connect(self.save_settings)
+        self.settings_page.btn_reset.clicked.connect(self.reset_settings)
+
         self.setAcceptDrops(True)
 
-    # --- 添加显示公告的方法 ---
+    def _build_scroll_page(self, page_widget):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page_widget)
+        return scroll
+
+    def switch_page(self, page_name):
+        mapping = {"search": 0, "library": 1, "settings": 2}
+        self.pages.setCurrentIndex(mapping[page_name])
+        self.sidebar.set_current_page(page_name)
+
+    def start_version_check(self):
+        if self.version_worker and self.version_worker.isRunning():
+            return
+        self.version_worker = VersionCheckWorker(self.language)
+        self.version_worker.result_ready.connect(self._update_version_info)
+        self.version_worker.start()
+
+    def _update_version_info(self, version_info):
+        self.version_info = version_info
+        self.apply_texts()
+
+    def start_notice_fetch(self):
+        if self.notice_worker and self.notice_worker.isRunning():
+            return
+        self.notice_worker = NoticeFetchWorker(self.language)
+        self.notice_worker.result_ready.connect(self._update_notice_payload)
+        self.notice_worker.start()
+
+    def _update_notice_payload(self, notice_payload):
+        self.notice_payload = notice_payload
+
+    def apply_texts(self):
+        self.texts = get_texts(self.language)
+        t = self.texts
+        try:
+            config = load_config()
+        except Exception as exc:
+            self.show_error_dialog(t["settings_load_failed"], exc)
+            return
+
+        self.setWindowTitle(f"{t['app_name']} v{get_app_version()}")
+        self.sidebar.title.setText(t["app_name"])
+        self.sidebar.subtitle.setText(t["app_subtitle"])
+        self.sidebar.hero_tag.setText(t["hero_tag"])
+        self.sidebar.hero_title.setText(t["hero_title"])
+        self.sidebar.hero_body.setText(t["hero_body"])
+        self.sidebar.btn_page_search.setText(t["nav_search"])
+        self.sidebar.btn_page_library.setText(t["nav_library"])
+        self.sidebar.btn_page_settings.setText(t["nav_settings"])
+        self.sidebar.btn_notice.setText(t["notice_short"])
+        if self.version_info and self.version_info.get("has_update"):
+            self.sidebar.btn_about.setText(t["about_short_update"])
+            self.sidebar.btn_about.setObjectName("UpdateButton")
+        else:
+            self.sidebar.btn_about.setText(t["about_short"])
+            self.sidebar.btn_about.setObjectName("SecondaryButton")
+        self.sidebar.btn_about.style().unpolish(self.sidebar.btn_about)
+        self.sidebar.btn_about.style().polish(self.sidebar.btn_about)
+        self.sidebar.btn_about.update()
+        self.sidebar.btn_language.setText(t["language_toggle"])
+        self.sidebar.btn_theme.setText(t["theme_light"] if self.is_dark_mode else t["theme_dark"])
+
+        self.search_page.header.title.setText(t["search_page_title"])
+        self.search_page.header.subtitle.setText(t["search_page_desc"])
+        self.search_page.controls_title.setText(t["controls_label"])
+        self.search_page.controls_hint.setText(t["controls_hint"])
+        self.search_page.session_title.setText(t["workspace_label"])
+        self.search_page.session_hint.setText(t["workspace_hint"])
+        self.search_page.preview_title.setText(t["preview_panel"])
+        self.search_page.results_title.setText(t["results_panel"])
+        self.search_page.btn_browse.setText(t["browse_image"])
+        self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
+        self.search_page.btn_search.setText(t["search"])
+        self.search_page.btn_clear.setText(t["clear"])
+        self.search_page.preview_placeholder.setText(t["preview_placeholder"])
+        self.result_table.setHorizontalHeaderLabels(t["result_headers"])
+
+        self.library_page.header.title.setText(t["library_page_title"])
+        self.library_page.header.subtitle.setText(t["library_page_desc"])
+        self.library_page.table_title.setText(t["library_table_title"])
+        self.library_page.btn_add_lib.setText(t["add_folder"])
+        self.library_page.btn_sync_db.setText(t["update_index"])
+
+        self.settings_page.header.title.setText(t["settings_page_title"])
+        self.settings_page.header.subtitle.setText(t["settings_page_desc"])
+        self.settings_page.general_title.setText(t["settings_group_title"])
+        self.settings_page.btn_save.setText(t["save_settings"])
+        self.settings_page.btn_reset.setText(t["reset_settings"])
+        self.settings_page.configure_form_labels(t)
+
+        if not self.current_img_path and not self.search_page.img_label.pixmap():
+            self.search_page.img_label.setText(t["image_drop_hint"])
+
+        self.search_page.lbl_status.setText(t["ready"])
+        self.library_page.lbl_status.setText(t["ready"])
+        self.settings_page.lbl_status.setText(t["settings_hint"])
+        self.refresh_library_table()
+
+    def load_settings_values(self):
+        try:
+            config = load_config()
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_load_failed"], exc)
+            return
+        self.settings_page.input_fps.setValue(config.get("fps", DEFAULT_CONFIG["fps"]))
+        self.settings_page.input_top_k.setValue(config.get("search_top_k", DEFAULT_CONFIG["search_top_k"]))
+        self.settings_page.input_preview_seconds.setValue(
+            config.get("preview_seconds", DEFAULT_CONFIG["preview_seconds"])
+        )
+        self.settings_page.input_preview_width.setValue(
+            config.get("preview_width", DEFAULT_CONFIG["preview_width"])
+        )
+        self.settings_page.input_preview_height.setValue(
+            config.get("preview_height", DEFAULT_CONFIG["preview_height"])
+        )
+        self.settings_page.input_thumb_width.setValue(
+            config.get("thumb_width", DEFAULT_CONFIG["thumb_width"])
+        )
+        self.settings_page.input_thumb_height.setValue(
+            config.get("thumb_height", DEFAULT_CONFIG["thumb_height"])
+        )
+        self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
+
+    def save_settings(self):
+        try:
+            config = load_config()
+            config["fps"] = self.settings_page.input_fps.value()
+            config["search_top_k"] = self.settings_page.input_top_k.value()
+            config["preview_seconds"] = self.settings_page.input_preview_seconds.value()
+            config["preview_width"] = self.settings_page.input_preview_width.value()
+            config["preview_height"] = self.settings_page.input_preview_height.value()
+            config["thumb_width"] = self.settings_page.input_thumb_width.value()
+            config["thumb_height"] = self.settings_page.input_thumb_height.value()
+            config["ffmpeg_path"] = self.settings_page.input_ffmpeg_path.text().strip()
+            save_config(config)
+            self.settings_page.lbl_status.setText(self.texts["saved_settings"])
+            self.show_info_dialog(self.texts["success_title"], self.texts["saved_settings"], kind="success")
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def reset_settings(self):
+        try:
+            config = load_config()
+            for key, value in DEFAULT_CONFIG.items():
+                if key in {"theme", "language"}:
+                    continue
+                config[key] = value
+            save_config(config)
+            self.load_settings_values()
+            self.settings_page.lbl_status.setText(self.texts["reset_settings_done"])
+            self.show_info_dialog(self.texts["success_title"], self.texts["reset_settings_done"], kind="success")
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
     def show_notice(self):
-        NoticeDialog(self, self.is_dark_mode).exec()
+        NoticeDialog(self, self.is_dark_mode, self.language, notice=self.notice_payload).exec()
 
-    # --- 完善显示关于的方法 ---
     def show_about(self):
-        AboutDialog(self, self.is_dark_mode).exec()
+        AboutDialog(self, self.is_dark_mode, self.language, version_info=self.version_info).exec()
+
     def refresh_library_table(self):
-        meta = load_meta(CONFIG["meta_file"])
-        libs = meta.get("libraries", {})
-        self.side.lib_table.setRowCount(0)
-        is_indexing = self.up_worker is not None and self.up_worker.isRunning()
+        try:
+            is_indexing = self.up_worker is not None and self.up_worker.isRunning()
+            populate_library_table(
+                self.library_page.lib_table,
+                list_libraries(),
+                is_indexing,
+                self.sync_library,
+                self.remove_library_entry,
+                self.open_library_folder,
+                self.texts,
+            )
+        except Exception as exc:
+            self.show_error_dialog(self.texts["library_load_failed"], exc)
 
-        for i, (path, data) in enumerate(libs.items()):
-            row = self.side.lib_table.rowCount()
-            self.side.lib_table.insertRow(row)
+    def sync_library(self, path):
+        self.start_update_index(target_lib=path)
 
-            # 0:序号 1:路径 2:状态 3:按钮
-            it0 = QTableWidgetItem(str(i + 1));
-            it0.setTextAlignment(Qt.AlignCenter)
-            self.side.lib_table.setItem(row, 0, it0)
-
-            name = os.path.basename(path) or path
-            it1 = QTableWidgetItem(name);
-            it1.setTextAlignment(Qt.AlignCenter);
-            it1.setToolTip(path)
-            self.side.lib_table.setItem(row, 1, it1)
-
-            exists = os.path.exists(path)
-            has_idx = len(data.get("files", {})) > 0
-            color, txt = ("#52c41a", "正常") if exists and has_idx else (
-                ("#faad14", "未同步") if exists else ("#ff4d4f", "变更"))
-            it2 = QTableWidgetItem(txt);
-            it2.setForeground(QColor(color));
-            it2.setTextAlignment(Qt.AlignCenter)
-            self.side.lib_table.setItem(row, 2, it2)
-
-            # --- 优化后的按钮区域 ---
-            btns = QWidget()
-            lay = QHBoxLayout(btns)
-            lay.setContentsMargins(8, 0, 8, 0)
-            lay.setSpacing(10)  # 按钮之间拉开距离
-            lay.setAlignment(Qt.AlignCenter)
-
-            r_btn = QPushButton("🔄")
-            r_btn.setProperty("class", "TableBtn")  # 应用样式类
-            r_btn.setFixedSize(50, 28)
-            r_btn.setCursor(Qt.PointingHandCursor)
-            r_btn.clicked.connect(self.refresh_library_table)
-
-            d_btn = QPushButton("🗑️")
-            d_btn.setProperty("class", "TableDeleteBtn")  # 应用删除样式类
-            d_btn.setFixedSize(50, 28)
-            d_btn.setCursor(Qt.PointingHandCursor)
-            d_btn.setEnabled(not is_indexing)
-            d_btn.clicked.connect(lambda _, p=path: self.remove_library(p))
-
-            lay.addWidget(r_btn)
-            lay.addWidget(d_btn)
-            self.side.lib_table.setCellWidget(row, 3, btns)
+    def open_library_folder(self, path):
+        open_folder_in_explorer(path)
 
     def start_search(self):
         if self.thumb_thread and self.thumb_thread.isRunning():
-            self.thumb_thread.stop();
+            self.thumb_thread.stop()
             self.thumb_thread.wait()
 
-        self.start_time = time.time()
-        t_query = self.side.text_search.text().strip()
-        query = t_query if t_query else self.current_img_path
-        if not query: return
+        text_query = self.search_page.text_search.text().strip()
+        query = text_query if text_query else self.current_img_path
+        if not query:
+            self.search_page.lbl_status.setText(self.texts["empty_query"])
+            return
 
-        self.side.btn_search.setEnabled(False)
-        self.side.lbl_status.setText("🔍 正在检索...")
-        self.worker = SearchWorker(query, bool(t_query))
+        self.switch_page("search")
+        self.start_time = time.time()
+        self.search_page.btn_search.setEnabled(False)
+        self.search_page.lbl_status.setText(self.texts["searching"])
+        self.worker = SearchWorker(query, bool(text_query))
         self.worker.result_ready.connect(self.display_results)
-        self.worker.finished.connect(lambda: self.side.btn_search.setEnabled(True))
+        self.worker.finished.connect(lambda: self.search_page.btn_search.setEnabled(True))
         self.worker.start()
 
     def display_results(self, results):
-        self.result_table.setRowCount(0)
         if not results:
-            self.side.lbl_status.setText("❌ 未找到结果");
+            self.result_table.setRowCount(0)
+            self.search_page.lbl_status.setText(self.texts["no_results"])
             return
 
-        self.result_table.setUpdatesEnabled(False)
-        for i, (ts, sec, score, v_path) in enumerate(results):
-            self.result_table.insertRow(i)
-            # 0:序号 1:预览 2:名称 3:时间 4:匹配 5:按钮
-            it0 = QTableWidgetItem(str(i + 1));
-            it0.setTextAlignment(Qt.AlignCenter)
-            self.result_table.setItem(i, 0, it0)
-
-            lbl = QLabel("⌛");
-            lbl.setAlignment(Qt.AlignCenter)
-            self.result_table.setCellWidget(i, 1, lbl)
-
-            it2 = QTableWidgetItem(os.path.basename(v_path));
-            it2.setTextAlignment(Qt.AlignCenter)
-            self.result_table.setItem(i, 2, it2)
-
-            it3 = QTableWidgetItem(f"{int(sec // 60):02d}:{int(sec % 60):02d}");
-            it3.setTextAlignment(Qt.AlignCenter)
-            self.result_table.setItem(i, 3, it3)
-
-            it4 = QTableWidgetItem(f"{int(score * 100)}%");
-            it4.setTextAlignment(Qt.AlignCenter)
-            self.result_table.setItem(i, 4, it4)
-
-            btns = QWidget()
-            lay = QHBoxLayout(btns)
-            lay.setContentsMargins(10, 0, 10, 0)
-            lay.setSpacing(12)
-            lay.setAlignment(Qt.AlignCenter)
-
-            # --- 预览按钮 ---
-            p_btn = QPushButton("▶ 预览")
-            p_btn.setProperty("class", "TableBtn")
-            p_btn.setFixedSize(70, 32)  # 稍微调宽一点，方便点击
-            p_btn.setCursor(Qt.PointingHandCursor)
-            p_btn.setToolTip("播放当前片段")
-
-            # --- 定位按钮 ---
-            l_btn = QPushButton("📂 定位")
-            l_btn.setProperty("class", "TableLocateBtn")
-            l_btn.setFixedSize(70, 32)
-            l_btn.setCursor(Qt.PointingHandCursor)
-            l_btn.setToolTip("在文件夹中显示")
-
-            # 绑定信号
-            p_btn.clicked.connect(lambda _, p=v_path, s=sec: self.handle_play(p, s))
-            l_btn.clicked.connect(lambda _, p=v_path: open_in_explorer(p))
-
-            # 把它们加进布局
-            lay.addWidget(p_btn)
-            lay.addWidget(l_btn)
-            self.result_table.setCellWidget(i, 5, btns)
-
-        self.result_table.setUpdatesEnabled(True)
+        populate_result_table(self.result_table, results, self.handle_play, open_in_explorer, self.texts)
         duration = time.time() - self.start_time
-        self.side.lbl_status.setText(f"✅ 耗时 {duration:.2f}s | 找到 {len(results)} 个结果")
+        self.search_page.lbl_status.setText(self.texts["search_done"].format(duration=duration, count=len(results)))
 
         self.thumb_thread = ThumbLoader(results)
         self.thumb_thread.thumb_ready.connect(self.update_row_thumb)
         self.thumb_thread.start()
 
     def update_row_thumb(self, row, pixmap):
-        lbl = QLabel();
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setPixmap(pixmap)
-        self.result_table.setCellWidget(row, 1, lbl)
+        label = QLabel()
+        label.setAlignment(Qt.AlignCenter)
+        label.setPixmap(pixmap)
+        self.result_table.setCellWidget(row, 1, label)
 
     def clear_all_content(self):
         self.current_img_path = None
-        self.side.text_search.clear()
-        self.side.img_label.clear()
-        self.side.img_label.setText("📷\n点击或拖入图片检索")
+        self.search_page.text_search.clear()
+        self.search_page.img_label.clear()
+        self.search_page.img_label.setText(self.texts["image_drop_hint"])
         self.result_table.setRowCount(0)
         self.media_player.stop()
-        if self.thumb_thread: self.thumb_thread.stop()
-        self.side.lbl_status.setText("系统就绪（已清空）")
+        if self.thumb_thread:
+            self.thumb_thread.stop()
+        self.search_page.lbl_status.setText(self.texts["ready"])
 
-    # --- 基础功能逻辑 ---
     def select_video_folder(self):
-        p = QFileDialog.getExistingDirectory(self, "选择文件夹")
-        if p:
-            p = os.path.normpath(p)
-            meta = load_meta(CONFIG["meta_file"])
-            if p not in meta["libraries"]:
-                meta["libraries"][p] = {"files": {}, "last_scan": ""}
-                save_meta(meta, CONFIG["meta_file"]);
+        path = QFileDialog.getExistingDirectory(self, self.texts["select_folder"])
+        if not path:
+            return
+        try:
+            if add_library(path):
                 self.refresh_library_table()
+                self.library_page.lbl_status.setText(self.texts["library_added"])
+                self.show_info_dialog(self.texts["success_title"], self.texts["library_added"], kind="success")
+        except Exception as exc:
+            self.show_error_dialog(self.texts["library_add_failed"], exc)
 
-    def remove_library(self, path):
-        if self.show_custom_msg("确认", f"移除库及其索引数据？\n{path}", QMessageBox.Question,
-                                QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
-            meta = load_meta(CONFIG["meta_file"])
-            if path in meta["libraries"]:
-                from src.update_video import delete_physical_video_data
-                for info in meta["libraries"][path].get("files", {}).values():
-                    delete_physical_video_data(info.get("vid"), CONFIG)
-                del meta["libraries"][path]
-                save_meta(meta, CONFIG["meta_file"]);
+    def remove_library_entry(self, path):
+        confirmed = QMessageBox.question(
+            self,
+            self.texts["confirm_title"],
+            self.texts["remove_library_confirm"].format(path=path),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmed != QMessageBox.Yes:
+            return
+        try:
+            if remove_library_entry(path, delete_physical_video_data):
                 self.refresh_library_table()
+                self.library_page.lbl_status.setText(self.texts["library_removed"])
+                self.show_info_dialog(self.texts["success_title"], self.texts["library_removed"], kind="success")
+            else:
+                self.library_page.lbl_status.setText(self.texts["library_remove_failed"])
+        except Exception as exc:
+            self.show_error_dialog(self.texts["library_remove_failed"], exc)
 
-    def start_update_index(self):
-        self.side.btn_sync_db.setEnabled(False);
-        self.side.btn_add_lib.setEnabled(False)
-        self.side.progress_bar.setVisible(True)
-        self.up_worker = IndexUpdateWorker()
-        self.up_worker.progress_signal.connect(
-            lambda v, t: (self.side.progress_bar.setValue(v), self.side.lbl_status.setText(t)))
-        self.up_worker.finished_signal.connect(self.on_update_finished)
-        self.up_worker.start()
+    def start_update_index(self, target_lib=None):
+        try:
+            self.switch_page("library")
+            if self.up_worker and self.up_worker.isRunning():
+                return
+            self.library_page.btn_sync_db.setEnabled(False)
+            self.library_page.btn_add_lib.setEnabled(False)
+            self.library_page.progress_bar.setVisible(True)
+            self.current_update_target = target_lib
+            self.up_worker = IndexUpdateWorker(target_lib=target_lib)
+            self.up_worker.progress_signal.connect(
+                lambda value, text: (self.library_page.progress_bar.setValue(value), self.library_page.lbl_status.setText(text))
+            )
+            self.up_worker.finished_signal.connect(self.on_update_finished)
+            self.up_worker.start()
+        except Exception as exc:
+            self.show_error_dialog(self.texts["index_start_failed"], exc)
 
     def on_update_finished(self, success):
-        self.side.btn_sync_db.setEnabled(True);
-        self.side.btn_add_lib.setEnabled(True)
-        self.side.progress_bar.setVisible(False);
+        self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_add_lib.setEnabled(True)
+        self.library_page.progress_bar.setVisible(False)
         self.refresh_library_table()
-        self.side.lbl_status.setText("✅ 同步完成" if success else "❌ 同步失败")
+        if success:
+            status_text = self.texts["index_updated_single"] if self.current_update_target else self.texts["index_updated"]
+        else:
+            status_text = self.texts["index_failed"]
+        self.library_page.lbl_status.setText(status_text)
+        self.current_update_target = None
 
     def handle_play(self, path, sec):
         self.media_player.stop()
-        cache = os.path.join(os.environ["LOCALAPPDATA"], "VideoSeek", "cache", "preview.mp4")
-        os.makedirs(os.path.dirname(cache), exist_ok=True)
-        if create_preview_clip(path, sec, cache).returncode == 0:
-            self.media_player.setSource(QUrl.fromLocalFile(cache));
+        self.media_player.setSource(QUrl())
+
+        cache_path = build_preview_cache_path(path, sec)
+        result = create_preview_clip(path, sec, cache_path)
+        if result.returncode == 0:
+            self._cleanup_previous_preview()
+            self.current_preview_path = cache_path
+            self.media_player.setSource(QUrl.fromLocalFile(cache_path))
             self.media_player.play()
+        else:
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+            self.search_page.lbl_status.setText(self.texts["preview_failed"])
 
     def upload_file(self):
-        p, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.jpg *.png)")
-        if p:
-            self.current_img_path = p
-            self.side.img_label.setPixmap(QPixmap(p).scaled(280, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            self.side.text_search.clear()
+        path, _ = QFileDialog.getOpenFileName(self, self.texts["select_image"], "", self.texts["image_filter"])
+        if path:
+            self._set_image_query(path, clear_text=True)
 
     def apply_theme(self):
         style = DARK_STYLE if self.is_dark_mode else LIGHT_STYLE
-        self.setStyleSheet(style)
-        # 强制刷新子控件样式
-        self.side.style().unpolish(self.side)
-        self.side.style().polish(self.side)
-        self.side.btn_theme.setText("☀️" if self.is_dark_mode else "🌙")
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(style)
+        self.update()
+        self.sidebar.btn_theme.setText(self.texts["theme_light"] if self.is_dark_mode else self.texts["theme_dark"])
 
     def toggle_theme(self):
         self.is_dark_mode = not self.is_dark_mode
         self.apply_theme()
-        cfg = load_config();
-        cfg["theme"] = "dark" if self.is_dark_mode else "light"
-        save_config(cfg)
+        config = load_config()
+        config["theme"] = "dark" if self.is_dark_mode else "light"
+        save_config(config)
 
-    def show_custom_msg(self, title, text, icon, buttons=QMessageBox.Ok):
-        msg = QMessageBox(self);
-        msg.setWindowTitle(title);
-        msg.setText(text);
-        msg.setIcon(icon);
-        msg.setStandardButtons(buttons)
-        msg.setStyleSheet(DARK_STYLE if self.is_dark_mode else LIGHT_STYLE)
-        return msg.exec()
+    def toggle_language(self):
+        self.language = "en" if self.language == "zh" else "zh"
+        config = load_config()
+        config["language"] = self.language
+        save_config(config)
+        self.version_info = get_local_version_status(self.language)
+        self.notice_payload = get_local_notice_payload(self.language)
+        self.apply_texts()
+        self.apply_theme()
+        self.start_version_check()
+        self.start_notice_fetch()
 
+    def show_error_dialog(self, message, exc=None):
+        detail = self.texts["generic_detail"].format(detail=str(exc)) if exc else ""
+        text = f"{message}\n\n{detail}".strip()
+        AppMessageDialog(
+            self.texts["error_title"],
+            text,
+            kind="error",
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+        ).exec()
 
-    def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls(): e.acceptProposedAction()
+    def show_info_dialog(self, title, text, kind="info"):
+        AppMessageDialog(
+            title,
+            text,
+            kind=kind,
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+        ).exec()
 
-    def dropEvent(self, e):
-        urls = e.mimeData().urls()
-        if urls: self.upload_file_path(urls[0].toLocalFile())
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
 
-    def upload_file_path(self, p):
-        self.current_img_path = p
-        self.side.img_label.setPixmap(QPixmap(p).scaled(280, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        if urls:
+            self.upload_file_path(urls[0].toLocalFile())
+
+    def upload_file_path(self, path):
+        self._set_image_query(path, clear_text=False)
+        self.switch_page("search")
 
     def closeEvent(self, event):
-        if self.worker: self.worker.quit()
-        if self.up_worker: self.up_worker.quit()
-        if self.thumb_thread: self.thumb_thread.stop()
+        if self.worker:
+            self.worker.quit()
+        if self.up_worker:
+            self.up_worker.quit()
+        if self.thumb_thread:
+            self.thumb_thread.stop()
+        if self.version_worker:
+            self.version_worker.quit()
+        if self.notice_worker:
+            self.notice_worker.quit()
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+        self._cleanup_previous_preview()
         event.accept()
+
+    def _set_image_query(self, path, clear_text):
+        self.current_img_path = path
+        self.search_page.img_label.setPixmap(
+            QPixmap(path).scaled(420, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+        if clear_text:
+            self.search_page.text_search.clear()
+        self.search_page.lbl_status.setText(self.texts["image_loaded"])
+
+    def _cleanup_previous_preview(self):
+        if not self.current_preview_path:
+            return
+        if os.path.exists(self.current_preview_path):
+            try:
+                os.remove(self.current_preview_path)
+            except OSError:
+                pass
+        self.current_preview_path = None

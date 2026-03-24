@@ -1,0 +1,17 @@
+{
+    "theme": "light",
+    "fps": 1,
+    "meta_file": "data/meta.json",
+    "vector_dir": "data/vector",
+    "index_dir": "data/index",
+    "cross_index_file": "data/global/cross_video_index.faiss",
+    "cross_vector_file": "data/global/cross_video_vectors.npy",
+    "language": "zh",
+    "search_top_k": 20,
+    "preview_seconds": 6,
+    "preview_width": 640,
+    "preview_height": 360,
+    "thumb_width": 130,
+    "thumb_height": 75,
+    "ffmpeg_path": ""
+}
