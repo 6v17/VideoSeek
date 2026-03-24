@@ -1,5 +1,5 @@
 
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QFrame
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QFrame, QTextEdit
 from PySide6.QtCore import Qt
 
 from src.config import load_config
@@ -177,3 +177,41 @@ class AboutDialog(QDialog):
         btn_lay.addWidget(btn_close)
         btn_lay.addStretch()
         layout.addLayout(btn_lay)
+
+
+class NoticeDialog(QDialog):
+    def __init__(self, parent=None, is_dark=True):
+        super().__init__(parent)
+        self.setWindowTitle("系统公告")
+        self.setFixedSize(400, 300)
+
+        bg = "#1e1e1e" if is_dark else "#ffffff"
+        text = "#eeeeee" if is_dark else "#333333"
+        border = "#333333" if is_dark else "#dddddd"
+
+        self.setStyleSheet(f"background-color: {bg}; color: {text};")
+
+        layout = QVBoxLayout(self)
+
+        title = QLabel("📢 最新公告")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(title)
+
+        # 这里可以写你的公告内容
+        notice_text = (
+            "1. 欢迎使用 VideoSeek v1.0.0！\n"
+            "2. 本地索引更新后，检索速度将大幅提升。\n"
+            "3. 如遇预览卡顿，请检查 ffmpeg 环境配置。\n"
+            "4. 更多功能开发中，敬请期待..."
+        )
+
+        content = QTextEdit()
+        content.setPlainText(notice_text)
+        content.setReadOnly(True)
+        content.setStyleSheet(f"border: 1px solid {border}; padding: 10px; border-radius: 5px;")
+        layout.addWidget(content)
+
+        btn_close = QPushButton("关闭")
+        btn_close.setFixedWidth(80)
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close, 0, Qt.AlignCenter)

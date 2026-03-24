@@ -7,6 +7,23 @@ QMainWindow {
     font-family: "Segoe UI", "Microsoft YaHei", "Helvetica Neue", sans-serif;
     font-size: 13px;
 }
+QTableWidget {
+    outline: none;
+    border: none;
+    background-color: transparent;
+}
+QTableWidget::item {
+    border-bottom: 1px solid rgba(128, 128, 128, 0.1); /* 代替网格线 */
+}
+/* 表格内的按钮缩小一点，更精致 */
+QTableWidget QPushButton {
+    font-size: 11px;
+    padding: 2px;
+}
+#DeleteButton:hover {
+    background-color: #ff4d4f;
+    color: white;
+}
 /* 全局字体与平滑渲染 */
 QMainWindow {
     font-family: "Segoe UI", "Microsoft YaHei", "Helvetica Neue", sans-serif;
@@ -277,7 +294,158 @@ QToolTip {
     font-size: 12px;
 }
 """
+COMMON_STYLE += """
+/* 表格内的小按钮基础样式 */
+.TableBtn {
+    border: none;
+    background-color: transparent;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #0078D4;
+    padding: 2px 8px;
+}
 
+/* 刷新/预览等常规按钮 */
+.TableBtn:hover {
+    background-color: rgba(0, 120, 212, 0.15);
+}
+
+/* 删除按钮专项（平时灰色，悬停变红） */
+.TableDeleteBtn {
+    border: none;
+    background-color: transparent;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #888888;
+    padding: 2px 8px;
+}
+.TableDeleteBtn:hover {
+    background-color: #FF4D4F;
+    color: white;
+}
+
+/* 结果列表里的定位按钮 */
+.TableLocateBtn:hover {
+    background-color: rgba(45, 164, 78, 0.15);
+    color: #2DA44E;
+}
+"""
+# ui/styles.py
+
+COMMON_STYLE += """
+/* 表格内的小按钮基础样式 */
+.TableBtn {
+    border: none;
+    background-color: transparent;
+    border-radius: 6px;
+    font-size: 15px;      /* 这里调大图标和文字 */
+    font-weight: bold;
+    color: #0078D4;
+    padding: 2px 10px;
+}
+
+/* 删除按钮专项 */
+.TableDeleteBtn {
+    border: none;
+    background-color: transparent;
+    border-radius: 6px;
+    font-size: 15px;      /* 同样调大 */
+    color: #888888;
+    padding: 2px 10px;
+}
+
+/* 检索按钮的悬停效果微调 (因为字号变大了) */
+#SearchButton {
+    font-size: 18px;
+    font-weight: 800;
+}
+"""
+
+# ui/styles.py
+
+# 在 COMMON_STYLE 中加入
+COMMON_STYLE += """
+/* 头部小图标按钮 (公告、关于) */
+#HeaderIconBtn {
+    background-color: transparent;
+    border: none;
+    font-size: 22px;             /* 大图标 */
+    border-radius: 22px;         /* 圆形悬停效果 */
+}
+#HeaderIconBtn:hover {
+    background-color: rgba(128, 128, 128, 0.15); /* 淡淡的灰色圆圈 */
+}
+
+/* 主题切换按钮 (太阳、月亮) */
+#ThemeIconBtn {
+    background-color: transparent;
+    border: none;
+    font-size: 28px;             /* 更大的图标 */
+    border-radius: 27px;
+}
+#ThemeIconBtn:hover {
+    background-color: rgba(0, 120, 212, 0.1);    /* 淡淡的蓝色圆圈 */
+}
+#ThemeIconBtn:pressed {
+    font-size: 24px;             /* 按下时图标稍微缩小，有点击感 */
+}
+"""
+# ui/styles.py
+
+COMMON_STYLE += """
+/* --- 表格内通用透明按钮样式 --- */
+.TableBtn, .TableLocateBtn, .TableDeleteBtn {
+    background-color: transparent; /* 平时完全透明 */
+    border: none;                  /* 无边框 */
+    border-radius: 6px;            /* 悬停时的圆角 */
+    font-size: 14px;               /* 调大图标字号 */
+    font-weight: bold;
+    padding: 2px 5px;
+}
+
+/* 预览按钮：悬停变浅蓝色 */
+.TableBtn:hover {
+    background-color: rgba(0, 120, 212, 0.1); 
+    color: #0078D4;
+}
+
+/* 定位按钮：悬停变浅绿色 */
+.TableLocateBtn:hover {
+    background-color: rgba(45, 164, 78, 0.1);
+    color: #2DA44E;
+}
+
+/* 删除按钮：悬停变浅红色 */
+.TableDeleteBtn:hover {
+    background-color: rgba(255, 77, 79, 0.1);
+    color: #FF4D4F;
+}
+
+/* 按下时的反馈（缩小一点点） */
+.TableBtn:pressed, .TableLocateBtn:pressed, .TableDeleteBtn:pressed {
+    font-size: 12px;
+}
+"""
+# ui/styles.py
+
+COMMON_STYLE += """
+/* 头部小图标按钮 */
+#HeaderIconBtn {
+    background-color: transparent;
+    border: none;
+    font-size: 18px;             /* 稍微调小一点字号，更精致 */
+    border-radius: 16px;         /* 32px的一半 */
+}
+
+/* 主题切换按钮 */
+#ThemeIconBtn {
+    background-color: transparent;
+    border: none;
+    font-size: 22px;             /* 太阳月亮稍微调小 */
+    border-radius: 21px;         /* 42px的一半 */
+}
+"""
 # ========== 暗色主题 ==========
 DARK_STYLE = COMMON_STYLE + """
 /* 主窗口背景 */
@@ -288,7 +456,11 @@ QMainWindow {
     background-color: #252526;
     border-right: 1px solid #3E3E42;
 }
-
+QTableWidget { 
+    background-color: #1E1E1E; 
+    gridline-color: transparent;
+}
+#LibTable { background-color: #252526; }
 /* 标签 */
 QLabel {
     color: #E0E0E0;
@@ -463,7 +635,11 @@ QLabel {
 #SidePanel QLabel {
     color: #2C2C2C;
 }
-
+QTableWidget { 
+    background-color: #FFFFFF; 
+    gridline-color: transparent;
+}
+#LibTable { background-color: #FFFFFF; }
 /* 图片拖放区 */
 #ImageDropZone {
     background-color: #FAFAFA;

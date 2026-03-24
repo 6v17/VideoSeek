@@ -11,18 +11,45 @@ class SidePanel(QWidget):
         self.setObjectName("SidePanel")
         self.setFixedWidth(360)                     # 加宽
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 28, 24, 24)   # 边距更舒适
+        layout.setContentsMargins(18, 28, 24, 24)   # 边距更舒适
         layout.setSpacing(18)                       # 间距稍大
 
         # 头部标题
         header = QHBoxLayout()
+        # 1. 调大间距：12-15px 是比较舒服的“呼吸感”间距
+        header.setSpacing(12)
+        header.setContentsMargins(0, 0, 0, 0)  # 确保布局本身没有内边距
+
         self.title = QLabel("VideoSeek")
+        # 2. 稍微收紧标题宽度，只要不挡住'k'即可
+        self.title.setMinimumWidth(130)
         self.title.setStyleSheet("font-size: 24px; font-weight: 800; color: #0078D4;")
+
+        # --- 按钮尺寸统一化 ---
+        # 建议把所有按钮容器统一设为相同高度（如36px），宽度根据图标微调
+
+        self.btn_notice = QPushButton("📢")
+        self.btn_notice.setObjectName("HeaderIconBtn")
+        self.btn_notice.setFixedSize(50, 50)  # 稍微大一点
+        self.btn_notice.setCursor(Qt.PointingHandCursor)
+
+        self.btn_about = QPushButton("❓")
+        self.btn_about.setObjectName("HeaderIconBtn")
+        self.btn_about.setFixedSize(50, 50)
+        self.btn_about.setCursor(Qt.PointingHandCursor)
+
         self.btn_theme = QPushButton("🌙")
-        self.btn_theme.setFixedSize(42, 42)
+        self.btn_theme.setObjectName("ThemeIconBtn")
+        self.btn_theme.setFixedSize(50, 50)  # 主题按钮作为主交互，略大一点
+        self.btn_theme.setCursor(Qt.PointingHandCursor)
+
         header.addWidget(self.title)
-        header.addStretch()
+        header.addStretch()  # 这个弹簧会把三个按钮整体推向右侧
+
+        header.addWidget(self.btn_notice)
+        header.addWidget(self.btn_about)
         header.addWidget(self.btn_theme)
+
         layout.addLayout(header)
 
         # 库管理表格
@@ -30,24 +57,24 @@ class SidePanel(QWidget):
         # 库管理表格
         self.lib_table = QTableWidget(0, 4)
         self.lib_table.setObjectName("LibTable")
-        self.lib_table.setHorizontalHeaderLabels(["序号", "文件夹名", "状态", "操作"])
+        self.lib_table.setHorizontalHeaderLabels(["序号", "文件夹", "状态", "操作"])
         self.lib_table.verticalHeader().setVisible(False)
-        self.lib_table.setFixedHeight(180)
+        self.lib_table.setFixedHeight(200)  # 稍微加高一点
 
         # 设置各列宽度
-        self.lib_table.setColumnWidth(0, 50)  # 序号列，加宽到50像素
-        self.lib_table.setColumnWidth(1, 0)  # 路径列设为0，稍后设Stretch
-        self.lib_table.setColumnWidth(2, 50)  # 状态列，固定70像素
-        self.lib_table.setColumnWidth(3, 150)   # 操作列
-        # 设置拉伸策略
+        self.lib_table.setColumnWidth(0, 40)
+        self.lib_table.setColumnWidth(2, 60)
+        self.lib_table.setColumnWidth(3, 110)  # 缩减操作列，让文件夹名更宽
+
         self.lib_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.lib_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)  # 路径列拉伸
+        self.lib_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.lib_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
         self.lib_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.lib_table.verticalHeader().setDefaultSectionSize(60)  # 行高
-        # =================================
 
+        # --- 优化点：减小行高，让表格更紧凑 ---
+        self.lib_table.verticalHeader().setDefaultSectionSize(45)
         self.lib_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.lib_table.setFocusPolicy(Qt.NoFocus)  # 去除选中时的虚线框
         layout.addWidget(self.lib_table)
 
         self.btn_add_lib = QPushButton("➕ 添加文件夹")
@@ -72,6 +99,7 @@ class SidePanel(QWidget):
         search_lay = QHBoxLayout()
         search_lay.setSpacing(8)  # 按钮之间间距
         self.btn_search = QPushButton("🚀 开始检索")
+        self.btn_search.setStyleSheet("font-size: 18px; font-weight: bold;")
         self.btn_search.setObjectName("SearchButton")
         self.btn_search.setFixedHeight(48)
         self.btn_search.setFixedWidth(200)
@@ -104,7 +132,9 @@ class ResultTable(QTableWidget):
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(95)
         self.setAlternatingRowColors(True)
+        self.verticalHeader().setDefaultSectionSize(85)  # 稍微减小高度
         self.setFocusPolicy(Qt.NoFocus)
+        self.setShowGrid(False)  # 关闭网格线，改用样式表的底边框，更现代
 
         # 启用水平滚动条，确保所有列可见
         self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)

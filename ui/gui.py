@@ -7,7 +7,7 @@ from PySide6.QtMultimedia import *
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from ui.styles import DARK_STYLE, LIGHT_STYLE
-from ui.dialogs import AboutDialog
+from ui.dialogs import AboutDialog, NoticeDialog
 from ui.components import SidePanel, ResultTable
 from ui.workers import SearchWorker, IndexUpdateWorker, ThumbLoader
 from src.config import load_config, save_config
@@ -68,6 +68,8 @@ class MainWindow(QMainWindow):
 
         # 信号绑定
         self.side.btn_theme.clicked.connect(self.toggle_theme)
+        self.side.btn_about.clicked.connect(self.show_about)
+        self.side.btn_notice.clicked.connect(self.show_notice)
         self.side.btn_add_lib.clicked.connect(self.select_video_folder)
         self.side.btn_search.clicked.connect(self.start_search)
         self.side.btn_clear.clicked.connect(self.clear_all_content)
@@ -75,6 +77,13 @@ class MainWindow(QMainWindow):
         self.side.img_label.mousePressEvent = lambda e: self.upload_file()
         self.setAcceptDrops(True)
 
+    # --- 添加显示公告的方法 ---
+    def show_notice(self):
+        NoticeDialog(self, self.is_dark_mode).exec()
+
+    # --- 完善显示关于的方法 ---
+    def show_about(self):
+        AboutDialog(self, self.is_dark_mode).exec()
     def refresh_library_table(self):
         meta = load_meta(CONFIG["meta_file"])
         libs = meta.get("libraries", {})
@@ -105,18 +114,27 @@ class MainWindow(QMainWindow):
             it2.setTextAlignment(Qt.AlignCenter)
             self.side.lib_table.setItem(row, 2, it2)
 
-            btns = QWidget();
-            lay = QHBoxLayout(btns);
-            lay.setContentsMargins(0, 0, 0, 0);
+            # --- 优化后的按钮区域 ---
+            btns = QWidget()
+            lay = QHBoxLayout(btns)
+            lay.setContentsMargins(8, 0, 8, 0)
+            lay.setSpacing(10)  # 按钮之间拉开距离
             lay.setAlignment(Qt.AlignCenter)
-            r_btn = QPushButton("刷新");
-            r_btn.setFixedSize(50, 30);
+
+            r_btn = QPushButton("🔄")
+            r_btn.setProperty("class", "TableBtn")  # 应用样式类
+            r_btn.setFixedSize(50, 28)
+            r_btn.setCursor(Qt.PointingHandCursor)
             r_btn.clicked.connect(self.refresh_library_table)
-            d_btn = QPushButton("删除️");
-            d_btn.setFixedSize(50, 30);
+
+            d_btn = QPushButton("🗑️")
+            d_btn.setProperty("class", "TableDeleteBtn")  # 应用删除样式类
+            d_btn.setFixedSize(50, 28)
+            d_btn.setCursor(Qt.PointingHandCursor)
             d_btn.setEnabled(not is_indexing)
             d_btn.clicked.connect(lambda _, p=path: self.remove_library(p))
-            lay.addWidget(r_btn);
+
+            lay.addWidget(r_btn)
             lay.addWidget(d_btn)
             self.side.lib_table.setCellWidget(row, 3, btns)
 
@@ -167,17 +185,32 @@ class MainWindow(QMainWindow):
             it4.setTextAlignment(Qt.AlignCenter)
             self.result_table.setItem(i, 4, it4)
 
-            btns = QWidget();
-            lay = QHBoxLayout(btns);
-            lay.setContentsMargins(0, 0, 0, 0);
+            btns = QWidget()
+            lay = QHBoxLayout(btns)
+            lay.setContentsMargins(10, 0, 10, 0)
+            lay.setSpacing(12)
             lay.setAlignment(Qt.AlignCenter)
-            p_btn = QPushButton("预览")
-            p_btn.setFixedSize(70, 30);
-            l_btn = QPushButton("定位")
-            l_btn.setFixedSize(70, 30);
+
+            # --- 预览按钮 ---
+            p_btn = QPushButton("▶ 预览")
+            p_btn.setProperty("class", "TableBtn")
+            p_btn.setFixedSize(70, 32)  # 稍微调宽一点，方便点击
+            p_btn.setCursor(Qt.PointingHandCursor)
+            p_btn.setToolTip("播放当前片段")
+
+            # --- 定位按钮 ---
+            l_btn = QPushButton("📂 定位")
+            l_btn.setProperty("class", "TableLocateBtn")
+            l_btn.setFixedSize(70, 32)
+            l_btn.setCursor(Qt.PointingHandCursor)
+            l_btn.setToolTip("在文件夹中显示")
+
+            # 绑定信号
             p_btn.clicked.connect(lambda _, p=v_path, s=sec: self.handle_play(p, s))
             l_btn.clicked.connect(lambda _, p=v_path: open_in_explorer(p))
-            lay.addWidget(p_btn);
+
+            # 把它们加进布局
+            lay.addWidget(p_btn)
             lay.addWidget(l_btn)
             self.result_table.setCellWidget(i, 5, btns)
 
@@ -261,7 +294,11 @@ class MainWindow(QMainWindow):
             self.side.text_search.clear()
 
     def apply_theme(self):
-        self.setStyleSheet(DARK_STYLE if self.is_dark_mode else LIGHT_STYLE)
+        style = DARK_STYLE if self.is_dark_mode else LIGHT_STYLE
+        self.setStyleSheet(style)
+        # 强制刷新子控件样式
+        self.side.style().unpolish(self.side)
+        self.side.style().polish(self.side)
         self.side.btn_theme.setText("☀️" if self.is_dark_mode else "🌙")
 
     def toggle_theme(self):
@@ -280,8 +317,6 @@ class MainWindow(QMainWindow):
         msg.setStyleSheet(DARK_STYLE if self.is_dark_mode else LIGHT_STYLE)
         return msg.exec()
 
-    def show_about(self):
-        AboutDialog(self, self.is_dark_mode).exec()
 
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls(): e.acceptProposedAction()
