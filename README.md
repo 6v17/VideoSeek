@@ -130,10 +130,10 @@ python -m nuitka --standalone ^
 main.py
 ```
 ## Download
-```bash
+
  1、Gitee Release: [https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases](https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases)
  2、GitHub Release: [https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases](https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases)
-```
+
 ## License
 
 MIT
