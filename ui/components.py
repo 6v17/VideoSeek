@@ -17,12 +17,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.layout import COMPONENT_SIZES
+
 
 class NavigationSidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("NavSidebar")
-        self.setFixedWidth(248)
+        self.setFixedWidth(COMPONENT_SIZES["sidebar_width"])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 20, 18, 18)
@@ -73,7 +75,7 @@ class NavigationSidebar(QWidget):
 
         for button in [self.btn_notice, self.btn_about, self.btn_language, self.btn_theme]:
             button.setCursor(Qt.PointingHandCursor)
-            button.setFixedHeight(36)
+            button.setFixedHeight(COMPONENT_SIZES["sidebar_action_height"])
             layout.addWidget(button)
 
     def _build_nav_button(self, text, checked=False):
@@ -82,7 +84,7 @@ class NavigationSidebar(QWidget):
         button.setCheckable(True)
         button.setChecked(checked)
         button.setCursor(Qt.PointingHandCursor)
-        button.setFixedHeight(42)
+        button.setFixedHeight(COMPONENT_SIZES["nav_button_height"])
         return button
 
     def set_current_page(self, page_name):
@@ -157,7 +159,7 @@ class SearchPage(QWidget):
         self.img_label.setObjectName("ImageDropZone")
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setWordWrap(True)
-        self.img_label.setMinimumHeight(260)
+        self.img_label.setMinimumHeight(COMPONENT_SIZES["image_drop_min_height"])
         self.btn_browse = QPushButton()
         self.btn_browse.setObjectName("SecondaryButton")
         self.text_search = QLineEdit()
@@ -188,7 +190,7 @@ class SearchPage(QWidget):
         self.preview_title.setObjectName("CardTitle")
         self.preview_host = QFrame()
         self.preview_host.setObjectName("VideoContainer")
-        self.preview_host.setMinimumHeight(300)
+        self.preview_host.setMinimumHeight(COMPONENT_SIZES["preview_host_min_height"])
         self.preview_host_layout = QVBoxLayout(self.preview_host)
         self.preview_host_layout.setContentsMargins(6, 6, 6, 6)
         self.preview_placeholder = QLabel()
@@ -210,7 +212,7 @@ class SearchPage(QWidget):
         self.results_title = QLabel()
         self.results_title.setObjectName("CardTitle")
         self.result_table = ResultTable()
-        self.result_table.setMinimumHeight(520)
+        self.result_table.setMinimumHeight(COMPONENT_SIZES["result_table_min_height"])
         results_layout.addWidget(self.results_title)
         results_layout.addWidget(self.result_table)
         root.addWidget(self.results_card, 4)
@@ -247,8 +249,8 @@ class LibraryPage(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFixedHeight(18)
-        self.progress_bar.setMinimumWidth(260)
+        self.progress_bar.setFixedHeight(COMPONENT_SIZES["progress_bar_height"])
+        self.progress_bar.setMinimumWidth(COMPONENT_SIZES["progress_bar_min_width"])
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("StatusLabel")
         self.lbl_status.setWordWrap(True)
@@ -326,6 +328,7 @@ class SettingsPage(QWidget):
         self.input_thumb_height = QSpinBox()
         self.input_thumb_height.setRange(45, 320)
         self.input_ffmpeg_path = QLineEdit()
+        self.input_model_dir = QLineEdit()
         self.label_fps = QLabel()
         self.label_top_k = QLabel()
         self.label_preview_seconds = QLabel()
@@ -334,6 +337,7 @@ class SettingsPage(QWidget):
         self.label_thumb_width = QLabel()
         self.label_thumb_height = QLabel()
         self.label_ffmpeg_path = QLabel()
+        self.label_model_dir = QLabel()
         self.hint_fps = QLabel()
         self.hint_top_k = QLabel()
         self.hint_preview_seconds = QLabel()
@@ -342,15 +346,18 @@ class SettingsPage(QWidget):
         self.hint_thumb_width = QLabel()
         self.hint_thumb_height = QLabel()
         self.hint_ffmpeg_path = QLabel()
+        self.hint_ffmpeg_active = QLabel()
+        self.hint_model_dir = QLabel()
 
-        self._configure_setting_input(self.input_fps, width=88)
-        self._configure_setting_input(self.input_top_k, width=88)
-        self._configure_setting_input(self.input_preview_seconds, width=88)
-        self._configure_setting_input(self.input_preview_width, width=88)
-        self._configure_setting_input(self.input_preview_height, width=88)
-        self._configure_setting_input(self.input_thumb_width, width=88)
-        self._configure_setting_input(self.input_thumb_height, width=88)
-        self._configure_setting_input(self.input_ffmpeg_path, width=260)
+        self._configure_setting_input(self.input_fps, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_top_k, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_preview_width, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_preview_height, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"])
+        self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"])
 
         self.form.addRow(self.label_fps, self._build_setting_row(self.input_fps, self.hint_fps))
         self.form.addRow(self.label_top_k, self._build_setting_row(self.input_top_k, self.hint_top_k))
@@ -376,7 +383,11 @@ class SettingsPage(QWidget):
         )
         self.form.addRow(
             self.label_ffmpeg_path,
-            self._build_setting_row(self.input_ffmpeg_path, self.hint_ffmpeg_path),
+            self._build_setting_row(self.input_ffmpeg_path, self.hint_ffmpeg_path, self.hint_ffmpeg_active),
+        )
+        self.form.addRow(
+            self.label_model_dir,
+            self._build_setting_row(self.input_model_dir, self.hint_model_dir),
         )
         form_layout.addLayout(self.form)
 
@@ -402,15 +413,24 @@ class SettingsPage(QWidget):
         widget.setFixedWidth(width)
         widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-    def _build_setting_row(self, field, hint_label):
+    def _build_setting_row(self, field, hint_label, extra_hint_label=None):
         hint_label.setObjectName("CardHint")
         hint_label.setWordWrap(True)
+        if extra_hint_label is not None:
+            extra_hint_label.setObjectName("CardHint")
+            extra_hint_label.setWordWrap(True)
         row = QWidget()
-        layout = QHBoxLayout(row)
+        layout = QVBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        layout.addWidget(field, 0)
-        layout.addWidget(hint_label, 1)
+        layout.setSpacing(6)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(12)
+        top.addWidget(field, 0)
+        top.addWidget(hint_label, 1)
+        layout.addLayout(top)
+        if extra_hint_label is not None:
+            layout.addWidget(extra_hint_label)
         return row
 
     def configure_form_labels(self, texts):
@@ -422,6 +442,7 @@ class SettingsPage(QWidget):
         self.label_thumb_width.setText(texts["setting_thumb_width"])
         self.label_thumb_height.setText(texts["setting_thumb_height"])
         self.label_ffmpeg_path.setText(texts["setting_ffmpeg_path"])
+        self.label_model_dir.setText(texts["setting_model_dir"])
         self.hint_fps.setText(texts["setting_fps_hint"])
         self.hint_top_k.setText(texts["setting_top_k_hint"])
         self.hint_preview_seconds.setText(texts["setting_preview_seconds_hint"])
@@ -430,6 +451,8 @@ class SettingsPage(QWidget):
         self.hint_thumb_width.setText(texts["setting_thumb_width_hint"])
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
         self.hint_ffmpeg_path.setText(texts["setting_ffmpeg_path_hint"])
+        self.hint_ffmpeg_active.setText(texts["setting_ffmpeg_active"].format(path=texts["setting_ffmpeg_unknown"]))
+        self.hint_model_dir.setText(texts["setting_model_dir_hint"])
 
 
 class ResultTable(QTableWidget):

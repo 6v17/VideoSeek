@@ -18,18 +18,23 @@ Desktop semantic video search built with `PySide6`, `ONNX Runtime`, `FAISS`, and
 pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy regex
 ```
 
-3. Put these model files into `models/`:
+3. Start the app:
+
+```bash
+python main.py
+```
+
+On first launch, the app can prepare runtime resources automatically from the remote manifest configured in `src/app/app_meta.py`.
+
+Manual fallback:
+
+- Put these model files into `%LOCALAPPDATA%\\VideoSeek\\models\\` or `models/`:
 
 - `clip_visual.onnx`
 - `clip_text.onnx`
 - `bpe_simple_vocab_16e6.txt.gz`
 
-4. Put `ffmpeg.exe` in the project root.
-5. Start the app:
-
-```bash
-python main.py
-```
+- Put `ffmpeg.exe` into `%LOCALAPPDATA%\\VideoSeek\\bin\\` or make sure `ffmpeg` is available on `PATH`
 
 ## Project Structure
 
@@ -50,29 +55,39 @@ src/
     search_service.py  search loading and query embedding
     library_service.py library metadata operations
     indexing_service.py scan, reuse, merge, and index helpers
+    model_service.py   model manifest parsing and download helpers
+    ffmpeg_service.py  ffmpeg manifest parsing and download helpers
+    runtime_resource_service.py runtime resource status and directory helpers
     notice_service.py  remote/local notice loading
     version_service.py remote version comparison
   workflows/
     update_video.py    indexing workflow entry
   utils.py             shared utility helpers
 ui/
-  gui.py               main window orchestration
+  gui.py               main window shell and UI wiring
+  runtime_resource_controller.py runtime resource dialog/download flow
+  app_meta_controller.py version and notice refresh flow
+  search_controller.py search and thumbnail flow
+  indexing_controller.py indexing workflow UI flow
+  preview_controller.py preview playback flow
   components.py        reusable UI widgets
   table_views.py       table population helpers
   workers.py           background workers
 tests/
-  test_services.py     lightweight service-layer tests
+  test_runtime_resource_service.py runtime resource service tests
+  test_notice_version_utils.py notice, version, and config sync tests
+  test_download_services.py model and ffmpeg manifest/download tests
+  test_controllers.py lightweight controller tests
 ```
 
 ## Architecture
 
-- `ui/gui.py` coordinates user actions and worker threads.
-- `ui/workers.py` isolates long-running search, indexing, and thumbnail jobs.
-- `src/app/` owns product metadata, user config, and i18n text resources.
-- `src/core/` owns lower-level search, embedding, tokenization, and FAISS helpers.
-- `src/services/` owns business-facing library, search, indexing, notice, and version services.
-- `src/workflows/` owns higher-level indexing workflow orchestration.
-- `src/utils.py` keeps shared filesystem, FFmpeg, and metadata helpers.
+- `ui/gui.py` is now mainly the shell: page wiring, text refresh, and cross-controller coordination.
+- `ui/*_controller.py` files own workflow-heavy UI logic that previously lived in the main window.
+- `ui/workers.py` isolates long-running background jobs.
+- `src/services/` owns business logic, remote metadata parsing, and runtime resource state.
+- `src/workflows/` keeps higher-level indexing orchestration.
+- `src/utils.py` keeps shared filesystem, FFmpeg, preview, and config sync helpers.
 
 ## Configuration Layers
 
@@ -93,24 +108,29 @@ config.json
   fps
   preview_seconds
   ffmpeg_path
+  model_dir
 
 src/app/app_meta.py
   version
   notice_url
   version_url
-  download_url
+  model_manifest_url
   remote_timeout
 ```
 
 ## Tests
 
-The repo now includes a small `unittest` suite for service-layer behavior:
+Run the focused lightweight test suite with:
 
 ```bash
-python -m unittest tests.test_services
+python -m unittest ^
+  tests.test_runtime_resource_service ^
+  tests.test_notice_version_utils ^
+  tests.test_download_services ^
+  tests.test_controllers
 ```
 
-Current environment note: I could not run the tests here because no Python interpreter is available in the shell.
+These tests intentionally focus on services/controllers and avoid heavy runtime dependencies where possible.
 
 ## Packaging
 
@@ -124,9 +144,7 @@ python -m nuitka --standalone ^
 --output-dir=dist ^
 --output-filename=VideoSeek ^
 --windows-icon-from-ico=icon.ico ^
---include-data-dir=models=models ^
 --include-data-file=config.json=config.json ^
---include-data-file=ffmpeg.exe=ffmpeg.exe ^
 main.py
 ```
 ## Download
@@ -134,6 +152,67 @@ main.py
  1、Gitee Release: [https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases](https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases)
  
  2、GitHub Release: [https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases](https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases)
+
+Runtime resource packaging note:
+
+- The app prefers external runtime resources over bundling large files into every release.
+- Default external model directory on Windows is `%LOCALAPPDATA%\\VideoSeek\\models`.
+- Default managed FFmpeg path is `%LOCALAPPDATA%\\VideoSeek\\bin\\ffmpeg.exe`.
+- If `model_manifest_url` is configured in `src/app/app_meta.py`, the app can prepare both models and FFmpeg from one remote manifest.
+- The manifest can define a primary source plus mirror sources, and the app will automatically try the next source if one fails.
+
+Example model manifest:
+
+```json
+{
+  "version": "clip-vit-b32-1",
+  "base_url": "https://github.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O/VideoSeek/releases/download/models/",
+  "mirrors": [
+    {
+      "label": "cdn",
+      "base_url": "https://cdn.example.com/videoseek-models/"
+    },
+    "https://mirror.example.com/videoseek-models/"
+  ],
+  "files": [
+    {
+      "name": "clip_visual.onnx",
+      "sha256": "optional_sha256_hex"
+    },
+    {
+      "name": "clip_text.onnx",
+      "sha256": "optional_sha256_hex"
+    },
+    {
+      "name": "bpe_simple_vocab_16e6.txt.gz",
+      "sha256": "optional_sha256_hex"
+    }
+  ],
+  "ffmpeg": {
+    "name": "ffmpeg.exe",
+    "base_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/bin/"
+  }
+}
+```
+
+Optional per-file source override:
+
+```json
+{
+  "name": "clip_visual.onnx",
+  "sha256": "optional_sha256_hex",
+  "sources": [
+    {
+      "label": "oss",
+      "base_url": "https://oss.example.com/videoseek-models/"
+    },
+    {
+      "label": "github",
+      "url": "https://github.com/<owner>/<repo>/releases/download/models/clip_visual.onnx"
+    }
+  ]
+}
+```
 
 ## License
 

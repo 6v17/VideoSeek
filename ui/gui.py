@@ -1,40 +1,44 @@
 import os
-import time
-
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QLabel, QMainWindow, QMessageBox, QScrollArea, QStackedWidget, QVBoxLayout, QWidget, QHBoxLayout
+from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QMainWindow, QMessageBox, QScrollArea, QStackedWidget, QVBoxLayout, QWidget, QHBoxLayout
 
 from src.app.config import DEFAULT_CONFIG, get_app_version, load_config, save_config
 from src.app.i18n import get_texts
 from src.services.library_service import add_library, list_libraries, remove_library as remove_library_entry
 from src.services.notice_service import get_local_notice_payload
 from src.workflows.update_video import delete_physical_video_data
-from src.utils import build_preview_cache_path, create_preview_clip, open_folder_in_explorer, open_in_explorer
+from src.utils import (
+    get_ffmpeg_status_text,
+    get_configured_model_dir,
+    open_folder_in_explorer,
+    open_in_explorer,
+    sync_ffmpeg_path_to_config,
+    sync_model_dir_to_config,
+)
 from src.services.version_service import get_local_version_status
+from ui.app_meta_controller import AppMetaController
 from ui.components import LibraryPage, NavigationSidebar, SearchPage, SettingsPage
 from ui.dialogs import AboutDialog, AppMessageDialog, NoticeDialog
+from ui.indexing_controller import IndexingController
+from ui.layout import WINDOW_SIZES, apply_window_size
+from ui.preview_controller import PreviewController
+from ui.runtime_resource_controller import RuntimeResourceController
+from ui.search_controller import SearchController
 from ui.styles import DARK_STYLE, LIGHT_STYLE
-from ui.table_views import populate_library_table, populate_result_table
-from ui.workers import IndexUpdateWorker, NoticeFetchWorker, SearchWorker, ThumbLoader, VersionCheckWorker
+from ui.table_views import populate_library_table
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.startup_cancelled = False
         self.current_img_path = None
-        self.worker = None
-        self.up_worker = None
-        self.thumb_thread = None
-        self.start_time = 0.0
-        self.current_preview_path = None
-        self.current_update_target = None
         self.version_info = None
-        self.version_worker = None
         self.notice_payload = None
-        self.notice_worker = None
+        self.models_ready = True
 
         cfg = load_config()
         self.is_dark_mode = cfg.get("theme", "dark") == "dark"
@@ -44,20 +48,39 @@ class MainWindow(QMainWindow):
         self.notice_payload = get_local_notice_payload(self.language)
 
         self.init_ui()
+        self.app_meta_controller = AppMetaController(self)
+        self.app_meta_controller.version_ready.connect(self._update_version_info)
+        self.app_meta_controller.notice_ready.connect(self._update_notice_payload)
+        self.indexing_controller = IndexingController(self)
+        self.indexing_controller.status_changed.connect(self._update_indexing_progress)
+        self.indexing_controller.finished.connect(self._finish_indexing)
+        self.preview_controller = PreviewController(self)
+        self.search_controller = SearchController(self)
+        self.runtime_resource_controller = RuntimeResourceController(self)
+        self.runtime_resource_controller.startup_cancelled.connect(self._handle_runtime_resource_exit)
+        self.runtime_resource_controller.resources_ready.connect(self._finish_runtime_resource_download)
+        self.runtime_resource_controller.status_changed.connect(self._apply_runtime_resource_status)
         self.media_player = QMediaPlayer()
         self.media_player.setVideoOutput(self.video_widget)
+        sync_model_dir_to_config()
+        sync_ffmpeg_path_to_config()
         self.load_settings_values()
         self.apply_texts()
+        self.check_runtime_resources()
+        if self.startup_cancelled:
+            return
         self.refresh_library_table()
         self.apply_theme()
-        self.start_version_check()
-        self.start_notice_fetch()
+        self.app_meta_controller.refresh(self.language)
 
     def init_ui(self):
-        config = load_config()
         self.setWindowTitle(f"VideoSeek v{get_app_version()}")
-        self.resize(1280, 820)
-        self.setMinimumSize(1080, 700)
+        apply_window_size(
+            self,
+            WINDOW_SIZES["main"]["preferred"],
+            WINDOW_SIZES["main"]["minimum"],
+            WINDOW_SIZES["main"]["screen_margin"],
+        )
 
         central = QWidget()
         central.setObjectName("AppRoot")
@@ -125,23 +148,9 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentIndex(mapping[page_name])
         self.sidebar.set_current_page(page_name)
 
-    def start_version_check(self):
-        if self.version_worker and self.version_worker.isRunning():
-            return
-        self.version_worker = VersionCheckWorker(self.language)
-        self.version_worker.result_ready.connect(self._update_version_info)
-        self.version_worker.start()
-
     def _update_version_info(self, version_info):
         self.version_info = version_info
         self.apply_texts()
-
-    def start_notice_fetch(self):
-        if self.notice_worker and self.notice_worker.isRunning():
-            return
-        self.notice_worker = NoticeFetchWorker(self.language)
-        self.notice_worker.result_ready.connect(self._update_notice_payload)
-        self.notice_worker.start()
 
     def _update_notice_payload(self, notice_payload):
         self.notice_payload = notice_payload
@@ -204,6 +213,9 @@ class MainWindow(QMainWindow):
         self.settings_page.btn_save.setText(t["save_settings"])
         self.settings_page.btn_reset.setText(t["reset_settings"])
         self.settings_page.configure_form_labels(t)
+        self.settings_page.hint_ffmpeg_active.setText(
+            t["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
+        )
 
         if not self.current_img_path and not self.search_page.img_label.pixmap():
             self.search_page.img_label.setText(t["image_drop_hint"])
@@ -237,6 +249,10 @@ class MainWindow(QMainWindow):
             config.get("thumb_height", DEFAULT_CONFIG["thumb_height"])
         )
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
+        self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
+        self.settings_page.hint_ffmpeg_active.setText(
+            self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
+        )
 
     def save_settings(self):
         try:
@@ -249,7 +265,20 @@ class MainWindow(QMainWindow):
             config["thumb_width"] = self.settings_page.input_thumb_width.value()
             config["thumb_height"] = self.settings_page.input_thumb_height.value()
             config["ffmpeg_path"] = self.settings_page.input_ffmpeg_path.text().strip()
+            config["model_dir"] = self.settings_page.input_model_dir.text().strip() or DEFAULT_CONFIG["model_dir"]
             save_config(config)
+            if not config["model_dir"]:
+                synced_model_dir = sync_model_dir_to_config()
+                if synced_model_dir:
+                    self.settings_page.input_model_dir.setText(synced_model_dir)
+            if not config["ffmpeg_path"]:
+                synced_path = sync_ffmpeg_path_to_config()
+                if synced_path:
+                    self.settings_page.input_ffmpeg_path.setText(synced_path)
+            self.check_runtime_resources(show_dialog=False)
+            self.settings_page.hint_ffmpeg_active.setText(
+                self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
+            )
             self.settings_page.lbl_status.setText(self.texts["saved_settings"])
             self.show_info_dialog(self.texts["success_title"], self.texts["saved_settings"], kind="success")
         except Exception as exc:
@@ -263,7 +292,17 @@ class MainWindow(QMainWindow):
                     continue
                 config[key] = value
             save_config(config)
+            synced_model_dir = sync_model_dir_to_config()
+            synced_path = sync_ffmpeg_path_to_config()
             self.load_settings_values()
+            if synced_model_dir:
+                self.settings_page.input_model_dir.setText(synced_model_dir)
+            if synced_path:
+                self.settings_page.input_ffmpeg_path.setText(synced_path)
+            self.check_runtime_resources(show_dialog=False)
+            self.settings_page.hint_ffmpeg_active.setText(
+                self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
+            )
             self.settings_page.lbl_status.setText(self.texts["reset_settings_done"])
             self.show_info_dialog(self.texts["success_title"], self.texts["reset_settings_done"], kind="success")
         except Exception as exc:
@@ -277,7 +316,7 @@ class MainWindow(QMainWindow):
 
     def refresh_library_table(self):
         try:
-            is_indexing = self.up_worker is not None and self.up_worker.isRunning()
+            is_indexing = self.indexing_controller.is_running()
             populate_library_table(
                 self.library_page.lib_table,
                 list_libraries(),
@@ -297,9 +336,9 @@ class MainWindow(QMainWindow):
         open_folder_in_explorer(path)
 
     def start_search(self):
-        if self.thumb_thread and self.thumb_thread.isRunning():
-            self.thumb_thread.stop()
-            self.thumb_thread.wait()
+        if not self.check_runtime_resources():
+            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
 
         text_query = self.search_page.text_search.text().strip()
         query = text_query if text_query else self.current_img_path
@@ -308,44 +347,19 @@ class MainWindow(QMainWindow):
             return
 
         self.switch_page("search")
-        self.start_time = time.time()
-        self.search_page.btn_search.setEnabled(False)
-        self.search_page.lbl_status.setText(self.texts["searching"])
-        self.worker = SearchWorker(query, bool(text_query))
-        self.worker.result_ready.connect(self.display_results)
-        self.worker.finished.connect(lambda: self.search_page.btn_search.setEnabled(True))
-        self.worker.start()
-
-    def display_results(self, results):
-        if not results:
-            self.result_table.setRowCount(0)
-            self.search_page.lbl_status.setText(self.texts["no_results"])
-            return
-
-        populate_result_table(self.result_table, results, self.handle_play, open_in_explorer, self.texts)
-        duration = time.time() - self.start_time
-        self.search_page.lbl_status.setText(self.texts["search_done"].format(duration=duration, count=len(results)))
-
-        self.thumb_thread = ThumbLoader(results)
-        self.thumb_thread.thumb_ready.connect(self.update_row_thumb)
-        self.thumb_thread.start()
-
-    def update_row_thumb(self, row, pixmap):
-        label = QLabel()
-        label.setAlignment(Qt.AlignCenter)
-        label.setPixmap(pixmap)
-        self.result_table.setCellWidget(row, 1, label)
+        self.search_controller.start_search(query, bool(text_query))
 
     def clear_all_content(self):
         self.current_img_path = None
         self.search_page.text_search.clear()
         self.search_page.img_label.clear()
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
-        self.result_table.setRowCount(0)
+        self.search_controller.clear_results()
         self.media_player.stop()
-        if self.thumb_thread:
-            self.thumb_thread.stop()
         self.search_page.lbl_status.setText(self.texts["ready"])
+
+    def open_result_in_explorer(self, path):
+        open_in_explorer(path)
 
     def select_video_folder(self):
         path = QFileDialog.getExistingDirectory(self, self.texts["select_folder"])
@@ -381,48 +395,39 @@ class MainWindow(QMainWindow):
 
     def start_update_index(self, target_lib=None):
         try:
+            if not self.check_runtime_resources():
+                self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
+                return
             self.switch_page("library")
-            if self.up_worker and self.up_worker.isRunning():
+            if self.indexing_controller.is_running():
                 return
             self.library_page.btn_sync_db.setEnabled(False)
             self.library_page.btn_add_lib.setEnabled(False)
             self.library_page.progress_bar.setVisible(True)
-            self.current_update_target = target_lib
-            self.up_worker = IndexUpdateWorker(target_lib=target_lib)
-            self.up_worker.progress_signal.connect(
-                lambda value, text: (self.library_page.progress_bar.setValue(value), self.library_page.lbl_status.setText(text))
-            )
-            self.up_worker.finished_signal.connect(self.on_update_finished)
-            self.up_worker.start()
+            self.indexing_controller.start(target_lib=target_lib)
         except Exception as exc:
             self.show_error_dialog(self.texts["index_start_failed"], exc)
 
-    def on_update_finished(self, success):
+    def _update_indexing_progress(self, value, text):
+        self.library_page.progress_bar.setValue(value)
+        self.library_page.lbl_status.setText(text)
+
+    def _finish_indexing(self, success, target_lib):
         self.library_page.btn_sync_db.setEnabled(True)
         self.library_page.btn_add_lib.setEnabled(True)
         self.library_page.progress_bar.setVisible(False)
         self.refresh_library_table()
         if success:
-            status_text = self.texts["index_updated_single"] if self.current_update_target else self.texts["index_updated"]
+            status_text = self.texts["index_updated_single"] if target_lib else self.texts["index_updated"]
         else:
             status_text = self.texts["index_failed"]
         self.library_page.lbl_status.setText(status_text)
-        self.current_update_target = None
 
     def handle_play(self, path, sec):
-        self.media_player.stop()
-        self.media_player.setSource(QUrl())
-
-        cache_path = build_preview_cache_path(path, sec)
-        result = create_preview_clip(path, sec, cache_path)
-        if result.returncode == 0:
-            self._cleanup_previous_preview()
-            self.current_preview_path = cache_path
-            self.media_player.setSource(QUrl.fromLocalFile(cache_path))
-            self.media_player.play()
-        else:
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
+        if not self.check_runtime_resources():
+            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
+        if not self.preview_controller.play(path, sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
 
     def upload_file(self):
@@ -454,8 +459,7 @@ class MainWindow(QMainWindow):
         self.notice_payload = get_local_notice_payload(self.language)
         self.apply_texts()
         self.apply_theme()
-        self.start_version_check()
-        self.start_notice_fetch()
+        self.app_meta_controller.refresh(self.language)
 
     def show_error_dialog(self, message, exc=None):
         detail = self.texts["generic_detail"].format(detail=str(exc)) if exc else ""
@@ -493,19 +497,11 @@ class MainWindow(QMainWindow):
         self.switch_page("search")
 
     def closeEvent(self, event):
-        if self.worker:
-            self.worker.quit()
-        if self.up_worker:
-            self.up_worker.quit()
-        if self.thumb_thread:
-            self.thumb_thread.stop()
-        if self.version_worker:
-            self.version_worker.quit()
-        if self.notice_worker:
-            self.notice_worker.quit()
-        self.media_player.stop()
-        self.media_player.setSource(QUrl())
-        self._cleanup_previous_preview()
+        self.search_controller.shutdown()
+        self.indexing_controller.shutdown()
+        self.app_meta_controller.shutdown()
+        self.runtime_resource_controller.shutdown()
+        self.preview_controller.shutdown()
         event.accept()
 
     def _set_image_query(self, path, clear_text):
@@ -517,12 +513,50 @@ class MainWindow(QMainWindow):
             self.search_page.text_search.clear()
         self.search_page.lbl_status.setText(self.texts["image_loaded"])
 
-    def _cleanup_previous_preview(self):
-        if not self.current_preview_path:
+    def _shutdown_thread(self, thread, stop_first=False):
+        if not thread or not thread.isRunning():
             return
-        if os.path.exists(self.current_preview_path):
-            try:
-                os.remove(self.current_preview_path)
-            except OSError:
-                pass
-        self.current_preview_path = None
+        if stop_first and hasattr(thread, "stop"):
+            thread.stop()
+        thread.quit()
+        if thread.wait(1500):
+            return
+        thread.requestInterruption()
+        if thread.wait(1500):
+            return
+        thread.terminate()
+        thread.wait(1000)
+
+    def open_runtime_resource_folder(self):
+        from src.services.runtime_resource_service import ensure_runtime_resource_dirs
+
+        root_dir = ensure_runtime_resource_dirs()
+        open_folder_in_explorer(root_dir)
+
+    def _handle_runtime_resource_exit(self):
+        self.startup_cancelled = True
+        self.close()
+
+    def check_runtime_resources(self, show_dialog=True):
+        return self.runtime_resource_controller.check_resources(show_dialog=show_dialog)
+
+    def start_runtime_resource_download(self):
+        self.runtime_resource_controller.start_download()
+
+    def _finish_runtime_resource_download(self, result):
+        self.check_runtime_resources(show_dialog=False)
+        self.settings_page.input_model_dir.setText(result.get("model_dir", get_configured_model_dir()))
+        if result.get("ffmpeg_path"):
+            self.settings_page.input_ffmpeg_path.setText(result["ffmpeg_path"])
+            self.settings_page.hint_ffmpeg_active.setText(
+                self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
+            )
+
+    def _apply_runtime_resource_status(self, status):
+        self.models_ready = status["model_ready"]
+        self.search_page.btn_search.setEnabled(self.models_ready)
+        self.library_page.btn_sync_db.setEnabled(status["resources_ready"])
+        if not status["resources_ready"]:
+            status_text = self.texts["model_features_disabled"]
+            self.search_page.lbl_status.setText(status_text)
+            self.library_page.lbl_status.setText(status_text)

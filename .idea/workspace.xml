@@ -1,14 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="codex全面优化">
-      <change afterPath="$PROJECT_DIR$/ffmpeg.exe" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/tokenizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/tokenizer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/version_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/version_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="EmbeddingIndexingInfo">
+    <option name="cachedIndexableFilesCount" value="937" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -47,6 +67,10 @@
     &quot;accountId&quot;: &quot;f3fc3911-9f7a-4780-8d95-3f3e182c3639&quot;
   }
 }</component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 8
 }</component>
@@ -58,24 +82,30 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;org.jetbrains.plugins.github.ui.GithubSettingsConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.main.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "master",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "D:/PycharmProjects/VideoSeek",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek" />
@@ -106,6 +136,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="D:\PycharmProjects\VideoSeek\src\core.py" />
@@ -150,8 +181,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.31033.139" />
-        <option value="bundled-python-sdk-2653e85de345-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.31033.139" />
+        <option value="bundled-js-predefined-d6986cc7102b-3bd3a6803838-JavaScript-PY-261.22158.340" />
+        <option value="bundled-python-sdk-b63d5a1f7c97-b61e75351b1f-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.22158.340" />
       </set>
     </attachedChunks>
   </component>
@@ -179,6 +210,19 @@
       <workItem from="1774337841473" duration="888000" />
       <workItem from="1774357027897" duration="42000" />
       <workItem from="1774357382548" duration="476000" />
+      <workItem from="1774357872228" duration="2617000" />
+      <workItem from="1774519618972" duration="400000" />
+      <workItem from="1774520084399" duration="451000" />
+      <workItem from="1774520583209" duration="5320000" />
+      <workItem from="1774952551057" duration="493000" />
+      <workItem from="1774954373568" duration="806000" />
+      <workItem from="1774957141397" duration="616000" />
+      <workItem from="1774958041755" duration="829000" />
+      <workItem from="1774958894664" duration="276000" />
+      <workItem from="1774959316194" duration="14000" />
+      <workItem from="1774959344433" duration="13000" />
+      <workItem from="1774959816444" duration="8000" />
+      <workItem from="1774959833090" duration="17454000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -396,7 +440,31 @@
       <option name="project" value="LOCAL" />
       <updated>1774357567033</updated>
     </task>
-    <option name="localTasksCounter" value="28" />
+    <task id="LOCAL-00028" summary="codex全面优化">
+      <option name="closed" value="true" />
+      <created>1774357894439</created>
+      <option name="number" value="00028" />
+      <option name="presentableId" value="LOCAL-00028" />
+      <option name="project" value="LOCAL" />
+      <updated>1774357894439</updated>
+    </task>
+    <task id="LOCAL-00029" summary="codex全面优化">
+      <option name="closed" value="true" />
+      <created>1774357991577</created>
+      <option name="number" value="00029" />
+      <option name="presentableId" value="LOCAL-00029" />
+      <option name="project" value="LOCAL" />
+      <updated>1774357991577</updated>
+    </task>
+    <task id="LOCAL-00030" summary="codex全面优化">
+      <option name="closed" value="true" />
+      <created>1774358114998</created>
+      <option name="number" value="00030" />
+      <option name="presentableId" value="LOCAL-00030" />
+      <option name="project" value="LOCAL" />
+      <updated>1774358114998</updated>
+    </task>
+    <option name="localTasksCounter" value="31" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

@@ -2,7 +2,7 @@ import json
 import os
 
 from src.app.app_meta import get_app_meta
-from src.utils import get_resource_path
+from src.utils import get_default_model_dir, get_resource_path
 
 CONFIG_FILE = get_resource_path("config.json")
 
@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "thumb_width": 130,
     "thumb_height": 75,
     "ffmpeg_path": "",
+    "model_dir": get_default_model_dir(),
     "meta_file": "data/meta.json",
     "vector_dir": "data/vector",
     "index_dir": "data/index",

@@ -7,18 +7,19 @@ import onnxruntime as ort
 from src.core.extract_frames import extract_frames_with_ffmpeg
 from src.core.faiss_index import create_clip_index, save_vectors
 from src.core.tokenizer import tokenize
-from src.utils import ensure_folder_exists, free_memory, get_resource_path, measure_time
+from src.utils import ensure_folder_exists, ensure_model_files, free_memory, measure_time
 
 
 class CLIPOnnxEngine:
     def __init__(self):
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
         self.visual_session = ort.InferenceSession(
-            get_resource_path("models/clip_visual.onnx"),
+            model_paths["clip_visual.onnx"],
             providers=providers,
         )
         self.text_session = ort.InferenceSession(
-            get_resource_path("models/clip_text.onnx"),
+            model_paths["clip_text.onnx"],
             providers=providers,
         )
         self.mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32).reshape(1, 1, 3)
@@ -66,15 +67,22 @@ class CLIPOnnxEngine:
         return feat
 
 
-engine = CLIPOnnxEngine()
+engine = None
+
+
+def get_engine():
+    global engine
+    if engine is None:
+        engine = CLIPOnnxEngine()
+    return engine
 
 
 def get_clip_embeddings_batch(frames):
-    return engine.encode_images(frames)
+    return get_engine().encode_images(frames)
 
 
 def get_text_embedding(text):
-    return engine.encode_text(text)
+    return get_engine().encode_text(text)
 
 
 @measure_time("Video indexing time:")
@@ -83,7 +91,7 @@ def generate_vectors_and_index_for_video(video_path, video_id, index_dir, vector
     if not frames:
         return [], [], None
 
-    vectors = engine.encode_images(frames)
+    vectors = get_engine().encode_images(frames)
     free_memory()
 
     vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))

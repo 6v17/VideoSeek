@@ -9,27 +9,25 @@ from src.app.i18n import get_texts
 
 def get_local_version_status(language):
     texts = get_texts(language)
-    app_meta = get_app_meta()
     current_version = get_app_version()
     return {
         "current_version": current_version,
         "latest_version": current_version,
         "status_text": texts["version_check_unavailable"],
-        "download_url": app_meta.get("download_url", ""),
+        "download_url": "",
         "has_update": False,
     }
 
 
 def get_version_status(language):
     texts = get_texts(language)
-    app_meta = get_app_meta()
     current_version = get_app_version()
     remote_data = fetch_remote_version()
     if not remote_data:
         return get_local_version_status(language)
 
     latest_version = str(remote_data.get("version") or current_version)
-    download_url = str(remote_data.get("download_url") or app_meta.get("download_url", ""))
+    download_url = str(remote_data.get("download_url") or "")
     has_update = _compare_versions(latest_version, current_version) > 0
     status_key = "version_update_available" if has_update else "version_up_to_date"
     return {

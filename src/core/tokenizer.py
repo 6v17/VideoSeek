@@ -1,54 +1,57 @@
 import gzip
 import html
-import os
-import numpy as np
-import ftfy
-import regex as re
-from src.utils import get_resource_path
-
 from functools import lru_cache
+
+import ftfy
+import numpy as np
+import regex as re
+
+from src.utils import ensure_model_files
+
+
 def whitespace_clean(text):
-    text = re.sub(r'\s+', ' ', text)
-    text = text.strip()
-    return text
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 @lru_cache()
 def default_bpe():
-    return get_resource_path("models/bpe_simple_vocab_16e6.txt.gz")
+    return ensure_model_files(["bpe_simple_vocab_16e6.txt.gz"])["bpe_simple_vocab_16e6.txt.gz"]
 
 
+class SimpleTokenizer:
+    def __init__(self, bpe_path=None):
+        if bpe_path is None:
+            bpe_path = default_bpe()
 
-
-class SimpleTokenizer(object):
-    def __init__(self, bpe_path: str = default_bpe()):
         self.byte_encoder = self.bytes_to_unicode()
         self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
         try:
-            merges = gzip.open(bpe_path).read().decode("utf-8").split('\n')
-        except Exception as e:
-            print(f"读取词汇表失败: {e}")
+            merges = gzip.open(bpe_path).read().decode("utf-8").split("\n")
+        except Exception as exc:
+            print(f"Failed to read BPE vocab: {exc}")
             merges = []
 
-        merges = merges[1:49152 - 256 - 2 + 1]
+        merges = merges[1 : 49152 - 256 - 2 + 1]
         merges = [tuple(merge.split()) for merge in merges]
         self.bpe_ranks = dict(zip(merges, range(len(merges))))
-        self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
+        self.cache = {"<|startoftext|>": "<|startoftext|>", "<|endoftext|>": "<|endoftext|>"}
         self.pat = re.compile(
             r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]+|[^\s\p{L}\p{N}]+""",
-            re.IGNORECASE)
+            re.IGNORECASE,
+        )
 
         vocab = list(self.byte_encoder.values())
-        vocab = vocab + [v + '</w>' for v in vocab]
-        for m in merges:
-            vocab.append("".join(m))
-        vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+        vocab = vocab + [value + "</w>" for value in vocab]
+        for merge in merges:
+            vocab.append("".join(merge))
+        vocab.extend(["<|startoftext|>", "<|endoftext|>"])
         self.encoder = dict(zip(vocab, range(len(vocab))))
         self.decoder = {v: k for k, v in self.encoder.items()}
 
     def bytes_to_unicode(self):
-        bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("¡"), ord("¬") + 1)) + list(
-            range(ord("®"), ord("ÿ") + 1))
+        # Standard CLIP byte-to-unicode table.
+        bs = list(range(33, 127)) + list(range(161, 173)) + list(range(174, 256))
         cs = bs[:]
         n = 0
         for b in range(256):
@@ -70,16 +73,17 @@ class SimpleTokenizer(object):
     def bpe(self, token):
         if token in self.cache:
             return self.cache[token]
-        word = tuple(token[:-1]) + (token[-1] + '</w>',)
-        pairs = self.get_pairs(word)
 
+        word = tuple(token[:-1]) + (token[-1] + "</w>",)
+        pairs = self.get_pairs(word)
         if not pairs:
-            return token + '</w>'
+            return token + "</w>"
 
         while True:
-            bigram = min(pairs, key=lambda pair: self.bpe_ranks.get(pair, float('inf')))
+            bigram = min(pairs, key=lambda pair: self.bpe_ranks.get(pair, float("inf")))
             if bigram not in self.bpe_ranks:
                 break
+
             first, second = bigram
             new_word = []
             i = 0
@@ -88,7 +92,7 @@ class SimpleTokenizer(object):
                     j = word.index(first, i)
                     new_word.extend(word[i:j])
                     i = j
-                except:
+                except ValueError:
                     new_word.extend(word[i:])
                     break
 
@@ -98,46 +102,54 @@ class SimpleTokenizer(object):
                 else:
                     new_word.append(word[i])
                     i += 1
+
             word = tuple(new_word)
             if len(word) == 1:
                 break
-            else:
-                pairs = self.get_pairs(word)
-        word = ' '.join(word)
-        self.cache[token] = word
-        return word
+            pairs = self.get_pairs(word)
+
+        result = " ".join(word)
+        self.cache[token] = result
+        return result
 
     def encode(self, text):
         bpe_tokens = []
         text = whitespace_clean(ftfy.fix_text(html.unescape(text)).lower())
         for token in re.findall(self.pat, text):
-            token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
-            bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
+            token = "".join(self.byte_encoder[b] for b in token.encode("utf-8"))
+            bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(" "))
         return bpe_tokens
 
 
-# 实例化单例
-_tokenizer = SimpleTokenizer()
+_tokenizer = None
 
 
-def tokenize(texts, context_length: int = 77):
+def get_tokenizer():
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = SimpleTokenizer()
+    return _tokenizer
+
+
+def tokenize(texts, context_length=77):
+    tokenizer = get_tokenizer()
     if isinstance(texts, str):
         texts = [texts]
+
     all_tokens = []
     for text in texts:
-        sot_token = _tokenizer.encoder['<|startoftext|>']
-        eot_token = _tokenizer.encoder['<|endoftext|>']
-        # 核心修复：增加对 encode 过程中可能产生的 KeyError 的处理
+        sot_token = tokenizer.encoder["<|startoftext|>"]
+        eot_token = tokenizer.encoder["<|endoftext|>"]
         try:
-            tokens = [sot_token] + _tokenizer.encode(text) + [eot_token]
+            tokens = [sot_token] + tokenizer.encode(text) + [eot_token]
         except KeyError:
-            # 如果真的遇到无法解析的特殊字符，退而求其次只保留起止符
             tokens = [sot_token, eot_token]
 
         result = np.zeros(context_length, dtype=np.int32)
         if len(tokens) > context_length:
             tokens = tokens[:context_length]
             tokens[-1] = eot_token
-        result[:len(tokens)] = tokens
+        result[: len(tokens)] = tokens
         all_tokens.append(result)
+
     return np.array(all_tokens)

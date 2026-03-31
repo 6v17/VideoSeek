@@ -4,6 +4,8 @@ from PySide6.QtGui import QImage, QPixmap
 
 from src.app.config import load_config
 from src.core.core import run_search
+from src.services.ffmpeg_service import download_ffmpeg
+from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
 from src.services.version_service import get_version_status
 
@@ -116,3 +118,56 @@ class NoticeFetchWorker(QThread):
             self.result_ready.emit(result)
         except Exception as exc:
             print(f"Notice Fetch Error: {exc}")
+
+
+class ResourceDownloadWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, need_models=True, need_ffmpeg=True):
+        super().__init__()
+        self.need_models = need_models
+        self.need_ffmpeg = need_ffmpeg
+
+    def run(self):
+        try:
+            result = {"model_dir": "", "ffmpeg_path": ""}
+            if self.need_models and self.need_ffmpeg:
+                self.progress_signal.emit(0, "Preparing runtime resources")
+
+            if self.need_models:
+                model_result = download_models(
+                    progress_callback=lambda progress, text: self.progress_signal.emit(
+                        min(69, progress),
+                        text,
+                    )
+                )
+                result["model_dir"] = model_result.get("model_dir", "")
+
+            if self.need_ffmpeg:
+                ffmpeg_result = download_ffmpeg(
+                    progress_callback=lambda current, total, label: self.progress_signal.emit(
+                        70 + min(29, _ffmpeg_progress(current, total) // 3),
+                        _ffmpeg_progress_text(current, total, label),
+                    )
+                )
+                result["ffmpeg_path"] = ffmpeg_result.get("path", "")
+
+            self.progress_signal.emit(100, "Runtime resources ready")
+            self.finished_signal.emit(result)
+        except Exception as exc:
+            self.error_signal.emit(str(exc))
+
+
+def _ffmpeg_progress(current, total):
+    if total <= 0:
+        return 50
+    return min(100, int((current / total) * 100))
+
+
+def _ffmpeg_progress_text(current, total, label):
+    source_text = f" via {label}" if label else ""
+    if total > 0:
+        return f"Downloading FFmpeg{source_text} ({current // 1024 // 1024}MB/{total // 1024 // 1024}MB)"
+    return f"Downloading FFmpeg{source_text}"

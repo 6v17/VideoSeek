@@ -12,6 +12,8 @@ if __name__ == "__main__":
     app.setFont(font)
 
     window = MainWindow()
+    if getattr(window, "startup_cancelled", False):
+        sys.exit(0)
     window.show()
 
     sys.exit(app.exec())

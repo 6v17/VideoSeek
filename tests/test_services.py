@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import numpy as np
 
+from src.services import model_service
 from src.services import indexing_service, search_service
+from src import utils
 
 
 class IndexingServiceTests(unittest.TestCase):
@@ -76,6 +78,95 @@ class SearchServiceTests(unittest.TestCase):
         mock_build_query_vector.assert_not_called()
         mock_search_vector.assert_not_called()
 
+
+class UtilsTests(unittest.TestCase):
+    def test_resolve_resource_path_prefers_configured_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            configured_dir = Path(temp_dir) / "models"
+            configured_dir.mkdir()
+            target = configured_dir / "clip_text.onnx"
+            target.write_bytes(b"model")
+
+            result = utils.resolve_resource_path("models/clip_text.onnx", str(configured_dir))
+
+        self.assertEqual(Path(result), target)
+
+    def test_resolve_resource_path_falls_back_to_packaged_resource(self):
+        packaged_path = str(Path("D:/packaged/models/clip_text.onnx"))
+        with patch("src.utils.get_resource_path", return_value=packaged_path), patch(
+            "src.utils.os.path.exists",
+            side_effect=lambda path: path == packaged_path,
+        ):
+            result = utils.resolve_resource_path("models/clip_text.onnx", "D:/missing-models")
+
+        self.assertEqual(result, packaged_path)
+
+    def test_get_missing_model_files_reports_missing_entries(self):
+        with patch("src.utils.get_model_path", side_effect=lambda filename: f"D:/models/{filename}"), patch(
+            "src.utils.os.path.exists",
+            side_effect=lambda path: path.endswith("clip_text.onnx"),
+        ):
+            missing, resolved = utils.get_missing_model_files(["clip_visual.onnx", "clip_text.onnx"])
+
+        self.assertEqual(missing, ["clip_visual.onnx"])
+        self.assertEqual(resolved["clip_text.onnx"], "D:/models/clip_text.onnx")
+
+
+class ModelServiceTests(unittest.TestCase):
+    def test_normalize_manifest_uses_base_url_for_missing_file_urls(self):
+        manifest = model_service._normalize_manifest(
+            {
+                "version": "v1",
+                "base_url": "https://example.com/models/",
+                "files": [{"name": "clip_visual.onnx"}],
+            },
+            "https://example.com/manifest.json",
+        )
+
+        self.assertEqual(manifest["version"], "v1")
+        self.assertEqual(
+            manifest["files"][0]["sources"][0]["url"],
+            "https://example.com/models/clip_visual.onnx",
+        )
+
+    def test_normalize_manifest_includes_mirrors(self):
+        manifest = model_service._normalize_manifest(
+            {
+                "base_url": "https://primary.example.com/models/",
+                "mirrors": [
+                    {"label": "cdn", "base_url": "https://cdn.example.com/models/"},
+                    "https://mirror.example.com/models/",
+                ],
+                "files": [{"name": "clip_visual.onnx"}],
+            },
+            "https://example.com/manifest.json",
+        )
+
+        sources = manifest["files"][0]["sources"]
+        self.assertEqual(len(sources), 3)
+        self.assertEqual(sources[1]["label"], "cdn")
+        self.assertEqual(sources[2]["url"], "https://mirror.example.com/models/clip_visual.onnx")
+
+    def test_normalize_manifest_respects_file_sources(self):
+        manifest = model_service._normalize_manifest(
+            {
+                "base_url": "https://primary.example.com/models/",
+                "files": [
+                    {
+                        "name": "clip_visual.onnx",
+                        "sources": [
+                            {"label": "oss", "base_url": "https://oss.example.com/models/"},
+                            {"label": "github", "url": "https://github.com/example/clip_visual.onnx"},
+                        ],
+                    }
+                ],
+            },
+            "https://example.com/manifest.json",
+        )
+
+        sources = manifest["files"][0]["sources"]
+        self.assertEqual(sources[0]["url"], "https://oss.example.com/models/clip_visual.onnx")
+        self.assertEqual(sources[1]["label"], "github")
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ import gc
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -25,22 +26,162 @@ def measure_time(message=""):
 
 
 def get_ffmpeg_path():
+    resolved_path, _ = resolve_ffmpeg_path_info()
+    return resolved_path or "ffmpeg"
+
+
+def get_app_data_dir():
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        return os.path.join(local_appdata, "VideoSeek")
+    return os.path.join(os.path.expanduser("~"), ".videoseek")
+
+
+def get_default_model_dir():
+    return os.path.join(get_app_data_dir(), "models")
+
+
+def get_default_ffmpeg_path():
+    return os.path.join(get_app_data_dir(), "bin", "ffmpeg.exe")
+
+
+def has_ffmpeg():
+    ffmpeg_path = get_ffmpeg_path()
+    return os.path.exists(ffmpeg_path) or shutil.which(ffmpeg_path) is not None
+
+
+def get_ffmpeg_status_text():
+    resolved_path, source = resolve_ffmpeg_path_info()
+    if source == "system":
+        return f"PATH: {resolved_path}"
+    return resolved_path or "Unavailable"
+
+
+def resolve_ffmpeg_path_info():
     from src.app.config import load_config
 
     config = load_config()
     configured_path = config.get("ffmpeg_path", "").strip()
-    if configured_path:
-        return configured_path
+    if configured_path and os.path.exists(configured_path):
+        return configured_path, "configured"
+
+    default_path = get_default_ffmpeg_path()
+    if os.path.exists(default_path):
+        return default_path, "managed"
 
     if getattr(sys, "frozen", False) or "__file__" not in globals():
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.abspath(".")
 
-    ffmpeg_exe = os.path.join(base_dir, "ffmpeg.exe")
-    if not os.path.exists(ffmpeg_exe):
-        ffmpeg_exe = "ffmpeg"
-    return ffmpeg_exe
+    bundled_path = os.path.join(base_dir, "ffmpeg.exe")
+    if os.path.exists(bundled_path):
+        return bundled_path, "bundled"
+
+    system_path = shutil.which("ffmpeg")
+    if system_path:
+        return system_path, "system"
+
+    return "", "missing"
+
+
+def sync_ffmpeg_path_to_config():
+    from src.app.config import load_config, save_config
+
+    config = load_config()
+    configured_path = config.get("ffmpeg_path", "").strip()
+    if configured_path and os.path.exists(configured_path):
+        return configured_path
+
+    resolved_path, source = resolve_ffmpeg_path_info()
+    if source == "missing" or not resolved_path:
+        return ""
+
+    config["ffmpeg_path"] = resolved_path
+    save_config(config)
+    return resolved_path
+
+
+def resolve_model_dir_info():
+    try:
+        from src.app.config import load_config
+
+        configured_model_dir = load_config().get("model_dir", "").strip()
+        if configured_model_dir:
+            return configured_model_dir, "configured"
+    except Exception:
+        pass
+
+    return get_default_model_dir(), "default"
+
+
+def sync_model_dir_to_config():
+    from src.app.config import load_config, save_config
+
+    config = load_config()
+    configured_model_dir = config.get("model_dir", "").strip()
+    if configured_model_dir and configured_model_dir != get_default_model_dir():
+        return configured_model_dir
+
+    resolved_dir, _ = resolve_model_dir_info()
+    if not resolved_dir:
+        return ""
+
+    config["model_dir"] = resolved_dir
+    save_config(config)
+    return resolved_dir
+
+
+def get_configured_model_dir():
+    resolved_dir, _ = resolve_model_dir_info()
+    return resolved_dir
+
+
+def resolve_resource_path(relative_path, configured_base_dir=""):
+    normalized_relative = relative_path.replace("/", os.sep)
+    candidate_paths = []
+
+    if configured_base_dir:
+        configured_name = os.path.basename(normalized_relative)
+        candidate_paths.append(os.path.join(configured_base_dir, configured_name))
+
+    candidate_paths.append(get_resource_path(normalized_relative))
+
+    for candidate in candidate_paths:
+        if os.path.exists(candidate):
+            return candidate
+
+    return candidate_paths[0]
+
+
+def get_model_path(filename):
+    return resolve_resource_path(os.path.join("models", filename), get_configured_model_dir())
+
+
+def get_missing_model_files(model_filenames):
+    missing = []
+    resolved_paths = {}
+
+    for filename in model_filenames:
+        path = get_model_path(filename)
+        resolved_paths[filename] = path
+        if not os.path.exists(path):
+            missing.append(filename)
+
+    return missing, resolved_paths
+
+
+def ensure_model_files(model_filenames):
+    missing, resolved_paths = get_missing_model_files(model_filenames)
+
+    if missing:
+        missing_display = ", ".join(missing)
+        raise FileNotFoundError(
+            f"Missing model files: {missing_display}. "
+            f"Place them in '{get_configured_model_dir()}' or next to the app under 'models'."
+        )
+
+    return resolved_paths
 
 
 def free_memory():
@@ -119,7 +260,7 @@ def create_preview_clip(input_path, start_sec, output_path):
 
 
 def build_preview_cache_path(video_path, start_sec):
-    cache_dir = os.path.join(os.environ["LOCALAPPDATA"], "VideoSeek", "cache")
+    cache_dir = os.path.join(get_app_data_dir(), "cache")
     os.makedirs(cache_dir, exist_ok=True)
     key = f"{video_path}|{int(start_sec)}|{uuid.uuid4().hex}"
     filename = f"preview_{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.mp4"
