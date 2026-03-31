@@ -3,6 +3,7 @@ import time
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QLabel
 
+from src.core.clip_embedding import get_engine_runtime_warning
 from ui.table_views import populate_result_table
 from ui.workers import SearchWorker, ThumbLoader
 
@@ -14,6 +15,7 @@ class SearchController(QObject):
         self.worker = None
         self.thumb_thread = None
         self.start_time = 0.0
+        self._gpu_warning_shown = False
 
     def start_search(self, query, is_text):
         self.stop_thumbnail_loading()
@@ -24,6 +26,7 @@ class SearchController(QObject):
 
         self.worker = SearchWorker(query, is_text)
         self.worker.result_ready.connect(self._display_results)
+        self.worker.error_signal.connect(self._handle_search_error)
         self.worker.finished.connect(self._finish_search)
         self.worker.start()
 
@@ -39,6 +42,7 @@ class SearchController(QObject):
         self._shutdown_thread(self.thumb_thread, stop_first=True)
 
     def _display_results(self, results):
+        self.parent_window._update_inference_backend_hint()
         if not results:
             self.parent_window.result_table.setRowCount(0)
             self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["no_results"])
@@ -68,6 +72,21 @@ class SearchController(QObject):
 
     def _finish_search(self):
         self.parent_window.search_page.btn_search.setEnabled(True)
+
+    def _handle_search_error(self, error_text):
+        self.parent_window._update_inference_backend_hint()
+        self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["search_failed"])
+        runtime_warning = get_engine_runtime_warning()
+        if runtime_warning:
+            if not self._gpu_warning_shown:
+                self._gpu_warning_shown = True
+                self.parent_window.show_info_dialog(
+                    self.parent_window.texts["warning_title"],
+                    self.parent_window.texts["gpu_runtime_unavailable"].format(detail=runtime_warning),
+                    kind="warning",
+                )
+            return
+        self.parent_window.show_error_dialog(self.parent_window.texts["search_failed"], error_text)
 
     def _shutdown_thread(self, thread, stop_first=False):
         if not thread or not thread.isRunning():

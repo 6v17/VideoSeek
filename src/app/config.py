@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
     "preview_height": 360,
     "thumb_width": 130,
     "thumb_height": 75,
+    "prefer_gpu": True,
     "ffmpeg_path": "",
     "model_dir": get_default_model_dir(),
     "meta_file": "data/meta.json",

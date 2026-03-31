@@ -1,10 +1,15 @@
 import sys
 import types
 import unittest
+import re as std_re
 from unittest.mock import MagicMock, patch
 
 sys.modules.setdefault("cv2", types.SimpleNamespace())
 sys.modules.setdefault("numpy", types.SimpleNamespace())
+sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
+sys.modules.setdefault("faiss", types.SimpleNamespace())
+sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
+sys.modules.setdefault("regex", std_re)
 
 if "PySide6" not in sys.modules:
     qtcore = types.ModuleType("PySide6.QtCore")

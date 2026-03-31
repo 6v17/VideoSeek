@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+from src.app.config import load_config
 from src.core.extract_frames import extract_frames_with_ffmpeg
 from src.core.faiss_index import create_clip_index, save_vectors
 from src.core.tokenizer import tokenize
@@ -12,7 +13,15 @@ from src.utils import ensure_folder_exists, ensure_model_files, free_memory, mea
 
 class CLIPOnnxEngine:
     def __init__(self):
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        prefer_gpu = load_config().get("prefer_gpu", True)
+        providers = ["CPUExecutionProvider"]
+        if prefer_gpu:
+            if hasattr(ort, "preload_dlls"):
+                try:
+                    ort.preload_dlls()
+                except Exception:
+                    pass
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
         self.visual_session = ort.InferenceSession(
             model_paths["clip_visual.onnx"],
@@ -22,6 +31,21 @@ class CLIPOnnxEngine:
             model_paths["clip_text.onnx"],
             providers=providers,
         )
+        self.active_providers = {
+            "visual": self.visual_session.get_providers(),
+            "text": self.text_session.get_providers(),
+        }
+        self.using_cuda = all(
+            "CUDAExecutionProvider" in provider_list for provider_list in self.active_providers.values()
+        )
+        self.prefer_gpu = prefer_gpu
+        self.runtime_warning = ""
+        if prefer_gpu and not self.using_cuda:
+            self.runtime_warning = (
+                "GPU execution is unavailable. ONNX Runtime fell back to CPU. "
+                "Install matching CUDA 12.x, cuDNN 9.x, and the latest MSVC runtime."
+            )
+        self.backend_label = "GPU" if self.using_cuda else "CPU"
         self.mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32).reshape(1, 1, 3)
         self._feature_dim = None
@@ -83,6 +107,34 @@ def get_clip_embeddings_batch(frames):
 
 def get_text_embedding(text):
     return get_engine().encode_text(text)
+
+
+def get_engine_runtime_warning():
+    warning = get_engine().runtime_warning
+    return warning.strip()
+
+
+def get_engine_runtime_status():
+    if engine is None:
+        prefer_gpu = load_config().get("prefer_gpu", True)
+        return {
+            "initialized": False,
+            "prefer_gpu": prefer_gpu,
+            "backend": "",
+            "warning": "",
+        }
+
+    return {
+        "initialized": True,
+        "prefer_gpu": engine.prefer_gpu,
+        "backend": engine.backend_label,
+        "warning": engine.runtime_warning.strip(),
+    }
+
+
+def reset_engine():
+    global engine
+    engine = None
 
 
 @measure_time("Video indexing time:")

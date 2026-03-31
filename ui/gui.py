@@ -1,4 +1,5 @@
 import os
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
@@ -7,6 +8,8 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QMainWindow, QM
 
 from src.app.config import DEFAULT_CONFIG, get_app_version, load_config, save_config
 from src.app.i18n import get_texts
+from src.core.clip_embedding import get_engine_runtime_status, reset_engine
+from src.services.about_service import get_local_about_payload
 from src.services.library_service import add_library, list_libraries, remove_library as remove_library_entry
 from src.services.notice_service import get_local_notice_payload
 from src.workflows.update_video import delete_physical_video_data
@@ -38,6 +41,7 @@ class MainWindow(QMainWindow):
         self.current_img_path = None
         self.version_info = None
         self.notice_payload = None
+        self.about_payload = None
         self.models_ready = True
 
         cfg = load_config()
@@ -46,11 +50,13 @@ class MainWindow(QMainWindow):
         self.texts = get_texts(self.language)
         self.version_info = get_local_version_status(self.language)
         self.notice_payload = get_local_notice_payload(self.language)
+        self.about_payload = get_local_about_payload(self.language)
 
         self.init_ui()
         self.app_meta_controller = AppMetaController(self)
         self.app_meta_controller.version_ready.connect(self._update_version_info)
         self.app_meta_controller.notice_ready.connect(self._update_notice_payload)
+        self.app_meta_controller.about_ready.connect(self._update_about_payload)
         self.indexing_controller = IndexingController(self)
         self.indexing_controller.status_changed.connect(self._update_indexing_progress)
         self.indexing_controller.finished.connect(self._finish_indexing)
@@ -155,6 +161,9 @@ class MainWindow(QMainWindow):
     def _update_notice_payload(self, notice_payload):
         self.notice_payload = notice_payload
 
+    def _update_about_payload(self, about_payload):
+        self.about_payload = about_payload
+
     def apply_texts(self):
         self.texts = get_texts(self.language)
         t = self.texts
@@ -185,6 +194,8 @@ class MainWindow(QMainWindow):
         self.sidebar.btn_about.update()
         self.sidebar.btn_language.setText(t["language_toggle"])
         self.sidebar.btn_theme.setText(t["theme_light"] if self.is_dark_mode else t["theme_dark"])
+        self.sidebar.runtime_hint.hide()
+        self.sidebar.runtime_hint.setToolTip("")
 
         self.search_page.header.title.setText(t["search_page_title"])
         self.search_page.header.subtitle.setText(t["search_page_desc"])
@@ -216,6 +227,7 @@ class MainWindow(QMainWindow):
         self.settings_page.hint_ffmpeg_active.setText(
             t["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
         )
+        self._update_inference_backend_hint()
 
         if not self.current_img_path and not self.search_page.img_label.pixmap():
             self.search_page.img_label.setText(t["image_drop_hint"])
@@ -248,15 +260,19 @@ class MainWindow(QMainWindow):
         self.settings_page.input_thumb_height.setValue(
             config.get("thumb_height", DEFAULT_CONFIG["thumb_height"])
         )
+        prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
+        self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
         self.settings_page.hint_ffmpeg_active.setText(
             self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
         )
+        self._update_inference_backend_hint()
 
     def save_settings(self):
         try:
             config = load_config()
+            previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
             config["fps"] = self.settings_page.input_fps.value()
             config["search_top_k"] = self.settings_page.input_top_k.value()
             config["preview_seconds"] = self.settings_page.input_preview_seconds.value()
@@ -264,9 +280,12 @@ class MainWindow(QMainWindow):
             config["preview_height"] = self.settings_page.input_preview_height.value()
             config["thumb_width"] = self.settings_page.input_thumb_width.value()
             config["thumb_height"] = self.settings_page.input_thumb_height.value()
+            config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
             config["ffmpeg_path"] = self.settings_page.input_ffmpeg_path.text().strip()
             config["model_dir"] = self.settings_page.input_model_dir.text().strip() or DEFAULT_CONFIG["model_dir"]
             save_config(config)
+            if previous_prefer_gpu != config["prefer_gpu"]:
+                reset_engine()
             if not config["model_dir"]:
                 synced_model_dir = sync_model_dir_to_config()
                 if synced_model_dir:
@@ -279,6 +298,7 @@ class MainWindow(QMainWindow):
             self.settings_page.hint_ffmpeg_active.setText(
                 self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
             )
+            self._update_inference_backend_hint()
             self.settings_page.lbl_status.setText(self.texts["saved_settings"])
             self.show_info_dialog(self.texts["success_title"], self.texts["saved_settings"], kind="success")
         except Exception as exc:
@@ -287,11 +307,14 @@ class MainWindow(QMainWindow):
     def reset_settings(self):
         try:
             config = load_config()
+            previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
             for key, value in DEFAULT_CONFIG.items():
                 if key in {"theme", "language"}:
                     continue
                 config[key] = value
             save_config(config)
+            if previous_prefer_gpu != config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]):
+                reset_engine()
             synced_model_dir = sync_model_dir_to_config()
             synced_path = sync_ffmpeg_path_to_config()
             self.load_settings_values()
@@ -303,6 +326,7 @@ class MainWindow(QMainWindow):
             self.settings_page.hint_ffmpeg_active.setText(
                 self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
             )
+            self._update_inference_backend_hint()
             self.settings_page.lbl_status.setText(self.texts["reset_settings_done"])
             self.show_info_dialog(self.texts["success_title"], self.texts["reset_settings_done"], kind="success")
         except Exception as exc:
@@ -312,7 +336,13 @@ class MainWindow(QMainWindow):
         NoticeDialog(self, self.is_dark_mode, self.language, notice=self.notice_payload).exec()
 
     def show_about(self):
-        AboutDialog(self, self.is_dark_mode, self.language, version_info=self.version_info).exec()
+        AboutDialog(
+            self,
+            self.is_dark_mode,
+            self.language,
+            version_info=self.version_info,
+            about=self.about_payload,
+        ).exec()
 
     def refresh_library_table(self):
         try:
@@ -457,6 +487,7 @@ class MainWindow(QMainWindow):
         save_config(config)
         self.version_info = get_local_version_status(self.language)
         self.notice_payload = get_local_notice_payload(self.language)
+        self.about_payload = get_local_about_payload(self.language)
         self.apply_texts()
         self.apply_theme()
         self.app_meta_controller.refresh(self.language)
@@ -532,6 +563,34 @@ class MainWindow(QMainWindow):
 
         root_dir = ensure_runtime_resource_dirs()
         open_folder_in_explorer(root_dir)
+
+    def _update_inference_backend_hint(self):
+        status = get_engine_runtime_status()
+        backend_text = ""
+        show_help_link = False
+
+        if status["initialized"]:
+            backend_text = status["backend"] or ""
+            if status["warning"]:
+                backend_text = self.texts["setting_inference_cpu_recommend"]
+                show_help_link = True
+                self.settings_page.hint_inference_backend.setProperty("state", "warn")
+            elif str(status["backend"]).upper() == "GPU":
+                self.settings_page.hint_inference_backend.setProperty("state", "ok")
+            else:
+                self.settings_page.hint_inference_backend.setProperty("state", "neutral")
+        else:
+            self.settings_page.hint_inference_backend.setProperty("state", "neutral")
+
+        self.settings_page.hint_inference_backend.setText(
+            self.texts["setting_inference_backend"].format(backend=backend_text)
+            if backend_text else ""
+        )
+        self.settings_page.hint_inference_backend.setVisible(bool(backend_text))
+        self.settings_page.hint_gpu_runtime.setText(self.texts["setting_gpu_runtime_link_only"])
+        self.settings_page.hint_gpu_runtime.setVisible(show_help_link)
+        self.settings_page.hint_inference_backend.style().unpolish(self.settings_page.hint_inference_backend)
+        self.settings_page.hint_inference_backend.style().polish(self.settings_page.hint_inference_backend)
 
     def _handle_runtime_resource_exit(self):
         self.startup_cancelled = True

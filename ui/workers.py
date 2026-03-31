@@ -4,6 +4,7 @@ from PySide6.QtGui import QImage, QPixmap
 
 from src.app.config import load_config
 from src.core.core import run_search
+from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
@@ -12,6 +13,7 @@ from src.services.version_service import get_version_status
 
 class SearchWorker(QThread):
     result_ready = Signal(list)
+    error_signal = Signal(str)
     finished = Signal()
 
     def __init__(self, query, is_text):
@@ -25,6 +27,7 @@ class SearchWorker(QThread):
             self.result_ready.emit(list(results) if results is not None else [])
         except Exception as exc:
             print(f"Search Error: {exc}")
+            self.error_signal.emit(str(exc))
         finally:
             self.finished.emit()
 
@@ -118,6 +121,21 @@ class NoticeFetchWorker(QThread):
             self.result_ready.emit(result)
         except Exception as exc:
             print(f"Notice Fetch Error: {exc}")
+
+
+class AboutFetchWorker(QThread):
+    result_ready = Signal(dict)
+
+    def __init__(self, language):
+        super().__init__()
+        self.language = language
+
+    def run(self):
+        try:
+            result = get_about_payload(self.language)
+            self.result_ready.emit(result)
+        except Exception as exc:
+            print(f"About Fetch Error: {exc}")
 
 
 class ResourceDownloadWorker(QThread):

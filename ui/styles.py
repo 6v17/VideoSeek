@@ -27,6 +27,21 @@ QWidget {
 #BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint, #StatusLabel {
     color: __MUTED__;
 }
+#StatusHint {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+}
+#StatusHint[state="ok"] {
+    color: __SUCCESS__;
+}
+#StatusHint[state="warn"] {
+    color: __WARN__;
+}
+#StatusHint[state="neutral"] {
+    color: __MUTED__;
+}
 #StatusLabel {
     font-size: 12px;
 }
@@ -99,14 +114,14 @@ QPushButton:hover {
     border-color: __ACCENT__;
     color: __HEADLINE__;
 }
-QLineEdit, QSpinBox {
+QLineEdit, QSpinBox, QComboBox {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 10px;
     padding: 8px 10px;
     color: __TEXT__;
 }
-QLineEdit:focus, QSpinBox:focus {
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
     border: 1px solid __ACCENT__;
 }
 #ImageDropZone, #PreviewPlaceholder {
@@ -223,6 +238,8 @@ DARK_STYLE = build_style({
     "SUCCESS": "#2ec27e",
     "SUCCESS_HOVER": "#45d690",
     "SUCCESS_SOFT": "#173d30",
+    "WARN": "#f4c95d",
+    "WARN_SOFT": "#43381a",
     "DANGER": "#ff6b6b",
     "DANGER_SOFT": "#432326",
     "SIDEBAR": "#121a2a",
@@ -250,6 +267,8 @@ LIGHT_STYLE = build_style({
     "SUCCESS": "#198754",
     "SUCCESS_HOVER": "#28a068",
     "SUCCESS_SOFT": "#def4e8",
+    "WARN": "#9a6b00",
+    "WARN_SOFT": "#fff1c9",
     "DANGER": "#d9534f",
     "DANGER_SOFT": "#fbe2e1",
     "SIDEBAR": "#eaf0f9",

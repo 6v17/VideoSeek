@@ -10,12 +10,12 @@ from ui.layout import WINDOW_SIZES, apply_dialog_size, message_dialog_min_width
 
 def dialog_palette(is_dark):
     return {
-        "bg": "#161c28" if is_dark else "#f7f3e8",
-        "card": "#1d2635" if is_dark else "#fffdfa",
+        "bg": "#161c28" if is_dark else "#f3f6fb",
+        "card": "#1d2635" if is_dark else "#ffffff",
         "text": "#f3f5f8" if is_dark else "#1d2430",
         "muted": "#9aa6b7" if is_dark else "#617086",
         "accent": "#4a86ff" if is_dark else "#3b6fd8",
-        "border": "#2d3950" if is_dark else "#d7deea",
+        "border": "#2d3950" if is_dark else "#d5ddea",
     }
 
 
@@ -115,11 +115,11 @@ class AppMessageDialog(QDialog):
 
 
 class AboutDialog(QDialog):
-    def __init__(self, parent=None, is_dark=True, language="zh", version_info=None):
+    def __init__(self, parent=None, is_dark=True, language="zh", version_info=None, about=None):
         super().__init__(parent)
         texts = get_texts(language)
-        config = load_config()
         version_info = version_info or {}
+        about = about or {}
 
         self.setWindowTitle(texts["about_title"])
         apply_dialog_size(
@@ -140,10 +140,14 @@ class AboutDialog(QDialog):
         self.setStyleSheet(f"""
             QDialog {{ background: {bg}; }}
             QLabel {{ color: {text}; background: transparent; }}
-            #Card {{ background: {card}; border: 1px solid {border}; border-radius: 20px; }}
-            #Title {{ font-size: 24px; font-weight: 800; }}
-            #Muted {{ color: {muted}; font-size: 12px; }}
-            #Body {{ color: {muted}; font-size: 13px; line-height: 1.45; }}
+            QTextEdit, QTextBrowser {{
+                background: {card};
+                color: {muted};
+                border: 1px solid {border};
+                border-radius: 16px;
+                padding: 12px;
+                font-size: 13px;
+            }}
             QPushButton {{
                 background: {accent};
                 color: white;
@@ -154,32 +158,34 @@ class AboutDialog(QDialog):
             }}
         """)
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 18, 18, 18)
-
-        card_frame = QFrame()
-        card_frame.setObjectName("Card")
-        layout = QVBoxLayout(card_frame)
-        layout.setContentsMargins(24, 24, 24, 20)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        badge = QLabel(texts["about_badge"])
-        badge.setStyleSheet(f"color: {accent}; font-size: 11px; font-weight: 800;")
-        title = QLabel(texts["app_name"])
-        title.setObjectName("Title")
+        title_text = about.get("title", texts["app_name"])
+        subtitle_text = about.get("badge", texts["about_badge"])
+        title = QLabel(title_text)
+        title.setStyleSheet("font-size: 22px; font-weight: 800;")
+        subtitle = QLabel(subtitle_text)
+        subtitle.setStyleSheet(f"color: {muted}; font-size: 12px;")
+        subtitle.setWordWrap(True)
         version = QLabel(texts["version_label"].format(version=get_app_version()))
-        version.setObjectName("Muted")
+        version.setStyleSheet(f"color: {muted}; font-size: 12px;")
         version_status = QLabel(version_info.get("status_text", texts["version_check_unavailable"]))
-        version_status.setObjectName("Body")
+        version_status.setStyleSheet(f"color: {muted}; font-size: 13px;")
         version_status.setWordWrap(True)
 
         divider = QFrame()
         divider.setFrameShape(QFrame.HLine)
         divider.setStyleSheet(f"background: {border}; max-height: 1px; margin: 8px 0;")
 
-        body = QLabel(texts["about_body"])
-        body.setObjectName("Body")
-        body.setWordWrap(True)
+        body = QTextBrowser()
+        body.setReadOnly(True)
+        body.setOpenExternalLinks(True)
+        if about.get("format") == "html":
+            body.setHtml(about.get("body", texts["about_body"]))
+        else:
+            body.setPlainText(about.get("body", texts["about_body"]))
 
         download_button = QPushButton(texts["download_latest"])
         download_button.setFixedHeight(40)
@@ -190,16 +196,19 @@ class AboutDialog(QDialog):
         close_button.setFixedHeight(40)
         close_button.clicked.connect(self.accept)
 
-        layout.addWidget(badge)
         layout.addWidget(title)
+        layout.addWidget(subtitle)
         layout.addWidget(version)
         layout.addWidget(version_status)
         layout.addWidget(divider)
         layout.addWidget(body)
-        layout.addStretch()
-        layout.addWidget(download_button)
-        layout.addWidget(close_button)
-        outer.addWidget(card_frame)
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        if download_button.isVisible():
+            button_row.addWidget(download_button)
+        button_row.addWidget(close_button)
+
+        layout.addLayout(button_row)
 
 
 class NoticeDialog(QDialog):

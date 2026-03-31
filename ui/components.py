@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFormLayout,
     QFrame,
     QHeaderView,
@@ -62,6 +63,11 @@ class NavigationSidebar(QWidget):
         layout.addWidget(self.btn_page_search)
         layout.addWidget(self.btn_page_library)
         layout.addWidget(self.btn_page_settings)
+        self.runtime_hint = QLabel("")
+        self.runtime_hint.setObjectName("StatusLabel")
+        self.runtime_hint.setWordWrap(True)
+        self.runtime_hint.hide()
+        layout.addWidget(self.runtime_hint)
         layout.addStretch()
 
         self.btn_notice = QPushButton("Notes")
@@ -327,6 +333,7 @@ class SettingsPage(QWidget):
         self.input_thumb_width.setRange(80, 480)
         self.input_thumb_height = QSpinBox()
         self.input_thumb_height.setRange(45, 320)
+        self.input_prefer_gpu = QComboBox()
         self.input_ffmpeg_path = QLineEdit()
         self.input_model_dir = QLineEdit()
         self.label_fps = QLabel()
@@ -336,6 +343,7 @@ class SettingsPage(QWidget):
         self.label_preview_height = QLabel()
         self.label_thumb_width = QLabel()
         self.label_thumb_height = QLabel()
+        self.label_prefer_gpu = QLabel()
         self.label_ffmpeg_path = QLabel()
         self.label_model_dir = QLabel()
         self.hint_fps = QLabel()
@@ -345,8 +353,11 @@ class SettingsPage(QWidget):
         self.hint_preview_height = QLabel()
         self.hint_thumb_width = QLabel()
         self.hint_thumb_height = QLabel()
+        self.hint_prefer_gpu = QLabel()
         self.hint_ffmpeg_path = QLabel()
         self.hint_ffmpeg_active = QLabel()
+        self.hint_inference_backend = QLabel()
+        self.hint_gpu_runtime = QLabel()
         self.hint_model_dir = QLabel()
 
         self._configure_setting_input(self.input_fps, width=COMPONENT_SIZES["settings_input_width"])
@@ -356,6 +367,7 @@ class SettingsPage(QWidget):
         self._configure_setting_input(self.input_preview_height, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"])
         self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"])
 
@@ -382,8 +394,21 @@ class SettingsPage(QWidget):
             self._build_setting_row(self.input_thumb_height, self.hint_thumb_height),
         )
         self.form.addRow(
+            self.label_prefer_gpu,
+            self._build_setting_row(
+                self.input_prefer_gpu,
+                self.hint_prefer_gpu,
+                self.hint_inference_backend,
+                self.hint_gpu_runtime,
+            ),
+        )
+        self.form.addRow(
             self.label_ffmpeg_path,
-            self._build_setting_row(self.input_ffmpeg_path, self.hint_ffmpeg_path, self.hint_ffmpeg_active),
+            self._build_setting_row(
+                self.input_ffmpeg_path,
+                self.hint_ffmpeg_path,
+                self.hint_ffmpeg_active,
+            ),
         )
         self.form.addRow(
             self.label_model_dir,
@@ -413,12 +438,16 @@ class SettingsPage(QWidget):
         widget.setFixedWidth(width)
         widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-    def _build_setting_row(self, field, hint_label, extra_hint_label=None):
+    def _build_setting_row(self, field, hint_label, extra_hint_label=None, extra_hint_label_2=None, extra_hint_label_3=None):
         hint_label.setObjectName("CardHint")
         hint_label.setWordWrap(True)
-        if extra_hint_label is not None:
-            extra_hint_label.setObjectName("CardHint")
-            extra_hint_label.setWordWrap(True)
+        for extra_hint in [extra_hint_label, extra_hint_label_2, extra_hint_label_3]:
+            if extra_hint is not None:
+                if extra_hint in (self.hint_inference_backend, self.hint_gpu_runtime):
+                    extra_hint.setObjectName("StatusHint")
+                else:
+                    extra_hint.setObjectName("CardHint")
+                extra_hint.setWordWrap(True)
         row = QWidget()
         layout = QVBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -429,8 +458,9 @@ class SettingsPage(QWidget):
         top.addWidget(field, 0)
         top.addWidget(hint_label, 1)
         layout.addLayout(top)
-        if extra_hint_label is not None:
-            layout.addWidget(extra_hint_label)
+        for extra_hint in [extra_hint_label, extra_hint_label_2, extra_hint_label_3]:
+            if extra_hint is not None:
+                layout.addWidget(extra_hint)
         return row
 
     def configure_form_labels(self, texts):
@@ -441,6 +471,12 @@ class SettingsPage(QWidget):
         self.label_preview_height.setText(texts["setting_preview_height"])
         self.label_thumb_width.setText(texts["setting_thumb_width"])
         self.label_thumb_height.setText(texts["setting_thumb_height"])
+        self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
+        self.input_prefer_gpu.blockSignals(True)
+        self.input_prefer_gpu.clear()
+        self.input_prefer_gpu.addItem(texts["setting_prefer_gpu_option_gpu"], True)
+        self.input_prefer_gpu.addItem(texts["setting_prefer_gpu_option_cpu"], False)
+        self.input_prefer_gpu.blockSignals(False)
         self.label_ffmpeg_path.setText(texts["setting_ffmpeg_path"])
         self.label_model_dir.setText(texts["setting_model_dir"])
         self.hint_fps.setText(texts["setting_fps_hint"])
@@ -450,8 +486,18 @@ class SettingsPage(QWidget):
         self.hint_preview_height.setText(texts["setting_preview_height_hint"])
         self.hint_thumb_width.setText(texts["setting_thumb_width_hint"])
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
+        self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
         self.hint_ffmpeg_path.setText(texts["setting_ffmpeg_path_hint"])
         self.hint_ffmpeg_active.setText(texts["setting_ffmpeg_active"].format(path=texts["setting_ffmpeg_unknown"]))
+        self.hint_inference_backend.setText(
+            texts["setting_inference_backend"].format(backend=texts["setting_inference_uninitialized"])
+        )
+        self.hint_inference_backend.setProperty("state", "neutral")
+        self.hint_gpu_runtime.setText(texts["setting_gpu_runtime_link_only"])
+        self.hint_gpu_runtime.setOpenExternalLinks(True)
+        self.hint_gpu_runtime.setTextFormat(Qt.RichText)
+        self.hint_gpu_runtime.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self.hint_gpu_runtime.setVisible(False)
         self.hint_model_dir.setText(texts["setting_model_dir_hint"])
 
 

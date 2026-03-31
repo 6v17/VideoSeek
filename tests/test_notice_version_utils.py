@@ -6,7 +6,7 @@ from unittest.mock import patch
 sys.modules.setdefault("cv2", types.SimpleNamespace())
 sys.modules.setdefault("numpy", types.SimpleNamespace())
 
-from src.services import notice_service, version_service
+from src.services import about_service, notice_service, version_service
 from src import utils
 
 
@@ -35,6 +35,33 @@ class NoticeServiceTests(unittest.TestCase):
         texts = {"notice_heading": "Heading", "notice_subtitle": "Subtitle", "notice_body": "Body"}
 
         result = notice_service._normalize_notice({"format": "markdown"}, texts)
+
+        self.assertEqual(result["format"], "plain")
+
+
+class AboutServiceTests(unittest.TestCase):
+    def test_normalize_about_supports_html_and_list_body(self):
+        texts = {"about_badge": "Badge", "app_name": "VideoSeek", "about_body": "Body"}
+
+        result = about_service._normalize_about(
+            {
+                "badge": "Remote Badge",
+                "title": "Remote Title",
+                "body": ["line one", "line two"],
+                "format": "html",
+            },
+            texts,
+        )
+
+        self.assertEqual(result["badge"], "Remote Badge")
+        self.assertEqual(result["title"], "Remote Title")
+        self.assertEqual(result["format"], "html")
+        self.assertIn("line one", result["body"])
+
+    def test_normalize_about_falls_back_to_plain_for_unknown_format(self):
+        texts = {"about_badge": "Badge", "app_name": "VideoSeek", "about_body": "Body"}
+
+        result = about_service._normalize_about({"format": "markdown"}, texts)
 
         self.assertEqual(result["format"], "plain")
 
