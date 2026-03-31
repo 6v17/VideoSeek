@@ -149,10 +149,6 @@ main.py
 ```
 ## Download
 
- 1、Gitee Release: [https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases](https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases)
- 
- 2、GitHub Release: [https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases](https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases)
-
 Runtime resource packaging note:
 
 - The app prefers external runtime resources over bundling large files into every release.
@@ -166,7 +162,7 @@ Example model manifest:
 ```json
 {
   "version": "clip-vit-b32-1",
-  "base_url": "https://github.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O/VideoSeek/releases/download/models/",
+  "base_url": "https://github.com/6v17/VideoSeek/releases/download/models/",
   "mirrors": [
     {
       "label": "cdn",
