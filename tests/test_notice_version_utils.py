@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 sys.modules.setdefault("cv2", types.SimpleNamespace())
 sys.modules.setdefault("numpy", types.SimpleNamespace())
+sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
+sys.modules.setdefault("faiss", types.SimpleNamespace())
+sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
+sys.modules.setdefault("regex", __import__("re"))
 
+from src.core import clip_embedding
 from src.services import about_service, notice_service, version_service
 from src import utils
 
@@ -129,6 +134,26 @@ class UtilsConfigSyncTests(unittest.TestCase):
         self.assertEqual(result, "D:/ffmpeg/bin/ffmpeg.exe")
         self.assertEqual(mock_load_config.return_value["ffmpeg_path"], "D:/ffmpeg/bin/ffmpeg.exe")
         mock_save_config.assert_called_once_with(mock_load_config.return_value)
+
+
+class RuntimeDiagnosticTests(unittest.TestCase):
+    @patch("src.core.clip_embedding._collect_available_dll_names")
+    def test_detect_gpu_runtime_issue_prefers_cuda(self, mock_collect_names):
+        mock_collect_names.return_value = {"vcruntime140.dll", "cudnn64_9.dll"}
+
+        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "cuda")
+
+    @patch("src.core.clip_embedding._collect_available_dll_names")
+    def test_detect_gpu_runtime_issue_reports_cudnn(self, mock_collect_names):
+        mock_collect_names.return_value = {"vcruntime140.dll", "cudart64_12.dll", "cublas64_12.dll"}
+
+        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "cudnn")
+
+    @patch("src.core.clip_embedding._collect_available_dll_names")
+    def test_detect_gpu_runtime_issue_reports_msvc(self, mock_collect_names):
+        mock_collect_names.return_value = {"cudart64_12.dll", "cublaslt64_12.dll", "cudnn64_9.dll"}
+
+        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "msvc")
 
 
 if __name__ == "__main__":

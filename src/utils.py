@@ -11,13 +11,17 @@ import uuid
 import cv2
 import numpy as np
 
+from src.app.logging_utils import get_logger
+
+logger = get_logger("utils")
+
 #
 def measure_time(message=""):
     def decorator(func):
         def wrapper(*args, **kwargs):
             started = time.time()
             result = func(*args, **kwargs)
-            print(f"{message} {func.__name__} took: {time.time() - started:.2f}s")
+            logger.info("%s %s took %.2fs", message, func.__name__, time.time() - started)
             return result
 
         return wrapper
@@ -186,7 +190,7 @@ def ensure_model_files(model_filenames):
 
 def free_memory():
     gc.collect()
-    print("Memory cleanup completed.")
+    logger.info("Memory cleanup completed")
 
 
 def ensure_folder_exists(file_path):
@@ -273,7 +277,7 @@ def libx264_param():
 
 def open_in_explorer(video_path):
     if not os.path.exists(video_path):
-        print(f"File does not exist: {video_path}")
+        logger.warning("File does not exist: %s", video_path)
         return
 
     path = os.path.normpath(os.path.abspath(video_path))
@@ -282,7 +286,7 @@ def open_in_explorer(video_path):
         try:
             subprocess.run(["explorer", f"/select,{path}"], check=False)
         except Exception as exc:
-            print(f"Windows locate failed: {exc}")
+            logger.warning("Windows locate failed: %s", exc)
             os.startfile(os.path.dirname(path))
     elif sys.platform == "darwin":
         subprocess.run(["open", "-R", path], check=False)
@@ -292,7 +296,7 @@ def open_in_explorer(video_path):
 
 def open_folder_in_explorer(folder_path):
     if not os.path.exists(folder_path):
-        print(f"Folder does not exist: {folder_path}")
+        logger.warning("Folder does not exist: %s", folder_path)
         return
 
     path = os.path.normpath(os.path.abspath(folder_path))
@@ -301,7 +305,7 @@ def open_folder_in_explorer(folder_path):
         try:
             os.startfile(path)
         except OSError as exc:
-            print(f"Windows folder open failed: {exc}")
+            logger.warning("Windows folder open failed: %s", exc)
     elif sys.platform == "darwin":
         subprocess.run(["open", path], check=False)
     else:
@@ -336,7 +340,7 @@ def get_single_thumbnail(video_path, time_sec):
         if len(buffer) > 0:
             return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
     except Exception as exc:
-        print(f"Thumbnail capture failed: {exc}")
+        logger.warning("Thumbnail capture failed: %s", exc)
     return None
 
 

@@ -6,8 +6,12 @@ from src.app.config import load_config
 from src.core.core import run_search
 from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
+from src.services.link_search_service import run_link_search
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
+from src.services.remote_index_service import download_remote_index_pack
+from src.services.remote_library_service import build_remote_library_from_links
+from src.services.remote_search_service import run_remote_search
 from src.services.version_service import get_version_status
 
 
@@ -71,11 +75,11 @@ class ThumbLoader(QThread):
         thumb_width = config.get("thumb_width", 130)
         thumb_height = config.get("thumb_height", 75)
 
-        for row, (_, sec, _, video_path) in enumerate(self.results):
+        for row, (start_sec, _, _, video_path) in enumerate(self.results):
             if not self._running:
                 break
 
-            frame = get_single_thumbnail(video_path, sec)
+            frame = get_single_thumbnail(video_path, start_sec)
             if frame is None:
                 self.msleep(15)
                 continue
@@ -173,6 +177,89 @@ class ResourceDownloadWorker(QThread):
                 result["ffmpeg_path"] = ffmpeg_result.get("path", "")
 
             self.progress_signal.emit(100, "Runtime resources ready")
+            self.finished_signal.emit(result)
+        except Exception as exc:
+            self.error_signal.emit(str(exc))
+
+
+class LinkSearchWorker(QThread):
+    progress_signal = Signal(int, str)
+    result_ready = Signal(dict)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(self, link, mode):
+        super().__init__()
+        self.link = link
+        self.mode = mode
+
+    def run(self):
+        try:
+            payload = run_link_search(
+                self.link,
+                mode=self.mode,
+                progress_callback=lambda progress, text: self.progress_signal.emit(progress, text),
+            )
+            self.result_ready.emit(payload)
+        except Exception as exc:
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class RemoteSearchWorker(QThread):
+    result_ready = Signal(list)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(self, query_data, is_text):
+        super().__init__()
+        self.query_data = query_data
+        self.is_text = is_text
+
+    def run(self):
+        try:
+            results = run_remote_search(self.query_data, is_text=self.is_text)
+            self.result_ready.emit(results or [])
+        except Exception as exc:
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class RemoteIndexDownloadWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def run(self):
+        try:
+            status = download_remote_index_pack(
+                progress_callback=lambda value, text: self.progress_signal.emit(value, text)
+            )
+            self.finished_signal.emit(status)
+        except Exception as exc:
+            self.error_signal.emit(str(exc))
+
+
+class RemoteLibraryBuildWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, links, mode):
+        super().__init__()
+        self.links = links
+        self.mode = mode
+
+    def run(self):
+        try:
+            result = build_remote_library_from_links(
+                self.links,
+                mode=self.mode,
+                incremental=True,
+                progress_callback=lambda value, text: self.progress_signal.emit(value, text),
+            )
             self.finished_signal.emit(result)
         except Exception as exc:
             self.error_signal.emit(str(exc))

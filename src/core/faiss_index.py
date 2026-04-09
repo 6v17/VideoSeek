@@ -3,7 +3,11 @@
 import faiss
 import numpy as np
 
+from src.app.logging_utils import get_logger
+from src.core.semantic_chunking import pack_chunks, unpack_chunks
 from src.utils import measure_time
+
+logger = get_logger("faiss_index")
 
 
 @measure_time("Index build time:")
@@ -17,7 +21,7 @@ def create_clip_index(vectors_list, index_file):
     index = faiss.IndexFlatIP(vectors.shape[1])
     index.add(vectors)
     faiss.write_index(index, index_file)
-    print(f"Index saved to {index_file}")
+    logger.info("Index saved to %s", index_file)
     return index
 
 
@@ -43,7 +47,7 @@ def search_vector(query_vector, index, timestamps, video_paths, top_k=10):
     return matched_results
 
 
-def save_vectors(vectors_list, timestamps, output_file):
+def save_vectors(vectors_list, timestamps, output_file, chunks=None, chunk_config=None):
     folder_path = os.path.dirname(output_file)
     if folder_path and not os.path.exists(folder_path):
         os.makedirs(folder_path)
@@ -52,8 +56,13 @@ def save_vectors(vectors_list, timestamps, output_file):
         "vector": np.asarray(vectors_list, dtype="float32"),
         "timestamps": np.asarray(timestamps, dtype="float32"),
     }
+    chunk_payload = pack_chunks(chunks or [])
+    if chunk_payload is not None:
+        data["chunks"] = chunk_payload
+    if isinstance(chunk_config, dict):
+        data["chunk_config"] = chunk_config
     np.save(output_file, data)
-    print(f"Vectors saved to {output_file}")
+    logger.info("Vectors saved to %s", output_file)
     return data
 
 
@@ -61,5 +70,12 @@ def load_vectors(input_file):
     if os.path.exists(input_file):
         return np.load(input_file, allow_pickle=True).item()
 
-    print(f"Vector file not found: {input_file}")
+    logger.warning("Vector file not found: %s", input_file)
     return None
+
+
+def load_chunks(input_file):
+    data = load_vectors(input_file)
+    if isinstance(data, dict):
+        return unpack_chunks(data.get("chunks"))
+    return []

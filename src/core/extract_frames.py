@@ -4,7 +4,10 @@ import cv2
 import numpy as np
 
 from src.app.config import load_config
+from src.app.logging_utils import get_logger
 from src.utils import get_ffmpeg_path
+
+logger = get_logger("extract_frames")
 
 
 def extract_frames_with_ffmpeg(video_path):
@@ -62,5 +65,5 @@ def extract_frames_with_ffmpeg(video_path):
         count += 1
 
     process.terminate()
-    print(f"Frame extraction completed: {len(frames)} frames")
+    logger.info("Frame extraction completed: %s frames for %s", len(frames), video_path)
     return frames, timestamps

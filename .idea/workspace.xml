@@ -4,21 +4,30 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="外置文件剥离">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="GPU选择优化">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_controllers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/extract_frames.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/faiss_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/faiss_index.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/tokenizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/tokenizer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_notice_version_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_notice_version_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/app_meta_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/app_meta_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/search_controller.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/styles.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/table_views.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -27,7 +36,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="71" />
+    <option name="cachedIndexableFilesCount" value="988" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -223,7 +232,15 @@
       <workItem from="1774959344433" duration="13000" />
       <workItem from="1774959816444" duration="8000" />
       <workItem from="1774959833090" duration="21605000" />
-      <workItem from="1774981603646" duration="2175000" />
+      <workItem from="1774981603646" duration="2320000" />
+      <workItem from="1775002973406" duration="8935000" />
+      <workItem from="1775212071085" duration="2529000" />
+      <workItem from="1775565354887" duration="82000" />
+      <workItem from="1775565665700" duration="1000" />
+      <workItem from="1775565676438" duration="16000" />
+      <workItem from="1775565787285" duration="173000" />
+      <workItem from="1775648106978" duration="7439000" />
+      <workItem from="1775708716440" duration="14534000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -481,7 +498,15 @@
       <option name="project" value="LOCAL" />
       <updated>1774977605756</updated>
     </task>
-    <option name="localTasksCounter" value="33" />
+    <task id="LOCAL-00033" summary="GPU选择优化">
+      <option name="closed" value="true" />
+      <created>1774983910053</created>
+      <option name="number" value="00033" />
+      <option name="presentableId" value="LOCAL-00033" />
+      <option name="project" value="LOCAL" />
+      <updated>1774983910053</updated>
+    </task>
+    <option name="localTasksCounter" value="34" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -528,7 +553,8 @@
     <MESSAGE value="ui优化" />
     <MESSAGE value="codex全面优化" />
     <MESSAGE value="外置文件剥离" />
-    <option name="LAST_COMMIT_MESSAGE" value="外置文件剥离" />
+    <MESSAGE value="GPU选择优化" />
+    <option name="LAST_COMMIT_MESSAGE" value="GPU选择优化" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/VideoSeek$main.coverage" NAME="main 覆盖结果" MODIFIED="1773485649708" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

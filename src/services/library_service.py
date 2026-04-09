@@ -1,3 +1,5 @@
+import os
+
 from src.app.config import load_config
 from src.utils import canonicalize_library_path, load_meta, save_meta
 
@@ -66,3 +68,39 @@ def remove_library(path, delete_video_data):
         delete_video_data(video_id, config)
 
     return True
+
+
+def list_local_vector_details():
+    config = load_config()
+    libraries = list_libraries()
+    vector_dir = os.path.normpath(config.get("vector_dir", ""))
+    index_dir = os.path.normpath(config.get("index_dir", ""))
+    entries = []
+
+    for library_path, library_data in libraries.items():
+        files = library_data.get("files", {})
+        for rel_path, info in files.items():
+            video_id = str(info.get("vid", "")).strip()
+            if not video_id:
+                continue
+            vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
+            index_file = os.path.normpath(os.path.join(index_dir, f"{video_id}_index.faiss"))
+            entries.append(
+                {
+                    "library_path": library_path,
+                    "video_rel_path": rel_path,
+                    "video_id": video_id,
+                    "vector_file": vector_file,
+                    "index_file": index_file,
+                    "vector_exists": os.path.exists(vector_file),
+                    "index_exists": os.path.exists(index_file),
+                }
+            )
+
+    entries.sort(key=lambda item: (item["library_path"], item["video_rel_path"]))
+    return {
+        "vector_dir": vector_dir,
+        "index_dir": index_dir,
+        "entries": entries,
+        "total_entries": len(entries),
+    }

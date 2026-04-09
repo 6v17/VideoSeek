@@ -1,6 +1,7 @@
 import os
 
 from src.app.config import load_config
+from src.app.logging_utils import get_logger
 from src.services.indexing_service import (
     build_global_index,
     cleanup_missing_library_files,
@@ -9,12 +10,15 @@ from src.services.indexing_service import (
 )
 from src.utils import get_video_hash, load_meta, save_meta
 
+logger = get_logger("update_video")
+
 
 def get_video_id(abs_path):
     return get_video_hash(abs_path)
 
 
 def update_videos_flow(target_lib=None, progress_callback=None):
+    logger.info("Starting index update%s", f" for {target_lib}" if target_lib else "")
     garbage_collect_indices()
     config = load_config()
     meta = load_meta(config["meta_file"])
@@ -25,7 +29,7 @@ def update_videos_flow(target_lib=None, progress_callback=None):
     for video_id in cleanup_missing_library_files(meta, config, target_lib):
         delete_physical_video_data(video_id, config)
 
-    all_vectors, all_timestamps, all_paths = scan_target_libraries(
+    all_vectors, all_timestamps, all_paths, all_chunk_vectors, all_chunk_ranges, all_chunk_paths = scan_target_libraries(
         meta,
         config,
         get_video_id,
@@ -36,10 +40,11 @@ def update_videos_flow(target_lib=None, progress_callback=None):
     save_meta(meta, config["meta_file"])
     if not any(len(lib.get("files", {})) > 0 for lib in meta["libraries"].values()):
         clear_global_index(config)
+        logger.info("No libraries remain after cleanup; cleared global indexes")
         return None, None, None, None
 
     if not all_vectors:
-        print("No valid videos found during indexing")
+        logger.warning("No valid videos found during indexing")
         clear_global_index(config)
         return None, None, None, None
 
@@ -47,6 +52,9 @@ def update_videos_flow(target_lib=None, progress_callback=None):
         all_vectors,
         all_timestamps,
         all_paths,
+        all_chunk_vectors,
+        all_chunk_ranges,
+        all_chunk_paths,
         config,
         progress_callback=progress_callback,
     )
@@ -68,12 +76,12 @@ def delete_physical_video_data(video_id, config):
     try:
         if os.path.exists(vector_file):
             os.remove(vector_file)
-            print(f"[Cleanup] Removed vector file for {video_id}")
+            logger.info("Removed vector file for %s", video_id)
         if os.path.exists(index_file):
             os.remove(index_file)
-            print(f"[Cleanup] Removed index file for {video_id}")
+            logger.info("Removed index file for %s", video_id)
     except Exception as exc:
-        print(f"Failed to remove files for {video_id}: {exc}")
+        logger.error("Failed to remove files for %s: %s", video_id, exc)
 
 
 def garbage_collect_indices():
@@ -94,6 +102,6 @@ def garbage_collect_indices():
             if video_id not in valid_ids and len(video_id) > 10:
                 try:
                     os.remove(os.path.join(folder, filename))
-                    print(f"[GC] Removed orphan file {filename}")
+                    logger.info("Removed orphan file %s", filename)
                 except OSError:
                     pass

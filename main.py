@@ -1,9 +1,12 @@
 # main.py
 import sys
 from PySide6.QtWidgets import QApplication
+from src.app.logging_utils import get_logger, setup_logging
 from ui.gui import MainWindow
 
 if __name__ == "__main__":
+    setup_logging()
+    logger = get_logger("main")
     app = QApplication(sys.argv)
 
     # 设置全局字体
@@ -11,9 +14,13 @@ if __name__ == "__main__":
     font.setFamily("Microsoft YaHei UI")
     app.setFont(font)
 
+    logger.info("Application starting")
     window = MainWindow()
     if getattr(window, "startup_cancelled", False):
+        logger.info("Startup cancelled before main window was shown")
         sys.exit(0)
     window.show()
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    logger.info("Application exiting with code %s", exit_code)
+    sys.exit(exit_code)

@@ -8,6 +8,8 @@ Desktop semantic video search built with `PySide6`, `ONNX Runtime`, `FAISS`, and
 - Build frame-level embeddings with CLIP
 - Store and query vectors with FAISS
 - Preview matched clips inside the desktop app
+- Build and search a remote library from online links
+- Inspect local vector paths and remote source-link details in-app
 
 ## Run Locally
 
@@ -15,7 +17,7 @@ Desktop semantic video search built with `PySide6`, `ONNX Runtime`, `FAISS`, and
 2. Install dependencies:
 
 ```bash
-pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy regex
+pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy regex yt-dlp
 ```
 
 3. Start the app:
@@ -55,6 +57,9 @@ src/
     search_service.py  search loading and query embedding
     library_service.py library metadata operations
     indexing_service.py scan, reuse, merge, and index helpers
+    remote_library_service.py remote link build/export/import helpers
+    remote_search_service.py remote vector search helpers
+    link_search_service.py local-link-to-local-library match helpers
     model_service.py   model manifest parsing and download helpers
     ffmpeg_service.py  ffmpeg manifest parsing and download helpers
     runtime_resource_service.py runtime resource status and directory helpers
@@ -68,6 +73,8 @@ ui/
   runtime_resource_controller.py runtime resource dialog/download flow
   app_meta_controller.py version and notice refresh flow
   search_controller.py search and thumbnail flow
+  network_search_controller.py remote library search/build flow
+  link_search_controller.py link-to-local-library match flow
   indexing_controller.py indexing workflow UI flow
   preview_controller.py preview playback flow
   components.py        reusable UI widgets
@@ -95,6 +102,12 @@ tests/
 - Controls local runtime behavior such as theme, language, FPS, preview size, thumbnail size, and FFmpeg path.
 - Safe for end users to modify.
 
+Remote build related config:
+
+- `fps`: shared sampling rate used by both local indexing and remote library build.
+- `remote_max_frames`: advanced safety cap for sampled frames per remote source video.
+  This cap only applies when video duration is very long and `fps` would produce too many frames.
+
 - App metadata: `src/app/app_meta.py`
 - Controls built-in app version plus remote notice, version, and download endpoints.
 - Intended for product/distribution control and should not be exposed to end users.
@@ -106,6 +119,7 @@ config.json
   theme
   language
   fps
+  remote_max_frames
   preview_seconds
   ffmpeg_path
   model_dir
@@ -117,6 +131,18 @@ src/app/app_meta.py
   model_manifest_url
   remote_timeout
 ```
+
+## Remote Library Notes
+
+- Build modes:
+  - `Download then match`: higher compatibility across sites.
+  - `Stream URL match`: faster when a site exposes stable stream URLs.
+- Duplicate links are pre-checked before heavy processing to avoid unnecessary re-download/re-embedding when possible.
+- Build status now reports staged progress (`resolve/download -> extract -> embed -> merge -> index`) and completion summary (`success/failed/skipped`).
+- In-app tools on the Remote Library page:
+  - `View Link List`: inspect grouped source-link records.
+  - `Open Download Folder`: open remote build cache folders quickly.
+- Some sites may still require fresh browser cookies for extraction (for example, certain Douyin pages), and unsupported pages (search/list pages) should be skipped.
 
 ## Tests
 
@@ -131,6 +157,29 @@ python -m unittest ^
 ```
 
 These tests intentionally focus on services/controllers and avoid heavy runtime dependencies where possible.
+
+## Build Remote Library Pack
+
+Use this script to build a distributable remote vector library from online links:
+
+```bash
+python scripts/build_remote_index.py --links-file docs/remote_links.txt --base-url https://your-cdn/videoseek/remote --incremental
+```
+
+Outputs:
+
+- `remote_index.faiss`
+- `remote_vectors.npy` (includes `timestamps`, `source_links`, `titles`)
+- `manifest.json`
+
+Then set `remote_index_manifest_url` in `src/app/app_meta.py` to your published manifest URL.
+
+Incremental behavior:
+
+- With `--incremental`, the script loads existing `remote_vectors.npy` and only appends new items.
+- Dedup key is `source_id + timestamp(ms)`.
+- If no new vectors are appended, it skips rebuild by default.
+- Use `--force-rebuild` to rebuild files even when no new vectors are detected.
 
 ## Packaging
 

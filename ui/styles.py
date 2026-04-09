@@ -101,8 +101,27 @@ QPushButton:hover {
 #SearchButton:hover {
     background: __SUCCESS_HOVER__;
 }
+#LinkUtilityButton {
+    background: __ACCENT_SOFT__;
+    border-color: __LINE_STRONG__;
+    color: __HEADLINE__;
+    font-weight: 600;
+}
+#LinkUtilityButton:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __ACCENT__;
+}
 #GhostButton {
     background: transparent;
+}
+#DangerGhostButton {
+    background: transparent;
+    border-color: __DANGER__;
+    color: __DANGER__;
+    font-weight: 700;
+}
+#DangerGhostButton:hover {
+    background: __DANGER_SOFT__;
 }
 #NavButton {
     text-align: left;
@@ -114,14 +133,14 @@ QPushButton:hover {
     border-color: __ACCENT__;
     color: __HEADLINE__;
 }
-QLineEdit, QSpinBox, QComboBox {
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 10px;
     padding: 8px 10px;
     color: __TEXT__;
 }
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid __ACCENT__;
 }
 #ImageDropZone, #PreviewPlaceholder {

@@ -7,6 +7,8 @@ import numpy as np
 
 from src.services import model_service
 from src.services import indexing_service, search_service
+from src.services import link_search_service
+from src.services import library_service, remote_library_service
 from src import utils
 
 
@@ -167,6 +169,110 @@ class ModelServiceTests(unittest.TestCase):
         sources = manifest["files"][0]["sources"]
         self.assertEqual(sources[0]["url"], "https://oss.example.com/models/clip_visual.onnx")
         self.assertEqual(sources[1]["label"], "github")
+
+
+class LinkSearchServiceTests(unittest.TestCase):
+    def test_normalize_link_input_extracts_url_from_mixed_text(self):
+        mixed = "【最近爆火】 https://www.bilibili.com/video/BV1Zk9FBwELs/?share_source=copy_web"
+        normalized = link_search_service._normalize_link_input(mixed)
+        self.assertEqual(
+            normalized,
+            "https://www.bilibili.com/video/BV1Zk9FBwELs/?share_source=copy_web",
+        )
+
+    def test_search_against_global_index_deduplicates_and_limits(self):
+        class DummyIndex:
+            ntotal = 4
+
+            @staticmethod
+            def search(_vectors, _k):
+                distances = np.array([[0.9, 0.8, 0.7], [0.95, 0.6, 0.5]], dtype=np.float32)
+                indices = np.array([[0, 1, 2], [0, 3, 1]], dtype=np.int64)
+                return distances, indices
+
+        results = link_search_service._search_against_global_index(
+            query_vectors=np.zeros((2, 3), dtype=np.float32),
+            source_timestamps=[0.0, 1.0],
+            search_index=DummyIndex(),
+            index_timestamps=[10.0, 20.0, 30.0, 40.0],
+            index_paths=["a.mp4", "b.mp4", "c.mp4", "d.mp4"],
+            top_k=3,
+            per_frame_k=3,
+        )
+
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[0]["video_path"], "a.mp4")
+        self.assertAlmostEqual(results[0]["match_time"], 10.0)
+        self.assertGreaterEqual(results[0]["score"], results[1]["score"])
+
+    def test_prepare_source_rejects_invalid_mode(self):
+        with self.assertRaises(ValueError):
+            link_search_service._prepare_source("https://example.com/video", mode="bad")
+
+
+class LibraryDetailServiceTests(unittest.TestCase):
+    @patch("src.services.library_service.os.path.exists")
+    @patch("src.services.library_service.list_libraries")
+    @patch("src.services.library_service.load_config")
+    def test_list_local_vector_details_builds_entries(
+        self,
+        mock_load_config,
+        mock_list_libraries,
+        mock_exists,
+    ):
+        mock_load_config.return_value = {
+            "vector_dir": "data/vector",
+            "index_dir": "data/index",
+        }
+        mock_list_libraries.return_value = {
+            "D:/videos": {
+                "files": {
+                    "a.mp4": {"vid": "vid_a"},
+                    "b.mp4": {"vid": "vid_b"},
+                }
+            }
+        }
+        mock_exists.side_effect = lambda path: path.endswith("vid_a_vectors.npy") or path.endswith("vid_a_index.faiss")
+
+        result = library_service.list_local_vector_details()
+
+        self.assertEqual(result["total_entries"], 2)
+        self.assertEqual(result["entries"][0]["video_rel_path"], "a.mp4")
+        self.assertTrue(result["entries"][0]["vector_exists"])
+        self.assertFalse(result["entries"][1]["vector_exists"])
+
+
+class RemoteLibraryDetailServiceTests(unittest.TestCase):
+    @patch("src.services.remote_library_service._load_existing_payload")
+    @patch("src.services.remote_library_service.os.path.exists", return_value=True)
+    @patch("src.services.remote_library_service.get_remote_library_status")
+    def test_list_remote_link_details_groups_by_source(
+        self,
+        mock_status,
+        _mock_exists,
+        mock_payload,
+    ):
+        mock_status.return_value = {
+            "ready": True,
+            "index_file": "data/remote/remote_index.faiss",
+            "vector_file": "data/remote/remote_vectors.npy",
+        }
+        mock_payload.return_value = {
+            "source_links": ["https://a", "https://a", "https://b"],
+            "titles": ["A", "A", "B"],
+            "paths": ["id_a", "id_a", "id_b"],
+            "timestamps": [1.0, 2.5, 0.5],
+        }
+
+        result = remote_library_service.list_remote_link_details()
+
+        self.assertEqual(result["total_vectors"], 3)
+        self.assertEqual(result["total_links"], 2)
+        first = result["entries"][0]
+        self.assertEqual(first["source_link"], "https://a")
+        self.assertEqual(first["frames"], 2)
+        self.assertAlmostEqual(first["min_time"], 1.0)
+        self.assertAlmostEqual(first["max_time"], 2.5)
 
 if __name__ == "__main__":
     unittest.main()

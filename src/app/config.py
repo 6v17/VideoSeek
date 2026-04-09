@@ -2,9 +2,11 @@ import json
 import os
 
 from src.app.app_meta import get_app_meta
+from src.app.logging_utils import get_logger
 from src.utils import get_default_model_dir, get_resource_path
 
 CONFIG_FILE = get_resource_path("config.json")
+logger = get_logger("config")
 
 DEFAULT_CONFIG = {
     "fps": 1,
@@ -15,6 +17,11 @@ DEFAULT_CONFIG = {
     "thumb_width": 130,
     "thumb_height": 75,
     "prefer_gpu": True,
+    "similarity_threshold": 0.85,
+    "max_chunk_duration": 5.0,
+    "min_chunk_size": 2,
+    "chunk_similarity_mode": "chunk",
+    "search_mode": "frame",
     "ffmpeg_path": "",
     "model_dir": get_default_model_dir(),
     "meta_file": "data/meta.json",
@@ -22,6 +29,11 @@ DEFAULT_CONFIG = {
     "index_dir": "data/index",
     "cross_index_file": "data/global/cross_video_index.faiss",
     "cross_vector_file": "data/global/cross_video_vectors.npy",
+    "cross_chunk_index_file": "data/global/cross_chunk_index.faiss",
+    "cross_chunk_vector_file": "data/global/cross_chunk_vectors.npy",
+    "remote_index_file": "data/remote/remote_index.faiss",
+    "remote_vector_file": "data/remote/remote_vectors.npy",
+    "remote_max_frames": 2000,
     "theme": "dark",
     "language": "zh",
 }
@@ -36,9 +48,15 @@ def load_config():
             config = json.load(handle)
         for key, value in DEFAULT_CONFIG.items():
             config.setdefault(key, value)
+        # Migrate legacy cap from old builds; 300 causes long videos to look capped at ~299s.
+        try:
+            if int(config.get("remote_max_frames", 0)) == 300:
+                config["remote_max_frames"] = DEFAULT_CONFIG["remote_max_frames"]
+        except Exception:
+            config["remote_max_frames"] = DEFAULT_CONFIG["remote_max_frames"]
         return config
 
-    print(f"Config file {CONFIG_FILE} not found, using default values.")
+    logger.info("Config file %s not found, using default values", CONFIG_FILE)
     return DEFAULT_CONFIG.copy()
 
 

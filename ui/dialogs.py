@@ -1,7 +1,24 @@
 import webbrowser
+import json
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QProgressBar, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractItemView,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QTableWidget,
+    QTableWidgetItem,
+    QPushButton,
+    QTextBrowser,
+    QProgressBar,
+    QVBoxLayout,
+)
 
 from src.app.config import get_app_version, load_config
 from src.app.i18n import get_texts
@@ -283,6 +300,288 @@ class NoticeDialog(QDialog):
         layout.addWidget(subtitle)
         layout.addWidget(content)
         layout.addLayout(button_row)
+
+
+class LinkEditorDialog(QDialog):
+    def __init__(self, parent=None, is_dark=True, language="zh", initial_links=None):
+        super().__init__(parent)
+        self.texts = get_texts(language)
+        palette = dialog_palette(is_dark)
+        self._links = list(initial_links or [])
+
+        self.setWindowTitle(self.texts["network_link_editor_title"])
+        apply_dialog_size(
+            self,
+            WINDOW_SIZES["notice_dialog"]["preferred"],
+            WINDOW_SIZES["notice_dialog"]["minimum"],
+            WINDOW_SIZES["notice_dialog"]["screen_margin"],
+        )
+
+        self.setStyleSheet(
+            f"""
+            QDialog {{ background: {palette['bg']}; }}
+            QLabel {{ color: {palette['text']}; background: transparent; }}
+            #Hint {{ color: {palette['muted']}; font-size: 12px; }}
+            QPlainTextEdit {{
+                background: {palette['card']};
+                color: {palette['text']};
+                border: 1px solid {palette['border']};
+                border-radius: 12px;
+                padding: 10px;
+                font-family: Consolas, 'Microsoft YaHei UI';
+                font-size: 12px;
+            }}
+            QPushButton {{
+                border-radius: 10px;
+                border: 1px solid {palette['border']};
+                padding: 8px 12px;
+                color: {palette['text']};
+                background: {palette['card']};
+            }}
+            #Primary {{ background: {palette['accent']}; color: white; border-color: {palette['accent']}; }}
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+
+        title = QLabel(self.texts["network_link_editor_title"])
+        title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        hint = QLabel(self.texts["network_link_editor_hint"])
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+
+        self.editor = QPlainTextEdit()
+        self.editor.setPlaceholderText(self.texts["network_link_editor_placeholder"])
+        self.editor.setPlainText("\n".join(self._links))
+
+        toolbar = QHBoxLayout()
+        self.btn_import = QPushButton(self.texts["network_link_editor_import"])
+        self.btn_clear = QPushButton(self.texts["network_link_editor_clear"])
+        toolbar.addWidget(self.btn_import)
+        toolbar.addWidget(self.btn_clear)
+        toolbar.addStretch()
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+        self.btn_cancel = QPushButton(self.texts["cancel"])
+        self.btn_ok = QPushButton(self.texts["confirm_action"])
+        self.btn_ok.setObjectName("Primary")
+        actions.addWidget(self.btn_cancel)
+        actions.addWidget(self.btn_ok)
+
+        root.addWidget(title)
+        root.addWidget(hint)
+        root.addWidget(self.editor, 1)
+        root.addLayout(toolbar)
+        root.addLayout(actions)
+
+        self.btn_import.clicked.connect(self._import_file)
+        self.btn_clear.clicked.connect(self.editor.clear)
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_ok.clicked.connect(self.accept)
+
+    def get_links(self):
+        lines = [line.strip() for line in self.editor.toPlainText().splitlines()]
+        deduped = []
+        seen = set()
+        for line in lines:
+            if not line or line.startswith("#"):
+                continue
+            if line in seen:
+                continue
+            seen.add(line)
+            deduped.append(line)
+        return deduped
+
+    def _import_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.texts["network_links_file_title"],
+            "",
+            self.texts["network_links_file_filter"],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                imported = [line.rstrip("\n") for line in handle]
+        except Exception:
+            return
+        existing = self.editor.toPlainText().splitlines()
+        merged = [line for line in existing if line.strip()]
+        merged.extend(imported)
+        self.editor.setPlainText("\n".join(merged))
+
+
+class ResourceTableDialog(QDialog):
+    def __init__(
+        self,
+        parent=None,
+        is_dark=True,
+        language="zh",
+        title="",
+        subtitle="",
+        headers=None,
+        rows=None,
+        export_default_name="details.json",
+        stretch_column=-1,
+        fixed_column_widths=None,
+    ):
+        super().__init__(parent)
+        self.texts = get_texts(language)
+        self.rows = list(rows or [])
+        self.headers = list(headers or [])
+        self.export_default_name = export_default_name
+        self.stretch_column = int(stretch_column)
+        self.fixed_column_widths = dict(fixed_column_widths or {})
+
+        palette = dialog_palette(is_dark)
+        self.setWindowTitle(title or self.texts["details_title_default"])
+        self.setMinimumSize(820, 520)
+        self.resize(980, 620)
+        self.setStyleSheet(
+            f"""
+            QDialog {{ background: {palette['bg']}; }}
+            QLabel {{ color: {palette['text']}; background: transparent; }}
+            #Hint {{ color: {palette['muted']}; font-size: 12px; }}
+            QTableWidget {{
+                background: {palette['card']};
+                color: {palette['text']};
+                border: 1px solid {palette['border']};
+                border-radius: 12px;
+                gridline-color: {palette['border']};
+            }}
+            QHeaderView::section {{
+                color: {palette['muted']};
+                background: transparent;
+                border: none;
+                padding: 8px;
+                font-weight: 700;
+            }}
+            QPushButton {{
+                border-radius: 10px;
+                border: 1px solid {palette['border']};
+                padding: 8px 12px;
+                color: {palette['text']};
+                background: {palette['card']};
+            }}
+            #Primary {{ background: {palette['accent']}; color: white; border-color: {palette['accent']}; }}
+            """
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+
+        title_label = QLabel(title or self.texts["details_title_default"])
+        title_label.setStyleSheet("font-size: 18px; font-weight: 700;")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("Hint")
+        subtitle_label.setWordWrap(True)
+
+        self.table = QTableWidget(0, len(self.headers))
+        self.table.setHorizontalHeaderLabels(self.headers)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        button_row = QHBoxLayout()
+        self.btn_copy = QPushButton(self.texts["details_copy_json"])
+        self.btn_export = QPushButton(self.texts["details_export_json"])
+        self.btn_close = QPushButton(self.texts["close"])
+        self.btn_close.setObjectName("Primary")
+        button_row.addWidget(self.btn_copy)
+        button_row.addWidget(self.btn_export)
+        button_row.addStretch()
+        button_row.addWidget(self.btn_close)
+
+        self.status_hint = QLabel("")
+        self.status_hint.setObjectName("Hint")
+
+        root.addWidget(title_label)
+        root.addWidget(subtitle_label)
+        root.addWidget(self.table, 1)
+        root.addWidget(self.status_hint)
+        root.addLayout(button_row)
+
+        self._populate_rows()
+        self._apply_column_layout()
+
+        self.btn_copy.clicked.connect(self._copy_json)
+        self.btn_export.clicked.connect(self._export_json)
+        self.btn_close.clicked.connect(self.accept)
+
+    def _populate_rows(self):
+        self.table.setRowCount(0)
+        for row_data in self.rows:
+            row_index = self.table.rowCount()
+            self.table.insertRow(row_index)
+            for col_index, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value))
+                if col_index == 0:
+                    item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row_index, col_index, item)
+        if not self.rows:
+            self.status_hint.setText(self.texts["details_empty"])
+
+    def _apply_column_layout(self):
+        if not self.headers:
+            return
+        stretch_col = self.stretch_column
+        if stretch_col < 0 or stretch_col >= len(self.headers):
+            stretch_col = len(self.headers) - 1
+
+        for col in range(len(self.headers)):
+            self.table.resizeColumnToContents(col)
+            width = self.table.columnWidth(col)
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Interactive)
+            self.table.setColumnWidth(col, max(80, min(width, 620)))
+
+        for col, width in self.fixed_column_widths.items():
+            col_index = int(col)
+            col_width = int(width)
+            if 0 <= col_index < len(self.headers) and col_width > 0:
+                self.table.horizontalHeader().setSectionResizeMode(col_index, QHeaderView.Fixed)
+                self.table.setColumnWidth(col_index, col_width)
+
+        if 0 <= stretch_col < len(self.headers) and stretch_col not in {int(k) for k in self.fixed_column_widths.keys()}:
+            self.table.setColumnWidth(stretch_col, max(self.table.columnWidth(stretch_col), 360))
+
+    def _copy_json(self):
+        payload = {
+            "headers": self.headers,
+            "rows": self.rows,
+        }
+        QApplication.clipboard().setText(json.dumps(payload, ensure_ascii=False, indent=2))
+        self.status_hint.setText(self.texts["details_copy_done"])
+
+    def _export_json(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.texts["details_export_title"],
+            self.export_default_name,
+            self.texts["details_export_filter"],
+        )
+        if not path:
+            return
+        payload = {
+            "headers": self.headers,
+            "rows": self.rows,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+        except Exception:
+            self.status_hint.setText(self.texts["details_export_failed"])
+            return
+        self.status_hint.setText(self.texts["details_export_done"].format(path=path))
 
 
 class ModelDownloadDialog(QDialog):

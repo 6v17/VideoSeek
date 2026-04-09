@@ -6,7 +6,10 @@ import ftfy
 import numpy as np
 import regex as re
 
+from src.app.logging_utils import get_logger
 from src.utils import ensure_model_files
+
+logger = get_logger("tokenizer")
 
 
 def whitespace_clean(text):
@@ -29,7 +32,7 @@ class SimpleTokenizer:
         try:
             merges = gzip.open(bpe_path).read().decode("utf-8").split("\n")
         except Exception as exc:
-            print(f"Failed to read BPE vocab: {exc}")
+            logger.error("Failed to read BPE vocab: %s", exc)
             merges = []
 
         merges = merges[1 : 49152 - 256 - 2 + 1]
