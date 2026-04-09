@@ -1,6 +1,17 @@
 # VideoSeek
 
+[中文说明](./README.zh-CN.md) | **English**
+
 Desktop semantic video search built with `PySide6`, `ONNX Runtime`, `FAISS`, and `FFmpeg`.
+
+## Tech Stack
+
+- Language: `Python`
+- Desktop UI: `PySide6` (Qt for Python)
+- Embedding inference: `ONNX Runtime`
+- Vector index/search: `FAISS`
+- Video processing: `FFmpeg`
+- Media extraction from links: `yt-dlp`
 
 ## What It Does
 

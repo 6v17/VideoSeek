@@ -1,6 +1,17 @@
 # VideoSeek 中文说明
 
+[**中文**](./README.zh-CN.md) | [English](./README.md)
+
 VideoSeek 是一个基于 `PySide6 + ONNX Runtime + FAISS + FFmpeg` 的桌面语义视频检索工具。
+
+## 技术栈
+
+- 语言：`Python`
+- 桌面 UI：`PySide6`（Qt for Python）
+- 向量推理：`ONNX Runtime`
+- 向量索引与检索：`FAISS`
+- 视频处理：`FFmpeg`
+- 链接媒体提取：`yt-dlp`
 
 ## 功能概览
 
