@@ -134,6 +134,11 @@ src/app/app_meta.py
 
 ## Remote Library Notes
 
+- The Remote Library page is split into two sections:
+  - `Build Remote Library`: link input, build mode, build/import/export tools, and build progress/status.
+  - `Search Remote Library`: text/image query, search actions, and search status.
+- Link input is now inline on the page (multi-line). Paste one or more URLs and click build directly.
+- Precheck no longer opens a blocking popup. It reports summary in build status and continues automatically when buildable links exist.
 - Build modes:
   - `Download then match`: higher compatibility across sites.
   - `Stream URL match`: faster when a site exposes stable stream URLs.
