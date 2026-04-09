@@ -198,10 +198,6 @@ main.py
 ```
 ## Download
 
- 1、Gitee Release: [https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases](https://gitee.com/lIlIlIlIlIlIlIlIlIlIlIlIl/VideoSeek/releases)
- 
- 2、GitHub Release: [https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases](https://gitee.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O//VideoSeek/releases)
-
 Runtime resource packaging note:
 
 - The app prefers external runtime resources over bundling large files into every release.
@@ -210,58 +206,6 @@ Runtime resource packaging note:
 - If `model_manifest_url` is configured in `src/app/app_meta.py`, the app can prepare both models and FFmpeg from one remote manifest.
 - The manifest can define a primary source plus mirror sources, and the app will automatically try the next source if one fails.
 
-Example model manifest:
-
-```json
-{
-  "version": "clip-vit-b32-1",
-  "base_url": "https://github.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O/VideoSeek/releases/download/models/",
-  "mirrors": [
-    {
-      "label": "cdn",
-      "base_url": "https://cdn.example.com/videoseek-models/"
-    },
-    "https://mirror.example.com/videoseek-models/"
-  ],
-  "files": [
-    {
-      "name": "clip_visual.onnx",
-      "sha256": "optional_sha256_hex"
-    },
-    {
-      "name": "clip_text.onnx",
-      "sha256": "optional_sha256_hex"
-    },
-    {
-      "name": "bpe_simple_vocab_16e6.txt.gz",
-      "sha256": "optional_sha256_hex"
-    }
-  ],
-  "ffmpeg": {
-    "name": "ffmpeg.exe",
-    "base_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/bin/"
-  }
-}
-```
-
-Optional per-file source override:
-
-```json
-{
-  "name": "clip_visual.onnx",
-  "sha256": "optional_sha256_hex",
-  "sources": [
-    {
-      "label": "oss",
-      "base_url": "https://oss.example.com/videoseek-models/"
-    },
-    {
-      "label": "github",
-      "url": "https://github.com/<owner>/<repo>/releases/download/models/clip_visual.onnx"
-    }
-  ]
-}
-```
 
 ## License
 
