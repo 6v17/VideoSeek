@@ -132,6 +132,23 @@ src/app/app_meta.py
   remote_timeout
 ```
 
+## Models Used
+
+Core embedding resources:
+
+- `clip_visual.onnx`: CLIP image encoder
+- `clip_text.onnx`: CLIP text encoder
+- `bpe_simple_vocab_16e6.txt.gz`: tokenizer vocabulary for CLIP text encoder
+
+Default model lookup locations:
+
+- `%LOCALAPPDATA%\\VideoSeek\\models\\`
+- `models/` in project directory
+
+Runtime video tool:
+
+- `ffmpeg.exe` (for frame extraction and preview)
+
 ## Remote Library Notes
 
 - The Remote Library page is split into two sections:

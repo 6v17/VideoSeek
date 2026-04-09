@@ -54,6 +54,23 @@ tests/
 - `ffmpeg_path`：FFmpeg 路径
 - `model_dir`：模型目录
 
+## 使用模型与运行资源
+
+核心向量模型（CLIP ONNX）：
+
+- `clip_visual.onnx`：图像编码器
+- `clip_text.onnx`：文本编码器
+- `bpe_simple_vocab_16e6.txt.gz`：文本 tokenizer 词表
+
+默认模型目录：
+
+- `%LOCALAPPDATA%\VideoSeek\models\`
+- 项目目录下 `models/`
+
+视频处理依赖：
+
+- `ffmpeg.exe`（用于抽帧与预览）
+
 ## 网络库页面说明
 
 网络库页面已拆分为两个区域：
