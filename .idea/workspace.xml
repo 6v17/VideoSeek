@@ -5,7 +5,45 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="增加网络搜索功能">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.zh-CN.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.zh-CN.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/icon.ico" beforeDir="false" afterPath="$PROJECT_DIR$/icon.ico" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/copy_overrides.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/copy_overrides.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/faiss_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/faiss_index.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/tokenizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/tokenizer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/ffmpeg_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/ffmpeg_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/link_search_service.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/model_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/remote_index_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/remote_index_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/remote_library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/remote_library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/remote_search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/remote_search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_controllers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_notice_version_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_notice_version_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/app_meta_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/app_meta_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/indexing_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/indexing_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/link_search_controller.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/network_search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/network_search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/preview_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/runtime_resource_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/runtime_resource_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/table_populators.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/table_views.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -13,7 +51,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="988" />
+    <option name="cachedIndexableFilesCount" value="4856" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -216,7 +254,23 @@
       <workItem from="1775565676438" duration="16000" />
       <workItem from="1775565787285" duration="173000" />
       <workItem from="1775648106978" duration="7439000" />
-      <workItem from="1775708716440" duration="16069000" />
+      <workItem from="1775708716440" duration="20127000" />
+      <workItem from="1775750089907" duration="5222000" />
+      <workItem from="1775795817927" duration="971000" />
+      <workItem from="1775796807980" duration="700000" />
+      <workItem from="1775797522025" duration="331000" />
+      <workItem from="1775797865009" duration="156000" />
+      <workItem from="1775798030054" duration="147000" />
+      <workItem from="1775881738157" duration="3347000" />
+      <workItem from="1775885101343" duration="409000" />
+      <workItem from="1775885521261" duration="18678000" />
+      <workItem from="1775911158437" duration="2846000" />
+      <workItem from="1775915356278" duration="3155000" />
+      <workItem from="1775964991532" duration="1898000" />
+      <workItem from="1775968715959" duration="3843000" />
+      <workItem from="1775972574206" duration="1500000" />
+      <workItem from="1775974813169" duration="329000" />
+      <workItem from="1775975385322" duration="2870000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -514,7 +568,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775742689947</updated>
     </task>
-    <option name="localTasksCounter" value="38" />
+    <task id="LOCAL-00038" summary="增加网络搜索功能">
+      <option name="closed" value="true" />
+      <created>1775742756748</created>
+      <option name="number" value="00038" />
+      <option name="presentableId" value="LOCAL-00038" />
+      <option name="project" value="LOCAL" />
+      <updated>1775742756748</updated>
+    </task>
+    <option name="localTasksCounter" value="39" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

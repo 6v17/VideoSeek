@@ -34,10 +34,6 @@ def load_remote_search_assets(config):
     }
 
 
-def run_remote_text_search(query_text, top_k=None):
-    return run_remote_search(query_text, is_text=True, top_k=top_k)
-
-
 def run_remote_search(query_data, is_text=True, top_k=None):
     config = load_config()
     if top_k is None:

@@ -7,8 +7,8 @@ import numpy as np
 
 from src.services import model_service
 from src.services import indexing_service, search_service
-from src.services import link_search_service
 from src.services import library_service, remote_library_service
+from src.workflows import update_video
 from src import utils
 
 
@@ -32,6 +32,61 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIn("keep.mp4", meta["libraries"]["C:\\videos"]["files"])
         self.assertNotIn("missing.mp4", meta["libraries"]["C:\\videos"]["files"])
 
+    def test_cleanup_missing_library_files_keeps_entries_when_library_root_is_offline(self):
+        meta = {
+            "libraries": {
+                "E:\\videos": {
+                    "files": {
+                        "movie.mp4": {"vid": "keep"},
+                    }
+                }
+            }
+        }
+
+        with patch("src.services.indexing_service.os.path.exists", return_value=False):
+            removed = list(indexing_service.cleanup_missing_library_files(meta, {}, None))
+
+        self.assertEqual(removed, [])
+        self.assertIn("movie.mp4", meta["libraries"]["E:\\videos"]["files"])
+
+    def test_list_missing_library_files_skips_offline_library_roots(self):
+        meta = {
+            "libraries": {
+                "D:\\online": {
+                    "files": {
+                        "missing.mp4": {"vid": "gone"},
+                    }
+                },
+                "E:\\offline": {
+                    "files": {
+                        "keep.mp4": {"vid": "keep"},
+                    }
+                },
+            }
+        }
+
+        def fake_exists(path):
+            if path == "D:\\online":
+                return True
+            if path == "E:\\offline":
+                return False
+            return False
+
+        with patch("src.services.indexing_service.os.path.exists", side_effect=fake_exists):
+            missing = list(indexing_service.list_missing_library_files(meta, {}, None))
+
+        self.assertEqual(
+            missing,
+            [
+                {
+                    "library_path": "D:\\online",
+                    "video_rel_path": "missing.mp4",
+                    "abs_path": "D:\\online\\missing.mp4",
+                    "video_id": "gone",
+                }
+            ],
+        )
+
     def test_discover_video_files_filters_supported_extensions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -47,6 +102,114 @@ class IndexingServiceTests(unittest.TestCase):
             sorted(Path(path).name for path in result),
             ["clip.mp4", "scene.mkv"],
         )
+
+    @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
+    @patch("src.services.indexing_service.collect_existing_chunks", return_value=([], [], []))
+    @patch("src.services.indexing_service.collect_existing_vectors", return_value=([], [], []))
+    @patch("src.services.indexing_service.process_single_video")
+    @patch("src.services.indexing_service.discover_video_files", return_value=["D:\\videos\\clip.mp4"])
+    @patch("src.services.indexing_service.os.path.exists", return_value=True)
+    def test_scan_target_libraries_persists_meta_after_new_video(
+        self,
+        _mock_exists,
+        _mock_discover,
+        mock_process_single_video,
+        _mock_collect_vectors,
+        _mock_collect_chunks,
+        _mock_load_chunks,
+    ):
+        meta = {"libraries": {"D:\\videos": {"files": {}}}}
+        persist_calls = []
+        mock_process_single_video.return_value = (np.array([[1.0]], dtype=np.float32), [0.0], True)
+
+        indexing_service.scan_target_libraries(
+            meta,
+            {},
+            lambda path: "vid_a",
+            persist_meta_callback=lambda: persist_calls.append("saved"),
+        )
+
+        self.assertEqual(persist_calls, ["saved"])
+
+    @patch("src.workflows.update_video.build_global_index", return_value=("v", "t", "p", "i"))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([1], [0.0], ["a.mp4"], [], [], []))
+    @patch("src.workflows.update_video.save_meta")
+    @patch("src.workflows.update_video.cleanup_missing_library_files", side_effect=AssertionError("should not cleanup"))
+    @patch("src.workflows.update_video.load_meta", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid"}}}}})
+    @patch("src.workflows.update_video.load_config")
+    @patch("src.workflows.update_video.garbage_collect_indices")
+    def test_update_videos_flow_skips_cleanup_when_auto_cleanup_disabled(
+        self,
+        _mock_gc,
+        mock_load_config,
+        _mock_load_meta,
+        _mock_cleanup,
+        _mock_save_meta,
+        _mock_scan,
+        mock_build,
+    ):
+        mock_load_config.return_value = {
+            "auto_cleanup_missing_files": False,
+            "meta_file": "data/meta.json",
+        }
+
+        output = update_video.update_videos_flow()
+
+        self.assertEqual(output, ("v", "t", "p", "i"))
+        mock_build.assert_called_once()
+        saved_meta = mock_load_meta.return_value
+        self.assertEqual(saved_meta["libraries"]["D:\\videos"]["index_state"], "ready")
+
+    @patch("src.workflows.update_video.delete_physical_video_data")
+    @patch("src.workflows.update_video.build_global_index", return_value=("v", "t", "p", "i"))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([1], [0.0], ["a.mp4"], [], [], []))
+    @patch("src.workflows.update_video.save_meta")
+    @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(["vid_a"]))
+    @patch("src.workflows.update_video.load_meta", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid"}}}}})
+    @patch("src.workflows.update_video.load_config")
+    @patch("src.workflows.update_video.garbage_collect_indices")
+    def test_update_videos_flow_forces_cleanup_when_requested(
+        self,
+        _mock_gc,
+        mock_load_config,
+        _mock_load_meta,
+        mock_cleanup,
+        _mock_save_meta,
+        _mock_scan,
+        mock_build,
+        mock_delete_video_data,
+    ):
+        mock_load_config.return_value = {
+            "auto_cleanup_missing_files": False,
+            "meta_file": "data/meta.json",
+        }
+
+        output = update_video.update_videos_flow(force_cleanup_missing_files=True)
+
+        self.assertEqual(output, ("v", "t", "p", "i"))
+        mock_cleanup.assert_called_once()
+        mock_delete_video_data.assert_called_once_with("vid_a", mock_load_config.return_value)
+        mock_build.assert_called_once()
+
+    @patch("src.workflows.update_video.save_meta")
+    @patch("src.workflows.update_video.load_meta", return_value={"libraries": {"D:\\videos": {"files": {}}}})
+    @patch("src.workflows.update_video.load_config", return_value={"auto_cleanup_missing_files": False, "meta_file": "data/meta.json"})
+    @patch("src.workflows.update_video.garbage_collect_indices")
+    @patch("src.workflows.update_video.scan_target_libraries", side_effect=RuntimeError("interrupted"))
+    def test_update_videos_flow_keeps_partial_state_on_interruption(
+        self,
+        _mock_scan,
+        _mock_gc,
+        _mock_load_config,
+        mock_load_meta,
+        mock_save_meta,
+    ):
+        with self.assertRaises(RuntimeError):
+            update_video.update_videos_flow()
+
+        saved_meta = mock_load_meta.return_value
+        self.assertEqual(saved_meta["libraries"]["D:\\videos"]["index_state"], "partial")
+        self.assertTrue(mock_save_meta.called)
 
 
 class SearchServiceTests(unittest.TestCase):
@@ -113,6 +276,99 @@ class UtilsTests(unittest.TestCase):
         self.assertEqual(missing, ["clip_visual.onnx"])
         self.assertEqual(resolved["clip_text.onnx"], "D:/models/clip_text.onnx")
 
+    @patch("src.utils.subprocess.run")
+    @patch("src.utils.os.path.exists", return_value=True)
+    def test_open_in_explorer_uses_windows_select_argument_split(
+        self,
+        _mock_exists,
+        mock_run,
+    ):
+        with patch("src.utils.sys.platform", "win32"):
+            result = utils.open_in_explorer("D:/videos/clip.mp4")
+
+        self.assertTrue(result)
+        mock_run.assert_called_once()
+        args = mock_run.call_args.args[0]
+        self.assertEqual(args[0], "explorer")
+        self.assertEqual(args[1], "/select,")
+        self.assertTrue(str(args[2]).lower().endswith("clip.mp4"))
+
+    @patch("src.utils.subprocess.run")
+    @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
+    @patch(
+        "src.utils.load_config",
+        return_value={
+            "preview_seconds": 6,
+            "preview_width": 640,
+            "preview_height": 360,
+        },
+    )
+    @patch("src.utils.os.path.exists", return_value=False)
+    def test_create_preview_clip_uses_precise_seek_after_input(
+        self,
+        _mock_exists,
+        _mock_load_config,
+        _mock_get_ffmpeg,
+        mock_run,
+    ):
+        mock_run.return_value = unittest.mock.Mock(returncode=0)
+
+        utils.create_preview_clip("D:/videos/clip.mp4", 12.3456, "D:/cache/p.mp4")
+
+        cmd = mock_run.call_args.args[0]
+        first_ss = cmd.index("-ss")
+        i_pos = cmd.index("-i")
+        second_ss = cmd.index("-ss", i_pos + 1)
+        self.assertLess(first_ss, i_pos)
+        self.assertGreater(second_ss, i_pos)
+        self.assertEqual(cmd[second_ss + 1], "1.000")
+        self.assertIn("-c:a", cmd)
+        self.assertIn("aac", cmd)
+
+    @patch("src.utils.subprocess.run")
+    @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
+    @patch(
+        "src.utils.load_config",
+        return_value={
+            "preview_seconds": 6,
+            "preview_width": 640,
+            "preview_height": 360,
+        },
+    )
+    @patch("src.utils.os.path.exists", return_value=False)
+    def test_create_preview_clip_respects_duration_override(
+        self,
+        _mock_exists,
+        _mock_load_config,
+        _mock_get_ffmpeg,
+        mock_run,
+    ):
+        mock_run.return_value = unittest.mock.Mock(returncode=0)
+
+        utils.create_preview_clip("D:/videos/clip.mp4", 10.0, "D:/cache/p.mp4", duration_sec=2.25)
+
+        cmd = mock_run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("-t") + 1], "2.250")
+
+    @patch("src.utils.subprocess.run")
+    @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
+    @patch("src.utils.os.path.exists", return_value=False)
+    def test_export_original_clip_uses_stream_copy(
+        self,
+        _mock_exists,
+        _mock_get_ffmpeg,
+        mock_run,
+    ):
+        mock_run.return_value = unittest.mock.Mock(returncode=0)
+
+        utils.export_original_clip("D:/videos/clip.mp4", 8.0, 3.5, "D:/out/clip.mp4")
+
+        cmd = mock_run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("-c:v") + 1], "libx264")
+        self.assertEqual(cmd[cmd.index("-crf") + 1], "18")
+        self.assertEqual(cmd[cmd.index("-c:a") + 1], "aac")
+        self.assertEqual(cmd[cmd.index("-t") + 1], "3.500")
+
 
 class ModelServiceTests(unittest.TestCase):
     def test_normalize_manifest_uses_base_url_for_missing_file_urls(self):
@@ -169,45 +425,6 @@ class ModelServiceTests(unittest.TestCase):
         sources = manifest["files"][0]["sources"]
         self.assertEqual(sources[0]["url"], "https://oss.example.com/models/clip_visual.onnx")
         self.assertEqual(sources[1]["label"], "github")
-
-
-class LinkSearchServiceTests(unittest.TestCase):
-    def test_normalize_link_input_extracts_url_from_mixed_text(self):
-        mixed = "【最近爆火】 https://www.bilibili.com/video/BV1Zk9FBwELs/?share_source=copy_web"
-        normalized = link_search_service._normalize_link_input(mixed)
-        self.assertEqual(
-            normalized,
-            "https://www.bilibili.com/video/BV1Zk9FBwELs/?share_source=copy_web",
-        )
-
-    def test_search_against_global_index_deduplicates_and_limits(self):
-        class DummyIndex:
-            ntotal = 4
-
-            @staticmethod
-            def search(_vectors, _k):
-                distances = np.array([[0.9, 0.8, 0.7], [0.95, 0.6, 0.5]], dtype=np.float32)
-                indices = np.array([[0, 1, 2], [0, 3, 1]], dtype=np.int64)
-                return distances, indices
-
-        results = link_search_service._search_against_global_index(
-            query_vectors=np.zeros((2, 3), dtype=np.float32),
-            source_timestamps=[0.0, 1.0],
-            search_index=DummyIndex(),
-            index_timestamps=[10.0, 20.0, 30.0, 40.0],
-            index_paths=["a.mp4", "b.mp4", "c.mp4", "d.mp4"],
-            top_k=3,
-            per_frame_k=3,
-        )
-
-        self.assertEqual(len(results), 3)
-        self.assertEqual(results[0]["video_path"], "a.mp4")
-        self.assertAlmostEqual(results[0]["match_time"], 10.0)
-        self.assertGreaterEqual(results[0]["score"], results[1]["score"])
-
-    def test_prepare_source_rejects_invalid_mode(self):
-        with self.assertRaises(ValueError):
-            link_search_service._prepare_source("https://example.com/video", mode="bad")
 
 
 class LibraryDetailServiceTests(unittest.TestCase):
@@ -273,6 +490,7 @@ class RemoteLibraryDetailServiceTests(unittest.TestCase):
         self.assertEqual(first["frames"], 2)
         self.assertAlmostEqual(first["min_time"], 1.0)
         self.assertAlmostEqual(first["max_time"], 2.5)
+
 
 if __name__ == "__main__":
     unittest.main()

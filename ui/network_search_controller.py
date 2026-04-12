@@ -9,6 +9,7 @@ from src.services.remote_library_service import (
 )
 from ui.network_build_presenter import format_build_finished_status, format_build_progress_text
 from ui.table_views import populate_network_result_table
+from ui.threading_utils import shutdown_thread
 from ui.workers import RemoteLibraryBuildWorker, RemoteSearchWorker
 
 
@@ -85,8 +86,8 @@ class NetworkSearchController(QObject):
             )
 
     def shutdown(self):
-        self._shutdown_thread(self.search_worker)
-        self._shutdown_thread(self.build_worker)
+        shutdown_thread(self.search_worker)
+        shutdown_thread(self.build_worker)
 
     def _display_results(self, results):
         if not results:
@@ -130,15 +131,3 @@ class NetworkSearchController(QObject):
         self.parent_window.link_page.progress_bar.setVisible(False)
         self.parent_window.show_error_dialog(self.parent_window.texts["network_build_failed"], error_text)
         self.refresh_status()
-
-    def _shutdown_thread(self, thread):
-        if not thread or not thread.isRunning():
-            return
-        thread.quit()
-        if thread.wait(1500):
-            return
-        thread.requestInterruption()
-        if thread.wait(1500):
-            return
-        thread.terminate()
-        thread.wait(1000)

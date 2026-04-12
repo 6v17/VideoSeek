@@ -1,6 +1,8 @@
-﻿import os
-
+import ctypes
+import os
+import platform
 import site
+import sys
 
 import cv2
 import numpy as np
@@ -19,38 +21,36 @@ class CLIPOnnxEngine:
         prefer_gpu = load_config().get("prefer_gpu", True)
         providers = ["CPUExecutionProvider"]
         if prefer_gpu:
-            if hasattr(ort, "preload_dlls"):
-                try:
-                    ort.preload_dlls()
-                except Exception:
-                    pass
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+
         model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
         self.visual_session = ort.InferenceSession(
             model_paths["clip_visual.onnx"],
+            sess_options=_build_session_options(prefer_gpu),
             providers=providers,
         )
         self.text_session = ort.InferenceSession(
             model_paths["clip_text.onnx"],
+            sess_options=_build_session_options(prefer_gpu),
             providers=providers,
         )
         self.active_providers = {
             "visual": self.visual_session.get_providers(),
             "text": self.text_session.get_providers(),
         }
-        self.using_cuda = all(
-            "CUDAExecutionProvider" in provider_list for provider_list in self.active_providers.values()
+        self.using_gpu = all(
+            "DmlExecutionProvider" in provider_list for provider_list in self.active_providers.values()
         )
         self.prefer_gpu = prefer_gpu
         self.runtime_warning = ""
         self.runtime_issue = ""
-        if prefer_gpu and not self.using_cuda:
+        if prefer_gpu and not self.using_gpu:
             self.runtime_issue = detect_gpu_runtime_issue()
             self.runtime_warning = (
                 "GPU execution is unavailable. ONNX Runtime fell back to CPU. "
-                "Install matching CUDA 12.x, cuDNN 9.x, and the latest MSVC runtime."
+                "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
             )
-        self.backend_label = "GPU" if self.using_cuda else "CPU"
+        self.backend_label = "GPU" if self.using_gpu else "CPU"
         self.mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32).reshape(1, 1, 3)
         self._feature_dim = None
@@ -69,6 +69,8 @@ class CLIPOnnxEngine:
         return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
 
     def encode_images(self, frames):
+        # Retained intentionally: this public image-encoding entrypoint is
+        # reached via helper wrappers and may be missed by static analysis.
         if self._feature_dim is None:
             dummy = np.zeros((1, 3, 224, 224), dtype=np.float32)
             dummy_feat = self.visual_session.run(None, {"input": dummy})[0]
@@ -90,6 +92,8 @@ class CLIPOnnxEngine:
         return np.vstack(embeddings)
 
     def encode_text(self, text):
+        # Retained intentionally: this public text-encoding entrypoint is
+        # reached via helper wrappers and may be missed by static analysis.
         tokens = tokenize([text]).astype(np.int32)
         feat = self.text_session.run(None, {"input": tokens})[0].astype(np.float32)
         feat /= (np.linalg.norm(feat, axis=-1, keepdims=True) + 1e-10)
@@ -145,15 +149,63 @@ def reset_engine():
 
 
 def detect_gpu_runtime_issue():
-    available_names = _collect_available_dll_names()
+    if not _is_windows():
+        return "windows"
+    if not _is_windows_10_1903_or_newer():
+        return "windows_version"
+    if not _is_directml_provider_available():
+        return "directml"
+    if not _can_load_windows_dll("DirectML.dll") or not _can_load_windows_dll("d3d12.dll"):
+        return "directx"
 
-    if not _has_any_prefix(available_names, ("cudart64_12", "cublas64_12", "cublaslt64_12")):
-        return "cuda"
-    if not _has_any_prefix(available_names, ("cudnn64_9", "cudnn_ops64_9", "cudnn_cnn64_9")):
-        return "cudnn"
+    available_names = _collect_available_dll_names()
     if not _has_any_prefix(available_names, ("vcruntime140", "vcruntime140_1", "msvcp140")):
         return "msvc"
     return "unknown"
+
+
+def _build_session_options(prefer_gpu):
+    session_options = ort.SessionOptions()
+    if prefer_gpu:
+        # DirectML sessions require sequential execution and are more stable with memory pattern disabled.
+        session_options.enable_mem_pattern = False
+        session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    return session_options
+
+
+def _is_directml_provider_available():
+    try:
+        return "DmlExecutionProvider" in ort.get_available_providers()
+    except AttributeError:
+        return False
+
+
+def _is_windows():
+    return os.name == "nt"
+
+
+def _is_windows_10_1903_or_newer():
+    if not _is_windows():
+        return False
+
+    try:
+        version = sys.getwindowsversion()
+        return (version.major, version.build) >= (10, 18362)
+    except AttributeError:
+        pass
+
+    return platform.release() in {"10", "11"}
+
+
+def _can_load_windows_dll(name):
+    if not _is_windows():
+        return False
+
+    try:
+        ctypes.WinDLL(name)
+        return True
+    except (AttributeError, OSError):
+        return False
 
 
 def _has_any_prefix(names, prefixes):

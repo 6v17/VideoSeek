@@ -5,12 +5,14 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QFileDialog,
     QFrame,
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QTableWidget,
     QTableWidgetItem,
@@ -428,6 +430,14 @@ class ResourceTableDialog(QDialog):
         export_default_name="details.json",
         stretch_column=-1,
         fixed_column_widths=None,
+        confirm_mode=False,
+        confirm_text="",
+        issue_row_predicate=None,
+        summary_text="",
+        row_payloads=None,
+        extra_actions=None,
+        selection_mode=QAbstractItemView.SingleSelection,
+        row_double_click_handler=None,
     ):
         super().__init__(parent)
         self.texts = get_texts(language)
@@ -436,6 +446,16 @@ class ResourceTableDialog(QDialog):
         self.export_default_name = export_default_name
         self.stretch_column = int(stretch_column)
         self.fixed_column_widths = dict(fixed_column_widths or {})
+        self.confirm_mode = bool(confirm_mode)
+        self.confirm_text = confirm_text or self.texts["confirm_action"]
+        self.issue_row_predicate = issue_row_predicate
+        self.summary_text = summary_text
+        self.row_payloads = list(row_payloads or self.rows)
+        self.extra_actions = list(extra_actions or [])
+        self.selection_mode = selection_mode
+        self.row_double_click_handler = row_double_click_handler
+        self.filtered_rows = list(self.rows)
+        self.filtered_payloads = list(self.row_payloads)
 
         palette = dialog_palette(is_dark)
         self.setWindowTitle(title or self.texts["details_title_default"])
@@ -446,6 +466,14 @@ class ResourceTableDialog(QDialog):
             QDialog {{ background: {palette['bg']}; }}
             QLabel {{ color: {palette['text']}; background: transparent; }}
             #Hint {{ color: {palette['muted']}; font-size: 12px; }}
+            #SummaryCard {{
+                background: {palette['card']};
+                border: 1px solid {palette['border']};
+                border-radius: 12px;
+                padding: 10px 12px;
+            }}
+            #SummaryValue {{ color: {palette['text']}; font-size: 18px; font-weight: 800; }}
+            #SummaryLabel {{ color: {palette['muted']}; font-size: 11px; }}
             QTableWidget {{
                 background: {palette['card']};
                 color: {palette['text']};
@@ -481,11 +509,37 @@ class ResourceTableDialog(QDialog):
         subtitle_label.setObjectName("Hint")
         subtitle_label.setWordWrap(True)
 
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        self.input_filter = QLineEdit()
+        self.input_filter.setPlaceholderText(self.texts["details_filter_placeholder"])
+        self.toggle_issues = QCheckBox(self.texts["details_show_issues"])
+        self.btn_reset_filter = QPushButton(self.texts["details_reset_filter"])
+        self.btn_reset_filter.setObjectName("Ghost")
+        self.toggle_issues.setVisible(callable(self.issue_row_predicate))
+        filter_row.addWidget(self.input_filter, 1)
+        filter_row.addWidget(self.toggle_issues)
+        filter_row.addWidget(self.btn_reset_filter)
+
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(8)
+        self.summary_total = self._build_summary_card(self.texts["details_total_label"], "0")
+        self.summary_visible = self._build_summary_card(self.texts["details_visible_label"], "0")
+        self.summary_issues = self._build_summary_card(self.texts["details_issues_label"], "0")
+        summary_row.addWidget(self.summary_total, 1)
+        summary_row.addWidget(self.summary_visible, 1)
+        summary_row.addWidget(self.summary_issues, 1)
+
+        self.summary_hint = QLabel(self.summary_text)
+        self.summary_hint.setObjectName("Hint")
+        self.summary_hint.setWordWrap(True)
+        self.summary_hint.setVisible(bool(self.summary_text))
+
         self.table = QTableWidget(0, len(self.headers))
         self.table.setHorizontalHeaderLabels(self.headers)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(self.selection_mode)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.verticalHeader().setVisible(False)
@@ -495,11 +549,23 @@ class ResourceTableDialog(QDialog):
         button_row = QHBoxLayout()
         self.btn_copy = QPushButton(self.texts["details_copy_json"])
         self.btn_export = QPushButton(self.texts["details_export_json"])
+        self.btn_cancel = QPushButton(self.texts["cancel"])
         self.btn_close = QPushButton(self.texts["close"])
         self.btn_close.setObjectName("Primary")
         button_row.addWidget(self.btn_copy)
         button_row.addWidget(self.btn_export)
+        self.extra_action_buttons = []
+        for action in self.extra_actions:
+            button = QPushButton(action.get("label", "Action"))
+            button.setObjectName(action.get("object_name", "Ghost"))
+            button.clicked.connect(lambda _, handler=action.get("handler"): handler(self) if callable(handler) else None)
+            self.extra_action_buttons.append(button)
+            button_row.addWidget(button)
         button_row.addStretch()
+        if self.confirm_mode:
+            self.btn_cancel.setObjectName("Ghost")
+            self.btn_close.setText(self.confirm_text)
+            button_row.addWidget(self.btn_cancel)
         button_row.addWidget(self.btn_close)
 
         self.status_hint = QLabel("")
@@ -507,29 +573,90 @@ class ResourceTableDialog(QDialog):
 
         root.addWidget(title_label)
         root.addWidget(subtitle_label)
+        root.addLayout(filter_row)
+        root.addLayout(summary_row)
+        root.addWidget(self.summary_hint)
         root.addWidget(self.table, 1)
         root.addWidget(self.status_hint)
         root.addLayout(button_row)
 
-        self._populate_rows()
+        self._refresh_rows()
         self._apply_column_layout()
 
+        self.input_filter.textChanged.connect(self._refresh_rows)
+        if self.toggle_issues.isVisible():
+            self.toggle_issues.toggled.connect(self._refresh_rows)
+        self.btn_reset_filter.clicked.connect(self.reset_filters)
+        if callable(self.row_double_click_handler):
+            self.table.itemDoubleClicked.connect(self._handle_item_double_click)
         self.btn_copy.clicked.connect(self._copy_json)
         self.btn_export.clicked.connect(self._export_json)
+        if self.confirm_mode:
+            self.btn_cancel.clicked.connect(self.reject)
         self.btn_close.clicked.connect(self.accept)
 
-    def _populate_rows(self):
+    def _build_summary_card(self, label_text, value_text):
+        card = QFrame()
+        card.setObjectName("SummaryCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(2)
+        value = QLabel(value_text)
+        value.setObjectName("SummaryValue")
+        label = QLabel(label_text)
+        label.setObjectName("SummaryLabel")
+        layout.addWidget(value)
+        layout.addWidget(label)
+        card.value_label = value
+        return card
+
+    def _is_issue_row(self, row_data):
+        if not callable(self.issue_row_predicate):
+            return False
+        try:
+            return bool(self.issue_row_predicate(row_data))
+        except Exception:
+            return False
+
+    def _matches_filter(self, row_data):
+        keyword = self.input_filter.text().strip().lower()
+        if keyword and keyword not in " ".join(str(value).lower() for value in row_data):
+            return False
+        if self.toggle_issues.isVisible() and self.toggle_issues.isChecked() and not self._is_issue_row(row_data):
+            return False
+        return True
+
+    def _refresh_rows(self):
+        filtered_pairs = [
+            (row, payload)
+            for row, payload in zip(self.rows, self.row_payloads)
+            if self._matches_filter(row)
+        ]
+        self.filtered_rows = [row for row, _ in filtered_pairs]
+        self.filtered_payloads = [payload for _, payload in filtered_pairs]
         self.table.setRowCount(0)
-        for row_data in self.rows:
+        for row_data in self.filtered_rows:
             row_index = self.table.rowCount()
             self.table.insertRow(row_index)
             for col_index, value in enumerate(row_data):
                 item = QTableWidgetItem(str(value))
                 if col_index == 0:
                     item.setTextAlignment(Qt.AlignCenter)
+                if self._is_issue_row(row_data):
+                    item.setForeground(Qt.GlobalColor.red)
                 self.table.setItem(row_index, col_index, item)
-        if not self.rows:
+        total_rows = len(self.rows)
+        visible_rows = len(self.filtered_rows)
+        issue_rows = sum(1 for row in self.rows if self._is_issue_row(row))
+        self.summary_total.value_label.setText(str(total_rows))
+        self.summary_visible.value_label.setText(str(visible_rows))
+        self.summary_issues.value_label.setText(str(issue_rows))
+        if not self.filtered_rows:
             self.status_hint.setText(self.texts["details_empty"])
+        else:
+            self.status_hint.setText(
+                self.texts["details_showing_count"].format(visible=visible_rows, total=total_rows)
+            )
 
     def _apply_column_layout(self):
         if not self.headers:
@@ -557,7 +684,7 @@ class ResourceTableDialog(QDialog):
     def _copy_json(self):
         payload = {
             "headers": self.headers,
-            "rows": self.rows,
+            "rows": self.filtered_rows,
         }
         QApplication.clipboard().setText(json.dumps(payload, ensure_ascii=False, indent=2))
         self.status_hint.setText(self.texts["details_copy_done"])
@@ -573,7 +700,7 @@ class ResourceTableDialog(QDialog):
             return
         payload = {
             "headers": self.headers,
-            "rows": self.rows,
+            "rows": self.filtered_rows,
         }
         try:
             with open(path, "w", encoding="utf-8") as handle:
@@ -582,6 +709,40 @@ class ResourceTableDialog(QDialog):
             self.status_hint.setText(self.texts["details_export_failed"])
             return
         self.status_hint.setText(self.texts["details_export_done"].format(path=path))
+
+    def reset_filters(self):
+        self.input_filter.clear()
+        if self.toggle_issues.isVisible():
+            self.toggle_issues.setChecked(False)
+        else:
+            self._refresh_rows()
+
+    def get_selected_payloads(self):
+        selected_indexes = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
+        return [
+            self.filtered_payloads[row]
+            for row in selected_indexes
+            if 0 <= row < len(self.filtered_payloads)
+        ]
+
+    def remove_selected_payloads(self):
+        selected = self.get_selected_payloads()
+        if not selected:
+            return 0
+        remaining_pairs = [
+            (row, payload)
+            for row, payload in zip(self.rows, self.row_payloads)
+            if payload not in selected
+        ]
+        self.rows = [row for row, _ in remaining_pairs]
+        self.row_payloads = [payload for _, payload in remaining_pairs]
+        self._refresh_rows()
+        return len(selected)
+
+    def _handle_item_double_click(self, item):
+        row_index = item.row()
+        if 0 <= row_index < len(self.filtered_payloads):
+            self.row_double_click_handler(self, self.filtered_payloads[row_index])
 
 
 class ModelDownloadDialog(QDialog):

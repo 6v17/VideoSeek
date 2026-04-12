@@ -1,20 +1,11 @@
-import hashlib
 import json
 import os
-import urllib.error
 import urllib.request
 
 from src.app.app_meta import get_app_meta
 from src.app.config import load_config, save_config
-from src.utils import ensure_folder_exists, get_default_ffmpeg_path, has_ffmpeg
-
-
-def get_ffmpeg_status():
-    return {
-        "ready": has_ffmpeg(),
-        "target_path": get_default_ffmpeg_path(),
-        "download_enabled": bool(get_app_meta().get("model_manifest_url", "").strip()),
-    }
+from src.services.download_utils import download_file
+from src.utils import ensure_folder_exists, get_default_ffmpeg_path
 
 
 def fetch_remote_ffmpeg_manifest():
@@ -132,39 +123,11 @@ def _download_file_from_sources(sources, target_path, expected_sha256="", progre
 
 
 def _download_file(url, target_path, expected_sha256="", progress_callback=None, source_label=""):
-    timeout = get_app_meta().get("remote_timeout", 4)
-    request = urllib.request.Request(
+    return download_file(
         url,
-        headers={"User-Agent": "VideoSeek/ffmpeg-download"},
+        target_path,
+        expected_sha256=expected_sha256,
+        progress_callback=progress_callback,
+        source_label=source_label,
+        user_agent="VideoSeek/ffmpeg-download",
     )
-    hasher = hashlib.sha256()
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
-            total_size = _safe_int(response.headers.get("Content-Length"))
-            downloaded = 0
-            while True:
-                chunk = response.read(1024 * 256)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                hasher.update(chunk)
-                downloaded += len(chunk)
-                if progress_callback:
-                    progress_callback(downloaded, total_size, source_label)
-    except urllib.error.URLError as exc:
-        if os.path.exists(target_path):
-            os.remove(target_path)
-        raise RuntimeError(f"Failed to download from {url}") from exc
-
-    if expected_sha256 and hasher.hexdigest().lower() != expected_sha256.lower():
-        if os.path.exists(target_path):
-            os.remove(target_path)
-        raise RuntimeError(f"Checksum mismatch for {os.path.basename(target_path)}")
-
-
-def _safe_int(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0

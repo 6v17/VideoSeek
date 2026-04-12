@@ -17,9 +17,8 @@ from src.services.remote_link_precheck_service import (
     build_precheck_source_candidates as _build_precheck_source_candidates,
     build_stable_source_id as _build_stable_source_id,
     normalize_link_input as _normalize_link_input,
-    precheck_remote_links as _precheck_remote_links,
 )
-from src.utils import get_ffmpeg_path
+from src.utils import get_app_data_dir, get_ffmpeg_path
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -99,29 +98,6 @@ def list_remote_link_details():
         "total_links": len(entries),
         "total_vectors": size,
     }
-
-
-def precheck_remote_links(links):
-    return _precheck_remote_links(links)
-
-
-def build_remote_library_from_links_file(
-    links_file,
-    mode="download",
-    incremental=True,
-    fps=0,
-    max_frames_per_video=None,
-    progress_callback=None,
-):
-    links = _load_links(links_file)
-    return build_remote_library_from_links(
-        links,
-        mode=mode,
-        incremental=incremental,
-        fps=fps,
-        max_frames_per_video=max_frames_per_video,
-        progress_callback=progress_callback,
-    )
 
 
 def build_remote_library_from_links(
@@ -323,24 +299,10 @@ def import_remote_library_zip(zip_path):
             target.write(source.read())
     return get_remote_library_status()
 
-
-def _load_links(path):
-    links = []
-    with open(path, "r", encoding="utf-8") as handle:
-        for raw in handle:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            normalized = _normalize_link_input(line)
-            if normalized:
-                links.append(normalized)
-    return links
-
-
 def _prepare_source(link, mode="download"):
     yt_dlp = _load_yt_dlp()
     if mode == "download":
-        cache_dir = os.path.join("data", "remote_build_cache")
+        cache_dir = os.path.join(get_app_data_dir(), "data", "remote_build_cache")
         os.makedirs(cache_dir, exist_ok=True)
         options = {
             "format": "mp4/bestvideo+bestaudio/best",

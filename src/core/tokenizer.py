@@ -116,6 +116,8 @@ class SimpleTokenizer:
         return result
 
     def encode(self, text):
+        # Retained intentionally: tokenizer methods are often consumed through
+        # wrappers, so static analysis may not resolve all call paths.
         bpe_tokens = []
         text = whitespace_clean(ftfy.fix_text(html.unescape(text)).lower())
         for token in re.findall(self.pat, text):

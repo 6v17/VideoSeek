@@ -8,7 +8,7 @@ from src.services.indexing_service import (
     clear_global_index,
     scan_target_libraries,
 )
-from src.utils import get_video_hash, load_meta, save_meta
+from src.utils import canonicalize_library_path, get_video_hash, load_meta, save_meta
 
 logger = get_logger("update_video")
 
@@ -17,17 +17,60 @@ def get_video_id(abs_path):
     return get_video_hash(abs_path)
 
 
-def update_videos_flow(target_lib=None, progress_callback=None):
+def _iter_target_library_paths(meta, target_lib=None, include_offline=False):
+    target_key = canonicalize_library_path(target_lib) if target_lib else None
+    for root_path in list(meta.get("libraries", {}).keys()):
+        if target_key and canonicalize_library_path(root_path) != target_key:
+            continue
+        if include_offline or os.path.exists(root_path):
+            yield root_path
+
+
+def _set_library_index_state(meta, state, target_lib=None, include_offline=False):
+    for root_path in _iter_target_library_paths(meta, target_lib=target_lib, include_offline=include_offline):
+        library = meta["libraries"].setdefault(root_path, {})
+        library["index_state"] = state
+
+
+def _finalize_library_index_state(meta, target_lib=None):
+    for root_path in _iter_target_library_paths(meta, target_lib=target_lib, include_offline=True):
+        library = meta["libraries"].get(root_path, {})
+        if not os.path.exists(root_path):
+            continue
+        has_files = bool(library.get("files", {}))
+        library["index_state"] = "ready" if has_files else "pending"
+
+
+def update_videos_flow(
+    target_lib=None,
+    progress_callback=None,
+    force_cleanup_missing_files=False,
+    should_stop_callback=None,
+):
+    # Retained intentionally: imported dynamically inside IndexUpdateWorker.run().
     logger.info("Starting index update%s", f" for {target_lib}" if target_lib else "")
     garbage_collect_indices()
     config = load_config()
     meta = load_meta(config["meta_file"])
+    meta_file = config["meta_file"]
+    _set_library_index_state(meta, "partial", target_lib=target_lib)
+    save_meta(meta, meta_file)
 
-    if progress_callback:
-        progress_callback(5, "Cleaning stale index data")
+    should_cleanup_missing_files = force_cleanup_missing_files or config.get("auto_cleanup_missing_files", False)
 
-    for video_id in cleanup_missing_library_files(meta, config, target_lib):
-        delete_physical_video_data(video_id, config)
+    if should_cleanup_missing_files:
+        if progress_callback:
+            progress_callback(5, "Cleaning stale index data")
+        removed_any = False
+        for video_id in cleanup_missing_library_files(meta, config, target_lib):
+            removed_any = True
+            delete_physical_video_data(video_id, config)
+        if removed_any:
+            save_meta(meta, meta_file)
+    else:
+        if progress_callback:
+            progress_callback(5, "Keeping vectors for offline or missing files")
+        logger.info("Automatic cleanup for missing files is disabled; keeping cached vectors and indexes")
 
     all_vectors, all_timestamps, all_paths, all_chunk_vectors, all_chunk_ranges, all_chunk_paths = scan_target_libraries(
         meta,
@@ -35,20 +78,29 @@ def update_videos_flow(target_lib=None, progress_callback=None):
         get_video_id,
         target_lib=target_lib,
         progress_callback=progress_callback,
+        persist_meta_callback=lambda: save_meta(meta, meta_file),
+        should_stop_callback=should_stop_callback,
     )
 
-    save_meta(meta, config["meta_file"])
+    if should_stop_callback and should_stop_callback():
+        raise InterruptedError("Index update stopped before rebuilding global index")
+
+    save_meta(meta, meta_file)
     if not any(len(lib.get("files", {})) > 0 for lib in meta["libraries"].values()):
+        _finalize_library_index_state(meta, target_lib=target_lib)
+        save_meta(meta, meta_file)
         clear_global_index(config)
         logger.info("No libraries remain after cleanup; cleared global indexes")
         return None, None, None, None
 
     if not all_vectors:
+        _finalize_library_index_state(meta, target_lib=target_lib)
+        save_meta(meta, meta_file)
         logger.warning("No valid videos found during indexing")
         clear_global_index(config)
         return None, None, None, None
 
-    return build_global_index(
+    result = build_global_index(
         all_vectors,
         all_timestamps,
         all_paths,
@@ -58,13 +110,9 @@ def update_videos_flow(target_lib=None, progress_callback=None):
         config,
         progress_callback=progress_callback,
     )
-
-
-def merge_and_save_all_vectors(all_vectors, all_timestamps, all_paths, config):
-    from src.services.indexing_service import merge_and_save_all_vectors as merge_vectors
-
-    merge_vectors(all_vectors, all_timestamps, all_paths, config)
-
+    _finalize_library_index_state(meta, target_lib=target_lib)
+    save_meta(meta, meta_file)
+    return result
 
 def delete_physical_video_data(video_id, config):
     if not video_id:

@@ -24,6 +24,12 @@ from PySide6.QtWidgets import (
 from ui.layout import COMPONENT_SIZES
 
 
+def _fallback_text(texts, key, zh_text, en_text):
+    if key in texts:
+        return texts[key]
+    return en_text if str(texts.get("delete", "")).lower() == "delete" else zh_text
+
+
 class NavigationSidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -263,10 +269,13 @@ class LibraryPage(QWidget):
         self.btn_add_lib.setObjectName("SecondaryButton")
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
+        self.btn_cleanup_missing = QPushButton()
+        self.btn_cleanup_missing.setObjectName("GhostButton")
         self.btn_vector_details = QPushButton()
         self.btn_vector_details.setObjectName("GhostButton")
         toolbar.addWidget(self.btn_add_lib)
         toolbar.addWidget(self.btn_sync_db)
+        toolbar.addWidget(self.btn_cleanup_missing)
         toolbar.addWidget(self.btn_vector_details)
         toolbar.addStretch()
 
@@ -546,6 +555,7 @@ class SettingsPage(QWidget):
         self.input_min_chunk_size.setRange(1, 50)
         self.input_chunk_similarity_mode = QComboBox()
         self.input_prefer_gpu = QComboBox()
+        self.input_auto_cleanup_missing_files = QComboBox()
         self.input_ffmpeg_path = QLineEdit()
         self.input_model_dir = QLineEdit()
         self.label_fps = QLabel()
@@ -561,6 +571,7 @@ class SettingsPage(QWidget):
         self.label_min_chunk_size = QLabel()
         self.label_chunk_similarity_mode = QLabel()
         self.label_prefer_gpu = QLabel()
+        self.label_auto_cleanup_missing_files = QLabel()
         self.label_ffmpeg_path = QLabel()
         self.label_model_dir = QLabel()
         self.hint_fps = QLabel()
@@ -576,6 +587,7 @@ class SettingsPage(QWidget):
         self.hint_min_chunk_size = QLabel()
         self.hint_chunk_similarity_mode = QLabel()
         self.hint_prefer_gpu = QLabel()
+        self.hint_auto_cleanup_missing_files = QLabel()
         self.hint_ffmpeg_path = QLabel()
         self.hint_ffmpeg_active = QLabel()
         self.hint_inference_backend = QLabel()
@@ -595,6 +607,7 @@ class SettingsPage(QWidget):
         self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"])
         self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"])
 
@@ -647,6 +660,13 @@ class SettingsPage(QWidget):
                 self.hint_prefer_gpu,
                 self.hint_inference_backend,
                 self.hint_gpu_runtime,
+            ),
+        )
+        self.form.addRow(
+            self.label_auto_cleanup_missing_files,
+            self._build_setting_row(
+                self.input_auto_cleanup_missing_files,
+                self.hint_auto_cleanup_missing_files,
             ),
         )
         self.form.addRow(
@@ -724,6 +744,7 @@ class SettingsPage(QWidget):
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
         self.label_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
+        self.label_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files"])
         self.input_chunk_similarity_mode.blockSignals(True)
         self.input_chunk_similarity_mode.clear()
         self.input_chunk_similarity_mode.addItem(texts["setting_chunk_similarity_mode_chunk"], "chunk")
@@ -734,6 +755,11 @@ class SettingsPage(QWidget):
         self.input_prefer_gpu.addItem(texts["setting_prefer_gpu_option_gpu"], True)
         self.input_prefer_gpu.addItem(texts["setting_prefer_gpu_option_cpu"], False)
         self.input_prefer_gpu.blockSignals(False)
+        self.input_auto_cleanup_missing_files.blockSignals(True)
+        self.input_auto_cleanup_missing_files.clear()
+        self.input_auto_cleanup_missing_files.addItem(texts["setting_auto_cleanup_missing_files_option_off"], False)
+        self.input_auto_cleanup_missing_files.addItem(texts["setting_auto_cleanup_missing_files_option_on"], True)
+        self.input_auto_cleanup_missing_files.blockSignals(False)
         self.label_ffmpeg_path.setText(texts["setting_ffmpeg_path"])
         self.label_model_dir.setText(texts["setting_model_dir"])
         self.hint_fps.setText(texts["setting_fps_hint"])
@@ -749,6 +775,7 @@ class SettingsPage(QWidget):
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
         self.hint_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
+        self.hint_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files_hint"])
         self.hint_ffmpeg_path.setText(texts["setting_ffmpeg_path_hint"])
         self.hint_ffmpeg_active.setText(texts["setting_ffmpeg_active"].format(path=texts["setting_ffmpeg_unknown"]))
         self.hint_inference_backend.setText(
@@ -781,7 +808,7 @@ class ResultTable(QTableWidget):
         self.setColumnWidth(3, 108)
         self.setColumnWidth(4, 74)
         self.setColumnWidth(5, 74)
-        self.setColumnWidth(6, 156)
+        self.setColumnWidth(6, 236)
         self.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)

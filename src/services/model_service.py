@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import urllib.error
@@ -6,6 +5,7 @@ import urllib.parse
 import urllib.request
 
 from src.app.app_meta import get_app_meta
+from src.services.download_utils import download_file
 from src.utils import get_configured_model_dir, get_missing_model_files
 
 REQUIRED_MODEL_FILES = [
@@ -13,18 +13,6 @@ REQUIRED_MODEL_FILES = [
     "clip_text.onnx",
     "bpe_simple_vocab_16e6.txt.gz",
 ]
-
-
-def get_local_model_status():
-    missing_files, _ = get_missing_model_files(REQUIRED_MODEL_FILES)
-    app_meta = get_app_meta()
-    return {
-        "ready": not missing_files,
-        "missing_files": missing_files,
-        "model_dir": get_configured_model_dir(),
-        "download_enabled": bool(app_meta.get("model_manifest_url", "").strip()),
-    }
-
 
 def fetch_remote_model_manifest():
     app_meta = get_app_meta()
@@ -136,36 +124,14 @@ def _download_file_from_sources(sources, target_path, expected_sha256="", progre
 
 
 def _download_file(url, target_path, expected_sha256="", progress_callback=None, source_label=""):
-    timeout = get_app_meta().get("remote_timeout", 4)
-    request = urllib.request.Request(
+    return download_file(
         url,
-        headers={"User-Agent": "VideoSeek/model-download"},
+        target_path,
+        expected_sha256=expected_sha256,
+        progress_callback=progress_callback,
+        source_label=source_label,
+        user_agent="VideoSeek/model-download",
     )
-    hasher = hashlib.sha256()
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
-            total_size = _safe_int(response.headers.get("Content-Length"))
-            downloaded = 0
-
-            while True:
-                chunk = response.read(1024 * 256)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                hasher.update(chunk)
-                downloaded += len(chunk)
-                if progress_callback:
-                    progress_callback(downloaded, total_size, source_label)
-    except urllib.error.URLError as exc:
-        if os.path.exists(target_path):
-            os.remove(target_path)
-        raise RuntimeError(f"Failed to download from {url}") from exc
-
-    if expected_sha256 and hasher.hexdigest().lower() != expected_sha256.lower():
-        if os.path.exists(target_path):
-            os.remove(target_path)
-        raise RuntimeError(f"Checksum mismatch for {os.path.basename(target_path)}")
 
 
 def _normalize_manifest(data, manifest_url):
@@ -292,13 +258,6 @@ def _normalize_explicit_source(source, file_name, index):
         "label": str(source.get("label", "")).strip() or f"source-{index}",
         "url": url,
     }
-def _safe_int(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _format_bytes(value):
     units = ["B", "KB", "MB", "GB"]
     size = float(value or 0)

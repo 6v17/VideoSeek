@@ -13,18 +13,19 @@
     "preview_height": 360,
     "thumb_width": 130,
     "thumb_height": 75,
-    "ffmpeg_path": "C:\\Users\\LiuWei\\AppData\\Local\\VideoSeek\\bin\\ffmpeg.exe",
-    "model_dir": "C:\\Users\\LiuWei\\AppData\\Local\\VideoSeek\\models",
+    "ffmpeg_path": "",
+    "model_dir": "",
     "prefer_gpu": true,
     "similarity_threshold": 0.85,
     "max_chunk_duration": 5.0,
     "min_chunk_size": 2,
     "chunk_similarity_mode": "chunk",
-    "search_mode": "frame",
+    "search_mode": "chunk",
     "cross_chunk_index_file": "data/global/cross_chunk_index.faiss",
     "cross_chunk_vector_file": "data/global/cross_chunk_vectors.npy",
     "remote_index_file": "data/remote/remote_index.faiss",
     "remote_vector_file": "data/remote/remote_vectors.npy",
     "remote_max_frames": 2000,
-    "remote_sample_fps": 1.0
+    "remote_sample_fps": 1.0,
+    "auto_cleanup_missing_files": false
 }

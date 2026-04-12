@@ -6,6 +6,12 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTableWidgetItem, QWidget
 
 
+def _fallback_text(texts, key, zh_text, en_text):
+    if key in texts:
+        return texts[key]
+    return en_text if str(texts.get("delete", "")).lower() == "delete" else zh_text
+
+
 def populate_library_table(table, libraries, is_indexing, on_sync, on_remove, on_open, texts):
     table.setRowCount(0)
     table.setHorizontalHeaderLabels(texts["library_headers"])
@@ -31,7 +37,7 @@ def populate_library_table(table, libraries, is_indexing, on_sync, on_remove, on
         table.setCellWidget(row, 3, _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts))
 
 
-def populate_result_table(table, results, on_preview, on_locate, texts):
+def populate_result_table(table, results, on_preview, on_locate, on_export, texts):
     table.setRowCount(0)
     table.setHorizontalHeaderLabels(texts["result_headers"])
     table.setUpdatesEnabled(False)
@@ -64,7 +70,11 @@ def populate_result_table(table, results, on_preview, on_locate, texts):
         score_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, 5, score_item)
 
-        table.setCellWidget(row, 6, _build_result_actions(video_path, start_sec, on_preview, on_locate, texts))
+        table.setCellWidget(
+            row,
+            6,
+            _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate, on_export, texts),
+        )
 
     table.setUpdatesEnabled(True)
 
@@ -156,21 +166,27 @@ def populate_network_result_table(table, results, texts):
 def _library_status_text(path, data, texts):
     exists = os.path.exists(path)
     has_index = len(data.get("files", {})) > 0
+    state = str(data.get("index_state", "")).strip().lower()
+    if exists and state == "partial":
+        return _fallback_text(texts, "lib_partial", "部分完成", "Partial")
     if exists and has_index:
         return texts["lib_ready"]
     if exists:
         return texts["lib_pending"]
-    return texts["lib_missing"]
+    return _fallback_text(texts, "lib_offline", "离线/不可用", "Offline")
 
 
 def _library_status_color(path, data):
     exists = os.path.exists(path)
     has_index = len(data.get("files", {})) > 0
+    state = str(data.get("index_state", "")).strip().lower()
+    if exists and state == "partial":
+        return "#1677ff"
     if exists and has_index:
         return "#52c41a"
     if exists:
         return "#faad14"
-    return "#ff4d4f"
+    return "#8c8c8c"
 
 
 def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts):
@@ -206,7 +222,7 @@ def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts
     return container
 
 
-def _build_result_actions(video_path, sec, on_preview, on_locate, texts):
+def _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate, on_export, texts):
     container = QWidget()
     layout = QHBoxLayout(container)
     layout.setContentsMargins(10, 0, 10, 0)
@@ -218,7 +234,9 @@ def _build_result_actions(video_path, sec, on_preview, on_locate, texts):
     preview_button.setFixedSize(74, 32)
     preview_button.setCursor(Qt.PointingHandCursor)
     preview_button.setToolTip(texts["preview_tip"])
-    preview_button.clicked.connect(lambda _, path=video_path, start_sec=sec: on_preview(path, start_sec))
+    preview_button.clicked.connect(
+        lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_preview(path, clip_start, clip_end)
+    )
 
     locate_button = QPushButton(texts["locate"])
     locate_button.setProperty("class", "TableLocateBtn")
@@ -227,8 +245,18 @@ def _build_result_actions(video_path, sec, on_preview, on_locate, texts):
     locate_button.setToolTip(texts["locate_tip"])
     locate_button.clicked.connect(lambda _, path=video_path: on_locate(path))
 
+    export_button = QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
+    export_button.setProperty("class", "TableBtn")
+    export_button.setFixedSize(74, 32)
+    export_button.setCursor(Qt.PointingHandCursor)
+    export_button.setToolTip(_fallback_text(texts, "export_clip_tip", "导出原画质片段", "Export original-quality clip"))
+    export_button.clicked.connect(
+        lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_export(path, clip_start, clip_end)
+    )
+
     layout.addWidget(preview_button)
     layout.addWidget(locate_button)
+    layout.addWidget(export_button)
     return container
 
 

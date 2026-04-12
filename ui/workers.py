@@ -6,11 +6,10 @@ from src.app.config import load_config
 from src.core.core import run_search
 from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
-from src.services.link_search_service import run_link_search
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
-from src.services.remote_index_service import download_remote_index_pack
 from src.services.remote_library_service import build_remote_library_from_links
+from src.services.search_service import warmup_search_runtime
 from src.services.remote_search_service import run_remote_search
 from src.services.version_service import get_version_status
 
@@ -36,13 +35,31 @@ class SearchWorker(QThread):
             self.finished.emit()
 
 
+class SearchWarmupWorker(QThread):
+    finished = Signal()
+
+    def run(self):
+        try:
+            warmup_search_runtime()
+        except Exception as exc:
+            print(f"Search Warmup Error: {exc}")
+        finally:
+            self.finished.emit()
+
+
 class IndexUpdateWorker(QThread):
     progress_signal = Signal(int, str)
-    finished_signal = Signal(bool)
+    finished_signal = Signal(bool, bool)
 
-    def __init__(self, target_lib=None):
+    def __init__(self, target_lib=None, force_cleanup_missing_files=False):
         super().__init__()
         self.target_lib = target_lib
+        self.force_cleanup_missing_files = force_cleanup_missing_files
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
 
     def run(self):
         try:
@@ -51,11 +68,15 @@ class IndexUpdateWorker(QThread):
             result = update_videos_flow(
                 target_lib=self.target_lib,
                 progress_callback=lambda progress, text: self.progress_signal.emit(progress, text),
+                force_cleanup_missing_files=self.force_cleanup_missing_files,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
             )
-            self.finished_signal.emit(result[0] is not None)
+            self.finished_signal.emit(result[0] is not None, False)
+        except InterruptedError:
+            self.finished_signal.emit(False, True)
         except Exception as exc:
             print(f"Update Error: {exc}")
-            self.finished_signal.emit(False)
+            self.finished_signal.emit(False, False)
 
 
 class ThumbLoader(QThread):
@@ -182,31 +203,6 @@ class ResourceDownloadWorker(QThread):
             self.error_signal.emit(str(exc))
 
 
-class LinkSearchWorker(QThread):
-    progress_signal = Signal(int, str)
-    result_ready = Signal(dict)
-    error_signal = Signal(str)
-    finished = Signal()
-
-    def __init__(self, link, mode):
-        super().__init__()
-        self.link = link
-        self.mode = mode
-
-    def run(self):
-        try:
-            payload = run_link_search(
-                self.link,
-                mode=self.mode,
-                progress_callback=lambda progress, text: self.progress_signal.emit(progress, text),
-            )
-            self.result_ready.emit(payload)
-        except Exception as exc:
-            self.error_signal.emit(str(exc))
-        finally:
-            self.finished.emit()
-
-
 class RemoteSearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
@@ -225,21 +221,6 @@ class RemoteSearchWorker(QThread):
             self.error_signal.emit(str(exc))
         finally:
             self.finished.emit()
-
-
-class RemoteIndexDownloadWorker(QThread):
-    progress_signal = Signal(int, str)
-    finished_signal = Signal(dict)
-    error_signal = Signal(str)
-
-    def run(self):
-        try:
-            status = download_remote_index_pack(
-                progress_callback=lambda value, text: self.progress_signal.emit(value, text)
-            )
-            self.finished_signal.emit(status)
-        except Exception as exc:
-            self.error_signal.emit(str(exc))
 
 
 class RemoteLibraryBuildWorker(QThread):

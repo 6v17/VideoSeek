@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import urllib.error
@@ -6,6 +5,7 @@ import urllib.request
 
 from src.app.app_meta import get_app_meta
 from src.app.config import load_config
+from src.services.download_utils import download_file
 
 
 def get_remote_index_status():
@@ -53,6 +53,8 @@ def fetch_remote_index_manifest():
 
 
 def download_remote_index_pack(progress_callback=None):
+    # Retained intentionally: not wired to the current UI, but still serves as
+    # the remote index pack download entrypoint for future UI or script usage.
     manifest = fetch_remote_index_manifest()
     if not manifest:
         raise RuntimeError("Remote index manifest is unavailable.")
@@ -95,31 +97,14 @@ def download_remote_index_pack(progress_callback=None):
 
 
 def _download_file(url, target_path, expected_sha256="", progress_callback=None):
-    timeout = int(get_app_meta().get("remote_timeout", 4))
-    request = urllib.request.Request(url, headers={"User-Agent": "VideoSeek/remote-index-download"})
-    hasher = hashlib.sha256()
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
-            total_size = _safe_int(response.headers.get("Content-Length"))
-            downloaded = 0
-            while True:
-                chunk = response.read(1024 * 256)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                hasher.update(chunk)
-                downloaded += len(chunk)
-                if progress_callback:
-                    progress_callback(downloaded, total_size)
-    except urllib.error.URLError as exc:
-        if os.path.exists(target_path):
-            os.remove(target_path)
-        raise RuntimeError(f"Failed to download {url}") from exc
-
-    if expected_sha256 and hasher.hexdigest().lower() != expected_sha256.lower():
-        if os.path.exists(target_path):
-            os.remove(target_path)
-        raise RuntimeError(f"Checksum mismatch: {os.path.basename(target_path)}")
+    return download_file(
+        url,
+        target_path,
+        expected_sha256=expected_sha256,
+        progress_callback=lambda current, total_size, _label: progress_callback(current, total_size)
+        if progress_callback else None,
+        user_agent="VideoSeek/remote-index-download",
+    )
 
 
 def _emit_download_progress(progress_callback, base, span, file_name, current, total_size):
@@ -138,13 +123,6 @@ def _emit_download_progress(progress_callback, base, span, file_name, current, t
 def _emit(progress_callback, value, text):
     if progress_callback:
         progress_callback(int(value), str(text))
-
-
-def _safe_int(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _format_bytes(value):

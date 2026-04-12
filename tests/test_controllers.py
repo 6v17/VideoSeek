@@ -96,6 +96,7 @@ if "ui.workers" not in sys.modules:
 
     workers_module.ResourceDownloadWorker = _BaseWorker
     workers_module.SearchWorker = _BaseWorker
+    workers_module.SearchWarmupWorker = _BaseWorker
     workers_module.ThumbLoader = _BaseWorker
     sys.modules["ui.workers"] = workers_module
 
@@ -118,6 +119,7 @@ def _make_parent_window():
     parent.show_info_dialog = MagicMock()
     parent.open_runtime_resource_folder = MagicMock()
     parent.handle_play = MagicMock()
+    parent.handle_export_clip = MagicMock()
     parent.open_result_in_explorer = MagicMock()
     parent.search_page = MagicMock()
     parent.search_page.btn_search = MagicMock()
@@ -234,6 +236,19 @@ class SearchControllerTests(unittest.TestCase):
 
         parent.result_table.setRowCount.assert_called_once_with(0)
         parent.search_page.lbl_status.setText.assert_called_with("No results")
+
+    @patch("ui.search_controller.SearchWarmupWorker")
+    def test_start_warmup_starts_once(self, mock_worker_cls):
+        parent = _make_parent_window()
+        controller = SearchController(parent)
+        worker = MagicMock()
+        mock_worker_cls.return_value = worker
+
+        controller.start_warmup()
+        controller.start_warmup()
+
+        mock_worker_cls.assert_called_once_with()
+        worker.start.assert_called_once()
 
 
 if __name__ == "__main__":

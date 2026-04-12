@@ -28,7 +28,7 @@ Desktop semantic video search built with `PySide6`, `ONNX Runtime`, `FAISS`, and
 2. Install dependencies:
 
 ```bash
-pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy regex yt-dlp
+pip install onnxruntime-directml opencv-python PySide6 faiss-cpu numpy pillow ftfy regex yt-dlp
 ```
 
 3. Start the app:
@@ -229,6 +229,13 @@ python -m nuitka --standalone ^
 --include-data-file=config.json=config.json ^
 main.py
 ```
+
+If you bundle `config.json`, keep machine-local runtime fields empty:
+
+- `model_dir`
+- `ffmpeg_path`
+
+Otherwise the first launch on another machine may inherit invalid absolute paths from the build machine before the app migrates settings into `%LOCALAPPDATA%\\VideoSeek\\config.json`.
 ## Download
 
 Runtime resource packaging note:

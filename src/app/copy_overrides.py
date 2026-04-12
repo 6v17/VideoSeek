@@ -48,13 +48,13 @@ COPY_OVERRIDES = {
         "setting_remote_max_frames": "网络帧数上限(高级)",
         "setting_remote_max_frames_hint": "安全上限。仅在视频很长且 FPS 较高时触发，通常保持默认。",
         "setting_top_k_hint": "每次检索最多返回的结果条数。",
-        "setting_search_mode_hint": "按帧检索更细，按 Chunk 检索更语义化。",
+        "setting_search_mode_hint": "按帧检索更细，按片段检索更语义化。",
         "settings_hint": "修改后点击“保存设置”生效。",
         "saved_settings": "设置已保存。",
         "settings_saved_no_rebuild": "设置已保存，后续检索将使用新参数。",
-        "settings_saved_chunk_rebuild": "设置已保存。Chunk 相关参数已变更，需重建索引后生效。",
+        "settings_saved_chunk_rebuild": "设置已保存。片段相关参数已变更，需重建索引后生效。",
         "settings_saved_full_rebuild": "设置已保存。FPS 已变更，需重建索引（含重新抽帧与向量生成）。",
-        "settings_saved_mixed_rebuild": "设置已保存。FPS 与 Chunk 参数已变更，需完整重建索引。",
+        "settings_saved_mixed_rebuild": "设置已保存。FPS 与片段参数已变更，需完整重建索引。",
         "library_vectors_title": "本地向量文件详情",
         "network_links_title": "网络来源链接详情",
         "details_title_default": "详情",
@@ -69,6 +69,10 @@ COPY_OVERRIDES = {
         "search_failed": "检索失败。",
         "link_search_failed": "链接检索失败。",
         "empty_query": "请先输入文本或上传图片。",
+        "query_too_short": "输入太短，建议至少描述主体或动作，例如：“夜晚街道上奔跑的男人”。",
+        "query_generic_title": "搜索提示",
+        "query_generic_hint": "当前描述比较泛，建议补充主体、动作、场景或镜头特征。",
+        "query_refined": "已自动整理输入：{query}",
         "link_empty_query": "请先输入视频链接。",
         "warning_title": "提示",
         "error_title": "操作失败",
@@ -145,6 +149,10 @@ COPY_OVERRIDES = {
         "search_failed": "Search failed.",
         "link_search_failed": "Link search failed.",
         "empty_query": "Enter text or upload an image first.",
+        "query_too_short": "The query is too short. Describe at least the subject or action.",
+        "query_generic_title": "Search Tip",
+        "query_generic_hint": "This description is broad. Add subject, action, scene, or shot details.",
+        "query_refined": "Normalized query: {query}",
         "link_empty_query": "Enter a video link first.",
         "warning_title": "Notice",
         "error_title": "Operation Failed",
@@ -158,4 +166,3 @@ def apply_copy_overrides(base_texts, language):
     merged = dict(base_texts or {})
     merged.update(COPY_OVERRIDES.get(language, {}))
     return merged
-

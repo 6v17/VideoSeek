@@ -3,11 +3,11 @@ import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtMultimedia import QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QMainWindow, QMessageBox, QScrollArea, QStackedWidget, QVBoxLayout, QWidget, QHBoxLayout
 
-from src.app.config import DEFAULT_CONFIG, get_app_version, load_config, save_config
+from src.app.config import DEFAULT_CONFIG, get_app_version, load_config, pop_migration_notice, save_config
 from src.app.i18n import get_texts
 from src.core.clip_embedding import get_engine_runtime_status, reset_engine
 from src.services.about_service import get_local_about_payload
@@ -15,15 +15,20 @@ from src.services.library_service import (
     add_library,
     list_libraries,
     list_local_vector_details,
+    list_partial_libraries,
     remove_library as remove_library_entry,
 )
 from src.services.notice_service import get_local_notice_payload
+from src.services.indexing_service import list_missing_library_files
+from src.services.query_text_service import prepare_text_query
 from src.services.remote_library_service import list_remote_link_details
 from src.services.remote_link_precheck_service import precheck_remote_links
 from src.workflows.update_video import delete_physical_video_data
 from src.utils import (
+    get_app_data_dir,
     get_ffmpeg_status_text,
     get_configured_model_dir,
+    load_meta,
     open_folder_in_explorer,
     open_in_explorer,
     sync_ffmpeg_path_to_config,
@@ -47,6 +52,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.startup_cancelled = False
+        self._close_when_indexing_stops = False
         self.current_img_path = None
         self.network_query_img_path = None
         self.version_info = None
@@ -78,15 +84,20 @@ class MainWindow(QMainWindow):
         self.runtime_resource_controller.resources_ready.connect(self._finish_runtime_resource_download)
         self.runtime_resource_controller.status_changed.connect(self._apply_runtime_resource_status)
         self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.audio_output.setVolume(1.0)
+        self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
         sync_model_dir_to_config()
         sync_ffmpeg_path_to_config()
         self.apply_texts()
         self.load_settings_values()
+        self._show_startup_migration_notice()
         self.check_runtime_resources()
         if self.startup_cancelled:
             return
         self.refresh_library_table()
+        self._prompt_resume_partial_indexing()
         self.apply_theme()
         self.app_meta_controller.refresh(self.language)
 
@@ -159,6 +170,7 @@ class MainWindow(QMainWindow):
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
+        self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
         self.library_page.btn_vector_details.clicked.connect(self.show_local_vector_details)
 
         self.settings_page.btn_save.clicked.connect(self.save_settings)
@@ -279,6 +291,7 @@ class MainWindow(QMainWindow):
         self.library_page.table_title.setText(t["library_table_title"])
         self.library_page.btn_add_lib.setText(t["add_folder"])
         self.library_page.btn_sync_db.setText(t["update_index"])
+        self.library_page.btn_cleanup_missing.setText(t["cleanup_missing_vectors"])
         self.library_page.btn_vector_details.setText(t["library_vectors_detail"])
 
         self.settings_page.header.title.setText(t["settings_page_title"])
@@ -345,6 +358,10 @@ class MainWindow(QMainWindow):
         )
         prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
         self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
+        auto_cleanup_missing_files = bool(
+            config.get("auto_cleanup_missing_files", DEFAULT_CONFIG["auto_cleanup_missing_files"])
+        )
+        self.settings_page.input_auto_cleanup_missing_files.setCurrentIndex(1 if auto_cleanup_missing_files else 0)
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
         self.settings_page.hint_ffmpeg_active.setText(
@@ -385,6 +402,9 @@ class MainWindow(QMainWindow):
             config["min_chunk_size"] = new_min_chunk_size
             config["chunk_similarity_mode"] = new_chunk_similarity_mode
             config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
+            config["auto_cleanup_missing_files"] = bool(
+                self.settings_page.input_auto_cleanup_missing_files.currentData()
+            )
             config["ffmpeg_path"] = self.settings_page.input_ffmpeg_path.text().strip()
             config["model_dir"] = self.settings_page.input_model_dir.text().strip() or DEFAULT_CONFIG["model_dir"]
             save_config(config)
@@ -483,7 +503,22 @@ class MainWindow(QMainWindow):
             return
 
         text_query = self.search_page.text_search.text().strip()
-        query = text_query if text_query else self.current_img_path
+        if text_query:
+            query_info = prepare_text_query(text_query)
+            if query_info["too_short"]:
+                self.search_page.lbl_status.setText(self.texts["query_too_short"])
+                return
+            if query_info["changed"]:
+                self.search_page.text_search.setText(query_info["normalized"])
+            if query_info["generic"]:
+                self.show_info_dialog(
+                    self.texts["query_generic_title"],
+                    self.texts["query_generic_hint"],
+                    kind="info",
+                )
+            query = query_info["normalized"]
+        else:
+            query = self.current_img_path
         if not query:
             self.search_page.lbl_status.setText(self.texts["empty_query"])
             return
@@ -547,14 +582,7 @@ class MainWindow(QMainWindow):
             self.show_error_dialog(self.texts["library_add_failed"], exc)
 
     def remove_library_entry(self, path):
-        confirmed = QMessageBox.question(
-            self,
-            self.texts["confirm_title"],
-            self.texts["remove_library_confirm"].format(path=path),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if confirmed != QMessageBox.Yes:
+        if not self.show_confirm_dialog(self.texts["confirm_title"], self.texts["remove_library_confirm"].format(path=path)):
             return
         try:
             if remove_library_entry(path, delete_physical_video_data):
@@ -567,6 +595,109 @@ class MainWindow(QMainWindow):
             self.show_error_dialog(self.texts["library_remove_failed"], exc)
 
     def start_update_index(self, target_lib=None):
+        self._start_index_update(target_lib=target_lib, force_cleanup_missing_files=False)
+
+    def cleanup_missing_library_vectors(self):
+        try:
+            config = load_config()
+            meta = load_meta(config["meta_file"])
+            missing_entries = list(list_missing_library_files(meta, config))
+        except Exception as exc:
+            self.show_error_dialog(self.texts["library_load_failed"], exc)
+            return
+
+        if not missing_entries:
+            self.show_info_dialog(
+                self.texts["cleanup_missing_vectors_preview_title"],
+                self.texts["cleanup_missing_vectors_preview_empty"],
+                kind="info",
+            )
+            return
+
+        reviewed_entries = self._show_cleanup_preview_dialog(missing_entries)
+        if reviewed_entries is None:
+            return
+        if not reviewed_entries:
+            self.show_info_dialog(
+                self.texts["cleanup_missing_vectors_preview_title"],
+                self.texts["cleanup_missing_vectors_preview_empty"],
+                kind="info",
+            )
+            return
+
+        if not self.show_confirm_dialog(
+            self.texts["confirm_title"],
+            self.texts["cleanup_missing_vectors_confirm"].format(count=len(reviewed_entries)),
+            kind="warning",
+        ):
+            return
+        self._start_index_update(target_lib=None, force_cleanup_missing_files=True)
+
+    def _show_cleanup_preview_dialog(self, missing_entries):
+        rows = []
+        for index, entry in enumerate(missing_entries, start=1):
+            rows.append(
+                [
+                    index,
+                    entry["library_path"],
+                    entry["video_rel_path"],
+                    entry.get("video_id", "") or "",
+                    entry["abs_path"],
+                ]
+            )
+
+        subtitle = "\n".join(
+            [
+                self.texts["cleanup_missing_vectors_preview_summary"].format(
+                    count=len(missing_entries),
+                    libraries=len({entry["library_path"] for entry in missing_entries}),
+                ),
+                self.texts["cleanup_missing_vectors_preview_continue"],
+            ]
+        )
+        dialog = ResourceTableDialog(
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+            title=self.texts["cleanup_missing_vectors_preview_title"],
+            subtitle=subtitle,
+            headers=self.texts["cleanup_missing_vectors_headers"],
+            rows=rows,
+            export_default_name=self.texts["cleanup_missing_vectors_export_name"],
+            stretch_column=4,
+            fixed_column_widths={
+                0: 52,
+                2: 220,
+                3: 140,
+            },
+            confirm_mode=True,
+            confirm_text=self.texts["confirm_action"],
+            issue_row_predicate=lambda row: True,
+            summary_text=self.texts["cleanup_missing_vectors_preview_continue"],
+            row_payloads=missing_entries,
+            extra_actions=[
+                {
+                    "label": self.texts["details_exclude_selected"],
+                    "object_name": "Ghost",
+                    "handler": self._exclude_cleanup_preview_selection,
+                }
+            ],
+            selection_mode=QAbstractItemView.ExtendedSelection,
+        )
+        if not dialog.exec():
+            return None
+        return dialog.row_payloads
+
+    def _exclude_cleanup_preview_selection(self, dialog):
+        removed = dialog.remove_selected_payloads()
+        if not removed:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        dialog.status_hint.setText(self.texts["details_excluded_count"].format(count=removed))
+        if not dialog.row_payloads:
+            dialog.reject()
+
+    def _start_index_update(self, target_lib=None, force_cleanup_missing_files=False):
         try:
             if not self.check_runtime_resources():
                 self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
@@ -576,8 +707,12 @@ class MainWindow(QMainWindow):
                 return
             self.library_page.btn_sync_db.setEnabled(False)
             self.library_page.btn_add_lib.setEnabled(False)
+            self.library_page.btn_cleanup_missing.setEnabled(False)
             self.library_page.progress_bar.setVisible(True)
-            self.indexing_controller.start(target_lib=target_lib)
+            self.indexing_controller.start(
+                target_lib=target_lib,
+                force_cleanup_missing_files=force_cleanup_missing_files,
+            )
         except Exception as exc:
             self.show_error_dialog(self.texts["index_start_failed"], exc)
 
@@ -585,23 +720,50 @@ class MainWindow(QMainWindow):
         self.library_page.progress_bar.setValue(value)
         self.library_page.lbl_status.setText(text)
 
-    def _finish_indexing(self, success, target_lib):
+    def _finish_indexing(self, success, target_lib, stopped=False):
         self.library_page.btn_sync_db.setEnabled(True)
         self.library_page.btn_add_lib.setEnabled(True)
+        self.library_page.btn_cleanup_missing.setEnabled(True)
         self.library_page.progress_bar.setVisible(False)
         self.refresh_library_table()
-        if success:
+        if stopped:
+            status_text = self.texts["index_stopped"]
+        elif success:
             status_text = self.texts["index_updated_single"] if target_lib else self.texts["index_updated"]
         else:
             status_text = self.texts["index_failed"]
         self.library_page.lbl_status.setText(status_text)
+        if self._close_when_indexing_stops:
+            self._close_when_indexing_stops = False
+            self.close()
 
-    def handle_play(self, path, sec):
+    def handle_play(self, path, sec, end_sec=None):
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
             return
-        if not self.preview_controller.play(path, sec):
+        if not self.preview_controller.play(path, sec, end_sec=end_sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
+
+    def handle_export_clip(self, path, sec, end_sec=None):
+        base_name = os.path.splitext(os.path.basename(path))[0]
+        suggested_name = f"{base_name}_clip_{int(float(sec)):06d}.mp4"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.texts.get("export_clip_title", "导出预览片段"),
+            suggested_name,
+            self.texts.get("export_clip_filter", "视频文件 (*.mp4 *.mkv *.mov)"),
+        )
+        if not save_path:
+            return
+        try:
+            result = self.preview_controller.export_clip(path, sec, save_path, end_sec=end_sec)
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or b"").decode("utf-8", errors="ignore").strip())
+            self.search_page.lbl_status.setText(
+                self.texts.get("export_clip_success", "片段已导出：{path}").format(path=save_path)
+            )
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("export_clip_failed", "导出片段失败。"), exc)
 
     def upload_file(self):
         path, _ = QFileDialog.getOpenFileName(self, self.texts["select_image"], "", self.texts["image_filter"])
@@ -658,6 +820,53 @@ class MainWindow(QMainWindow):
             language=self.language,
         ).exec()
 
+    def show_confirm_dialog(self, title, text, kind="warning"):
+        dialog = AppMessageDialog(
+            title,
+            text,
+            kind=kind,
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+            confirm=True,
+        )
+        dialog.exec()
+        return dialog.confirmed()
+
+    def _show_startup_migration_notice(self):
+        notice = pop_migration_notice()
+        if not notice:
+            return
+        self.show_info_dialog(
+            self.texts["migration_notice_title"],
+            self.texts["migration_notice_body"].format(
+                config_file=notice["config_file"],
+                data_dir=notice["data_dir"],
+            ),
+            kind="info",
+        )
+
+    def _prompt_resume_partial_indexing(self):
+        partial_libraries = list_partial_libraries(include_offline=False)
+        if not partial_libraries or self.indexing_controller.is_running():
+            return
+
+        if len(partial_libraries) == 1:
+            message = self.texts["partial_resume_body_single"].format(library=partial_libraries[0])
+        else:
+            message = self.texts["partial_resume_body_multi"].format(count=len(partial_libraries))
+
+        if not self.show_confirm_dialog(
+            self.texts["partial_resume_title"],
+            message,
+            kind="warning",
+        ):
+            return
+
+        self.switch_page("library")
+        self.library_page.lbl_status.setText(self.texts["partial_resume_status"])
+        self.start_update_index()
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -680,6 +889,12 @@ class MainWindow(QMainWindow):
         self.switch_page("link")
 
     def closeEvent(self, event):
+        if self.indexing_controller.is_running():
+            self._close_when_indexing_stops = True
+            self.indexing_controller.request_stop()
+            self.library_page.lbl_status.setText(self.texts["index_stop_requested"])
+            event.ignore()
+            return
         self.search_controller.shutdown()
         self.network_search_controller.shutdown()
         self.indexing_controller.shutdown()
@@ -697,20 +912,6 @@ class MainWindow(QMainWindow):
             self.search_page.text_search.clear()
         self.search_page.lbl_status.setText(self.texts["image_loaded"])
 
-    def _shutdown_thread(self, thread, stop_first=False):
-        if not thread or not thread.isRunning():
-            return
-        if stop_first and hasattr(thread, "stop"):
-            thread.stop()
-        thread.quit()
-        if thread.wait(1500):
-            return
-        thread.requestInterruption()
-        if thread.wait(1500):
-            return
-        thread.terminate()
-        thread.wait(1000)
-
     def open_runtime_resource_folder(self):
         from src.services.runtime_resource_service import ensure_runtime_resource_dirs
 
@@ -726,10 +927,14 @@ class MainWindow(QMainWindow):
             backend_text = status["backend"] or ""
             if status["warning"]:
                 issue_text = self.texts["setting_runtime_issue_unknown"]
-                if status.get("issue") == "cuda":
-                    issue_text = self.texts["setting_runtime_issue_cuda"]
-                elif status.get("issue") == "cudnn":
-                    issue_text = self.texts["setting_runtime_issue_cudnn"]
+                if status.get("issue") == "directml":
+                    issue_text = self.texts["setting_runtime_issue_directml"]
+                elif status.get("issue") == "directx":
+                    issue_text = self.texts["setting_runtime_issue_directx"]
+                elif status.get("issue") == "windows":
+                    issue_text = self.texts["setting_runtime_issue_windows"]
+                elif status.get("issue") == "windows_version":
+                    issue_text = self.texts["setting_runtime_issue_windows_version"]
                 elif status.get("issue") == "msvc":
                     issue_text = self.texts["setting_runtime_issue_msvc"]
                 backend_text = self.texts["setting_inference_cpu_issue"].format(issue=issue_text)
@@ -769,6 +974,20 @@ class MainWindow(QMainWindow):
         query_text = self.link_page.input_link.text().strip()
         query_data = query_text
         is_text = True
+        if query_text:
+            query_info = prepare_text_query(query_text)
+            if query_info["too_short"]:
+                self.link_page.lbl_search_status.setText(self.texts["query_too_short"])
+                return
+            if query_info["changed"]:
+                self.link_page.input_link.setText(query_info["normalized"])
+            if query_info["generic"]:
+                self.show_info_dialog(
+                    self.texts["query_generic_title"],
+                    self.texts["query_generic_hint"],
+                    kind="info",
+                )
+            query_data = query_info["normalized"]
         if not query_data:
             query_data = self.network_query_img_path
             is_text = False
@@ -854,6 +1073,7 @@ class MainWindow(QMainWindow):
             detail = list_local_vector_details()
             headers = self.texts["library_vectors_headers"]
             rows = []
+            payloads = []
             for index, item in enumerate(detail["entries"], start=1):
                 rows.append(
                     [
@@ -866,6 +1086,7 @@ class MainWindow(QMainWindow):
                         self.texts["details_yes"] if item["index_exists"] else self.texts["details_no"],
                     ]
                 )
+                payloads.append(item)
             subtitle = self.texts["library_vectors_subtitle"].format(
                 total=detail["total_entries"],
                 vector_dir=detail["vector_dir"],
@@ -879,16 +1100,51 @@ class MainWindow(QMainWindow):
                 subtitle=subtitle,
                 headers=headers,
                 rows=rows,
+                row_payloads=payloads,
                 export_default_name="local_vector_details.json",
+                issue_row_predicate=lambda row: row[5] == self.texts["details_no"] or row[6] == self.texts["details_no"],
+                extra_actions=[
+                    {
+                        "label": self.texts["details_open_selected"],
+                        "object_name": "Ghost",
+                        "handler": self._open_selected_vector_detail_path,
+                    },
+                    {
+                        "label": self.texts["details_copy_selected"],
+                        "object_name": "Ghost",
+                        "handler": self._copy_selected_vector_detail_path,
+                    },
+                ],
             ).exec()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
+
+    def _open_selected_vector_detail_path(self, dialog):
+        selected = dialog.get_selected_payloads()
+        if not selected:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        payload = selected[0]
+        target_path = payload["vector_file"] if payload.get("vector_exists") else payload["index_file"]
+        open_folder_in_explorer(os.path.dirname(target_path))
+        dialog.status_hint.setText(target_path)
+
+    def _copy_selected_vector_detail_path(self, dialog):
+        selected = dialog.get_selected_payloads()
+        if not selected:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        payload = selected[0]
+        target_path = payload["vector_file"] if payload.get("vector_exists") else payload["index_file"]
+        QApplication.clipboard().setText(target_path)
+        dialog.status_hint.setText(self.texts["details_copy_done"])
 
     def show_network_link_details(self):
         try:
             detail = list_remote_link_details()
             headers = self.texts["network_links_headers"]
             rows = []
+            payloads = []
             for index, item in enumerate(detail["entries"], start=1):
                 rows.append(
                     [
@@ -900,6 +1156,7 @@ class MainWindow(QMainWindow):
                         f"{float(item.get('max_time', 0.0)):.2f}",
                     ]
                 )
+                payloads.append(item)
             subtitle = self.texts["network_links_subtitle"].format(
                 links=detail["total_links"],
                 vectors=detail["total_vectors"],
@@ -913,6 +1170,7 @@ class MainWindow(QMainWindow):
                 subtitle=subtitle,
                 headers=headers,
                 rows=rows,
+                row_payloads=payloads,
                 export_default_name="remote_link_details.json",
                 stretch_column=2,
                 fixed_column_widths={
@@ -921,14 +1179,54 @@ class MainWindow(QMainWindow):
                     4: 116,
                     5: 116,
                 },
+                extra_actions=[
+                    {
+                        "label": self.texts["details_open_selected_link"],
+                        "object_name": "Ghost",
+                        "handler": self._open_selected_network_link,
+                    },
+                    {
+                        "label": self.texts["details_copy_selected_link"],
+                        "object_name": "Ghost",
+                        "handler": self._copy_selected_network_link,
+                    },
+                ],
+                row_double_click_handler=self._open_network_link_payload,
             ).exec()
         except Exception as exc:
             self.show_error_dialog(self.texts["network_links_load_failed"], exc)
 
+    def _open_network_link_payload(self, dialog, payload):
+        link = str(payload.get("source_link", "") or payload.get("source_id", "")).strip()
+        if not link:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        webbrowser.open(link)
+        dialog.status_hint.setText(link)
+
+    def _open_selected_network_link(self, dialog):
+        selected = dialog.get_selected_payloads()
+        if not selected:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        self._open_network_link_payload(dialog, selected[0])
+
+    def _copy_selected_network_link(self, dialog):
+        selected = dialog.get_selected_payloads()
+        if not selected:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        link = str(selected[0].get("source_link", "") or selected[0].get("source_id", "")).strip()
+        if not link:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        QApplication.clipboard().setText(link)
+        dialog.status_hint.setText(self.texts["details_copy_done"])
+
     def open_network_download_cache_folder(self):
         cache_dirs = [
-            os.path.join("data", "remote_build_cache"),
-            os.path.join("data", "link_cache"),
+            os.path.join(get_app_data_dir(), "data", "remote_build_cache"),
+            os.path.join(get_app_data_dir(), "data", "link_cache"),
         ]
         for cache_dir in cache_dirs:
             if os.path.exists(cache_dir):
@@ -951,6 +1249,8 @@ class MainWindow(QMainWindow):
         self.search_page.btn_search.setEnabled(self.models_ready)
         self.network_search_controller.refresh_status()
         self.library_page.btn_sync_db.setEnabled(status["resources_ready"])
+        if status["resources_ready"]:
+            self.search_controller.start_warmup()
         if not status["resources_ready"]:
             status_text = self.texts["model_features_disabled"]
             self.search_page.lbl_status.setText(status_text)

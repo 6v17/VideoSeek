@@ -4,12 +4,26 @@ import cv2
 import faiss
 import numpy as np
 
-from src.core.clip_embedding import get_clip_embeddings_batch, get_text_embedding
+from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_text_embedding
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.core.faiss_index import load_clip_index, search_vector
 
 logger = get_logger("search_service")
+_FRAME_ASSET_CACHE = {"key": None, "value": (None, None, None)}
+_CHUNK_ASSET_CACHE = {"key": None, "value": (None, None, None)}
+
+
+def _asset_cache_key(index_file, vector_file):
+    try:
+        return (
+            os.path.abspath(index_file),
+            os.path.getmtime(index_file),
+            os.path.abspath(vector_file),
+            os.path.getmtime(vector_file),
+        )
+    except OSError:
+        return None
 
 
 def load_search_assets(config):
@@ -20,17 +34,28 @@ def load_search_assets(config):
         logger.warning("Global frame search index is missing. Please update the index first.")
         return None, None, None
 
+    cache_key = _asset_cache_key(index_file, vector_file)
+    if cache_key is not None and _FRAME_ASSET_CACHE["key"] == cache_key:
+        return _FRAME_ASSET_CACHE["value"]
+
     search_index = load_clip_index(index_file)
     if search_index is None:
+        _FRAME_ASSET_CACHE["key"] = None
+        _FRAME_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
 
     try:
         data = np.load(vector_file, allow_pickle=True).item()
     except Exception as exc:
         logger.error("Failed to load frame search vectors: %s", exc)
+        _FRAME_ASSET_CACHE["key"] = None
+        _FRAME_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
 
-    return search_index, data.get("timestamps"), data.get("paths")
+    value = (search_index, data.get("timestamps"), data.get("paths"))
+    _FRAME_ASSET_CACHE["key"] = cache_key
+    _FRAME_ASSET_CACHE["value"] = value
+    return value
 
 
 def load_chunk_search_assets(config):
@@ -41,17 +66,28 @@ def load_chunk_search_assets(config):
         logger.warning("Global chunk search index is missing. Please update the index first.")
         return None, None, None
 
+    cache_key = _asset_cache_key(index_file, vector_file)
+    if cache_key is not None and _CHUNK_ASSET_CACHE["key"] == cache_key:
+        return _CHUNK_ASSET_CACHE["value"]
+
     search_index = load_clip_index(index_file)
     if search_index is None:
+        _CHUNK_ASSET_CACHE["key"] = None
+        _CHUNK_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
 
     try:
         data = np.load(vector_file, allow_pickle=True).item()
     except Exception as exc:
         logger.error("Failed to load chunk search vectors: %s", exc)
+        _CHUNK_ASSET_CACHE["key"] = None
+        _CHUNK_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
 
-    return search_index, data.get("ranges"), data.get("paths")
+    value = (search_index, data.get("ranges"), data.get("paths"))
+    _CHUNK_ASSET_CACHE["key"] = cache_key
+    _CHUNK_ASSET_CACHE["value"] = value
+    return value
 
 
 def build_query_vector(query_data, is_text=False):
@@ -69,6 +105,8 @@ def build_query_vector(query_data, is_text=False):
 
 
 def run_search(query_data, is_text=False, top_k=None):
+    # Retained intentionally: exported via src.core.core and reached by
+    # worker-side runtime imports that static analysis can miss.
     config = load_config()
     search_mode = config.get("search_mode", "frame")
     logger.info("Running %s search (is_text=%s)", search_mode, is_text)
@@ -107,3 +145,10 @@ def run_chunk_search(query_data, is_text=False, top_k=None):
         end_time = float(time_range[1])
         matched_results.append((start_time, end_time, distances[0][rank], video_paths[index_value]))
     return matched_results
+
+
+def warmup_search_runtime():
+    config = load_config()
+    get_engine()
+    load_search_assets(config)
+    load_chunk_search_assets(config)

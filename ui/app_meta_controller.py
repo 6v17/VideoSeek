@@ -1,5 +1,6 @@
 from PySide6.QtCore import QObject, Signal
 
+from ui.threading_utils import shutdown_thread
 from ui.workers import AboutFetchWorker, NoticeFetchWorker, VersionCheckWorker
 
 
@@ -43,13 +44,4 @@ class AppMetaController(QObject):
 
     def shutdown(self):
         for worker in (self.version_worker, self.notice_worker, self.about_worker):
-            if not worker or not worker.isRunning():
-                continue
-            worker.quit()
-            if worker.wait(1500):
-                continue
-            worker.requestInterruption()
-            if worker.wait(1500):
-                continue
-            worker.terminate()
-            worker.wait(1000)
+            shutdown_thread(worker)

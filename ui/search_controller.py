@@ -5,7 +5,8 @@ from PySide6.QtWidgets import QLabel
 
 from src.core.clip_embedding import get_engine_runtime_warning
 from ui.table_views import populate_result_table
-from ui.workers import SearchWorker, ThumbLoader
+from ui.threading_utils import shutdown_thread
+from ui.workers import SearchWarmupWorker, SearchWorker, ThumbLoader
 
 
 class SearchController(QObject):
@@ -13,9 +14,11 @@ class SearchController(QObject):
         super().__init__(parent_window)
         self.parent_window = parent_window
         self.worker = None
+        self.warmup_worker = None
         self.thumb_thread = None
         self.start_time = 0.0
         self._gpu_warning_shown = False
+        self._warmup_started = False
 
     def start_search(self, query, is_text):
         self.stop_thumbnail_loading()
@@ -36,10 +39,19 @@ class SearchController(QObject):
 
     def shutdown(self):
         self.stop_thumbnail_loading()
-        self._shutdown_thread(self.worker)
+        shutdown_thread(self.worker)
+        shutdown_thread(self.warmup_worker)
+
+    def start_warmup(self):
+        if self._warmup_started:
+            return
+        self._warmup_started = True
+        self.warmup_worker = SearchWarmupWorker()
+        self.warmup_worker.finished.connect(self._finish_warmup)
+        self.warmup_worker.start()
 
     def stop_thumbnail_loading(self):
-        self._shutdown_thread(self.thumb_thread, stop_first=True)
+        shutdown_thread(self.thumb_thread, stop_first=True)
 
     def _display_results(self, results):
         self.parent_window._update_inference_backend_hint()
@@ -53,6 +65,7 @@ class SearchController(QObject):
             results,
             self.parent_window.handle_play,
             self.parent_window.open_result_in_explorer,
+            self.parent_window.handle_export_clip,
             self.parent_window.texts,
         )
         duration = time.time() - self.start_time
@@ -73,6 +86,9 @@ class SearchController(QObject):
     def _finish_search(self):
         self.parent_window.search_page.btn_search.setEnabled(True)
 
+    def _finish_warmup(self):
+        self.warmup_worker = None
+
     def _handle_search_error(self, error_text):
         self.parent_window._update_inference_backend_hint()
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["search_failed"])
@@ -87,17 +103,3 @@ class SearchController(QObject):
                 )
             return
         self.parent_window.show_error_dialog(self.parent_window.texts["search_failed"], error_text)
-
-    def _shutdown_thread(self, thread, stop_first=False):
-        if not thread or not thread.isRunning():
-            return
-        if stop_first and hasattr(thread, "stop"):
-            thread.stop()
-        thread.quit()
-        if thread.wait(1500):
-            return
-        thread.requestInterruption()
-        if thread.wait(1500):
-            return
-        thread.terminate()
-        thread.wait(1000)

@@ -111,7 +111,7 @@ def resolve_model_dir_info():
         from src.app.config import load_config
 
         configured_model_dir = load_config().get("model_dir", "").strip()
-        if configured_model_dir:
+        if configured_model_dir and os.path.isdir(configured_model_dir):
             return configured_model_dir, "configured"
     except Exception:
         pass
@@ -124,7 +124,7 @@ def sync_model_dir_to_config():
 
     config = load_config()
     configured_model_dir = config.get("model_dir", "").strip()
-    if configured_model_dir and configured_model_dir != get_default_model_dir():
+    if configured_model_dir and configured_model_dir != get_default_model_dir() and os.path.isdir(configured_model_dir):
         return configured_model_dir
 
     resolved_dir, _ = resolve_model_dir_info()
@@ -216,14 +216,19 @@ def save_meta(meta, meta_file):
         json.dump(meta, handle, indent=4, ensure_ascii=False)
 
 
-def create_preview_clip(input_path, start_sec, output_path):
+def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
     from src.app.config import load_config
 
     ffmpeg = get_ffmpeg_path()
     config = load_config()
-    preview_seconds = config.get("preview_seconds", 6)
+    preview_seconds = float(config.get("preview_seconds", 6))
     preview_width = config.get("preview_width", 640)
     preview_height = config.get("preview_height", 360)
+
+    input_path = os.fspath(input_path)
+    output_path = os.fspath(output_path)
+    start_sec = max(0.0, float(start_sec))
+    clip_duration = preview_seconds if duration_sec is None else max(0.1, float(duration_sec))
 
     if os.path.exists(output_path):
         try:
@@ -231,15 +236,20 @@ def create_preview_clip(input_path, start_sec, output_path):
         except OSError:
             pass
 
+    fast_seek = max(0.0, start_sec - 1.0)
+    precise_seek = start_sec - fast_seek
+
     cmd = [
         ffmpeg,
         "-y",
         "-ss",
-        str(max(0, start_sec - 1)),
-        "-t",
-        str(preview_seconds),
+        f"{fast_seek:.3f}",
         "-i",
         input_path,
+        "-ss",
+        f"{precise_seek:.3f}",
+        "-t",
+        f"{clip_duration:.3f}",
         "-s",
         f"{preview_width}x{preview_height}",
         "-c:v",
@@ -250,7 +260,12 @@ def create_preview_clip(input_path, start_sec, output_path):
         "zerolatency",
         "-crf",
         "32",
-        "-an",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
         output_path,
     ]
 
@@ -263,6 +278,75 @@ def create_preview_clip(input_path, start_sec, output_path):
     return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
 
 
+def export_original_clip(input_path, start_sec, duration_sec, output_path):
+    ffmpeg = get_ffmpeg_path()
+    input_path = os.fspath(input_path)
+    output_path = os.fspath(output_path)
+    start_sec = max(0.0, float(start_sec))
+    duration_sec = max(0.1, float(duration_sec))
+
+    ensure_folder_exists(output_path)
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-ss",
+        f"{start_sec:.3f}",
+        "-i",
+        input_path,
+        "-t",
+        f"{duration_sec:.3f}",
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+
+    return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
+
+
+def get_video_duration_seconds(video_path):
+    path = os.fspath(video_path)
+    capture = cv2.VideoCapture(path)
+    if not capture.isOpened():
+        capture.release()
+        return None
+
+    fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+    frame_count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+    capture.release()
+
+    if fps <= 0.0 or frame_count <= 0.0:
+        return None
+    return frame_count / fps
+
+
 def build_preview_cache_path(video_path, start_sec):
     cache_dir = os.path.join(get_app_data_dir(), "cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -272,19 +356,21 @@ def build_preview_cache_path(video_path, start_sec):
 
 
 def libx264_param():
+    # Retained intentionally until ffmpeg codec selection is fully inlined.
     return "libx264"
 
 
 def open_in_explorer(video_path):
-    if not os.path.exists(video_path):
+    path = os.fspath(video_path)
+    if not os.path.exists(path):
         logger.warning("File does not exist: %s", video_path)
-        return
+        return False
 
-    path = os.path.normpath(os.path.abspath(video_path))
+    path = os.path.normpath(os.path.abspath(path))
 
     if sys.platform == "win32":
         try:
-            subprocess.run(["explorer", f"/select,{path}"], check=False)
+            subprocess.run(["explorer", "/select,", path], check=False)
         except Exception as exc:
             logger.warning("Windows locate failed: %s", exc)
             os.startfile(os.path.dirname(path))
@@ -292,6 +378,7 @@ def open_in_explorer(video_path):
         subprocess.run(["open", "-R", path], check=False)
     else:
         subprocess.run(["xdg-open", os.path.dirname(path)], check=False)
+    return True
 
 
 def open_folder_in_explorer(folder_path):
@@ -313,6 +400,7 @@ def open_folder_in_explorer(folder_path):
 
 
 def get_single_thumbnail(video_path, time_sec):
+    # Retained intentionally: imported dynamically inside ThumbLoader.run().
     ffmpeg_bin = get_ffmpeg_path()
     cmd = [
         ffmpeg_bin,

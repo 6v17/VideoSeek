@@ -7,6 +7,7 @@ from src.services.runtime_resource_service import (
     get_runtime_resource_status,
 )
 from ui.dialogs import ModelDownloadDialog
+from ui.threading_utils import shutdown_thread
 from ui.workers import ResourceDownloadWorker
 
 
@@ -71,9 +72,7 @@ class RuntimeResourceController(QObject):
         self.worker.start()
 
     def shutdown(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.quit()
-            self.worker.wait(1500)
+        shutdown_thread(self.worker)
 
     def _ensure_dialog(self):
         if self.dialog is None:

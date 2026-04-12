@@ -22,6 +22,18 @@ def list_libraries():
     return normalized
 
 
+def list_partial_libraries(include_offline=False):
+    libraries = list_libraries()
+    partial = []
+    for path, data in libraries.items():
+        if str(data.get("index_state", "")).strip().lower() != "partial":
+            continue
+        if not include_offline and not os.path.exists(path):
+            continue
+        partial.append(path)
+    return partial
+
+
 def add_library(path):
     config = load_config()
     meta = load_meta(config["meta_file"])
@@ -31,7 +43,7 @@ def add_library(path):
     if normalized_path in meta["libraries"]:
         return False
 
-    meta["libraries"][normalized_path] = {"files": {}, "last_scan": ""}
+    meta["libraries"][normalized_path] = {"files": {}, "last_scan": "", "index_state": "pending"}
     save_meta(meta, config["meta_file"])
     return True
 

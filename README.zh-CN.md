@@ -26,7 +26,7 @@ VideoSeek 是一个基于 `PySide6 + ONNX Runtime + FAISS + FFmpeg` 的桌面语
 1. 安装依赖
 
 ```bash
-pip install onnxruntime-gpu opencv-python PySide6 faiss-cpu numpy pillow ftfy regex yt-dlp
+pip install onnxruntime-directml opencv-python PySide6 faiss-cpu numpy pillow ftfy regex yt-dlp
 ```
 
 2. 启动应用
