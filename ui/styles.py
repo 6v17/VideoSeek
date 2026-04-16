@@ -11,21 +11,30 @@ QWidget {
 #AppRoot, #ContentArea {
     background: __WINDOW__;
 }
-#NavSidebar, #PageHeader, #PanelCard {
+#NavSidebar, #PageHeader, #PanelCard, #SubPanelCard {
     background: __SIDEBAR__;
     border: 1px solid __LINE__;
     border-radius: 18px;
 }
-#PageHeader, #PanelCard {
+#PageHeader, #PanelCard, #SubPanelCard {
     background: __PANEL__;
+}
+#SettingsSectionHeader {
+    background: __FIELD__;
+    border-bottom: 1px solid __LINE__;
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
 }
 #BrandTitle {
     color: __HEADLINE__;
     font-size: 28px;
     font-weight: 700;
 }
-#BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint, #StatusLabel {
+#BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint {
     color: __MUTED__;
+}
+#CardHint {
+    line-height: 1.45em;
 }
 #StatusHint {
     color: __MUTED__;
@@ -43,7 +52,13 @@ QWidget {
     color: __MUTED__;
 }
 #StatusLabel {
+    color: __HEADLINE__;
     font-size: 12px;
+    font-weight: 600;
+    background: __ACCENT_SOFT__;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 10px;
+    padding: 8px 10px;
 }
 #HeroCard {
     background: __HERO__;
@@ -142,6 +157,72 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid __ACCENT__;
+}
+QLabel[settingLabel="true"] {
+    color: __HEADLINE__;
+    font-weight: 600;
+    line-height: 1.35em;
+}
+#SubPanelCard QLabel[settingLabel="true"] {
+    padding-top: 6px;
+}
+#SettingHintButton {
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 9px;
+    color: __MUTED__;
+    background: __FIELD__;
+    font-weight: 700;
+    font-size: 11px;
+}
+#SettingHintButton:hover {
+    border-color: __ACCENT__;
+    color: __ACCENT__;
+}
+QSpinBox[settingField="true"], QDoubleSpinBox[settingField="true"], QComboBox[settingField="true"], QLineEdit[settingField="true"] {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+    padding: 7px 10px;
+    min-height: 34px;
+    color: __HEADLINE__;
+}
+QSpinBox[settingField="true"]:hover, QDoubleSpinBox[settingField="true"]:hover, QComboBox[settingField="true"]:hover, QLineEdit[settingField="true"]:hover {
+    border-color: __LINE_STRONG__;
+}
+QSpinBox[settingField="true"]:focus, QDoubleSpinBox[settingField="true"]:focus, QComboBox[settingField="true"]:focus, QLineEdit[settingField="true"]:focus {
+    border-color: __ACCENT__;
+}
+QComboBox[settingField="true"]::drop-down {
+    border: none;
+    width: 24px;
+}
+QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::up-button, QSpinBox[settingField="true"]::down-button, QDoubleSpinBox[settingField="true"]::down-button {
+    border: none;
+    width: 20px;
+    background: transparent;
+}
+#SettingRowContainer {
+    background: transparent;
+    border-bottom: 1px solid __LINE__;
+}
+#SettingRow {
+    background: transparent;
+}
+#SettingLabelBlock {
+    background: transparent;
+}
+#SamplingBundle {
+    background: transparent;
+}
+#InlineFieldLabel {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 2px;
 }
 #ImageDropZone, #PreviewPlaceholder {
     background: __FIELD__;

@@ -60,7 +60,7 @@ def update_videos_flow(
 
     if should_cleanup_missing_files:
         if progress_callback:
-            progress_callback(5, "Cleaning stale index data")
+            progress_callback(5, "Cleaning stale index source")
         removed_any = False
         for video_id in cleanup_missing_library_files(meta, config, target_lib):
             removed_any = True

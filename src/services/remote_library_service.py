@@ -18,7 +18,7 @@ from src.services.remote_link_precheck_service import (
     build_stable_source_id as _build_stable_source_id,
     normalize_link_input as _normalize_link_input,
 )
-from src.utils import get_app_data_dir, get_ffmpeg_path
+from src.utils import get_app_data_dir, get_ffmpeg_path, resolve_sampling_fps
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -175,9 +175,9 @@ def build_remote_library_from_links(
             if str(source.get("source_id", "")).strip():
                 existing_source_ids.add(str(source["source_id"]).strip())
             duration = _probe_duration(source["input"], headers=source.get("http_headers"))
-            effective_fps = sampled_fps
-            if duration and duration > 0 and (sampled_fps * duration) > max_frames_per_video:
-                effective_fps = max(float(max_frames_per_video) / float(duration), 0.01)
+            effective_fps = resolve_sampling_fps(duration, config=config, requested_fps=sampled_fps)
+            if duration and duration > 0 and (effective_fps * duration) > max_frames_per_video:
+                effective_fps = min(effective_fps, max(float(max_frames_per_video) / float(duration), 0.01))
             _emit(progress_callback, min(95, base + max(1, int(step_span * 0.35))), f"Extracting frames {idx}/{total_links}")
             frames, timestamps = _extract_frames(
                 source["input"],
@@ -302,7 +302,7 @@ def import_remote_library_zip(zip_path):
 def _prepare_source(link, mode="download"):
     yt_dlp = _load_yt_dlp()
     if mode == "download":
-        cache_dir = os.path.join(get_app_data_dir(), "data", "remote_build_cache")
+        cache_dir = os.path.join(get_app_data_dir(), "source", "remote_build_cache")
         os.makedirs(cache_dir, exist_ok=True)
         options = {
             "format": "mp4/bestvideo+bestaudio/best",
@@ -584,7 +584,7 @@ def _probe_local_duration_fallback(source_input):
 def _write_build_report(mode, requested_links, status, max_frames_per_video, sampled_fps):
     paths = get_remote_library_paths()
     vector_file = str(paths.get("vector_file", "") or "")
-    report_dir = os.path.dirname(vector_file) if vector_file else os.path.join("data", "remote")
+    report_dir = os.path.dirname(vector_file) if vector_file else os.path.join("source", "remote")
     os.makedirs(report_dir, exist_ok=True)
     report_path = os.path.join(report_dir, "build_report.json")
 

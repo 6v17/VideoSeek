@@ -1,4 +1,4 @@
-import tempfile
+﻿import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -150,7 +150,7 @@ class IndexingServiceTests(unittest.TestCase):
     ):
         mock_load_config.return_value = {
             "auto_cleanup_missing_files": False,
-            "meta_file": "data/meta.json",
+            "meta_file": "source/meta.json",
         }
 
         output = update_video.update_videos_flow()
@@ -181,7 +181,7 @@ class IndexingServiceTests(unittest.TestCase):
     ):
         mock_load_config.return_value = {
             "auto_cleanup_missing_files": False,
-            "meta_file": "data/meta.json",
+            "meta_file": "source/meta.json",
         }
 
         output = update_video.update_videos_flow(force_cleanup_missing_files=True)
@@ -193,7 +193,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.workflows.update_video.save_meta")
     @patch("src.workflows.update_video.load_meta", return_value={"libraries": {"D:\\videos": {"files": {}}}})
-    @patch("src.workflows.update_video.load_config", return_value={"auto_cleanup_missing_files": False, "meta_file": "data/meta.json"})
+    @patch("src.workflows.update_video.load_config", return_value={"auto_cleanup_missing_files": False, "meta_file": "source/meta.json"})
     @patch("src.workflows.update_video.garbage_collect_indices")
     @patch("src.workflows.update_video.scan_target_libraries", side_effect=RuntimeError("interrupted"))
     def test_update_videos_flow_keeps_partial_state_on_interruption(
@@ -245,6 +245,76 @@ class SearchServiceTests(unittest.TestCase):
 
 
 class UtilsTests(unittest.TestCase):
+    def test_resolve_sampling_fps_returns_fixed_fps_by_default(self):
+        result = utils.resolve_sampling_fps(
+            duration_sec=600,
+            config={"fps": 2},
+        )
+
+        self.assertEqual(result, 2.0)
+
+    def test_resolve_sampling_fps_uses_fixed_mode_even_with_rules(self):
+        result = utils.resolve_sampling_fps(
+            duration_sec=120,
+            config={"fps": 1.5, "sampling_fps_mode": "fixed", "sampling_fps_rules": "0-5m=10"},
+        )
+
+        self.assertEqual(result, 1.5)
+
+    def test_resolve_sampling_fps_matches_custom_ranges(self):
+        config = {
+            "fps": 1,
+            "sampling_fps_mode": "dynamic",
+            "sampling_fps_rules": "0-10m=2; 10m-30m=1; 30m-=0.25",
+        }
+
+        self.assertEqual(utils.resolve_sampling_fps(duration_sec=120, config=config), 2.0)
+        self.assertEqual(utils.resolve_sampling_fps(duration_sec=900, config=config), 1.0)
+        self.assertEqual(utils.resolve_sampling_fps(duration_sec=3600, config=config), 0.25)
+
+    def test_resolve_sampling_fps_falls_back_to_base_fps_when_no_range_matches(self):
+        result = utils.resolve_sampling_fps(
+            duration_sec=60,
+            config={"fps": 1.5, "sampling_fps_mode": "dynamic", "sampling_fps_rules": "10m-20m=0.8"},
+        )
+
+        self.assertEqual(result, 1.5)
+
+    def test_resolve_sampling_fps_uses_narrower_matching_rule_when_ranges_overlap(self):
+        result = utils.resolve_sampling_fps(
+            duration_sec=120,
+            config={"fps": 1, "sampling_fps_mode": "dynamic", "sampling_fps_rules": "0-1h=0.5; 0-10m=2; 10m-30m=1"},
+        )
+
+        self.assertEqual(result, 2.0)
+
+    def test_parse_sampling_fps_rules_normalizes_common_separators(self):
+        rules = utils.parse_sampling_fps_rules("0-10m=2\uFF1B10m-30m=1\uFF0C30m-=0.4")
+
+        self.assertEqual([rule["fps"] for rule in rules], [2.0, 1.0, 0.4])
+
+    def test_validate_sampling_fps_rules_rejects_invalid_items(self):
+        is_valid, _ = utils.validate_sampling_fps_rules("0-10m=2; bad-rule")
+
+        self.assertFalse(is_valid)
+
+    def test_validate_sampling_fps_rules_rejects_missing_units(self):
+        is_valid, _ = utils.validate_sampling_fps_rules("0-10m=2; 10-60=1")
+
+        self.assertFalse(is_valid)
+
+    def test_validate_sampling_fps_rules_rejects_non_minute_units(self):
+        is_valid, _ = utils.validate_sampling_fps_rules("0-10m=2; 10m-1h=1")
+
+        self.assertFalse(is_valid)
+
+    def test_validate_sampling_fps_rules_rejects_reversed_or_overlapping_ranges(self):
+        reversed_valid, _ = utils.validate_sampling_fps_rules("0-10m=2; 60m-1m=1")
+        overlap_valid, _ = utils.validate_sampling_fps_rules("0-10m=2; 5m-20m=1")
+
+        self.assertFalse(reversed_valid)
+        self.assertFalse(overlap_valid)
+
     def test_resolve_resource_path_prefers_configured_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             configured_dir = Path(temp_dir) / "models"
@@ -438,8 +508,8 @@ class LibraryDetailServiceTests(unittest.TestCase):
         mock_exists,
     ):
         mock_load_config.return_value = {
-            "vector_dir": "data/vector",
-            "index_dir": "data/index",
+            "vector_dir": "source/vector",
+            "index_dir": "source/index",
         }
         mock_list_libraries.return_value = {
             "D:/videos": {
@@ -460,6 +530,62 @@ class LibraryDetailServiceTests(unittest.TestCase):
 
 
 class RemoteLibraryDetailServiceTests(unittest.TestCase):
+    @patch("src.services.remote_library_service._write_build_report", return_value="source/remote/build_report.json")
+    @patch("src.services.remote_library_service.get_remote_library_status")
+    @patch("src.services.remote_library_service.np.save")
+    @patch("src.services.remote_library_service.create_clip_index")
+    @patch("src.services.remote_library_service.get_clip_embeddings_batch")
+    @patch("src.services.remote_library_service._extract_frames")
+    @patch("src.services.remote_library_service._probe_duration", return_value=600.0)
+    @patch("src.services.remote_library_service._prepare_source")
+    @patch("src.services.remote_library_service.get_remote_library_paths")
+    @patch("src.services.remote_library_service.load_config")
+    def test_build_remote_library_from_links_uses_dynamic_sampling_fps(
+        self,
+        mock_load_config,
+        mock_paths,
+        mock_prepare_source,
+        _mock_probe_duration,
+        mock_extract_frames,
+        mock_embeddings,
+        mock_create_index,
+        _mock_save,
+        mock_status,
+        _mock_write_report,
+    ):
+        mock_load_config.return_value = {
+            "fps": 1,
+            "sampling_fps_mode": "dynamic",
+            "sampling_fps_rules": "0-5m=2; 5m-20m=0.5; 20m-=0.25",
+            "remote_max_frames": 2000,
+        }
+        mock_paths.return_value = {
+            "index_file": "source/remote/remote_index.faiss",
+            "vector_file": "source/remote/remote_vectors.npy",
+        }
+        mock_prepare_source.return_value = {
+            "input": "https://example.com/video.mp4",
+            "http_headers": None,
+            "source_link": "https://example.com/watch?v=1",
+            "source_id": "source_1",
+            "title": "Sample",
+        }
+        mock_extract_frames.return_value = ([np.zeros((224, 224, 3), dtype=np.uint8)], [0.0])
+        mock_embeddings.return_value = np.array([[1.0, 0.0]], dtype=np.float32)
+        mock_create_index.return_value = object()
+        mock_status.return_value = {
+            "ready": True,
+            "index_file": "source/remote/remote_index.faiss",
+            "vector_file": "source/remote/remote_vectors.npy",
+        }
+
+        remote_library_service.build_remote_library_from_links(
+            ["https://example.com/watch?v=1"],
+            incremental=False,
+        )
+
+        self.assertAlmostEqual(mock_extract_frames.call_args.kwargs["fps"], 0.5)
+
     @patch("src.services.remote_library_service._load_existing_payload")
     @patch("src.services.remote_library_service.os.path.exists", return_value=True)
     @patch("src.services.remote_library_service.get_remote_library_status")
@@ -471,8 +597,8 @@ class RemoteLibraryDetailServiceTests(unittest.TestCase):
     ):
         mock_status.return_value = {
             "ready": True,
-            "index_file": "data/remote/remote_index.faiss",
-            "vector_file": "data/remote/remote_vectors.npy",
+            "index_file": "source/remote/remote_index.faiss",
+            "vector_file": "source/remote/remote_vectors.npy",
         }
         mock_payload.return_value = {
             "source_links": ["https://a", "https://a", "https://b"],

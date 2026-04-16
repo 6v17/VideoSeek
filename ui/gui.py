@@ -1,11 +1,13 @@
 import os
 import re
+import webbrowser
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QMainWindow, QMessageBox, QScrollArea, QStackedWidget, QVBoxLayout, QWidget, QHBoxLayout
+from PySide6.QtWidgets import QApplication, QFileDialog, QFrame, QMainWindow, QMessageBox, QScrollArea, QStackedWidget, \
+    QVBoxLayout, QWidget, QHBoxLayout, QAbstractItemView
 
 from src.app.config import DEFAULT_CONFIG, get_app_version, load_config, pop_migration_notice, save_config
 from src.app.i18n import get_texts
@@ -29,15 +31,20 @@ from src.utils import (
     get_ffmpeg_status_text,
     get_configured_model_dir,
     load_meta,
+    normalize_sampling_fps_mode,
+    normalize_sampling_fps_rules_text,
     open_folder_in_explorer,
     open_in_explorer,
+    parse_sampling_fps_rules,
+    resolve_sampling_fps,
+    validate_sampling_fps_rules,
     sync_ffmpeg_path_to_config,
     sync_model_dir_to_config,
 )
 from src.services.version_service import get_local_version_status
 from ui.app_meta_controller import AppMetaController
 from ui.components import LibraryPage, LinkSearchPage, NavigationSidebar, SearchPage, SettingsPage
-from ui.dialogs import AboutDialog, AppMessageDialog, NoticeDialog, ResourceTableDialog
+from ui.dialogs import AboutDialog, AppMessageDialog, NoticeDialog, ResourceTableDialog, SamplingRulesDialog
 from ui.indexing_controller import IndexingController
 from ui.layout import WINDOW_SIZES, apply_window_size
 from ui.network_search_controller import NetworkSearchController
@@ -59,6 +66,7 @@ class MainWindow(QMainWindow):
         self.notice_payload = None
         self.about_payload = None
         self.models_ready = True
+        self._startup_complete = False
 
         cfg = load_config()
         self.is_dark_mode = cfg.get("theme", "dark") == "dark"
@@ -88,18 +96,14 @@ class MainWindow(QMainWindow):
         self.audio_output.setVolume(1.0)
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
-        sync_model_dir_to_config()
-        sync_ffmpeg_path_to_config()
         self.apply_texts()
         self.load_settings_values()
         self._show_startup_migration_notice()
         self.check_runtime_resources()
         if self.startup_cancelled:
             return
-        self.refresh_library_table()
-        self._prompt_resume_partial_indexing()
         self.apply_theme()
-        self.app_meta_controller.refresh(self.language)
+        QTimer.singleShot(0, self._finish_startup_sequence)
 
     def init_ui(self):
         self.setWindowTitle(f"VideoSeek v{get_app_version()}")
@@ -134,7 +138,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self._build_scroll_page(self.search_page))
         self.pages.addWidget(self._build_scroll_page(self.link_page))
         self.pages.addWidget(self._build_scroll_page(self.library_page))
-        self.pages.addWidget(self._build_scroll_page(self.settings_page))
+        self.pages.addWidget(self.settings_page)
         content_layout.addWidget(self.pages)
         main_layout.addWidget(self.content, 1)
 
@@ -175,6 +179,7 @@ class MainWindow(QMainWindow):
 
         self.settings_page.btn_save.clicked.connect(self.save_settings)
         self.settings_page.btn_reset.clicked.connect(self.reset_settings)
+        self.settings_page.btn_edit_sampling_rules.clicked.connect(self._open_sampling_rules_dialog)
 
         self.setAcceptDrops(True)
 
@@ -300,9 +305,6 @@ class MainWindow(QMainWindow):
         self.settings_page.btn_save.setText(t["save_settings"])
         self.settings_page.btn_reset.setText(t["reset_settings"])
         self.settings_page.configure_form_labels(t)
-        self.settings_page.hint_ffmpeg_active.setText(
-            t["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
-        )
         self._update_inference_backend_hint()
 
         if not self.current_img_path and not self.search_page.img_label.pixmap():
@@ -313,7 +315,22 @@ class MainWindow(QMainWindow):
         self.link_page.lbl_search_status.setText(t["ready"])
         self.library_page.lbl_status.setText(t["ready"])
         self.settings_page.lbl_status.setText(t["settings_hint"])
+        self._bind_sampling_preview_signals()
+        self._update_sampling_preview()
+        if self._startup_complete:
+            self.refresh_library_table()
+
+    def _finish_startup_sequence(self):
+        synced_model_dir = sync_model_dir_to_config()
+        synced_path = sync_ffmpeg_path_to_config()
+        if synced_model_dir:
+            self.settings_page.input_model_dir.setText(synced_model_dir)
+        if synced_path:
+            self.settings_page.input_ffmpeg_path.setText(synced_path)
+        self._startup_complete = True
         self.refresh_library_table()
+        self._prompt_resume_partial_indexing()
+        self.app_meta_controller.refresh(self.language)
 
     def load_settings_values(self):
         try:
@@ -321,7 +338,17 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_load_failed"], exc)
             return
+        sampling_fps_mode = normalize_sampling_fps_mode(
+            config.get("sampling_fps_mode", DEFAULT_CONFIG["sampling_fps_mode"])
+        )
+        self.settings_page.set_sampling_fps_mode(sampling_fps_mode)
         self.settings_page.input_fps.setValue(config.get("fps", DEFAULT_CONFIG["fps"]))
+        sampling_rules = normalize_sampling_fps_rules_text(
+            config.get("sampling_fps_rules", DEFAULT_CONFIG["sampling_fps_rules"])
+        )
+        if sampling_fps_mode == "dynamic" and not sampling_rules:
+            sampling_rules = DEFAULT_CONFIG["sampling_fps_rules"]
+        self.settings_page.set_sampling_fps_rules_text(sampling_rules)
         self.settings_page.input_top_k.setValue(config.get("search_top_k", DEFAULT_CONFIG["search_top_k"]))
         self.settings_page.input_preview_seconds.setValue(
             config.get("preview_seconds", DEFAULT_CONFIG["preview_seconds"])
@@ -364,15 +391,20 @@ class MainWindow(QMainWindow):
         self.settings_page.input_auto_cleanup_missing_files.setCurrentIndex(1 if auto_cleanup_missing_files else 0)
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
-        self.settings_page.hint_ffmpeg_active.setText(
-            self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
-        )
         self._update_inference_backend_hint()
+        self._update_sampling_rules_feedback()
+        self._update_sampling_preview()
 
     def save_settings(self):
         try:
             config = load_config()
-            previous_fps = config.get("fps", DEFAULT_CONFIG["fps"])
+            previous_fps = config.get("fps", DEFAULT_CONFIG["fps"] )
+            previous_sampling_fps_mode = normalize_sampling_fps_mode(
+                config.get("sampling_fps_mode", DEFAULT_CONFIG["sampling_fps_mode"])
+            )
+            previous_sampling_fps_rules = normalize_sampling_fps_rules_text(
+                config.get("sampling_fps_rules", DEFAULT_CONFIG["sampling_fps_rules"])
+            )
             previous_similarity_threshold = float(
                 config.get("similarity_threshold", DEFAULT_CONFIG["similarity_threshold"])
             )
@@ -385,11 +417,30 @@ class MainWindow(QMainWindow):
             )
             previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
             new_fps = self.settings_page.input_fps.value()
+            new_sampling_fps_mode = normalize_sampling_fps_mode(
+                self.settings_page.get_sampling_fps_mode()
+            )
+            new_sampling_fps_rules = normalize_sampling_fps_rules_text(
+                self.settings_page.get_sampling_fps_rules_text()
+            )
+            rules_valid, _ = validate_sampling_fps_rules(new_sampling_fps_rules)
+            if new_sampling_fps_mode == "dynamic" and new_sampling_fps_rules and not rules_valid:
+                self.settings_page.lbl_status.setText(self.texts["setting_sampling_fps_rules_invalid"] )
+                self.show_info_dialog(
+                    self.texts["error_title"],
+                    self.texts["setting_sampling_fps_rules_invalid"],
+                    kind="warning",
+                )
+                return
             new_similarity_threshold = float(self.settings_page.input_similarity_threshold.value())
             new_max_chunk_duration = float(self.settings_page.input_max_chunk_duration.value())
             new_min_chunk_size = int(self.settings_page.input_min_chunk_size.value())
             new_chunk_similarity_mode = str(self.settings_page.input_chunk_similarity_mode.currentData())
             config["fps"] = new_fps
+            config["sampling_fps_mode"] = new_sampling_fps_mode
+            # Preserve the user's rule set even while fixed mode is active so
+            # switching back to dynamic mode does not silently drop it.
+            config["sampling_fps_rules"] = new_sampling_fps_rules
             config["search_top_k"] = self.settings_page.input_top_k.value()
             config["preview_seconds"] = self.settings_page.input_preview_seconds.value()
             config["preview_width"] = self.settings_page.input_preview_width.value()
@@ -408,7 +459,12 @@ class MainWindow(QMainWindow):
             config["ffmpeg_path"] = self.settings_page.input_ffmpeg_path.text().strip()
             config["model_dir"] = self.settings_page.input_model_dir.text().strip() or DEFAULT_CONFIG["model_dir"]
             save_config(config)
-            fps_changed = previous_fps != new_fps
+            effective_rules = new_sampling_fps_rules if new_sampling_fps_mode == "dynamic" else ""
+            fps_changed = (
+                previous_fps != new_fps
+                or previous_sampling_fps_mode != new_sampling_fps_mode
+                or previous_sampling_fps_rules != effective_rules
+            )
             chunk_changed = (
                 previous_similarity_threshold != new_similarity_threshold
                 or previous_max_chunk_duration != new_max_chunk_duration
@@ -426,10 +482,8 @@ class MainWindow(QMainWindow):
                 if synced_path:
                     self.settings_page.input_ffmpeg_path.setText(synced_path)
             self.check_runtime_resources(show_dialog=False)
-            self.settings_page.hint_ffmpeg_active.setText(
-                self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
-            )
             self._update_inference_backend_hint()
+            self._update_sampling_preview()
             save_message = self._build_settings_save_message(fps_changed, chunk_changed)
             self.settings_page.lbl_status.setText(save_message)
             self.show_info_dialog(self.texts["success_title"], save_message, kind="success")
@@ -455,14 +509,104 @@ class MainWindow(QMainWindow):
             if synced_path:
                 self.settings_page.input_ffmpeg_path.setText(synced_path)
             self.check_runtime_resources(show_dialog=False)
-            self.settings_page.hint_ffmpeg_active.setText(
-                self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
-            )
             self._update_inference_backend_hint()
-            self.settings_page.lbl_status.setText(self.texts["reset_settings_done"])
+            self._update_sampling_preview()
+            self.settings_page.lbl_status.setText(self.texts["reset_settings_done"] )
             self.show_info_dialog(self.texts["success_title"], self.texts["reset_settings_done"], kind="success")
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _bind_sampling_preview_signals(self):
+        if getattr(self, "_sampling_preview_bound", False):
+            return
+        self._sampling_preview_bound = True
+        self.settings_page.input_fps.valueChanged.connect(self._update_sampling_preview)
+        self.settings_page.input_sampling_fps_mode.currentIndexChanged.connect(self._handle_sampling_mode_preview_changed)
+        self.settings_page.input_sampling_fps_mode.currentIndexChanged.connect(self._handle_sampling_mode_feedback_changed)
+        self.settings_page.input_sampling_fps_rules.textChanged.connect(self._update_sampling_preview)
+        self.settings_page.input_sampling_fps_rules.textChanged.connect(self._update_sampling_rules_feedback)
+
+    def _handle_sampling_mode_preview_changed(self, *_args):
+        self._ensure_dynamic_sampling_defaults()
+        self._update_sampling_preview()
+
+    def _handle_sampling_mode_feedback_changed(self, *_args):
+        self._ensure_dynamic_sampling_defaults()
+        self._update_sampling_rules_feedback()
+
+    def _open_sampling_rules_dialog(self):
+        dialog = SamplingRulesDialog(
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+            rules_text=self.settings_page.get_sampling_fps_rules_text() or DEFAULT_CONFIG["sampling_fps_rules"],
+        )
+        if dialog.exec():
+            self.settings_page.set_sampling_fps_rules_text(dialog.rules_text())
+            self._update_sampling_rules_feedback()
+            self._update_sampling_preview()
+
+    def _ensure_dynamic_sampling_defaults(self):
+        if normalize_sampling_fps_mode(self.settings_page.get_sampling_fps_mode()) != "dynamic":
+            return
+        current_rules_text = normalize_sampling_fps_rules_text(self.settings_page.get_sampling_fps_rules_text())
+        if current_rules_text:
+            return
+        self.settings_page.set_sampling_fps_rules_text(DEFAULT_CONFIG["sampling_fps_rules"])
+
+    def _update_sampling_rules_feedback(self):
+        current_rules_text = self.settings_page.get_sampling_fps_rules_text()
+        rules_text = normalize_sampling_fps_rules_text(current_rules_text)
+        sampling_fps_mode = normalize_sampling_fps_mode(self.settings_page.get_sampling_fps_mode())
+        default_hint = self.texts["setting_sampling_fps_rules_hint"]
+        if current_rules_text != rules_text:
+            self.settings_page.set_sampling_fps_rules_text(rules_text)
+            return
+        if sampling_fps_mode != "dynamic":
+            self.settings_page.set_sampling_rules_error_state(False)
+            return
+
+        is_valid, _ = validate_sampling_fps_rules(rules_text)
+        if rules_text and not is_valid:
+            self.settings_page.set_sampling_rules_error_state(True)
+            return
+
+        self.settings_page.set_sampling_rules_error_state(False)
+
+    def _update_sampling_preview(self):
+        base_fps = float(self.settings_page.input_fps.value())
+        sampling_fps_mode = normalize_sampling_fps_mode(self.settings_page.get_sampling_fps_mode())
+        rules_text = normalize_sampling_fps_rules_text(self.settings_page.get_sampling_fps_rules_text())
+        rules_valid, _ = validate_sampling_fps_rules(rules_text)
+        if sampling_fps_mode == "dynamic" and rules_text and not rules_valid:
+            return
+        samples = [
+            ("2m", 120.0),
+            ("10m", 600.0),
+            ("30m", 1800.0),
+            ("2h", 7200.0),
+        ]
+        preview_parts = []
+        for label, duration_sec in samples:
+            fps_value = resolve_sampling_fps(
+                duration_sec=duration_sec,
+                config={
+                    "fps": base_fps,
+                    "sampling_fps_mode": sampling_fps_mode,
+                    "sampling_fps_rules": rules_text,
+                },
+            )
+            frame_count = max(1, int(round(duration_sec * fps_value)))
+            if self.language == "zh":
+                preview_parts.append(f"{label} -> {fps_value:.2f} FPS / ~{frame_count}\u5e27")
+            else:
+                preview_parts.append(f"{label} -> {fps_value:.2f} FPS / ~{frame_count} frames")
+
+        if self.language != "zh":
+            prefix = "Fixed sampling" if sampling_fps_mode == "fixed" else "Duration-range sampling"
+        else:
+            prefix = "\u56fa\u5b9a\u91c7\u6837" if sampling_fps_mode == "fixed" else "\u603b\u957f\u5ea6\u533a\u95f4\u91c7\u6837"
+        self.settings_page.hint_sampling_fps_preview.setText(f"{prefix}: " + " | ".join(preview_parts))
 
     def show_notice(self):
         NoticeDialog(self, self.is_dark_mode, self.language, notice=self.notice_payload).exec()
@@ -749,9 +893,9 @@ class MainWindow(QMainWindow):
         suggested_name = f"{base_name}_clip_{int(float(sec)):06d}.mp4"
         save_path, _ = QFileDialog.getSaveFileName(
             self,
-            self.texts.get("export_clip_title", "导出预览片段"),
+            self.texts.get("export_clip_title", "\u5bfc\u51fa\u9884\u89c8\u7247\u6bb5"),
             suggested_name,
-            self.texts.get("export_clip_filter", "视频文件 (*.mp4 *.mkv *.mov)"),
+            self.texts.get("export_clip_filter", "\u89c6\u9891\u6587\u4ef6 (*.mp4 *.mkv *.mov)"),
         )
         if not save_path:
             return
@@ -760,10 +904,10 @@ class MainWindow(QMainWindow):
             if result.returncode != 0:
                 raise RuntimeError((result.stderr or b"").decode("utf-8", errors="ignore").strip())
             self.search_page.lbl_status.setText(
-                self.texts.get("export_clip_success", "片段已导出：{path}").format(path=save_path)
+                self.texts.get("export_clip_success", "\u7247\u6bb5\u5df2\u5bfc\u51fa\uff1a{path}").format(path=save_path)
             )
         except Exception as exc:
-            self.show_error_dialog(self.texts.get("export_clip_failed", "导出片段失败。"), exc)
+            self.show_error_dialog(self.texts.get("export_clip_failed", "\u5bfc\u51fa\u7247\u6bb5\u5931\u8d25\u3002"), exc)
 
     def upload_file(self):
         path, _ = QFileDialog.getOpenFileName(self, self.texts["select_image"], "", self.texts["image_filter"])
@@ -947,15 +1091,16 @@ class MainWindow(QMainWindow):
         else:
             self.settings_page.hint_inference_backend.setProperty("state", "neutral")
 
-        self.settings_page.hint_inference_backend.setText(
+        backend_label = (
             self.texts["setting_inference_backend"].format(backend=backend_text)
-            if backend_text else ""
+            if backend_text else self.texts["setting_inference_backend"].format(
+                backend=self.texts["setting_inference_uninitialized"]
+            )
         )
-        self.settings_page.hint_inference_backend.setVisible(bool(backend_text))
-        self.settings_page.hint_gpu_runtime.setText(self.texts["setting_gpu_runtime_link_only"])
-        self.settings_page.hint_gpu_runtime.setVisible(show_help_link)
-        self.settings_page.hint_inference_backend.style().unpolish(self.settings_page.hint_inference_backend)
-        self.settings_page.hint_inference_backend.style().polish(self.settings_page.hint_inference_backend)
+        if show_help_link:
+            backend_label = f"{backend_label} | {self.texts['setting_gpu_runtime_link_only']}"
+        ffmpeg_label = self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
+        self.settings_page.set_runtime_status_texts(backend_label, ffmpeg_label)
 
     def _handle_runtime_resource_exit(self):
         self.startup_cancelled = True
@@ -1080,8 +1225,8 @@ class MainWindow(QMainWindow):
                         index,
                         item["library_path"],
                         item["video_rel_path"],
-                        item["vector_file"],
-                        item["index_file"],
+                        os.path.basename(item["vector_file"]) if item.get("vector_file") else "",
+                        os.path.basename(item["index_file"]) if item.get("index_file") else "",
                         self.texts["details_yes"] if item["vector_exists"] else self.texts["details_no"],
                         self.texts["details_yes"] if item["index_exists"] else self.texts["details_no"],
                     ]
@@ -1102,6 +1247,14 @@ class MainWindow(QMainWindow):
                 rows=rows,
                 row_payloads=payloads,
                 export_default_name="local_vector_details.json",
+                stretch_column=3,
+                fixed_column_widths={
+                    0: 52,
+                    1: 220,
+                    2: 220,
+                    5: 86,
+                    6: 86,
+                },
                 issue_row_predicate=lambda row: row[5] == self.texts["details_no"] or row[6] == self.texts["details_no"],
                 extra_actions=[
                     {
@@ -1115,19 +1268,60 @@ class MainWindow(QMainWindow):
                         "handler": self._copy_selected_vector_detail_path,
                     },
                 ],
+                row_double_click_handler=self._open_vector_detail_payload,
             ).exec()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
+
+    def _open_vector_detail_payload(self, dialog, payload, item=None):
+        column = item.column() if item is not None else 3
+        library_path = str(payload.get("library_path", "")).strip()
+        video_rel_path = str(payload.get("video_rel_path", "")).strip()
+        vector_file = str(payload.get("vector_file", "")).strip()
+        index_file = str(payload.get("index_file", "")).strip()
+
+        if column == 1:
+            if not library_path:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            open_folder_in_explorer(library_path)
+            dialog.status_hint.setText(library_path)
+            return
+
+        if column == 2:
+            if not library_path or not video_rel_path:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            video_path = os.path.join(library_path, video_rel_path)
+            if os.path.exists(video_path):
+                open_in_explorer(video_path)
+                dialog.status_hint.setText(video_path)
+            else:
+                open_folder_in_explorer(library_path)
+                dialog.status_hint.setText(video_path)
+            return
+
+        if column == 3:
+            if not vector_file:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            open_in_explorer(vector_file) if os.path.exists(vector_file) else open_folder_in_explorer(os.path.dirname(vector_file))
+            dialog.status_hint.setText(vector_file)
+            return
+
+        if column == 4:
+            if not index_file:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            open_in_explorer(index_file) if os.path.exists(index_file) else open_folder_in_explorer(os.path.dirname(index_file))
+            dialog.status_hint.setText(index_file)
 
     def _open_selected_vector_detail_path(self, dialog):
         selected = dialog.get_selected_payloads()
         if not selected:
             dialog.status_hint.setText(self.texts["details_nothing_selected"])
             return
-        payload = selected[0]
-        target_path = payload["vector_file"] if payload.get("vector_exists") else payload["index_file"]
-        open_folder_in_explorer(os.path.dirname(target_path))
-        dialog.status_hint.setText(target_path)
+        self._open_vector_detail_payload(dialog, selected[0], dialog.table.currentItem())
 
     def _copy_selected_vector_detail_path(self, dialog):
         selected = dialog.get_selected_payloads()
@@ -1196,7 +1390,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.show_error_dialog(self.texts["network_links_load_failed"], exc)
 
-    def _open_network_link_payload(self, dialog, payload):
+    def _open_network_link_payload(self, dialog, payload, item=None):
+        column = item.column() if item is not None else 2
+        if column not in {1, 2}:
+            return
         link = str(payload.get("source_link", "") or payload.get("source_id", "")).strip()
         if not link:
             dialog.status_hint.setText(self.texts["details_nothing_selected"])
@@ -1209,7 +1406,7 @@ class MainWindow(QMainWindow):
         if not selected:
             dialog.status_hint.setText(self.texts["details_nothing_selected"])
             return
-        self._open_network_link_payload(dialog, selected[0])
+        self._open_network_link_payload(dialog, selected[0], dialog.table.currentItem())
 
     def _copy_selected_network_link(self, dialog):
         selected = dialog.get_selected_payloads()
@@ -1225,8 +1422,8 @@ class MainWindow(QMainWindow):
 
     def open_network_download_cache_folder(self):
         cache_dirs = [
-            os.path.join(get_app_data_dir(), "data", "remote_build_cache"),
-            os.path.join(get_app_data_dir(), "data", "link_cache"),
+            os.path.join(get_app_data_dir(), "source", "remote_build_cache"),
+            os.path.join(get_app_data_dir(), "source", "link_cache"),
         ]
         for cache_dir in cache_dirs:
             if os.path.exists(cache_dir):
@@ -1240,9 +1437,7 @@ class MainWindow(QMainWindow):
         self.settings_page.input_model_dir.setText(result.get("model_dir", get_configured_model_dir()))
         if result.get("ffmpeg_path"):
             self.settings_page.input_ffmpeg_path.setText(result["ffmpeg_path"])
-            self.settings_page.hint_ffmpeg_active.setText(
-                self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
-            )
+            self._update_inference_backend_hint()
 
     def _apply_runtime_resource_status(self, status):
         self.models_ready = status["model_ready"]

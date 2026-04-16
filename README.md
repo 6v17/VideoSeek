@@ -242,7 +242,7 @@ python -m nuitka --standalone ^
 --output-dir=dist ^
 --output-filename=VideoSeek ^
 --windows-icon-from-ico=icon.ico ^
---include-data-file=config.json=config.json ^
+--include-source-file=config.json=config.json ^
 main.py
 ```
 

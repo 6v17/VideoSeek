@@ -5,14 +5,15 @@ import numpy as np
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from src.utils import get_ffmpeg_path
+from src.utils import get_ffmpeg_path, get_video_duration_seconds, resolve_sampling_fps
 
 logger = get_logger("extract_frames")
 
 
 def extract_frames_with_ffmpeg(video_path):
     config = load_config()
-    fps = config.get("fps", 1)
+    video_duration = get_video_duration_seconds(video_path)
+    fps = resolve_sampling_fps(video_duration, config=config)
 
     cap = cv2.VideoCapture(video_path)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -65,5 +66,5 @@ def extract_frames_with_ffmpeg(video_path):
         count += 1
 
     process.terminate()
-    logger.info("Frame extraction completed: %s frames for %s", len(frames), video_path)
+    logger.info("Frame extraction completed: %s frames for %s at %.3f FPS", len(frames), video_path, fps)
     return frames, timestamps

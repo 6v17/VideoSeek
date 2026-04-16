@@ -112,7 +112,7 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
             "timestamps": np.asarray([0.0, 1.0], dtype=np.float32),
         }
         config = {
-            "vector_dir": "data/vector",
+            "vector_dir": "source/vector",
             "similarity_threshold": 0.85,
             "max_chunk_duration": 5.0,
             "min_chunk_size": 2,
@@ -144,7 +144,7 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
             },
         }
         config = {
-            "vector_dir": "data/vector",
+            "vector_dir": "source/vector",
             "similarity_threshold": 0.85,
             "max_chunk_duration": 5.0,
             "min_chunk_size": 2,
@@ -174,8 +174,8 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
     @patch("src.services.indexing_service.ensure_folder_exists")
     def test_merge_and_save_all_chunks_persists_ranges(self, _mock_ensure_folder, mock_np_save, mock_create_index):
         config = {
-            "cross_chunk_index_file": "data/global/cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "data/global/cross_chunk_vectors.npy",
+            "cross_chunk_index_file": "source/global/cross_chunk_index.faiss",
+            "cross_chunk_vector_file": "source/global/cross_chunk_vectors.npy",
         }
         vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
         ranges = [(0.0, 1.0), (2.0, 3.0)]

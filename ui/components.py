@@ -1,9 +1,9 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDoubleSpinBox,
-    QFormLayout,
     QFrame,
     QGridLayout,
     QHeaderView,
@@ -12,11 +12,13 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QTextEdit,
     QTableWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +30,203 @@ def _fallback_text(texts, key, zh_text, en_text):
     if key in texts:
         return texts[key]
     return en_text if str(texts.get("delete", "")).lower() == "delete" else zh_text
+
+
+class SamplingRuleRow(QWidget):
+    def __init__(self, on_change, on_remove, parent=None):
+        super().__init__(parent)
+        self._on_change = on_change
+        self._on_remove = on_remove
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.start_input = QLineEdit()
+        self.end_input = QLineEdit()
+        self.fps_input = NoWheelDoubleSpinBox()
+        self.fps_input.setRange(0.01, 24.0)
+        self.fps_input.setDecimals(2)
+        self.fps_input.setSingleStep(0.1)
+        self.btn_remove = QPushButton()
+        self.btn_remove.setObjectName("GhostButton")
+        self.btn_remove.setMinimumHeight(34)
+
+        for widget, width in ((self.start_input, 92), (self.end_input, 92)):
+            widget.setMinimumWidth(width)
+            widget.setMaximumWidth(width + 36)
+            widget.setMinimumHeight(34)
+
+        self.fps_input.setMinimumWidth(86)
+        self.fps_input.setMaximumWidth(126)
+        self.fps_input.setMinimumHeight(34)
+
+        layout.addWidget(self.start_input, 0)
+        layout.addWidget(self.end_input, 0)
+        layout.addWidget(self.fps_input, 0)
+        layout.addWidget(self.btn_remove, 0)
+        layout.addStretch(1)
+
+        self.start_input.textChanged.connect(self._emit_change)
+        self.end_input.textChanged.connect(self._emit_change)
+        self.fps_input.valueChanged.connect(self._emit_change)
+        self.btn_remove.clicked.connect(lambda: self._on_remove(self))
+
+    def _emit_change(self, *_args):
+        self._on_change()
+
+    def set_texts(self, start_text, end_text, fps_value):
+        self.start_input.setText(start_text)
+        self.end_input.setText(end_text)
+        self.fps_input.setValue(max(0.01, float(fps_value)))
+
+    def get_rule_text(self):
+        start_text = self.start_input.text().strip()
+        end_text = self.end_input.text().strip()
+        fps_text = f"{self.fps_input.value():.2f}".rstrip("0").rstrip(".")
+        if not start_text and not end_text:
+            return ""
+        return f"{start_text}-{end_text}={fps_text}"
+
+
+class ClickableLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._click_handler = None
+
+    def set_click_handler(self, handler):
+        self._click_handler = handler
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and callable(self._click_handler) and self.rect().contains(event.position().toPoint()):
+            self._click_handler()
+        super().mouseReleaseEvent(event)
+
+
+class _NoWheelMixin:
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class NoWheelSpinBox(_NoWheelMixin, QSpinBox):
+    pass
+
+
+class NoWheelDoubleSpinBox(_NoWheelMixin, QDoubleSpinBox):
+    pass
+
+
+class NoWheelComboBox(_NoWheelMixin, QComboBox):
+    pass
+
+
+class SettingDetailPopup(QFrame):
+    def __init__(self, parent=None, is_dark=True):
+        super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setObjectName("SettingDetailPopup")
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self._anchor_label = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+
+        self.title_label = QLabel()
+        self.title_label.setObjectName("SettingDetailPopupTitle")
+        self.title_label.setWordWrap(True)
+
+        self.body_label = QLabel()
+        self.body_label.setObjectName("SettingDetailPopupBody")
+        self.body_label.setWordWrap(True)
+
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.body_label)
+        self.set_dark_mode(is_dark)
+
+    def set_dark_mode(self, is_dark):
+        bg = "#1b2433" if is_dark else "#ffffff"
+        border = "#3a4a67" if is_dark else "#d5ddea"
+        title = "#f5f8ff" if is_dark else "#121826"
+        body = "#b4c0d4" if is_dark else "#5f6e84"
+        shadow = "rgba(6, 12, 22, 0.28)" if is_dark else "rgba(15, 23, 42, 0.12)"
+        self.setStyleSheet(
+            f"""
+            #SettingDetailPopup {{
+                background: {bg};
+                border: 1px solid {border};
+                border-radius: 12px;
+            }}
+            #SettingDetailPopupTitle {{
+                color: {title};
+                font-size: 13px;
+                font-weight: 700;
+                background: transparent;
+            }}
+            #SettingDetailPopupBody {{
+                color: {body};
+                font-size: 12px;
+                font-weight: 600;
+                line-height: 1.45em;
+                background: transparent;
+            }}
+            """
+        )
+        self.setGraphicsEffect(None)
+
+    def show_for_label(self, label, title, text):
+        self._anchor_label = label
+        self.title_label.setText(title)
+        self.body_label.setText(text)
+        self.body_label.setMaximumWidth(320)
+        self.adjustSize()
+
+        anchor_global = label.mapToGlobal(label.rect().topRight())
+        x = anchor_global.x() + 10
+        y = anchor_global.y() - 4
+        screen = label.screen()
+        available = screen.availableGeometry() if screen is not None else self.screen().availableGeometry()
+
+        if x + self.width() > available.right() - 12:
+            left_anchor = label.mapToGlobal(label.rect().topLeft())
+            x = left_anchor.x() - self.width() - 10
+        if x < available.left() + 12:
+            x = available.left() + 12
+        if y + self.height() > available.bottom() - 12:
+            y = max(available.top() + 12, available.bottom() - self.height() - 12)
+        if y < available.top() + 12:
+            y = available.top() + 12
+
+        self.move(QPoint(x, y))
+        self.show()
+        self.raise_()
+
+    def hide_and_clear(self):
+        self._anchor_label = None
+        self.hide()
+
+    def eventFilter(self, watched, event):
+        if not self.isVisible():
+            return False
+        if event.type() == QEvent.MouseButtonPress:
+            global_pos = event.globalPosition().toPoint()
+            if self.geometry().contains(global_pos):
+                return False
+            if self._anchor_label is not None:
+                anchor_rect = self._anchor_label.rect()
+                anchor_pos = self._anchor_label.mapFromGlobal(global_pos)
+                if anchor_rect.contains(anchor_pos):
+                    return False
+            self.hide_and_clear()
+        elif event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            self.hide_and_clear()
+        elif event.type() == QEvent.WindowDeactivate:
+            self.hide_and_clear()
+        return False
+
+    def closeEvent(self, event):
+        self.hide_and_clear()
+        super().closeEvent(event)
 
 
 class NavigationSidebar(QWidget):
@@ -511,70 +710,114 @@ class SettingsPage(QWidget):
         self.header = PageHeader()
         root.addWidget(self.header)
 
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        root.addWidget(self.scroll, 1)
+
+        self.scroll_content = QWidget()
+        self.scroll.setWidget(self.scroll_content)
+        content_layout = QVBoxLayout(self.scroll_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
         self.form_card = QFrame()
         self.form_card.setObjectName("PanelCard")
         form_layout = QVBoxLayout(self.form_card)
         form_layout.setContentsMargins(18, 18, 18, 18)
-        form_layout.setSpacing(14)
+        form_layout.setSpacing(16)
+        content_layout.addWidget(self.form_card)
+        content_layout.addStretch()
 
         self.general_title = QLabel()
         self.general_title.setObjectName("CardTitle")
         form_layout.addWidget(self.general_title)
 
-        self.form = QFormLayout()
-        self.form.setLabelAlignment(Qt.AlignLeft)
-        self.form.setFormAlignment(Qt.AlignTop)
-        self.form.setHorizontalSpacing(18)
-        self.form.setVerticalSpacing(12)
+        self.runtime_status_card = QFrame()
+        self.runtime_status_card.setObjectName("SubPanelCard")
+        runtime_status_layout = QVBoxLayout(self.runtime_status_card)
+        runtime_status_layout.setContentsMargins(14, 12, 14, 12)
+        runtime_status_layout.setSpacing(8)
+        self.runtime_status_title = QLabel()
+        self.runtime_status_title.setObjectName("CardTitle")
+        self.runtime_status_header = QWidget()
+        runtime_status_header_layout = QHBoxLayout(self.runtime_status_header)
+        runtime_status_header_layout.setContentsMargins(0, 0, 0, 0)
+        runtime_status_header_layout.setSpacing(12)
+        self.runtime_status_backend = QLabel()
+        self.runtime_status_backend.setObjectName("StatusHint")
+        self.runtime_status_backend.setWordWrap(True)
+        self.runtime_status_ffmpeg = QLabel()
+        self.runtime_status_ffmpeg.setObjectName("StatusHint")
+        self.runtime_status_ffmpeg.setWordWrap(True)
+        runtime_status_header_layout.addWidget(self.runtime_status_title, 0)
+        runtime_status_header_layout.addWidget(self.runtime_status_backend, 1)
+        runtime_status_layout.addWidget(self.runtime_status_header)
+        runtime_status_layout.addWidget(self.runtime_status_ffmpeg)
+        form_layout.addWidget(self.runtime_status_card)
 
-        self.input_fps = QSpinBox()
-        self.input_fps.setRange(1, 24)
-        self.input_top_k = QSpinBox()
+        self.input_fps = NoWheelDoubleSpinBox()
+        self.input_fps.setRange(0.01, 24.0)
+        self.input_fps.setDecimals(2)
+        self.input_fps.setSingleStep(0.1)
+        self.input_sampling_fps_mode = NoWheelComboBox()
+        self.input_sampling_fps_rules = QLineEdit(self)
+        self.input_top_k = NoWheelSpinBox()
         self.input_top_k.setRange(1, 200)
-        self.input_preview_seconds = QSpinBox()
+        self.input_preview_seconds = NoWheelSpinBox()
         self.input_preview_seconds.setRange(2, 20)
-        self.input_preview_width = QSpinBox()
+        self.input_preview_width = NoWheelSpinBox()
         self.input_preview_width.setRange(160, 1920)
-        self.input_preview_height = QSpinBox()
+        self.input_preview_height = NoWheelSpinBox()
         self.input_preview_height.setRange(90, 1080)
-        self.input_thumb_width = QSpinBox()
+        self.input_thumb_width = NoWheelSpinBox()
         self.input_thumb_width.setRange(80, 480)
-        self.input_thumb_height = QSpinBox()
+        self.input_thumb_height = NoWheelSpinBox()
         self.input_thumb_height.setRange(45, 320)
-        self.input_remote_max_frames = QSpinBox()
+        self.input_remote_max_frames = NoWheelSpinBox()
         self.input_remote_max_frames.setRange(200, 20000)
-        self.input_similarity_threshold = QDoubleSpinBox()
+        self.input_similarity_threshold = NoWheelDoubleSpinBox()
         self.input_similarity_threshold.setRange(0.1, 1.0)
         self.input_similarity_threshold.setSingleStep(0.01)
         self.input_similarity_threshold.setDecimals(2)
-        self.input_max_chunk_duration = QDoubleSpinBox()
+        self.input_max_chunk_duration = NoWheelDoubleSpinBox()
         self.input_max_chunk_duration.setRange(1.0, 60.0)
         self.input_max_chunk_duration.setSingleStep(0.5)
         self.input_max_chunk_duration.setDecimals(1)
-        self.input_min_chunk_size = QSpinBox()
+        self.input_min_chunk_size = NoWheelSpinBox()
         self.input_min_chunk_size.setRange(1, 50)
-        self.input_chunk_similarity_mode = QComboBox()
-        self.input_prefer_gpu = QComboBox()
-        self.input_auto_cleanup_missing_files = QComboBox()
+        self.input_chunk_similarity_mode = NoWheelComboBox()
+        self.input_prefer_gpu = NoWheelComboBox()
+        self.input_auto_cleanup_missing_files = NoWheelComboBox()
         self.input_ffmpeg_path = QLineEdit()
         self.input_model_dir = QLineEdit()
-        self.label_fps = QLabel()
-        self.label_top_k = QLabel()
-        self.label_preview_seconds = QLabel()
-        self.label_preview_width = QLabel()
-        self.label_preview_height = QLabel()
-        self.label_thumb_width = QLabel()
-        self.label_thumb_height = QLabel()
-        self.label_remote_max_frames = QLabel()
-        self.label_similarity_threshold = QLabel()
-        self.label_max_chunk_duration = QLabel()
-        self.label_min_chunk_size = QLabel()
-        self.label_chunk_similarity_mode = QLabel()
-        self.label_prefer_gpu = QLabel()
-        self.label_auto_cleanup_missing_files = QLabel()
-        self.label_ffmpeg_path = QLabel()
-        self.label_model_dir = QLabel()
+        self.section_search_title = QLabel()
+        self.section_preview_title = QLabel()
+        self.section_index_title = QLabel()
+        self.section_runtime_title = QLabel()
+        self.label_fps = ClickableLabel()
+        self.label_top_k = ClickableLabel()
+        self.label_preview_seconds = ClickableLabel()
+        self.label_preview_width = ClickableLabel()
+        self.label_preview_height = ClickableLabel()
+        self.label_thumb_width = ClickableLabel()
+        self.label_thumb_height = ClickableLabel()
+        self.label_remote_max_frames = ClickableLabel()
+        self.label_similarity_threshold = ClickableLabel()
+        self.label_max_chunk_duration = ClickableLabel()
+        self.label_min_chunk_size = ClickableLabel()
+        self.label_chunk_similarity_mode = ClickableLabel()
+        self.label_prefer_gpu = ClickableLabel()
+        self.label_auto_cleanup_missing_files = ClickableLabel()
+        self.label_ffmpeg_path = ClickableLabel()
+        self.label_model_dir = ClickableLabel()
         self.hint_fps = QLabel()
+        self.hint_sampling_fps_mode = QLabel()
+        self.hint_sampling_fps_rules = QLabel()
+        self.hint_sampling_fps_preview = QLabel()
+        self.sampling_rules_summary = QLabel()
+        self.btn_edit_sampling_rules = QPushButton()
         self.hint_top_k = QLabel()
         self.hint_preview_seconds = QLabel()
         self.hint_preview_width = QLabel()
@@ -593,8 +836,14 @@ class SettingsPage(QWidget):
         self.hint_inference_backend = QLabel()
         self.hint_gpu_runtime = QLabel()
         self.hint_model_dir = QLabel()
+        self.sampling_rule_rows = []
+        self._setting_detail_bindings = []
+        self._active_setting_label = None
+        self.detail_popup = SettingDetailPopup(is_dark=True)
+        QApplication.instance().installEventFilter(self.detail_popup)
 
-        self._configure_setting_input(self.input_fps, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_fps, width=94)
+        self._configure_setting_input(self.input_sampling_fps_mode, width=136)
         self._configure_setting_input(self.input_top_k, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_preview_width, width=COMPONENT_SIZES["settings_input_width"])
@@ -608,80 +857,102 @@ class SettingsPage(QWidget):
         self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"])
-        self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"])
+        self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
+        self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
 
-        self.form.addRow(self.label_fps, self._build_setting_row(self.input_fps, self.hint_fps))
-        self.form.addRow(self.label_top_k, self._build_setting_row(self.input_top_k, self.hint_top_k))
-        self.form.addRow(
-            self.label_preview_seconds,
-            self._build_setting_row(self.input_preview_seconds, self.hint_preview_seconds),
+        self.sections_stack = QVBoxLayout()
+        self.sections_stack.setContentsMargins(0, 0, 0, 0)
+        self.sections_stack.setSpacing(12)
+        form_layout.addLayout(self.sections_stack)
+
+        for hint_label in (
+            self.hint_sampling_fps_mode,
+            self.hint_sampling_fps_rules,
+            self.hint_sampling_fps_preview,
+        ):
+            hint_label.setObjectName("StatusHint")
+            hint_label.setWordWrap(True)
+        self.sampling_rules_summary.setObjectName("StatusHint")
+        self.sampling_rules_summary.setWordWrap(False)
+
+        self.input_sampling_bundle = QWidget()
+        self.input_sampling_bundle.setObjectName("SamplingBundle")
+        sampling_bundle_layout = QHBoxLayout(self.input_sampling_bundle)
+        sampling_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        sampling_bundle_layout.setSpacing(8)
+        sampling_bundle_layout.addWidget(self.input_sampling_fps_mode, 0)
+        sampling_bundle_layout.addWidget(self.input_fps, 0)
+        self.btn_edit_sampling_rules.setObjectName("GhostButton")
+        sampling_bundle_layout.addWidget(self.btn_edit_sampling_rules, 0)
+        self.sampling_rules_summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        sampling_bundle_layout.addWidget(self.sampling_rules_summary, 1)
+        self.input_sampling_fps_rules.hide()
+
+        self.section_search_card, self.section_search_form = self._create_settings_section(self.section_search_title)
+        self.section_preview_card, self.section_preview_form = self._create_settings_section(self.section_preview_title)
+        self.section_index_card, self.section_index_form = self._create_settings_section(self.section_index_title)
+        self.section_runtime_card, self.section_runtime_form = self._create_settings_section(self.section_runtime_title)
+        self._add_setting_row(
+            self.section_search_form,
+            0,
+            self.label_fps,
+            self.input_sampling_bundle,
+            self.hint_fps,
+            show_help=False,
         )
-        self.form.addRow(
-            self.label_preview_width,
-            self._build_setting_row(self.input_preview_width, self.hint_preview_width),
-        )
-        self.form.addRow(
-            self.label_preview_height,
-            self._build_setting_row(self.input_preview_height, self.hint_preview_height),
-        )
-        self.form.addRow(
-            self.label_thumb_width,
-            self._build_setting_row(self.input_thumb_width, self.hint_thumb_width),
-        )
-        self.form.addRow(
-            self.label_thumb_height,
-            self._build_setting_row(self.input_thumb_height, self.hint_thumb_height),
-        )
-        self.form.addRow(
+        self._add_setting_row(self.section_search_form, 1, self.label_top_k, self.input_top_k, self.hint_top_k)
+        self._add_setting_row(
+            self.section_search_form,
+            2,
             self.label_remote_max_frames,
-            self._build_setting_row(self.input_remote_max_frames, self.hint_remote_max_frames),
+            self.input_remote_max_frames,
+            self.hint_remote_max_frames,
         )
-        self.form.addRow(
-            self.label_similarity_threshold,
-            self._build_setting_row(self.input_similarity_threshold, self.hint_similarity_threshold),
-        )
-        self.form.addRow(
-            self.label_max_chunk_duration,
-            self._build_setting_row(self.input_max_chunk_duration, self.hint_max_chunk_duration),
-        )
-        self.form.addRow(
-            self.label_min_chunk_size,
-            self._build_setting_row(self.input_min_chunk_size, self.hint_min_chunk_size),
-        )
-        self.form.addRow(
-            self.label_chunk_similarity_mode,
-            self._build_setting_row(self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode),
-        )
-        self.form.addRow(
+
+        self._add_setting_row(self.section_preview_form, 0, self.label_preview_seconds, self.input_preview_seconds, self.hint_preview_seconds)
+        self._add_setting_row(self.section_preview_form, 1, self.label_preview_width, self.input_preview_width, self.hint_preview_width)
+        self._add_setting_row(self.section_preview_form, 2, self.label_preview_height, self.input_preview_height, self.hint_preview_height)
+        self._add_setting_row(self.section_preview_form, 3, self.label_thumb_width, self.input_thumb_width, self.hint_thumb_width)
+        self._add_setting_row(self.section_preview_form, 4, self.label_thumb_height, self.input_thumb_height, self.hint_thumb_height)
+
+        self._add_setting_row(self.section_index_form, 0, self.label_similarity_threshold, self.input_similarity_threshold, self.hint_similarity_threshold)
+        self._add_setting_row(self.section_index_form, 1, self.label_max_chunk_duration, self.input_max_chunk_duration, self.hint_max_chunk_duration)
+        self._add_setting_row(self.section_index_form, 2, self.label_min_chunk_size, self.input_min_chunk_size, self.hint_min_chunk_size)
+        self._add_setting_row(self.section_index_form, 3, self.label_chunk_similarity_mode, self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode)
+
+        self._add_setting_row(
+            self.section_runtime_form,
+            0,
             self.label_prefer_gpu,
-            self._build_setting_row(
-                self.input_prefer_gpu,
-                self.hint_prefer_gpu,
-                self.hint_inference_backend,
-                self.hint_gpu_runtime,
-            ),
+            self.input_prefer_gpu,
+            self.hint_prefer_gpu,
         )
-        self.form.addRow(
+        self._add_setting_row(
+            self.section_runtime_form,
+            1,
             self.label_auto_cleanup_missing_files,
-            self._build_setting_row(
-                self.input_auto_cleanup_missing_files,
-                self.hint_auto_cleanup_missing_files,
-            ),
+            self.input_auto_cleanup_missing_files,
+            self.hint_auto_cleanup_missing_files,
         )
-        self.form.addRow(
+        self._add_setting_row(
+            self.section_runtime_form,
+            2,
             self.label_ffmpeg_path,
-            self._build_setting_row(
-                self.input_ffmpeg_path,
-                self.hint_ffmpeg_path,
-                self.hint_ffmpeg_active,
-            ),
+            self.input_ffmpeg_path,
+            self.hint_ffmpeg_path,
         )
-        self.form.addRow(
-            self.label_model_dir,
-            self._build_setting_row(self.input_model_dir, self.hint_model_dir),
-        )
-        form_layout.addLayout(self.form)
+        self._add_setting_row(self.section_runtime_form, 3, self.label_model_dir, self.input_model_dir, self.hint_model_dir)
+
+        self.sections_stack.addWidget(self.section_search_card)
+        self.sections_stack.addWidget(self.section_preview_card)
+        self.sections_stack.addWidget(self.section_index_card)
+        self.sections_stack.addWidget(self.section_runtime_card)
+
+        self.action_card = QFrame()
+        self.action_card.setObjectName("PanelCard")
+        action_card_layout = QVBoxLayout(self.action_card)
+        action_card_layout.setContentsMargins(18, 14, 18, 14)
+        action_card_layout.setSpacing(10)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -692,46 +963,198 @@ class SettingsPage(QWidget):
         action_row.addWidget(self.btn_save)
         action_row.addWidget(self.btn_reset)
         action_row.addStretch()
-        form_layout.addLayout(action_row)
+        action_card_layout.addLayout(action_row)
 
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("StatusLabel")
         self.lbl_status.setWordWrap(True)
-        form_layout.addWidget(self.lbl_status)
-        root.addWidget(self.form_card)
-        root.addStretch()
+        action_card_layout.addWidget(self.lbl_status)
+        root.addWidget(self.action_card, 0)
+        self.input_sampling_fps_mode.currentIndexChanged.connect(self._handle_sampling_mode_changed)
+        self._update_sampling_mode_visibility()
 
-    def _configure_setting_input(self, widget, width):
-        widget.setFixedWidth(width)
-        widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    def _handle_sampling_mode_changed(self, *_args):
+        self._update_sampling_mode_visibility()
 
-    def _build_setting_row(self, field, hint_label, extra_hint_label=None, extra_hint_label_2=None, extra_hint_label_3=None):
-        hint_label.setObjectName("CardHint")
-        hint_label.setWordWrap(True)
-        for extra_hint in [extra_hint_label, extra_hint_label_2, extra_hint_label_3]:
-            if extra_hint is not None:
-                if extra_hint in (self.hint_inference_backend, self.hint_gpu_runtime):
-                    extra_hint.setObjectName("StatusHint")
-                else:
-                    extra_hint.setObjectName("CardHint")
-                extra_hint.setWordWrap(True)
-        row = QWidget()
-        layout = QVBoxLayout(row)
+    def _update_sampling_mode_visibility(self):
+        is_dynamic = self.get_sampling_fps_mode() == "dynamic"
+        self.input_fps.setVisible(not is_dynamic)
+        self.btn_edit_sampling_rules.setVisible(is_dynamic)
+        self.sampling_rules_summary.setVisible(is_dynamic)
+        self.hint_fps.setVisible(False)
+        self.hint_sampling_fps_mode.setVisible(False)
+        self.hint_sampling_fps_rules.setVisible(False)
+        self.hint_sampling_fps_preview.setVisible(False)
+
+    def get_sampling_fps_mode(self):
+        return str(self.input_sampling_fps_mode.currentData() or "fixed")
+
+    def set_sampling_fps_mode(self, mode):
+        normalized_mode = str(mode or "fixed")
+        index = self.input_sampling_fps_mode.findData(normalized_mode)
+        self.input_sampling_fps_mode.setCurrentIndex(0 if index < 0 else index)
+        self._update_sampling_mode_visibility()
+
+    def set_sampling_fps_rules_text(self, rules_text):
+        self.input_sampling_fps_rules.setText(str(rules_text or "").strip())
+        self.refresh_sampling_rules_summary()
+
+    def get_sampling_fps_rules_text(self):
+        return self.input_sampling_fps_rules.text().strip()
+
+    def set_sampling_rules_error_state(self, has_error):
+        if has_error:
+            self.sampling_rules_summary.setStyleSheet("color: #d9534f;")
+            return
+        self.sampling_rules_summary.setStyleSheet("")
+
+    def refresh_sampling_rules_summary(self):
+        normalized = self.get_sampling_fps_rules_text()
+        if not normalized:
+            self.sampling_rules_summary.setText("")
+            return
+        parts = []
+        for chunk in normalized.split(";"):
+            item = chunk.strip()
+            if item:
+                parts.append(item)
+        self.sampling_rules_summary.setText(" | ".join(parts[:3]) + (" ..." if len(parts) > 3 else ""))
+
+    def _configure_setting_input(self, widget, width, expanding=False):
+        widget.setMinimumWidth(width)
+        widget.setMaximumWidth(16777215 if expanding else width + 44)
+        widget.setMinimumHeight(34)
+        widget.setSizePolicy(QSizePolicy.Expanding if expanding else QSizePolicy.Fixed, QSizePolicy.Fixed)
+        widget.setProperty("settingField", True)
+
+    def _configure_setting_label(self, label):
+        label.setMinimumWidth(140)
+        label.setMaximumWidth(210)
+        label.setMinimumHeight(40)
+        label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        label.setWordWrap(True)
+        label.setProperty("settingLabel", True)
+
+    def _create_settings_section(self, title_label):
+        card = QFrame()
+        card.setObjectName("SubPanelCard")
+        layout = QVBoxLayout(card)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(12)
-        top.addWidget(field, 0)
-        top.addWidget(hint_label, 1)
-        layout.addLayout(top)
-        for extra_hint in [extra_hint_label, extra_hint_label_2, extra_hint_label_3]:
-            if extra_hint is not None:
-                layout.addWidget(extra_hint)
+        layout.setSpacing(0)
+        title_label.setObjectName("CardTitle")
+        title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        title_wrap = QWidget()
+        title_wrap.setObjectName("SettingsSectionHeader")
+        title_wrap_layout = QHBoxLayout(title_wrap)
+        title_wrap_layout.setContentsMargins(16, 14, 16, 14)
+        title_wrap_layout.setSpacing(0)
+        title_wrap_layout.addWidget(title_label)
+        title_wrap_layout.addStretch()
+        layout.addWidget(title_wrap)
+        form = QGridLayout()
+        form.setContentsMargins(16, 4, 16, 8)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(0)
+        form.setColumnMinimumWidth(0, 260)
+        form.setColumnStretch(0, 0)
+        form.setColumnStretch(1, 1)
+        layout.addLayout(form)
+        return card, form
+
+    def _add_setting_row(self, grid, row, label, field, hint_label, *extra_hint_labels, show_help=True):
+        row_widget = self._build_setting_row(field)
+        label_block = self._build_setting_label_block(label, hint_label, extra_hint_labels)
+        row_container = QWidget()
+        row_container.setObjectName("SettingRowContainer")
+        row_layout = QGridLayout(row_container)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setHorizontalSpacing(16)
+        row_layout.setVerticalSpacing(0)
+        row_layout.setColumnMinimumWidth(0, 260)
+        row_layout.setColumnStretch(0, 0)
+        row_layout.setColumnStretch(1, 1)
+        row_layout.addWidget(label_block, 0, 0, Qt.AlignLeft | Qt.AlignTop)
+        row_layout.addWidget(row_widget, 0, 1)
+        grid.addWidget(row_container, row, 0, 1, 2)
+
+    def _build_setting_label_block(self, label, hint_label, extra_hint_labels):
+        block = QWidget()
+        block.setObjectName("SettingLabelBlock")
+        layout = QVBoxLayout(block)
+        layout.setContentsMargins(0, 10, 0, 10)
+        layout.setSpacing(0)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(6)
+        title_row.addWidget(label, 1)
+        layout.addLayout(title_row)
+        self._bind_setting_detail(label, hint_label, extra_hint_labels)
+        return block
+
+    def _build_setting_detail_text(self, hint_label, extra_hint_labels):
+        message_parts = []
+        hint_text = hint_label.text().strip() if hint_label is not None else ""
+        if hint_text:
+            message_parts.append(hint_text)
+        for extra_hint in extra_hint_labels:
+            if extra_hint is None:
+                continue
+            extra_text = extra_hint.text().strip()
+            if extra_text:
+                message_parts.append(extra_text)
+        return "\n\n".join(message_parts)
+
+    def _bind_setting_detail(self, label, hint_label, extra_hint_labels):
+        self._setting_detail_bindings.append((label, hint_label, extra_hint_labels))
+        label.set_click_handler(
+            lambda l=label, h=hint_label, e=extra_hint_labels: self._activate_setting_detail(l, h, e)
+        )
+
+    def _activate_setting_detail(self, label, hint_label, extra_hint_labels):
+        detail_text = self._build_setting_detail_text(hint_label, extra_hint_labels)
+        if not detail_text:
+            return
+        self._active_setting_label = label
+        for current_label, _, _ in self._setting_detail_bindings:
+            current_label.setStyleSheet("font-weight: 700; color: #3b82f6;" if current_label is label else "")
+        self.detail_popup.set_dark_mode(getattr(self.window(), "is_dark_mode", True))
+        self.detail_popup.show_for_label(label, label.text().strip(), detail_text)
+
+    def _build_setting_row(self, field):
+        row = QWidget()
+        row.setObjectName("SettingRow")
+        layout = QVBoxLayout(row)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(0)
+        field_row = QHBoxLayout()
+        field_row.setContentsMargins(0, 0, 0, 0)
+        field_row.setSpacing(0)
+        stretch = 1 if field.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding else 0
+        field_row.addWidget(field, stretch, Qt.AlignLeft)
+        if not stretch:
+            field_row.addStretch(1)
+        layout.addLayout(field_row)
         return row
 
     def configure_form_labels(self, texts):
+        self._current_texts = texts
+        self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索与采样", "Search & Sampling"))
+        self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview & Thumbnails"))
+        self.section_index_title.setText(_fallback_text(texts, "settings_section_indexing", "索引与分段", "Indexing & Chunking"))
+        self.section_runtime_title.setText(_fallback_text(texts, "settings_section_runtime", "运行时与资源", "Runtime & Resources"))
+        self.runtime_status_title.setText(_fallback_text(texts, "settings_runtime_status", "当前运行状态", "Current Runtime"))
         self.label_fps.setText(texts["setting_fps"])
+        current_mode = self.get_sampling_fps_mode()
+        self.input_sampling_fps_mode.blockSignals(True)
+        self.input_sampling_fps_mode.clear()
+        self.input_sampling_fps_mode.addItem(texts["setting_sampling_fps_mode_fixed"], "fixed")
+        self.input_sampling_fps_mode.addItem(texts["setting_sampling_fps_mode_dynamic"], "dynamic")
+        restore_index = self.input_sampling_fps_mode.findData(current_mode)
+        self.input_sampling_fps_mode.setCurrentIndex(0 if restore_index < 0 else restore_index)
+        self.input_sampling_fps_mode.blockSignals(False)
+        self.input_sampling_fps_rules.setPlaceholderText(texts["setting_sampling_fps_rules_placeholder"])
+        self.btn_edit_sampling_rules.setText(texts["setting_sampling_fps_rules_edit"])
+        self.refresh_sampling_rules_summary()
         self.label_top_k.setText(texts["setting_top_k"])
         self.label_preview_seconds.setText(texts["setting_preview_seconds"])
         self.label_preview_width.setText(texts["setting_preview_width"])
@@ -763,6 +1186,9 @@ class SettingsPage(QWidget):
         self.label_ffmpeg_path.setText(texts["setting_ffmpeg_path"])
         self.label_model_dir.setText(texts["setting_model_dir"])
         self.hint_fps.setText(texts["setting_fps_hint"])
+        self.hint_sampling_fps_mode.setText(texts["setting_sampling_fps_mode_hint"])
+        self.hint_sampling_fps_rules.setText(texts["setting_sampling_fps_rules_hint"])
+        self.hint_sampling_fps_preview.setText(texts["setting_sampling_fps_preview"])
         self.hint_top_k.setText(texts["setting_top_k_hint"])
         self.hint_preview_seconds.setText(texts["setting_preview_seconds_hint"])
         self.hint_preview_width.setText(texts["setting_preview_width_hint"])
@@ -788,6 +1214,39 @@ class SettingsPage(QWidget):
         self.hint_gpu_runtime.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.hint_gpu_runtime.setVisible(False)
         self.hint_model_dir.setText(texts["setting_model_dir_hint"])
+        self._update_sampling_mode_visibility()
+        for label in [
+            self.label_fps,
+            self.label_top_k,
+            self.label_preview_seconds,
+            self.label_preview_width,
+            self.label_preview_height,
+            self.label_thumb_width,
+            self.label_thumb_height,
+            self.label_remote_max_frames,
+            self.label_similarity_threshold,
+            self.label_max_chunk_duration,
+            self.label_min_chunk_size,
+            self.label_chunk_similarity_mode,
+            self.label_prefer_gpu,
+            self.label_auto_cleanup_missing_files,
+            self.label_ffmpeg_path,
+            self.label_model_dir,
+        ]:
+            self._configure_setting_label(label)
+    def refresh_active_setting_detail(self):
+        if self._active_setting_label is not None:
+            for label, hint_label, extra_hint_labels in self._setting_detail_bindings:
+                if label is self._active_setting_label:
+                    self._activate_setting_detail(label, hint_label, extra_hint_labels)
+                    return
+        if self._setting_detail_bindings:
+            label, hint_label, extra_hint_labels = self._setting_detail_bindings[0]
+            self._activate_setting_detail(label, hint_label, extra_hint_labels)
+
+    def set_runtime_status_texts(self, backend_text, ffmpeg_text):
+        self.runtime_status_backend.setText(backend_text or "")
+        self.runtime_status_ffmpeg.setText(ffmpeg_text or "")
 
 
 class ResultTable(QTableWidget):

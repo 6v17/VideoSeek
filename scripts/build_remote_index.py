@@ -144,7 +144,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output-dir",
-        default=os.path.join("data", "remote_pack"),
+        default=os.path.join("source", "remote_pack"),
         help="Output folder for index/vector/manifest files.",
     )
     parser.add_argument(
@@ -217,7 +217,7 @@ def load_links(path):
 def prepare_source(link, mode="download"):
     yt_dlp = load_yt_dlp()
     if mode == "download":
-        cache_dir = os.path.join("data", "remote_build_cache")
+        cache_dir = os.path.join("source", "remote_build_cache")
         os.makedirs(cache_dir, exist_ok=True)
         options = {
             "format": "mp4/bestvideo+bestaudio/best",

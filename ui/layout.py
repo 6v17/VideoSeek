@@ -33,8 +33,8 @@ COMPONENT_SIZES = {
     "result_table_min_height": 520,
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
-    "settings_input_width": 88,
-    "settings_path_input_width": 260,
+    "settings_input_width": 116,
+    "settings_path_input_width": 520,
 }
 
 

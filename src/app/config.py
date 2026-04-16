@@ -4,19 +4,27 @@ import shutil
 
 from src.app.app_meta import get_app_meta
 from src.app.logging_utils import get_logger
-from src.utils import get_app_data_dir, get_default_model_dir, get_resource_path
+from src.utils import (
+    get_app_data_dir,
+    get_default_model_dir,
+    get_resource_path,
+    normalize_sampling_fps_mode,
+    normalize_sampling_fps_rules_text,
+)
 
 logger = get_logger("config")
 _LAST_MIGRATION_NOTICE = None
 
 APP_DATA_DIR = get_app_data_dir()
-DATA_DIR = os.path.join(APP_DATA_DIR, "data")
+DATA_DIR = os.path.join(APP_DATA_DIR, "source")
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
 LEGACY_CONFIG_FILE = get_resource_path("config.json")
-LEGACY_DATA_DIR = get_resource_path("data")
+LEGACY_DATA_DIR = get_resource_path("source")
 
 DEFAULT_CONFIG = {
     "fps": 1,
+    "sampling_fps_mode": "fixed",
+    "sampling_fps_rules": "0-10m=2; 10m-60m=1; 60m-=0.5",
     "search_top_k": 20,
     "preview_seconds": 6,
     "preview_width": 640,
@@ -44,6 +52,38 @@ DEFAULT_CONFIG = {
     "auto_cleanup_missing_files": False,
     "theme": "dark",
     "language": "zh",
+}
+
+CONFIG_BOUNDS = {
+    "fps": (0.01, 24.0),
+    "search_top_k": (1, 200),
+    "preview_seconds": (2, 20),
+    "preview_width": (160, 1920),
+    "preview_height": (90, 1080),
+    "thumb_width": (80, 480),
+    "thumb_height": (45, 320),
+    "remote_max_frames": (200, 20000),
+    "similarity_threshold": (0.1, 1.0),
+    "max_chunk_duration": (1.0, 60.0),
+    "min_chunk_size": (1, 50),
+}
+
+CONFIG_INT_KEYS = {
+    "search_top_k",
+    "preview_seconds",
+    "preview_width",
+    "preview_height",
+    "thumb_width",
+    "thumb_height",
+    "remote_max_frames",
+    "min_chunk_size",
+}
+
+CONFIG_ENUMS = {
+    "chunk_similarity_mode": {"chunk", "frame"},
+    "search_mode": {"frame", "chunk"},
+    "theme": {"dark", "light"},
+    "language": {"zh", "en"},
 }
 
 PATH_KEYS = {
@@ -139,6 +179,57 @@ def _sanitize_runtime_resource_paths(config, is_legacy_config=False):
     return sanitized
 
 
+def _sanitize_sampling_settings(config):
+    sanitized = dict(config)
+    for obsolete_key in ("dynamic_fps_reference_duration", "dynamic_fps_min", "dynamic_fps_max"):
+        sanitized.pop(obsolete_key, None)
+
+    try:
+        fps_value = float(sanitized.get("fps", DEFAULT_CONFIG["fps"]))
+        sanitized["fps"] = fps_value if fps_value >= 0.01 else DEFAULT_CONFIG["fps"]
+    except (TypeError, ValueError):
+        sanitized["fps"] = DEFAULT_CONFIG["fps"]
+    sanitized["sampling_fps_mode"] = normalize_sampling_fps_mode(
+        sanitized.get("sampling_fps_mode", DEFAULT_CONFIG["sampling_fps_mode"])
+    )
+    sanitized["sampling_fps_rules"] = normalize_sampling_fps_rules_text(
+        sanitized.get("sampling_fps_rules", DEFAULT_CONFIG["sampling_fps_rules"])
+    )
+    return sanitized
+
+
+def _coerce_bounded_value(raw_value, default_value, minimum, maximum, as_int=False):
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        value = float(default_value)
+    value = min(maximum, max(minimum, value))
+    return int(round(value)) if as_int else float(value)
+
+
+def _sanitize_general_settings(config):
+    sanitized = dict(config)
+
+    for key, (minimum, maximum) in CONFIG_BOUNDS.items():
+        sanitized[key] = _coerce_bounded_value(
+            sanitized.get(key, DEFAULT_CONFIG[key]),
+            DEFAULT_CONFIG[key],
+            minimum,
+            maximum,
+            as_int=key in CONFIG_INT_KEYS,
+        )
+
+    for key, allowed_values in CONFIG_ENUMS.items():
+        value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()
+        sanitized[key] = value if value in allowed_values else DEFAULT_CONFIG[key]
+
+    sanitized["prefer_gpu"] = bool(sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]))
+    sanitized["auto_cleanup_missing_files"] = bool(
+        sanitized.get("auto_cleanup_missing_files", DEFAULT_CONFIG["auto_cleanup_missing_files"])
+    )
+    return sanitized
+
+
 def _should_migrate_to_user_data(config):
     for key in PATH_KEYS:
         value = os.path.normpath(str(config.get(key, "") or ""))
@@ -154,7 +245,7 @@ def _migrate_legacy_storage_if_needed(config):
         return migrated
 
     if os.path.exists(LEGACY_DATA_DIR):
-        logger.info("Migrating legacy data directory from %s to %s", LEGACY_DATA_DIR, DATA_DIR)
+        logger.info("Migrating legacy source directory from %s to %s", LEGACY_DATA_DIR, DATA_DIR)
         _clone_data_tree(LEGACY_DATA_DIR, DATA_DIR)
         _LAST_MIGRATION_NOTICE = {
             "legacy_data_dir": LEGACY_DATA_DIR,
@@ -187,6 +278,8 @@ def load_config():
             config,
             is_legacy_config=os.path.normpath(config_path) == os.path.normpath(LEGACY_CONFIG_FILE),
         )
+        config = _sanitize_sampling_settings(config)
+        config = _sanitize_general_settings(config)
         config = _migrate_legacy_storage_if_needed(config)
         # Migrate legacy cap from old builds; 300 causes long videos to look capped at ~299s.
         try:
@@ -205,6 +298,8 @@ def load_config():
 
 
 def save_config(config):
+    config = _sanitize_sampling_settings(_apply_default_values(dict(config)))
+    config = _sanitize_general_settings(config)
     _ensure_parent_dir(CONFIG_FILE)
     with open(CONFIG_FILE, "w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=4, ensure_ascii=False)
