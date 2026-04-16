@@ -332,6 +332,74 @@ def export_original_clip(input_path, start_sec, duration_sec, output_path):
 
 
 def get_video_duration_seconds(video_path):
+    stream_info = get_video_stream_info(video_path)
+    duration = stream_info.get("duration")
+    if duration is not None and duration > 0:
+        return duration
+    return _probe_video_duration_with_opencv(video_path)
+
+
+def get_video_stream_info(video_path):
+    ffprobe_path = get_ffprobe_path()
+    if not ffprobe_path:
+        return {"width": None, "height": None, "duration": None}
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height:format=duration",
+        "-of",
+        "json",
+        os.fspath(video_path),
+    ]
+
+    startupinfo = None
+    if hasattr(subprocess, "STARTUPINFO"):
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            startupinfo=startupinfo,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return {"width": None, "height": None, "duration": None}
+
+        payload = json.loads(result.stdout or "{}")
+        streams = payload.get("streams") or []
+        stream = streams[0] if streams else {}
+        format_payload = payload.get("format") or {}
+        return {
+            "width": _safe_int(stream.get("width")),
+            "height": _safe_int(stream.get("height")),
+            "duration": _safe_float(format_payload.get("duration")),
+        }
+    except Exception:
+        return {"width": None, "height": None, "duration": None}
+
+
+def get_ffprobe_path():
+    ffmpeg_path = get_ffmpeg_path()
+    ffmpeg_dir = os.path.dirname(ffmpeg_path)
+    ffmpeg_name = os.path.basename(ffmpeg_path).lower()
+    if ffmpeg_name.startswith("ffmpeg"):
+        candidate_name = ffmpeg_name.replace("ffmpeg", "ffprobe", 1)
+        candidate_path = os.path.join(ffmpeg_dir, candidate_name)
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return shutil.which("ffprobe") or ""
+
+
+def _probe_video_duration_with_opencv(video_path):
     path = os.fspath(video_path)
     capture = cv2.VideoCapture(path)
     if not capture.isOpened():
@@ -345,6 +413,22 @@ def get_video_duration_seconds(video_path):
     if fps <= 0.0 or frame_count <= 0.0:
         return None
     return frame_count / fps
+
+
+def _safe_float(value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _safe_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _parse_duration_token(token):

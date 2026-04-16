@@ -7,6 +7,7 @@ from ui.workers import IndexUpdateWorker
 class IndexingController(QObject):
     status_changed = Signal(int, str)
     finished = Signal(bool, object, bool)
+    runtime_status_changed = Signal(dict)
 
     def __init__(self, parent_window):
         super().__init__(parent_window)
@@ -27,6 +28,7 @@ class IndexingController(QObject):
             force_cleanup_missing_files=force_cleanup_missing_files,
         )
         self.worker.progress_signal.connect(self.status_changed.emit)
+        self.worker.runtime_status_signal.connect(self.runtime_status_changed.emit)
         self.worker.finished_signal.connect(self._finish)
         self.worker.start()
         return True

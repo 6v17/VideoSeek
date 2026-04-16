@@ -328,6 +328,25 @@ class PreviewControllerTests(unittest.TestCase):
         )
         parent.media_player.play.assert_called_once()
 
+    def test_stop_preview_clears_current_preview_context(self):
+        parent = _make_parent_window()
+        controller = PreviewController(parent)
+        controller.vlc_player = MagicMock()
+        controller.current_preview_context = {
+            "video_path": "D:/videos/clip.mp4",
+            "start_sec": 1.0,
+            "end_sec": 3.0,
+        }
+        controller.cleanup_previous_preview = MagicMock()
+
+        controller.stop_preview()
+
+        controller.vlc_player.stop.assert_called_once()
+        parent.media_player.stop.assert_called_once()
+        parent.media_player.setSource.assert_called_once()
+        controller.cleanup_previous_preview.assert_called_once()
+        self.assertIsNone(controller.current_preview_context)
+
 
 class VlcPreviewPlayerTests(unittest.TestCase):
     def test_handle_timeout_pauses_instead_of_stopping(self):
@@ -365,6 +384,17 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         self.assertIsNone(player._player)
         self.assertIsNone(player._instance)
         self.assertTrue(player._released)
+
+    def test_stop_clears_bound_media(self):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        player._player = MagicMock()
+
+        player.stop()
+
+        player._player.stop.assert_called_once()
+        player._player.set_media.assert_called_once_with(None)
 
 
 if __name__ == "__main__":

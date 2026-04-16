@@ -7,7 +7,6 @@ from unittest.mock import patch
 sys.modules.setdefault("cv2", types.SimpleNamespace())
 sys.modules.setdefault("faiss", types.SimpleNamespace())
 sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
-sys.modules.setdefault("numpy", types.SimpleNamespace())
 sys.modules.setdefault("regex", std_re)
 
 
@@ -58,6 +57,67 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
             issue = clip_embedding.detect_gpu_runtime_issue()
 
         self.assertEqual(issue, "directx")
+
+    @patch("src.core.clip_embedding._run_gpu_runtime_probe_once", return_value={"ok": False, "issue": "directx", "detail": "probe crashed"})
+    def test_prepare_inference_runtime_falls_back_to_cpu_when_probe_fails(self, _mock_probe):
+        status = clip_embedding.prepare_inference_runtime(prefer_gpu=True)
+
+        self.assertFalse(status["effective_prefer_gpu"])
+        self.assertEqual(status["issue"], "directx")
+        self.assertIn("probe crashed", status["warning"])
+
+    @patch("src.core.clip_embedding._run_gpu_runtime_probe_once", return_value={"ok": True, "issue": "", "detail": ""})
+    def test_prepare_inference_runtime_keeps_gpu_when_probe_succeeds(self, _mock_probe):
+        status = clip_embedding.prepare_inference_runtime(prefer_gpu=True)
+
+        self.assertTrue(status["effective_prefer_gpu"])
+        self.assertEqual(status["warning"], "")
+
+    def test_parse_gpu_probe_payload_uses_last_json_line(self):
+        payload = clip_embedding._parse_gpu_probe_payload("noise\n{\"ok\": false, \"issue\": \"unknown\", \"detail\": \"x\"}\n")
+
+        self.assertEqual(payload["issue"], "unknown")
+
+    @patch("src.core.clip_embedding.os.path.exists", return_value=True)
+    @patch("src.core.clip_embedding.sys.frozen", False, create=True)
+    @patch("src.core.clip_embedding.sys.executable", "C:/Python/python.exe", create=True)
+    def test_build_gpu_probe_command_uses_main_script_in_dev_mode(self, _mock_exists):
+        command = clip_embedding._build_gpu_probe_command()
+
+        self.assertEqual(command[0], "C:/Python/python.exe")
+        self.assertTrue(command[1].endswith("main.py"))
+        self.assertEqual(command[2], "--gpu-probe")
+
+    @patch("src.core.clip_embedding._run_isolated_gpu_probe", return_value={"ok": False, "issue": "directx", "detail": "broken"})
+    @patch("builtins.print")
+    def test_gpu_probe_cli_main_returns_failure_exit_code(self, mock_print, _mock_probe):
+        exit_code = clip_embedding.gpu_probe_cli_main()
+
+        self.assertEqual(exit_code, 1)
+        mock_print.assert_called_once()
+
+    @patch("src.core.clip_embedding.load_config", return_value={"prefer_gpu": True})
+    def test_get_engine_runtime_status_uses_probe_cache_before_engine_init(self, _mock_load_config):
+        clip_embedding._GPU_PROBE_CACHE = {"ok": True, "issue": "", "detail": ""}
+        self.addCleanup(lambda: setattr(clip_embedding, "_GPU_PROBE_CACHE", None))
+        self.addCleanup(lambda: setattr(clip_embedding, "engine", None))
+        clip_embedding.engine = None
+
+        status = clip_embedding.get_engine_runtime_status()
+
+        self.assertTrue(status["initialized"])
+        self.assertEqual(status["backend"], "GPU")
+
+    @patch("src.core.clip_embedding.load_config", return_value={"prefer_gpu": False})
+    def test_get_engine_runtime_status_reports_cpu_when_gpu_disabled(self, _mock_load_config):
+        self.addCleanup(lambda: setattr(clip_embedding, "engine", None))
+        clip_embedding.engine = None
+        clip_embedding._GPU_PROBE_CACHE = None
+
+        status = clip_embedding.get_engine_runtime_status()
+
+        self.assertTrue(status["initialized"])
+        self.assertEqual(status["backend"], "CPU")
 
 
 if __name__ == "__main__":

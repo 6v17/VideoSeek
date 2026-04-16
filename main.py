@@ -2,11 +2,16 @@
 import sys
 from PySide6.QtWidgets import QApplication
 from src.app.logging_utils import get_logger, setup_logging
+from src.core.clip_embedding import gpu_probe_cli_main
 from ui.gui import MainWindow
 
 if __name__ == "__main__":
     setup_logging()
     logger = get_logger("main")
+
+    if "--gpu-probe" in sys.argv:
+        sys.exit(gpu_probe_cli_main())
+
     app = QApplication(sys.argv)
 
     # 设置全局字体

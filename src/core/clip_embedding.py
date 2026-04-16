@@ -1,7 +1,9 @@
 import ctypes
+import json
 import os
 import platform
 import site
+import subprocess
 import sys
 
 import cv2
@@ -9,16 +11,22 @@ import numpy as np
 import onnxruntime as ort
 
 from src.app.config import load_config
+from src.app.logging_utils import get_logger
 from src.core.extract_frames import extract_frames_with_ffmpeg
 from src.core.faiss_index import create_clip_index, save_vectors
 from src.core.semantic_chunking import build_semantic_chunks, chunk_config_payload
 from src.core.tokenizer import tokenize
 from src.utils import ensure_folder_exists, ensure_model_files, free_memory, measure_time
 
+logger = get_logger("clip_embedding")
+_GPU_PROBE_CACHE = None
+
 
 class CLIPOnnxEngine:
     def __init__(self):
-        prefer_gpu = load_config().get("prefer_gpu", True)
+        config_prefer_gpu = load_config().get("prefer_gpu", True)
+        runtime_plan = prepare_inference_runtime(prefer_gpu=config_prefer_gpu)
+        prefer_gpu = runtime_plan["effective_prefer_gpu"]
         providers = ["CPUExecutionProvider"]
         if prefer_gpu:
             providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
@@ -41,16 +49,25 @@ class CLIPOnnxEngine:
         self.using_gpu = all(
             "DmlExecutionProvider" in provider_list for provider_list in self.active_providers.values()
         )
-        self.prefer_gpu = prefer_gpu
-        self.runtime_warning = ""
-        self.runtime_issue = ""
-        if prefer_gpu and not self.using_gpu:
+        self.prefer_gpu = config_prefer_gpu
+        self.runtime_warning = runtime_plan["warning"]
+        self.runtime_issue = runtime_plan["issue"]
+        if prefer_gpu and not self.using_gpu and not self.runtime_warning:
             self.runtime_issue = detect_gpu_runtime_issue()
             self.runtime_warning = (
                 "GPU execution is unavailable. ONNX Runtime fell back to CPU. "
                 "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
             )
         self.backend_label = "GPU" if self.using_gpu else "CPU"
+        logger.info(
+            "Initialized inference engine: configured_prefer_gpu=%s effective_prefer_gpu=%s backend=%s visual_providers=%s text_providers=%s issue=%s",
+            config_prefer_gpu,
+            prefer_gpu,
+            self.backend_label,
+            self.active_providers["visual"],
+            self.active_providers["text"],
+            self.runtime_issue or "",
+        )
         self.mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32).reshape(1, 1, 3)
         self._feature_dim = None
@@ -106,6 +123,7 @@ engine = None
 def get_engine():
     global engine
     if engine is None:
+        logger.info("Inference engine is not initialized; creating a new runtime instance")
         engine = CLIPOnnxEngine()
     return engine
 
@@ -126,6 +144,31 @@ def get_engine_runtime_warning():
 def get_engine_runtime_status():
     if engine is None:
         prefer_gpu = load_config().get("prefer_gpu", True)
+        if not prefer_gpu:
+            return {
+                "initialized": True,
+                "prefer_gpu": prefer_gpu,
+                "backend": "CPU",
+                "warning": "",
+                "issue": "",
+            }
+        probe = dict(_GPU_PROBE_CACHE) if isinstance(_GPU_PROBE_CACHE, dict) else None
+        if prefer_gpu and probe:
+            if probe.get("ok"):
+                return {
+                    "initialized": True,
+                    "prefer_gpu": prefer_gpu,
+                    "backend": "GPU",
+                    "warning": "",
+                    "issue": "",
+                }
+            return {
+                "initialized": True,
+                "prefer_gpu": prefer_gpu,
+                "backend": "CPU",
+                "warning": _build_gpu_runtime_warning(probe.get("detail")),
+                "issue": probe.get("issue", ""),
+            }
         return {
             "initialized": False,
             "prefer_gpu": prefer_gpu,
@@ -144,8 +187,236 @@ def get_engine_runtime_status():
 
 
 def reset_engine():
-    global engine
+    global engine, _GPU_PROBE_CACHE
+    logger.info("Resetting inference engine and cached GPU probe result")
     engine = None
+    _GPU_PROBE_CACHE = None
+
+
+def prepare_inference_runtime(prefer_gpu=None):
+    configured_prefer_gpu = load_config().get("prefer_gpu", True) if prefer_gpu is None else bool(prefer_gpu)
+    logger.info("Preparing inference runtime: configured_prefer_gpu=%s", configured_prefer_gpu)
+    if not configured_prefer_gpu:
+        logger.info("Inference runtime preparation selected CPU because GPU preference is disabled")
+        return {
+            "configured_prefer_gpu": configured_prefer_gpu,
+            "effective_prefer_gpu": False,
+            "warning": "",
+            "issue": "",
+        }
+
+    if _is_gpu_probe_child():
+        return {
+            "configured_prefer_gpu": configured_prefer_gpu,
+            "effective_prefer_gpu": True,
+            "warning": "",
+            "issue": "",
+        }
+
+    probe = _run_gpu_runtime_probe_once()
+    if probe["ok"]:
+        logger.info("GPU runtime probe succeeded; DirectML remains enabled for this run")
+        return {
+            "configured_prefer_gpu": configured_prefer_gpu,
+            "effective_prefer_gpu": True,
+            "warning": "",
+            "issue": "",
+        }
+
+    warning = _build_gpu_runtime_warning(probe["detail"])
+    logger.warning(
+        "GPU runtime probe failed; falling back to CPU. issue=%s detail=%s",
+        probe["issue"],
+        probe["detail"],
+    )
+    return {
+        "configured_prefer_gpu": configured_prefer_gpu,
+        "effective_prefer_gpu": False,
+        "warning": warning,
+        "issue": probe["issue"],
+    }
+
+
+def gpu_probe_cli_main():
+    payload = _run_isolated_gpu_probe()
+    print(json.dumps(payload, ensure_ascii=False))
+    return 0 if payload.get("ok") else 1
+
+
+def _run_gpu_runtime_probe_once():
+    global _GPU_PROBE_CACHE
+    if _GPU_PROBE_CACHE is None:
+        logger.info("GPU runtime probe cache miss; launching isolated probe")
+        _GPU_PROBE_CACHE = _probe_gpu_runtime_subprocess()
+    else:
+        logger.info("GPU runtime probe cache hit: ok=%s issue=%s", _GPU_PROBE_CACHE.get("ok"), _GPU_PROBE_CACHE.get("issue", ""))
+    return dict(_GPU_PROBE_CACHE)
+
+
+def _probe_gpu_runtime_subprocess():
+    command = _build_gpu_probe_command()
+    if not command:
+        return {
+            "ok": False,
+            "issue": "unknown",
+            "detail": "Python executable is unavailable for GPU runtime probing.",
+        }
+
+    env = os.environ.copy()
+    env["VIDEOSEEK_GPU_PROBE_CHILD"] = "1"
+    logger.info("Starting GPU runtime probe subprocess: command=%s", command)
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=25,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("GPU runtime probe subprocess timed out after 25s")
+        return {
+            "ok": False,
+            "issue": "unknown",
+            "detail": "GPU runtime probe timed out.",
+        }
+    except Exception as exc:
+        logger.exception("GPU runtime probe subprocess failed to start")
+        return {
+            "ok": False,
+            "issue": "unknown",
+            "detail": str(exc),
+        }
+
+    payload = _parse_gpu_probe_payload(result.stdout)
+    logger.info(
+        "GPU runtime probe subprocess finished: returncode=%s parsed_ok=%s parsed_issue=%s stdout_tail=%s stderr_tail=%s",
+        result.returncode,
+        payload.get("ok"),
+        payload.get("issue", ""),
+        _truncate_log_text(result.stdout),
+        _truncate_log_text(result.stderr),
+    )
+    if result.returncode == 0 and payload.get("ok"):
+        return {
+            "ok": True,
+            "issue": "",
+            "detail": "",
+        }
+
+    issue = payload.get("issue") or "unknown"
+    detail = payload.get("detail") or f"GPU runtime probe exited with code {result.returncode}."
+    return {
+        "ok": False,
+        "issue": issue,
+        "detail": detail,
+    }
+
+
+def _build_gpu_probe_command():
+    executable = sys.executable
+    if not executable:
+        return []
+
+    if getattr(sys, "frozen", False):
+        return [executable, "--gpu-probe"]
+
+    main_script = _resolve_main_script_path()
+    if not main_script:
+        return []
+    return [executable, main_script, "--gpu-probe"]
+
+
+def _resolve_main_script_path():
+    candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "main.py"))
+    return candidate if os.path.exists(candidate) else ""
+
+
+def _parse_gpu_probe_payload(stdout_text):
+    text = str(stdout_text or "").strip()
+    if not text:
+        return {}
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _run_isolated_gpu_probe():
+    try:
+        logger.info("GPU probe child starting DirectML validation")
+        model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
+        providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        visual_session = ort.InferenceSession(
+            model_paths["clip_visual.onnx"],
+            sess_options=_build_session_options(True),
+            providers=providers,
+        )
+        text_session = ort.InferenceSession(
+            model_paths["clip_text.onnx"],
+            sess_options=_build_session_options(True),
+            providers=providers,
+        )
+        active_providers = {
+            "visual": visual_session.get_providers(),
+            "text": text_session.get_providers(),
+        }
+        logger.info("GPU probe child initialized sessions with providers: visual=%s text=%s", active_providers["visual"], active_providers["text"])
+        using_gpu = all("DmlExecutionProvider" in provider_list for provider_list in active_providers.values())
+        if not using_gpu:
+            issue = detect_gpu_runtime_issue()
+            logger.warning("GPU probe child did not activate DirectML provider: issue=%s", issue or "unknown")
+            return {
+                "ok": False,
+                "issue": issue or "unknown",
+                "detail": "DirectML provider was not activated during GPU runtime probe.",
+            }
+
+        dummy_image = np.zeros((1, 3, 224, 224), dtype=np.float32)
+        visual_session.run(None, {"input": dummy_image})
+        dummy_tokens = tokenize(["gpu probe"]).astype(np.int32)
+        text_session.run(None, {"input": dummy_tokens})
+        logger.info("GPU probe child completed DirectML validation successfully")
+        return {
+            "ok": True,
+            "issue": "",
+            "detail": "",
+        }
+    except Exception as exc:
+        issue = detect_gpu_runtime_issue()
+        logger.exception("GPU probe child failed during DirectML validation")
+        return {
+            "ok": False,
+            "issue": issue or "unknown",
+            "detail": str(exc),
+        }
+
+
+def _build_gpu_runtime_warning(detail):
+    base = (
+        "GPU execution is unavailable. ONNX Runtime fell back to CPU. "
+        "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
+    )
+    detail_text = str(detail or "").strip()
+    if not detail_text:
+        return base
+    return f"{base} Detail: {detail_text}"
+
+
+def _is_gpu_probe_child():
+    return os.environ.get("VIDEOSEEK_GPU_PROBE_CHILD") == "1"
+
+
+def _truncate_log_text(text, limit=240):
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit]}..."
 
 
 def detect_gpu_runtime_issue():

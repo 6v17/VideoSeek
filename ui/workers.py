@@ -3,6 +3,8 @@ from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 
 from src.app.config import load_config
+from src.app.i18n import get_texts
+from src.app.logging_utils import get_logger
 from src.core.core import run_search
 from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
@@ -12,6 +14,8 @@ from src.services.remote_library_service import build_remote_library_from_links
 from src.services.search_service import warmup_search_runtime
 from src.services.remote_search_service import run_remote_search
 from src.services.version_service import get_version_status
+
+logger = get_logger("workers")
 
 
 class SearchWorker(QThread):
@@ -50,6 +54,7 @@ class SearchWarmupWorker(QThread):
 class IndexUpdateWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(bool, bool)
+    runtime_status_signal = Signal(dict)
 
     def __init__(self, target_lib=None, force_cleanup_missing_files=False):
         super().__init__()
@@ -63,7 +68,27 @@ class IndexUpdateWorker(QThread):
 
     def run(self):
         try:
+            from src.core.clip_embedding import get_engine_runtime_status, prepare_inference_runtime
             from src.workflows.update_video import update_videos_flow
+
+            logger.info(
+                "Index update worker starting runtime preparation: target_lib=%s force_cleanup_missing_files=%s",
+                self.target_lib,
+                self.force_cleanup_missing_files,
+            )
+            runtime_status = prepare_inference_runtime()
+            effective_runtime_status = get_engine_runtime_status()
+            logger.info(
+                "Index update worker runtime ready: backend=%s initialized=%s warning=%s issue=%s",
+                effective_runtime_status.get("backend", ""),
+                effective_runtime_status.get("initialized"),
+                bool(effective_runtime_status.get("warning")),
+                effective_runtime_status.get("issue", ""),
+            )
+            self.runtime_status_signal.emit(effective_runtime_status)
+            if runtime_status.get("warning"):
+                language = load_config().get("language", "zh")
+                self.progress_signal.emit(1, get_texts(language).get("gpu_runtime_compact", "GPU runtime unavailable, using CPU"))
 
             result = update_videos_flow(
                 target_lib=self.target_lib,

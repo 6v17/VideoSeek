@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self.app_meta_controller.about_ready.connect(self._update_about_payload)
         self.indexing_controller = IndexingController(self)
         self.indexing_controller.status_changed.connect(self._update_indexing_progress)
+        self.indexing_controller.runtime_status_changed.connect(self._apply_runtime_status)
         self.indexing_controller.finished.connect(self._finish_indexing)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
@@ -703,7 +704,7 @@ class MainWindow(QMainWindow):
         self.search_page.img_label.clear()
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
         self.search_controller.clear_results()
-        self.media_player.stop()
+        self.preview_controller.stop_preview()
         self.search_page.lbl_status.setText(self.texts["ready"])
 
     def clear_link_search_content(self):
@@ -873,11 +874,15 @@ class MainWindow(QMainWindow):
         self.library_page.progress_bar.setValue(value)
         self.library_page.lbl_status.setText(text)
 
+    def _apply_runtime_status(self, _status):
+        self._update_inference_backend_hint()
+
     def _finish_indexing(self, success, target_lib, stopped=False):
         self.library_page.btn_sync_db.setEnabled(True)
         self.library_page.btn_add_lib.setEnabled(True)
         self.library_page.btn_cleanup_missing.setEnabled(True)
         self.library_page.progress_bar.setVisible(False)
+        self._update_inference_backend_hint()
         self.refresh_library_table()
         if stopped:
             status_text = self.texts["index_stopped"]

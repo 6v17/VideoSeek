@@ -85,6 +85,7 @@ class PreviewController:
         self.parent_window.media_player.stop()
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
+        self.current_preview_context = None
 
     def get_current_preview_context(self):
         return dict(self.current_preview_context) if self.current_preview_context else None
