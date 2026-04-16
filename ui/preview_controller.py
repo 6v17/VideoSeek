@@ -4,12 +4,15 @@ from PySide6.QtCore import QUrl
 
 from src.app.config import load_config
 from src.utils import build_preview_cache_path, create_preview_clip, export_original_clip, get_video_duration_seconds
+from ui.vlc_player import VlcPreviewPlayer
 
 
 class PreviewController:
     def __init__(self, parent_window):
         self.parent_window = parent_window
         self.current_preview_path = None
+        self.current_preview_context = None
+        self.vlc_player = None
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         start_sec = float(start_sec)
@@ -50,11 +53,23 @@ class PreviewController:
         media_player.setSource(QUrl())
 
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
+        clip_end = clip_start + clip_duration
+        self.cleanup_previous_preview()
+        self.current_preview_context = {
+            "video_path": video_path,
+            "start_sec": clip_start,
+            "end_sec": clip_end,
+        }
+
+        if self.vlc_player is None:
+            self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+
+        if self.vlc_player.play(video_path, clip_start, stop_sec=clip_end):
+            return True
 
         cache_path = build_preview_cache_path(video_path, clip_start)
         result = create_preview_clip(video_path, clip_start, cache_path, duration_sec=clip_duration)
         if result.returncode == 0:
-            self.cleanup_previous_preview()
             self.current_preview_path = cache_path
             media_player.setSource(QUrl.fromLocalFile(cache_path))
             media_player.play()
@@ -63,6 +78,16 @@ class PreviewController:
         if os.path.exists(cache_path):
             os.remove(cache_path)
         return False
+
+    def stop_preview(self):
+        if self.vlc_player is not None:
+            self.vlc_player.stop()
+        self.parent_window.media_player.stop()
+        self.parent_window.media_player.setSource(QUrl())
+        self.cleanup_previous_preview()
+
+    def get_current_preview_context(self):
+        return dict(self.current_preview_context) if self.current_preview_context else None
 
     def export_clip(self, video_path, start_sec, output_path, end_sec=None):
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
@@ -79,6 +104,10 @@ class PreviewController:
         self.current_preview_path = None
 
     def shutdown(self):
+        if self.vlc_player is not None:
+            self.vlc_player.shutdown()
+            self.vlc_player = None
         self.parent_window.media_player.stop()
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
+        self.current_preview_context = None

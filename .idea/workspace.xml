@@ -4,7 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="1.0.5更新优化">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="界面优化">
+      <change afterPath="$PROJECT_DIR$/docs/static_call_analysis.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/source/ffmpeg-8.1-full_build.7z" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
@@ -373,27 +374,17 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libgoom_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/DEVELOPMENT.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/build_remote_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/build_remote_index.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/copy_overrides.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/copy_overrides.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/extract_frames.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/remote_library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/remote_library_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_semantic_chunking.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_controllers.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/layout.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/styles.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/preview_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/table_views.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -401,7 +392,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="5234" />
+    <option name="cachedIndexableFilesCount" value="5236" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -473,7 +464,7 @@
     &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/data&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/vlc_lib&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -485,8 +476,8 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="D:\PycharmProjects\VideoSeek\data" />
       <recent name="D:\PycharmProjects\VideoSeek\vlc_lib" />
+      <recent name="D:\PycharmProjects\VideoSeek\data" />
       <recent name="D:\PycharmProjects\VideoSeek" />
       <recent name="D:\PycharmProjects\VideoSeek\models" />
       <recent name="D:\PycharmProjects\VideoSeek\img" />
@@ -635,6 +626,9 @@
       <workItem from="1776305919078" duration="2141000" />
       <workItem from="1776308227452" duration="10042000" />
       <workItem from="1776323606608" duration="12603000" />
+      <workItem from="1776339599017" duration="626000" />
+      <workItem from="1776340235078" duration="4817000" />
+      <workItem from="1776345090930" duration="7582000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -948,7 +942,15 @@
       <option name="project" value="LOCAL" />
       <updated>1776184317470</updated>
     </task>
-    <option name="localTasksCounter" value="40" />
+    <task id="LOCAL-00040" summary="界面优化">
+      <option name="closed" value="true" />
+      <created>1776339849822</created>
+      <option name="number" value="00040" />
+      <option name="presentableId" value="LOCAL-00040" />
+      <option name="project" value="LOCAL" />
+      <updated>1776339849822</updated>
+    </task>
+    <option name="localTasksCounter" value="41" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -983,7 +985,6 @@
     <MESSAGE value="重构" />
     <MESSAGE value="打包路径修复" />
     <MESSAGE value="拆分同步、搜索功能" />
-    <MESSAGE value="界面优化" />
     <MESSAGE value="打包优化" />
     <MESSAGE value="删除无用函数" />
     <MESSAGE value="修改nuitka打包路径问题" />
@@ -998,7 +999,8 @@
     <MESSAGE value="GPU选择优化" />
     <MESSAGE value="增加网络搜索功能" />
     <MESSAGE value="1.0.5更新优化" />
-    <option name="LAST_COMMIT_MESSAGE" value="1.0.5更新优化" />
+    <MESSAGE value="界面优化" />
+    <option name="LAST_COMMIT_MESSAGE" value="界面优化" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

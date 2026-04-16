@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import webbrowser
 
 from PySide6.QtCore import Qt, QTimer
@@ -48,6 +49,7 @@ from ui.dialogs import AboutDialog, AppMessageDialog, NoticeDialog, ResourceTabl
 from ui.indexing_controller import IndexingController
 from ui.layout import WINDOW_SIZES, apply_window_size
 from ui.network_search_controller import NetworkSearchController
+from ui.preview_dialog import PreviewDialog
 from ui.preview_controller import PreviewController
 from ui.runtime_resource_controller import RuntimeResourceController
 from ui.search_controller import SearchController
@@ -67,6 +69,8 @@ class MainWindow(QMainWindow):
         self.about_payload = None
         self.models_ready = True
         self._startup_complete = False
+        self._preview_dialog_cooldown_until = 0.0
+        self._preview_dialog_opening = False
 
         cfg = load_config()
         self.is_dark_mode = cfg.get("theme", "dark") == "dark"
@@ -144,6 +148,9 @@ class MainWindow(QMainWindow):
 
         self.search_page.preview_placeholder.hide()
         self.video_widget = QVideoWidget()
+        self.video_widget.setAttribute(Qt.WA_NativeWindow, True)
+        self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.search_page.preview_host.mouseDoubleClickEvent = self.open_current_preview_dialog
         self.search_page.preview_host_layout.addWidget(self.video_widget)
 
         self.result_table = self.search_page.result_table
@@ -160,6 +167,7 @@ class MainWindow(QMainWindow):
         self.search_page.btn_browse.clicked.connect(self.upload_file)
         self.search_page.btn_search.clicked.connect(self.start_search)
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
+        self.search_page.btn_expand_preview.clicked.connect(self.open_current_preview_dialog)
         self.search_page.search_mode.currentIndexChanged.connect(self._save_search_mode)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self.link_page.query_image_label.mousePressEvent = lambda e: self.upload_network_query_image()
@@ -255,6 +263,7 @@ class MainWindow(QMainWindow):
         self.search_page.session_title.setText(t["workspace_label"])
         self.search_page.session_hint.setText(t["workspace_hint"])
         self.search_page.preview_title.setText(t["preview_panel"])
+        self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_browse.setText(t["browse_image"])
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
@@ -888,6 +897,44 @@ class MainWindow(QMainWindow):
         if not self.preview_controller.play(path, sec, end_sec=end_sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
 
+    def open_current_preview_dialog(self, _event=None):
+        if not self.check_runtime_resources():
+            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
+        now = time.monotonic()
+        if self._preview_dialog_opening or now < self._preview_dialog_cooldown_until:
+            self.search_page.lbl_status.setText(
+                self.texts.get("preview_dialog_busy", "Preview is still switching. Try again in a moment.")
+            )
+            return
+
+        payload = self.preview_controller.get_current_preview_context()
+        if not payload:
+            return
+        video_path = str(payload.get("video_path", "")).strip()
+        if not video_path:
+            return
+
+        start_sec = float(payload.get("start_sec", 0.0))
+        end_sec = float(payload.get("end_sec", start_sec))
+        self.preview_controller.stop_preview()
+        self._preview_dialog_opening = True
+        self._preview_dialog_cooldown_until = now + 0.8
+
+        try:
+            if not hasattr(self, "_preview_dialog") or self._preview_dialog is None:
+                self._preview_dialog = PreviewDialog(self, video_path, start_sec, end_sec, self.texts)
+            else:
+                self._preview_dialog.load_preview(video_path, start_sec, end_sec)
+            self._preview_dialog.show()
+            self._preview_dialog.raise_()
+            self._preview_dialog.activateWindow()
+        finally:
+            QTimer.singleShot(800, self._release_preview_dialog_gate)
+
+    def _release_preview_dialog_gate(self):
+        self._preview_dialog_opening = False
+
     def handle_export_clip(self, path, sec, end_sec=None):
         base_name = os.path.splitext(os.path.basename(path))[0]
         suggested_name = f"{base_name}_clip_{int(float(sec)):06d}.mp4"
@@ -1033,12 +1080,21 @@ class MainWindow(QMainWindow):
         self.switch_page("link")
 
     def closeEvent(self, event):
+        if hasattr(self, "_preview_dialog") and self._preview_dialog is not None:
+            if self._preview_dialog.is_export_running():
+                self.search_page.lbl_status.setText(
+                    self.texts.get("preview_dialog_export_running", "Clip export is still running. Please wait.")
+                )
+                event.ignore()
+                return
         if self.indexing_controller.is_running():
             self._close_when_indexing_stops = True
             self.indexing_controller.request_stop()
             self.library_page.lbl_status.setText(self.texts["index_stop_requested"])
             event.ignore()
             return
+        if hasattr(self, "_preview_dialog") and self._preview_dialog is not None:
+            self._preview_dialog.shutdown_player()
         self.search_controller.shutdown()
         self.network_search_controller.shutdown()
         self.indexing_controller.shutdown()
@@ -1248,6 +1304,7 @@ class MainWindow(QMainWindow):
                 row_payloads=payloads,
                 export_default_name="local_vector_details.json",
                 stretch_column=3,
+                allow_sorting=False,
                 fixed_column_widths={
                     0: 52,
                     1: 220,
@@ -1367,6 +1424,7 @@ class MainWindow(QMainWindow):
                 row_payloads=payloads,
                 export_default_name="remote_link_details.json",
                 stretch_column=2,
+                allow_sorting=False,
                 fixed_column_widths={
                     0: 52,
                     3: 86,

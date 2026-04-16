@@ -47,6 +47,15 @@ def populate_result_table(table, results, on_preview, on_locate, on_export, text
 
         order_item = QTableWidgetItem(str(row + 1))
         order_item.setTextAlignment(Qt.AlignCenter)
+        order_item.setData(
+            Qt.UserRole,
+            {
+                "video_path": video_path,
+                "start_sec": float(start_sec),
+                "end_sec": float(end_sec),
+                "score": float(score),
+            },
+        )
         table.setItem(row, 0, order_item)
 
         preview_placeholder = QLabel(texts["thumb_loading"])

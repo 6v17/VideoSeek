@@ -630,7 +630,7 @@ class SamplingRulesDialog(QDialog):
         return self._rules_text
 
 
-class ResourceTableDialog(QDialog):
+class LegacyResourceTableDialog(QDialog):
     def __init__(
         self,
         parent=None,
@@ -651,6 +651,7 @@ class ResourceTableDialog(QDialog):
         extra_actions=None,
         selection_mode=QAbstractItemView.SingleSelection,
         row_double_click_handler=None,
+        allow_sorting=True,
     ):
         super().__init__(parent)
         self.texts = get_texts(language)
@@ -667,6 +668,7 @@ class ResourceTableDialog(QDialog):
         self.extra_actions = list(extra_actions or [])
         self.selection_mode = selection_mode
         self.row_double_click_handler = row_double_click_handler
+        self.allow_sorting = bool(allow_sorting)
         self.filtered_rows = list(self.rows)
         self.filtered_payloads = list(self.row_payloads)
 
@@ -1167,6 +1169,7 @@ class ResourceTableDialog(QDialog):
         extra_actions=None,
         selection_mode=QAbstractItemView.SingleSelection,
         row_double_click_handler=None,
+        allow_sorting=True,
     ):
         super().__init__(parent)
         self.texts = get_texts(language)
@@ -1183,6 +1186,7 @@ class ResourceTableDialog(QDialog):
         self.extra_actions = list(extra_actions or [])
         self.selection_mode = selection_mode
         self.row_double_click_handler = row_double_click_handler
+        self.allow_sorting = bool(allow_sorting)
         self.filtered_rows = list(self.rows)
         self.filtered_payloads = list(self.row_payloads)
 
@@ -1328,7 +1332,7 @@ class ResourceTableDialog(QDialog):
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
-        self.table.setSortingEnabled(True)
+        self.table.setSortingEnabled(self.allow_sorting)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.setMinimumHeight(360)
@@ -1456,7 +1460,7 @@ class ResourceTableDialog(QDialog):
                 if self._is_issue_row(row_data):
                     item.setForeground(Qt.GlobalColor.red)
                 self.table.setItem(row_index, col_index, item)
-        self.table.setSortingEnabled(True)
+        self.table.setSortingEnabled(self.allow_sorting)
 
         total_rows = len(self.rows)
         visible_rows = len(self.filtered_rows)
