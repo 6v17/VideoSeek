@@ -107,21 +107,6 @@ tests/
 - `src/workflows/` keeps higher-level indexing orchestration.
 - `src/utils.py` keeps shared filesystem, FFmpeg, preview, and config sync helpers.
 
-## Agent Notes
-
-This repository includes agent guidance in:
-
-- `AGENTS.md`
-- `AGENTS.zh-CN.md`
-
-These files document project structure, testing expectations, and high-risk areas.
-
-In particular, changes touching the local-library sync/indexing path should be treated conservatively:
-
-- Avoid broad refactors in `src/services/indexing_service.py`, `src/workflows/update_video.py`, `src/core/extract_frames.py`, `src/core/clip_embedding.py`, `src/core/faiss_index.py`, `ui/workers.py`, and `ui/indexing_controller.py`.
-- Prefer minimal fixes or narrowly scoped feature changes.
-- Run syntax checks plus `tests.test_services` after changes in the indexing path.
-- Also run `tests.test_controllers` when UI start/stop/progress flow changes.
 
 ## Configuration Layers
 
