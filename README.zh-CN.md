@@ -54,22 +54,6 @@ ui/
 tests/
 ```
 
-## Agent 说明
-
-仓库内包含两份给 AI 编码代理使用的说明文件：
-
-- `AGENTS.md`
-- `AGENTS.zh-CN.md`
-
-这两份文件定义了项目结构、测试要求以及高风险修改区域。
-
-其中，本地视频库同步/索引链路属于高风险区域，修改时应遵守以下原则：
-
-- 不要在 `src/services/indexing_service.py`、`src/workflows/update_video.py`、`src/core/extract_frames.py`、`src/core/clip_embedding.py`、`src/core/faiss_index.py`、`ui/workers.py`、`ui/indexing_controller.py` 中做大范围重构
-- 优先最小修复或范围明确的小功能变更
-- 修改索引链路后，至少执行语法检查和 `tests.test_services`
-- 如果同时改了 UI 的启动、停止、进度相关流程，还应执行 `tests.test_controllers`
-
 ## 配置说明
 
 用户配置文件：`config.json`
