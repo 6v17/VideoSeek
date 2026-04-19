@@ -215,39 +215,6 @@ Incremental behavior:
 - If no new vectors are appended, it skips rebuild by default.
 - Use `--force-rebuild` to rebuild files even when no new vectors are detected.
 
-## Packaging
-
-Example Nuitka command:
-
-```powershell
-python -m nuitka --standalone `
---plugin-enable=pyside6 `
---include-qt-plugins=multimedia `
---windows-console-mode=disable `
---output-dir=dist `
---output-filename=VideoSeek `
---windows-icon-from-ico=icon.ico `
---include-data-file=config.json=config.json `
---include-data-dir=vlc_lib=vlc_lib `
---include-package=yt_dlp `
---nofollow-import-to=yt_dlp.extractor.lazy_extractors `
---show-progress `
---verbose `
-main.py
-```
-
-If you bundle `config.json`, keep machine-local runtime fields empty:
-
-- `model_dir`
-- `ffmpeg_path`
-
-Otherwise the first launch on another machine may inherit invalid absolute paths from the build machine before the app migrates settings into `%LOCALAPPDATA%\\VideoSeek\\config.json`.
-
-VLC packaging note:
-
-- `vlc_lib` is required for local VLC preview playback in packaged builds.
-- In practice, some VLC runtime DLLs may still be missed by Nuitka data inclusion depending on file type handling.
-- If the packaged app cannot play through VLC, copy the whole `vlc_lib` folder into `dist/main.dist\vlc_lib` after packaging and verify `libvlc.dll`, `libvlccore.dll`, and the `plugins` directory are present.
 ## Download
 
 Runtime resource packaging note:
