@@ -132,44 +132,6 @@ tests/
 - 网络构建缓存：`data/remote_build_cache`
 - 链接检索缓存：`data/link_cache`
 
-## 打包
-
-示例 Nuitka 命令（PowerShell）：
-
-```powershell
-python -m nuitka --standalone `
---plugin-enable=pyside6 `
---include-qt-plugins=multimedia `
---windows-console-mode=disable `
---output-dir=dist `
---output-filename=VideoSeek `
---windows-icon-from-ico=icon.ico `
---include-data-file=config.json=config.json `
---include-data-dir=vlc_lib=vlc_lib `
---include-package=yt_dlp `
---nofollow-import-to=yt_dlp.extractor.lazy_extractors `
---show-progress `
---verbose `
-main.py
-```
-
-如果一起打包 `config.json`，建议保持以下机器本地字段为空：
-
-- `model_dir`
-- `ffmpeg_path`
-
-否则切换到另一台机器首次启动时，可能先继承构建机上的绝对路径，再迁移到 `%LOCALAPPDATA%\VideoSeek\config.json`。
-
-VLC 打包说明：
-
-- 本地 VLC 预览依赖 `vlc_lib`
-- 实际打包时，Nuitka 可能不会完整带上 VLC 目录中的全部 DLL
-- 如果打包后的程序无法正常用 VLC 预览，建议在打包完成后，把整个 `vlc_lib` 目录完整复制到 `dist/main.dist\vlc_lib`
-- 发布前至少确认以下内容存在：
-  - `libvlc.dll`
-  - `libvlccore.dll`
-  - `plugins/`
-
 ## 测试
 
 ```bash
