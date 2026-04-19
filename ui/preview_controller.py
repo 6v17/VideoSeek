@@ -3,6 +3,7 @@ import os
 from PySide6.QtCore import QUrl
 
 from src.app.config import load_config
+from ui.threading_utils import shutdown_thread
 from src.utils import (
     build_preview_cache_path,
     create_preview_clip,
@@ -11,6 +12,7 @@ from src.utils import (
     start_export_original_clip_process,
 )
 from ui.vlc_player import VlcPreviewPlayer
+from ui.workers import PreviewWarmupWorker
 
 
 class PreviewController:
@@ -20,6 +22,7 @@ class PreviewController:
         self.current_preview_context = None
         self.vlc_player = None
         self._warmup_started = False
+        self.warmup_worker = None
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         start_sec = float(start_sec)
@@ -68,10 +71,9 @@ class PreviewController:
             "end_sec": clip_end,
         }
 
-        if self.vlc_player is None:
-            self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+        vlc_player = self._ensure_vlc_player()
 
-        if self.vlc_player.play(video_path, clip_start, stop_sec=clip_end):
+        if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
             return True
 
         cache_path = build_preview_cache_path(video_path, clip_start)
@@ -90,8 +92,17 @@ class PreviewController:
         if self._warmup_started:
             return
         self._warmup_started = True
+        self.warmup_worker = PreviewWarmupWorker()
+        self.warmup_worker.finished.connect(self._finish_warmup)
+        self.warmup_worker.start()
+
+    def _ensure_vlc_player(self):
         if self.vlc_player is None:
             self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+        return self.vlc_player
+
+    def _finish_warmup(self):
+        self.warmup_worker = None
 
     def stop_preview(self):
         if self.vlc_player is not None:
@@ -123,6 +134,7 @@ class PreviewController:
         self.current_preview_path = None
 
     def shutdown(self):
+        shutdown_thread(self.warmup_worker)
         if self.vlc_player is not None:
             self.vlc_player.shutdown()
             self.vlc_player = None

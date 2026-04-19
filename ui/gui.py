@@ -1186,15 +1186,7 @@ class MainWindow(QMainWindow):
         )
         if not save_path:
             return
-        try:
-            result = self.preview_controller.export_clip(path, sec, save_path, end_sec=end_sec)
-            if result.returncode != 0:
-                raise RuntimeError((result.stderr or b"").decode("utf-8", errors="ignore").strip())
-            self.search_page.lbl_status.setText(
-                self.texts.get("export_clip_success", "\u7247\u6bb5\u5df2\u5bfc\u51fa\uff1a{path}").format(path=save_path)
-            )
-        except Exception as exc:
-            self.show_error_dialog(self.texts.get("export_clip_failed", "\u5bfc\u51fa\u7247\u6bb5\u5931\u8d25\u3002"), exc)
+        self._queue_preview_export(path, float(sec), float(end_sec if end_sec is not None else sec), save_path)
 
     def upload_file(self):
         path, _ = QFileDialog.getOpenFileName(self, self.texts["select_image"], "", self.texts["image_filter"])

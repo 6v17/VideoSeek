@@ -14,6 +14,7 @@ from src.services.remote_library_service import build_remote_library_from_links
 from src.services.search_service import warmup_search_runtime
 from src.services.remote_search_service import run_remote_search
 from src.services.version_service import get_version_status
+from ui.vlc_player import warmup_vlc_runtime
 
 logger = get_logger("workers")
 
@@ -47,6 +48,18 @@ class SearchWarmupWorker(QThread):
             warmup_search_runtime()
         except Exception as exc:
             print(f"Search Warmup Error: {exc}")
+        finally:
+            self.finished.emit()
+
+
+class PreviewWarmupWorker(QThread):
+    finished = Signal()
+
+    def run(self):
+        try:
+            warmup_vlc_runtime()
+        except Exception as exc:
+            print(f"Preview Warmup Error: {exc}")
         finally:
             self.finished.emit()
 

@@ -121,6 +121,7 @@ if "ui.workers" not in sys.modules:
     workers_module.ResourceDownloadWorker = _BaseWorker
     workers_module.SearchWorker = _BaseWorker
     workers_module.SearchWarmupWorker = _BaseWorker
+    workers_module.PreviewWarmupWorker = _BaseWorker
     workers_module.ThumbLoader = _BaseWorker
     sys.modules["ui.workers"] = workers_module
 
@@ -281,15 +282,18 @@ class SearchControllerTests(unittest.TestCase):
 
 
 class PreviewControllerTests(unittest.TestCase):
-    @patch("ui.preview_controller.VlcPreviewPlayer")
-    def test_start_warmup_initializes_vlc_player_once(self, mock_vlc_cls):
+    @patch("ui.preview_controller.PreviewWarmupWorker")
+    def test_start_warmup_starts_once(self, mock_worker_cls):
         parent = _make_parent_window()
         controller = PreviewController(parent)
+        worker = MagicMock()
+        mock_worker_cls.return_value = worker
 
         controller.start_warmup()
         controller.start_warmup()
 
-        mock_vlc_cls.assert_called_once_with(parent.video_widget)
+        mock_worker_cls.assert_called_once_with()
+        worker.start.assert_called_once()
 
     @patch("ui.preview_controller.VlcPreviewPlayer")
     @patch("ui.preview_controller.get_video_duration_seconds", return_value=120.0)
