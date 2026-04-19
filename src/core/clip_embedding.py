@@ -314,11 +314,14 @@ def _probe_gpu_runtime_subprocess():
 
 
 def _build_gpu_probe_command():
-    executable = sys.executable
+    executable = _resolve_probe_executable_path()
     if not executable:
         return []
 
-    if getattr(sys, "frozen", False):
+    executable_lower = executable.lower()
+    executable_name = os.path.basename(executable_lower)
+    is_python_launcher = executable_name.startswith("python")
+    if (executable_lower.endswith(".exe") and not is_python_launcher) or getattr(sys, "frozen", False):
         return [executable, "--gpu-probe"]
 
     main_script = _resolve_main_script_path()
@@ -330,6 +333,34 @@ def _build_gpu_probe_command():
 def _resolve_main_script_path():
     candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "main.py"))
     return candidate if os.path.exists(candidate) else ""
+
+
+def _resolve_probe_executable_path():
+    candidates = [
+        str(getattr(sys, "executable", "") or "").strip(),
+        str((sys.argv or [""])[0] or "").strip(),
+        _get_windows_module_filename(),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        normalized = os.path.abspath(candidate)
+        if os.path.exists(normalized):
+            return normalized
+    return ""
+
+
+def _get_windows_module_filename():
+    if os.name != "nt":
+        return ""
+    try:
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = ctypes.windll.kernel32.GetModuleFileNameW(None, buffer, len(buffer))
+        if length <= 0:
+            return ""
+        return buffer.value[:length]
+    except Exception:
+        return ""
 
 
 def _parse_gpu_probe_payload(stdout_text):
