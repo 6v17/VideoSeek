@@ -220,6 +220,8 @@ class SettingDetailPopup(QFrame):
             self.hide_and_clear()
         elif event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
             self.hide_and_clear()
+        elif event.type() in {QEvent.Wheel, QEvent.Scroll, QEvent.ScrollPrepare}:
+            self.hide_and_clear()
         elif event.type() == QEvent.WindowDeactivate:
             self.hide_and_clear()
         return False
@@ -419,10 +421,7 @@ class SearchPage(QWidget):
         preview_header.setSpacing(10)
         self.preview_title = QLabel()
         self.preview_title.setObjectName("CardTitle")
-        self.btn_expand_preview = QPushButton()
-        self.btn_expand_preview.setObjectName("GhostButton")
         preview_header.addWidget(self.preview_title, 1)
-        preview_header.addWidget(self.btn_expand_preview)
         self.preview_host = QFrame()
         self.preview_host.setObjectName("VideoContainer")
         self.preview_host.setMinimumHeight(COMPONENT_SIZES["preview_host_min_height"])
@@ -444,11 +443,21 @@ class SearchPage(QWidget):
         results_layout = QVBoxLayout(self.results_card)
         results_layout.setContentsMargins(18, 18, 18, 18)
         results_layout.setSpacing(10)
+        results_header = QHBoxLayout()
+        results_header.setContentsMargins(0, 0, 0, 0)
+        results_header.setSpacing(10)
         self.results_title = QLabel()
         self.results_title.setObjectName("CardTitle")
+        self.btn_expand_preview = QPushButton()
+        self.btn_expand_preview.setObjectName("GhostButton")
+        self.btn_export_tasks = QPushButton()
+        self.btn_export_tasks.setObjectName("GhostButton")
+        results_header.addWidget(self.results_title, 1)
+        results_header.addWidget(self.btn_expand_preview)
+        results_header.addWidget(self.btn_export_tasks)
         self.result_table = ResultTable()
         self.result_table.setMinimumHeight(COMPONENT_SIZES["result_table_min_height"])
-        results_layout.addWidget(self.results_title)
+        results_layout.addLayout(results_header)
         results_layout.addWidget(self.result_table)
         root.addWidget(self.results_card, 4)
 

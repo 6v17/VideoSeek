@@ -3,7 +3,13 @@ import os
 from PySide6.QtCore import QUrl
 
 from src.app.config import load_config
-from src.utils import build_preview_cache_path, create_preview_clip, export_original_clip, get_video_duration_seconds
+from src.utils import (
+    build_preview_cache_path,
+    create_preview_clip,
+    export_original_clip,
+    get_video_duration_seconds,
+    start_export_original_clip_process,
+)
 from ui.vlc_player import VlcPreviewPlayer
 
 
@@ -13,6 +19,7 @@ class PreviewController:
         self.current_preview_path = None
         self.current_preview_context = None
         self.vlc_player = None
+        self._warmup_started = False
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         start_sec = float(start_sec)
@@ -79,6 +86,13 @@ class PreviewController:
             os.remove(cache_path)
         return False
 
+    def start_warmup(self):
+        if self._warmup_started:
+            return
+        self._warmup_started = True
+        if self.vlc_player is None:
+            self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+
     def stop_preview(self):
         if self.vlc_player is not None:
             self.vlc_player.stop()
@@ -93,6 +107,10 @@ class PreviewController:
     def export_clip(self, video_path, start_sec, output_path, end_sec=None):
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
         return export_original_clip(video_path, clip_start, clip_duration, output_path)
+
+    def start_export_process(self, video_path, start_sec, output_path, end_sec=None):
+        clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
+        return start_export_original_clip_process(video_path, clip_start, clip_duration, output_path)
 
     def cleanup_previous_preview(self):
         if not self.current_preview_path:

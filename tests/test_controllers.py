@@ -282,6 +282,16 @@ class SearchControllerTests(unittest.TestCase):
 
 class PreviewControllerTests(unittest.TestCase):
     @patch("ui.preview_controller.VlcPreviewPlayer")
+    def test_start_warmup_initializes_vlc_player_once(self, mock_vlc_cls):
+        parent = _make_parent_window()
+        controller = PreviewController(parent)
+
+        controller.start_warmup()
+        controller.start_warmup()
+
+        mock_vlc_cls.assert_called_once_with(parent.video_widget)
+
+    @patch("ui.preview_controller.VlcPreviewPlayer")
     @patch("ui.preview_controller.get_video_duration_seconds", return_value=120.0)
     @patch("ui.preview_controller.load_config", return_value={"preview_seconds": 6})
     def test_play_prefers_vlc_for_direct_preview(self, _mock_config, _mock_duration, mock_vlc_cls):

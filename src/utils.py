@@ -279,6 +279,21 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
 
 
 def export_original_clip(input_path, start_sec, duration_sec, output_path):
+    cmd = build_export_original_clip_command(input_path, start_sec, duration_sec, output_path)
+    return subprocess.run(cmd, startupinfo=_build_hidden_startupinfo(), capture_output=True)
+
+
+def start_export_original_clip_process(input_path, start_sec, duration_sec, output_path):
+    cmd = build_export_original_clip_command(input_path, start_sec, duration_sec, output_path)
+    return subprocess.Popen(
+        cmd,
+        startupinfo=_build_hidden_startupinfo(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def build_export_original_clip_command(input_path, start_sec, duration_sec, output_path):
     ffmpeg = get_ffmpeg_path()
     input_path = os.fspath(input_path)
     output_path = os.fspath(output_path)
@@ -292,7 +307,7 @@ def export_original_clip(input_path, start_sec, duration_sec, output_path):
         except OSError:
             pass
 
-    cmd = [
+    return [
         ffmpeg,
         "-y",
         "-ss",
@@ -322,13 +337,14 @@ def export_original_clip(input_path, start_sec, duration_sec, output_path):
         output_path,
     ]
 
+
+def _build_hidden_startupinfo():
     startupinfo = None
     if sys.platform == "win32":
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0
-
-    return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
+    return startupinfo
 
 
 def get_video_duration_seconds(video_path):

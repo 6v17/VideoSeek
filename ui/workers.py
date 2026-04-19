@@ -121,11 +121,15 @@ class ThumbLoader(QThread):
         thumb_width = config.get("thumb_width", 130)
         thumb_height = config.get("thumb_height", 75)
 
-        for row, (start_sec, _, _, video_path) in enumerate(self.results):
+        for row, (start_sec, end_sec, _, video_path) in enumerate(self.results):
             if not self._running:
                 break
 
-            frame = get_single_thumbnail(video_path, start_sec)
+            thumb_time = float(start_sec)
+            if float(end_sec) > float(start_sec):
+                thumb_time = (float(start_sec) + float(end_sec)) / 2.0
+
+            frame = get_single_thumbnail(video_path, thumb_time)
             if frame is None:
                 self.msleep(15)
                 continue

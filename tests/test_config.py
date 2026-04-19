@@ -161,6 +161,20 @@ class ConfigMigrationTests(unittest.TestCase):
 
             self.assertEqual(loaded["fps"], 1.5)
 
+    def test_load_config_uses_dynamic_sampling_mode_by_default_for_new_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_config_file = root / "config.json"
+
+            with patch.object(config_module, "CONFIG_FILE", str(user_config_file)):
+                loaded = config_module.load_config()
+
+            self.assertEqual(loaded["sampling_fps_mode"], "dynamic")
+            self.assertEqual(
+                loaded["sampling_fps_rules"],
+                "0-10m=2; 10m-60m=1; 60m-=0.5",
+            )
+
     def test_save_config_preserves_sampling_rules_in_fixed_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -234,7 +248,7 @@ class ConfigMigrationTests(unittest.TestCase):
             self.assertEqual(loaded["language"], config_module.DEFAULT_CONFIG["language"])
 
     def test_default_config_includes_sampling_rules_template(self):
-        self.assertEqual(config_module.DEFAULT_CONFIG["sampling_fps_rules"], "0-10m=2; 10m-60m=1; 60m-=2")
+        self.assertEqual(config_module.DEFAULT_CONFIG["sampling_fps_rules"], "0-10m=2; 10m-60m=1; 60m-=0.5")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import os
 import re as std_re
 import sys
 import types
@@ -84,9 +85,27 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
     def test_build_gpu_probe_command_uses_main_script_in_dev_mode(self, _mock_exists):
         command = clip_embedding._build_gpu_probe_command()
 
-        self.assertEqual(command[0], "C:/Python/python.exe")
+        self.assertEqual(os.path.normpath(command[0]), os.path.normpath("C:/Python/python.exe"))
         self.assertTrue(command[1].endswith("main.py"))
         self.assertEqual(command[2], "--gpu-probe")
+
+    @patch("src.core.clip_embedding.os.path.exists", return_value=True)
+    @patch("src.core.clip_embedding.sys.frozen", True, create=True)
+    @patch("src.core.clip_embedding.sys.executable", "", create=True)
+    @patch("src.core.clip_embedding.sys.argv", ["D:/VideoSeek/VideoSeek.exe"], create=True)
+    def test_build_gpu_probe_command_uses_argv0_for_frozen_app_when_sys_executable_missing(self, _mock_exists):
+        command = clip_embedding._build_gpu_probe_command()
+
+        self.assertEqual(command, [os.path.abspath("D:/VideoSeek/VideoSeek.exe"), "--gpu-probe"])
+
+    @patch("src.core.clip_embedding.os.path.exists", return_value=True)
+    @patch("src.core.clip_embedding.sys.frozen", False, create=True)
+    @patch("src.core.clip_embedding.sys.executable", "", create=True)
+    @patch("src.core.clip_embedding.sys.argv", ["D:/VideoSeek/VideoSeek.exe"], create=True)
+    def test_build_gpu_probe_command_uses_exe_even_when_frozen_flag_is_missing(self, _mock_exists):
+        command = clip_embedding._build_gpu_probe_command()
+
+        self.assertEqual(command, [os.path.abspath("D:/VideoSeek/VideoSeek.exe"), "--gpu-probe"])
 
     @patch("src.core.clip_embedding._run_isolated_gpu_probe", return_value={"ok": False, "issue": "directx", "detail": "broken"})
     @patch("builtins.print")

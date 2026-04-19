@@ -23,7 +23,7 @@ LEGACY_DATA_DIR = get_resource_path("source")
 
 DEFAULT_CONFIG = {
     "fps": 1,
-    "sampling_fps_mode": "fixed",
+    "sampling_fps_mode": "dynamic",
     "sampling_fps_rules": "0-10m=2; 10m-60m=1; 60m-=0.5",
     "search_top_k": 20,
     "preview_seconds": 6,
