@@ -192,29 +192,6 @@ python -m unittest ^
 
 These tests intentionally focus on services/controllers and avoid heavy runtime dependencies where possible.
 
-## Build Remote Library Pack
-
-Use this script to build a distributable remote vector library from online links:
-
-```bash
-python scripts/build_remote_index.py --links-file docs/remote_links.txt --base-url https://your-cdn/videoseek/remote --incremental
-```
-
-Outputs:
-
-- `remote_index.faiss`
-- `remote_vectors.npy` (includes `timestamps`, `source_links`, `titles`)
-- `manifest.json`
-
-Then set `remote_index_manifest_url` in `src/app/app_meta.py` to your published manifest URL.
-
-Incremental behavior:
-
-- With `--incremental`, the script loads existing `remote_vectors.npy` and only appends new items.
-- Dedup key is `source_id + timestamp(ms)`.
-- If no new vectors are appended, it skips rebuild by default.
-- Use `--force-rebuild` to rebuild files even when no new vectors are detected.
-
 ## Download
 
 Runtime resource packaging note:
