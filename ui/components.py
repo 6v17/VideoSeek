@@ -394,6 +394,15 @@ class SearchPage(QWidget):
         mode_row.addWidget(self.search_mode)
         mode_row.addStretch()
 
+        mobile_row = QHBoxLayout()
+        mobile_row.setSpacing(8)
+        self.btn_mobile_toggle = QPushButton()
+        self.btn_mobile_toggle.setObjectName("MobileBridgeButton")
+        self.btn_mobile_qr = QPushButton()
+        self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
+        mobile_row.addWidget(self.btn_mobile_toggle, 1)
+        mobile_row.addWidget(self.btn_mobile_qr)
+
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
         self.btn_search = QPushButton()
@@ -409,6 +418,7 @@ class SearchPage(QWidget):
         query_layout.addWidget(self.btn_browse)
         query_layout.addWidget(self.text_search)
         query_layout.addLayout(mode_row)
+        query_layout.addLayout(mobile_row)
         query_layout.addLayout(action_row)
 
         self.preview_card = QFrame()

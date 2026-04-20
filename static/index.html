@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VideoSeek Mobile Upload</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg: linear-gradient(145deg, #dbeafe 0%, #eff6ff 48%, #f8fafc 100%);
+            --card: rgba(255, 255, 255, 0.9);
+            --text: #0f172a;
+            --muted: #475569;
+            --border: rgba(148, 163, 184, 0.28);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+        }
+
+        .shell {
+            width: min(100%, 420px);
+        }
+
+        .badge {
+            margin-bottom: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary);
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            box-shadow: 0 30px 80px rgba(15, 23, 42, 0.12);
+            padding: 28px 22px 20px;
+            backdrop-filter: blur(16px);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            line-height: 1.12;
+        }
+
+        .subtitle {
+            margin: 10px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .upload-area {
+            margin-top: 24px;
+            border: 2px dashed #bfdbfe;
+            border-radius: 24px;
+            background: white;
+            padding: 28px 14px;
+            text-align: center;
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .upload-area:active {
+            transform: scale(0.985);
+            border-color: var(--primary);
+        }
+
+        .upload-area strong {
+            display: block;
+            margin-top: 8px;
+            font-size: 16px;
+        }
+
+        .upload-area span {
+            display: block;
+            margin-top: 6px;
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        #preview {
+            max-width: 100%;
+            max-height: 260px;
+            display: none;
+            border-radius: 16px;
+            margin: 0 auto;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        button {
+            border: none;
+            border-radius: 16px;
+            padding: 15px 16px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .btn-primary {
+            flex: 1;
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.24);
+        }
+
+        .btn-primary:active {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: #64748b;
+            border: 1px solid rgba(148, 163, 184, 0.38);
+        }
+
+        .status {
+            margin-top: 14px;
+            min-height: 22px;
+            color: #475569;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <div class="badge">VideoSeek LAN Upload</div>
+    <div class="card">
+        <h1>手机上传图片，电脑端直接出结果</h1>
+        <p class="subtitle">拍照或选择图片后发送到当前电脑。搜索结果会继续显示在电脑端 VideoSeek 里。</p>
+
+        <div class="upload-area" onclick="document.getElementById('file-input').click()">
+            <div id="placeholder">
+                <div style="font-size: 40px;">&#128247;</div>
+                <strong>选择一张图片</strong>
+                <span>支持 JPG / PNG / WEBP / BMP</span>
+            </div>
+            <img id="preview" alt="preview">
+        </div>
+
+        <input id="file-input" type="file" accept="image/*" onchange="previewImage()">
+
+        <div class="actions">
+            <button class="btn-primary" id="submit-btn" onclick="submitImage()">发送并搜索</button>
+            <button class="btn-secondary" onclick="clearFile()">重置</button>
+        </div>
+        <div class="status" id="status"></div>
+    </div>
+</div>
+
+<script>
+    const uploadToken = "__UPLOAD_TOKEN__";
+
+    function setStatus(message) {
+        document.getElementById("status").innerText = message || "";
+    }
+
+    function previewImage() {
+        const fileInput = document.getElementById("file-input");
+        const preview = document.getElementById("preview");
+        const placeholder = document.getElementById("placeholder");
+        if (!fileInput.files || !fileInput.files[0]) {
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = event => {
+            preview.src = event.target.result;
+            preview.style.display = "block";
+            placeholder.style.display = "none";
+        };
+        reader.readAsDataURL(fileInput.files[0]);
+        setStatus("");
+    }
+
+    async function submitImage() {
+        const fileInput = document.getElementById("file-input");
+        if (!fileInput.files || !fileInput.files[0]) {
+            alert("请先选择图片");
+            return;
+        }
+
+        const button = document.getElementById("submit-btn");
+        button.disabled = true;
+        button.innerText = "发送中...";
+        setStatus("图片正在发送到电脑端...");
+
+        const formData = new FormData();
+        formData.append("token", uploadToken);
+        formData.append("file", fileInput.files[0]);
+
+        try {
+            const response = await fetch("/search", {
+                method: "POST",
+                body: formData
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.ok) {
+                throw new Error(payload.detail || "上传失败");
+            }
+            setStatus(payload.message || "已发送到电脑端，请查看 VideoSeek 搜索结果。");
+        } catch (error) {
+            setStatus(error.message || "连接失败，请确认和电脑在同一局域网。");
+        } finally {
+            button.disabled = false;
+            button.innerText = "发送并搜索";
+        }
+    }
+
+    function clearFile() {
+        document.getElementById("file-input").value = "";
+        document.getElementById("preview").style.display = "none";
+        document.getElementById("placeholder").style.display = "block";
+        setStatus("");
+    }
+</script>
+</body>
+</html>

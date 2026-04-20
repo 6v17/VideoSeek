@@ -6,7 +6,11 @@
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="修复bug">
       <change afterPath="$PROJECT_DIR$/docs/static_call_analysis.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/fastapi_test.py" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/source/ffmpeg-8.1-full_build.7z" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/web/display_qr.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/static/favicon.ico" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/static/index.html" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -375,14 +379,13 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.zh-CN.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.zh-CN.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/DEVELOPMENT.md" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_controllers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/preview_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/styles.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -390,11 +393,12 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="5983" />
+    <option name="cachedIndexableFilesCount" value="5621" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
+        <option value="HTML File" />
         <option value="Python Script" />
       </list>
     </option>
@@ -451,6 +455,7 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
@@ -462,7 +467,7 @@
     &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/vlc_lib&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/static&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -474,11 +479,11 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\PycharmProjects\VideoSeek\static" />
       <recent name="D:\PycharmProjects\VideoSeek\vlc_lib" />
       <recent name="D:\PycharmProjects\VideoSeek\data" />
       <recent name="D:\PycharmProjects\VideoSeek" />
       <recent name="D:\PycharmProjects\VideoSeek\models" />
-      <recent name="D:\PycharmProjects\VideoSeek\img" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\ui" />
@@ -634,7 +639,10 @@
       <workItem from="1776595622518" duration="184000" />
       <workItem from="1776595815802" duration="513000" />
       <workItem from="1776596341265" duration="6513000" />
-      <workItem from="1776602881141" duration="1499000" />
+      <workItem from="1776602881141" duration="4148000" />
+      <workItem from="1776682322873" duration="4503000" />
+      <workItem from="1776687846768" duration="194000" />
+      <workItem from="1776688064673" duration="8935000" />
     </task>
     <task id="LOCAL-00001" summary="最小案例">
       <option name="closed" value="true" />
@@ -1004,7 +1012,31 @@
       <option name="project" value="LOCAL" />
       <updated>1776601584872</updated>
     </task>
-    <option name="localTasksCounter" value="47" />
+    <task id="LOCAL-00047" summary="修复bug">
+      <option name="closed" value="true" />
+      <created>1776604495856</created>
+      <option name="number" value="00047" />
+      <option name="presentableId" value="LOCAL-00047" />
+      <option name="project" value="LOCAL" />
+      <updated>1776604495856</updated>
+    </task>
+    <task id="LOCAL-00048" summary="修复bug">
+      <option name="closed" value="true" />
+      <created>1776604603308</created>
+      <option name="number" value="00048" />
+      <option name="presentableId" value="LOCAL-00048" />
+      <option name="project" value="LOCAL" />
+      <updated>1776604603308</updated>
+    </task>
+    <task id="LOCAL-00049" summary="修复bug">
+      <option name="closed" value="true" />
+      <created>1776604632409</created>
+      <option name="number" value="00049" />
+      <option name="presentableId" value="LOCAL-00049" />
+      <option name="project" value="LOCAL" />
+      <updated>1776604632409</updated>
+    </task>
+    <option name="localTasksCounter" value="50" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

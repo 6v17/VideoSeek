@@ -27,6 +27,7 @@ from src.services.indexing_service import list_missing_library_files
 from src.services.query_text_service import prepare_text_query
 from src.services.remote_library_service import list_remote_link_details
 from src.services.remote_link_precheck_service import precheck_remote_links
+from src.web.display_qr import build_qr_pixmap
 from src.workflows.update_video import delete_physical_video_data
 from src.utils import (
     get_app_data_dir,
@@ -46,9 +47,10 @@ from src.utils import (
 from src.services.version_service import get_local_version_status
 from ui.app_meta_controller import AppMetaController
 from ui.components import LibraryPage, LinkSearchPage, NavigationSidebar, SearchPage, SettingsPage
-from ui.dialogs import AboutDialog, AppMessageDialog, NoticeDialog, ResourceTableDialog, SamplingRulesDialog
+from ui.dialogs import AboutDialog, AppMessageDialog, MobileBridgeDialog, NoticeDialog, ResourceTableDialog, SamplingRulesDialog
 from ui.indexing_controller import IndexingController
 from ui.layout import WINDOW_SIZES, apply_window_size
+from ui.mobile_bridge_controller import MobileBridgeController
 from ui.network_search_controller import NetworkSearchController
 from ui.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
 from ui.preview_controller import PreviewController
@@ -97,6 +99,9 @@ class MainWindow(QMainWindow):
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
         self.network_search_controller = NetworkSearchController(self)
+        self.mobile_bridge_controller = MobileBridgeController(self)
+        self.mobile_bridge_controller.upload_received.connect(self._handle_mobile_upload_received)
+        self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
         self.runtime_resource_controller = RuntimeResourceController(self)
         self.runtime_resource_controller.startup_cancelled.connect(self._handle_runtime_resource_exit)
         self.runtime_resource_controller.resources_ready.connect(self._finish_runtime_resource_download)
@@ -174,6 +179,8 @@ class MainWindow(QMainWindow):
         self.search_page.btn_browse.clicked.connect(self.upload_file)
         self.search_page.btn_search.clicked.connect(self.start_search)
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
+        self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
+        self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
         self.search_page.btn_expand_preview.clicked.connect(self.open_current_preview_dialog)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._save_search_mode)
@@ -277,6 +284,11 @@ class MainWindow(QMainWindow):
         self._update_expand_preview_button()
         self.search_page.btn_browse.setText(t["browse_image"])
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
+        self.search_page.btn_mobile_toggle.setText(
+            t["mobile_bridge_stop"] if self.mobile_bridge_controller.is_running() else t["mobile_bridge_start"]
+        )
+        self.search_page.btn_mobile_qr.setText(t["mobile_bridge_qr"])
+        self.search_page.btn_mobile_qr.setEnabled(self.mobile_bridge_controller.is_running())
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
@@ -688,6 +700,58 @@ class MainWindow(QMainWindow):
 
         self.switch_page("search")
         self.search_controller.start_search(query, bool(text_query))
+
+    def toggle_mobile_bridge(self):
+        try:
+            url = self.mobile_bridge_controller.toggle()
+        except Exception as exc:
+            self.show_error_dialog(self.texts["mobile_bridge_start_failed"], exc)
+            return
+
+        if url:
+            self.search_page.lbl_status.setText(self.texts["mobile_bridge_running"].format(url=url))
+            self.show_mobile_bridge_qr()
+        else:
+            self.search_page.lbl_status.setText(self.texts["mobile_bridge_stopped"])
+        self._update_mobile_bridge_controls()
+
+    def show_mobile_bridge_qr(self):
+        if not self.mobile_bridge_controller.is_running():
+            return
+        url = self.mobile_bridge_controller.get_access_url()
+        MobileBridgeDialog(
+            url=url,
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+            qr_pixmap=build_qr_pixmap(url),
+        ).exec()
+
+    def _handle_mobile_upload_received(self, path, _source):
+        self.switch_page("search")
+        self._set_image_query(path, clear_text=True)
+        self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
+        self.start_search()
+
+    def _handle_mobile_bridge_status_changed(self, _state):
+        self._update_mobile_bridge_controls()
+
+    def _update_mobile_bridge_controls(self):
+        is_running = hasattr(self, "mobile_bridge_controller") and self.mobile_bridge_controller.is_running()
+        self.search_page.btn_mobile_toggle.setObjectName(
+            "MobileBridgeButtonActive" if is_running else "MobileBridgeButton"
+        )
+        self.search_page.btn_mobile_toggle.style().unpolish(self.search_page.btn_mobile_toggle)
+        self.search_page.btn_mobile_toggle.style().polish(self.search_page.btn_mobile_toggle)
+        self.search_page.btn_mobile_toggle.update()
+        self.search_page.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
+        self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
+        self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
+        self.search_page.btn_mobile_qr.update()
+        self.search_page.btn_mobile_toggle.setText(
+            self.texts["mobile_bridge_stop"] if is_running else self.texts["mobile_bridge_start"]
+        )
+        self.search_page.btn_mobile_qr.setEnabled(is_running)
 
     def _save_search_mode(self):
         try:
@@ -1330,6 +1394,7 @@ class MainWindow(QMainWindow):
             self._preview_dialog.shutdown_player()
         self.search_controller.shutdown()
         self.network_search_controller.shutdown()
+        self.mobile_bridge_controller.shutdown()
         self.indexing_controller.shutdown()
         self.app_meta_controller.shutdown()
         self.runtime_resource_controller.shutdown()

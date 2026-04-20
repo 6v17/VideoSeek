@@ -116,6 +116,38 @@ QPushButton:hover {
 #SearchButton:hover {
     background: __SUCCESS_HOVER__;
 }
+#MobileBridgeButton {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: white;
+    font-weight: 700;
+}
+#MobileBridgeButton:hover {
+    background: #1d4ed8;
+}
+#MobileBridgeButtonActive {
+    background: __DANGER__;
+    border-color: __DANGER__;
+    color: white;
+    font-weight: 700;
+}
+#MobileBridgeButtonActive:hover {
+    background: #c53c3c;
+}
+#MobileBridgeQrButton {
+    background: rgba(37, 99, 235, 0.12);
+    border-color: #60a5fa;
+    color: #1d4ed8;
+    font-weight: 700;
+}
+#MobileBridgeQrButton:hover {
+    background: rgba(37, 99, 235, 0.2);
+}
+#MobileBridgeQrButton:disabled {
+    background: rgba(148, 163, 184, 0.12);
+    border-color: rgba(148, 163, 184, 0.3);
+    color: rgba(100, 116, 139, 0.78);
+}
 #LinkUtilityButton {
     background: __ACCENT_SOFT__;
     border-color: __LINE_STRONG__;
