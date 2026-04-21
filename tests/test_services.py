@@ -103,6 +103,85 @@ class IndexingServiceTests(unittest.TestCase):
             ["clip.mp4", "scene.mkv"],
         )
 
+    @patch("src.services.indexing_service.generate_vectors_and_index_for_video", return_value=([], [], None))
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    def test_process_single_video_marks_sync_failed_when_generation_returns_empty_data(
+        self,
+        _mock_getmtime,
+        _mock_generate,
+    ):
+        lib_files = {}
+
+        vectors, timestamps, metadata_updated = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+        )
+
+        self.assertIsNone(vectors)
+        self.assertIsNone(timestamps)
+        self.assertTrue(metadata_updated)
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
+        self.assertEqual(lib_files["clip.mp4"]["vid"], "vid_a")
+
+    @patch("src.services.indexing_service.create_clip_index")
+    @patch("src.services.indexing_service.os.path.exists", return_value=False)
+    @patch("src.services.indexing_service.load_video_vectors_by_id")
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    def test_process_single_video_rebuilds_missing_per_video_index_when_reusing_vectors(
+        self,
+        _mock_getmtime,
+        mock_load_vectors,
+        _mock_exists,
+        mock_create_index,
+    ):
+        vectors = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0], dtype=np.float32)
+        mock_load_vectors.return_value = (vectors, timestamps)
+        lib_files = {"clip.mp4": {"vid": "vid_a", "mod_time": 123.0}}
+
+        reused_vectors, reused_timestamps, metadata_updated = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+        )
+
+        self.assertTrue(metadata_updated)
+        self.assertEqual(reused_vectors.tolist(), vectors.tolist())
+        self.assertEqual(reused_timestamps.tolist(), timestamps.tolist())
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "ready")
+        mock_create_index.assert_called_once()
+        self.assertEqual(mock_create_index.call_args.args[1], "index\\vid_a_index.faiss")
+
+    @patch(
+        "src.services.indexing_service.generate_vectors_and_index_for_video",
+        return_value=(np.array([[1.0]], dtype=np.float32), [0.0, 1.0], None),
+    )
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    def test_process_single_video_marks_sync_failed_when_vector_timestamp_counts_mismatch(
+        self,
+        _mock_getmtime,
+        _mock_generate,
+    ):
+        lib_files = {}
+
+        vectors, timestamps, metadata_updated = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+        )
+
+        self.assertIsNone(vectors)
+        self.assertIsNone(timestamps)
+        self.assertTrue(metadata_updated)
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
+
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.collect_existing_chunks", return_value=([], [], []))
     @patch("src.services.indexing_service.collect_existing_vectors", return_value=([], [], []))
@@ -129,6 +208,34 @@ class IndexingServiceTests(unittest.TestCase):
             persist_meta_callback=lambda: persist_calls.append("saved"),
         )
 
+        self.assertEqual(persist_calls, ["saved"])
+
+    @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
+    @patch("src.services.indexing_service.collect_existing_chunks", return_value=([], [], []))
+    @patch("src.services.indexing_service.collect_existing_vectors", return_value=([], [], []))
+    @patch("src.services.indexing_service.process_single_video", return_value=(None, None, True))
+    @patch("src.services.indexing_service.discover_video_files", return_value=["D:\\videos\\clip.mp4"])
+    @patch("src.services.indexing_service.os.path.exists", return_value=True)
+    def test_scan_target_libraries_collects_failed_videos(
+        self,
+        _mock_exists,
+        _mock_discover,
+        _mock_process_single_video,
+        _mock_collect_vectors,
+        _mock_collect_chunks,
+        _mock_load_chunks,
+    ):
+        meta = {"libraries": {"D:\\videos": {"files": {}}}}
+        persist_calls = []
+
+        result = indexing_service.scan_target_libraries(
+            meta,
+            {},
+            lambda path: "vid_a",
+            persist_meta_callback=lambda: persist_calls.append("saved"),
+        )
+
+        self.assertEqual(result[-1], ["D:\\videos\\clip.mp4"])
         self.assertEqual(persist_calls, ["saved"])
 
     @patch("src.workflows.update_video.build_global_index", return_value=("v", "t", "p", "i"))
@@ -159,6 +266,58 @@ class IndexingServiceTests(unittest.TestCase):
         mock_build.assert_called_once()
         saved_meta = mock_load_meta.return_value
         self.assertEqual(saved_meta["libraries"]["D:\\videos"]["index_state"], "ready")
+
+    @patch("src.workflows.update_video.os.path.exists")
+    @patch("src.workflows.update_video.build_global_index", return_value=("v", "t", "p", "i"))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([1], [0.0], ["a.mp4"], [], [], [], []))
+    @patch("src.workflows.update_video.save_meta")
+    @patch("src.workflows.update_video.cleanup_missing_library_files", side_effect=AssertionError("should not cleanup"))
+    @patch(
+        "src.workflows.update_video.load_meta",
+        return_value={
+            "libraries": {
+                "D:\\videos": {
+                    "files": {
+                        "missing.mp4": {"vid": "vid_missing", "asset_state": "ready"},
+                    }
+                }
+            }
+        },
+    )
+    @patch("src.workflows.update_video.load_config")
+    @patch("src.workflows.update_video.garbage_collect_indices")
+    def test_update_videos_flow_marks_missing_source_when_cleanup_disabled(
+        self,
+        _mock_gc,
+        mock_load_config,
+        mock_load_meta,
+        _mock_cleanup,
+        _mock_save_meta,
+        _mock_scan,
+        mock_build,
+        mock_exists,
+    ):
+        mock_load_config.return_value = {
+            "auto_cleanup_missing_files": False,
+            "meta_file": "source/meta.json",
+        }
+
+        def fake_exists(path):
+            normalized = str(path).replace("/", "\\")
+            if normalized == "D:\\videos":
+                return True
+            if normalized == "D:\\videos\\missing.mp4":
+                return False
+            return True
+
+        mock_exists.side_effect = fake_exists
+
+        output = update_video.update_videos_flow()
+
+        self.assertEqual(output, ("v", "t", "p", "i"))
+        mock_build.assert_called_once()
+        saved_meta = mock_load_meta.return_value
+        self.assertEqual(saved_meta["libraries"]["D:\\videos"]["files"]["missing.mp4"]["asset_state"], "missing_source")
 
     @patch("src.workflows.update_video.delete_physical_video_data")
     @patch("src.workflows.update_video.build_global_index", return_value=("v", "t", "p", "i"))
@@ -498,6 +657,11 @@ class ModelServiceTests(unittest.TestCase):
 
 
 class LibraryDetailServiceTests(unittest.TestCase):
+    @patch("src.services.library_service.load_clip_index", return_value=object())
+    @patch(
+        "src.services.library_service.load_vectors",
+        return_value={"vector": np.array([[1.0]], dtype=np.float32), "timestamps": np.array([0.0], dtype=np.float32)},
+    )
     @patch("src.services.library_service.os.path.exists")
     @patch("src.services.library_service.list_libraries")
     @patch("src.services.library_service.load_config")
@@ -506,6 +670,8 @@ class LibraryDetailServiceTests(unittest.TestCase):
         mock_load_config,
         mock_list_libraries,
         mock_exists,
+        _mock_load_vectors,
+        _mock_load_index,
     ):
         mock_load_config.return_value = {
             "vector_dir": "source/vector",
@@ -515,18 +681,79 @@ class LibraryDetailServiceTests(unittest.TestCase):
             "D:/videos": {
                 "files": {
                     "a.mp4": {"vid": "vid_a"},
-                    "b.mp4": {"vid": "vid_b"},
+                    "b.mp4": {"vid": "vid_b", "asset_state": "sync_failed"},
                 }
             }
         }
-        mock_exists.side_effect = lambda path: path.endswith("vid_a_vectors.npy") or path.endswith("vid_a_index.faiss")
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized.endswith("/a.mp4"):
+                return True
+            if normalized.endswith("/b.mp4"):
+                return True
+            if normalized.endswith("vid_a_vectors.npy"):
+                return True
+            if normalized.endswith("vid_a_index.faiss"):
+                return True
+            return False
+
+        mock_exists.side_effect = fake_exists
 
         result = library_service.list_local_vector_details()
 
         self.assertEqual(result["total_entries"], 2)
         self.assertEqual(result["entries"][0]["video_rel_path"], "a.mp4")
+        self.assertTrue(result["entries"][0]["source_exists"])
         self.assertTrue(result["entries"][0]["vector_exists"])
+        self.assertEqual(result["entries"][0]["asset_state"], "ready")
         self.assertFalse(result["entries"][1]["vector_exists"])
+        self.assertEqual(result["entries"][1]["asset_state"], "sync_failed")
+
+    @patch("src.services.library_service.load_clip_index", return_value=object())
+    @patch(
+        "src.services.library_service.load_vectors",
+        return_value={"vector": np.array([[1.0]], dtype=np.float32), "timestamps": np.array([0.0], dtype=np.float32)},
+    )
+    @patch("src.services.library_service.os.path.exists")
+    @patch("src.services.library_service.list_libraries")
+    @patch("src.services.library_service.load_config")
+    def test_list_local_vector_details_marks_missing_source(
+        self,
+        mock_load_config,
+        mock_list_libraries,
+        mock_exists,
+        _mock_load_vectors,
+        _mock_load_index,
+    ):
+        mock_load_config.return_value = {
+            "vector_dir": "source/vector",
+            "index_dir": "source/index",
+        }
+        mock_list_libraries.return_value = {
+            "D:/videos": {
+                "files": {
+                    "a.mp4": {"vid": "vid_a", "asset_state": "ready"},
+                }
+            }
+        }
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized.endswith("/a.mp4"):
+                return False
+            if normalized.endswith("vid_a_vectors.npy"):
+                return True
+            if normalized.endswith("vid_a_index.faiss"):
+                return True
+            return False
+
+        mock_exists.side_effect = fake_exists
+
+        result = library_service.list_local_vector_details()
+
+        self.assertFalse(result["entries"][0]["source_exists"])
+        self.assertEqual(result["entries"][0]["asset_state"], "missing_source")
 
 
 class RemoteLibraryDetailServiceTests(unittest.TestCase):

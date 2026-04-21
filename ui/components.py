@@ -2,6 +2,7 @@ from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -379,8 +380,6 @@ class SearchPage(QWidget):
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setWordWrap(True)
         self.img_label.setMinimumHeight(COMPONENT_SIZES["image_drop_min_height"])
-        self.btn_browse = QPushButton()
-        self.btn_browse.setObjectName("SecondaryButton")
         self.text_search = QLineEdit()
         self.text_search.setObjectName("SearchInput")
         self.search_mode = QComboBox()
@@ -396,12 +395,18 @@ class SearchPage(QWidget):
 
         mobile_row = QHBoxLayout()
         mobile_row.setSpacing(8)
+        self.mobile_toggle_label = QLabel()
+        self.mobile_toggle_label.setObjectName("CardHint")
         self.btn_mobile_toggle = QPushButton()
-        self.btn_mobile_toggle.setObjectName("MobileBridgeButton")
+        self.btn_mobile_toggle.setObjectName("MobileBridgeToggle")
+        self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_mobile_toggle.setCheckable(True)
         self.btn_mobile_qr = QPushButton()
         self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
-        mobile_row.addWidget(self.btn_mobile_toggle, 1)
+        mobile_row.addWidget(self.mobile_toggle_label)
+        mobile_row.addWidget(self.btn_mobile_toggle)
         mobile_row.addWidget(self.btn_mobile_qr)
+        mobile_row.addStretch()
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -415,7 +420,6 @@ class SearchPage(QWidget):
         query_layout.addWidget(self.controls_title)
         query_layout.addWidget(self.controls_hint)
         query_layout.addWidget(self.img_label)
-        query_layout.addWidget(self.btn_browse)
         query_layout.addWidget(self.text_search)
         query_layout.addLayout(mode_row)
         query_layout.addLayout(mobile_row)
@@ -565,8 +569,6 @@ class LinkSearchPage(QWidget):
 
         self.input_link = QLineEdit()
         self.input_link.setObjectName("SearchInput")
-        self.btn_browse = QPushButton()
-        self.btn_browse.setObjectName("SecondaryButton")
         self.query_image_label = QLabel()
         self.query_image_label.setObjectName("ImageDropZone")
         self.query_image_label.setAlignment(Qt.AlignCenter)
@@ -672,7 +674,6 @@ class LinkSearchPage(QWidget):
         search_layout.addWidget(self.search_title)
         search_layout.addWidget(self.search_hint)
         search_layout.addWidget(self.input_link)
-        search_layout.addWidget(self.btn_browse)
         search_layout.addWidget(self.query_image_label)
         search_layout.addLayout(search_action_row)
         search_layout.addWidget(self.lbl_search_status)

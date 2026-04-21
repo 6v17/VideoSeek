@@ -13,6 +13,42 @@ VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
 logger = get_logger("indexing_service")
 
 
+def _has_usable_vectors(vectors, timestamps):
+    if vectors is None or timestamps is None:
+        return False
+    try:
+        vector_count = len(vectors)
+        timestamp_count = len(timestamps)
+    except TypeError:
+        return False
+    return vector_count > 0 and vector_count == timestamp_count
+
+
+def _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, asset_state):
+    previous = dict(lib_files.get(rel_path, {}))
+    updated = dict(previous)
+    updated["vid"] = video_id
+    updated["mod_time"] = video_mod_time
+    updated["asset_state"] = asset_state
+    if updated == previous:
+        return False
+    lib_files[rel_path] = updated
+    return True
+
+
+def _ensure_video_index_file(video_id, vectors, config):
+    index_file = os.path.join(config["index_dir"], f"{video_id}_index.faiss")
+    if os.path.exists(index_file):
+        return False
+    try:
+        create_clip_index(vectors, index_file)
+        logger.info("Rebuilt missing per-video index for %s", video_id)
+        return True
+    except Exception as exc:
+        logger.warning("Failed to rebuild missing per-video index for %s: %s", video_id, exc)
+        return False
+
+
 def load_video_vectors_by_id(video_id, config):
     vector_file = os.path.join(config["vector_dir"], f"{video_id}_vectors.npy")
     data = load_vectors(vector_file)
@@ -151,19 +187,42 @@ def process_single_video(abs_path, rel_path, lib_files, config, get_video_id):
 
         if saved.get("vid") == video_id and saved.get("mod_time") == video_mod_time:
             vectors, timestamps = load_video_vectors_by_id(video_id, config)
-            if vectors is not None:
+            if _has_usable_vectors(vectors, timestamps):
+                _ensure_video_index_file(video_id, vectors, config)
+                metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
                 logger.info("Reusing existing frame vectors for %s", os.path.basename(abs_path))
-                return vectors, timestamps, False
+                return vectors, timestamps, metadata_updated
 
         logger.info("Indexing video %s", os.path.basename(abs_path))
         vectors, timestamps, _ = generate_vectors_and_index_for_video(
             abs_path, video_id, config["index_dir"], config["vector_dir"]
         )
-        lib_files[rel_path] = {"vid": video_id, "mod_time": video_mod_time}
-        return vectors, timestamps, True
+        if not _has_usable_vectors(vectors, timestamps):
+            metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "sync_failed")
+            if vectors is None or timestamps is None:
+                logger.warning("Vector generation failed for %s and the file was marked sync_failed", abs_path)
+            elif len(vectors) == 0 or len(timestamps) == 0:
+                logger.warning("Vector generation returned empty data for %s and the file was marked sync_failed", abs_path)
+            else:
+                logger.warning(
+                    "Vector/timestamp counts differ for %s; marked sync_failed: vectors=%s timestamps=%s",
+                    abs_path,
+                    len(vectors),
+                    len(timestamps),
+                )
+            return None, None, metadata_updated
+        metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
+        return vectors, timestamps, metadata_updated
     except Exception as exc:
         logger.error("Failed to process video %s: %s", abs_path, exc)
-        return None, None, False
+        metadata_updated = False
+        try:
+            video_id = get_video_id(abs_path)
+            video_mod_time = os.path.getmtime(abs_path)
+            metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "sync_failed")
+        except Exception:
+            pass
+        return None, None, metadata_updated
 
 
 def scan_target_libraries(
@@ -177,6 +236,7 @@ def scan_target_libraries(
 ):
     all_vectors, all_timestamps, all_paths = collect_existing_vectors(meta, config, target_lib)
     all_chunk_vectors, all_chunk_ranges, all_chunk_paths = collect_existing_chunks(meta, config, target_lib)
+    failed_videos = []
     libraries = list(meta["libraries"].items())
     library_count = len(libraries)
     target_key = canonicalize_library_path(target_lib) if target_lib else None
@@ -203,10 +263,11 @@ def scan_target_libraries(
                 progress_callback(int((file_index / len(valid_files)) * 100), f"Processing {os.path.basename(abs_path)}")
 
             vectors, timestamps, metadata_updated = process_single_video(abs_path, rel_path, lib_files, config, get_video_id)
-            if vectors is None:
-                continue
             if metadata_updated and persist_meta_callback:
                 persist_meta_callback()
+            if vectors is None:
+                failed_videos.append(abs_path)
+                continue
             all_vectors.append(vectors)
             all_timestamps.extend(timestamps)
             all_paths.extend([abs_path] * len(timestamps))
@@ -217,7 +278,7 @@ def scan_target_libraries(
 
         lib_data["files"] = lib_files
 
-    return all_vectors, all_timestamps, all_paths, all_chunk_vectors, all_chunk_ranges, all_chunk_paths
+    return all_vectors, all_timestamps, all_paths, all_chunk_vectors, all_chunk_ranges, all_chunk_paths, failed_videos
 
 
 def clear_global_index(config):

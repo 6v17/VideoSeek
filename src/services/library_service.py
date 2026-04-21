@@ -1,6 +1,7 @@
 import os
 
 from src.app.config import load_config
+from src.core.faiss_index import load_clip_index, load_vectors
 from src.utils import canonicalize_library_path, load_meta, save_meta
 
 
@@ -82,6 +83,51 @@ def remove_library(path, delete_video_data):
     return True
 
 
+def _read_vector_health(vector_file):
+    if not os.path.exists(vector_file):
+        return False, False
+    try:
+        data = load_vectors(vector_file)
+    except Exception:
+        return True, False
+    if not isinstance(data, dict):
+        return True, False
+    vectors = data.get("vector")
+    timestamps = data.get("timestamps")
+    if vectors is None or timestamps is None:
+        return True, False
+    try:
+        vector_count = len(vectors)
+        timestamp_count = len(timestamps)
+    except TypeError:
+        return True, False
+    if vector_count <= 0 or vector_count != timestamp_count:
+        return True, False
+    return True, True
+
+
+def _read_index_health(index_file):
+    if not os.path.exists(index_file):
+        return False, False
+    try:
+        return True, load_clip_index(index_file) is not None
+    except Exception:
+        return True, False
+
+
+def _effective_asset_state(info, source_exists, vector_exists, vector_ok, index_exists, index_ok):
+    stored_state = str(info.get("asset_state", "")).strip().lower()
+    if not source_exists:
+        return "missing_source"
+    if stored_state == "sync_failed" and (not vector_exists or not vector_ok or not index_exists or not index_ok):
+        return "sync_failed"
+    if not vector_exists or not index_exists:
+        return "missing_asset"
+    if not vector_ok or not index_ok:
+        return "broken_asset"
+    return "ready"
+
+
 def list_local_vector_details():
     config = load_config()
     libraries = list_libraries()
@@ -95,17 +141,30 @@ def list_local_vector_details():
             video_id = str(info.get("vid", "")).strip()
             if not video_id:
                 continue
+            video_path = os.path.normpath(os.path.join(library_path, rel_path))
             vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
             index_file = os.path.normpath(os.path.join(index_dir, f"{video_id}_index.faiss"))
+            source_exists = os.path.exists(video_path)
+            vector_exists, vector_ok = _read_vector_health(vector_file)
+            index_exists, index_ok = _read_index_health(index_file)
             entries.append(
                 {
                     "library_path": library_path,
                     "video_rel_path": rel_path,
                     "video_id": video_id,
+                    "source_exists": source_exists,
+                    "asset_state": _effective_asset_state(
+                        info,
+                        source_exists=source_exists,
+                        vector_exists=vector_exists,
+                        vector_ok=vector_ok,
+                        index_exists=index_exists,
+                        index_ok=index_ok,
+                    ),
                     "vector_file": vector_file,
                     "index_file": index_file,
-                    "vector_exists": os.path.exists(vector_file),
-                    "index_exists": os.path.exists(index_file),
+                    "vector_exists": vector_exists,
+                    "index_exists": index_exists,
                 }
             )
 

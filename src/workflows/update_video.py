@@ -41,6 +41,21 @@ def _finalize_library_index_state(meta, target_lib=None):
         library["index_state"] = "ready" if has_files else "pending"
 
 
+def _mark_missing_source_entries(meta, target_lib=None):
+    changed = False
+    for root_path in _iter_target_library_paths(meta, target_lib=target_lib, include_offline=False):
+        library = meta["libraries"].get(root_path, {})
+        for rel_path, info in library.get("files", {}).items():
+            abs_path = os.path.join(root_path, rel_path)
+            if os.path.exists(abs_path):
+                continue
+            if info.get("asset_state") == "missing_source":
+                continue
+            info["asset_state"] = "missing_source"
+            changed = True
+    return changed
+
+
 def update_videos_flow(
     target_lib=None,
     progress_callback=None,
@@ -72,7 +87,7 @@ def update_videos_flow(
             progress_callback(5, "Keeping vectors for offline or missing files")
         logger.info("Automatic cleanup for missing files is disabled; keeping cached vectors and indexes")
 
-    all_vectors, all_timestamps, all_paths, all_chunk_vectors, all_chunk_ranges, all_chunk_paths = scan_target_libraries(
+    scan_result = scan_target_libraries(
         meta,
         config,
         get_video_id,
@@ -81,9 +96,39 @@ def update_videos_flow(
         persist_meta_callback=lambda: save_meta(meta, meta_file),
         should_stop_callback=should_stop_callback,
     )
+    if len(scan_result) == 7:
+        (
+            all_vectors,
+            all_timestamps,
+            all_paths,
+            all_chunk_vectors,
+            all_chunk_ranges,
+            all_chunk_paths,
+            failed_videos,
+        ) = scan_result
+    else:
+        (
+            all_vectors,
+            all_timestamps,
+            all_paths,
+            all_chunk_vectors,
+            all_chunk_ranges,
+            all_chunk_paths,
+        ) = scan_result
+        failed_videos = []
 
     if should_stop_callback and should_stop_callback():
         raise InterruptedError("Index update stopped before rebuilding global index")
+
+    if failed_videos:
+        logger.warning(
+            "Index update skipped %s videos because vectors were not generated successfully: %s",
+            len(failed_videos),
+            failed_videos,
+        )
+
+    if _mark_missing_source_entries(meta, target_lib=target_lib):
+        save_meta(meta, meta_file)
 
     save_meta(meta, meta_file)
     if not any(len(lib.get("files", {})) > 0 for lib in meta["libraries"].values()):

@@ -116,23 +116,38 @@ QPushButton:hover {
 #SearchButton:hover {
     background: __SUCCESS_HOVER__;
 }
-#MobileBridgeButton {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: white;
+#MobileBridgeToggle {
+    min-width: 52px;
+    max-width: 52px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
+    border-radius: 15px;
+    border: 1px solid __LINE_STRONG__;
+    background: rgba(15, 23, 42, 0.05);
+    color: __TEXT_MUTED__;
     font-weight: 700;
+    text-align: center;
 }
-#MobileBridgeButton:hover {
-    background: #1d4ed8;
+#MobileBridgeToggle[bridgeState="off"] {
+    background: rgba(148, 163, 184, 0.16);
+    border-color: rgba(100, 116, 139, 0.35);
+    color: #475569;
 }
-#MobileBridgeButtonActive {
-    background: __DANGER__;
-    border-color: __DANGER__;
-    color: white;
-    font-weight: 700;
+#MobileBridgeToggle[bridgeState="on"] {
+    background: rgba(22, 163, 74, 0.14);
+    border-color: rgba(22, 163, 74, 0.5);
+    color: #15803d;
 }
-#MobileBridgeButtonActive:hover {
-    background: #c53c3c;
+#MobileBridgeToggle:hover {
+    border-color: currentColor;
+    background: rgba(15, 23, 42, 0.08);
+}
+#MobileBridgeToggle[bridgeState="on"]:hover {
+    background: rgba(22, 163, 74, 0.2);
+}
+#MobileBridgeToggle[bridgeState="off"]:hover {
+    background: rgba(148, 163, 184, 0.22);
 }
 #MobileBridgeQrButton {
     background: rgba(37, 99, 235, 0.12);

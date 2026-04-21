@@ -176,7 +176,6 @@ class MainWindow(QMainWindow):
         self.sidebar.btn_about.clicked.connect(self.show_about)
         self.sidebar.btn_notice.clicked.connect(self.show_notice)
 
-        self.search_page.btn_browse.clicked.connect(self.upload_file)
         self.search_page.btn_search.clicked.connect(self.start_search)
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
         self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
@@ -189,7 +188,6 @@ class MainWindow(QMainWindow):
         self.link_page.btn_build.clicked.connect(self.start_network_build)
         self.link_page.btn_import.clicked.connect(self.import_network_library)
         self.link_page.btn_export.clicked.connect(self.export_network_library)
-        self.link_page.btn_browse.clicked.connect(self.upload_network_query_image)
         self.link_page.btn_run.clicked.connect(self.start_network_search)
         self.link_page.btn_clear.clicked.connect(self.clear_link_search_content)
         self.link_page.btn_link_details.clicked.connect(self.show_network_link_details)
@@ -282,11 +280,13 @@ class MainWindow(QMainWindow):
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_expand_preview_button()
-        self.search_page.btn_browse.setText(t["browse_image"])
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
-        self.search_page.btn_mobile_toggle.setText(
+        self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))
+        self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(self.mobile_bridge_controller.is_running(), texts=t))
+        self.search_page.btn_mobile_toggle.setToolTip(
             t["mobile_bridge_stop"] if self.mobile_bridge_controller.is_running() else t["mobile_bridge_start"]
         )
+        self.search_page.btn_mobile_toggle.setChecked(self.mobile_bridge_controller.is_running())
         self.search_page.btn_mobile_qr.setText(t["mobile_bridge_qr"])
         self.search_page.btn_mobile_qr.setEnabled(self.mobile_bridge_controller.is_running())
         self.search_page.btn_search.setText(t["search"])
@@ -310,7 +310,6 @@ class MainWindow(QMainWindow):
         self.link_page.mode_combo.blockSignals(False)
         self.link_page.build_links_input.setPlaceholderText(t["network_link_editor_placeholder"])
         self.link_page.input_link.setPlaceholderText(t["link_input_placeholder"])
-        self.link_page.btn_browse.setText(t["browse_image"])
         self.link_page.query_image_label.setText(t["network_image_preview_hint"])
         self.link_page.btn_build.setText(t["network_build"])
         self.link_page.btn_import.setText(t["network_import"])
@@ -738,9 +737,10 @@ class MainWindow(QMainWindow):
 
     def _update_mobile_bridge_controls(self):
         is_running = hasattr(self, "mobile_bridge_controller") and self.mobile_bridge_controller.is_running()
-        self.search_page.btn_mobile_toggle.setObjectName(
-            "MobileBridgeButtonActive" if is_running else "MobileBridgeButton"
-        )
+        self.search_page.btn_mobile_toggle.blockSignals(True)
+        self.search_page.btn_mobile_toggle.setChecked(is_running)
+        self.search_page.btn_mobile_toggle.blockSignals(False)
+        self.search_page.btn_mobile_toggle.setProperty("bridgeState", "on" if is_running else "off")
         self.search_page.btn_mobile_toggle.style().unpolish(self.search_page.btn_mobile_toggle)
         self.search_page.btn_mobile_toggle.style().polish(self.search_page.btn_mobile_toggle)
         self.search_page.btn_mobile_toggle.update()
@@ -748,10 +748,15 @@ class MainWindow(QMainWindow):
         self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
         self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
         self.search_page.btn_mobile_qr.update()
-        self.search_page.btn_mobile_toggle.setText(
+        self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(is_running))
+        self.search_page.btn_mobile_toggle.setToolTip(
             self.texts["mobile_bridge_stop"] if is_running else self.texts["mobile_bridge_start"]
         )
         self.search_page.btn_mobile_qr.setEnabled(is_running)
+
+    def _mobile_bridge_toggle_text(self, is_running, texts=None):
+        t = texts or self.texts
+        return t.get("mobile_bridge_toggle_on" if is_running else "mobile_bridge_toggle_off", "ON" if is_running else "OFF")
 
     def _save_search_mode(self):
         try:
@@ -1573,6 +1578,7 @@ class MainWindow(QMainWindow):
             headers = self.texts["library_vectors_headers"]
             rows = []
             payloads = []
+            ready_state_text = self._local_vector_asset_state_text("ready")
             for index, item in enumerate(detail["entries"], start=1):
                 rows.append(
                     [
@@ -1581,8 +1587,10 @@ class MainWindow(QMainWindow):
                         item["video_rel_path"],
                         os.path.basename(item["vector_file"]) if item.get("vector_file") else "",
                         os.path.basename(item["index_file"]) if item.get("index_file") else "",
+                        self.texts["details_yes"] if item.get("source_exists") else self.texts["details_no"],
                         self.texts["details_yes"] if item["vector_exists"] else self.texts["details_no"],
                         self.texts["details_yes"] if item["index_exists"] else self.texts["details_no"],
+                        self._local_vector_asset_state_text(item.get("asset_state", "")),
                     ]
                 )
                 payloads.append(item)
@@ -1609,8 +1617,10 @@ class MainWindow(QMainWindow):
                     2: 220,
                     5: 86,
                     6: 86,
+                    7: 86,
+                    8: 132,
                 },
-                issue_row_predicate=lambda row: row[5] == self.texts["details_no"] or row[6] == self.texts["details_no"],
+                issue_row_predicate=lambda row, ready_text=ready_state_text: row[8] != ready_text,
                 extra_actions=[
                     {
                         "label": self.texts["details_open_selected"],
@@ -1627,6 +1637,10 @@ class MainWindow(QMainWindow):
             ).exec()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
+
+    def _local_vector_asset_state_text(self, asset_state):
+        state_key = str(asset_state or "").strip().lower() or "ready"
+        return self.texts.get(f"library_asset_state_{state_key}", state_key)
 
     def _open_vector_detail_payload(self, dialog, payload, item=None):
         column = item.column() if item is not None else 3
