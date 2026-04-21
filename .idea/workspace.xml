@@ -4,9 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="重新提交">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="增加同步异常状态">
       <change afterPath="$PROJECT_DIR$/docs/static_call_analysis.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/source/ffmpeg-8.1-full_build.7z" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -376,14 +375,8 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/styles.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/mobile_bridge.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/mobile_bridge.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/favicon.ico" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -391,7 +384,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="5628" />
+    <option name="cachedIndexableFilesCount" value="6762" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -646,23 +639,8 @@
       <workItem from="1776766808251" duration="1215000" />
       <workItem from="1776768037538" duration="339000" />
       <workItem from="1776768402145" duration="6294000" />
-      <workItem from="1776774932680" duration="5714000" />
-    </task>
-    <task id="LOCAL-00006" summary="抽帧优化">
-      <option name="closed" value="true" />
-      <created>1774106813232</created>
-      <option name="number" value="00006" />
-      <option name="presentableId" value="LOCAL-00006" />
-      <option name="project" value="LOCAL" />
-      <updated>1774106813232</updated>
-    </task>
-    <task id="LOCAL-00007" summary="重构">
-      <option name="closed" value="true" />
-      <created>1774107203598</created>
-      <option name="number" value="00007" />
-      <option name="presentableId" value="LOCAL-00007" />
-      <option name="project" value="LOCAL" />
-      <updated>1774107203598</updated>
+      <workItem from="1776774932680" duration="7695000" />
+      <workItem from="1776783507673" duration="2239000" />
     </task>
     <task id="LOCAL-00008" summary="打包路径修复">
       <option name="closed" value="true" />
@@ -1040,7 +1018,23 @@
       <option name="project" value="LOCAL" />
       <updated>1776773772314</updated>
     </task>
-    <option name="localTasksCounter" value="55" />
+    <task id="LOCAL-00055" summary="增加同步异常状态">
+      <option name="closed" value="true" />
+      <created>1776780806960</created>
+      <option name="number" value="00055" />
+      <option name="presentableId" value="LOCAL-00055" />
+      <option name="project" value="LOCAL" />
+      <updated>1776780806960</updated>
+    </task>
+    <task id="LOCAL-00056" summary="增加同步异常状态">
+      <option name="closed" value="true" />
+      <created>1776781127460</created>
+      <option name="number" value="00056" />
+      <option name="presentableId" value="LOCAL-00056" />
+      <option name="project" value="LOCAL" />
+      <updated>1776781127460</updated>
+    </task>
+    <option name="localTasksCounter" value="57" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1094,7 +1088,8 @@
     <MESSAGE value="修复bug" />
     <MESSAGE value="加入局域网传图搜索功能" />
     <MESSAGE value="重新提交" />
-    <option name="LAST_COMMIT_MESSAGE" value="重新提交" />
+    <MESSAGE value="增加同步异常状态" />
+    <option name="LAST_COMMIT_MESSAGE" value="增加同步异常状态" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
