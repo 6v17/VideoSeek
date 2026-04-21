@@ -159,6 +159,20 @@ def process_single_video(abs_path, rel_path, lib_files, config, get_video_id):
         vectors, timestamps, _ = generate_vectors_and_index_for_video(
             abs_path, video_id, config["index_dir"], config["vector_dir"]
         )
+        if vectors is None or timestamps is None:
+            logger.warning("Skipping metadata update for %s because vector generation returned no data", abs_path)
+            return None, None, False
+        if len(vectors) == 0 or len(timestamps) == 0:
+            logger.warning("Skipping metadata update for %s because vector generation returned empty data", abs_path)
+            return None, None, False
+        if len(vectors) != len(timestamps):
+            logger.warning(
+                "Skipping metadata update for %s because vector/timestamp counts differ: vectors=%s timestamps=%s",
+                abs_path,
+                len(vectors),
+                len(timestamps),
+            )
+            return None, None, False
         lib_files[rel_path] = {"vid": video_id, "mod_time": video_mod_time}
         return vectors, timestamps, True
     except Exception as exc:
