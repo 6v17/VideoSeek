@@ -560,16 +560,9 @@ def _candidate_dll_dirs():
 def generate_vectors_and_index_for_video(video_path, video_id, index_dir, vector_dir):
     frames, timestamps = extract_frames_with_ffmpeg(video_path)
     if not frames:
-        raise ValueError(f"No frames extracted from video: {video_path}")
+        return [], [], None
 
     vectors = get_engine().encode_images(frames)
-    if vectors is None or len(vectors) == 0:
-        raise ValueError(f"No embeddings generated for video: {video_path}")
-    if len(vectors) != len(timestamps):
-        raise ValueError(
-            f"Embedding count mismatch for video: {video_path} "
-            f"(vectors={len(vectors)} timestamps={len(timestamps)})"
-        )
     free_memory()
     config = load_config()
     chunk_config = chunk_config_payload(

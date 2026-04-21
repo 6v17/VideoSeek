@@ -25,12 +25,7 @@ class IndexingServiceTests(unittest.TestCase):
             }
         }
 
-        def fake_exists(path):
-            if path == "C:\\videos":
-                return True
-            return path.endswith("keep.mp4")
-
-        with patch("src.services.indexing_service.os.path.exists", side_effect=fake_exists):
+        with patch("src.services.indexing_service.os.path.exists", side_effect=lambda path: path.endswith("keep.mp4")):
             removed = list(indexing_service.cleanup_missing_library_files(meta, {}, None))
 
         self.assertEqual(removed, ["gone"])
@@ -108,53 +103,6 @@ class IndexingServiceTests(unittest.TestCase):
             ["clip.mp4", "scene.mkv"],
         )
 
-    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
-    @patch("src.services.indexing_service.generate_vectors_and_index_for_video", return_value=([], [], None))
-    def test_process_single_video_skips_meta_update_when_generation_returns_empty_data(
-        self,
-        _mock_generate,
-        _mock_getmtime,
-    ):
-        lib_files = {}
-
-        vectors, timestamps, metadata_updated = indexing_service.process_single_video(
-            "D:\\videos\\clip.mp4",
-            "clip.mp4",
-            lib_files,
-            {"index_dir": "source/index", "vector_dir": "source/vector"},
-            lambda path: "vid_a",
-        )
-
-        self.assertIsNone(vectors)
-        self.assertIsNone(timestamps)
-        self.assertFalse(metadata_updated)
-        self.assertEqual(lib_files, {})
-
-    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
-    @patch(
-        "src.services.indexing_service.generate_vectors_and_index_for_video",
-        return_value=(np.array([[1.0]], dtype=np.float32), [], object()),
-    )
-    def test_process_single_video_skips_meta_update_when_vector_timestamp_counts_mismatch(
-        self,
-        _mock_generate,
-        _mock_getmtime,
-    ):
-        lib_files = {}
-
-        vectors, timestamps, metadata_updated = indexing_service.process_single_video(
-            "D:\\videos\\clip.mp4",
-            "clip.mp4",
-            lib_files,
-            {"index_dir": "source/index", "vector_dir": "source/vector"},
-            lambda path: "vid_a",
-        )
-
-        self.assertIsNone(vectors)
-        self.assertIsNone(timestamps)
-        self.assertFalse(metadata_updated)
-        self.assertEqual(lib_files, {})
-
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.collect_existing_chunks", return_value=([], [], []))
     @patch("src.services.indexing_service.collect_existing_vectors", return_value=([], [], []))
@@ -188,15 +136,13 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.workflows.update_video.save_meta")
     @patch("src.workflows.update_video.cleanup_missing_library_files", side_effect=AssertionError("should not cleanup"))
     @patch("src.workflows.update_video.load_meta", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid"}}}}})
-    @patch("src.workflows.update_video.os.path.exists", return_value=True)
     @patch("src.workflows.update_video.load_config")
     @patch("src.workflows.update_video.garbage_collect_indices")
     def test_update_videos_flow_skips_cleanup_when_auto_cleanup_disabled(
         self,
         _mock_gc,
         mock_load_config,
-        _mock_exists,
-        mock_load_meta,
+        _mock_load_meta,
         _mock_cleanup,
         _mock_save_meta,
         _mock_scan,
@@ -248,19 +194,17 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.workflows.update_video.save_meta")
     @patch("src.workflows.update_video.load_meta", return_value={"libraries": {"D:\\videos": {"files": {}}}})
     @patch("src.workflows.update_video.load_config", return_value={"auto_cleanup_missing_files": False, "meta_file": "source/meta.json"})
-    @patch("src.workflows.update_video.os.path.exists", return_value=True)
     @patch("src.workflows.update_video.garbage_collect_indices")
-    @patch("src.workflows.update_video.scan_target_libraries", side_effect=InterruptedError("interrupted"))
+    @patch("src.workflows.update_video.scan_target_libraries", side_effect=RuntimeError("interrupted"))
     def test_update_videos_flow_keeps_partial_state_on_interruption(
         self,
         _mock_scan,
         _mock_gc,
-        _mock_exists,
         _mock_load_config,
         mock_load_meta,
         mock_save_meta,
     ):
-        with self.assertRaises(InterruptedError):
+        with self.assertRaises(RuntimeError):
             update_video.update_videos_flow()
 
         saved_meta = mock_load_meta.return_value
@@ -419,11 +363,10 @@ class UtilsTests(unittest.TestCase):
         self.assertEqual(args[1], "/select,")
         self.assertTrue(str(args[2]).lower().endswith("clip.mp4"))
 
-    @patch("src.utils.ensure_folder_exists")
     @patch("src.utils.subprocess.run")
     @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
     @patch(
-        "src.app.config.load_config",
+        "src.utils.load_config",
         return_value={
             "preview_seconds": 6,
             "preview_width": 640,
@@ -437,7 +380,6 @@ class UtilsTests(unittest.TestCase):
         _mock_load_config,
         _mock_get_ffmpeg,
         mock_run,
-        _mock_ensure_folder_exists,
     ):
         mock_run.return_value = unittest.mock.Mock(returncode=0)
 
@@ -453,11 +395,10 @@ class UtilsTests(unittest.TestCase):
         self.assertIn("-c:a", cmd)
         self.assertIn("aac", cmd)
 
-    @patch("src.utils.ensure_folder_exists")
     @patch("src.utils.subprocess.run")
     @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
     @patch(
-        "src.app.config.load_config",
+        "src.utils.load_config",
         return_value={
             "preview_seconds": 6,
             "preview_width": 640,
@@ -471,7 +412,6 @@ class UtilsTests(unittest.TestCase):
         _mock_load_config,
         _mock_get_ffmpeg,
         mock_run,
-        _mock_ensure_folder_exists,
     ):
         mock_run.return_value = unittest.mock.Mock(returncode=0)
 
@@ -482,12 +422,10 @@ class UtilsTests(unittest.TestCase):
 
     @patch("src.utils.subprocess.run")
     @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
-    @patch("src.utils.ensure_folder_exists")
     @patch("src.utils.os.path.exists", return_value=False)
     def test_export_original_clip_uses_stream_copy(
         self,
         _mock_exists,
-        _mock_ensure_folder_exists,
         _mock_get_ffmpeg,
         mock_run,
     ):

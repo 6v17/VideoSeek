@@ -1391,7 +1391,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if hasattr(self, "_preview_dialog") and self._preview_dialog is not None:
-            self._preview_dialog.shutdown_player()
+            self._preview_dialog.shutdown_player(fast=True)
         self.search_controller.shutdown()
         self.network_search_controller.shutdown()
         self.mobile_bridge_controller.shutdown()

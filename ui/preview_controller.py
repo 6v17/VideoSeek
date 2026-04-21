@@ -136,7 +136,7 @@ class PreviewController:
     def shutdown(self):
         shutdown_thread(self.warmup_worker)
         if self.vlc_player is not None:
-            self.vlc_player.shutdown()
+            self.vlc_player.shutdown(fast=True)
             self.vlc_player = None
         self.parent_window.media_player.stop()
         self.parent_window.media_player.setSource(QUrl())

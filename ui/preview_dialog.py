@@ -207,10 +207,10 @@ class PreviewDialog(QDialog):
         self._update_segment_ui()
         self._start_playback()
 
-    def shutdown_player(self):
+    def shutdown_player(self, fast=False):
         self._begin_close()
         self._close_after_export = False
-        self._dispose_player()
+        self._dispose_player(fast=fast)
 
     def cancel_export_and_wait(self, timeout_ms=3000):
         return True
@@ -252,13 +252,13 @@ class PreviewDialog(QDialog):
             self.player = VlcPreviewPlayer(self.video_host)
         return self.player
 
-    def _dispose_player(self):
+    def _dispose_player(self, fast=False):
         if self.player is None:
             return
         try:
             self.player.stop()
         finally:
-            self.player.shutdown()
+            self.player.shutdown(fast=fast)
             self.player = None
 
     def keyPressEvent(self, event):

@@ -116,7 +116,7 @@ class VlcPreviewPlayer:
             except Exception:
                 pass
 
-    def shutdown(self):
+    def shutdown(self, fast=False):
         if self._released:
             return
         self._released = True
@@ -138,10 +138,12 @@ class VlcPreviewPlayer:
                 self._player.audio_set_mute(True)
             except Exception:
                 pass
-            self._player.release()
+            if not fast:
+                self._player.release()
             self._player = None
         if self._instance is not None:
-            self._instance.release()
+            if not fast:
+                self._instance.release()
             self._instance = None
 
     def _initialize(self):
