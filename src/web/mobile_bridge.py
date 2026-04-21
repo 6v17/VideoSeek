@@ -26,6 +26,167 @@ from src.utils import ensure_folder_exists, get_app_data_dir, get_resource_path
 
 logger = get_logger("mobile_bridge")
 
+_FALLBACK_UPLOAD_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VideoSeek Mobile Upload</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", sans-serif;
+            background: linear-gradient(145deg, #dbeafe 0%, #eff6ff 48%, #f8fafc 100%);
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+        }
+        .card {
+            width: min(100%, 420px);
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 24px;
+            box-shadow: 0 30px 80px rgba(15, 23, 42, 0.12);
+            padding: 24px 20px;
+        }
+        h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.1; }
+        p { margin: 0; color: #475569; line-height: 1.5; }
+        .picker {
+            margin-top: 24px;
+            padding: 28px 14px;
+            border: 2px dashed #bfdbfe;
+            border-radius: 20px;
+            background: #fff;
+            text-align: center;
+        }
+        #preview {
+            display: none;
+            max-width: 100%;
+            max-height: 260px;
+            border-radius: 16px;
+            margin: 0 auto;
+        }
+        #file-input { display: none; }
+        .actions { display: flex; gap: 10px; margin-top: 18px; }
+        button {
+            border: none;
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .primary {
+            flex: 1;
+            background: #2563eb;
+            color: #fff;
+        }
+        .secondary {
+            background: transparent;
+            color: #64748b;
+            border: 1px solid rgba(148, 163, 184, 0.38);
+        }
+        .status {
+            margin-top: 14px;
+            min-height: 22px;
+            color: #475569;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>Upload an image</h1>
+    <p>Send a photo to this desktop. Results stay in the VideoSeek window on the computer.</p>
+
+    <div class="picker" onclick="document.getElementById('file-input').click()">
+        <div id="placeholder">
+            <div style="font-size: 40px;">&#128247;</div>
+            <strong>Select one image</strong>
+            <div style="margin-top: 6px; color: #64748b; font-size: 13px;">JPG / PNG / WEBP / BMP</div>
+        </div>
+        <img id="preview" alt="preview">
+    </div>
+
+    <input id="file-input" type="file" accept="image/*" onchange="previewImage()">
+
+    <div class="actions">
+        <button class="primary" id="submit-btn" onclick="submitImage()">Send to desktop</button>
+        <button class="secondary" onclick="clearFile()">Reset</button>
+    </div>
+    <div class="status" id="status"></div>
+</div>
+
+<script>
+const uploadToken = "__UPLOAD_TOKEN__";
+
+function setStatus(message) {
+    document.getElementById("status").innerText = message || "";
+}
+
+function previewImage() {
+    const fileInput = document.getElementById("file-input");
+    const preview = document.getElementById("preview");
+    const placeholder = document.getElementById("placeholder");
+    if (!fileInput.files || !fileInput.files[0]) {
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = event => {
+        preview.src = event.target.result;
+        preview.style.display = "block";
+        placeholder.style.display = "none";
+    };
+    reader.readAsDataURL(fileInput.files[0]);
+    setStatus("");
+}
+
+async function submitImage() {
+    const fileInput = document.getElementById("file-input");
+    if (!fileInput.files || !fileInput.files[0]) {
+        alert("Select an image first.");
+        return;
+    }
+
+    const button = document.getElementById("submit-btn");
+    button.disabled = true;
+    button.innerText = "Sending...";
+    setStatus("Uploading image to the desktop...");
+
+    const formData = new FormData();
+    formData.append("token", uploadToken);
+    formData.append("file", fileInput.files[0]);
+
+    try {
+        const response = await fetch("/search", { method: "POST", body: formData });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+            throw new Error(payload.detail || "Upload failed.");
+        }
+        setStatus(payload.message || "Image sent. Check VideoSeek on the desktop.");
+    } catch (error) {
+        setStatus(error.message || "Upload failed.");
+    } finally {
+        button.disabled = false;
+        button.innerText = "Send to desktop";
+    }
+}
+
+function clearFile() {
+    document.getElementById("file-input").value = "";
+    document.getElementById("preview").style.display = "none";
+    document.getElementById("placeholder").style.display = "block";
+    setStatus("");
+}
+</script>
+</body>
+</html>
+"""
+
 
 def get_local_ip():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -56,10 +217,14 @@ class MobileBridgeService:
         self._server = None
         self._started = threading.Event()
         self._lock = threading.Lock()
+        self._static_dir = get_resource_path("static")
+        self._template_path = get_resource_path(os.path.join("static", "index.html"))
 
         self.app = FastAPI(title="VideoSeek Mobile Bridge")
-        static_dir = get_resource_path("static")
-        self.app.mount("/static", StaticFiles(directory=static_dir), name="static")
+        if os.path.isdir(self._static_dir):
+            self.app.mount("/static", StaticFiles(directory=self._static_dir), name="static")
+        else:
+            logger.warning("Mobile bridge static directory missing: %s", self._static_dir)
         self.app.get("/", response_class=HTMLResponse)(self._index)
         self.app.post("/search")(self._search)
         self.app.get("/health")(self._health)
@@ -125,10 +290,16 @@ class MobileBridgeService:
         if token != self.token:
             raise HTTPException(status_code=403, detail="Invalid access token.")
 
-        template_path = get_resource_path(os.path.join("static", "index.html"))
-        with open(template_path, "r", encoding="utf-8") as handle:
-            html = handle.read()
+        html = self._load_index_html()
         return html.replace("__UPLOAD_TOKEN__", self.token)
+
+    def _load_index_html(self):
+        if os.path.isfile(self._template_path):
+            with open(self._template_path, "r", encoding="utf-8") as handle:
+                return handle.read()
+
+        logger.warning("Mobile bridge page missing, using embedded fallback: %s", self._template_path)
+        return _FALLBACK_UPLOAD_PAGE
 
     async def _search(
         self,
