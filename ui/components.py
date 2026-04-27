@@ -379,7 +379,9 @@ class SearchPage(QWidget):
         self.img_label.setObjectName("ImageDropZone")
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setWordWrap(True)
-        self.img_label.setMinimumHeight(COMPONENT_SIZES["image_drop_min_height"])
+        self.img_label.setFixedHeight(COMPONENT_SIZES["image_drop_min_height"])
+        self.img_label.setMinimumWidth(0)
+        self.img_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.text_search = QLineEdit()
         self.text_search.setObjectName("SearchInput")
         self.search_mode = QComboBox()
@@ -492,21 +494,51 @@ class LibraryPage(QWidget):
         toolbar_card_layout.setContentsMargins(18, 16, 18, 16)
         toolbar_card_layout.setSpacing(10)
 
+        def _toolbar_divider():
+            divider = QFrame()
+            divider.setFrameShape(QFrame.VLine)
+            divider.setFrameShadow(QFrame.Plain)
+            divider.setObjectName("ToolbarDivider")
+            return divider
+
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
         self.btn_add_lib = QPushButton()
-        self.btn_add_lib.setObjectName("SecondaryButton")
+        self.btn_add_lib.setObjectName("UpdateButton")
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
+        self.btn_stop_index = QPushButton()
+        self.btn_stop_index.setObjectName("DangerGhostButton")
+        self.btn_stop_index.setEnabled(False)
+        self.btn_stop_index.setVisible(False)
+        self.btn_index_issues = QPushButton()
+        self.btn_index_issues.setObjectName("GhostButton")
+        self.btn_index_issues.setEnabled(False)
         self.btn_cleanup_missing = QPushButton()
         self.btn_cleanup_missing.setObjectName("GhostButton")
         self.btn_vector_details = QPushButton()
         self.btn_vector_details.setObjectName("GhostButton")
+        self.btn_debug_gpu_oom = QPushButton()
+        self.btn_debug_gpu_oom.setObjectName("GhostButton")
+        self.btn_debug_gpu_oom.setVisible(False)
+        self.btn_debug_system_oom = QPushButton()
+        self.btn_debug_system_oom.setObjectName("GhostButton")
+        self.btn_debug_system_oom.setVisible(False)
         toolbar.addWidget(self.btn_add_lib)
         toolbar.addWidget(self.btn_sync_db)
+        toolbar.addSpacing(4)
+        toolbar.addWidget(_toolbar_divider())
+        toolbar.addSpacing(4)
+        toolbar.addWidget(self.btn_index_issues)
+        toolbar.addSpacing(4)
+        toolbar.addWidget(_toolbar_divider())
+        toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_cleanup_missing)
         toolbar.addWidget(self.btn_vector_details)
+        toolbar.addWidget(self.btn_debug_gpu_oom)
+        toolbar.addWidget(self.btn_debug_system_oom)
         toolbar.addStretch()
+        toolbar.addWidget(self.btn_stop_index)
 
         progress_row = QHBoxLayout()
         progress_row.setSpacing(12)
@@ -561,6 +593,17 @@ class LinkSearchPage(QWidget):
         self.header = PageHeader()
         root.addWidget(self.header)
 
+        self.notice_card = QFrame()
+        self.notice_card.setObjectName("NoticeCard")
+        notice_layout = QVBoxLayout(self.notice_card)
+        notice_layout.setContentsMargins(16, 12, 16, 12)
+        notice_layout.setSpacing(0)
+        self.notice_body = QLabel()
+        self.notice_body.setObjectName("NoticeBody")
+        self.notice_body.setWordWrap(True)
+        notice_layout.addWidget(self.notice_body)
+        root.addWidget(self.notice_card)
+
         self.control_card = QFrame()
         self.control_card.setObjectName("PanelCard")
         control_layout = QVBoxLayout(self.control_card)
@@ -573,7 +616,9 @@ class LinkSearchPage(QWidget):
         self.query_image_label.setObjectName("ImageDropZone")
         self.query_image_label.setAlignment(Qt.AlignCenter)
         self.query_image_label.setWordWrap(True)
-        self.query_image_label.setMinimumHeight(140)
+        self.query_image_label.setFixedHeight(140)
+        self.query_image_label.setMinimumWidth(0)
+        self.query_image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
@@ -778,10 +823,14 @@ class SettingsPage(QWidget):
         self.runtime_status_ffmpeg = QLabel()
         self.runtime_status_ffmpeg.setObjectName("StatusHint")
         self.runtime_status_ffmpeg.setWordWrap(True)
+        self.runtime_status_data = QLabel()
+        self.runtime_status_data.setObjectName("StatusHint")
+        self.runtime_status_data.setWordWrap(True)
         runtime_status_header_layout.addWidget(self.runtime_status_title, 0)
         runtime_status_header_layout.addWidget(self.runtime_status_backend, 1)
         runtime_status_layout.addWidget(self.runtime_status_header)
         runtime_status_layout.addWidget(self.runtime_status_ffmpeg)
+        runtime_status_layout.addWidget(self.runtime_status_data)
         form_layout.addWidget(self.runtime_status_card)
 
         self.input_fps = NoWheelDoubleSpinBox()
@@ -804,6 +853,8 @@ class SettingsPage(QWidget):
         self.input_thumb_height.setRange(45, 320)
         self.input_remote_max_frames = NoWheelSpinBox()
         self.input_remote_max_frames.setRange(200, 20000)
+        self.input_embedding_batch_size = NoWheelSpinBox()
+        self.input_embedding_batch_size.setRange(1, 64)
         self.input_similarity_threshold = NoWheelDoubleSpinBox()
         self.input_similarity_threshold.setRange(0.1, 1.0)
         self.input_similarity_threshold.setSingleStep(0.01)
@@ -817,8 +868,12 @@ class SettingsPage(QWidget):
         self.input_chunk_similarity_mode = NoWheelComboBox()
         self.input_prefer_gpu = NoWheelComboBox()
         self.input_auto_cleanup_missing_files = NoWheelComboBox()
+        self.input_data_root = QLineEdit()
+        self.btn_browse_data_root = QPushButton()
         self.input_ffmpeg_path = QLineEdit()
+        self.btn_browse_ffmpeg_path = QPushButton()
         self.input_model_dir = QLineEdit()
+        self.btn_browse_model_dir = QPushButton()
         self.section_search_title = QLabel()
         self.section_preview_title = QLabel()
         self.section_index_title = QLabel()
@@ -831,12 +886,14 @@ class SettingsPage(QWidget):
         self.label_thumb_width = ClickableLabel()
         self.label_thumb_height = ClickableLabel()
         self.label_remote_max_frames = ClickableLabel()
+        self.label_embedding_batch_size = ClickableLabel()
         self.label_similarity_threshold = ClickableLabel()
         self.label_max_chunk_duration = ClickableLabel()
         self.label_min_chunk_size = ClickableLabel()
         self.label_chunk_similarity_mode = ClickableLabel()
         self.label_prefer_gpu = ClickableLabel()
         self.label_auto_cleanup_missing_files = ClickableLabel()
+        self.label_data_root = ClickableLabel()
         self.label_ffmpeg_path = ClickableLabel()
         self.label_model_dir = ClickableLabel()
         self.hint_fps = QLabel()
@@ -852,12 +909,14 @@ class SettingsPage(QWidget):
         self.hint_thumb_width = QLabel()
         self.hint_thumb_height = QLabel()
         self.hint_remote_max_frames = QLabel()
+        self.hint_embedding_batch_size = QLabel()
         self.hint_similarity_threshold = QLabel()
         self.hint_max_chunk_duration = QLabel()
         self.hint_min_chunk_size = QLabel()
         self.hint_chunk_similarity_mode = QLabel()
         self.hint_prefer_gpu = QLabel()
         self.hint_auto_cleanup_missing_files = QLabel()
+        self.hint_data_root = QLabel()
         self.hint_ffmpeg_path = QLabel()
         self.hint_ffmpeg_active = QLabel()
         self.hint_inference_backend = QLabel()
@@ -878,14 +937,43 @@ class SettingsPage(QWidget):
         self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_remote_max_frames, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_embedding_batch_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_similarity_threshold, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_max_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_data_root, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
         self._configure_setting_input(self.input_ffmpeg_path, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
         self._configure_setting_input(self.input_model_dir, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
+        self.btn_browse_data_root.setObjectName("GhostButton")
+        self.btn_browse_data_root.setMinimumHeight(34)
+        self.btn_browse_ffmpeg_path.setObjectName("GhostButton")
+        self.btn_browse_ffmpeg_path.setMinimumHeight(34)
+        self.btn_browse_model_dir.setObjectName("GhostButton")
+        self.btn_browse_model_dir.setMinimumHeight(34)
+
+        self.input_data_root_bundle = QWidget()
+        input_data_root_bundle_layout = QHBoxLayout(self.input_data_root_bundle)
+        input_data_root_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        input_data_root_bundle_layout.setSpacing(8)
+        input_data_root_bundle_layout.addWidget(self.input_data_root, 1)
+        input_data_root_bundle_layout.addWidget(self.btn_browse_data_root, 0)
+
+        self.input_ffmpeg_path_bundle = QWidget()
+        input_ffmpeg_path_bundle_layout = QHBoxLayout(self.input_ffmpeg_path_bundle)
+        input_ffmpeg_path_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        input_ffmpeg_path_bundle_layout.setSpacing(8)
+        input_ffmpeg_path_bundle_layout.addWidget(self.input_ffmpeg_path, 1)
+        input_ffmpeg_path_bundle_layout.addWidget(self.btn_browse_ffmpeg_path, 0)
+
+        self.input_model_dir_bundle = QWidget()
+        input_model_dir_bundle_layout = QHBoxLayout(self.input_model_dir_bundle)
+        input_model_dir_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        input_model_dir_bundle_layout.setSpacing(8)
+        input_model_dir_bundle_layout.addWidget(self.input_model_dir, 1)
+        input_model_dir_bundle_layout.addWidget(self.btn_browse_model_dir, 0)
 
         self.sections_stack = QVBoxLayout()
         self.sections_stack.setContentsMargins(0, 0, 0, 0)
@@ -942,10 +1030,11 @@ class SettingsPage(QWidget):
         self._add_setting_row(self.section_preview_form, 3, self.label_thumb_width, self.input_thumb_width, self.hint_thumb_width)
         self._add_setting_row(self.section_preview_form, 4, self.label_thumb_height, self.input_thumb_height, self.hint_thumb_height)
 
-        self._add_setting_row(self.section_index_form, 0, self.label_similarity_threshold, self.input_similarity_threshold, self.hint_similarity_threshold)
-        self._add_setting_row(self.section_index_form, 1, self.label_max_chunk_duration, self.input_max_chunk_duration, self.hint_max_chunk_duration)
-        self._add_setting_row(self.section_index_form, 2, self.label_min_chunk_size, self.input_min_chunk_size, self.hint_min_chunk_size)
-        self._add_setting_row(self.section_index_form, 3, self.label_chunk_similarity_mode, self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode)
+        self._add_setting_row(self.section_index_form, 0, self.label_embedding_batch_size, self.input_embedding_batch_size, self.hint_embedding_batch_size)
+        self._add_setting_row(self.section_index_form, 1, self.label_similarity_threshold, self.input_similarity_threshold, self.hint_similarity_threshold)
+        self._add_setting_row(self.section_index_form, 2, self.label_max_chunk_duration, self.input_max_chunk_duration, self.hint_max_chunk_duration)
+        self._add_setting_row(self.section_index_form, 3, self.label_min_chunk_size, self.input_min_chunk_size, self.hint_min_chunk_size)
+        self._add_setting_row(self.section_index_form, 4, self.label_chunk_similarity_mode, self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode)
 
         self._add_setting_row(
             self.section_runtime_form,
@@ -964,11 +1053,24 @@ class SettingsPage(QWidget):
         self._add_setting_row(
             self.section_runtime_form,
             2,
+            self.label_data_root,
+            self.input_data_root_bundle,
+            self.hint_data_root,
+        )
+        self._add_setting_row(
+            self.section_runtime_form,
+            3,
             self.label_ffmpeg_path,
-            self.input_ffmpeg_path,
+            self.input_ffmpeg_path_bundle,
             self.hint_ffmpeg_path,
         )
-        self._add_setting_row(self.section_runtime_form, 3, self.label_model_dir, self.input_model_dir, self.hint_model_dir)
+        self._add_setting_row(
+            self.section_runtime_form,
+            4,
+            self.label_model_dir,
+            self.input_model_dir_bundle,
+            self.hint_model_dir,
+        )
 
         self.sections_stack.addWidget(self.section_search_card)
         self.sections_stack.addWidget(self.section_preview_card)
@@ -987,8 +1089,12 @@ class SettingsPage(QWidget):
         self.btn_save.setObjectName("PrimaryButton")
         self.btn_reset = QPushButton()
         self.btn_reset.setObjectName("GhostButton")
+        self.btn_cleanup_old_data_root = QPushButton()
+        self.btn_cleanup_old_data_root.setObjectName("DangerGhostButton")
+        self.btn_cleanup_old_data_root.hide()
         action_row.addWidget(self.btn_save)
         action_row.addWidget(self.btn_reset)
+        action_row.addWidget(self.btn_cleanup_old_data_root)
         action_row.addStretch()
         action_card_layout.addLayout(action_row)
 
@@ -1189,27 +1295,42 @@ class SettingsPage(QWidget):
         self.label_thumb_width.setText(texts["setting_thumb_width"])
         self.label_thumb_height.setText(texts["setting_thumb_height"])
         self.label_remote_max_frames.setText(texts["setting_remote_max_frames"])
+        self.label_embedding_batch_size.setText(texts["setting_embedding_batch_size"])
         self.label_similarity_threshold.setText(texts["setting_similarity_threshold"])
         self.label_max_chunk_duration.setText(texts["setting_max_chunk_duration"])
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
         self.label_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
         self.label_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files"])
+        current_chunk_similarity_mode = self.input_chunk_similarity_mode.currentData()
         self.input_chunk_similarity_mode.blockSignals(True)
         self.input_chunk_similarity_mode.clear()
         self.input_chunk_similarity_mode.addItem(texts["setting_chunk_similarity_mode_chunk"], "chunk")
         self.input_chunk_similarity_mode.addItem(texts["setting_chunk_similarity_mode_frame"], "frame")
+        restore_index = self.input_chunk_similarity_mode.findData(current_chunk_similarity_mode)
+        self.input_chunk_similarity_mode.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_chunk_similarity_mode.blockSignals(False)
+        current_prefer_gpu = self.input_prefer_gpu.currentData()
         self.input_prefer_gpu.blockSignals(True)
         self.input_prefer_gpu.clear()
         self.input_prefer_gpu.addItem(texts["setting_prefer_gpu_option_gpu"], True)
         self.input_prefer_gpu.addItem(texts["setting_prefer_gpu_option_cpu"], False)
+        restore_index = self.input_prefer_gpu.findData(current_prefer_gpu)
+        self.input_prefer_gpu.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_prefer_gpu.blockSignals(False)
+        current_auto_cleanup_missing_files = self.input_auto_cleanup_missing_files.currentData()
         self.input_auto_cleanup_missing_files.blockSignals(True)
         self.input_auto_cleanup_missing_files.clear()
         self.input_auto_cleanup_missing_files.addItem(texts["setting_auto_cleanup_missing_files_option_off"], False)
         self.input_auto_cleanup_missing_files.addItem(texts["setting_auto_cleanup_missing_files_option_on"], True)
+        restore_index = self.input_auto_cleanup_missing_files.findData(current_auto_cleanup_missing_files)
+        self.input_auto_cleanup_missing_files.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_auto_cleanup_missing_files.blockSignals(False)
+        self.label_data_root.setText(texts["setting_data_root"])
+        self.btn_browse_data_root.setText(texts["browse_data_root"])
+        self.btn_browse_ffmpeg_path.setText(texts["browse_file"])
+        self.btn_browse_model_dir.setText(texts["browse_folder"])
+        self.btn_cleanup_old_data_root.setText(texts["cleanup_old_data_root"])
         self.label_ffmpeg_path.setText(texts["setting_ffmpeg_path"])
         self.label_model_dir.setText(texts["setting_model_dir"])
         self.hint_fps.setText(texts["setting_fps_hint"])
@@ -1223,12 +1344,14 @@ class SettingsPage(QWidget):
         self.hint_thumb_width.setText(texts["setting_thumb_width_hint"])
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
         self.hint_remote_max_frames.setText(texts["setting_remote_max_frames_hint"])
+        self.hint_embedding_batch_size.setText(texts["setting_embedding_batch_size_hint"])
         self.hint_similarity_threshold.setText(texts["setting_similarity_threshold_hint"])
         self.hint_max_chunk_duration.setText(texts["setting_max_chunk_duration_hint"])
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
         self.hint_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
         self.hint_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files_hint"])
+        self.hint_data_root.setText(texts["setting_data_root_hint"])
         self.hint_ffmpeg_path.setText(texts["setting_ffmpeg_path_hint"])
         self.hint_ffmpeg_active.setText(texts["setting_ffmpeg_active"].format(path=texts["setting_ffmpeg_unknown"]))
         self.hint_inference_backend.setText(
@@ -1251,12 +1374,14 @@ class SettingsPage(QWidget):
             self.label_thumb_width,
             self.label_thumb_height,
             self.label_remote_max_frames,
+            self.label_embedding_batch_size,
             self.label_similarity_threshold,
             self.label_max_chunk_duration,
             self.label_min_chunk_size,
             self.label_chunk_similarity_mode,
             self.label_prefer_gpu,
             self.label_auto_cleanup_missing_files,
+            self.label_data_root,
             self.label_ffmpeg_path,
             self.label_model_dir,
         ]:
@@ -1271,9 +1396,10 @@ class SettingsPage(QWidget):
             label, hint_label, extra_hint_labels = self._setting_detail_bindings[0]
             self._activate_setting_detail(label, hint_label, extra_hint_labels)
 
-    def set_runtime_status_texts(self, backend_text, ffmpeg_text):
+    def set_runtime_status_texts(self, backend_text, ffmpeg_text, data_text=""):
         self.runtime_status_backend.setText(backend_text or "")
         self.runtime_status_ffmpeg.setText(ffmpeg_text or "")
+        self.runtime_status_data.setText(data_text or "")
 
 
 class ResultTable(QTableWidget):

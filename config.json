@@ -26,6 +26,8 @@
     "remote_index_file": "data/remote/remote_index.faiss",
     "remote_vector_file": "data/remote/remote_vectors.npy",
     "remote_max_frames": 2000,
+    "embedding_batch_size": 16,
     "remote_sample_fps": 1.0,
-    "auto_cleanup_missing_files": false
+    "auto_cleanup_missing_files": false,
+    "show_debug_test_buttons": false
 }

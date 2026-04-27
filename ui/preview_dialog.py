@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget
 
+from src.utils import get_video_duration_seconds
 from ui.vlc_player import VlcPreviewPlayer
 
 
@@ -92,8 +93,10 @@ class PreviewDialog(QDialog):
         self._close_after_export = False
         self._pending_close = False
         self._min_close_at = 0.0
+        self._pending_ui_seek_ms = None
         self.segment_start_sec = None
         self.segment_end_sec = None
+        self._known_total_ms = 0
         self.export_worker = None
 
         self.setWindowTitle(self.texts.get("preview_dialog_title", "Large Preview"))
@@ -193,6 +196,8 @@ class PreviewDialog(QDialog):
         self.video_path = str(video_path)
         self.start_sec = float(start_sec)
         self.end_sec = float(end_sec)
+        self._known_total_ms = self._resolve_known_total_ms(video_path)
+        self._pending_ui_seek_ms = None
         self._slider_dragging = False
         self.segment_start_sec = None
         self.segment_end_sec = None
@@ -323,9 +328,10 @@ class PreviewDialog(QDialog):
         if self._closing:
             return
         player = self._ensure_player()
-        length = player.get_length()
+        length = self._effective_total_ms(player)
         if length > 0:
             new_time = int((self.slider.value() / 1000.0) * length)
+            self._pending_ui_seek_ms = new_time
             player.set_time(new_time, unlock=True)
             self._extend_close_guard(1.0)
             player.resume()
@@ -339,7 +345,8 @@ class PreviewDialog(QDialog):
         if player is None:
             return
         current_ms = max(0, player.get_time())
-        total_ms = max(0, player.get_length())
+        total_ms = self._effective_total_ms(player)
+        current_ms = self._resolve_display_time_ms(current_ms)
 
         if not self._slider_dragging and total_ms > 0:
             self.slider.blockSignals(True)
@@ -351,6 +358,33 @@ class PreviewDialog(QDialog):
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         else:
             self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+
+    def _resolve_known_total_ms(self, video_path):
+        try:
+            duration_sec = get_video_duration_seconds(video_path)
+        except Exception:
+            return 0
+        if duration_sec is None:
+            return 0
+        return max(0, int(float(duration_sec) * 1000))
+
+    def _effective_total_ms(self, player):
+        total_ms = max(0, player.get_length())
+        if total_ms > 0:
+            self._known_total_ms = total_ms
+            return total_ms
+        return self._known_total_ms
+
+    def _resolve_display_time_ms(self, current_ms):
+        pending_seek_ms = self._pending_ui_seek_ms
+        if pending_seek_ms is None:
+            return current_ms
+        if abs(current_ms - pending_seek_ms) <= 800 or current_ms > pending_seek_ms:
+            self._pending_ui_seek_ms = None
+            return current_ms
+        if current_ms <= 250 and pending_seek_ms > 250:
+            return pending_seek_ms
+        return current_ms
 
     def _toggle_fullscreen(self):
         if self._closing:

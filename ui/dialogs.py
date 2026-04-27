@@ -1507,6 +1507,17 @@ class ResourceTableDialog(QDialog):
     def _inline_text(self, zh_text, en_text):
         return en_text if self.texts["close"].lower() == "close" else zh_text
 
+    def set_rows(self, rows, row_payloads=None):
+        self.rows = list(rows or [])
+        self.row_payloads = list(row_payloads or self.rows)
+        self._refresh_rows()
+        self._apply_column_layout()
+
+    def set_summary_text(self, text):
+        self.summary_text = str(text or "")
+        self.summary_hint.setText(self.summary_text)
+        self.summary_hint.setVisible(bool(self.summary_text))
+
     def _build_summary_card(self, label_text, value_text):
         card = QFrame()
         card.setObjectName("SummaryCard")

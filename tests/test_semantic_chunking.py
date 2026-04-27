@@ -169,10 +169,10 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         self.assertEqual(len(chunks), 2)
         self.assertEqual((chunks[0]["start"], chunks[1]["end"]), (0.0, 3.0))
 
+    @patch("src.services.indexing_service.atomic_save_numpy")
     @patch("src.services.indexing_service.create_clip_index")
-    @patch("src.services.indexing_service.np.save")
     @patch("src.services.indexing_service.ensure_folder_exists")
-    def test_merge_and_save_all_chunks_persists_ranges(self, _mock_ensure_folder, mock_np_save, mock_create_index):
+    def test_merge_and_save_all_chunks_persists_ranges(self, _mock_ensure_folder, mock_create_index, mock_atomic_save):
         config = {
             "cross_chunk_index_file": "source/global/cross_chunk_index.faiss",
             "cross_chunk_vector_file": "source/global/cross_chunk_vectors.npy",
@@ -184,9 +184,37 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         indexing_service.merge_and_save_all_chunks(vectors, ranges, paths, config)
 
         mock_create_index.assert_called_once()
-        saved_payload = mock_np_save.call_args[0][1]
+        saved_payload = mock_atomic_save.call_args[0][1]
         self.assertEqual(saved_payload["ranges"].shape, (2, 2))
         self.assertEqual(saved_payload["paths"], paths)
+        self.assertEqual(saved_payload["format_version"], 2)
+        self.assertNotIn("vector", saved_payload)
+
+    @patch("src.services.indexing_service.atomic_save_numpy")
+    @patch("src.services.indexing_service.create_clip_index")
+    @patch("src.services.indexing_service.ensure_folder_exists")
+    def test_merge_and_save_all_vectors_omits_duplicate_vector_payload(
+        self,
+        _mock_ensure_folder,
+        mock_create_index,
+        mock_atomic_save,
+    ):
+        config = {
+            "cross_index_file": "source/global/cross_video_index.faiss",
+            "cross_vector_file": "source/global/cross_video_vectors.npy",
+        }
+        vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        timestamps = np.asarray([0.0, 2.0], dtype=np.float32)
+        paths = ["a.mp4", "b.mp4"]
+
+        indexing_service.merge_and_save_all_vectors(vectors, timestamps, paths, config)
+
+        mock_create_index.assert_called_once()
+        saved_payload = mock_atomic_save.call_args[0][1]
+        self.assertEqual(saved_payload["timestamps"].shape, (2,))
+        self.assertEqual(saved_payload["paths"], paths)
+        self.assertEqual(saved_payload["format_version"], 2)
+        self.assertNotIn("vector", saved_payload)
 
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
@@ -210,6 +238,50 @@ class ChunkSearchTests(unittest.TestCase):
 
         self.assertIsNotNone(index)
         self.assertEqual(ranges.shape, (1, 2))
+        self.assertEqual(paths, ["video.mp4"])
+
+    @patch("src.services.search_service.load_clip_index")
+    @patch("src.services.search_service.np.load")
+    @patch("src.services.search_service.os.path.exists", return_value=True)
+    def test_load_search_assets_accepts_legacy_payload_with_vector_field(self, _mock_exists, mock_np_load, mock_load_index):
+        mock_load_index.return_value = object()
+        mock_np_load.return_value.item.return_value = {
+            "vector": np.asarray([[1.0, 0.0]], dtype=np.float32),
+            "timestamps": np.asarray([0.0], dtype=np.float32),
+            "paths": ["video.mp4"],
+        }
+
+        index, timestamps, paths = search_service.load_search_assets(
+            {
+                "cross_index_file": "cross_video_index.faiss",
+                "cross_vector_file": "cross_video_vectors.npy",
+            }
+        )
+
+        self.assertIsNotNone(index)
+        self.assertEqual(timestamps.shape, (1,))
+        self.assertEqual(paths, ["video.mp4"])
+
+    @patch("src.services.search_service.load_clip_index")
+    @patch("src.services.search_service.np.load")
+    @patch("src.services.search_service.os.path.exists", return_value=True)
+    def test_load_search_assets_accepts_compact_payload_without_vector_field(self, _mock_exists, mock_np_load, mock_load_index):
+        mock_load_index.return_value = object()
+        mock_np_load.return_value.item.return_value = {
+            "format_version": 2,
+            "timestamps": np.asarray([0.0], dtype=np.float32),
+            "paths": ["video.mp4"],
+        }
+
+        index, timestamps, paths = search_service.load_search_assets(
+            {
+                "cross_index_file": "cross_video_index.faiss",
+                "cross_vector_file": "cross_video_vectors.npy",
+            }
+        )
+
+        self.assertIsNotNone(index)
+        self.assertEqual(timestamps.shape, (1,))
         self.assertEqual(paths, ["video.mp4"])
 
     @patch("src.services.search_service.run_chunk_search", return_value=[("chunk",)])

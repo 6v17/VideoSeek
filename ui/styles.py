@@ -11,13 +11,28 @@ QWidget {
 #AppRoot, #ContentArea {
     background: __WINDOW__;
 }
-#NavSidebar, #PageHeader, #PanelCard, #SubPanelCard {
+#NavSidebar, #PageHeader, #PanelCard, #SubPanelCard, #NoticeCard {
     background: __SIDEBAR__;
     border: 1px solid __LINE__;
     border-radius: 18px;
 }
 #PageHeader, #PanelCard, #SubPanelCard {
     background: __PANEL__;
+}
+#NoticeCard {
+    background: __NOTICE_BG__;
+    border: 1px solid __NOTICE_LINE__;
+}
+#NoticeTitle {
+    color: __NOTICE_TEXT__;
+    font-size: 14px;
+    font-weight: 800;
+}
+#NoticeBody {
+    color: __NOTICE_TEXT__;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5em;
 }
 #SettingsSectionHeader {
     background: __FIELD__;
@@ -107,6 +122,15 @@ QPushButton:hover {
 #UpdateButton:hover {
     background: __BUTTON_SOFT_HOVER__;
 }
+#WarningButton {
+    background: __WARN_SOFT__;
+    border-color: __WARN__;
+    color: __WARN__;
+    font-weight: 700;
+}
+#WarningButton:hover {
+    background: __BUTTON_SOFT_HOVER__;
+}
 #SearchButton {
     background: __SUCCESS__;
     border-color: __SUCCESS__;
@@ -125,29 +149,29 @@ QPushButton:hover {
     border-radius: 15px;
     border: 1px solid __LINE_STRONG__;
     background: rgba(15, 23, 42, 0.05);
-    color: __TEXT_MUTED__;
+    color: __MUTED__;
     font-weight: 700;
     text-align: center;
 }
 #MobileBridgeToggle[bridgeState="off"] {
-    background: rgba(148, 163, 184, 0.16);
-    border-color: rgba(100, 116, 139, 0.35);
-    color: #475569;
+    background: __BUTTON_SOFT__;
+    border-color: __LINE_STRONG__;
+    color: __MUTED__;
 }
 #MobileBridgeToggle[bridgeState="on"] {
-    background: rgba(22, 163, 74, 0.14);
-    border-color: rgba(22, 163, 74, 0.5);
-    color: #15803d;
+    background: __SUCCESS_SOFT__;
+    border-color: __SUCCESS__;
+    color: __SUCCESS__;
 }
 #MobileBridgeToggle:hover {
     border-color: currentColor;
-    background: rgba(15, 23, 42, 0.08);
+    background: __BUTTON_SOFT_HOVER__;
 }
 #MobileBridgeToggle[bridgeState="on"]:hover {
-    background: rgba(22, 163, 74, 0.2);
+    background: __SUCCESS_SOFT__;
 }
 #MobileBridgeToggle[bridgeState="off"]:hover {
-    background: rgba(148, 163, 184, 0.22);
+    background: __BUTTON_SOFT_HOVER__;
 }
 #MobileBridgeQrButton {
     background: rgba(37, 99, 235, 0.12);
@@ -185,6 +209,13 @@ QPushButton:hover {
 #DangerGhostButton:hover {
     background: __DANGER_SOFT__;
 }
+#ToolbarDivider {
+    color: __LINE__;
+    background: __LINE__;
+    min-width: 1px;
+    max-width: 1px;
+    margin: 6px 2px;
+}
 #NavButton {
     text-align: left;
     padding-left: 14px;
@@ -201,6 +232,19 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     border-radius: 10px;
     padding: 8px 10px;
     color: __TEXT__;
+}
+#SearchModeSelect {
+    background: __FIELD__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+}
+#SearchModeSelect QAbstractItemView {
+    background: __PANEL__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    selection-background-color: __ACCENT_SOFT__;
+    selection-color: __HEADLINE__;
+    outline: 0;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid __ACCENT__;
@@ -401,6 +445,9 @@ DARK_STYLE = build_style({
     "BUTTON_SOFT": "#1b2940",
     "BUTTON_SOFT_HOVER": "#24385b",
     "VIDEO_BG": "#060c16",
+    "NOTICE_BG": "#21365f",
+    "NOTICE_LINE": "#5d87d6",
+    "NOTICE_TEXT": "#eef4ff",
 })
 
 LIGHT_STYLE = build_style({
@@ -430,4 +477,7 @@ LIGHT_STYLE = build_style({
     "BUTTON_SOFT": "#f6f8fc",
     "BUTTON_SOFT_HOVER": "#e7eef9",
     "VIDEO_BG": "#e3ebf8",
+    "NOTICE_BG": "#e8f0ff",
+    "NOTICE_LINE": "#7ca2f7",
+    "NOTICE_TEXT": "#1a3f8a",
 })

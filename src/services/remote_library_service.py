@@ -9,7 +9,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from src.app.config import load_config
+from src.app.config import get_data_storage_paths, load_config
 from src.core.clip_embedding import get_clip_embeddings_batch
 from src.core.faiss_index import create_clip_index
 from src.services.remote_link_precheck_service import (
@@ -18,7 +18,7 @@ from src.services.remote_link_precheck_service import (
     build_stable_source_id as _build_stable_source_id,
     normalize_link_input as _normalize_link_input,
 )
-from src.utils import get_app_data_dir, get_ffmpeg_path, resolve_sampling_fps
+from src.utils import get_ffmpeg_path, resolve_sampling_fps
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -302,7 +302,9 @@ def import_remote_library_zip(zip_path):
 def _prepare_source(link, mode="download"):
     yt_dlp = _load_yt_dlp()
     if mode == "download":
-        cache_dir = os.path.join(get_app_data_dir(), "source", "remote_build_cache")
+        cache_dir = get_data_storage_paths().get("remote_build_cache_dir", "")
+        if not cache_dir:
+            raise RuntimeError("Remote build cache path is not configured.")
         os.makedirs(cache_dir, exist_ok=True)
         options = {
             "format": "mp4/bestvideo+bestaudio/best",
@@ -582,11 +584,16 @@ def _probe_local_duration_fallback(source_input):
 
 
 def _write_build_report(mode, requested_links, status, max_frames_per_video, sampled_fps):
+    storage_paths = get_data_storage_paths()
     paths = get_remote_library_paths()
     vector_file = str(paths.get("vector_file", "") or "")
-    report_dir = os.path.dirname(vector_file) if vector_file else os.path.join("source", "remote")
-    os.makedirs(report_dir, exist_ok=True)
-    report_path = os.path.join(report_dir, "build_report.json")
+    report_path = str(storage_paths.get("remote_build_report_file", "") or "")
+    if not report_path:
+        report_dir = os.path.dirname(vector_file) if vector_file else ""
+        if not report_dir:
+            raise RuntimeError("Remote build report path is not configured.")
+        report_path = os.path.join(report_dir, "build_report.json")
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
 
     payload = {
         "mode": str(mode),

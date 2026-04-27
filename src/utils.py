@@ -49,6 +49,18 @@ def get_default_ffmpeg_path():
     return os.path.join(get_app_data_dir(), "bin", "ffmpeg.exe")
 
 
+def get_configured_ffmpeg_target_path(config=None):
+    from src.app.config import load_config
+
+    current_config = dict(config or load_config())
+    configured_path = str(current_config.get("ffmpeg_path", "") or "").strip()
+    if configured_path:
+        normalized_path = os.path.normpath(configured_path)
+        if os.path.isabs(normalized_path) or os.path.dirname(normalized_path):
+            return normalized_path
+    return os.path.normpath(get_default_ffmpeg_path())
+
+
 def has_ffmpeg():
     ffmpeg_path = get_ffmpeg_path()
     return os.path.exists(ffmpeg_path) or shutil.which(ffmpeg_path) is not None
@@ -65,7 +77,7 @@ def resolve_ffmpeg_path_info():
     from src.app.config import load_config
 
     config = load_config()
-    configured_path = config.get("ffmpeg_path", "").strip()
+    configured_path = get_configured_ffmpeg_target_path(config)
     if configured_path and os.path.exists(configured_path):
         return configured_path, "configured"
 
@@ -93,9 +105,13 @@ def sync_ffmpeg_path_to_config():
     from src.app.config import load_config, save_config
 
     config = load_config()
-    configured_path = config.get("ffmpeg_path", "").strip()
-    if configured_path and os.path.exists(configured_path):
-        return configured_path
+    configured_path = str(config.get("ffmpeg_path", "") or "").strip()
+    if configured_path:
+        normalized_path = os.path.normpath(configured_path)
+        if normalized_path != configured_path:
+            config["ffmpeg_path"] = normalized_path
+            save_config(config)
+        return normalized_path
 
     resolved_path, source = resolve_ffmpeg_path_info()
     if source == "missing" or not resolved_path:
@@ -110,22 +126,26 @@ def resolve_model_dir_info():
     try:
         from src.app.config import load_config
 
-        configured_model_dir = load_config().get("model_dir", "").strip()
-        if configured_model_dir and os.path.isdir(configured_model_dir):
-            return configured_model_dir, "configured"
+        configured_model_dir = str(load_config().get("model_dir", "") or "").strip()
+        if configured_model_dir:
+            return os.path.normpath(configured_model_dir), "configured"
     except Exception:
         pass
 
-    return get_default_model_dir(), "default"
+    return os.path.normpath(get_default_model_dir()), "default"
 
 
 def sync_model_dir_to_config():
     from src.app.config import load_config, save_config
 
     config = load_config()
-    configured_model_dir = config.get("model_dir", "").strip()
-    if configured_model_dir and configured_model_dir != get_default_model_dir() and os.path.isdir(configured_model_dir):
-        return configured_model_dir
+    configured_model_dir = str(config.get("model_dir", "") or "").strip()
+    if configured_model_dir:
+        normalized_dir = os.path.normpath(configured_model_dir)
+        if normalized_dir != configured_model_dir:
+            config["model_dir"] = normalized_dir
+            save_config(config)
+        return normalized_dir
 
     resolved_dir, _ = resolve_model_dir_info()
     if not resolved_dir:
@@ -403,6 +423,15 @@ def get_video_stream_info(video_path):
         return {"width": None, "height": None, "duration": None}
 
 
+def has_readable_video_stream(video_path):
+    stream_info = get_video_stream_info(video_path)
+    if stream_info.get("width") and stream_info.get("height"):
+        return True
+
+    fallback_info = _probe_video_stream_with_opencv(video_path)
+    return bool(fallback_info.get("width") and fallback_info.get("height"))
+
+
 def get_ffprobe_path():
     ffmpeg_path = get_ffmpeg_path()
     ffmpeg_dir = os.path.dirname(ffmpeg_path)
@@ -416,19 +445,31 @@ def get_ffprobe_path():
 
 
 def _probe_video_duration_with_opencv(video_path):
+    return _probe_video_stream_with_opencv(video_path).get("duration")
+
+
+def _probe_video_stream_with_opencv(video_path):
     path = os.fspath(video_path)
     capture = cv2.VideoCapture(path)
     if not capture.isOpened():
         capture.release()
-        return None
+        return {"width": None, "height": None, "duration": None}
 
+    width = float(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0.0)
+    height = float(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0.0)
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
     frame_count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
     capture.release()
 
-    if fps <= 0.0 or frame_count <= 0.0:
-        return None
-    return frame_count / fps
+    duration = None
+    if fps > 0.0 and frame_count > 0.0:
+        duration = frame_count / fps
+
+    return {
+        "width": int(width) if width > 0.0 else None,
+        "height": int(height) if height > 0.0 else None,
+        "duration": duration,
+    }
 
 
 def _safe_float(value):
@@ -606,7 +647,11 @@ def resolve_sampling_fps(duration_sec=None, config=None, requested_fps=None):
 
 
 def build_preview_cache_path(video_path, start_sec):
-    cache_dir = os.path.join(get_app_data_dir(), "cache")
+    from src.app.config import get_data_storage_paths
+
+    cache_dir = get_data_storage_paths().get("preview_cache_dir", "")
+    if not cache_dir:
+        cache_dir = os.path.join(get_app_data_dir(), "cache")
     os.makedirs(cache_dir, exist_ok=True)
     key = f"{video_path}|{int(start_sec)}|{uuid.uuid4().hex}"
     filename = f"preview_{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.mp4"

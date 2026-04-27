@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="增加同步异常状态">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="小bug">
       <change afterPath="$PROJECT_DIR$/docs/static_call_analysis.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
@@ -374,9 +374,37 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/config.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/extract_frames.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/ffmpeg_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/ffmpeg_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/remote_library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/remote_library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/runtime_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/runtime_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/web/mobile_bridge.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/mobile_bridge.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/static/favicon.ico" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_controllers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_extract_frames.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_notice_version_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_notice_version_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_semantic_chunking.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/indexing_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/indexing_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/preview_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/preview_dialog.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/styles.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/vlc_player.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/vlc_player.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -384,7 +412,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="6762" />
+    <option name="cachedIndexableFilesCount" value="7139" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -448,6 +476,7 @@
     &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
     &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
@@ -640,23 +669,33 @@
       <workItem from="1776768037538" duration="339000" />
       <workItem from="1776768402145" duration="6294000" />
       <workItem from="1776774932680" duration="7695000" />
-      <workItem from="1776783507673" duration="2239000" />
-    </task>
-    <task id="LOCAL-00008" summary="打包路径修复">
-      <option name="closed" value="true" />
-      <created>1774110046744</created>
-      <option name="number" value="00008" />
-      <option name="presentableId" value="LOCAL-00008" />
-      <option name="project" value="LOCAL" />
-      <updated>1774110046744</updated>
-    </task>
-    <task id="LOCAL-00009" summary="拆分同步、搜索功能">
-      <option name="closed" value="true" />
-      <created>1774120893153</created>
-      <option name="number" value="00009" />
-      <option name="presentableId" value="LOCAL-00009" />
-      <option name="project" value="LOCAL" />
-      <updated>1774120893153</updated>
+      <workItem from="1776783507673" duration="2561000" />
+      <workItem from="1776831691672" duration="3177000" />
+      <workItem from="1776852591858" duration="60000" />
+      <workItem from="1776852663603" duration="5113000" />
+      <workItem from="1776857794498" duration="6125000" />
+      <workItem from="1776958352775" duration="4051000" />
+      <workItem from="1776962430279" duration="546000" />
+      <workItem from="1776962990965" duration="137000" />
+      <workItem from="1776963141973" duration="3398000" />
+      <workItem from="1776999474108" duration="101000" />
+      <workItem from="1776999587397" duration="4377000" />
+      <workItem from="1777005850796" duration="1634000" />
+      <workItem from="1777007498301" duration="146000" />
+      <workItem from="1777007652271" duration="2508000" />
+      <workItem from="1777010172526" duration="3194000" />
+      <workItem from="1777014292021" duration="2283000" />
+      <workItem from="1777016688356" duration="4800000" />
+      <workItem from="1777026197701" duration="1975000" />
+      <workItem from="1777028186018" duration="3187000" />
+      <workItem from="1777036663411" duration="4725000" />
+      <workItem from="1777041617834" duration="1089000" />
+      <workItem from="1777044307038" duration="634000" />
+      <workItem from="1777044952009" duration="2718000" />
+      <workItem from="1777088738483" duration="384000" />
+      <workItem from="1777089142733" duration="4103000" />
+      <workItem from="1777093499922" duration="4960000" />
+      <workItem from="1777111443100" duration="5000" />
     </task>
     <task id="LOCAL-00010" summary="拆分同步、搜索功能">
       <option name="closed" value="true" />
@@ -1034,7 +1073,23 @@
       <option name="project" value="LOCAL" />
       <updated>1776781127460</updated>
     </task>
-    <option name="localTasksCounter" value="57" />
+    <task id="LOCAL-00057" summary="小bug">
+      <option name="closed" value="true" />
+      <created>1776786420594</created>
+      <option name="number" value="00057" />
+      <option name="presentableId" value="LOCAL-00057" />
+      <option name="project" value="LOCAL" />
+      <updated>1776786420594</updated>
+    </task>
+    <task id="LOCAL-00058" summary="小bug">
+      <option name="closed" value="true" />
+      <created>1776786428276</created>
+      <option name="number" value="00058" />
+      <option name="presentableId" value="LOCAL-00058" />
+      <option name="project" value="LOCAL" />
+      <updated>1776786428276</updated>
+    </task>
+    <option name="localTasksCounter" value="59" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1064,7 +1119,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="最小案例" />
     <MESSAGE value="抽帧优化" />
     <MESSAGE value="重构" />
     <MESSAGE value="打包路径修复" />
@@ -1089,7 +1143,8 @@
     <MESSAGE value="加入局域网传图搜索功能" />
     <MESSAGE value="重新提交" />
     <MESSAGE value="增加同步异常状态" />
-    <option name="LAST_COMMIT_MESSAGE" value="增加同步异常状态" />
+    <MESSAGE value="小bug" />
+    <option name="LAST_COMMIT_MESSAGE" value="小bug" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -1104,5 +1159,6 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/VideoSeek$main.coverage" NAME="main 覆盖结果" MODIFIED="1773485649708" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/VideoSeek$core.coverage" NAME="core 覆盖结果" MODIFIED="1776961755992" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>

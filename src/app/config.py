@@ -14,12 +14,29 @@ from src.utils import (
 
 logger = get_logger("config")
 _LAST_MIGRATION_NOTICE = None
+STORAGE_DIR_NAME = "data"
 
 APP_DATA_DIR = get_app_data_dir()
-DATA_DIR = os.path.join(APP_DATA_DIR, "source")
+DATA_DIR = os.path.join(APP_DATA_DIR, STORAGE_DIR_NAME)
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
 LEGACY_CONFIG_FILE = get_resource_path("config.json")
-LEGACY_DATA_DIR = get_resource_path("source")
+LEGACY_DATA_DIR = get_resource_path("data")
+
+
+def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
+    normalized_root = os.path.normpath(str(data_root or APP_DATA_DIR))
+    storage_dir = os.path.join(normalized_root, storage_dir_name)
+    return {
+        "meta_file": os.path.join(storage_dir, "meta.json"),
+        "vector_dir": os.path.join(storage_dir, "vector"),
+        "index_dir": os.path.join(storage_dir, "index"),
+        "cross_index_file": os.path.join(storage_dir, "global", "cross_video_index.faiss"),
+        "cross_vector_file": os.path.join(storage_dir, "global", "cross_video_vectors.npy"),
+        "cross_chunk_index_file": os.path.join(storage_dir, "global", "cross_chunk_index.faiss"),
+        "cross_chunk_vector_file": os.path.join(storage_dir, "global", "cross_chunk_vectors.npy"),
+        "remote_index_file": os.path.join(storage_dir, "remote", "remote_index.faiss"),
+        "remote_vector_file": os.path.join(storage_dir, "remote", "remote_vectors.npy"),
+    }
 
 DEFAULT_CONFIG = {
     "fps": 1,
@@ -32,6 +49,7 @@ DEFAULT_CONFIG = {
     "thumb_width": 130,
     "thumb_height": 75,
     "prefer_gpu": True,
+    "embedding_batch_size": 16,
     "similarity_threshold": 0.85,
     "max_chunk_duration": 5.0,
     "min_chunk_size": 2,
@@ -39,17 +57,11 @@ DEFAULT_CONFIG = {
     "search_mode": "frame",
     "ffmpeg_path": "",
     "model_dir": get_default_model_dir(),
-    "meta_file": os.path.join(DATA_DIR, "meta.json"),
-    "vector_dir": os.path.join(DATA_DIR, "vector"),
-    "index_dir": os.path.join(DATA_DIR, "index"),
-    "cross_index_file": os.path.join(DATA_DIR, "global", "cross_video_index.faiss"),
-    "cross_vector_file": os.path.join(DATA_DIR, "global", "cross_video_vectors.npy"),
-    "cross_chunk_index_file": os.path.join(DATA_DIR, "global", "cross_chunk_index.faiss"),
-    "cross_chunk_vector_file": os.path.join(DATA_DIR, "global", "cross_chunk_vectors.npy"),
-    "remote_index_file": os.path.join(DATA_DIR, "remote", "remote_index.faiss"),
-    "remote_vector_file": os.path.join(DATA_DIR, "remote", "remote_vectors.npy"),
+    "data_root": APP_DATA_DIR,
+    **build_data_storage_paths(APP_DATA_DIR),
     "remote_max_frames": 2000,
     "auto_cleanup_missing_files": False,
+    "show_debug_test_buttons": False,
     "theme": "dark",
     "language": "zh",
 }
@@ -63,6 +75,7 @@ CONFIG_BOUNDS = {
     "thumb_width": (80, 480),
     "thumb_height": (45, 320),
     "remote_max_frames": (200, 20000),
+    "embedding_batch_size": (1, 64),
     "similarity_threshold": (0.1, 1.0),
     "max_chunk_duration": (1.0, 60.0),
     "min_chunk_size": (1, 50),
@@ -76,6 +89,7 @@ CONFIG_INT_KEYS = {
     "thumb_width",
     "thumb_height",
     "remote_max_frames",
+    "embedding_batch_size",
     "min_chunk_size",
 }
 
@@ -98,17 +112,20 @@ PATH_KEYS = {
     "remote_vector_file",
 }
 
+DERIVED_DATA_PATH_KEYS = {
+    "data_dir",
+    "global_dir",
+    "remote_dir",
+    "preview_cache_dir",
+    "mobile_upload_dir",
+    "remote_build_cache_dir",
+    "link_cache_dir",
+    "remote_build_report_file",
+}
+
 LEGACY_DEFAULT_CONFIG = {
     **DEFAULT_CONFIG,
-    "meta_file": os.path.join(LEGACY_DATA_DIR, "meta.json"),
-    "vector_dir": os.path.join(LEGACY_DATA_DIR, "vector"),
-    "index_dir": os.path.join(LEGACY_DATA_DIR, "index"),
-    "cross_index_file": os.path.join(LEGACY_DATA_DIR, "global", "cross_video_index.faiss"),
-    "cross_vector_file": os.path.join(LEGACY_DATA_DIR, "global", "cross_video_vectors.npy"),
-    "cross_chunk_index_file": os.path.join(LEGACY_DATA_DIR, "global", "cross_chunk_index.faiss"),
-    "cross_chunk_vector_file": os.path.join(LEGACY_DATA_DIR, "global", "cross_chunk_vectors.npy"),
-    "remote_index_file": os.path.join(LEGACY_DATA_DIR, "remote", "remote_index.faiss"),
-    "remote_vector_file": os.path.join(LEGACY_DATA_DIR, "remote", "remote_vectors.npy"),
+    **build_data_storage_paths(os.path.dirname(LEGACY_DATA_DIR)),
 }
 
 def get_app_version():
@@ -122,7 +139,7 @@ def _ensure_parent_dir(path):
 
 
 def _load_json(path):
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, "r", encoding="utf-8-sig") as handle:
         return json.load(handle)
 
 
@@ -156,11 +173,43 @@ def _apply_default_values(config):
     return config
 
 
+def _normalize_data_root(config, config_base_dir):
+    normalized = dict(config)
+    normalized["data_root"] = _normalize_path_value(normalized.get("data_root", DEFAULT_CONFIG["data_root"]), config_base_dir)
+    return normalized
+
+
 def _normalize_storage_paths(config, config_base_dir):
     normalized = dict(config)
     for key in PATH_KEYS:
         normalized[key] = _normalize_path_value(normalized.get(key, DEFAULT_CONFIG[key]), config_base_dir)
     return normalized
+
+
+def _apply_data_root_storage_paths(config):
+    normalized = dict(config)
+    data_root = str(normalized.get("data_root", "") or "").strip()
+    if not data_root:
+        return normalized
+    normalized.update(build_data_storage_paths(data_root))
+    return normalized
+
+
+def _infer_data_root_from_storage_paths(config):
+    meta_file = str(config.get("meta_file", "") or "").strip()
+    if not meta_file:
+        return ""
+    meta_dir = os.path.dirname(os.path.normpath(meta_file))
+    if os.path.basename(meta_dir).lower() != STORAGE_DIR_NAME:
+        return ""
+    candidate_root = os.path.dirname(meta_dir)
+    expected_paths = build_data_storage_paths(candidate_root)
+    for key in PATH_KEYS:
+        actual = os.path.normpath(str(config.get(key, "") or ""))
+        expected = os.path.normpath(expected_paths[key])
+        if actual != expected:
+            return ""
+    return os.path.normpath(candidate_root)
 
 
 def _sanitize_runtime_resource_paths(config, is_legacy_config=False):
@@ -207,6 +256,23 @@ def _coerce_bounded_value(raw_value, default_value, minimum, maximum, as_int=Fal
     return int(round(value)) if as_int else float(value)
 
 
+def _coerce_bool(raw_value, default_value):
+    if isinstance(raw_value, bool):
+        return raw_value
+    if raw_value is None:
+        return bool(default_value)
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        return bool(default_value)
+    if isinstance(raw_value, (int, float)):
+        return bool(raw_value)
+    return bool(raw_value)
+
+
 def _sanitize_general_settings(config):
     sanitized = dict(config)
 
@@ -223,9 +289,17 @@ def _sanitize_general_settings(config):
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()
         sanitized[key] = value if value in allowed_values else DEFAULT_CONFIG[key]
 
-    sanitized["prefer_gpu"] = bool(sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]))
-    sanitized["auto_cleanup_missing_files"] = bool(
-        sanitized.get("auto_cleanup_missing_files", DEFAULT_CONFIG["auto_cleanup_missing_files"])
+    sanitized["prefer_gpu"] = _coerce_bool(
+        sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]),
+        DEFAULT_CONFIG["prefer_gpu"],
+    )
+    sanitized["auto_cleanup_missing_files"] = _coerce_bool(
+        sanitized.get("auto_cleanup_missing_files", DEFAULT_CONFIG["auto_cleanup_missing_files"]),
+        DEFAULT_CONFIG["auto_cleanup_missing_files"],
+    )
+    sanitized["show_debug_test_buttons"] = _coerce_bool(
+        sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
+        DEFAULT_CONFIG["show_debug_test_buttons"],
     )
     return sanitized
 
@@ -257,6 +331,7 @@ def _migrate_legacy_storage_if_needed(config):
     for key in PATH_KEYS:
         if os.path.normpath(str(migrated.get(key, "") or "")) == os.path.normpath(LEGACY_DEFAULT_CONFIG[key]):
             migrated[key] = DEFAULT_CONFIG[key]
+    migrated["data_root"] = DEFAULT_CONFIG["data_root"]
     return migrated
 
 
@@ -271,9 +346,23 @@ def _resolve_config_path():
 def load_config():
     config_path = _resolve_config_path()
     if os.path.exists(config_path):
-        config = _load_json(config_path)
-        config = _apply_default_values(config)
-        config = _normalize_storage_paths(config, os.path.dirname(config_path))
+        raw_config = _load_json(config_path)
+        has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
+        has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
+        config = _apply_default_values(raw_config)
+        if has_explicit_data_root:
+            config = _normalize_data_root(config, os.path.dirname(config_path))
+            config = _apply_data_root_storage_paths(config)
+        elif has_explicit_storage_paths:
+            config["data_root"] = ""
+            config = _normalize_storage_paths(config, os.path.dirname(config_path))
+            inferred_data_root = _infer_data_root_from_storage_paths(config)
+            if inferred_data_root:
+                config["data_root"] = inferred_data_root
+                config = _apply_data_root_storage_paths(config)
+        else:
+            config["data_root"] = os.path.dirname(config_path)
+            config = _apply_data_root_storage_paths(config)
         config = _sanitize_runtime_resource_paths(
             config,
             is_legacy_config=os.path.normpath(config_path) == os.path.normpath(LEGACY_CONFIG_FILE),
@@ -293,16 +382,70 @@ def load_config():
 
     logger.info("Config file %s not found, using default values", CONFIG_FILE)
     config = DEFAULT_CONFIG.copy()
+    config["data_root"] = os.path.dirname(CONFIG_FILE)
+    config = _apply_data_root_storage_paths(config)
     save_config(config)
     return config
 
 
 def save_config(config):
-    config = _sanitize_sampling_settings(_apply_default_values(dict(config)))
+    raw_config = dict(config)
+    has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
+    has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
+    config = _sanitize_sampling_settings(_apply_default_values(raw_config))
+    if has_explicit_data_root:
+        config = _normalize_data_root(config, os.path.dirname(CONFIG_FILE))
+        config = _apply_data_root_storage_paths(config)
+    elif has_explicit_storage_paths:
+        config["data_root"] = ""
+        config = _normalize_storage_paths(config, os.path.dirname(CONFIG_FILE))
+        inferred_data_root = _infer_data_root_from_storage_paths(config)
+        if inferred_data_root:
+            config["data_root"] = inferred_data_root
+            config = _apply_data_root_storage_paths(config)
+    else:
+        config["data_root"] = os.path.dirname(CONFIG_FILE)
+        config = _apply_data_root_storage_paths(config)
     config = _sanitize_general_settings(config)
     _ensure_parent_dir(CONFIG_FILE)
     with open(CONFIG_FILE, "w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=4, ensure_ascii=False)
+
+
+def get_configured_data_root(config=None):
+    normalized = dict(config or load_config())
+    data_root = str(normalized.get("data_root", "") or "").strip()
+    if data_root:
+        return os.path.normpath(data_root)
+
+    inferred_data_root = _infer_data_root_from_storage_paths(normalized)
+    if inferred_data_root:
+        return inferred_data_root
+
+    meta_file = str(normalized.get("meta_file", "") or "").strip()
+    if meta_file:
+        meta_dir = os.path.dirname(os.path.normpath(meta_file))
+        if os.path.basename(meta_dir).lower() == STORAGE_DIR_NAME:
+            return os.path.normpath(os.path.dirname(meta_dir))
+    return os.path.normpath(APP_DATA_DIR)
+
+
+def get_data_storage_paths(config=None):
+    data_root = get_configured_data_root(config)
+    storage_paths = build_data_storage_paths(data_root)
+    data_dir = os.path.dirname(storage_paths["meta_file"])
+    derived_paths = {
+        "data_dir": data_dir,
+        "global_dir": os.path.join(data_dir, "global"),
+        "remote_dir": os.path.join(data_dir, "remote"),
+        "preview_cache_dir": os.path.join(data_dir, "cache"),
+        "mobile_upload_dir": os.path.join(data_dir, "mobile_uploads"),
+        "remote_build_cache_dir": os.path.join(data_dir, "remote_build_cache"),
+        "link_cache_dir": os.path.join(data_dir, "link_cache"),
+        "remote_build_report_file": os.path.join(data_dir, "remote", "build_report.json"),
+    }
+    storage_paths.update(derived_paths)
+    return storage_paths
 
 
 def pop_migration_notice():

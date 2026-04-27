@@ -22,6 +22,7 @@ else:
     _IMPORT_ERROR = None
 
 from src.app.logging_utils import get_logger
+from src.app.config import get_data_storage_paths
 from src.utils import ensure_folder_exists, get_app_data_dir, get_resource_path
 
 logger = get_logger("mobile_bridge")
@@ -211,7 +212,9 @@ class MobileBridgeService:
         self.host = str(host)
         self.port = int(port)
         self.token = secrets.token_urlsafe(18)
-        self.upload_dir = os.path.join(get_app_data_dir(), "mobile_uploads")
+        self.upload_dir = str(get_data_storage_paths().get("mobile_upload_dir", "") or "")
+        if not self.upload_dir:
+            self.upload_dir = os.path.join(get_app_data_dir(), "mobile_uploads")
         self._on_image_received = on_image_received
         self._thread: Optional[threading.Thread] = None
         self._server = None

@@ -5,6 +5,9 @@ import types
 import unittest
 from unittest.mock import patch
 
+sys.modules.pop("numpy", None)
+import numpy as np
+
 sys.modules.setdefault("cv2", types.SimpleNamespace())
 sys.modules.setdefault("faiss", types.SimpleNamespace())
 sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
@@ -32,6 +35,82 @@ from src.core import clip_embedding
 
 
 class ClipEmbeddingRuntimeTests(unittest.TestCase):
+    def test_run_visual_batch_splits_failed_batch_until_single_frame(self):
+        class FakeSession:
+            def __init__(self):
+                self.batch_sizes = []
+
+            def run(self, _outputs, inputs):
+                batch = inputs["input"]
+                self.batch_sizes.append(int(batch.shape[0]))
+                if batch.shape[0] > 1:
+                    raise RuntimeError("temporary batch failure")
+                return [np.array([[1.0, 0.0]], dtype=np.float32)]
+
+        engine = clip_embedding.CLIPOnnxEngine.__new__(clip_embedding.CLIPOnnxEngine)
+        engine.visual_session = FakeSession()
+        engine.active_providers = {"visual": ["CPUExecutionProvider"], "text": ["CPUExecutionProvider"]}
+        engine.using_gpu = False
+        engine.backend_label = "CPU"
+        engine.runtime_warning = ""
+        engine._cpu_visual_session = None
+        engine._visual_force_cpu = False
+        engine._feature_dim = 2
+
+        batch = [np.zeros((3, 224, 224), dtype=np.float32), np.zeros((3, 224, 224), dtype=np.float32)]
+        result = engine._run_visual_batch(batch)
+
+        self.assertEqual(result.shape, (2, 2))
+        self.assertEqual(engine.visual_session.batch_sizes, [2, 1, 1])
+
+    def test_run_visual_batch_falls_back_to_cpu_after_gpu_single_frame_failure(self):
+        class FailingGpuSession:
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, _outputs, _inputs):
+                self.calls += 1
+                raise RuntimeError("DirectML GPU out of memory")
+
+        class CpuSession:
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, _outputs, _inputs):
+                self.calls += 1
+                return [np.array([[0.0, 1.0]], dtype=np.float32)]
+
+        engine = clip_embedding.CLIPOnnxEngine.__new__(clip_embedding.CLIPOnnxEngine)
+        engine.visual_session = FailingGpuSession()
+        engine.active_providers = {"visual": ["DmlExecutionProvider"], "text": ["DmlExecutionProvider"]}
+        engine.using_gpu = True
+        engine.backend_label = "GPU"
+        engine.runtime_warning = ""
+        engine._feature_dim = 2
+        engine._cpu_visual_session = None
+        engine._visual_force_cpu = False
+
+        cpu_session = CpuSession()
+        engine._create_cpu_visual_session = lambda: cpu_session
+
+        batch = [np.zeros((3, 224, 224), dtype=np.float32)]
+        first = engine._run_visual_batch(batch)
+        second = engine._run_visual_batch(batch)
+
+        self.assertEqual(first.shape, (1, 2))
+        self.assertEqual(second.shape, (1, 2))
+        self.assertEqual(engine.visual_session.calls, 1)
+        self.assertEqual(cpu_session.calls, 2)
+        self.assertTrue(engine._visual_force_cpu)
+        self.assertFalse(engine.using_gpu)
+        self.assertEqual(engine.backend_label, "CPU")
+        self.assertIn("fell back to CPU", engine.runtime_warning)
+
+    def test_resolve_embedding_batch_size_clamps_invalid_values(self):
+        self.assertEqual(clip_embedding._resolve_embedding_batch_size({"embedding_batch_size": "8"}), 8)
+        self.assertEqual(clip_embedding._resolve_embedding_batch_size({"embedding_batch_size": 0}), 1)
+        self.assertEqual(clip_embedding._resolve_embedding_batch_size({"embedding_batch_size": "bad"}), 16)
+
     def test_build_session_options_for_directml(self):
         options = clip_embedding._build_session_options(prefer_gpu=True)
 

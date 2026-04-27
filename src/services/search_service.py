@@ -26,6 +26,25 @@ def _asset_cache_key(index_file, vector_file):
         return None
 
 
+def _load_asset_metadata(vector_file, required_fields, asset_label):
+    try:
+        data = np.load(vector_file, allow_pickle=True).item()
+    except Exception as exc:
+        logger.error("Failed to load %s metadata: %s", asset_label, exc)
+        return None
+
+    if not isinstance(data, dict):
+        logger.error("Invalid %s metadata payload: expected dict", asset_label)
+        return None
+
+    missing_fields = [field for field in required_fields if data.get(field) is None]
+    if missing_fields:
+        logger.error("Invalid %s metadata payload: missing %s", asset_label, ", ".join(missing_fields))
+        return None
+
+    return data
+
+
 def load_search_assets(config):
     index_file = config["cross_index_file"]
     vector_file = config["cross_vector_file"]
@@ -44,10 +63,8 @@ def load_search_assets(config):
         _FRAME_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
 
-    try:
-        data = np.load(vector_file, allow_pickle=True).item()
-    except Exception as exc:
-        logger.error("Failed to load frame search vectors: %s", exc)
+    data = _load_asset_metadata(vector_file, required_fields=("timestamps", "paths"), asset_label="frame search")
+    if data is None:
         _FRAME_ASSET_CACHE["key"] = None
         _FRAME_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
@@ -76,10 +93,8 @@ def load_chunk_search_assets(config):
         _CHUNK_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None
 
-    try:
-        data = np.load(vector_file, allow_pickle=True).item()
-    except Exception as exc:
-        logger.error("Failed to load chunk search vectors: %s", exc)
+    data = _load_asset_metadata(vector_file, required_fields=("ranges", "paths"), asset_label="chunk search")
+    if data is None:
         _CHUNK_ASSET_CACHE["key"] = None
         _CHUNK_ASSET_CACHE["value"] = (None, None, None)
         return None, None, None

@@ -72,6 +72,8 @@ class VlcPreviewPlayer:
         self._instance = None
         self._player = None
         self._released = False
+        self._current_video_path = ""
+        self._pending_seek_ms = None
         self._initialize()
 
     def is_available(self):
@@ -81,6 +83,8 @@ class VlcPreviewPlayer:
         if not self.is_available():
             return False
 
+        self._current_video_path = os.fspath(video_path)
+        self._pending_seek_ms = None
         start_sec = max(0.0, float(start_sec))
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
 
@@ -106,6 +110,7 @@ class VlcPreviewPlayer:
         self._timer.stop()
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
+        self._pending_seek_ms = None
         if self._player is not None:
             try:
                 self._player.stop()
@@ -124,6 +129,8 @@ class VlcPreviewPlayer:
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
         self._user_unlocked = False
+        self._pending_seek_ms = None
+        self._current_video_path = ""
         if self._player is not None:
             self._detach_output_window()
             try:
@@ -188,9 +195,18 @@ class VlcPreviewPlayer:
     def resume(self):
         if self._player is None or self._released:
             return False
+        if self._pending_seek_ms is not None and self._restart_from_ms(self._pending_seek_ms):
+            return True
+        if self._should_restart_media():
+            restart_ms = self._pending_seek_ms
+            if restart_ms is None:
+                restart_ms = 0
+            if self._restart_from_ms(restart_ms):
+                return True
         result = self._player.play()
         if result == -1:
             return False
+        self._pending_seek_ms = None
         if self._stop_at_ms > 0:
             self._timer.start()
         return True
@@ -207,8 +223,9 @@ class VlcPreviewPlayer:
             return
         if unlock:
             self.unlock_full_playback()
+        self._pending_seek_ms = max(0, int(ms))
         try:
-            self._player.set_time(int(ms))
+            self._player.set_time(self._pending_seek_ms)
         except Exception:
             pass
 
@@ -252,6 +269,7 @@ class VlcPreviewPlayer:
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
         self._user_unlocked = False
+        self._pending_seek_ms = None
         if self._player is None:
             return
         try:
@@ -278,3 +296,30 @@ class VlcPreviewPlayer:
             self._player.pause()
         except Exception:
             pass
+
+    def _should_restart_media(self):
+        if not self._current_video_path:
+            return False
+        length_ms = self.get_length()
+        current_ms = self.get_time()
+        if current_ms < 0:
+            return True
+        return length_ms > 0 and current_ms >= max(0, length_ms - 250)
+
+    def _restart_from_ms(self, target_ms):
+        if self._player is None or self._released or self._instance is None or not self._current_video_path:
+            return False
+        start_sec = max(0.0, float(target_ms) / 1000.0)
+        try:
+            media = self._instance.media_new(self._current_video_path, f":start-time={start_sec:.3f}")
+            self._player.set_media(media)
+            self._bind_output_window()
+            result = self._player.play()
+        except Exception:
+            return False
+        if result == -1:
+            return False
+        self._pending_seek_ms = None
+        if self._stop_at_ms > 0:
+            self._timer.start()
+        return True

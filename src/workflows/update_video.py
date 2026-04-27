@@ -3,11 +3,13 @@ import os
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.services.indexing_service import (
+    IndexUpdateInterrupted,
     build_global_index,
     cleanup_missing_library_files,
     clear_global_index,
     scan_target_libraries,
 )
+from src.services.library_service import mark_global_index_fresh, mark_global_index_stale
 from src.utils import canonicalize_library_path, get_video_hash, load_meta, save_meta
 
 logger = get_logger("update_video")
@@ -61,6 +63,10 @@ def update_videos_flow(
     progress_callback=None,
     force_cleanup_missing_files=False,
     should_stop_callback=None,
+    cleanup_missing_entries=None,
+    issue_callback=None,
+    include_existing_assets=True,
+    rebuild_global_assets=True,
 ):
     # Retained intentionally: imported dynamically inside IndexUpdateWorker.run().
     logger.info("Starting index update%s", f" for {target_lib}" if target_lib else "")
@@ -72,31 +78,57 @@ def update_videos_flow(
     save_meta(meta, meta_file)
 
     should_cleanup_missing_files = force_cleanup_missing_files or config.get("auto_cleanup_missing_files", False)
+    search_assets_changed = False
 
     if should_cleanup_missing_files:
         if progress_callback:
             progress_callback(5, "Cleaning stale index source")
         removed_any = False
-        for video_id in cleanup_missing_library_files(meta, config, target_lib):
+        for video_id in cleanup_missing_library_files(
+            meta,
+            config,
+            target_lib,
+            selected_entries=cleanup_missing_entries,
+        ):
             removed_any = True
             delete_physical_video_data(video_id, config)
         if removed_any:
+            search_assets_changed = True
             save_meta(meta, meta_file)
     else:
         if progress_callback:
             progress_callback(5, "Keeping vectors for offline or missing files")
         logger.info("Automatic cleanup for missing files is disabled; keeping cached vectors and indexes")
 
-    scan_result = scan_target_libraries(
-        meta,
-        config,
-        get_video_id,
-        target_lib=target_lib,
-        progress_callback=progress_callback,
-        persist_meta_callback=lambda: save_meta(meta, meta_file),
-        should_stop_callback=should_stop_callback,
-    )
-    if len(scan_result) == 7:
+    try:
+        scan_result = scan_target_libraries(
+            meta,
+            config,
+            get_video_id,
+            target_lib=target_lib,
+            progress_callback=progress_callback,
+            persist_meta_callback=lambda: save_meta(meta, meta_file),
+            should_stop_callback=should_stop_callback,
+            issue_callback=issue_callback,
+            include_existing_assets=include_existing_assets,
+        )
+    except IndexUpdateInterrupted as exc:
+        if getattr(exc, "search_assets_changed", False):
+            mark_global_index_stale(meta=meta)
+            save_meta(meta, meta_file)
+        raise
+    if len(scan_result) == 8:
+        (
+            all_vectors,
+            all_timestamps,
+            all_paths,
+            all_chunk_vectors,
+            all_chunk_ranges,
+            all_chunk_paths,
+            failed_videos,
+            scan_search_assets_changed,
+        ) = scan_result
+    elif len(scan_result) == 7:
         (
             all_vectors,
             all_timestamps,
@@ -106,6 +138,7 @@ def update_videos_flow(
             all_chunk_paths,
             failed_videos,
         ) = scan_result
+        scan_search_assets_changed = False
     else:
         (
             all_vectors,
@@ -116,8 +149,13 @@ def update_videos_flow(
             all_chunk_paths,
         ) = scan_result
         failed_videos = []
+        scan_search_assets_changed = False
+    search_assets_changed = search_assets_changed or scan_search_assets_changed
 
     if should_stop_callback and should_stop_callback():
+        if search_assets_changed:
+            mark_global_index_stale(meta=meta)
+            save_meta(meta, meta_file)
         raise InterruptedError("Index update stopped before rebuilding global index")
 
     if failed_videos:
@@ -133,16 +171,38 @@ def update_videos_flow(
     save_meta(meta, meta_file)
     if not any(len(lib.get("files", {})) > 0 for lib in meta["libraries"].values()):
         _finalize_library_index_state(meta, target_lib=target_lib)
+        if rebuild_global_assets:
+            mark_global_index_fresh(meta=meta)
+        elif search_assets_changed:
+            mark_global_index_stale(meta=meta)
         save_meta(meta, meta_file)
-        clear_global_index(config)
-        logger.info("No libraries remain after cleanup; cleared global indexes")
+        if rebuild_global_assets:
+            clear_global_index(config)
+            logger.info("No libraries remain after cleanup; cleared global indexes")
         return None, None, None, None
 
     if not all_vectors:
         _finalize_library_index_state(meta, target_lib=target_lib)
+        if rebuild_global_assets:
+            mark_global_index_fresh(meta=meta)
+        elif search_assets_changed:
+            mark_global_index_stale(meta=meta)
         save_meta(meta, meta_file)
         logger.warning("No valid videos found during indexing")
-        clear_global_index(config)
+        if rebuild_global_assets:
+            clear_global_index(config)
+        return None, None, None, None
+
+    if not rebuild_global_assets:
+        _finalize_library_index_state(meta, target_lib=target_lib)
+        if search_assets_changed:
+            mark_global_index_stale(meta=meta)
+        save_meta(meta, meta_file)
+        logger.info(
+            "Skipped global index rebuild (rebuild_global_assets=False). local_vectors=%s local_chunks=%s",
+            len(all_paths),
+            len(all_chunk_paths),
+        )
         return None, None, None, None
 
     result = build_global_index(
@@ -156,6 +216,7 @@ def update_videos_flow(
         progress_callback=progress_callback,
     )
     _finalize_library_index_state(meta, target_lib=target_lib)
+    mark_global_index_fresh(meta=meta)
     save_meta(meta, meta_file)
     return result
 

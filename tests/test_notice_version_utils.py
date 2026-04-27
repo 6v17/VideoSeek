@@ -161,20 +161,38 @@ class UtilsConfigSyncTests(unittest.TestCase):
 
 
 class RuntimeDiagnosticTests(unittest.TestCase):
+    @patch("src.core.clip_embedding._is_windows", return_value=True)
+    @patch("src.core.clip_embedding._is_windows_10_1903_or_newer", return_value=True)
+    @patch("src.core.clip_embedding._is_directml_provider_available", return_value=False)
+    def test_detect_gpu_runtime_issue_reports_directml(self, _mock_provider, _mock_version, _mock_windows):
+        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "directml")
+
+    @patch("src.core.clip_embedding._is_windows", return_value=True)
+    @patch("src.core.clip_embedding._is_windows_10_1903_or_newer", return_value=True)
+    @patch("src.core.clip_embedding._is_directml_provider_available", return_value=True)
+    @patch("src.core.clip_embedding._can_load_windows_dll", return_value=False)
+    def test_detect_gpu_runtime_issue_reports_directx(
+        self,
+        _mock_dll,
+        _mock_provider,
+        _mock_version,
+        _mock_windows,
+    ):
+        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "directx")
+
+    @patch("src.core.clip_embedding._is_windows", return_value=True)
+    @patch("src.core.clip_embedding._is_windows_10_1903_or_newer", return_value=True)
+    @patch("src.core.clip_embedding._is_directml_provider_available", return_value=True)
+    @patch("src.core.clip_embedding._can_load_windows_dll", return_value=True)
     @patch("src.core.clip_embedding._collect_available_dll_names")
-    def test_detect_gpu_runtime_issue_prefers_cuda(self, mock_collect_names):
-        mock_collect_names.return_value = {"vcruntime140.dll", "cudnn64_9.dll"}
-
-        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "cuda")
-
-    @patch("src.core.clip_embedding._collect_available_dll_names")
-    def test_detect_gpu_runtime_issue_reports_cudnn(self, mock_collect_names):
-        mock_collect_names.return_value = {"vcruntime140.dll", "cudart64_12.dll", "cublas64_12.dll"}
-
-        self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "cudnn")
-
-    @patch("src.core.clip_embedding._collect_available_dll_names")
-    def test_detect_gpu_runtime_issue_reports_msvc(self, mock_collect_names):
+    def test_detect_gpu_runtime_issue_reports_msvc(
+        self,
+        mock_collect_names,
+        _mock_dll,
+        _mock_provider,
+        _mock_version,
+        _mock_windows,
+    ):
         mock_collect_names.return_value = {"cudart64_12.dll", "cublaslt64_12.dll", "cudnn64_9.dll"}
 
         self.assertEqual(clip_embedding.detect_gpu_runtime_issue(), "msvc")

@@ -5,7 +5,7 @@ import urllib.request
 from src.app.app_meta import get_app_meta
 from src.app.config import load_config, save_config
 from src.services.download_utils import download_file
-from src.utils import ensure_folder_exists, get_default_ffmpeg_path
+from src.utils import ensure_folder_exists, get_configured_ffmpeg_target_path
 
 
 def fetch_remote_ffmpeg_manifest():
@@ -33,7 +33,7 @@ def download_ffmpeg(progress_callback=None):
     if not ffmpeg_entry:
         raise RuntimeError("FFmpeg download source is unavailable.")
 
-    target_path = get_default_ffmpeg_path()
+    target_path = get_configured_ffmpeg_target_path()
     temp_path = f"{target_path}.part"
     ensure_folder_exists(target_path)
 

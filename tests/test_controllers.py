@@ -33,12 +33,35 @@ if "PySide6" not in sys.modules:
     class _Qt:
         AlignCenter = 0
         WA_NativeWindow = 100
+        Horizontal = 1
+        Key_Space = 32
 
     class _QLabel:
+        def __init__(self, *_args, **_kwargs):
+            self._text = ""
+
         def setAlignment(self, *_args, **_kwargs):
             pass
 
         def setPixmap(self, *_args, **_kwargs):
+            pass
+
+        def setText(self, value):
+            self._text = value
+
+        def text(self):
+            return self._text
+
+        def setWordWrap(self, *_args, **_kwargs):
+            pass
+
+        def setObjectName(self, *_args, **_kwargs):
+            pass
+
+        def setMinimumHeight(self, *_args, **_kwargs):
+            pass
+
+        def setTextInteractionFlags(self, *_args, **_kwargs):
             pass
 
     class _QUrl:
@@ -62,12 +85,131 @@ if "PySide6" not in sys.modules:
         def stop(self):
             return None
 
+        @staticmethod
+        def singleShot(*_args, **_kwargs):
+            return None
+
+    class _QThread:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            return None
+
+        def isRunning(self):
+            return False
+
+    class _WidgetBase:
+        def __init__(self, *_args, **_kwargs):
+            self._enabled = True
+
+        def setEnabled(self, value):
+            self._enabled = bool(value)
+
+        def isEnabled(self):
+            return self._enabled
+
+        def setMinimumHeight(self, *_args, **_kwargs):
+            pass
+
+        def setStyleSheet(self, *_args, **_kwargs):
+            pass
+
+        def setObjectName(self, *_args, **_kwargs):
+            pass
+
+    class _QPushButton(_WidgetBase):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self.clicked = _Signal()
+            self._text = ""
+
+        def setText(self, value):
+            self._text = value
+
+        def text(self):
+            return self._text
+
+    class _QSlider(_WidgetBase):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self.sliderPressed = _Signal()
+            self.sliderReleased = _Signal()
+            self._value = 0
+
+        def setRange(self, *_args, **_kwargs):
+            pass
+
+        def setValue(self, value):
+            self._value = value
+
+        def value(self):
+            return self._value
+
+        def blockSignals(self, *_args, **_kwargs):
+            pass
+
+    class _QBoxLayout:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def addWidget(self, *_args, **_kwargs):
+            pass
+
+        def addLayout(self, *_args, **_kwargs):
+            pass
+
+        def setContentsMargins(self, *_args, **_kwargs):
+            pass
+
+        def setSpacing(self, *_args, **_kwargs):
+            pass
+
+    class _QDialog(_WidgetBase):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self._fullscreen = False
+
+        def setWindowTitle(self, *_args, **_kwargs):
+            pass
+
+        def resize(self, *_args, **_kwargs):
+            pass
+
+        def showNormal(self):
+            self._fullscreen = False
+
+        def showFullScreen(self):
+            self._fullscreen = True
+
+        def isFullScreen(self):
+            return self._fullscreen
+
+        def hide(self):
+            pass
+
+    qtcore.QThread = _QThread
     qtcore.QObject = _QObject
     qtcore.Signal = _Signal
     qtcore.Qt = _Qt
     qtcore.QUrl = _QUrl
     qtcore.QTimer = _QTimer
     qtwidgets.QLabel = _QLabel
+    qtwidgets.QDialog = _QDialog
+    qtwidgets.QFileDialog = type(
+        "QFileDialog",
+        (),
+        {
+            "getSaveFileName": staticmethod(lambda *_args, **_kwargs: ("", "")),
+            "getOpenFileName": staticmethod(lambda *_args, **_kwargs: ("", "")),
+            "getExistingDirectory": staticmethod(lambda *_args, **_kwargs: ""),
+        },
+    )
+    qtwidgets.QHBoxLayout = _QBoxLayout
+    qtwidgets.QVBoxLayout = _QBoxLayout
+    qtwidgets.QPushButton = _QPushButton
+    qtwidgets.QSlider = _QSlider
+    qtwidgets.QWidget = _WidgetBase
 
     pyside6 = types.ModuleType("PySide6")
     sys.modules["PySide6"] = pyside6
@@ -122,11 +264,16 @@ if "ui.workers" not in sys.modules:
     workers_module.SearchWorker = _BaseWorker
     workers_module.SearchWarmupWorker = _BaseWorker
     workers_module.PreviewWarmupWorker = _BaseWorker
+    workers_module.LocalVectorDetailsWorker = _BaseWorker
     workers_module.ThumbLoader = _BaseWorker
+    workers_module.IndexUpdateWorker = _BaseWorker
     sys.modules["ui.workers"] = workers_module
 
+from ui.indexing_controller import IndexingController
+from ui.mobile_bridge_controller import MobileBridgeController
 from ui.runtime_resource_controller import RuntimeResourceController
 from ui.preview_controller import PreviewController
+from ui.preview_dialog import PreviewDialog
 from ui.search_controller import SearchController
 from ui.vlc_player import VlcPreviewPlayer
 
@@ -231,6 +378,78 @@ class RuntimeResourceControllerTests(unittest.TestCase):
         mock_worker_cls.assert_called_once_with(need_models=True, need_ffmpeg=True)
         dialog.set_progress_state.assert_called_once()
         worker.start.assert_called_once()
+
+
+class IndexingControllerTests(unittest.TestCase):
+    @patch("ui.indexing_controller.IndexUpdateWorker")
+    def test_start_passes_rebuild_global_assets_flag_to_worker(self, mock_worker_cls):
+        parent = _make_parent_window()
+        controller = IndexingController(parent)
+        worker = MagicMock()
+        worker.isRunning.return_value = False
+        mock_worker_cls.return_value = worker
+
+        started = controller.start(target_lib="D:/videos", rebuild_global_assets=False)
+
+        self.assertTrue(started)
+        mock_worker_cls.assert_called_once_with(
+            target_lib="D:/videos",
+            force_cleanup_missing_files=False,
+            cleanup_missing_entries=None,
+            rebuild_global_assets=False,
+        )
+        worker.start.assert_called_once()
+
+
+class MobileBridgeControllerTests(unittest.TestCase):
+    @patch("ui.mobile_bridge_controller.MobileBridgeService")
+    def test_start_creates_service_once_and_returns_access_url(self, mock_service_cls):
+        parent = _make_parent_window()
+        service = MagicMock()
+        service.is_running.side_effect = [False, True]
+        service.get_access_url.return_value = "http://192.168.1.2:8918/?token=abc"
+        mock_service_cls.return_value = service
+        controller = MobileBridgeController(parent)
+        statuses = []
+        controller.status_changed.connect(statuses.append)
+
+        url = controller.start()
+
+        mock_service_cls.assert_called_once()
+        kwargs = mock_service_cls.call_args.kwargs
+        self.assertTrue(callable(kwargs["on_image_received"]))
+        service.start.assert_called_once()
+        self.assertEqual(url, "http://192.168.1.2:8918/?token=abc")
+        self.assertEqual(statuses, ["running"])
+
+    @patch("ui.mobile_bridge_controller.MobileBridgeService")
+    def test_start_reuses_running_service_without_restarting(self, mock_service_cls):
+        parent = _make_parent_window()
+        service = MagicMock()
+        service.is_running.return_value = True
+        service.get_access_url.return_value = "http://192.168.1.2:8918/?token=abc"
+        mock_service_cls.return_value = service
+        controller = MobileBridgeController(parent)
+        statuses = []
+        controller.status_changed.connect(statuses.append)
+
+        first_url = controller.start()
+        second_url = controller.start()
+
+        self.assertEqual(first_url, "http://192.168.1.2:8918/?token=abc")
+        self.assertEqual(second_url, "http://192.168.1.2:8918/?token=abc")
+        service.start.assert_not_called()
+        self.assertEqual(statuses, [])
+
+    def test_handle_upload_received_emits_forwarded_payload(self):
+        parent = _make_parent_window()
+        controller = MobileBridgeController(parent)
+        received = []
+        controller.upload_received.connect(lambda path, source: received.append((path, source)))
+
+        controller._handle_upload_received("D:/Migrated/data/mobile_uploads/query.png", "192.168.1.10")
+
+        self.assertEqual(received, [("D:/Migrated/data/mobile_uploads/query.png", "192.168.1.10")])
 
 
 class SearchControllerTests(unittest.TestCase):
@@ -409,6 +628,98 @@ class VlcPreviewPlayerTests(unittest.TestCase):
 
         player._player.stop.assert_called_once()
         player._player.set_media.assert_called_once_with(None)
+
+    def test_resume_restarts_media_when_playback_has_reached_end(self):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        player._player = MagicMock()
+        player._instance = MagicMock()
+        player._current_video_path = "D:/videos/clip.mp4"
+        player._pending_seek_ms = 12000
+        player.get_time = MagicMock(return_value=30000)
+        player.get_length = MagicMock(return_value=30000)
+        player._instance.media_new.return_value = "media"
+        player._player.play.return_value = 0
+
+        result = player.resume()
+
+        self.assertTrue(result)
+        player._instance.media_new.assert_called_once_with("D:/videos/clip.mp4", ":start-time=12.000")
+        player._player.set_media.assert_called_once_with("media")
+
+    def test_resume_restarts_from_zero_when_playback_has_reached_end_without_seek(self):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        player._player = MagicMock()
+        player._instance = MagicMock()
+        player._current_video_path = "D:/videos/clip.mp4"
+        player._pending_seek_ms = None
+        player.get_time = MagicMock(return_value=30000)
+        player.get_length = MagicMock(return_value=30000)
+        player._instance.media_new.return_value = "media"
+        player._player.play.return_value = 0
+
+        result = player.resume()
+
+        self.assertTrue(result)
+        player._instance.media_new.assert_called_once_with("D:/videos/clip.mp4", ":start-time=0.000")
+
+    def test_resume_prioritizes_pending_seek_position(self):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        player._player = MagicMock()
+        player._instance = MagicMock()
+        player._current_video_path = "D:/videos/clip.mp4"
+        player._pending_seek_ms = 8000
+        player.get_time = MagicMock(return_value=1000)
+        player.get_length = MagicMock(return_value=30000)
+        player._instance.media_new.return_value = "media"
+        player._player.play.return_value = 0
+
+        result = player.resume()
+
+        self.assertTrue(result)
+        player._instance.media_new.assert_called_once_with("D:/videos/clip.mp4", ":start-time=8.000")
+
+
+class PreviewDialogTests(unittest.TestCase):
+    @patch("ui.preview_dialog.get_video_duration_seconds", return_value=120.0)
+    @patch("ui.preview_dialog.VlcPreviewPlayer")
+    def test_slider_release_uses_known_duration_when_vlc_length_is_unavailable(self, mock_vlc_cls, _mock_duration):
+        parent = MagicMock()
+        player = MagicMock()
+        player.play.return_value = True
+        player.get_length.return_value = -1
+        player.get_time.return_value = 0
+        player.is_playing.return_value = False
+        mock_vlc_cls.return_value = player
+
+        dialog = PreviewDialog(parent, "D:/videos/clip.mp4", 10.0, 16.0, {"preview_dialog_pause": "Pause"})
+        dialog.slider.setValue(500)
+        dialog._on_slider_released()
+
+        player.set_time.assert_called_once_with(60000, unlock=True)
+
+    @patch("ui.preview_dialog.get_video_duration_seconds", return_value=120.0)
+    @patch("ui.preview_dialog.VlcPreviewPlayer")
+    def test_sync_ui_holds_pending_seek_position_during_zero_time_flash(self, mock_vlc_cls, _mock_duration):
+        parent = MagicMock()
+        player = MagicMock()
+        player.play.return_value = True
+        player.get_length.return_value = 120000
+        player.get_time.return_value = 0
+        player.is_playing.return_value = True
+        mock_vlc_cls.return_value = player
+
+        dialog = PreviewDialog(parent, "D:/videos/clip.mp4", 10.0, 16.0, {"preview_dialog_pause": "Pause"})
+        dialog._pending_ui_seek_ms = 8000
+
+        dialog._sync_ui()
+
+        self.assertEqual(dialog.slider.value(), int((8000 / 120000) * 1000))
 
 
 if __name__ == "__main__":

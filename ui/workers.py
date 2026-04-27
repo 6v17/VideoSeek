@@ -1,4 +1,5 @@
 import cv2
+import os
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 
@@ -8,6 +9,7 @@ from src.app.logging_utils import get_logger
 from src.core.core import run_search
 from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
+from src.services.library_service import list_local_vector_details
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
 from src.services.remote_library_service import build_remote_library_from_links
@@ -66,13 +68,24 @@ class PreviewWarmupWorker(QThread):
 
 class IndexUpdateWorker(QThread):
     progress_signal = Signal(int, str)
-    finished_signal = Signal(bool, bool)
+    finished_signal = Signal(bool, bool, bool, object)
     runtime_status_signal = Signal(dict)
+    error_signal = Signal(str)
 
-    def __init__(self, target_lib=None, force_cleanup_missing_files=False):
+    def __init__(
+        self,
+        target_lib=None,
+        force_cleanup_missing_files=False,
+        cleanup_missing_entries=None,
+        rebuild_global_assets=True,
+        debug_failure="",
+    ):
         super().__init__()
         self.target_lib = target_lib
         self.force_cleanup_missing_files = force_cleanup_missing_files
+        self.cleanup_missing_entries = list(cleanup_missing_entries or [])
+        self.rebuild_global_assets = bool(rebuild_global_assets)
+        self.debug_failure = str(debug_failure or "").strip().lower()
         self._stop_requested = False
 
     def stop(self):
@@ -80,14 +93,26 @@ class IndexUpdateWorker(QThread):
         self.requestInterruption()
 
     def run(self):
+        issues = []
+        previous_gpu_debug = os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM")
+        previous_system_debug = os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM")
         try:
+            if self.debug_failure == "gpu_oom":
+                os.environ["VIDEOSEEK_DEBUG_FORCE_GPU_OOM"] = "1"
+                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM", None)
+            elif self.debug_failure == "system_oom":
+                os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = "1"
+                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
             from src.core.clip_embedding import get_engine_runtime_status, prepare_inference_runtime
             from src.workflows.update_video import update_videos_flow
 
             logger.info(
-                "Index update worker starting runtime preparation: target_lib=%s force_cleanup_missing_files=%s",
+                "Index update worker starting runtime preparation: target_lib=%s force_cleanup_missing_files=%s cleanup_missing_entries=%s rebuild_global_assets=%s debug_failure=%s",
                 self.target_lib,
                 self.force_cleanup_missing_files,
+                len(self.cleanup_missing_entries),
+                self.rebuild_global_assets,
+                self.debug_failure,
             )
             runtime_status = prepare_inference_runtime()
             effective_runtime_status = get_engine_runtime_status()
@@ -108,13 +133,26 @@ class IndexUpdateWorker(QThread):
                 progress_callback=lambda progress, text: self.progress_signal.emit(progress, text),
                 force_cleanup_missing_files=self.force_cleanup_missing_files,
                 should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                cleanup_missing_entries=self.cleanup_missing_entries,
+                issue_callback=issues.append,
+                rebuild_global_assets=self.rebuild_global_assets,
             )
-            self.finished_signal.emit(result[0] is not None, False)
+            self.finished_signal.emit(True, False, result[0] is not None, issues)
         except InterruptedError:
-            self.finished_signal.emit(False, True)
+            self.finished_signal.emit(False, True, False, issues)
         except Exception as exc:
-            print(f"Update Error: {exc}")
-            self.finished_signal.emit(False, False)
+            logger.exception("Index update worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, False, issues)
+        finally:
+            if previous_gpu_debug is None:
+                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
+            else:
+                os.environ["VIDEOSEEK_DEBUG_FORCE_GPU_OOM"] = previous_gpu_debug
+            if previous_system_debug is None:
+                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM", None)
+            else:
+                os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = previous_system_debug
 
 
 class ThumbLoader(QThread):
@@ -286,6 +324,21 @@ class RemoteLibraryBuildWorker(QThread):
             self.finished_signal.emit(result)
         except Exception as exc:
             self.error_signal.emit(str(exc))
+
+
+class LocalVectorDetailsWorker(QThread):
+    result_ready = Signal(dict)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def run(self):
+        try:
+            self.result_ready.emit(list_local_vector_details(validate_contents=True))
+        except Exception as exc:
+            logger.warning("local_vector_details_worker_failed: %s", exc)
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
 
 
 def _ffmpeg_progress(current, total):
