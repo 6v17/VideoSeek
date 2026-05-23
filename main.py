@@ -28,6 +28,9 @@ if __name__ == "__main__":
     app.setFont(font)
 
     logger.info("Application starting")
+    from src.storage.migration_runner import ensure_config_schema_v2_bootstrap
+
+    ensure_config_schema_v2_bootstrap()
     window = MainWindow()
     single_instance_server.set_activate_handler(window._show_main_window_from_tray)
     if getattr(window, "startup_cancelled", False):

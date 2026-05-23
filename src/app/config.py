@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 
 from src.app.app_meta import get_app_meta
 from src.app.logging_utils import get_logger
@@ -21,7 +20,21 @@ APP_DATA_DIR = get_app_data_dir()
 DATA_DIR = os.path.join(APP_DATA_DIR, STORAGE_DIR_NAME)
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
 LEGACY_CONFIG_FILE = get_resource_path("config.json")
-LEGACY_DATA_DIR = get_resource_path("data")
+# Oldest portable layout kept paths under <install_dir>/data/; we only rewrite config, never copy that tree.
+LEGACY_INSTALL_DIR = os.path.dirname(LEGACY_CONFIG_FILE)
+
+
+def _storage_dir_has_user_files(data_dir):
+    """True when a data directory exists and contains at least one file."""
+    if not os.path.isdir(data_dir):
+        return False
+    try:
+        for _root, _dirs, files in os.walk(data_dir):
+            if files:
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
@@ -137,7 +150,7 @@ DERIVED_DATA_PATH_KEYS = {
 
 LEGACY_DEFAULT_CONFIG = {
     **DEFAULT_CONFIG,
-    **build_data_storage_paths(os.path.dirname(LEGACY_DATA_DIR)),
+    **build_data_storage_paths(LEGACY_INSTALL_DIR),
 }
 
 def get_app_version():
@@ -162,21 +175,6 @@ def _normalize_path_value(value, base_dir):
     if os.path.isabs(normalized):
         return os.path.normpath(normalized)
     return os.path.normpath(os.path.join(base_dir, normalized))
-
-
-def _clone_data_tree(src_dir, dst_dir):
-    if not os.path.exists(src_dir):
-        return
-    for current_root, dirs, files in os.walk(src_dir):
-        rel_root = os.path.relpath(current_root, src_dir)
-        target_root = dst_dir if rel_root == "." else os.path.join(dst_dir, rel_root)
-        os.makedirs(target_root, exist_ok=True)
-        for name in files:
-            src_file = os.path.join(current_root, name)
-            dst_file = os.path.join(target_root, name)
-            if os.path.exists(dst_file):
-                continue
-            shutil.copy2(src_file, dst_file)
 
 
 def _apply_default_values(config):
@@ -356,22 +354,8 @@ def _should_migrate_to_user_data(config):
     return False
 
 
-def _migrate_legacy_storage_if_needed(config):
-    global _LAST_MIGRATION_NOTICE
+def _apply_legacy_storage_path_defaults(config):
     migrated = dict(config)
-    if not _should_migrate_to_user_data(migrated):
-        return migrated
-
-    if os.path.exists(LEGACY_DATA_DIR):
-        logger.info("Migrating legacy source directory from %s to %s", LEGACY_DATA_DIR, DATA_DIR)
-        _clone_data_tree(LEGACY_DATA_DIR, DATA_DIR)
-        _LAST_MIGRATION_NOTICE = {
-            "legacy_data_dir": LEGACY_DATA_DIR,
-            "data_dir": DATA_DIR,
-            "legacy_config_file": LEGACY_CONFIG_FILE,
-            "config_file": CONFIG_FILE,
-        }
-
     for key in PATH_KEYS:
         if os.path.normpath(str(migrated.get(key, "") or "")) == os.path.normpath(LEGACY_DEFAULT_CONFIG[key]):
             migrated[key] = DEFAULT_CONFIG[key]
@@ -379,10 +363,25 @@ def _migrate_legacy_storage_if_needed(config):
     return migrated
 
 
+def _migrate_legacy_storage_if_needed(config):
+    """Rewrite oldest install-relative data/ paths to the user profile. Install-dir data/ is not copied."""
+    global _LAST_MIGRATION_NOTICE
+    migrated = dict(config)
+    if not _should_migrate_to_user_data(migrated):
+        return migrated
+
+    logger.info(
+        "Rewriting legacy install-relative storage paths to user profile %s (install-dir data/ is not migrated)",
+        DATA_DIR,
+    )
+    return _apply_legacy_storage_path_defaults(migrated)
+
+
 def _resolve_config_path():
     if os.path.exists(CONFIG_FILE):
         return CONFIG_FILE
-    if os.path.exists(LEGACY_CONFIG_FILE):
+    legacy_data_dir = os.path.join(LEGACY_INSTALL_DIR, STORAGE_DIR_NAME)
+    if os.path.exists(LEGACY_CONFIG_FILE) and _storage_dir_has_user_files(legacy_data_dir):
         return LEGACY_CONFIG_FILE
     return CONFIG_FILE
 
@@ -394,6 +393,19 @@ def load_config():
         should_persist_new_defaults = any(key not in raw_config for key in DEFAULT_CONFIG)
         has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
         has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
+        if has_explicit_storage_paths and not has_explicit_data_root:
+            staged = dict(raw_config)
+            staged["data_root"] = ""
+            staged = _normalize_storage_paths(staged, os.path.dirname(config_path))
+            inferred_data_root = _infer_data_root_from_storage_paths(staged)
+            if inferred_data_root:
+                staged["data_root"] = inferred_data_root
+                staged = _apply_data_root_storage_paths(staged)
+            else:
+                staged["data_root"] = os.path.dirname(config_path)
+                staged = _apply_data_root_storage_paths(staged)
+            for key in (*PATH_KEYS, "data_root"):
+                raw_config[key] = staged[key]
         config = _apply_default_values(raw_config)
         if has_explicit_data_root:
             config = _normalize_data_root(config, os.path.dirname(config_path))
@@ -429,6 +441,7 @@ def load_config():
     config = DEFAULT_CONFIG.copy()
     config["data_root"] = os.path.dirname(CONFIG_FILE)
     config = _apply_data_root_storage_paths(config)
+    config = _migrate_legacy_storage_if_needed(config)
     save_config(config)
     return config
 

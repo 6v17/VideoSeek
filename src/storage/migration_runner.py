@@ -110,17 +110,20 @@ def _already_migrated(config, meta):
     remote_paths = get_remote_model_asset_paths(config=config)
     if not os.path.isdir(remote_paths["remote_dir"]):
         return False
-    resource_dir = get_active_model_resource_dir(config=config)
-    if not os.path.isdir(resource_dir):
-        return False
-    profile = get_active_model_profile(config=config)
-    for file_name in dict(profile.get("files") or {}).values():
-        name = str(file_name or "").strip()
-        if not name:
-            continue
-        if not os.path.exists(os.path.join(resource_dir, name)):
-            return False
     return True
+
+
+def ensure_config_schema_v2_bootstrap():
+    """Upgrade config.json to schema v2 before the UI reads model profiles.
+
+    Disk layout migration (vectors, meta, etc.) may still run later via ``begin_startup_migration``.
+    """
+    config = load_config()
+    if _read_schema_version(config.get("schema_version"), default=1) >= TARGET_SCHEMA_VERSION:
+        return config
+    logger.info("Bootstrapping config schema_version to %s before main window", TARGET_SCHEMA_VERSION)
+    save_config(_normalize_config_v2(config))
+    return load_config()
 
 
 def _normalize_config_v2(config):
@@ -516,13 +519,28 @@ def _migrate_remote_payload(config):
     return 1
 
 
+def _data_dir_has_user_payload(config):
+    """True when ``data/`` exists and contains at least one file (new installs are skipped)."""
+    data_dir = os.path.join(get_configured_data_root(config), "data")
+    if not os.path.isdir(data_dir):
+        return False
+    try:
+        for _root, _dirs, files in os.walk(data_dir):
+            if files:
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def _create_backup(config):
+    if not _data_dir_has_user_payload(config):
+        return ""
     data_root = get_configured_data_root(config)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     backup_root = os.path.join(data_root, f"data.backup-pre-v{TARGET_SCHEMA_VERSION}-{timestamp}")
     data_dir = os.path.join(data_root, "data")
-    if os.path.exists(data_dir):
-        shutil.copytree(data_dir, backup_root)
+    shutil.copytree(data_dir, backup_root)
     return backup_root
 
 
@@ -679,9 +697,14 @@ def run_startup_migration(progress_callback=None):
         )
         _emit(progress_callback, 12, "正在升级配置结构（跳过重复备份）")
     else:
-        _emit(progress_callback, 12, "正在备份现有数据")
-        backup_dir = _create_backup(config)
-        logger.info("Created pre-migration backup: %s", backup_dir)
+        if _data_dir_has_user_payload(config):
+            _emit(progress_callback, 12, "正在备份现有数据")
+            backup_dir = _create_backup(config)
+            logger.info("Created pre-migration backup: %s", backup_dir)
+        else:
+            backup_dir = ""
+            logger.info("Skipping pre-migration backup: no existing user data to copy")
+            _emit(progress_callback, 12, "正在准备数据结构升级")
 
     _emit(progress_callback, 30, "正在升级配置结构")
     normalized_config = _normalize_config_v2(config)

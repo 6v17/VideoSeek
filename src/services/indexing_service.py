@@ -612,6 +612,8 @@ def process_single_video(
         )
         logger.info("Indexing video %s", os.path.basename(abs_path))
         model_dirs = get_local_model_asset_dirs(config=config)
+        os.makedirs(model_dirs["vector_dir"], exist_ok=True)
+        os.makedirs(model_dirs["index_dir"], exist_ok=True)
         t_gen = time.perf_counter()
         vectors, timestamps, _ = generate_vectors_and_index_for_video(
             abs_path,

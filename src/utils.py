@@ -309,8 +309,8 @@ def free_memory():
 
 def ensure_folder_exists(file_path):
     folder = os.path.dirname(file_path)
-    if folder and not os.path.exists(folder):
-        os.makedirs(folder)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
 
 
 def canonicalize_library_path(path):

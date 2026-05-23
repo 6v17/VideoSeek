@@ -28,41 +28,43 @@ def get_config_schema_version(config=None):
         return 1
 
 
+def _default_fallback_model_profile(cfg):
+    fallback_model_dir = str(cfg.get("model_dir", "") or "").strip()
+    return {
+        "id": "clip_onnx_default",
+        "provider": "clip_onnx",
+        "display_name": "CLIP ONNX",
+        "enabled": True,
+        "runtime": {
+            "prefer_gpu": bool(cfg.get("prefer_gpu", True)),
+            "model_dir": fallback_model_dir,
+            "model_variant": "vit-base-patch32",
+        },
+        "files": {
+            "visual_model": "clip_visual.onnx",
+            "text_model": "clip_text.onnx",
+            "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+        },
+        "capabilities": {
+            "text_query": True,
+            "image_query": True,
+            "video_embedding": True,
+            "cross_modal_search": True,
+        },
+    }
+
+
 def get_active_model_profile(config=None):
     cfg = dict(config or load_config())
     schema_version = get_config_schema_version(cfg)
     if schema_version < 2:
-        raise RuntimeError(f"Unsupported config schema_version={schema_version}, expected >=2")
+        return _default_fallback_model_profile(cfg)
     models = cfg.get("models")
     if not isinstance(models, dict):
         models = {}
     profiles = models.get("profiles")
     if not isinstance(profiles, list) or not profiles:
-        # Recovery path: allow boot/migration even when user removed all profiles.
-        # Keep this in-memory only; migration/save flows can persist proper defaults.
-        fallback_model_dir = str(cfg.get("model_dir", "") or "").strip()
-        return {
-            "id": "clip_onnx_default",
-            "provider": "clip_onnx",
-            "display_name": "CLIP ONNX",
-            "enabled": True,
-            "runtime": {
-                "prefer_gpu": bool(cfg.get("prefer_gpu", True)),
-                "model_dir": fallback_model_dir,
-                "model_variant": "vit-base-patch32",
-            },
-            "files": {
-                "visual_model": "clip_visual.onnx",
-                "text_model": "clip_text.onnx",
-                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
-            },
-            "capabilities": {
-                "text_query": True,
-                "image_query": True,
-                "video_embedding": True,
-                "cross_modal_search": True,
-            },
-        }
+        return _default_fallback_model_profile(cfg)
     active_profile_id = str(models.get("active_profile", "") or "").strip()
     if not active_profile_id and profiles:
         first = profiles[0]

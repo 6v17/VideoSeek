@@ -291,4 +291,5 @@ class RuntimeGuiMixin:
             else:
                 banner_label.setText(banner_text)
                 set_runtime_banner_warn(banner, True)
+                banner_btn.show()
                 banner.show()

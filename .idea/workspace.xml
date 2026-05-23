@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="局域网HEIC格式图片上传Bug修复">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -374,16 +374,17 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/faiss_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/faiss_index.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/video_id_migration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_video_id_migration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_remix.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_remix.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_vector_network.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_vector_network.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_runtime.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_startup_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_startup_migration.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_tray.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_tray.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -397,7 +398,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="173" />
+    <option name="cachedIndexableFilesCount" value="174" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -438,7 +439,7 @@
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
     &quot;url&quot;: &quot;git@github.com:liuvgg/VideoSeek.git&quot;,
-    &quot;accountId&quot;: &quot;86adaf49-9911-48c4-9b1c-3066d87185ad&quot;
+    &quot;accountId&quot;: &quot;32fc49d4-fcb0-4bb7-b27a-3eaf6471599d&quot;
   }
 }</component>
   <component name="McpProjectServerCommands">
@@ -727,30 +728,11 @@
       <workItem from="1779030440428" duration="1322000" />
       <workItem from="1779097752371" duration="6418000" />
       <workItem from="1779105913022" duration="5000" />
-    </task>
-    <task id="LOCAL-00031" summary="外置文件剥离">
-      <option name="closed" value="true" />
-      <created>1774977434043</created>
-      <option name="number" value="00031" />
-      <option name="presentableId" value="LOCAL-00031" />
-      <option name="project" value="LOCAL" />
-      <updated>1774977434043</updated>
-    </task>
-    <task id="LOCAL-00032" summary="外置文件剥离">
-      <option name="closed" value="true" />
-      <created>1774977605756</created>
-      <option name="number" value="00032" />
-      <option name="presentableId" value="LOCAL-00032" />
-      <option name="project" value="LOCAL" />
-      <updated>1774977605756</updated>
-    </task>
-    <task id="LOCAL-00033" summary="GPU选择优化">
-      <option name="closed" value="true" />
-      <created>1774983910053</created>
-      <option name="number" value="00033" />
-      <option name="presentableId" value="LOCAL-00033" />
-      <option name="project" value="LOCAL" />
-      <updated>1774983910053</updated>
+      <workItem from="1779105926573" duration="208000" />
+      <workItem from="1779106658897" duration="16000" />
+      <workItem from="1779187402232" duration="3307000" />
+      <workItem from="1779351619985" duration="286000" />
+      <workItem from="1779351920894" duration="14236000" />
     </task>
     <task id="LOCAL-00034" summary="增加网络搜索功能">
       <option name="closed" value="true" />
@@ -1120,7 +1102,31 @@
       <option name="project" value="LOCAL" />
       <updated>1779030530533</updated>
     </task>
-    <option name="localTasksCounter" value="80" />
+    <task id="LOCAL-00080" summary="迁移数据非阻塞">
+      <option name="closed" value="true" />
+      <created>1779106048964</created>
+      <option name="number" value="00080" />
+      <option name="presentableId" value="LOCAL-00080" />
+      <option name="project" value="LOCAL" />
+      <updated>1779106048965</updated>
+    </task>
+    <task id="LOCAL-00081" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1779187815493</created>
+      <option name="number" value="00081" />
+      <option name="presentableId" value="LOCAL-00081" />
+      <option name="project" value="LOCAL" />
+      <updated>1779187815493</updated>
+    </task>
+    <task id="LOCAL-00082" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1779188328754</created>
+      <option name="number" value="00082" />
+      <option name="presentableId" value="LOCAL-00082" />
+      <option name="project" value="LOCAL" />
+      <updated>1779188328755</updated>
+    </task>
+    <option name="localTasksCounter" value="83" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1150,8 +1156,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="ui优化" />
-    <MESSAGE value="codex全面优化" />
     <MESSAGE value="外置文件剥离" />
     <MESSAGE value="GPU选择优化" />
     <MESSAGE value="增加网络搜索功能" />
@@ -1175,7 +1179,9 @@
     <MESSAGE value="混剪匹配默认参数标准化" />
     <MESSAGE value="抽帧、向量生成稳定性提高，部分逻辑bug修复" />
     <MESSAGE value="局域网HEIC格式图片上传Bug修复" />
-    <option name="LAST_COMMIT_MESSAGE" value="局域网HEIC格式图片上传Bug修复" />
+    <MESSAGE value="迁移数据非阻塞" />
+    <MESSAGE value="更新说明" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新说明" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

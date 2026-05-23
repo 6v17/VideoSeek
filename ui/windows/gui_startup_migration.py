@@ -128,3 +128,6 @@ class StartupMigrationGuiMixin:
         self.sidebar.runtime_hint.hide()
         for page in (self.search_page, self.library_page, self.remix_page, self.link_page):
             page.header.runtime_banner.hide()
+            page.header.runtime_banner_action.show()
+        if hasattr(self, "push_resources_status"):
+            self.push_resources_status()

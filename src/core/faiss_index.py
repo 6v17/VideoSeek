@@ -1,4 +1,6 @@
 ﻿import os
+import shutil
+import sys
 
 import faiss
 import numpy as np
@@ -11,17 +13,49 @@ from src.utils import measure_time
 logger = get_logger("faiss_index")
 
 
+def _path_has_non_ascii(path):
+    try:
+        os.fspath(path).encode("ascii")
+    except UnicodeEncodeError:
+        return True
+    return False
+
+
+def _faiss_io_stage_in_system_temp(path):
+    """FAISS C++ file IO on Windows often fails for non-ASCII paths; stage under %TEMP%."""
+    return sys.platform == "win32" and _path_has_non_ascii(path)
+
+
+def _paths_on_same_drive(path_a, path_b):
+    return os.path.normcase(os.path.splitdrive(path_a)[0]) == os.path.normcase(os.path.splitdrive(path_b)[0])
+
+
+def _commit_temp_file(temp_path, target_file):
+    """Move or copy a finished temp file to its final path (Windows cannot replace across drives)."""
+    if os.path.normcase(temp_path) == os.path.normcase(target_file):
+        return
+    if _paths_on_same_drive(temp_path, target_file):
+        os.replace(temp_path, target_file)
+        return
+    shutil.copy2(temp_path, target_file)
+    os.remove(temp_path)
+
+
 def _atomic_write_faiss_index(index, index_file):
     folder = os.path.dirname(index_file)
-    if folder and not os.path.exists(folder):
+    if folder:
         os.makedirs(folder, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".faiss", dir=folder or None)
+    stage_dir = tempfile.gettempdir() if _faiss_io_stage_in_system_temp(index_file) else (folder or None)
+    if _faiss_io_stage_in_system_temp(index_file):
+        logger.debug("Staging FAISS index write via system temp for path: %s", index_file)
+    fd, temp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".faiss", dir=stage_dir)
     os.close(fd)
     try:
         faiss.write_index(index, temp_path)
-        os.replace(temp_path, index_file)
+        _commit_temp_file(temp_path, index_file)
+        temp_path = ""
     finally:
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
 
@@ -93,9 +127,18 @@ def create_clip_index(vectors_list, index_file):
 
 
 def load_clip_index(index_file):
-    if os.path.exists(index_file):
+    if not os.path.exists(index_file):
+        return None
+    if not _faiss_io_stage_in_system_temp(index_file):
         return faiss.read_index(index_file)
-    return None
+    fd, temp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".faiss", dir=tempfile.gettempdir())
+    os.close(fd)
+    try:
+        shutil.copy2(index_file, temp_path)
+        return faiss.read_index(temp_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def search_vector(query_vector, index, timestamps, video_paths, top_k=10):

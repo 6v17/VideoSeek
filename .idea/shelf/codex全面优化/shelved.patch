@@ -1,0 +1,21 @@
+Index: src/app/app_meta.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>APP_META = {\r\n\r\n}\r\n\r\n\r\ndef get_app_meta():\r\n    return APP_META.copy()\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/app/app_meta.py b/src/app/app_meta.py
+--- a/src/app/app_meta.py	(revision 4aee92ee99ca907ac30c64ef3f1f7739787b816e)
++++ b/src/app/app_meta.py	(date 1774358120753)
+@@ -1,5 +1,9 @@
+ APP_META = {
+-
++    "version": "1.0.1",
++    "notice_url": "https://gist.githubusercontent.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O/013a61ea72bdd3a4c1bb7c5e225e93d7/raw/notice.json",
++    "version_url": "https://gist.githubusercontent.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O/f802c5553f574aa6653431e2bfe24dc6/raw/version.json",
++    "download_url": "https://github.com/O-O-O-O-O-O-O-O-O-O-O-O-O-O-O-O/VideoSeek/releases",
++    "remote_timeout": 4
+ }
+ 
+ 

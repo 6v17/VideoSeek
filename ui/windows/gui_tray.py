@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QStyle, QSystemTrayIcon
 
-from src.app.config import DEFAULT_CONFIG, load_config, save_config
+from src.app.config import DEFAULT_CONFIG, load_config
 from ui.dialogs.indexing_close_choice import IndexingCloseChoiceDialog
 
 
@@ -100,15 +100,6 @@ class TrayGuiMixin:
             return "cancel"
         return dialog.choice()
 
-    def _apply_tray_close_preference(self):
-        config = load_config()
-        config["close_window_action"] = "tray"
-        save_config(config)
-        if hasattr(self, "settings_page"):
-            tray_index = self.settings_page.input_close_window_action.findData("tray")
-            if tray_index >= 0:
-                self.settings_page.input_close_window_action.setCurrentIndex(tray_index)
-
     def _hide_window_to_tray(self, event, *, indexing_active=False, notify_key="tray_running_background"):
         event.ignore()
         self.hide()
@@ -138,7 +129,7 @@ class TrayGuiMixin:
             event.ignore()
             return True
         if choice == "background":
-            self._apply_tray_close_preference()
+            # Session-only: do not persist close_window_action; use Settings for a permanent default.
             self._hide_window_to_tray(event, indexing_active=True)
             return True
         if choice == "stop_exit":
