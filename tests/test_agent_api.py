@@ -1,0 +1,134 @@
+import unittest
+from unittest.mock import patch
+
+from src.domain.search_hit import SearchHit
+from src.web.agent_api import (
+    AgentSearchRequest,
+    api_error_payload,
+    build_health_payload,
+    execute_agent_search,
+    _clamp_top_k,
+    _filter_hits,
+    _hits_to_payload,
+)
+
+
+class AgentApiHelperTests(unittest.TestCase):
+    def test_api_error_payload_shape(self):
+        payload = api_error_payload("index_not_ready", "sync first")
+        self.assertEqual(payload["api_version"], "1")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "index_not_ready")
+
+    def test_hits_to_payload_stable_fields(self):
+        payload = _hits_to_payload(
+            [SearchHit(1.0, 2.0, 0.9, "D:/a.mp4"), SearchHit(3.0, 3.0, 0.5, "D:/b.mp4")]
+        )
+        self.assertEqual(payload[0]["rank"], 1)
+        self.assertEqual(payload[0]["start_sec"], 1.0)
+        self.assertEqual(payload[0]["end_sec"], 2.0)
+        self.assertEqual(payload[0]["video_path"], "D:/a.mp4")
+        self.assertIn("score", payload[0])
+
+    def test_filter_hits_min_score(self):
+        hits = [
+            SearchHit(0.0, 1.0, 0.2, "a.mp4"),
+            SearchHit(1.0, 2.0, 0.8, "b.mp4"),
+        ]
+        filtered = _filter_hits(hits, 0.5)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].video_path, "b.mp4")
+
+    def test_clamp_top_k(self):
+        with patch("src.web.agent_api.get_search_top_k", return_value=20):
+            self.assertEqual(_clamp_top_k(None), 20)
+            self.assertEqual(_clamp_top_k(3), 3)
+            self.assertEqual(_clamp_top_k(999), 200)
+            self.assertEqual(_clamp_top_k("bad"), 20)
+
+
+class AgentApiSearchTests(unittest.TestCase):
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_execute_agent_search_text_frame(self, mock_run_search, mock_snapshot):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "global_index_state": "fresh",
+        }
+        mock_run_search.return_value = [SearchHit(10.0, 10.0, 0.7, "D:/clip.mp4")]
+        body = AgentSearchRequest(
+            query="足球进球",
+            query_type="text",
+            top_k=5,
+            mode="frame",
+            client_request_id="beat-01",
+        )
+        payload = execute_agent_search(body)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["query"], "足球进球")
+        self.assertEqual(payload["mode"], "frame")
+        self.assertEqual(payload["client_request_id"], "beat-01")
+        self.assertEqual(len(payload["hits"]), 1)
+        mock_run_search.assert_called_once()
+
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_chunk_search")
+    def test_execute_agent_search_chunk_mode(self, mock_chunk_search, mock_snapshot):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "global_index_state": "fresh",
+        }
+        mock_chunk_search.return_value = [SearchHit(1.0, 4.0, 0.6, "D:/clip.mp4")]
+        body = AgentSearchRequest(query="product close-up", mode="chunk")
+        payload = execute_agent_search(body)
+        self.assertEqual(payload["mode"], "chunk")
+        self.assertEqual(payload["hits"][0]["end_sec"], 4.0)
+        mock_chunk_search.assert_called_once()
+
+
+class AgentApiHealthTests(unittest.TestCase):
+    @patch("src.web.agent_api._build_ffmpeg_info")
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.get_active_embedding_spec")
+    @patch("src.web.agent_api.list_libraries")
+    @patch("src.web.agent_api.get_search_mode")
+    def test_build_health_payload(self, mock_mode, mock_libraries, mock_spec, mock_snapshot, mock_ffmpeg):
+        mock_mode.return_value = "frame"
+        mock_libraries.return_value = {"D:/lib": {"files": {"a": {}, "b": {}}}}
+        mock_spec.return_value = {
+            "model_id": "clip_onnx_default",
+            "provider": "clip_onnx",
+            "embedding_space": "clip_onnx_default",
+            "dimension": 512,
+            "metric": "ip",
+        }
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "index_stale": False,
+            "global_index_state": "fresh",
+            "vector_count": 100,
+            "indexed_video_paths": 3,
+            "frame_index_ready": True,
+            "chunk_index_ready": True,
+            "frame_vector_count": 80,
+            "chunk_vector_count": 20,
+        }
+        mock_ffmpeg.return_value = {
+            "ffmpeg_available": True,
+            "ffmpeg_path": "D:/VideoSeek/bin/ffmpeg.exe",
+            "ffmpeg_source": "managed",
+        }
+        payload = build_health_payload()
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["index_ready"])
+        self.assertEqual(payload["video_count"], 2)
+        self.assertEqual(payload["dimension"], 512)
+        self.assertIn("index_id", payload)
+        self.assertTrue(payload["capabilities"]["text_search"])
+        self.assertTrue(payload["capabilities"]["chunk_search"])
+        self.assertTrue(payload["capabilities"]["local_ffmpeg_clip"])
+        self.assertEqual(payload["ffmpeg"]["ffmpeg_path"], "D:/VideoSeek/bin/ffmpeg.exe")
+
+
+if __name__ == "__main__":
+    unittest.main()
