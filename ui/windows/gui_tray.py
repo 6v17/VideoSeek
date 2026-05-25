@@ -177,6 +177,8 @@ class TrayGuiMixin:
         self.remix_worker = None
         self._stop_remix_thumbnail_loading()
         self.mobile_bridge_controller.shutdown()
+        if hasattr(self, "agent_api_controller"):
+            self.agent_api_controller.shutdown()
         self.indexing_controller.shutdown()
         self.app_meta_controller.shutdown()
         self.runtime_resource_controller.shutdown()

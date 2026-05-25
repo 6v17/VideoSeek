@@ -70,6 +70,7 @@ python -m unittest ^
 
 - 详细安装与排障：`docs/quickstart.md`
 - 架构与模块说明：`docs/architecture.md`
+- 外部 Agent 集成（拆文案、搜索 API，开发中）：`docs/for-agents.md`
 
 ## 许可证
 

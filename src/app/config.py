@@ -82,6 +82,7 @@ DEFAULT_CONFIG = {
     "remote_max_frames": 2000,
     "auto_cleanup_missing_files": False,
     "export_video_silent": False,
+    "agent_api_enabled": False,
     "show_debug_test_buttons": False,
     "theme": "dark",
     "language": "zh",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from src.app.config import (
     DEFAULT_CONFIG,
@@ -136,6 +136,8 @@ class SettingsGuiMixin:
         self.settings_page.input_close_window_action.setCurrentIndex(
             tray_index if close_window_action == "tray" and tray_index >= 0 else 0
         )
+        agent_api_enabled = bool(config.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"]))
+        self.settings_page.input_agent_api_enabled.setCurrentIndex(1 if agent_api_enabled else 0)
         self.settings_page.input_data_root.setText(get_configured_data_root(config))
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
@@ -145,6 +147,7 @@ class SettingsGuiMixin:
         self._refresh_pending_cleanup_actions(config)
         self._settings_loading = False
         self._set_settings_dirty(False)
+        self._refresh_agent_api_status()
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -173,6 +176,7 @@ class SettingsGuiMixin:
             self.settings_page.input_gpu_probe_unknown_keep_gpu,
             self.settings_page.input_auto_cleanup_missing_files,
             self.settings_page.input_close_window_action,
+            self.settings_page.input_agent_api_enabled,
             self.settings_page.input_active_model_profile,
             self.settings_page.input_data_root,
             self.settings_page.input_ffmpeg_path,
@@ -357,6 +361,7 @@ class SettingsGuiMixin:
             config["close_window_action"] = str(
                 self.settings_page.input_close_window_action.currentData() or "exit"
             )
+            config["agent_api_enabled"] = bool(self.settings_page.input_agent_api_enabled.currentData())
             selected_profile_id = str(self.settings_page.input_active_model_profile.currentData() or "").strip()
             models = config.get("models")
             if not isinstance(models, dict):
@@ -445,8 +450,47 @@ class SettingsGuiMixin:
             self.settings_page.lbl_status.setText(save_message)
             self.show_info_dialog(self.texts["success_title"], save_message, kind="success")
             self._set_settings_dirty(False)
+            self._apply_agent_api_settings()
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _apply_agent_api_settings(self):
+        if not hasattr(self, "agent_api_controller"):
+            return
+        from src.web.agent_api import is_agent_api_enabled
+
+        if is_agent_api_enabled():
+            url = self.agent_api_controller.start()
+            if not url:
+                self.show_info_dialog(
+                    self.texts["error_title"],
+                    self.texts.get("setting_agent_api_start_failed", "Failed to start Agent API."),
+                    kind="warning",
+                )
+        else:
+            self.agent_api_controller.stop()
+        self._refresh_agent_api_status()
+
+    def _refresh_agent_api_status(self):
+        if not hasattr(self, "settings_page"):
+            return
+        running = hasattr(self, "agent_api_controller") and self.agent_api_controller.is_running()
+        if running:
+            url = self.agent_api_controller.get_base_url()
+            text = self.texts.get("setting_agent_api_status_running", "Running: {url}").format(url=url)
+            self.settings_page.btn_copy_agent_api_url.setEnabled(True)
+        else:
+            text = self.texts.get("setting_agent_api_status_stopped", "Stopped")
+            self.settings_page.btn_copy_agent_api_url.setEnabled(False)
+        self.settings_page.lbl_agent_api_status.setText(text)
+
+    def copy_agent_api_url(self):
+        if not hasattr(self, "agent_api_controller") or not self.agent_api_controller.is_running():
+            return
+        QApplication.clipboard().setText(self.agent_api_controller.get_base_url())
+        self.settings_page.lbl_status.setText(
+            self.texts.get("setting_agent_api_copy_url_done", "Agent API base URL copied.")
+        )
 
     def reset_settings(self):
         try:
@@ -504,6 +548,7 @@ class SettingsGuiMixin:
                 reset_message = f"{reset_message}\n\n{self._build_data_root_migration_message(migration_result, requested_data_root)}"
             self.settings_page.lbl_status.setText(reset_message)
             self.show_info_dialog(self.texts["success_title"], reset_message, kind="success")
+            self._apply_agent_api_settings()
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
 

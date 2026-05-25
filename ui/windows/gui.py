@@ -45,6 +45,7 @@ from ui.widgets.settings import SettingsPage
 from ui.dialogs import AboutDialog, AppMessageDialog, MobileBridgeDialog, NoticeDialog
 from ui.controllers.indexing_controller import IndexingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
+from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
 from ui.controllers.network_search_controller import NetworkSearchController
 from ui.controllers.preview_controller import PreviewController
@@ -137,6 +138,7 @@ class MainWindow(
         self.mobile_bridge_controller = MobileBridgeController(self)
         self.mobile_bridge_controller.upload_received.connect(self._handle_mobile_upload_received)
         self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
+        self.agent_api_controller = AgentApiController(self)
         self.runtime_resource_controller = RuntimeResourceController(self)
         self.runtime_resource_controller.startup_cancelled.connect(self._handle_runtime_resource_exit)
         self.runtime_resource_controller.resources_ready.connect(self._finish_runtime_resource_download)
@@ -276,6 +278,7 @@ class MainWindow(
         self.settings_page.btn_show_runtime_diagnostics.clicked.connect(self.show_runtime_diagnostics)
         self.settings_page.btn_cleanup_old_data_root.clicked.connect(self.cleanup_old_data_root)
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
+        self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
 
         self.setAcceptDrops(True)
         for page in (self.search_page, self.link_page, self.remix_page, self.library_page, self.settings_page):
@@ -305,6 +308,8 @@ class MainWindow(
                 dlg.dismiss_for_page_switch()
         if page_name == "remix":
             self._refresh_remix_scope_tree()
+        if page_name == "settings":
+            self._refresh_agent_api_status()
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -487,6 +492,7 @@ class MainWindow(
         self.refresh_library_table()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
+        self._apply_agent_api_settings()
 
     def show_notice(self):
         NoticeDialog(self, self.is_dark_mode, self.language, notice=self.notice_payload).exec()

@@ -127,6 +127,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
         self.input_auto_cleanup_missing_files = NoWheelComboBox()
         self.input_close_window_action = NoWheelComboBox()
+        self.input_agent_api_enabled = NoWheelComboBox()
+        self.lbl_agent_api_status = QLabel()
+        self.lbl_agent_api_status.setObjectName("StatusHint")
+        self.lbl_agent_api_status.setWordWrap(True)
+        self.btn_copy_agent_api_url = QPushButton()
+        self.btn_copy_agent_api_url.setObjectName("AccentGhostButton")
+        self.btn_copy_agent_api_url.setMinimumHeight(34)
+        self.input_agent_api_bundle = QWidget()
+        agent_api_bundle_layout = QHBoxLayout(self.input_agent_api_bundle)
+        agent_api_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        agent_api_bundle_layout.setSpacing(8)
+        agent_api_bundle_layout.addWidget(self.input_agent_api_enabled, 0)
+        agent_api_bundle_layout.addWidget(self.lbl_agent_api_status, 1)
+        agent_api_bundle_layout.addWidget(self.btn_copy_agent_api_url, 0)
         self.input_export_video_silent = NoWheelComboBox()
         self.input_active_model_profile = NoWheelComboBox()
         self.btn_download_runtime_resources = QPushButton()
@@ -165,6 +179,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_gpu_probe_unknown_keep_gpu = ClickableLabel()
         self.label_auto_cleanup_missing_files = ClickableLabel()
         self.label_close_window_action = ClickableLabel()
+        self.label_agent_api_enabled = ClickableLabel()
         self.label_active_model_profile = ClickableLabel()
         self.label_data_root = ClickableLabel()
         self.label_ffmpeg_path = ClickableLabel()
@@ -196,6 +211,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_gpu_probe_unknown_keep_gpu = QLabel()
         self.hint_auto_cleanup_missing_files = QLabel()
         self.hint_close_window_action = QLabel()
+        self.hint_agent_api_enabled = QLabel()
         self.hint_active_model_profile = QLabel()
         self.hint_data_root = QLabel()
         self.hint_ffmpeg_path = QLabel()
@@ -240,6 +256,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_close_window_action, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_agent_api_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_export_video_silent, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_active_model_profile, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
@@ -398,6 +415,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_close_window_action,
             self.input_close_window_action,
             self.hint_close_window_action,
+        )
+        self._add_setting_row(
+            self.section_general_form,
+            2,
+            self.label_agent_api_enabled,
+            self.input_agent_api_bundle,
+            self.hint_agent_api_enabled,
         )
         self._add_setting_row(
             self.section_model_gpu_form,
@@ -661,6 +685,16 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu"])
         self.label_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files"])
         self.label_close_window_action.setText(texts["setting_close_window_action"])
+        self.label_agent_api_enabled.setText(texts["setting_agent_api_enabled"])
+        self.btn_copy_agent_api_url.setText(texts["setting_agent_api_copy_url"])
+        current_agent_api_enabled = self.input_agent_api_enabled.currentData()
+        self.input_agent_api_enabled.blockSignals(True)
+        self.input_agent_api_enabled.clear()
+        self.input_agent_api_enabled.addItem(texts["setting_agent_api_enabled_option_off"], False)
+        self.input_agent_api_enabled.addItem(texts["setting_agent_api_enabled_option_on"], True)
+        restore_index = self.input_agent_api_enabled.findData(current_agent_api_enabled)
+        self.input_agent_api_enabled.setCurrentIndex(0 if restore_index < 0 else restore_index)
+        self.input_agent_api_enabled.blockSignals(False)
         self.label_active_model_profile.setText(
             _fallback_text(texts, "setting_active_model_profile", "当前模型", "Active Model")
         )
@@ -766,6 +800,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu_hint"])
         self.hint_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files_hint"])
         self.hint_close_window_action.setText(texts["setting_close_window_action_hint"])
+        self.hint_agent_api_enabled.setText(texts["setting_agent_api_enabled_hint"])
         self.hint_active_model_profile.setText(
             _fallback_text(
                 texts,
@@ -813,6 +848,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_gpu_probe_unknown_keep_gpu,
             self.label_auto_cleanup_missing_files,
             self.label_close_window_action,
+            self.label_agent_api_enabled,
             self.label_active_model_profile,
             self.label_data_root,
             self.label_ffmpeg_path,

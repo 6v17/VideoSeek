@@ -264,13 +264,15 @@ def _apply_frame_neighbor_rerank(results, frame_ids, query_vector, search_index,
     return reranked
 
 
-def run_search(query_data, is_text=False, top_k=None) -> List[SearchHit]:
+def run_search(query_data, is_text=False, top_k=None, search_mode=None) -> List[SearchHit]:
     # Retained intentionally: exported via src.core.core and reached by
     # worker-side runtime imports that static analysis can miss.
     config = load_config()
-    search_mode = get_search_mode(config)
-    logger.info("Running %s search (is_text=%s)", search_mode, is_text)
-    if search_mode == "chunk":
+    mode = str(search_mode or get_search_mode(config)).strip().lower()
+    if mode not in {"frame", "chunk"}:
+        mode = get_search_mode(config)
+    logger.info("Running %s search (is_text=%s)", mode, is_text)
+    if mode == "chunk":
         return run_chunk_search(query_data, is_text=is_text, top_k=top_k)
     if top_k is None:
         top_k = get_search_top_k(config)
