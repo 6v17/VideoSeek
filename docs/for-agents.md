@@ -2,7 +2,9 @@
 
 This document is for **external agents** (Cursor, Claude Code, custom scripts, MCP tools) that help users turn **scripts / copy** into **rough-cut material lists** using VideoSeek’s **visual semantic search**.
 
-> **Status:** **In development** — `GET /api/v1/health` and `POST /api/v1/search` on `http://127.0.0.1:8765` when the desktop app is running **and** Agent API is enabled in **Settings → General → Agent API (localhost)** (`src/web/agent_api.py`). Default: **off**.
+> **Status:** **In development** — on `http://127.0.0.1:8765` when the desktop app is running **and** Agent API is enabled in **Settings → General → Agent API (localhost)** (`src/web/agent_api.py`). Default: **off**.
+>
+> Endpoints: `GET /api/v1/health` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `POST /api/v1/export/manifest`
 >
 > Request/response fields may still change before a public freeze. Treat this doc as the current draft, not a permanent contract.
 
@@ -12,7 +14,9 @@ This document is for **external agents** (Cursor, Claude Code, custom scripts, M
 
 The Agent API is a thin wrapper over `search_service` (not GUI automation). When the API stabilizes for external tools, these shapes are the intended baseline:
 
-### Hit fields (target shape)
+### Hit fields (minimum stable subset)
+
+Production search responses include **additional fields** — see §5.1 (`duration_sec`, `start_timecode`, `clip_window`, etc.). Do not parse §0 alone.
 
 ```json
 {
@@ -121,15 +125,13 @@ Agents **must** rewrite user script lines into **short, visible descriptions** b
 ## 4. Recommended Agent Workflow (Rough Cut)
 
 ```
-User script
-    → split into lines / beats
-    → for each beat: rewrite to visual query
-    → POST /search (or CLI) per query
-    → keep top 1–3 hits per query (by rank / score threshold)
-    → dedupe (same file + overlapping time)
-    → optionally expand frame hits to short intervals (§4.1)
-    → emit cuts.json (and/or call export_clip later)
-    → ffmpeg or NLE to assemble
+User script / screenshot folder
+    → split into beats OR batch image_folder
+    → for each beat: rewrite to visual query (§3)
+    → POST /search or POST /search/batch (expand_frame_hits: true; scope if single film)
+    → keep top 1–3 hits per beat
+    → POST /export/manifest (sources=results, dedupe: true) → cuts.json
+    → ffmpeg using health.ffmpeg.ffmpeg_path
 ```
 
 ### 4.1 Frame mode vs chunk mode
@@ -139,19 +141,21 @@ Controlled by `mode` (see §5). Desktop default is often `frame` (`config.json` 
 | `mode` | `start_sec` / `end_sec` | Agent handling |
 |--------|-------------------------|----------------|
 | `chunk` | Real interval from semantic chunking | Use as-is for rough cuts |
-| `frame` | Often **equal** (single timestamp) | Expand to a clip window before export |
+| `frame` | Often **equal** (single timestamp) | Server pads by default (`expand_frame_hits: true`) |
 
-For **frame** hits where `start_sec == end_sec`, expand symmetrically (recommended defaults):
+**Default:** leave `expand_frame_hits: true` (pad **3 s** before / **3 s** after; clamped to `video_duration_sec` when known). Hits include `clip_window.raw_*` for the original point.
+
+**Only if** `expand_frame_hits: false`, apply manual padding per below:
 
 - `pad_before_sec`: **3**
 - `pad_after_sec`: **3**
 
-Or set `end_sec = start_sec + preview_seconds` if the API exposes desktop `preview_seconds` (default **6** in app config). Clamp to `[0, video_duration]` if duration is known.
+Or set `end_sec = start_sec + preview_seconds` (desktop default **6**). Clamp to `[0, video_duration]`.
 
 ### 4.2 Choosing hits per query
 
 1. Sort by `rank` ascending (1 = best).
-2. Drop hits below `min_score` if set (§5.2 — calibrate per library; start around **0.2–0.35** only after you inspect real scores).
+2. Drop hits below `min_score` if set (§5.4 presets — calibrate per library).
 3. Prefer **diverse** files: do not take five hits from the same minute unless the script asks for it.
 4. For rough cut, **`top_k` request 3–5**, keep **1–2** per script line.
 
@@ -162,7 +166,16 @@ Merge when:
 - Same `video_path`, and
 - Intervals overlap more than **50%** of the shorter segment, or start times within **2 s** in frame mode.
 
-Keep the higher rank (lower `rank` number).
+Keep the higher rank (lower `rank` number). **`POST /export/manifest` with `dedupe: true` applies the same rules server-side** (§5.3).
+
+### 4.4 Screenshot folder workflow (end-to-end)
+
+1. `GET /api/v1/health` — check `index_ready`, read `ffmpeg.ffmpeg_path`
+2. `POST /api/v1/search/batch` — e.g. `{ "image_folder": "C:/shots", "top_k": 3, "mode": "chunk", "scope": { "video_paths": ["D:/film.mp4"] } }`
+3. `POST /api/v1/export/manifest` — `{ "sources": <batch.results>, "keep_per_source": 2, "dedupe": true, "write_path": "D:/cuts.json" }`
+4. Shell out to `ffmpeg.ffmpeg_path` per manifest item
+
+Or run: `python scripts/search_from_image_folder.py "C:/shots"` (steps 2–3 in one script).
 
 ---
 
@@ -173,7 +186,7 @@ Keep the higher rank (lower `rank` number).
 **Binding:** localhost only by default — not exposed to LAN.  
 **Auth:** none in v1 (local trust boundary).
 
-Only **read-only search** in v1 — no index rebuild, no delete, no config writes.
+**Safety boundary:** no index rebuild, no library/config mutation, no video export via API. Search is read-only against the index. **`export/manifest` may write a JSON file only when you pass `write_path`** (user/agent explicit).
 
 **Concurrency:** up to **2** concurrent searches; additional requests wait on a queue. **Timeout:** 120s per search → HTTP 503 `engine_busy`.
 
@@ -195,10 +208,13 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
   "search_mode_checked": "frame",
   "model": "clip_onnx_default",
   "provider": "clip_onnx",
+  "embedding_space": "clip_onnx_default",
   "dimension": 512,
   "metric": "ip",
   "video_count": 42,
   "vector_count": 12040,
+  "frame_vector_count": 9800,
+  "chunk_vector_count": 2240,
   "indexed_video_paths": 18,
   "index_id": "clip_onnx_default_512_ip_fresh",
   "capabilities": {
@@ -206,7 +222,8 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
     "image_search": true,
     "frame_search": true,
     "chunk_search": true,
-    "export_manifest": false,
+    "batch_search": true,
+    "export_manifest": true,
     "export_clip": false,
     "local_ffmpeg_clip": true
   },
@@ -216,7 +233,9 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
     "ffmpeg_source": "managed"
   },
   "max_concurrent_searches": 2,
-  "search_timeout_sec": 120
+  "search_timeout_sec": 120,
+  "max_batch_queries": 64,
+  "batch_timeout_sec": 600
 }
 ```
 
@@ -225,13 +244,16 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `index_ready` | If `false`, do not spam `/search` — ask user to sync index in VideoSeek |
 | `index_stale` | If `true`, results may be outdated until user rebuilds global index |
 | `index_id` | Cache key — confirm later searches use the same index snapshot / model |
-| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`) |
+| `embedding_space` | Embedding namespace in `index_id`; useful when comparing snapshots across runs |
+| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `batch_search: false` → loop `/search`) |
 | `ffmpeg.ffmpeg_path` | **Do not search the disk** — use this executable for `-ss/-to` clip export |
 | `ffmpeg.ffmpeg_available` | If `false`, ask user to install/import FFmpeg in VideoSeek settings |
 | `ffmpeg.ffmpeg_source` | `configured` / `managed` / `bundled` / `system` / `missing` (debug) |
 | `capabilities.local_ffmpeg_clip` | If `true`, agent may shell out to `ffmpeg.ffmpeg_path` after search |
 | `video_count` | Files tracked in library metadata |
-| `vector_count` | Vectors in the active global index for `mode` |
+| `vector_count` | Vectors in the active global index for `search_mode_checked` |
+| `frame_vector_count` / `chunk_vector_count` | Per-mode vector totals (even when only one mode is checked) |
+| `max_batch_queries` / `batch_timeout_sec` | Batch limits — size `queries[]` and expect HTTP 503 if exceeded |
 
 ### 5.1 `POST /api/v1/search`
 
@@ -246,7 +268,11 @@ Find segments in the **currently indexed local library** on the machine where Vi
   "top_k": 5,
   "mode": "chunk",
   "min_score": null,
-  "client_request_id": "beat-03"
+  "client_request_id": "beat-03",
+  "scope": { "video_paths": ["D:/library/it2017.mp4"] },
+  "expand_frame_hits": true,
+  "pad_before_sec": 3,
+  "pad_after_sec": 3
 }
 ```
 
@@ -258,6 +284,9 @@ Find segments in the **currently indexed local library** on the machine where Vi
 | `mode` | `"frame"` \| `"chunk"` | no | Override desktop `search_mode`. Default: follow app settings (`frame` in fresh installs). |
 | `min_score` | number \| null | no | Optional post-filter; implementation may compare against inner-product style scores. When unsure, omit and filter by rank only. |
 | `client_request_id` | string | no | Echoed back for correlating script beats. |
+| `scope.video_paths` | string[] | no | Limit hits to these absolute video paths (over-fetch then filter). |
+| `expand_frame_hits` | boolean | no | Default `true`. Pad frame point hits by `pad_*`. |
+| `pad_before_sec` / `pad_after_sec` | number | no | Default **3** / **3** when expanding frame hits. |
 
 \* For `query_type: "image_path"`, `query` is the file path.
 
@@ -277,12 +306,24 @@ Find segments in the **currently indexed local library** on the machine where Vi
       "video_path": "D:/Videos/library/match_01.mp4",
       "start_sec": 120.5,
       "end_sec": 125.0,
-      "score": 0.82
+      "score": 0.82,
+      "duration_sec": 4.5,
+      "start_timecode": "00:02:00",
+      "end_timecode": "00:02:05",
+      "clip_window": {
+        "start_sec": 120.5,
+        "end_sec": 125.0,
+        "padding_applied": false,
+        "raw_start_sec": 120.5,
+        "raw_end_sec": 125.0
+      }
     }
   ],
   "meta": {
     "returned": 1,
     "top_k": 5,
+    "fetch_top_k": 15,
+    "scope_applied": true,
     "index_ready": true,
     "elapsed_ms": 240
   }
@@ -293,8 +334,14 @@ Find segments in the **currently indexed local library** on the machine where Vi
 |-------|-------------|
 | `hits[].rank` | 1-based order after server-side ranking |
 | `hits[].video_path` | Absolute path to source media |
-| `hits[].start_sec` / `end_sec` | Seconds; see §4.1 for frame mode |
-| `hits[].score` | Similarity score from retrieval (higher = better match for dot-product style metrics used in frame rerank paths) |
+| `hits[].start_sec` / `end_sec` | Clip window (after pad when `expand_frame_hits: true`) |
+| `hits[].score` | Similarity score (higher = better for dot-product style metrics) |
+| `hits[].duration_sec` | `end_sec - start_sec` |
+| `hits[].start_timecode` / `end_timecode` | `HH:MM:SS` for human review |
+| `hits[].clip_window` | `raw_start_sec`, `raw_end_sec`, `padding_applied` |
+| `hits[].video_duration_sec` | Present when container duration is known |
+| `meta.fetch_top_k` | Internal over-fetch size when `scope` is set (then trimmed to `top_k`) |
+| `meta.scope_applied` | `true` when `scope.video_paths` filtered results |
 
 #### Error responses
 
@@ -320,7 +367,137 @@ All errors use the same JSON body (§0):
 
 Empty `hits` is **not** an error — try a more visual query (§3).
 
-### 5.2 Presets (copy into agent config)
+### 5.2 `POST /api/v1/search/batch`
+
+Run many searches in one HTTP call (screenshot folders, storyboard beats). **Limit:** 64 items per request; **timeout:** 600s for the whole batch. Each item still respects the global search concurrency cap (2).
+
+#### Request (screenshot folder)
+
+```json
+{
+  "image_folder": "D:/storyboard/beat03",
+  "top_k": 3,
+  "mode": "chunk",
+  "scope": { "video_paths": ["D:/library/it2017.mp4"] },
+  "expand_frame_hits": true,
+  "pad_before_sec": 3,
+  "pad_after_sec": 3,
+  "continue_on_error": true
+}
+```
+
+`image_folder` scans `*.png`, `*.jpg`, `*.jpeg`, `*.webp`, `*.bmp`, `*.gif` (sorted by filename). Each file becomes one search; `client_request_id` defaults to the filename.
+
+Batch-level **`top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*`** apply to every item (including folder-expanded images) unless an entry in `queries` overrides (scope per-item only).
+
+#### Request (explicit list)
+
+```json
+{
+  "queries": [
+    {
+      "query": "D:/refs/a.png",
+      "query_type": "image_path",
+      "client_request_id": "a"
+    },
+    {
+      "query": "黄衣 男孩 拖行",
+      "query_type": "text",
+      "client_request_id": "b"
+    }
+  ],
+  "top_k": 5,
+  "mode": "chunk",
+  "continue_on_error": true
+}
+```
+
+Batch-level `top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*` apply to all items unless overridden in `queries`. You may combine `queries` + `image_folder` in one request.
+
+| Field | Description |
+|-------|-------------|
+| `queries` | List of single-search bodies (same shape as §5.1) |
+| `image_folder` | Optional directory of reference images (agent does not need to list files) |
+| `scope` / `expand_frame_hits` / `pad_*` | Batch defaults inherited by all items (see folder example above) |
+| `continue_on_error` | If `true` (default), one bad path does not stop the rest |
+
+#### Response `200`
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "results": [
+    {
+      "ok": true,
+      "client_request_id": "a.png",
+      "query": "D:/storyboard/beat03/a.png",
+      "query_type": "image_path",
+      "mode": "chunk",
+      "hits": [ { "rank": 1, "video_path": "...", "start_sec": 0, "end_sec": 5, "score": 0.8 } ]
+    },
+    {
+      "ok": false,
+      "client_request_id": "missing.png",
+      "query": "D:/storyboard/beat03/missing.png",
+      "query_type": "image_path",
+      "hits": [],
+      "error": { "code": "invalid_request", "message": "image_path does not exist: ..." }
+    }
+  ],
+  "meta": {
+    "total": 2,
+    "processed": 2,
+    "succeeded": 1,
+    "failed": 1,
+    "elapsed_ms": 1200
+  }
+}
+```
+
+Top-level `ok` is `false` if any item failed, but `results` still contains per-item payloads.
+
+### 5.3 `POST /api/v1/export/manifest`
+
+Turn search/batch results into a standard `cuts.json` (dedupe + optional write to disk). **`dedupe: true` uses §4.3 rules server-side.**
+
+```json
+{
+  "project": "screenshots-rough",
+  "sources": [ { "ok": true, "hits": [ "..." ], "query": "..." } ],
+  "keep_per_source": 2,
+  "dedupe": true,
+  "write_path": "D:/cuts-from-screenshots.json",
+  "mode": "chunk",
+  "expand_frame_hits": true,
+  "pad_before_sec": 3,
+  "pad_after_sec": 3
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `sources` | List of `/search` or batch result blocks — pass the **`results` array from a batch response as JSON objects**, not a string placeholder or serialized JSON string |
+| `items` | Alternative: explicit manifest rows (skip `sources`) |
+| `keep_per_source` | Max hits per source block when building from `sources` |
+| `dedupe` | Apply §4.3 overlap rules |
+| `write_path` | Optional absolute path to write JSON; omit to return body only |
+| `mode` / `expand_frame_hits` / `pad_*` | Used when expanding raw items (usually hits are already enriched from search) |
+
+Or pass explicit `items` (same shape as manifest rows). Response:
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "manifest": { "version": 1, "project": "...", "items": [ ... ] },
+  "meta": { "item_count": 4, "dedupe": true, "write_path": "..." }
+}
+```
+
+`write_path` is optional — omit to receive JSON only.
+
+### 5.4 Presets (copy into agent config)
 
 **Rough-cut material pass (recommended starting point)**
 
@@ -340,24 +517,25 @@ Keep **1–2** hits per script beat.
 {
   "top_k": 8,
   "mode": "frame",
-  "min_score": null
+  "min_score": null,
+  "expand_frame_hits": true
 }
 ```
 
-Apply §4.1 padding before any cut/export.
+Server pads frame points by default; set `expand_frame_hits: false` only if you pad manually (§4.1).
 
-### 5.3 Planned follow-ups (v1.1+, fields frozen in §0)
+### 5.5 Planned follow-ups (v1.1+)
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/v1/export/manifest` | Write `cuts.json` from hit list |
 | `POST /api/v1/export/clip` | FFmpeg subclip (side effect — gate carefully) |
 
 ---
 
-## 6. `cuts.json` Manifest (Agent → FFmpeg)
+## 6. `cuts.json` Manifest (shape reference)
 
-When the HTTP export endpoint does not exist yet, agents should write this file themselves after search.
+**Preferred:** `POST /api/v1/export/manifest` (§5.3) after search/batch.  
+**Fallback:** build the same JSON yourself if the API is unavailable.
 
 ```json
 {
@@ -393,20 +571,18 @@ On Windows, quote paths with spaces. Use re-encode if `-c copy` breaks on non-ke
 ```text
 You are a rough-cut assistant using VideoSeek on the user's PC.
 
-VideoSeek finds video shots by VISUAL meaning, not dialogue. Before every search:
-1. Rewrite each script beat into a short visual query (objects, action, framing).
-2. Never search literal dialogue or abstract plot summaries.
-3. Call GET http://127.0.0.1:8765/api/v1/health; if index_ready is false, stop and ask the user to sync the library.
-4. Remember health.ffmpeg.ffmpeg_path for clipping; never guess ffmpeg location on disk.
-5. Call POST http://127.0.0.1:8765/api/v1/search with query_type=text.
-6. Use mode=chunk, top_k=5 for rough material; keep 1-2 hits per beat.
-7. Tag each hit with the query string used.
-8. If mode=frame and start_sec equals end_sec, pad about 3s before and after.
-9. Dedupe overlapping hits from the same file.
-10. Output cuts.json; to render clips use health.ffmpeg.ffmpeg_path with -ss/-to (not bare "ffmpeg").
+VideoSeek finds video shots by VISUAL meaning, not dialogue.
+Default pipeline:
+1. Rewrite each script beat into a short visual query (§3). Never search literal dialogue.
+2. GET http://127.0.0.1:8765/api/v1/health — stop if index_ready is false; save ffmpeg.ffmpeg_path.
+3. POST /api/v1/search or /search/batch with expand_frame_hits=true, mode=chunk, top_k=5; add scope.video_paths when working on one film.
+4. POST /api/v1/export/manifest with sources=<results>, dedupe=true, keep_per_source=2 (optional write_path).
+5. To render clips, use health.ffmpeg.ffmpeg_path with -ss/-to from manifest items (never bare "ffmpeg").
 
-If search returns empty hits, rephrase visually (synonyms, simpler nouns) at most twice.
-Do not rebuild indexes or change VideoSeek settings unless the user explicitly asks.
+Do not manually pad frame hits unless expand_frame_hits=false.
+Do not rebuild indexes or change VideoSeek settings unless the user asks.
+If search returns empty hits, rephrase visually at most twice.
+Run API calls in the user's local terminal when the IDE cannot reach 127.0.0.1:8765.
 ```
 
 ---
@@ -435,12 +611,12 @@ Before batch searching:
 
 ## 9. Safety Scope (Why This Is Low Risk)
 
-v1 agent integration should expose **search only**:
+v1 Agent API is designed for **orchestration, not library administration**:
 
-- No file deletion
-- No index rebuild
-- No writes to `config.json`
-- Worst case: irrelevant search results — same as typing a bad query in the UI
+- No file deletion, no index rebuild, no writes to `config.json`
+- Search reads the existing index only
+- **`export/manifest` may write one JSON file** when you explicitly set `write_path` (cuts list, not source media)
+- Worst case from search: irrelevant hits — same as a bad query in the GUI
 
 ---
 
@@ -452,6 +628,8 @@ v1 agent integration should expose **search only**:
 | GUI lifecycle | `ui/controllers/agent_api_controller.py` → start after startup |
 | Search | `src/services/search_service.py` → `run_search(..., search_mode=...)` / `run_chunk_search` |
 | Hit shape | `src/domain/search_hit.py` → `SearchHit` → JSON in `_hits_to_payload` |
+| Enriched hit fields | `src/web/agent_api.py` → `_enrich_hit_payload` (time range, paths, scores on each hit) |
+| `POST /export/manifest` | `src/web/agent_api.py` → `execute_export_manifest` |
 
 ---
 
@@ -461,3 +639,6 @@ v1 agent integration should expose **search only**:
 |------|--------|
 | 2026-05-25 | Initial agent guide |
 | 2026-05-25 | v1 API shipped (`health` + `search`); §0 draft protocol notes |
+| 2026-05-25 | P0: scope filter, enriched hits, `export/manifest` |
+| 2026-05-25 | Doc sync: Status, §4–§9, batch/manifest params, screenshot workflow |
+| 2026-05-25 | §5 numbering, `/health` contract fields, manifest `sources` note, §10 mapping |

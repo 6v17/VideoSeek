@@ -1,13 +1,18 @@
+import os
 import unittest
 from unittest.mock import patch
 
 from src.domain.search_hit import SearchHit
 from src.web.agent_api import (
+    AgentBatchSearchRequest,
     AgentSearchRequest,
+    _hits_to_payload,
     api_error_payload,
     build_health_payload,
+    execute_agent_batch_search,
     execute_agent_search,
     _clamp_top_k,
+    _expand_image_folder,
     _filter_hits,
     _hits_to_payload,
 )
@@ -22,7 +27,11 @@ class AgentApiHelperTests(unittest.TestCase):
 
     def test_hits_to_payload_stable_fields(self):
         payload = _hits_to_payload(
-            [SearchHit(1.0, 2.0, 0.9, "D:/a.mp4"), SearchHit(3.0, 3.0, 0.5, "D:/b.mp4")]
+            [SearchHit(1.0, 2.0, 0.9, "D:/a.mp4"), SearchHit(3.0, 3.0, 0.5, "D:/b.mp4")],
+            mode="chunk",
+            expand_frame_hits=False,
+            pad_before_sec=3.0,
+            pad_after_sec=3.0,
         )
         self.assertEqual(payload[0]["rank"], 1)
         self.assertEqual(payload[0]["start_sec"], 1.0)
@@ -128,6 +137,51 @@ class AgentApiHealthTests(unittest.TestCase):
         self.assertTrue(payload["capabilities"]["chunk_search"])
         self.assertTrue(payload["capabilities"]["local_ffmpeg_clip"])
         self.assertEqual(payload["ffmpeg"]["ffmpeg_path"], "D:/VideoSeek/bin/ffmpeg.exe")
+
+
+class AgentApiBatchTests(unittest.TestCase):
+    @patch("src.web.agent_api.execute_agent_search")
+    @patch("src.web.agent_api._index_snapshot")
+    def test_execute_agent_batch_search_mixed(self, mock_snapshot, mock_search):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_search.side_effect = [
+            {
+                "api_version": "1",
+                "ok": True,
+                "query": "D:/a.png",
+                "query_type": "image_path",
+                "mode": "chunk",
+                "client_request_id": "a",
+                "hits": [],
+                "meta": {},
+            },
+            ValueError("bad"),
+        ]
+        body = AgentBatchSearchRequest(
+            queries=[
+                AgentSearchRequest(query="D:/a.png", query_type="image_path", client_request_id="a"),
+                AgentSearchRequest(query="bad", query_type="text", client_request_id="b"),
+            ],
+            mode="chunk",
+            continue_on_error=True,
+        )
+        payload = execute_agent_batch_search(body)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["meta"]["succeeded"], 1)
+        self.assertEqual(payload["meta"]["failed"], 1)
+        self.assertEqual(len(payload["results"]), 2)
+
+    def test_expand_image_folder_sorted(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            open(os.path.join(tmp, "b.png"), "wb").close()
+            open(os.path.join(tmp, "a.jpg"), "wb").close()
+            open(os.path.join(tmp, "skip.txt"), "w", encoding="utf-8").close()
+            items = _expand_image_folder(tmp)
+            self.assertEqual(len(items), 2)
+            self.assertEqual(items[0].client_request_id, "a.jpg")
+            self.assertEqual(items[1].client_request_id, "b.png")
 
 
 if __name__ == "__main__":

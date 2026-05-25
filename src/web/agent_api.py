@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import threading
 import time
@@ -37,9 +38,21 @@ API_VERSION = "1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 SEARCH_TIMEOUT_SEC = 120.0
+BATCH_TIMEOUT_SEC = 600.0
 MAX_CONCURRENT_SEARCHES = 2
+MAX_BATCH_QUERIES = 64
+_BATCH_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+
+DEFAULT_FRAME_PAD_BEFORE_SEC = 3.0
+DEFAULT_FRAME_PAD_AFTER_SEC = 3.0
 
 _search_semaphore = threading.Semaphore(MAX_CONCURRENT_SEARCHES)
+_duration_cache: Dict[str, Optional[float]] = {}
+_duration_cache_lock = threading.Lock()
+
+
+class AgentSearchScope(BaseModel):
+    video_paths: Optional[List[str]] = None
 
 
 class AgentSearchRequest(BaseModel):
@@ -49,6 +62,50 @@ class AgentSearchRequest(BaseModel):
     mode: Optional[str] = None
     min_score: Optional[float] = None
     client_request_id: Optional[str] = None
+    scope: Optional[AgentSearchScope] = None
+    expand_frame_hits: bool = True
+    pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
+    pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+
+
+class AgentBatchSearchRequest(BaseModel):
+    """Batch search: explicit queries and/or all images under image_folder."""
+
+    queries: List[AgentSearchRequest] = Field(default_factory=list)
+    image_folder: Optional[str] = None
+    top_k: Optional[int] = None
+    mode: Optional[str] = None
+    min_score: Optional[float] = None
+    continue_on_error: bool = True
+    scope: Optional[AgentSearchScope] = None
+    expand_frame_hits: bool = True
+    pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
+    pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+
+
+class AgentManifestItem(BaseModel):
+    id: Optional[str] = None
+    query: Optional[str] = None
+    client_request_id: Optional[str] = None
+    video_path: str
+    start_sec: float
+    end_sec: float
+    score: Optional[float] = None
+    rank: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class AgentManifestRequest(BaseModel):
+    project: str = "rough-cut"
+    items: Optional[List[AgentManifestItem]] = None
+    sources: Optional[List[Dict[str, Any]]] = None
+    keep_per_source: int = Field(default=2, ge=1, le=50)
+    dedupe: bool = True
+    write_path: Optional[str] = None
+    expand_frame_hits: bool = True
+    pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
+    pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+    mode: Optional[str] = None
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
@@ -133,9 +190,10 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "image_search": True,
         "frame_search": bool(snapshot.get("frame_index_ready")),
         "chunk_search": bool(snapshot.get("chunk_index_ready")),
-        "export_manifest": False,
+        "export_manifest": True,
         "export_clip": False,
         "local_ffmpeg_clip": bool(ffmpeg_info.get("ffmpeg_available")),
+        "batch_search": True,
     }
 
 
@@ -195,6 +253,287 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "chunk_vector_count": snapshot["chunk_vector_count"],
         "max_concurrent_searches": MAX_CONCURRENT_SEARCHES,
         "search_timeout_sec": SEARCH_TIMEOUT_SEC,
+        "max_batch_queries": MAX_BATCH_QUERIES,
+        "batch_timeout_sec": BATCH_TIMEOUT_SEC,
+    }
+
+
+def _normalize_agent_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip()))))
+
+
+def _scope_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[str]]:
+    if scope is None or not scope.video_paths:
+        return None
+    normalized = {_normalize_agent_path(item) for item in scope.video_paths if str(item or "").strip()}
+    return normalized or None
+
+
+def _filter_hits_by_scope(hits: List[SearchHit], scope: Optional[AgentSearchScope]) -> List[SearchHit]:
+    allowed = _scope_path_set(scope)
+    if not allowed:
+        return hits
+    filtered = []
+    for hit in hits:
+        if _normalize_agent_path(hit.video_path) in allowed:
+            filtered.append(hit)
+    return filtered
+
+
+def _resolve_fetch_top_k(top_k: int, scope: Optional[AgentSearchScope]) -> int:
+    if _scope_path_set(scope):
+        return min(200, max(top_k * 5, top_k + 10))
+    return top_k
+
+
+def _get_video_duration_cached(video_path: str) -> Optional[float]:
+    key = _normalize_agent_path(video_path)
+    with _duration_cache_lock:
+        if key in _duration_cache:
+            return _duration_cache[key]
+    duration = None
+    try:
+        from src.utils import get_video_duration_seconds
+
+        raw = get_video_duration_seconds(video_path)
+        if raw is not None:
+            duration = float(raw)
+            if duration <= 0:
+                duration = None
+    except Exception:
+        duration = None
+    with _duration_cache_lock:
+        _duration_cache[key] = duration
+    return duration
+
+
+def _format_timecode(seconds: float) -> str:
+    total = max(0.0, float(seconds))
+    hours = int(total // 3600)
+    minutes = int((total % 3600) // 60)
+    secs = int(total % 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _is_frame_point_hit(start_sec: float, end_sec: float) -> bool:
+    return abs(float(end_sec) - float(start_sec)) < 0.01
+
+
+def _expand_clip_window(
+    start_sec: float,
+    end_sec: float,
+    *,
+    mode: str,
+    expand_frame_hits: bool,
+    pad_before_sec: float,
+    pad_after_sec: float,
+    video_path: str,
+) -> Dict[str, Any]:
+    raw_start = float(start_sec)
+    raw_end = float(end_sec)
+    clip_start = raw_start
+    clip_end = raw_end
+    padding_applied = False
+
+    if expand_frame_hits and mode == "frame" and _is_frame_point_hit(raw_start, raw_end):
+        clip_start = max(0.0, raw_start - float(pad_before_sec))
+        clip_end = raw_end + float(pad_after_sec)
+        padding_applied = True
+
+    duration = _get_video_duration_cached(video_path)
+    if duration is not None:
+        clip_start = max(0.0, min(clip_start, duration))
+        clip_end = max(clip_start, min(clip_end, duration))
+
+    return {
+        "start_sec": clip_start,
+        "end_sec": clip_end,
+        "raw_start_sec": raw_start,
+        "raw_end_sec": raw_end,
+        "padding_applied": padding_applied,
+    }
+
+
+def _enrich_hit_payload(
+    hit: SearchHit,
+    *,
+    rank: int,
+    mode: str,
+    expand_frame_hits: bool,
+    pad_before_sec: float,
+    pad_after_sec: float,
+) -> Dict[str, Any]:
+    window = _expand_clip_window(
+        hit.start_sec,
+        hit.end_sec,
+        mode=mode,
+        expand_frame_hits=expand_frame_hits,
+        pad_before_sec=pad_before_sec,
+        pad_after_sec=pad_after_sec,
+        video_path=str(hit.video_path),
+    )
+    start_sec = float(window["start_sec"])
+    end_sec = float(window["end_sec"])
+    duration = _get_video_duration_cached(str(hit.video_path))
+    payload = {
+        "rank": rank,
+        "video_path": str(hit.video_path),
+        "start_sec": start_sec,
+        "end_sec": end_sec,
+        "score": float(hit.score),
+        "duration_sec": max(0.0, end_sec - start_sec),
+        "start_timecode": _format_timecode(start_sec),
+        "end_timecode": _format_timecode(end_sec),
+        "clip_window": {
+            "start_sec": start_sec,
+            "end_sec": end_sec,
+            "padding_applied": bool(window["padding_applied"]),
+            "raw_start_sec": float(window["raw_start_sec"]),
+            "raw_end_sec": float(window["raw_end_sec"]),
+        },
+    }
+    if duration is not None:
+        payload["video_duration_sec"] = duration
+    return payload
+
+
+def _hits_to_payload(
+    hits: List[SearchHit],
+    *,
+    mode: str,
+    expand_frame_hits: bool,
+    pad_before_sec: float,
+    pad_after_sec: float,
+) -> List[Dict[str, Any]]:
+    return [
+        _enrich_hit_payload(
+            hit,
+            rank=rank,
+            mode=mode,
+            expand_frame_hits=expand_frame_hits,
+            pad_before_sec=pad_before_sec,
+            pad_after_sec=pad_after_sec,
+        )
+        for rank, hit in enumerate(hits, start=1)
+    ]
+
+
+def _interval_overlap_ratio(start_a, end_a, start_b, end_b) -> float:
+    left = max(float(start_a), float(start_b))
+    right = min(float(end_a), float(end_b))
+    overlap = max(0.0, right - left)
+    shorter = max(1e-6, min(float(end_a) - float(start_a), float(end_b) - float(start_b)))
+    return overlap / shorter
+
+
+def _should_deduplicate(item_a: Dict[str, Any], item_b: Dict[str, Any], *, mode: str) -> bool:
+    if _normalize_agent_path(item_a.get("video_path", "")) != _normalize_agent_path(item_b.get("video_path", "")):
+        return False
+    if _interval_overlap_ratio(item_a["start_sec"], item_a["end_sec"], item_b["start_sec"], item_b["end_sec"]) > 0.5:
+        return True
+    if mode == "frame" and abs(float(item_a["start_sec"]) - float(item_b["start_sec"])) <= 2.0:
+        return True
+    return False
+
+
+def _manifest_item_rank(item: Dict[str, Any]) -> int:
+    try:
+        return int(item.get("rank") or 9999)
+    except (TypeError, ValueError):
+        return 9999
+
+
+def dedupe_manifest_items(items: List[Dict[str, Any]], *, mode: str) -> List[Dict[str, Any]]:
+    ordered = sorted(items, key=_manifest_item_rank)
+    kept: List[Dict[str, Any]] = []
+    for candidate in ordered:
+        if any(_should_deduplicate(candidate, existing, mode=mode) for existing in kept):
+            continue
+        kept.append(candidate)
+    return kept
+
+
+def _manifest_items_from_sources(
+    sources: List[Dict[str, Any]],
+    *,
+    keep_per_source: int,
+    mode: Optional[str],
+    expand_frame_hits: bool,
+    pad_before_sec: float,
+    pad_after_sec: float,
+) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for block in sources:
+        if not block.get("ok", True) and block.get("error"):
+            continue
+        block_mode = str(block.get("mode") or mode or "chunk")
+        query = str(block.get("query") or "")
+        client_request_id = block.get("client_request_id")
+        hits = sorted(block.get("hits") or [], key=lambda row: row.get("rank", 999))
+        for hit in hits[:keep_per_source]:
+            stem = str(client_request_id or query or "item")
+            item_id = f"{stem}-rank-{hit.get('rank', 1)}"
+            items.append(
+                {
+                    "id": item_id,
+                    "query": query,
+                    "client_request_id": client_request_id,
+                    "video_path": hit["video_path"],
+                    "start_sec": float(hit["start_sec"]),
+                    "end_sec": float(hit["end_sec"]),
+                    "score": hit.get("score"),
+                    "rank": hit.get("rank"),
+                    "duration_sec": hit.get("duration_sec", max(0.0, float(hit["end_sec"]) - float(hit["start_sec"]))),
+                    "start_timecode": hit.get("start_timecode") or _format_timecode(hit["start_sec"]),
+                    "end_timecode": hit.get("end_timecode") or _format_timecode(hit["end_sec"]),
+                    "clip_window": hit.get("clip_window"),
+                    "video_duration_sec": hit.get("video_duration_sec"),
+                    "notes": f"source_query={query}" if query else "",
+                }
+            )
+    return items
+
+
+def execute_export_manifest(body: AgentManifestRequest) -> Dict[str, Any]:
+    mode = _normalize_mode(body.mode) if body.mode else "chunk"
+    if body.items:
+        raw_items = [item.model_dump() for item in body.items]
+    elif body.sources:
+        raw_items = _manifest_items_from_sources(
+            body.sources,
+            keep_per_source=body.keep_per_source,
+            mode=body.mode,
+            expand_frame_hits=body.expand_frame_hits,
+            pad_before_sec=body.pad_before_sec,
+            pad_after_sec=body.pad_after_sec,
+        )
+    else:
+        raise ValueError("Provide items or sources.")
+
+    if not raw_items:
+        raise ValueError("Manifest has no clip items.")
+
+    deduped = dedupe_manifest_items(raw_items, mode=mode) if body.dedupe else list(raw_items)
+    manifest = {"version": 1, "project": body.project, "items": deduped}
+    written_path = None
+    if body.write_path:
+        target = os.path.normpath(os.path.abspath(os.path.expanduser(str(body.write_path).strip())))
+        parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, ensure_ascii=False, indent=2)
+        written_path = target
+
+    return {
+        "api_version": API_VERSION,
+        "ok": True,
+        "manifest": manifest,
+        "meta": {
+            "item_count": len(deduped),
+            "dedupe": bool(body.dedupe),
+            "write_path": written_path,
+        },
     }
 
 
@@ -208,21 +547,6 @@ def _filter_hits(hits: List[SearchHit], min_score: Optional[float]) -> List[Sear
     return [hit for hit in hits if float(hit.score) >= threshold]
 
 
-def _hits_to_payload(hits: List[SearchHit]) -> List[Dict[str, Any]]:
-    payload = []
-    for rank, hit in enumerate(hits, start=1):
-        payload.append(
-            {
-                "rank": rank,
-                "video_path": str(hit.video_path),
-                "start_sec": float(hit.start_sec),
-                "end_sec": float(hit.end_sec),
-                "score": float(hit.score),
-            }
-        )
-    return payload
-
-
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     query_type = str(body.query_type or "text").strip().lower()
     if query_type not in {"text", "image_path"}:
@@ -234,6 +558,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
 
     mode = _normalize_mode(body.mode)
     top_k = _clamp_top_k(body.top_k)
+    fetch_k = _resolve_fetch_top_k(top_k, body.scope)
     snapshot = _index_snapshot(mode)
     if not snapshot["index_ready"]:
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
@@ -244,11 +569,13 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
 
     with _search_semaphore:
         if mode == "chunk":
-            hits = run_chunk_search(query, is_text=is_text, top_k=top_k)
+            hits = run_chunk_search(query, is_text=is_text, top_k=fetch_k)
         else:
-            hits = run_search(query, is_text=is_text, top_k=top_k, search_mode="frame")
+            hits = run_search(query, is_text=is_text, top_k=fetch_k, search_mode="frame")
 
     hits = _filter_hits(hits, body.min_score)
+    hits = _filter_hits_by_scope(hits, body.scope)
+    hits = hits[:top_k]
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -256,12 +583,132 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
         "query_type": query_type,
         "mode": mode,
         "client_request_id": body.client_request_id,
-        "hits": _hits_to_payload(hits),
+        "hits": _hits_to_payload(
+            hits,
+            mode=mode,
+            expand_frame_hits=bool(body.expand_frame_hits),
+            pad_before_sec=float(body.pad_before_sec),
+            pad_after_sec=float(body.pad_after_sec),
+        ),
         "meta": {
             "returned": len(hits),
             "top_k": top_k,
+            "fetch_top_k": fetch_k,
             "index_ready": True,
             "global_index_state": snapshot["global_index_state"],
+            "scope_applied": bool(_scope_path_set(body.scope)),
+        },
+    }
+
+
+def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchRequest) -> AgentSearchRequest:
+    return AgentSearchRequest(
+        query=item.query,
+        query_type=item.query_type,
+        top_k=item.top_k if item.top_k is not None else batch.top_k,
+        mode=item.mode if item.mode is not None else batch.mode,
+        min_score=item.min_score if item.min_score is not None else batch.min_score,
+        client_request_id=item.client_request_id,
+        scope=item.scope if item.scope is not None else batch.scope,
+        expand_frame_hits=batch.expand_frame_hits,
+        pad_before_sec=batch.pad_before_sec,
+        pad_after_sec=batch.pad_after_sec,
+    )
+
+
+def _expand_image_folder(folder: str) -> List[AgentSearchRequest]:
+    normalized = os.path.normpath(os.path.abspath(os.path.expanduser(str(folder).strip())))
+    if not os.path.isdir(normalized):
+        raise ValueError(f"image_folder is not a directory: {folder}")
+
+    items = []
+    for name in sorted(os.listdir(normalized)):
+        path = os.path.join(normalized, name)
+        if not os.path.isfile(path):
+            continue
+        if os.path.splitext(name)[1].lower() not in _BATCH_IMAGE_EXTENSIONS:
+            continue
+        items.append(
+            AgentSearchRequest(
+                query=path,
+                query_type="image_path",
+                client_request_id=name,
+            )
+        )
+    return items
+
+
+def _resolve_batch_queries(body: AgentBatchSearchRequest) -> List[AgentSearchRequest]:
+    expanded = list(body.queries or [])
+    if body.image_folder:
+        expanded.extend(_expand_image_folder(body.image_folder))
+    if not expanded:
+        raise ValueError("Provide at least one entry in queries or a non-empty image_folder.")
+    if len(expanded) > MAX_BATCH_QUERIES:
+        raise ValueError(f"Batch size exceeds limit ({MAX_BATCH_QUERIES}).")
+    return [_merge_search_request(item, body) for item in expanded]
+
+
+def _batch_item_error(
+    item: AgentSearchRequest,
+    code: str,
+    message: str,
+    *,
+    query_type: Optional[str] = None,
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "client_request_id": item.client_request_id,
+        "query": item.query,
+        "query_type": query_type or item.query_type,
+        "mode": mode,
+        "hits": [],
+        "error": {"code": code, "message": message},
+    }
+
+
+def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
+    queries = _resolve_batch_queries(body)
+    default_mode = _normalize_mode(body.mode)
+    snapshot = _index_snapshot(default_mode)
+    if not snapshot["index_ready"]:
+        raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
+
+    results = []
+    succeeded = 0
+    failed = 0
+    for item in queries:
+        try:
+            payload = execute_agent_search(item)
+            payload["ok"] = True
+            results.append(payload)
+            succeeded += 1
+        except ValueError as exc:
+            failed += 1
+            entry = _batch_item_error(item, "invalid_request", str(exc))
+            results.append(entry)
+            if not body.continue_on_error:
+                break
+        except Exception as exc:
+            failed += 1
+            entry = _batch_item_error(item, "query_failed", str(exc))
+            results.append(entry)
+            if not body.continue_on_error:
+                break
+
+    return {
+        "api_version": API_VERSION,
+        "ok": failed == 0,
+        "results": results,
+        "meta": {
+            "total": len(queries),
+            "processed": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "index_ready": True,
+            "global_index_state": snapshot["global_index_state"],
+            "continue_on_error": bool(body.continue_on_error),
         },
     }
 
@@ -285,6 +732,8 @@ class AgentApiService:
         self._register_exception_handlers()
         self.app.get("/api/v1/health")(self._health)
         self.app.post("/api/v1/search")(self._search)
+        self.app.post("/api/v1/search/batch")(self._search_batch)
+        self.app.post("/api/v1/export/manifest")(self._export_manifest)
 
     def _register_exception_handlers(self):
         from fastapi.exceptions import RequestValidationError
@@ -394,6 +843,48 @@ class AgentApiService:
             raise_api_error(422, "query_failed", str(exc))
         except Exception as exc:
             logger.exception("Agent search failed.")
+            raise_api_error(422, "query_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
+    async def _search_batch(self, body: AgentBatchSearchRequest):
+        started = time.perf_counter()
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(execute_agent_batch_search, body),
+                timeout=BATCH_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            raise_api_error(
+                503,
+                "engine_busy",
+                f"Batch search timed out after {int(BATCH_TIMEOUT_SEC)} seconds.",
+            )
+        except IndexNotReadyError as exc:
+            raise_api_error(409, "index_not_ready", str(exc))
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent batch search failed.")
+            raise_api_error(422, "query_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
+    async def _export_manifest(self, body: AgentManifestRequest):
+        started = time.perf_counter()
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(execute_export_manifest, body),
+                timeout=30.0,
+            )
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent manifest export failed.")
             raise_api_error(422, "query_failed", str(exc))
 
         payload.setdefault("meta", {})
