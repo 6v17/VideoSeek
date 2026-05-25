@@ -123,6 +123,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_min_chunk_size.setRange(1, 50)
         self.input_chunk_similarity_mode = NoWheelComboBox()
         self.input_prefer_gpu = NoWheelComboBox()
+        self.input_experimental_hw_decode = NoWheelComboBox()
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
         self.input_auto_cleanup_missing_files = NoWheelComboBox()
         self.input_close_window_action = NoWheelComboBox()
@@ -160,6 +161,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_min_chunk_size = ClickableLabel()
         self.label_chunk_similarity_mode = ClickableLabel()
         self.label_prefer_gpu = ClickableLabel()
+        self.label_experimental_hw_decode = ClickableLabel()
         self.label_gpu_probe_unknown_keep_gpu = ClickableLabel()
         self.label_auto_cleanup_missing_files = ClickableLabel()
         self.label_close_window_action = ClickableLabel()
@@ -190,6 +192,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_min_chunk_size = QLabel()
         self.hint_chunk_similarity_mode = QLabel()
         self.hint_prefer_gpu = QLabel()
+        self.hint_experimental_hw_decode = QLabel()
         self.hint_gpu_probe_unknown_keep_gpu = QLabel()
         self.hint_auto_cleanup_missing_files = QLabel()
         self.hint_close_window_action = QLabel()
@@ -233,6 +236,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_experimental_hw_decode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_close_window_action, width=COMPONENT_SIZES["settings_input_width"] + 36)
@@ -405,13 +409,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(
             self.section_model_gpu_form,
             1,
+            self.label_experimental_hw_decode,
+            self.input_experimental_hw_decode,
+            self.hint_experimental_hw_decode,
+        )
+        self._add_setting_row(
+            self.section_model_gpu_form,
+            2,
             self.label_gpu_probe_unknown_keep_gpu,
             self.input_gpu_probe_unknown_keep_gpu,
             self.hint_gpu_probe_unknown_keep_gpu,
         )
         self._add_setting_row(
             self.section_model_gpu_form,
-            2,
+            3,
             self.label_active_model_profile,
             self.input_active_model_profile_bundle,
             self.hint_active_model_profile,
@@ -646,6 +657,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
         self.label_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
+        self.label_experimental_hw_decode.setText(texts["setting_experimental_hw_decode"])
         self.label_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu"])
         self.label_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files"])
         self.label_close_window_action.setText(texts["setting_close_window_action"])
@@ -668,6 +680,14 @@ class SettingsPage(QWidget, SettingsFormMixin):
         restore_index = self.input_prefer_gpu.findData(current_prefer_gpu)
         self.input_prefer_gpu.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_prefer_gpu.blockSignals(False)
+        current_experimental_hw_decode = self.input_experimental_hw_decode.currentData()
+        self.input_experimental_hw_decode.blockSignals(True)
+        self.input_experimental_hw_decode.clear()
+        self.input_experimental_hw_decode.addItem(texts["setting_experimental_hw_decode_option_off"], False)
+        self.input_experimental_hw_decode.addItem(texts["setting_experimental_hw_decode_option_on"], True)
+        restore_hw_index = self.input_experimental_hw_decode.findData(current_experimental_hw_decode)
+        self.input_experimental_hw_decode.setCurrentIndex(0 if restore_hw_index < 0 else restore_hw_index)
+        self.input_experimental_hw_decode.blockSignals(False)
         current_gpu_probe_unknown_keep_gpu = self.input_gpu_probe_unknown_keep_gpu.currentData()
         self.input_gpu_probe_unknown_keep_gpu.blockSignals(True)
         self.input_gpu_probe_unknown_keep_gpu.clear()
@@ -742,6 +762,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
         self.hint_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
+        self.hint_experimental_hw_decode.setText(texts["setting_experimental_hw_decode_hint"])
         self.hint_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu_hint"])
         self.hint_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files_hint"])
         self.hint_close_window_action.setText(texts["setting_close_window_action_hint"])
@@ -788,6 +809,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_min_chunk_size,
             self.label_chunk_similarity_mode,
             self.label_prefer_gpu,
+            self.label_experimental_hw_decode,
             self.label_gpu_probe_unknown_keep_gpu,
             self.label_auto_cleanup_missing_files,
             self.label_close_window_action,

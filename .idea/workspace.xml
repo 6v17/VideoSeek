@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除远古旧版本迁移代码">
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -373,18 +373,17 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/faiss_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/faiss_index.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/extract_frames.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_extract_frames.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_extract_frames.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/settings/page.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/settings/page.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_runtime.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_startup_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_startup_migration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_tray.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_tray.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -398,7 +397,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="174" />
+    <option name="cachedIndexableFilesCount" value="178" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -733,14 +732,8 @@
       <workItem from="1779187402232" duration="3307000" />
       <workItem from="1779351619985" duration="286000" />
       <workItem from="1779351920894" duration="14236000" />
-    </task>
-    <task id="LOCAL-00034" summary="增加网络搜索功能">
-      <option name="closed" value="true" />
-      <created>1775741403054</created>
-      <option name="number" value="00034" />
-      <option name="presentableId" value="LOCAL-00034" />
-      <option name="project" value="LOCAL" />
-      <updated>1775741403054</updated>
+      <workItem from="1779535894724" duration="313000" />
+      <workItem from="1779668548165" duration="12784000" />
     </task>
     <task id="LOCAL-00035" summary="增加网络搜索功能">
       <option name="closed" value="true" />
@@ -1126,7 +1119,15 @@
       <option name="project" value="LOCAL" />
       <updated>1779188328755</updated>
     </task>
-    <option name="localTasksCounter" value="83" />
+    <task id="LOCAL-00083" summary="移除远古旧版本迁移代码">
+      <option name="closed" value="true" />
+      <created>1779536050161</created>
+      <option name="number" value="00083" />
+      <option name="presentableId" value="LOCAL-00083" />
+      <option name="project" value="LOCAL" />
+      <updated>1779536050161</updated>
+    </task>
+    <option name="localTasksCounter" value="84" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1156,7 +1157,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="外置文件剥离" />
     <MESSAGE value="GPU选择优化" />
     <MESSAGE value="增加网络搜索功能" />
     <MESSAGE value="1.0.5更新优化" />
@@ -1181,7 +1181,8 @@
     <MESSAGE value="局域网HEIC格式图片上传Bug修复" />
     <MESSAGE value="迁移数据非阻塞" />
     <MESSAGE value="更新说明" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新说明" />
+    <MESSAGE value="移除远古旧版本迁移代码" />
+    <option name="LAST_COMMIT_MESSAGE" value="移除远古旧版本迁移代码" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

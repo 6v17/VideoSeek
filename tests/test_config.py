@@ -397,6 +397,7 @@ class ConfigMigrationTests(unittest.TestCase):
                 json.dumps(
                     {
                         "prefer_gpu": "false",
+                        "experimental_hw_decode": "true",
                         "gpu_probe_unknown_keep_gpu": "true",
                         "auto_cleanup_missing_files": "true",
                     },
@@ -410,6 +411,7 @@ class ConfigMigrationTests(unittest.TestCase):
                 loaded = config_module.load_config()
 
             self.assertFalse(loaded["prefer_gpu"])
+            self.assertTrue(loaded["experimental_hw_decode"])
             self.assertTrue(loaded["gpu_probe_unknown_keep_gpu"])
             self.assertTrue(loaded["auto_cleanup_missing_files"])
 

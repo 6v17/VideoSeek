@@ -506,7 +506,15 @@ def get_video_duration_seconds(video_path):
 def get_video_stream_info(video_path):
     ffprobe_path = get_ffprobe_path()
     if not ffprobe_path:
-        return {"width": None, "height": None, "duration": None}
+        return {
+            "width": None,
+            "height": None,
+            "duration": None,
+            "codec_name": "",
+            "pix_fmt": "",
+            "bits_per_raw_sample": None,
+            "profile": "",
+        }
 
     command = [
         ffprobe_path,
@@ -515,7 +523,7 @@ def get_video_stream_info(video_path):
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=width,height:format=duration",
+        "stream=width,height,codec_name,pix_fmt,bits_per_raw_sample,profile:format=duration",
         "-of",
         "json",
         os.fspath(video_path),
@@ -536,7 +544,15 @@ def get_video_stream_info(video_path):
             timeout=10,
         )
         if result.returncode != 0:
-            return {"width": None, "height": None, "duration": None}
+            return {
+                "width": None,
+                "height": None,
+                "duration": None,
+                "codec_name": "",
+                "pix_fmt": "",
+                "bits_per_raw_sample": None,
+                "profile": "",
+            }
 
         payload = json.loads(result.stdout or "{}")
         streams = payload.get("streams") or []
@@ -546,9 +562,21 @@ def get_video_stream_info(video_path):
             "width": _safe_int(stream.get("width")),
             "height": _safe_int(stream.get("height")),
             "duration": _safe_float(format_payload.get("duration")),
+            "codec_name": str(stream.get("codec_name") or "").strip().lower(),
+            "pix_fmt": str(stream.get("pix_fmt") or "").strip().lower(),
+            "bits_per_raw_sample": _safe_int(stream.get("bits_per_raw_sample")),
+            "profile": str(stream.get("profile") or "").strip().lower(),
         }
     except Exception:
-        return {"width": None, "height": None, "duration": None}
+        return {
+            "width": None,
+            "height": None,
+            "duration": None,
+            "codec_name": "",
+            "pix_fmt": "",
+            "bits_per_raw_sample": None,
+            "profile": "",
+        }
 
 
 def has_readable_video_stream(video_path):

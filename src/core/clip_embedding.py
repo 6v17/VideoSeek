@@ -989,6 +989,8 @@ def _run_indexing_frame_reader(
                     break
                 except queue.Full:
                     continue
+    except InterruptedError:
+        logger.info("Indexing frame reader stopped for %s", os.path.basename(video_path))
     except Exception as exc:
         logger.exception("Indexing frame reader failed for %s", video_path)
         reader_error.append(exc)

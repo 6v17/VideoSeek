@@ -66,6 +66,7 @@ DEFAULT_CONFIG = {
     "thumb_width": 130,
     "thumb_height": 75,
     "prefer_gpu": True,
+    "experimental_hw_decode": False,
     "gpu_probe_unknown_keep_gpu": False,
     "embedding_batch_size": 16,
     "close_window_action": "exit",
@@ -326,6 +327,10 @@ def _sanitize_general_settings(config):
     sanitized["prefer_gpu"] = _coerce_bool(
         sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]),
         DEFAULT_CONFIG["prefer_gpu"],
+    )
+    sanitized["experimental_hw_decode"] = _coerce_bool(
+        sanitized.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"]),
+        DEFAULT_CONFIG["experimental_hw_decode"],
     )
     sanitized["gpu_probe_unknown_keep_gpu"] = _coerce_bool(
         sanitized.get("gpu_probe_unknown_keep_gpu", DEFAULT_CONFIG["gpu_probe_unknown_keep_gpu"]),

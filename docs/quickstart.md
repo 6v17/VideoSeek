@@ -110,6 +110,8 @@ Either:
 - Put `ffmpeg.exe` into `%LOCALAPPDATA%\VideoSeek\bin\`
 - Or keep `ffmpeg` accessible from `PATH`
 
+**Experimental hardware decode (Windows):** In Settings → Model/GPU, enable **Experimental: hardware decode (D3D11VA)**. Default is off (CPU decode). When on, indexing tries GPU decode with automatic fallback to CPU; 10-bit HEVC on NVIDIA may use a `p010` filter chain. See **`docs/ai/pipelines.md`** (Pipeline 1) for backend matrix and limits.
+
 ### 3.5 VLC Runtime for In-App Preview
 
 Install `python-vlc` and ensure runtime binaries are available.

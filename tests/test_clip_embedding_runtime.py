@@ -1,6 +1,8 @@
 import os
+import queue
 import re as std_re
 import sys
+import threading
 import types
 import unittest
 from unittest.mock import patch
@@ -453,6 +455,26 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
         self.assertEqual(batch_lengths, [2, 2, 1])
         self.assertEqual(len(vectors), 5)
         self.assertEqual(len(ts), 5)
+
+    @patch("src.core.clip_embedding.stream_frames_with_ffmpeg")
+    def test_indexing_frame_reader_user_stop_is_not_recorded_as_failure(self, mock_stream):
+        import src.core.clip_embedding as clip_embedding
+
+        mock_stream.side_effect = InterruptedError("Frame extraction stopped")
+        frame_queue = queue.Queue()
+        stop_event = threading.Event()
+        reader_error = []
+
+        clip_embedding._run_indexing_frame_reader(
+            "D:/v.mp4",
+            frame_queue,
+            stop_event,
+            reader_error,
+            {},
+        )
+
+        self.assertEqual(reader_error, [])
+        self.assertIsNone(frame_queue.get(timeout=1.0))
 
 
 if __name__ == "__main__":

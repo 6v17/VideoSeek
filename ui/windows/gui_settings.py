@@ -119,6 +119,10 @@ class SettingsGuiMixin:
         )
         prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
         self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
+        experimental_hw_decode = bool(
+            config.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"])
+        )
+        self.settings_page.input_experimental_hw_decode.setCurrentIndex(1 if experimental_hw_decode else 0)
         gpu_probe_unknown_keep_gpu = bool(
             config.get("gpu_probe_unknown_keep_gpu", DEFAULT_CONFIG["gpu_probe_unknown_keep_gpu"])
         )
@@ -165,6 +169,7 @@ class SettingsGuiMixin:
             self.settings_page.input_min_chunk_size,
             self.settings_page.input_chunk_similarity_mode,
             self.settings_page.input_prefer_gpu,
+            self.settings_page.input_experimental_hw_decode,
             self.settings_page.input_gpu_probe_unknown_keep_gpu,
             self.settings_page.input_auto_cleanup_missing_files,
             self.settings_page.input_close_window_action,
@@ -340,6 +345,9 @@ class SettingsGuiMixin:
             config["min_chunk_size"] = new_min_chunk_size
             config["chunk_similarity_mode"] = new_chunk_similarity_mode
             config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
+            config["experimental_hw_decode"] = bool(
+                self.settings_page.input_experimental_hw_decode.currentData()
+            )
             config["gpu_probe_unknown_keep_gpu"] = bool(
                 self.settings_page.input_gpu_probe_unknown_keep_gpu.currentData()
             )

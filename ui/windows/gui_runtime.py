@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 from src.app.app_meta import get_app_meta
 from src.app.config import get_configured_data_root, load_config
 from src.core.clip_embedding import get_engine_runtime_status
+from src.core.extract_frames import get_frame_decode_status
 from src.utils import get_configured_model_dir, get_ffmpeg_status_text, open_folder_in_explorer
 from ui.dialogs import AppMessageDialog
 from ui.widgets.styles import set_runtime_banner_warn
@@ -90,6 +91,14 @@ class RuntimeGuiMixin:
         lines.append(f"Backend: {backend}")
         lines.append(f"Initialized: {bool(status.get('initialized'))}")
         lines.append(f"Prefer GPU: {bool(status.get('prefer_gpu'))}")
+        decode_status = get_frame_decode_status(load_config())
+        lines.append(
+            self.texts.get("setting_runtime_detail_frame_decode", "Frame decode: requested={requested}, d3d11va available={available}, last={last}").format(
+                requested=bool(decode_status.get("requested")),
+                available=bool(decode_status.get("d3d11va_available")),
+                last=str(decode_status.get("last_backend") or "cpu"),
+            )
+        )
         issue_text = self._build_runtime_issue_summary(status)
         if issue_text:
             lines.append(issue_text)
