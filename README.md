@@ -30,7 +30,7 @@ python main.py
 
 ## Runtime Requirements
 
-- Model files depend on the active model profile (default `clip_onnx`). **Primary workflow:** get the maintainer-built zip from [123 cloud drive (models)](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) and **import it in the app** (same steps as quickstart § 3.1). `src/app/app_meta.py` still holds URLs for **release notes / version / about** and may point **「Go to download」** at the cloud folder; it is **not** assumed that ONNX files are fetched automatically without that zip flow.
+- Model files depend on the **active model profile** (default `clip_onnx`; also supports e.g. `siglip2_onnx`, `chinese_clip_onnx` via imported `model_manifest.json`). **Primary workflow:** get the maintainer-built zip from [123 cloud drive (models)](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) and **import it in the app** (same steps as quickstart § 3.1). `src/app/app_meta.py` still holds URLs for **release notes / version / about** and may point **「Go to download」** at the cloud folder; it is **not** assumed that ONNX files are fetched automatically without that zip flow.
 - Default `clip_onnx` example files:
   - `clip_visual.onnx`
   - `clip_text.onnx`

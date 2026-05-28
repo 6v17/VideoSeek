@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QFileDialog
 from src.app.config import load_config, save_config
 from src.core.clip_embedding import reset_engine
 from src.services.model_package_service import remove_model_profile
-from src.storage.config_store import get_active_model_profile, get_effective_model_dir
+from src.storage.config_store import get_active_model_profile, get_effective_model_dir, resolve_provider_dir
 from src.utils import get_configured_ffmpeg_target_path
 from ui.workers import ModelPackageImportWorker
 
@@ -111,7 +111,7 @@ class ModelPackagesGuiMixin:
             runtime = dict(profile.get("runtime") or {})
             variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
             if provider and variant:
-                provider_dir = "openai-clip" if provider == "clip_onnx" else ("siglip2" if provider == "siglip2_onnx" else provider.replace("_", "-"))
+                provider_dir = resolve_provider_dir(provider)
                 expected_tail = os.path.normcase(os.path.normpath(os.path.join(provider_dir, variant)))
                 if os.path.normcase(model_root).endswith(expected_tail):
                     parent = os.path.dirname(os.path.dirname(model_root))

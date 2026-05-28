@@ -28,9 +28,27 @@ else:
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
-from src.services.library_service import get_global_index_state, list_libraries
+from src.services.search_index_schema import (
+    TARGET_SEARCH_INDEX_SCHEMA_VERSION,
+    get_search_index_schema_version,
+    library_index_is_ready,
+    list_library_search_index_summaries,
+    needs_search_index_upgrade,
+)
 from src.services.search_service import load_chunk_search_assets, load_search_assets, run_chunk_search, run_search
-from src.storage.config_store import get_active_embedding_spec, get_search_mode, get_search_top_k
+from src.services.search_scope import (
+    is_search_scoped,
+    normalize_scope_path,
+    resolve_active_search_library_scope,
+    resolve_fetch_top_k,
+)
+from src.storage.config_store import (
+    get_active_embedding_spec,
+    get_search_mode,
+    get_search_scope_library_paths,
+    get_search_scope_mode,
+    get_search_top_k,
+)
 
 logger = get_logger("agent_api")
 
@@ -53,10 +71,13 @@ _duration_cache_lock = threading.Lock()
 
 class AgentSearchScope(BaseModel):
     video_paths: Optional[List[str]] = None
+    library_paths: Optional[List[str]] = None
+    use_saved_scope: bool = False
 
 
 class AgentSearchRequest(BaseModel):
-    query: str = Field(..., min_length=1)
+    query: Optional[str] = None
+    preset_id: Optional[str] = None
     query_type: str = "text"
     top_k: Optional[int] = None
     mode: Optional[str] = None
@@ -129,6 +150,8 @@ def _clamp_top_k(top_k: Optional[int]) -> int:
 
 
 def _count_library_videos() -> int:
+    from src.services.library_service import list_libraries
+
     total = 0
     for library in list_libraries().values():
         files = library.get("files", {}) if isinstance(library, dict) else {}
@@ -141,10 +164,32 @@ def _index_vector_count(search_index) -> int:
     return int(getattr(search_index, "ntotal", 0) or 0) if search_index is not None else 0
 
 
-def _index_snapshot(mode: str) -> Dict[str, Any]:
-    config = load_config()
-    frame_index, _frame_ts, frame_paths = load_search_assets(config)
-    chunk_index, _chunk_ranges, chunk_paths = load_chunk_search_assets(config)
+def _library_index_snapshot(config=None) -> Dict[str, Any]:
+    from src.storage.asset_store import load_model_metadata
+
+    cfg = config or load_config()
+    meta = load_model_metadata(config=cfg)
+    schema_version = get_search_index_schema_version(meta)
+    summaries = (
+        list_library_search_index_summaries(meta, config=cfg)
+        if schema_version >= TARGET_SEARCH_INDEX_SCHEMA_VERSION
+        else []
+    )
+    ready_count = sum(1 for item in summaries if str(item.get("status", "")).strip().lower() == "ready")
+    stale_count = sum(1 for item in summaries if str(item.get("status", "")).strip().lower() == "stale")
+    return {
+        "search_index_schema_version": schema_version,
+        "library_indexes_upgrade_needed": needs_search_index_upgrade(meta, config=cfg),
+        "library_index_count": len(summaries),
+        "library_indexes_ready": ready_count,
+        "library_indexes_stale": stale_count,
+    }
+
+
+def _index_snapshot(mode: str, config=None) -> Dict[str, Any]:
+    cfg = config or load_config()
+    frame_index, _frame_ts, frame_paths = load_search_assets(cfg)
+    chunk_index, _chunk_ranges, chunk_paths = load_chunk_search_assets(cfg)
 
     if mode == "chunk":
         search_index = chunk_index
@@ -158,9 +203,12 @@ def _index_snapshot(mode: str) -> Dict[str, Any]:
     if video_paths:
         unique_paths = {str(path) for path in video_paths if path}
     index_ready = search_index is not None and vector_count > 0
+    from src.services.library_service import get_global_index_state
+
     global_state = str(get_global_index_state() or "").strip().lower()
     frame_vector_count = _index_vector_count(frame_index)
     chunk_vector_count = _index_vector_count(chunk_index)
+    library_snapshot = _library_index_snapshot(cfg)
     return {
         "index_ready": index_ready,
         "vector_count": vector_count,
@@ -171,6 +219,7 @@ def _index_snapshot(mode: str) -> Dict[str, Any]:
         "chunk_index_ready": chunk_index is not None and chunk_vector_count > 0,
         "frame_vector_count": frame_vector_count,
         "chunk_vector_count": chunk_vector_count,
+        **library_snapshot,
     }
 
 
@@ -194,6 +243,7 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "export_clip": False,
         "local_ffmpeg_clip": bool(ffmpeg_info.get("ffmpeg_available")),
         "batch_search": True,
+        "search_presets": True,
     }
 
 
@@ -251,6 +301,12 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "indexed_video_paths": snapshot["indexed_video_paths"],
         "frame_vector_count": snapshot["frame_vector_count"],
         "chunk_vector_count": snapshot["chunk_vector_count"],
+        "search_index_schema_version": snapshot["search_index_schema_version"],
+        "library_indexes_upgrade_needed": bool(snapshot["library_indexes_upgrade_needed"]),
+        "library_index_count": snapshot["library_index_count"],
+        "library_indexes_ready": snapshot["library_indexes_ready"],
+        "library_indexes_stale": snapshot["library_indexes_stale"],
+        "saved_search_scope_mode": get_search_scope_mode(config),
         "max_concurrent_searches": MAX_CONCURRENT_SEARCHES,
         "search_timeout_sec": SEARCH_TIMEOUT_SEC,
         "max_batch_queries": MAX_BATCH_QUERIES,
@@ -259,31 +315,96 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
 
 
 def _normalize_agent_path(path: str) -> str:
-    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip()))))
+    return normalize_scope_path(path)
 
 
-def _scope_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[str]]:
+def _scope_video_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[str]]:
     if scope is None or not scope.video_paths:
         return None
     normalized = {_normalize_agent_path(item) for item in scope.video_paths if str(item or "").strip()}
     return normalized or None
 
 
-def _filter_hits_by_scope(hits: List[SearchHit], scope: Optional[AgentSearchScope]) -> List[SearchHit]:
-    allowed = _scope_path_set(scope)
-    if not allowed:
-        return hits
-    filtered = []
-    for hit in hits:
-        if _normalize_agent_path(hit.video_path) in allowed:
-            filtered.append(hit)
-    return filtered
+def _scope_library_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[str]]:
+    library_paths = _resolve_scope_library_paths(scope)
+    if not library_paths:
+        return None
+    normalized = {_normalize_agent_path(item) for item in library_paths}
+    return normalized or None
 
 
-def _resolve_fetch_top_k(top_k: int, scope: Optional[AgentSearchScope]) -> int:
-    if _scope_path_set(scope):
-        return min(200, max(top_k * 5, top_k + 10))
-    return top_k
+def _resolve_scope_video_paths(scope: Optional[AgentSearchScope]) -> Optional[List[str]]:
+    if scope is None or not scope.video_paths:
+        return None
+    paths = [str(item).strip() for item in scope.video_paths if str(item or "").strip()]
+    return paths or None
+
+
+def _resolve_scope_library_paths(scope: Optional[AgentSearchScope], config=None) -> Optional[List[str]]:
+    if scope is None:
+        return None
+    explicit = [str(item).strip() for item in (scope.library_paths or []) if str(item or "").strip()]
+    if explicit:
+        return explicit
+    if not bool(getattr(scope, "use_saved_scope", False)):
+        return None
+    cfg = config or load_config()
+    if get_search_scope_mode(cfg) != "selected":
+        return None
+    saved = [str(item).strip() for item in get_search_scope_library_paths(cfg) if str(item or "").strip()]
+    return saved or None
+
+
+def _per_library_indexes_ready(library_paths: Optional[List[str]], config=None) -> bool:
+    if not library_paths:
+        return False
+    from src.storage.asset_store import load_model_metadata
+
+    cfg = config or load_config()
+    meta = load_model_metadata(config=cfg)
+    if get_search_index_schema_version(meta) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
+        return False
+    return all(library_index_is_ready(path, config=cfg) for path in library_paths)
+
+
+def _search_index_ready_for_request(mode: str, scope: Optional[AgentSearchScope], config=None) -> bool:
+    cfg = config or load_config()
+    snapshot = _index_snapshot(mode, config=cfg)
+    scope_library_paths = _resolve_scope_library_paths(scope, config=cfg)
+    scope_video_paths = _resolve_scope_video_paths(scope)
+    if scope_library_paths and not scope_video_paths and _per_library_indexes_ready(scope_library_paths, config=cfg):
+        return True
+    return bool(snapshot["index_ready"])
+
+
+def _resolve_fetch_top_k(top_k: int, scope: Optional[AgentSearchScope], config=None) -> int:
+    cfg = config or load_config()
+    scope_library_paths = _resolve_scope_library_paths(scope, config=cfg)
+    scope_video_paths = _resolve_scope_video_paths(scope)
+    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+    if scoped and scope_library_paths and not scope_video_paths and _per_library_indexes_ready(scope_library_paths, config=cfg):
+        return top_k
+    return resolve_fetch_top_k(top_k, scoped)
+
+
+def _build_scope_meta(scope: Optional[AgentSearchScope], config=None) -> Dict[str, Any]:
+    cfg = config or load_config()
+    scope_library_paths = _resolve_scope_library_paths(scope, config=cfg)
+    scope_video_paths = _resolve_scope_video_paths(scope)
+    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+    uses_per_library = bool(
+        scope_library_paths
+        and not scope_video_paths
+        and _per_library_indexes_ready(scope_library_paths, config=cfg)
+    )
+    return {
+        "scope_applied": scoped,
+        "scope_video_paths": scope_video_paths or [],
+        "scope_library_paths": scope_library_paths or [],
+        "scope_uses_per_library_indexes": uses_per_library,
+        "scope_use_saved_scope": bool(scope and getattr(scope, "use_saved_scope", False)),
+        "saved_search_scope_mode": get_search_scope_mode(cfg),
+    }
 
 
 def _get_video_duration_cached(video_path: str) -> Optional[float]:
@@ -547,40 +668,180 @@ def _filter_hits(hits: List[SearchHit], min_score: Optional[float]) -> List[Sear
     return [hit for hit in hits if float(hit.score) >= threshold]
 
 
-def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
-    query_type = str(body.query_type or "text").strip().lower()
-    if query_type not in {"text", "image_path"}:
-        raise ValueError("query_type must be 'text' or 'image_path'")
+def _preset_to_agent_payload(preset: dict, config=None) -> Dict[str, Any]:
+    from src.services.search_preset_service import describe_preset_content, resolve_preset_ref_paths
 
-    query = str(body.query or "").strip()
-    if not query:
-        raise ValueError("query is required")
+    preset = dict(preset or {})
+    ref_count = len(resolve_preset_ref_paths(preset, config=config))
+    query = str(preset.get("query", "") or "").strip()
+    payload = {
+        "id": str(preset.get("id", "") or "").strip(),
+        "name": str(preset.get("name", "") or "").strip(),
+        "query": query,
+        "reference_image_count": ref_count,
+        "summary": describe_preset_content(preset, config=config),
+    }
+    fusion = preset.get("fusion")
+    if isinstance(fusion, dict):
+        payload["fusion"] = fusion
+    if preset.get("top_k") is not None:
+        payload["top_k"] = preset.get("top_k")
+    if preset.get("min_score") is not None:
+        payload["min_score"] = preset.get("min_score")
+    return payload
 
-    mode = _normalize_mode(body.mode)
-    top_k = _clamp_top_k(body.top_k)
-    fetch_k = _resolve_fetch_top_k(top_k, body.scope)
-    snapshot = _index_snapshot(mode)
-    if not snapshot["index_ready"]:
-        raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
-    is_text = query_type == "text"
-    if not is_text and not os.path.isfile(query):
-        raise ValueError(f"image_path does not exist: {query}")
+def list_agent_search_presets(config=None) -> Dict[str, Any]:
+    from src.services.search_preset_service import list_presets
 
-    with _search_semaphore:
-        if mode == "chunk":
-            hits = run_chunk_search(query, is_text=is_text, top_k=fetch_k)
-        else:
-            hits = run_search(query, is_text=is_text, top_k=fetch_k, search_mode="frame")
-
-    hits = _filter_hits(hits, body.min_score)
-    hits = _filter_hits_by_scope(hits, body.scope)
-    hits = hits[:top_k]
+    cfg = config or load_config()
+    presets = [_preset_to_agent_payload(item, config=cfg) for item in list_presets(config=cfg)]
     return {
         "api_version": API_VERSION,
         "ok": True,
-        "query": query,
+        "presets": presets,
+        "meta": {"count": len(presets)},
+    }
+
+
+def get_agent_search_preset(preset_id: str, config=None) -> Dict[str, Any]:
+    from src.services.search_preset_service import get_preset
+
+    preset_id = str(preset_id or "").strip()
+    if not preset_id:
+        raise ValueError("preset_id is required")
+    cfg = config or load_config()
+    preset = get_preset(preset_id, config=cfg)
+    if preset is None:
+        raise KeyError(f"Preset not found: {preset_id}")
+    return {
+        "api_version": API_VERSION,
+        "ok": True,
+        "preset": _preset_to_agent_payload(preset, config=cfg),
+    }
+
+
+def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[str, Any]:
+    cfg = config or load_config()
+    preset_id = str(body.preset_id or "").strip()
+    query = str(body.query or "").strip()
+    if preset_id and query:
+        raise ValueError("Provide either preset_id or query, not both.")
+    if not preset_id and not query:
+        raise ValueError("Provide preset_id or query.")
+
+    preset = None
+    query_vector = None
+    default_top_k = None
+    default_min_score = None
+
+    if preset_id:
+        from src.services.search_preset_service import build_preset_search_plan
+
+        try:
+            plan = build_preset_search_plan(preset_id, config=cfg)
+        except KeyError as exc:
+            raise ValueError(str(exc)) from exc
+        preset = dict(plan.get("preset") or {})
+        query_vector = plan.get("query_vector")
+        query_data = plan.get("query_data")
+        is_text = bool(plan.get("is_text"))
+        query_label = str(preset.get("name") or preset_id)
+        default_top_k = plan.get("top_k")
+        default_min_score = plan.get("min_score")
+        query_type = "text" if is_text else "image_path"
+    else:
+        query_type = str(body.query_type or "text").strip().lower()
+        if query_type not in {"text", "image_path"}:
+            raise ValueError("query_type must be 'text' or 'image_path'")
+        is_text = query_type == "text"
+        if not is_text and not os.path.isfile(query):
+            raise ValueError(f"image_path does not exist: {query}")
+        query_data = query
+        query_label = query
+        query_type = query_type
+
+    mode = _normalize_mode(body.mode)
+    top_k = _clamp_top_k(body.top_k if body.top_k is not None else default_top_k)
+    min_score = body.min_score if body.min_score is not None else default_min_score
+
+    if preset_id and body.scope is None:
+        scope_library_paths = resolve_active_search_library_scope(config=cfg)
+        scope_video_paths = None
+    else:
+        scope_library_paths = _resolve_scope_library_paths(body.scope, config=cfg)
+        scope_video_paths = _resolve_scope_video_paths(body.scope)
+
+    return {
+        "preset": preset,
+        "preset_id": preset_id or None,
+        "query_label": query_label,
+        "query_data": query_data,
         "query_type": query_type,
+        "is_text": is_text,
+        "query_vector": query_vector,
+        "mode": mode,
+        "top_k": top_k,
+        "min_score": min_score,
+        "scope_library_paths": scope_library_paths,
+        "scope_video_paths": scope_video_paths,
+    }
+
+
+def _scope_for_request_meta(body: AgentSearchRequest, resolved: Dict[str, Any]) -> Optional[AgentSearchScope]:
+    if body.scope is not None:
+        return body.scope
+    if resolved.get("preset_id"):
+        if resolved.get("scope_library_paths"):
+            return AgentSearchScope(library_paths=list(resolved["scope_library_paths"]))
+        return AgentSearchScope(use_saved_scope=True)
+    return None
+
+
+def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
+    config = load_config()
+    resolved = _resolve_agent_search_inputs(body, config=config)
+    mode = resolved["mode"]
+    top_k = resolved["top_k"]
+    scope_video_paths = resolved["scope_video_paths"]
+    scope_library_paths = resolved["scope_library_paths"]
+    fetch_k = _resolve_fetch_top_k(top_k, body.scope, config=config)
+    snapshot = _index_snapshot(mode, config=config)
+    if not _search_index_ready_for_request(mode, _scope_for_request_meta(body, resolved), config=config):
+        if scope_library_paths and snapshot.get("library_indexes_upgrade_needed"):
+            raise IndexNotReadyError(
+                "Per-library search indexes are not ready. Restart VideoSeek and wait for startup data migration to finish."
+            )
+        raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
+
+    with _search_semaphore:
+        if mode == "chunk":
+            hits = run_chunk_search(
+                resolved["query_data"],
+                is_text=bool(resolved["is_text"]),
+                top_k=top_k,
+                scope_video_paths=scope_video_paths,
+                scope_library_paths=scope_library_paths,
+                query_vector=resolved["query_vector"],
+            )
+        else:
+            hits = run_search(
+                resolved["query_data"],
+                is_text=bool(resolved["is_text"]),
+                top_k=top_k,
+                search_mode="frame",
+                scope_video_paths=scope_video_paths,
+                scope_library_paths=scope_library_paths,
+                query_vector=resolved["query_vector"],
+            )
+
+    hits = _filter_hits(hits, resolved["min_score"])
+    scope_meta = _build_scope_meta(_scope_for_request_meta(body, resolved), config=config)
+    response = {
+        "api_version": API_VERSION,
+        "ok": True,
+        "query": resolved["query_label"],
+        "query_type": resolved["query_type"],
         "mode": mode,
         "client_request_id": body.client_request_id,
         "hits": _hits_to_payload(
@@ -596,14 +857,22 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "fetch_top_k": fetch_k,
             "index_ready": True,
             "global_index_state": snapshot["global_index_state"],
-            "scope_applied": bool(_scope_path_set(body.scope)),
+            "search_index_schema_version": snapshot.get("search_index_schema_version"),
+            **scope_meta,
         },
     }
+    if resolved["preset_id"]:
+        response["preset_id"] = resolved["preset_id"]
+        preset = resolved.get("preset") or {}
+        if preset.get("name"):
+            response["preset_name"] = str(preset.get("name"))
+    return response
 
 
 def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchRequest) -> AgentSearchRequest:
     return AgentSearchRequest(
         query=item.query,
+        preset_id=item.preset_id,
         query_type=item.query_type,
         top_k=item.top_k if item.top_k is not None else batch.top_k,
         mode=item.mode if item.mode is not None else batch.mode,
@@ -660,7 +929,8 @@ def _batch_item_error(
     return {
         "ok": False,
         "client_request_id": item.client_request_id,
-        "query": item.query,
+        "query": item.query or item.preset_id,
+        "preset_id": item.preset_id,
         "query_type": query_type or item.query_type,
         "mode": mode,
         "hits": [],
@@ -670,9 +940,14 @@ def _batch_item_error(
 
 def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
     queries = _resolve_batch_queries(body)
+    config = load_config()
     default_mode = _normalize_mode(body.mode)
-    snapshot = _index_snapshot(default_mode)
-    if not snapshot["index_ready"]:
+    snapshot = _index_snapshot(default_mode, config=config)
+    if not _search_index_ready_for_request(default_mode, body.scope, config=config):
+        if _resolve_scope_library_paths(body.scope, config=config) and snapshot.get("library_indexes_upgrade_needed"):
+            raise IndexNotReadyError(
+                "Per-library search indexes are not ready. Restart VideoSeek and wait for startup data migration to finish."
+            )
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
     results = []
@@ -731,6 +1006,8 @@ class AgentApiService:
         self.app = FastAPI(title="VideoSeek Agent API", version=API_VERSION)
         self._register_exception_handlers()
         self.app.get("/api/v1/health")(self._health)
+        self.app.get("/api/v1/search/presets")(self._search_presets)
+        self.app.get("/api/v1/search/presets/{preset_id}")(self._search_preset_detail)
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
@@ -820,6 +1097,24 @@ class AgentApiService:
 
     async def _health(self, mode: Optional[str] = None):
         return build_health_payload(mode=mode)
+
+    async def _search_presets(self):
+        try:
+            return await asyncio.to_thread(list_agent_search_presets)
+        except Exception as exc:
+            logger.exception("Agent preset list failed.")
+            raise_api_error(500, "query_failed", str(exc))
+
+    async def _search_preset_detail(self, preset_id: str):
+        try:
+            return await asyncio.to_thread(get_agent_search_preset, preset_id)
+        except KeyError as exc:
+            raise_api_error(404, "invalid_request", str(exc))
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent preset detail failed.")
+            raise_api_error(500, "query_failed", str(exc))
 
     async def _search(self, body: AgentSearchRequest):
         started = time.perf_counter()

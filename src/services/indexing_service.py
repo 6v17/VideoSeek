@@ -21,6 +21,14 @@ from src.storage.config_store import (
     get_min_chunk_size,
     get_similarity_threshold,
 )
+from src.services.search_index_schema import (
+    TARGET_SEARCH_INDEX_SCHEMA_VERSION,
+    clear_library_search_index,
+    get_library_index_paths,
+    get_search_index_schema_version,
+    library_has_ready_videos,
+    mark_search_index_schema_upgraded,
+)
 from src.utils import (
     canonicalize_library_path,
     ensure_folder_exists,
@@ -922,6 +930,16 @@ def rebuild_indexes_from_cached_vectors(
         )
         stats["global_built"] = result is not None
 
+    if get_search_index_schema_version(meta) >= TARGET_SEARCH_INDEX_SCHEMA_VERSION:
+        library_stats = build_library_search_indexes(
+            meta,
+            config,
+            target_lib=target_lib,
+            progress_callback=progress_callback,
+            should_stop_callback=should_stop_callback,
+        )
+        stats.update(library_stats)
+
     if progress_callback:
         progress_callback(100, build_progress_token(stage="rebuild_index", file_index=file_total, file_total=file_total))
 
@@ -1104,3 +1122,128 @@ def build_global_index(
         time.perf_counter() - wall_start,
     )
     return timestamp_array, np.array(all_paths), index
+
+
+def _clear_library_search_index(library_path: str, config) -> None:
+    clear_library_search_index(library_path, config=config)
+
+
+def _save_library_frame_assets(library_path: str, timestamps, paths, config, frame_builder: IncrementalClipIndex) -> None:
+    asset_paths = get_library_index_paths(library_path, config=config)
+    ensure_folder_exists(asset_paths["frame_index_file"])
+    frame_builder.save(asset_paths["frame_index_file"])
+    payload = {
+        "format_version": 2,
+        "timestamps": np.asarray(timestamps, dtype="float32"),
+        "paths": paths,
+        "embedding_spec": get_active_embedding_spec(config=config),
+        "library_path": canonicalize_library_path(library_path),
+    }
+    atomic_save_numpy(asset_paths["frame_vector_file"], payload)
+
+
+def _save_library_chunk_assets(library_path: str, chunk_ranges, chunk_paths, config, chunk_builder: IncrementalClipIndex) -> None:
+    asset_paths = get_library_index_paths(library_path, config=config)
+    ensure_folder_exists(asset_paths["chunk_index_file"])
+    chunk_builder.save(asset_paths["chunk_index_file"])
+    payload = {
+        "format_version": 2,
+        "ranges": np.asarray(chunk_ranges, dtype="float32"),
+        "paths": chunk_paths,
+        "embedding_spec": get_active_embedding_spec(config=config),
+        "library_path": canonicalize_library_path(library_path),
+    }
+    atomic_save_numpy(asset_paths["chunk_vector_file"], payload)
+
+
+def build_library_search_indexes(
+    meta,
+    config,
+    target_lib=None,
+    progress_callback=None,
+    should_stop_callback=None,
+) -> dict:
+    """Build v2 per-library FAISS assets from cached per-video vectors."""
+    stats = {"libraries_built": 0, "libraries_cleared": 0, "libraries_skipped": 0}
+    libraries = list(_library_roots_for_global_merge(meta, target_lib, include_all_libraries=True))
+    total = len(libraries)
+
+    for index, (root_path, _lib_data) in enumerate(libraries, start=1):
+        if should_stop_callback and should_stop_callback():
+            raise InterruptedError("Search index upgrade stopped during library index build")
+        if progress_callback and total:
+            progress_callback(
+                min(88, int(85 * index / total)),
+                build_progress_token(stage="upgrade_index", file_index=index, file_total=total),
+            )
+        if not os.path.exists(root_path):
+            stats["libraries_skipped"] += 1
+            continue
+
+        frame_builder = IncrementalClipIndex()
+        all_timestamps = []
+        all_paths = []
+        for vectors, timestamps, abs_path in iter_ready_library_frame_sources(
+            meta,
+            config,
+            target_lib=root_path,
+            include_all_libraries=False,
+        ):
+            if should_stop_callback and should_stop_callback():
+                raise InterruptedError("Search index upgrade stopped during library index build")
+            frame_builder.add(vectors)
+            ts_list = np.asarray(timestamps, dtype="float32").reshape(-1).tolist()
+            all_paths.extend([abs_path] * len(ts_list))
+            all_timestamps.extend(ts_list)
+
+        if frame_builder.total <= 0:
+            _clear_library_search_index(root_path, config)
+            stats["libraries_cleared"] += 1
+            continue
+
+        _save_library_frame_assets(root_path, all_timestamps, all_paths, config, frame_builder)
+
+        chunk_builder = IncrementalClipIndex()
+        all_chunk_ranges = []
+        all_chunk_paths = []
+        for embedding, chunk_range, abs_path in iter_ready_library_chunk_sources(
+            meta,
+            config,
+            target_lib=root_path,
+            include_all_libraries=False,
+        ):
+            if should_stop_callback and should_stop_callback():
+                raise InterruptedError("Search index upgrade stopped during library index build")
+            chunk_builder.add(embedding.reshape(1, -1))
+            all_chunk_ranges.append(chunk_range)
+            all_chunk_paths.append(abs_path)
+
+        if chunk_builder.total > 0:
+            _save_library_chunk_assets(root_path, all_chunk_ranges, all_chunk_paths, config, chunk_builder)
+        else:
+            asset_paths = get_library_index_paths(root_path, config=config)
+            for key in ("chunk_index_file", "chunk_vector_file"):
+                path = asset_paths.get(key)
+                if path and os.path.exists(path):
+                    os.remove(path)
+
+        stats["libraries_built"] += 1
+        logger.info(
+            "Built library search index for %s (%s frame vectors, %s chunks)",
+            root_path,
+            frame_builder.total,
+            chunk_builder.total,
+        )
+
+    mark_search_index_schema_upgraded(meta, target_lib=target_lib)
+    if progress_callback:
+        progress_callback(90, build_progress_token(stage="upgrade_index", file_index=total, file_total=total))
+    logger.info(
+        "Library search index build finished: built=%s cleared=%s skipped=%s schema=%s",
+        stats["libraries_built"],
+        stats["libraries_cleared"],
+        stats["libraries_skipped"],
+        TARGET_SEARCH_INDEX_SCHEMA_VERSION,
+    )
+    return stats
+

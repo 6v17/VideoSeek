@@ -9,7 +9,15 @@ from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_t
 from src.app.config import DEFAULT_CONFIG, load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
+from src.services.search_scope import apply_search_scope, is_search_scoped, resolve_fetch_top_k
 from src.core.faiss_index import load_clip_index
+from src.services.search_index_schema import (
+    TARGET_SEARCH_INDEX_SCHEMA_VERSION,
+    get_library_index_paths,
+    get_search_index_schema_version,
+    library_index_is_ready,
+)
+from src.storage.asset_store import load_model_metadata
 from src.storage.config_store import (
     get_active_model_profile,
     get_frame_neighbor_rerank_enabled,
@@ -170,6 +178,48 @@ def load_chunk_search_assets(config):
     return value
 
 
+def _library_indexes_ready(config, library_paths) -> bool:
+    if get_search_index_schema_version(load_model_metadata(config=config)) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
+        return False
+    roots = [str(path or "").strip() for path in (library_paths or []) if str(path or "").strip()]
+    if not roots:
+        return False
+    return all(library_index_is_ready(path, config=config) for path in roots)
+
+
+def load_library_frame_search_assets(library_path, config):
+    if not library_index_is_ready(library_path, config=config):
+        return None, None, None
+    asset_paths = get_library_index_paths(library_path, config=config)
+    search_index = load_clip_index(asset_paths["frame_index_file"])
+    if search_index is None:
+        return None, None, None
+    data = _load_asset_metadata(asset_paths["frame_vector_file"], required_fields=("timestamps", "paths"), asset_label="library frame search")
+    if data is None:
+        return None, None, None
+    return search_index, data.get("timestamps"), data.get("paths")
+
+
+def load_library_chunk_search_assets(library_path, config):
+    asset_paths = get_library_index_paths(library_path, config=config)
+    if not os.path.exists(asset_paths["chunk_index_file"]) or not os.path.exists(asset_paths["chunk_vector_file"]):
+        return None, None, None
+    search_index = load_clip_index(asset_paths["chunk_index_file"])
+    if search_index is None:
+        return None, None, None
+    data = _load_asset_metadata(asset_paths["chunk_vector_file"], required_fields=("ranges", "paths"), asset_label="library chunk search")
+    if data is None:
+        return None, None, None
+    return search_index, data.get("ranges"), data.get("paths")
+
+
+def _merge_search_hits(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
+    if top_k <= 0:
+        return []
+    ordered = sorted(hits, key=lambda item: float(item.score), reverse=True)
+    return ordered[:top_k]
+
+
 def build_query_vector(query_data, is_text=False):
     if is_text:
         query_vector = get_text_embedding(query_data)
@@ -188,6 +238,28 @@ def build_query_vector(query_data, is_text=False):
     query_vector = query_vector.astype("float32")
     faiss.normalize_L2(query_vector)
     return query_vector
+
+
+def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
+    if query_vector is not None:
+        vector = np.asarray(query_vector, dtype=np.float32)
+        if vector.ndim == 1:
+            vector = vector.reshape(1, -1)
+        elif vector.ndim != 2 or vector.shape[0] != 1:
+            raise RuntimeError("Invalid query vector. Please retry the search.")
+        faiss.normalize_L2(vector)
+        return vector
+    return build_query_vector(query_data, is_text=is_text)
+
+
+def filter_hits_by_min_score(hits, min_score) -> List[SearchHit]:
+    if min_score is None:
+        return list(hits or [])
+    try:
+        threshold = float(min_score)
+    except (TypeError, ValueError):
+        return list(hits or [])
+    return [hit for hit in (hits or []) if float(getattr(hit, "score", 0.0) or 0.0) >= threshold]
 
 
 def _search_frame_results_with_ids(query_vector, index, timestamps, video_paths, top_k):
@@ -264,7 +336,15 @@ def _apply_frame_neighbor_rerank(results, frame_ids, query_vector, search_index,
     return reranked
 
 
-def run_search(query_data, is_text=False, top_k=None, search_mode=None) -> List[SearchHit]:
+def run_search(
+    query_data,
+    is_text=False,
+    top_k=None,
+    search_mode=None,
+    scope_video_paths=None,
+    scope_library_paths=None,
+    query_vector=None,
+) -> List[SearchHit]:
     # Retained intentionally: exported via src.core.core and reached by
     # worker-side runtime imports that static analysis can miss.
     config = load_config()
@@ -273,21 +353,61 @@ def run_search(query_data, is_text=False, top_k=None, search_mode=None) -> List[
         mode = get_search_mode(config)
     logger.info("Running %s search (is_text=%s)", mode, is_text)
     if mode == "chunk":
-        return run_chunk_search(query_data, is_text=is_text, top_k=top_k)
+        return run_chunk_search(
+            query_data,
+            is_text=is_text,
+            top_k=top_k,
+            scope_video_paths=scope_video_paths,
+            scope_library_paths=scope_library_paths,
+            query_vector=query_vector,
+        )
     if top_k is None:
         top_k = get_search_top_k(config)
+    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+    query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
+
+    if (
+        scoped
+        and scope_library_paths
+        and not scope_video_paths
+        and _library_indexes_ready(config, scope_library_paths)
+    ):
+        merged_hits: List[SearchHit] = []
+        for library_path in scope_library_paths:
+            search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
+            if search_index is None:
+                continue
+            matched_results, matched_ids = _search_frame_results_with_ids(
+                query_vector,
+                search_index,
+                timestamps,
+                video_paths,
+                top_k=top_k,
+            )
+            matched_results = _apply_frame_neighbor_rerank(
+                matched_results,
+                matched_ids,
+                query_vector,
+                search_index,
+                timestamps,
+                video_paths,
+                config,
+            )
+            merged_hits.extend(matched_results)
+        return _merge_search_hits(merged_hits, top_k)
+
+    fetch_k = resolve_fetch_top_k(top_k, scoped)
     search_index, timestamps, video_paths = load_search_assets(config)
     if search_index is None:
         return []
     _check_asset_profile_compatibility(config, _FRAME_ASSET_INFO, asset_label="frame")
 
-    query_vector = build_query_vector(query_data, is_text=is_text)
     matched_results, matched_ids = _search_frame_results_with_ids(
         query_vector,
         search_index,
         timestamps,
         video_paths,
-        top_k=top_k,
+        top_k=fetch_k,
     )
     matched_results = _apply_frame_neighbor_rerank(
         matched_results,
@@ -298,20 +418,64 @@ def run_search(query_data, is_text=False, top_k=None, search_mode=None) -> List[
         video_paths,
         config,
     )
-    return matched_results
+    return apply_search_scope(
+        matched_results,
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        top_k=top_k,
+    )
 
 
-def run_chunk_search(query_data, is_text=False, top_k=None) -> List[SearchHit]:
+def run_chunk_search(
+    query_data,
+    is_text=False,
+    top_k=None,
+    scope_video_paths=None,
+    scope_library_paths=None,
+    query_vector=None,
+) -> List[SearchHit]:
     config = load_config()
     if top_k is None:
         top_k = get_search_top_k(config)
+    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+    query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
+
+    if (
+        scoped
+        and scope_library_paths
+        and not scope_video_paths
+        and _library_indexes_ready(config, scope_library_paths)
+    ):
+        merged_hits: List[SearchHit] = []
+        for library_path in scope_library_paths:
+            search_index, ranges, video_paths = load_library_chunk_search_assets(library_path, config)
+            if search_index is None:
+                continue
+            actual_k = min(top_k, search_index.ntotal)
+            if actual_k <= 0:
+                continue
+            distances, indices = search_index.search(query_vector, actual_k)
+            for rank, index_value in enumerate(indices[0]):
+                if index_value == -1 or index_value >= len(video_paths):
+                    continue
+                time_range = ranges[index_value]
+                merged_hits.append(
+                    SearchHit(
+                        float(time_range[0]),
+                        float(time_range[1]),
+                        float(distances[0][rank]),
+                        video_paths[index_value],
+                    )
+                )
+        return _merge_search_hits(merged_hits, top_k)
+
+    fetch_k = resolve_fetch_top_k(top_k, scoped)
     search_index, ranges, video_paths = load_chunk_search_assets(config)
     if search_index is None:
         return []
     _check_asset_profile_compatibility(config, _CHUNK_ASSET_INFO, asset_label="chunk")
 
-    query_vector = build_query_vector(query_data, is_text=is_text)
-    actual_k = min(top_k, search_index.ntotal)
+    actual_k = min(fetch_k, search_index.ntotal)
     if actual_k <= 0:
         return []
     if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
@@ -335,7 +499,12 @@ def run_chunk_search(query_data, is_text=False, top_k=None) -> List[SearchHit]:
         matched_results.append(
             SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
         )
-    return matched_results
+    return apply_search_scope(
+        matched_results,
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        top_k=top_k,
+    )
 
 
 def warmup_search_runtime():

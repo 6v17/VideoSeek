@@ -243,7 +243,12 @@ def resolve_resource_path(relative_path, configured_base_dir=""):
 def get_model_path(filename):
     """Resolve a model asset path with stale runtime.model_dir compatibility fallback."""
     from src.app.config import load_config
-    from src.storage.config_store import get_active_model_profile, get_active_model_resource_dir
+    from src.storage.config_store import (
+        get_active_model_profile,
+        get_active_model_resource_dir,
+        iter_provider_resource_dir_candidates,
+        resolve_provider_dir,
+    )
 
     config = load_config()
     candidate_paths = []
@@ -254,19 +259,26 @@ def get_model_path(filename):
         runtime = dict(profile.get("runtime") or {})
         model_variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip() or "vit-base-patch32"
         provider = str(profile.get("provider", "") or "").strip()
-        if provider == "clip_onnx":
-            provider_dir = "openai-clip"
-        elif provider == "siglip2_onnx":
-            provider_dir = "siglip2"
-        else:
-            provider_dir = provider.replace("_", "-")
         top_level_model_root = str(config.get("model_dir", "") or "").strip()
-        if top_level_model_root:
-            fallback_path = os.path.join(top_level_model_root, provider_dir, model_variant, filename)
-            if os.path.normcase(os.path.normpath(fallback_path)) != os.path.normcase(
-                os.path.normpath(candidate_paths[0])
-            ):
+        if top_level_model_root and provider:
+            seen = {os.path.normcase(os.path.normpath(model_profile_dir))}
+            for provider_dir in iter_provider_resource_dir_candidates(provider):
+                fallback_path = os.path.join(top_level_model_root, provider_dir, model_variant, filename)
+                normalized = os.path.normcase(os.path.normpath(fallback_path))
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
                 candidate_paths.append(fallback_path)
+            # Primary canonical path when resource_dir resolution picked a legacy folder.
+            canonical_path = os.path.join(
+                top_level_model_root,
+                resolve_provider_dir(provider),
+                model_variant,
+                filename,
+            )
+            normalized = os.path.normcase(os.path.normpath(canonical_path))
+            if normalized not in seen:
+                candidate_paths.append(canonical_path)
     except Exception:
         pass
     for candidate in candidate_paths:
@@ -304,7 +316,7 @@ def ensure_model_files(model_filenames):
 
 def free_memory():
     gc.collect()
-    logger.info("Memory cleanup completed")
+    logger.debug("Memory cleanup completed")
 
 
 def ensure_folder_exists(file_path):

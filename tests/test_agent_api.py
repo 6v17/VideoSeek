@@ -6,11 +6,15 @@ from src.domain.search_hit import SearchHit
 from src.web.agent_api import (
     AgentBatchSearchRequest,
     AgentSearchRequest,
+    AgentSearchScope,
     _hits_to_payload,
+    _resolve_scope_library_paths,
     api_error_payload,
     build_health_payload,
     execute_agent_batch_search,
     execute_agent_search,
+    get_agent_search_preset,
+    list_agent_search_presets,
     _clamp_top_k,
     _expand_image_folder,
     _filter_hits,
@@ -55,6 +59,21 @@ class AgentApiHelperTests(unittest.TestCase):
             self.assertEqual(_clamp_top_k(999), 200)
             self.assertEqual(_clamp_top_k("bad"), 20)
 
+    @patch("src.web.agent_api.get_search_scope_library_paths", return_value=["D:/saved_lib"])
+    @patch("src.web.agent_api.get_search_scope_mode", return_value="selected")
+    def test_resolve_scope_library_paths_use_saved_scope(self, _mock_mode, _mock_paths):
+        scope = AgentSearchScope(use_saved_scope=True)
+        resolved = _resolve_scope_library_paths(scope)
+        self.assertEqual(resolved, ["D:/saved_lib"])
+
+    def test_resolve_scope_library_paths_explicit_wins(self):
+        scope = AgentSearchScope(
+            library_paths=["D:/explicit"],
+            use_saved_scope=True,
+        )
+        resolved = _resolve_scope_library_paths(scope)
+        self.assertEqual(resolved, ["D:/explicit"])
+
 
 class AgentApiSearchTests(unittest.TestCase):
     @patch("src.web.agent_api._index_snapshot")
@@ -96,12 +115,13 @@ class AgentApiSearchTests(unittest.TestCase):
 
 
 class AgentApiHealthTests(unittest.TestCase):
+    @patch("src.web.agent_api.get_search_scope_mode", return_value="all")
     @patch("src.web.agent_api._build_ffmpeg_info")
     @patch("src.web.agent_api._index_snapshot")
     @patch("src.web.agent_api.get_active_embedding_spec")
-    @patch("src.web.agent_api.list_libraries")
+    @patch("src.services.library_service.list_libraries")
     @patch("src.web.agent_api.get_search_mode")
-    def test_build_health_payload(self, mock_mode, mock_libraries, mock_spec, mock_snapshot, mock_ffmpeg):
+    def test_build_health_payload(self, mock_mode, mock_libraries, mock_spec, mock_snapshot, mock_ffmpeg, _mock_scope_mode):
         mock_mode.return_value = "frame"
         mock_libraries.return_value = {"D:/lib": {"files": {"a": {}, "b": {}}}}
         mock_spec.return_value = {
@@ -121,6 +141,11 @@ class AgentApiHealthTests(unittest.TestCase):
             "chunk_index_ready": True,
             "frame_vector_count": 80,
             "chunk_vector_count": 20,
+            "search_index_schema_version": 2,
+            "library_indexes_upgrade_needed": False,
+            "library_index_count": 2,
+            "library_indexes_ready": 2,
+            "library_indexes_stale": 0,
         }
         mock_ffmpeg.return_value = {
             "ffmpeg_available": True,
@@ -135,8 +160,11 @@ class AgentApiHealthTests(unittest.TestCase):
         self.assertIn("index_id", payload)
         self.assertTrue(payload["capabilities"]["text_search"])
         self.assertTrue(payload["capabilities"]["chunk_search"])
+        self.assertTrue(payload["capabilities"]["search_presets"])
         self.assertTrue(payload["capabilities"]["local_ffmpeg_clip"])
         self.assertEqual(payload["ffmpeg"]["ffmpeg_path"], "D:/VideoSeek/bin/ffmpeg.exe")
+        self.assertEqual(payload["search_index_schema_version"], 2)
+        self.assertEqual(payload["library_indexes_ready"], 2)
 
 
 class AgentApiBatchTests(unittest.TestCase):
@@ -182,6 +210,69 @@ class AgentApiBatchTests(unittest.TestCase):
             self.assertEqual(len(items), 2)
             self.assertEqual(items[0].client_request_id, "a.jpg")
             self.assertEqual(items[1].client_request_id, "b.png")
+
+
+class AgentApiPresetTests(unittest.TestCase):
+    @patch("src.services.search_preset_service.list_presets")
+    def test_list_agent_search_presets(self, mock_list_presets):
+        mock_list_presets.return_value = [
+            {
+                "id": "p1",
+                "name": "Night City",
+                "query": "anime night",
+                "ref_files": [],
+            }
+        ]
+        payload = list_agent_search_presets()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["meta"]["count"], 1)
+        self.assertEqual(payload["presets"][0]["id"], "p1")
+        self.assertEqual(payload["presets"][0]["reference_image_count"], 0)
+
+    @patch("src.services.search_preset_service.get_preset")
+    def test_get_agent_search_preset_not_found(self, mock_get_preset):
+        mock_get_preset.return_value = None
+        with self.assertRaises(KeyError):
+            get_agent_search_preset("missing")
+
+    @patch("src.services.search_scope.resolve_active_search_library_scope", return_value=["D:/lib"])
+    @patch("src.services.search_preset_service.build_preset_search_plan")
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_execute_agent_search_by_preset_id(
+        self,
+        mock_run_search,
+        mock_snapshot,
+        mock_build_plan,
+        _mock_scope,
+    ):
+        import numpy as np
+
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [SearchHit(10.0, 10.0, 0.7, "D:/clip.mp4")]
+        mock_build_plan.return_value = {
+            "preset": {"id": "p1", "name": "Night City", "query": "anime night"},
+            "query_vector": np.array([[0.1, 0.2]], dtype=np.float32),
+            "search_mode": "frame",
+            "top_k": 12,
+            "min_score": None,
+            "is_text": True,
+            "query_data": "anime night",
+        }
+        body = AgentSearchRequest(preset_id="p1", mode="frame")
+        payload = execute_agent_search(body)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["preset_id"], "p1")
+        self.assertEqual(payload["preset_name"], "Night City")
+        self.assertEqual(payload["query"], "Night City")
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertIsNotNone(kwargs.get("query_vector"))
+        self.assertEqual(kwargs.get("scope_library_paths"), ["D:/lib"])
+
+    def test_execute_agent_search_rejects_query_and_preset(self):
+        body = AgentSearchRequest(query="test", preset_id="p1")
+        with self.assertRaises(ValueError):
+            execute_agent_search(body)
 
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ You must mirror the **active model profile** layout (manifest + weights next to 
 - `clip_text.onnx`
 - `bpe_simple_vocab_16e6.txt.gz`
 
-If you switch to another provider/profile (for example `siglip2_onnx`), file requirements change with that profile. Runtime checks follow the active profile configuration.
+If you switch to another provider/profile (for example `siglip2_onnx` or `chinese_clip_onnx`), file requirements change with that profile. Runtime checks follow the active profile configuration.
 
 Implementation reference for zip/import behavior: `src/services/model_package_service.py`.
 
@@ -73,13 +73,13 @@ Official zips from the 123 pan folder already include this file—**you only nee
 - **Filename:** **`model_manifest.json`** (not `manifest.json`).
 - **Placement:** In the zip (or on disk after import), the manifest must sit **in the same folder** as the model weight files. After import, that folder is under  
   `<model_dir>/<provider_folder>/<variant>/`  
-  where **`provider_folder`** is derived from `provider`, e.g. `openai-clip` for `clip_onnx`, `siglip2` for `siglip2_onnx` (see `_provider_dir` in `src/services/model_package_service.py`).
+  where **`provider_folder`** is derived from `provider`, e.g. `openai-clip` for `clip_onnx`, `siglip2` for `siglip2_onnx`, `chinese-clip` for `chinese_clip_onnx` (see `resolve_provider_dir` in `src/storage/config_store.py`).
 
 **Required fields**
 
 | Field | Meaning |
 |-------|--------|
-| `provider` | Inference backend id, e.g. `clip_onnx`, `siglip2_onnx`. |
+| `provider` | Inference backend id, e.g. `clip_onnx`, `siglip2_onnx`, `chinese_clip_onnx`. |
 | `variant` **or** `model_variant` | Subfolder name for that provider, e.g. `vit-base-patch32`. |
 
 **Optional fields**
@@ -89,7 +89,7 @@ Official zips from the 123 pan folder already include this file—**you only nee
 | `id` | Profile id in Settings; if omitted, derived from `provider` + `variant`. |
 | `display_name` | Shown in the model profile UI. |
 | `prefer_gpu` | Boolean; default `true`. |
-| `required_files` | List of filenames that must exist beside the manifest. If omitted, defaults are used per `provider` (CLIP vs SigLIP2 file lists in code). |
+| `required_files` | List of filenames that must exist beside the manifest. If omitted, defaults are used per `provider` (CLIP / SigLIP2 / Chinese CLIP file lists in code). |
 | `files` | Map of logical keys → filenames for config; if omitted, built-in defaults apply for known providers. |
 
 **Minimal example (`clip_onnx`):**
@@ -102,7 +102,21 @@ Official zips from the 123 pan folder already include this file—**you only nee
 }
 ```
 
+**Minimal example (`chinese_clip_onnx`):**
+
+```json
+{
+  "provider": "chinese_clip_onnx",
+  "variant": "vit-base-patch16",
+  "display_name": "Chinese CLIP ViT-B/16 (512-d)"
+}
+```
+
+Zip layout: `chinese-clip/vit-base-patch16/model_manifest.json` plus `chinese_clip_image.onnx`, `chinese_clip_text.onnx`, `vocab.txt`, `preprocessor_config.json`, `config.json`.
+
 Authoritative validation and defaults: `import_model_packages` / `_install_extracted_packages` in `src/services/model_package_service.py`.
+
+**Switching the active model profile** (Settings → current model): embeddings and FAISS indexes are stored under `data/model_assets/<provider_folder>/<variant>/`. After you change profile, **re-sync / rebuild the library index** for that profile before search, remix trace, or Agent API calls. Search presets and remix embed caches also key off `embedding_spec` / `model_profile_id`.
 
 ### 3.4 FFmpeg
 

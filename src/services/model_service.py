@@ -17,6 +17,13 @@ REQUIRED_MODEL_FILES = [
 
 PROVIDER_REQUIRED_MODEL_FILES = {
     "clip_onnx": list(REQUIRED_MODEL_FILES),
+    "chinese_clip_onnx": [
+        "chinese_clip_image.onnx",
+        "chinese_clip_text.onnx",
+        "vocab.txt",
+        "preprocessor_config.json",
+        "config.json",
+    ],
     "siglip2_onnx": [
         "vision_model.onnx",
         "text_model.onnx",

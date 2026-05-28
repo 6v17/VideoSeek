@@ -22,6 +22,11 @@ def build_inference_engine(provider_id: str) -> object:
     pid = str(provider_id or "").strip() or "clip_onnx"
     factory = _ENGINE_FACTORIES.get(pid)
     if factory is None:
+        if pid != "clip_onnx":
+            raise RuntimeError(
+                f"Unsupported inference provider '{pid}'. "
+                "Install/register the provider engine or switch the active model profile."
+            )
         factory = _ENGINE_FACTORIES.get("clip_onnx")
     if factory is None:
         raise RuntimeError("No inference engine registered (missing clip_onnx default)")

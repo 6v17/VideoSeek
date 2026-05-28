@@ -15,24 +15,65 @@ class SearchController(QObject):
         self.warmup_worker = None
         self.thumb_thread = None
         self.start_time = 0.0
+        self._scope_library_paths = []
         self._gpu_warning_shown = False
         self._warmup_started = False
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
 
-    def start_search(self, query, is_text):
+    def start_search(
+        self,
+        query,
+        is_text,
+        scope_library_paths=None,
+        scope_video_paths=None,
+        query_vector=None,
+        search_mode=None,
+        top_k=None,
+        min_score=None,
+    ):
         self.stop_thumbnail_loading()
         self.start_time = time.time()
+        self._scope_library_paths = list(scope_library_paths or [])
 
         self.parent_window.search_page.btn_search.setEnabled(False)
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["searching"])
 
-        self.worker = SearchWorker(query, is_text)
+        self.worker = SearchWorker(
+            query=query,
+            is_text=is_text,
+            scope_library_paths=self._scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            query_vector=query_vector,
+            search_mode=search_mode,
+            top_k=top_k,
+            min_score=min_score,
+        )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
         self.worker.finished.connect(self._finish_search)
         self.worker.start()
+
+    def start_preset_search(self, preset_id):
+        from src.services.search_preset_service import build_preset_search_plan
+        from src.services.search_scope import resolve_active_search_library_scope, resolve_active_search_mode
+
+        plan = build_preset_search_plan(preset_id)
+        preset = plan["preset"]
+        scope_library_paths = resolve_active_search_library_scope()
+        if hasattr(self.parent_window, "apply_search_preset_to_ui"):
+            self.parent_window.apply_search_preset_to_ui(preset)
+        self.start_search(
+            query=plan.get("query_data"),
+            is_text=bool(plan.get("is_text")),
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=None,
+            query_vector=plan.get("query_vector"),
+            search_mode=resolve_active_search_mode(),
+            top_k=plan.get("top_k"),
+            min_score=plan.get("min_score"),
+        )
 
     def clear_results(self):
         self.stop_thumbnail_loading()
@@ -70,9 +111,8 @@ class SearchController(QObject):
             self.parent_window.texts,
         )
         duration = time.time() - self.start_time
-        self.parent_window.search_page.lbl_status.setText(
-            self.parent_window.texts["search_done"].format(duration=duration, count=len(results))
-        )
+        status_text = self.parent_window.texts["search_done"].format(duration=duration, count=len(results))
+        self.parent_window.search_page.lbl_status.setText(status_text)
 
         self.thumb_thread = ThumbLoader(results)
         self.thumb_thread.thumb_ready.connect(result_view.set_thumbnail)

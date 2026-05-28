@@ -40,6 +40,8 @@ class LibraryIndexingGuiMixin:
                 self.texts,
             )
             self._refresh_global_index_ui()
+            if hasattr(self, "_refresh_search_scope_ui"):
+                self._refresh_search_scope_ui()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return

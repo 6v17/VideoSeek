@@ -75,6 +75,8 @@ DEFAULT_CONFIG = {
     "min_chunk_size": 2,
     "chunk_similarity_mode": "chunk",
     "search_mode": "frame",
+    "search_scope_mode": "all",
+    "search_scope_library_paths": [],
     "ffmpeg_path": "",
     "model_dir": get_default_model_dir(),
     "data_root": APP_DATA_DIR,
@@ -122,6 +124,7 @@ CONFIG_INT_KEYS = {
 CONFIG_ENUMS = {
     "chunk_similarity_mode": {"chunk", "frame"},
     "search_mode": {"frame", "chunk"},
+    "search_scope_mode": {"all", "selected"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
     "close_window_action": {"exit", "tray"},
@@ -349,6 +352,12 @@ def _sanitize_general_settings(config):
         sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
         DEFAULT_CONFIG["show_debug_test_buttons"],
     )
+    raw_scope_paths = sanitized.get("search_scope_library_paths", DEFAULT_CONFIG["search_scope_library_paths"])
+    if not isinstance(raw_scope_paths, list):
+        raw_scope_paths = DEFAULT_CONFIG["search_scope_library_paths"]
+    sanitized["search_scope_library_paths"] = [
+        str(item or "").strip() for item in raw_scope_paths if str(item or "").strip()
+    ]
     return sanitized
 
 
@@ -511,6 +520,8 @@ def pop_migration_notice():
 def should_report_startup_migration_summary(result):
     if not isinstance(result, dict):
         return False
+    if bool(result.get("search_index_upgraded")):
+        return True
     if int(result.get("migrated_video_ids", 0) or 0) > 0:
         return True
     if int(result.get("failed_video_ids", 0) or 0) > 0:

@@ -97,8 +97,24 @@ Re-export for convenience: `from src.core.core import run_search, SearchHit, Rem
 ### Inference engines (`src/core/inference_registry.py`)
 
 - Providers register with `register_inference_engine(provider_id, factory)`.
-- `clip_embedding.get_engine()` resolves the active model profile’s `provider` through **`build_inference_engine`**, falling back to **`clip_onnx`** when unknown.
-- Defaults are registered when `clip_embedding` loads (`clip_onnx`, `siglip2_onnx`).
+- `clip_embedding.get_engine()` resolves the active model profile’s `provider` through **`build_inference_engine`**. Unknown providers raise at runtime (no silent fallback).
+- Built-in engines registered when `clip_embedding` loads: **`clip_onnx`**, **`siglip2_onnx`**, **`chinese_clip_onnx`**.
+- On-disk weight folders use **`resolve_provider_dir()`** in `config_store` (e.g. `openai-clip`, `siglip2`, `chinese-clip`). Index/vector assets live under `data/model_assets/<provider_dir>/<variant>/`.
+- **Chinese CLIP** reuses the same indexing/search pipeline as CLIP (FFmpeg frame stream → `encode_images` → semantic chunks → FAISS). Only `ChineseCLIPOnnxEngine` + Bert `vocab.txt` differ from OpenAI CLIP.
+- Unknown `provider` values **fail fast** in `build_inference_engine` (no silent fallback to `clip_onnx`).
+
+### Adding a model provider (plug-in checklist)
+
+New ONNX backends should only touch the **entry layer**; indexing, search, remix, and Agent API stay on `get_engine()` / `get_active_embedding_spec()`:
+
+1. Implement `*OnnxEngine` (usually subclass `OnnxVisionBatchMixin` for video frames).
+2. `register_inference_engine("<provider>_onnx", factory)` in `clip_embedding._register_default_inference_engines`.
+3. Map disk folder via `resolve_provider_dir()` in `config_store.py` (e.g. `chinese_clip_onnx` → `chinese-clip`).
+4. Add `PROVIDER_REQUIRED_MODEL_FILES` + manifest defaults in `model_package_service.py` / `model_service.py`.
+5. Add default `dimension` in `_PROVIDER_DEFAULT_DIMENSION`.
+6. Ship `model_manifest.json` inside `<provider_dir>/<variant>/` zips for **Import and Parse**.
+
+After users switch profile, they must **rebuild the library index** (vectors live under `data/model_assets/<provider_dir>/<variant>/`).
 
 ### Configuration reads (`src/storage/config_store.py`)
 
@@ -128,7 +144,7 @@ New code should prefer these getters; remaining legacy reads can be migrated gra
 ### Remix source match
 
 1. User selects a remix file, match parameters, and optional **library scope** (entire index vs checked videos) on the Remix page (`RemixMatchPage` in `ui/widgets/components.py`).
-2. `RemixMatchWorker` (`ui/workers.py`) calls `run_remix_match` in `remix_match_service.py`: load or compute remix-frame CLIP vectors (disk cache in `remix_embedding_cache.py`), query FAISS against scoped library vectors, then aggregate raw hits into segments in `remix_match_aggregate.py`.
+2. `RemixMatchWorker` (`ui/workers.py`) calls `run_remix_match` in `remix_match_service.py`: load or compute remix-frame embeddings via `get_clip_embeddings_batch` / `get_engine()` (disk cache in `remix_embedding_cache.py`, keyed by `model_profile_id`), query FAISS against the **active profile’s** scoped library vectors, then aggregate raw hits into segments in `remix_match_aggregate.py`.
 3. UI renders `RemixSearchHit` rows via `populate_remix_result_table` (`ui/views/table_views.py`); **Compare** opens `RemixCompareDialog` for side-by-side VLC preview.
 
 End-user and cache-path details: **`docs/remix_source_match.md`**.
@@ -158,6 +174,7 @@ src/
     faiss_index.py
     inference_registry.py
     semantic_chunking.py
+    chinese_clip_provider.py
     siglip_provider_draft.py
     tokenizer.py
   services/

@@ -127,6 +127,8 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertNotIn("global_index_state", mock_load_meta.return_value)
         mock_save_meta.assert_called_once()
 
+    @patch("src.services.library_service.garbage_collect_orphan_library_indexes")
+    @patch("src.services.library_service.clear_library_search_index")
     @patch("src.services.library_service.get_local_model_asset_dirs", return_value={"vector_dir": "source/vector", "index_dir": "source/index", "base_dir": "x"})
     @patch("src.services.library_service.os.path.exists", return_value=True)
     @patch("src.services.library_service.save_model_metadata")
@@ -157,13 +159,19 @@ class IndexingServiceTests(unittest.TestCase):
         mock_save_meta,
         _mock_exists,
         _mock_get_model_dirs,
+        mock_clear_library_index,
+        _mock_gc,
     ):
         result = library_service.remove_library("D:\\videos", lambda *_args, **_kwargs: None)
 
         self.assertTrue(result)
+        mock_clear_library_index.assert_called_once()
+        self.assertEqual(mock_clear_library_index.call_args.kwargs["config"], _mock_load_config.return_value)
         self.assertEqual(mock_load_meta.return_value["global_index_state"], library_service.GLOBAL_INDEX_STATE_STALE)
         mock_save_meta.assert_called_once()
 
+    @patch("src.services.library_service.garbage_collect_orphan_library_indexes")
+    @patch("src.services.library_service.clear_library_search_index")
     @patch("src.services.library_service.get_local_model_asset_dirs", return_value={"vector_dir": "source/vector", "index_dir": "source/index", "base_dir": "x"})
     @patch("src.services.library_service.os.path.exists", return_value=False)
     @patch("src.services.library_service.save_model_metadata")
@@ -193,12 +201,37 @@ class IndexingServiceTests(unittest.TestCase):
         mock_save_meta,
         _mock_exists,
         _mock_get_model_dirs,
+        mock_clear_library_index,
+        _mock_gc,
     ):
         result = library_service.remove_library("D:\\videos", lambda *_args, **_kwargs: None)
 
         self.assertTrue(result)
+        mock_clear_library_index.assert_called_once()
         self.assertNotIn("global_index_state", mock_load_meta.return_value)
         mock_save_meta.assert_called_once()
+
+    @patch("src.services.library_service.get_library_search_index_status", return_value="stale")
+    @patch("src.services.library_service.load_model_metadata", return_value={"search_index_schema_version": 2, "libraries": {}})
+    @patch("src.services.library_service.load_config", return_value={})
+    @patch("src.services.library_service.os.path.exists", return_value=True)
+    def test_resolve_library_card_status_shows_stale_when_library_index_missing(
+        self,
+        _mock_exists,
+        _mock_config,
+        _mock_meta,
+        _mock_status,
+    ):
+        texts = {"lib_ready": "Ready", "lib_search_index_stale": "Library index stale", "delete": "delete"}
+        label, state = library_service.resolve_library_card_status(
+            "D:\\videos",
+            {"files": {"a.mp4": {"asset_state": "ready"}}, "index_state": "ready"},
+            texts,
+            meta=_mock_meta.return_value,
+            config=_mock_config.return_value,
+        )
+        self.assertEqual(label, "Library index stale")
+        self.assertEqual(state, "partial")
 
     def test_cleanup_missing_library_files_removes_deleted_entries(self):
         meta = {
@@ -850,6 +883,47 @@ class IndexingServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(output[0])
         self.assertTrue(callable(mock_scan.call_args.kwargs["issue_callback"]))
+
+    @patch("src.workflows.update_video.build_library_search_indexes")
+    @patch("src.workflows.update_video.build_global_index")
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
+    @patch("src.workflows.update_video.save_model_metadata")
+    @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(()))
+    @patch(
+        "src.workflows.update_video.load_model_metadata",
+        return_value={
+            "search_index_schema_version": 2,
+            "libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid"}}}},
+            "global_index_state": library_service.GLOBAL_INDEX_STATE_STALE,
+        },
+    )
+    @patch("src.workflows.update_video.load_config")
+    @patch("src.workflows.update_video.garbage_collect_indices")
+    def test_update_videos_flow_profile_mode_rebuilds_library_index_when_v2(
+        self,
+        _mock_gc,
+        mock_load_config,
+        _mock_load_meta,
+        _mock_cleanup,
+        _mock_save_meta,
+        mock_scan,
+        mock_build_global,
+        mock_build_library_indexes,
+    ):
+        mock_load_config.return_value = {
+            "auto_cleanup_missing_files": False,
+            "meta_file": "source/meta.json",
+        }
+
+        output = update_video.update_videos_flow(
+            target_lib="D:\\videos",
+            include_existing_assets=False,
+            rebuild_global_assets=False,
+        )
+
+        self.assertEqual(output, (None, None, None, None))
+        mock_build_global.assert_not_called()
+        mock_build_library_indexes.assert_called_once()
 
     @patch("src.workflows.update_video.build_global_index")
     @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
@@ -2131,6 +2205,22 @@ class ModelPackageServiceTests(unittest.TestCase):
             self.assertEqual(result["errors"], [])
             self.assertTrue(mock_save_config.called)
             self.assertEqual(config["models"]["profiles"][0]["runtime"]["model_variant"], "vit-base-patch32")
+
+
+class ModelResourceDirTests(unittest.TestCase):
+    def test_resolve_model_resource_dir_prefers_legacy_chinese_clip_onnx_folder(self):
+        from src.storage.config_store import resolve_model_resource_dir
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            legacy_dir = os.path.join(temp_dir, "chinese-clip-onnx", "vit-base-patch16")
+            os.makedirs(legacy_dir, exist_ok=True)
+            marker = os.path.join(legacy_dir, "chinese_clip_text.onnx")
+            with open(marker, "wb") as handle:
+                handle.write(b"onnx")
+
+            resolved = resolve_model_resource_dir(temp_dir, "chinese_clip_onnx", "vit-base-patch16")
+
+            self.assertEqual(os.path.normcase(resolved), os.path.normcase(legacy_dir))
 
 
 if __name__ == "__main__":

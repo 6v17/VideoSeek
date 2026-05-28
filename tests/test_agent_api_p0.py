@@ -52,10 +52,7 @@ class AgentApiP0Tests(unittest.TestCase):
     @patch("src.web.agent_api.run_search")
     def test_scope_filters_hits(self, mock_run_search, mock_snapshot):
         mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
-        mock_run_search.return_value = [
-            SearchHit(1.0, 1.0, 0.9, "D:/keep.mp4"),
-            SearchHit(2.0, 2.0, 0.8, "D:/drop.mp4"),
-        ]
+        mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/keep.mp4")]
         body = AgentSearchRequest(
             query="boy",
             scope=AgentSearchScope(video_paths=["D:/keep.mp4"]),
@@ -67,6 +64,33 @@ class AgentApiP0Tests(unittest.TestCase):
         self.assertEqual(len(payload["hits"]), 1)
         self.assertEqual(payload["hits"][0]["video_path"], "D:/keep.mp4")
         self.assertTrue(payload["meta"]["scope_applied"])
+        mock_run_search.assert_called_once()
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("scope_video_paths"), ["D:/keep.mp4"])
+        self.assertIsNone(kwargs.get("scope_library_paths"))
+
+    @patch("src.web.agent_api._per_library_indexes_ready", return_value=True)
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_scope_library_paths_uses_per_library_route(self, mock_run_search, mock_snapshot, _mock_ready):
+        mock_snapshot.return_value = {
+            "index_ready": False,
+            "global_index_state": "stale",
+            "search_index_schema_version": 2,
+            "library_indexes_upgrade_needed": False,
+        }
+        mock_run_search.return_value = [SearchHit(2.0, 2.0, 0.8, "D:/lib/clip.mp4")]
+        body = AgentSearchRequest(
+            query="goal",
+            scope=AgentSearchScope(library_paths=["D:/Videos/MyLibrary"]),
+            mode="frame",
+        )
+        payload = execute_agent_search(body)
+        self.assertEqual(len(payload["hits"]), 1)
+        self.assertTrue(payload["meta"]["scope_uses_per_library_indexes"])
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("scope_library_paths"), ["D:/Videos/MyLibrary"])
+        self.assertIsNone(kwargs.get("scope_video_paths"))
 
     def test_dedupe_manifest_items(self):
         items = [

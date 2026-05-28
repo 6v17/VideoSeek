@@ -4,7 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="增加GPU解码抽帧（试验性）">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="加了搜索接口，供agent使用（beta）">
+      <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -372,15 +373,47 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libgoom_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/VideoSeek.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/VideoSeek.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.zh-CN.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.zh-CN.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/quickstart.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/quickstart.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/indexing_progress.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/indexing_progress.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/inference_registry.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/inference_registry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/siglip_provider_draft.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/siglip_provider_draft.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/model_package_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/model_package_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/model_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/runtime_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/runtime_resource_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/settings/page.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/settings/page.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_api_p0.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api_p0.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_startup_migration_gate.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_startup_migration_gate.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/layout.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_model_packages.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_model_packages.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_tray.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_tray.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_vector_network.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_vector_network.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -394,7 +427,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="178" />
+    <option name="cachedIndexableFilesCount" value="210" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -488,11 +521,11 @@
       <recent name="D:\PycharmProjects\VideoSeek\static" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="D:\PycharmProjects\VideoSeek\models\chinese-clip\vit-base-patch16" />
+      <recent name="D:\PycharmProjects\VideoSeek\models\onnx" />
+      <recent name="D:\PycharmProjects\VideoSeek" />
       <recent name="D:\PycharmProjects\VideoSeek\ui\controllers" />
       <recent name="D:\PycharmProjects\VideoSeek\ui\windows" />
-      <recent name="D:\PycharmProjects\VideoSeek\ui\playback" />
-      <recent name="D:\PycharmProjects\VideoSeek\ui\views" />
-      <recent name="D:\PycharmProjects\VideoSeek\ui\presenters" />
     </key>
   </component>
   <component name="RunManager">
@@ -731,39 +764,11 @@
       <workItem from="1779351920894" duration="14236000" />
       <workItem from="1779535894724" duration="313000" />
       <workItem from="1779668548165" duration="13477000" />
-      <workItem from="1779691565809" duration="11510000" />
-    </task>
-    <task id="LOCAL-00036" summary="增加网络搜索功能">
-      <option name="closed" value="true" />
-      <created>1775742201144</created>
-      <option name="number" value="00036" />
-      <option name="presentableId" value="LOCAL-00036" />
-      <option name="project" value="LOCAL" />
-      <updated>1775742201144</updated>
-    </task>
-    <task id="LOCAL-00037" summary="增加网络搜索功能">
-      <option name="closed" value="true" />
-      <created>1775742689947</created>
-      <option name="number" value="00037" />
-      <option name="presentableId" value="LOCAL-00037" />
-      <option name="project" value="LOCAL" />
-      <updated>1775742689947</updated>
-    </task>
-    <task id="LOCAL-00038" summary="增加网络搜索功能">
-      <option name="closed" value="true" />
-      <created>1775742756748</created>
-      <option name="number" value="00038" />
-      <option name="presentableId" value="LOCAL-00038" />
-      <option name="project" value="LOCAL" />
-      <updated>1775742756748</updated>
-    </task>
-    <task id="LOCAL-00039" summary="1.0.5更新优化">
-      <option name="closed" value="true" />
-      <created>1776184317470</created>
-      <option name="number" value="00039" />
-      <option name="presentableId" value="LOCAL-00039" />
-      <option name="project" value="LOCAL" />
-      <updated>1776184317470</updated>
+      <workItem from="1779691565809" duration="17058000" />
+      <workItem from="1779712258255" duration="2237000" />
+      <workItem from="1779791103632" duration="16551000" />
+      <workItem from="1779868751165" duration="27144000" />
+      <workItem from="1779934180261" duration="4973000" />
     </task>
     <task id="LOCAL-00040" summary="界面优化">
       <option name="closed" value="true" />
@@ -1125,7 +1130,39 @@
       <option name="project" value="LOCAL" />
       <updated>1779683638227</updated>
     </task>
-    <option name="localTasksCounter" value="85" />
+    <task id="LOCAL-00085" summary="加了搜索接口，供agent使用（beta）">
+      <option name="closed" value="true" />
+      <created>1779705980280</created>
+      <option name="number" value="00085" />
+      <option name="presentableId" value="LOCAL-00085" />
+      <option name="project" value="LOCAL" />
+      <updated>1779705980280</updated>
+    </task>
+    <task id="LOCAL-00086" summary="给agent调用api的说明书">
+      <option name="closed" value="true" />
+      <created>1779706038580</created>
+      <option name="number" value="00086" />
+      <option name="presentableId" value="LOCAL-00086" />
+      <option name="project" value="LOCAL" />
+      <updated>1779706038580</updated>
+    </task>
+    <task id="LOCAL-00087" summary="加了搜索接口，供agent使用（beta）">
+      <option name="closed" value="true" />
+      <created>1779706083437</created>
+      <option name="number" value="00087" />
+      <option name="presentableId" value="LOCAL-00087" />
+      <option name="project" value="LOCAL" />
+      <updated>1779706083437</updated>
+    </task>
+    <task id="LOCAL-00088" summary="加了搜索接口，供agent使用（beta）">
+      <option name="closed" value="true" />
+      <created>1779712564610</created>
+      <option name="number" value="00088" />
+      <option name="presentableId" value="LOCAL-00088" />
+      <option name="project" value="LOCAL" />
+      <updated>1779712564611</updated>
+    </task>
+    <option name="localTasksCounter" value="89" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1155,8 +1192,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="增加网络搜索功能" />
-    <MESSAGE value="1.0.5更新优化" />
     <MESSAGE value="界面优化" />
     <MESSAGE value="使用vlc进行预览视频" />
     <MESSAGE value="修复bug" />
@@ -1180,7 +1215,9 @@
     <MESSAGE value="更新说明" />
     <MESSAGE value="移除远古旧版本迁移代码" />
     <MESSAGE value="增加GPU解码抽帧（试验性）" />
-    <option name="LAST_COMMIT_MESSAGE" value="增加GPU解码抽帧（试验性）" />
+    <MESSAGE value="给agent调用api的说明书" />
+    <MESSAGE value="加了搜索接口，供agent使用（beta）" />
+    <option name="LAST_COMMIT_MESSAGE" value="加了搜索接口，供agent使用（beta）" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

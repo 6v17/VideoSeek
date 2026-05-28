@@ -19,7 +19,7 @@ from src.services.storage_service import (
     migrate_app_data_root,
     migrate_model_root,
 )
-from src.storage.config_store import get_effective_model_dir
+from src.storage.config_store import get_effective_model_dir, resolve_provider_dir
 from src.utils import (
     ensure_sampling_fps_rules_open_tail,
     normalize_sampling_fps_mode,
@@ -223,7 +223,7 @@ class SettingsGuiMixin:
                 continue
             runtime = dict(profile.get("runtime") or {})
             provider = str(profile.get("provider", "") or "").strip()
-            provider_dir = "openai-clip" if provider == "clip_onnx" else provider.replace("_", "-")
+            provider_dir = resolve_provider_dir(provider)
             model_variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
             if not model_variant:
                 model_variant = "vit-base-patch32"
@@ -440,6 +440,8 @@ class SettingsGuiMixin:
             self._update_sampling_preview()
             if profile_switched:
                 self.refresh_library_table()
+            if profile_switched and hasattr(self, "refresh_search_presets_ui"):
+                self.refresh_search_presets_ui()
             save_message = self._build_settings_save_message(fps_changed, chunk_changed)
             if auto_tail_rule:
                 save_message = f"{save_message}\n\n{self.texts['sampling_rules_auto_tail_added'].format(rule=auto_tail_rule)}"

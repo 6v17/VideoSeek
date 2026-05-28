@@ -37,6 +37,7 @@ onnxruntime_stub = types.SimpleNamespace(
     ExecutionMode=_ExecutionMode,
     GraphOptimizationLevel=_GraphOptimizationLevel,
     get_available_providers=lambda: ["CPUExecutionProvider"],
+    InferenceSession=object,
 )
 sys.modules.setdefault("onnxruntime", onnxruntime_stub)
 
@@ -85,14 +86,16 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
                 return [np.array([[1.0, 0.0]], dtype=np.float32)]
 
         engine = clip_embedding.CLIPOnnxEngine.__new__(clip_embedding.CLIPOnnxEngine)
-        engine.visual_session = FakeSession()
-        engine.active_providers = {"visual": ["CPUExecutionProvider"], "text": ["CPUExecutionProvider"]}
-        engine.using_gpu = False
-        engine.backend_label = "CPU"
-        engine.runtime_warning = ""
-        engine._cpu_visual_session = None
-        engine._visual_force_cpu = False
-        engine._feature_dim = 2
+        fake_session = FakeSession()
+        engine.init_vision_batch_state(
+            visual_session=fake_session,
+            embedding_batch_size=16,
+            image_size=224,
+            using_gpu=False,
+            backend_label="CPU",
+            active_providers={"visual": ["CPUExecutionProvider"], "text": ["CPUExecutionProvider"]},
+        )
+        engine.model_paths = {"clip_visual.onnx": "D:/clip/clip_visual.onnx"}
 
         batch = [np.zeros((3, 224, 224), dtype=np.float32), np.zeros((3, 224, 224), dtype=np.float32)]
         result = engine._run_visual_batch(batch)
@@ -118,14 +121,16 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
                 return [np.array([[0.0, 1.0]], dtype=np.float32)]
 
         engine = clip_embedding.CLIPOnnxEngine.__new__(clip_embedding.CLIPOnnxEngine)
-        engine.visual_session = FailingGpuSession()
-        engine.active_providers = {"visual": ["DmlExecutionProvider"], "text": ["DmlExecutionProvider"]}
-        engine.using_gpu = True
-        engine.backend_label = "GPU"
-        engine.runtime_warning = ""
+        engine.init_vision_batch_state(
+            visual_session=FailingGpuSession(),
+            embedding_batch_size=16,
+            image_size=224,
+            using_gpu=True,
+            backend_label="GPU",
+            active_providers={"visual": ["DmlExecutionProvider"], "text": ["DmlExecutionProvider"]},
+        )
+        engine.model_paths = {"clip_visual.onnx": "D:/clip/clip_visual.onnx"}
         engine._feature_dim = 2
-        engine._cpu_visual_session = None
-        engine._visual_force_cpu = False
 
         cpu_session = CpuSession()
         engine._create_cpu_visual_session = lambda: cpu_session
@@ -475,6 +480,38 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
 
         self.assertEqual(reader_error, [])
         self.assertIsNone(frame_queue.get(timeout=1.0))
+
+    @patch("src.core.clip_embedding.build_inference_engine")
+    @patch("src.core.clip_embedding.get_active_model_profile")
+    @patch("src.core.clip_embedding.load_config", return_value=_clip_schema_v2_config())
+    def test_get_engine_rebuilds_when_active_provider_changes(
+        self,
+        _mock_load_config,
+        mock_get_profile,
+        mock_build_engine,
+    ):
+        class DummyEngine:
+            provider_id = "clip_onnx"
+            model_profile_id = "clip_onnx_default"
+            visual_session = object()
+            backend_label = "CPU"
+
+        first = DummyEngine()
+        second = DummyEngine()
+        second.provider_id = "siglip2_onnx"
+        second.model_profile_id = "siglip2_default"
+        mock_build_engine.side_effect = [first, second]
+        mock_get_profile.side_effect = [
+            {"id": "clip_onnx_default", "provider": "clip_onnx"},
+            {"id": "siglip2_default", "provider": "siglip2_onnx"},
+        ]
+
+        got_first = clip_embedding.get_engine()
+        got_second = clip_embedding.get_engine()
+
+        self.assertIs(got_first, first)
+        self.assertIs(got_second, second)
+        self.assertEqual(mock_build_engine.call_count, 2)
 
 
 if __name__ == "__main__":

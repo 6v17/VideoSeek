@@ -96,6 +96,13 @@ def format_progress_text(text: str, texts: dict) -> str:
                 total=file_total,
             )
         return texts.get("index_progress_rebuild_index_open", "Rebuilding index from cached vectors…")
+    if stage == "upgrade_index":
+        if file_total > 0:
+            return texts.get("index_progress_upgrade_index", "{current}/{total}: upgrading search index").format(
+                current=file_index,
+                total=file_total,
+            )
+        return texts.get("index_progress_upgrade_index_open", "Upgrading search index…")
 
     return text
 

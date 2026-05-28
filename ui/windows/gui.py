@@ -62,6 +62,8 @@ from ui.windows.gui_model_packages import ModelPackagesGuiMixin
 from ui.windows.gui_ui_state import AppUiStateMixin
 from ui.windows.gui_tray import TrayGuiMixin
 from ui.windows.gui_startup_migration import StartupMigrationGuiMixin
+from ui.windows.gui_search_presets import SearchPresetsGuiMixin
+from ui.windows.gui_search_scope import SearchScopeGuiMixin
 
 
 class MainWindow(
@@ -76,6 +78,8 @@ class MainWindow(
     RuntimeGuiMixin,
     AppUiStateMixin,
     ModelPackagesGuiMixin,
+    SearchScopeGuiMixin,
+    SearchPresetsGuiMixin,
 ):
     """Sidebar / stacked widget order: local search → library → remix → remote link → settings."""
 
@@ -135,6 +139,7 @@ class MainWindow(
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
         self.network_search_controller = NetworkSearchController(self)
+        self._init_search_presets_ui()
         self.mobile_bridge_controller = MobileBridgeController(self)
         self.mobile_bridge_controller.upload_received.connect(self._handle_mobile_upload_received)
         self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
@@ -230,12 +235,14 @@ class MainWindow(
 
         self.search_page.btn_search.clicked.connect(self.start_search)
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
+        self.search_page.search_scope_select.editor_requested.connect(self.open_search_scope_editor)
         self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
         self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
         self.search_page.btn_expand_preview.clicked.connect(self.open_current_preview_dialog)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._save_search_mode)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
+        self._init_search_scope_state()
         self.link_page.query_image_label.mousePressEvent = lambda e: self.upload_network_query_image()
         self.link_page.btn_build.clicked.connect(self.start_network_build)
         self.link_page.btn_import.clicked.connect(self.import_network_library)
@@ -388,6 +395,8 @@ class MainWindow(
         self.search_page.btn_mobile_qr.setEnabled(self.mobile_bridge_controller.is_running())
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
+        self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
+        self._refresh_search_scope_ui()
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
         self.result_table.apply_header_labels(t)
         self.search_page.result_view.set_empty_message(t["no_results"])
@@ -477,6 +486,7 @@ class MainWindow(
         self._update_sampling_preview()
         if self._startup_complete:
             self.refresh_library_table()
+            self.refresh_search_presets_ui()
 
     def _finish_startup_sequence(self):
         synced_model_dir = sync_model_dir_to_config()
@@ -490,6 +500,7 @@ class MainWindow(
             self._defer_runtime_warmup = False
             self._start_runtime_warmup()
         self.refresh_library_table()
+        self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
         self._apply_agent_api_settings()
@@ -533,9 +544,15 @@ class MainWindow(
         if not query:
             self.search_page.lbl_status.setText(self.texts["empty_query"])
             return
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return
 
         self.switch_page("search")
-        self.search_controller.start_search(query, bool(text_query))
+        from src.services.search_scope import resolve_active_search_library_scope
+
+        scope_library_paths = resolve_active_search_library_scope()
+        self.search_controller.start_search(query, bool(text_query), scope_library_paths=scope_library_paths)
 
     def toggle_mobile_bridge(self):
         try:
@@ -772,6 +789,16 @@ class MainWindow(
         if video_lines:
             lines.append(self.texts["migration_summary_video_id_section"])
             lines.extend(video_lines)
+
+        if summary.get("search_index_upgraded"):
+            lines.append(self.texts["migration_summary_search_index_section"])
+            lines.append(
+                self.texts["migration_summary_search_index_built"].format(
+                    count=int(summary.get("search_index_libraries_built", 0) or 0),
+                )
+            )
+            if summary.get("search_index_global_built"):
+                lines.append(self.texts["migration_summary_search_index_global"])
 
         backup_dir = str(summary.get("backup_dir", "") or "").strip()
         if backup_dir:

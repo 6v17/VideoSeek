@@ -17,6 +17,13 @@ REQUIRED_MODEL_FILES = [
 
 PROVIDER_REQUIRED_MODEL_FILES = {
     "clip_onnx": list(REQUIRED_MODEL_FILES),
+    "chinese_clip_onnx": [
+        "chinese_clip_image.onnx",
+        "chinese_clip_text.onnx",
+        "vocab.txt",
+        "preprocessor_config.json",
+        "config.json",
+    ],
     "siglip2_onnx": [
         "vision_model.onnx",
         "text_model.onnx",
@@ -46,12 +53,9 @@ def _ensure_unique_profile_id(base_id, existing_idx):
 
 
 def _provider_dir(provider):
-    provider = str(provider or "").strip()
-    if provider == "clip_onnx":
-        return "openai-clip"
-    if provider == "siglip2_onnx":
-        return "siglip2"
-    return provider.replace("_", "-")
+    from src.storage.config_store import resolve_provider_dir
+
+    return resolve_provider_dir(provider)
 
 
 def _resolve_model_variant(profile):
@@ -301,6 +305,14 @@ def import_model_packages(model_root):
                     "text_model": "text_model.onnx",
                     "tokenizer_json": "tokenizer.json",
                     "tokenizer_config": "tokenizer_config.json",
+                }
+            elif provider == "chinese_clip_onnx":
+                files_map = {
+                    "image_model": "chinese_clip_image.onnx",
+                    "text_model": "chinese_clip_text.onnx",
+                    "tokenizer_vocab": "vocab.txt",
+                    "preprocessor_config": "preprocessor_config.json",
+                    "model_config": "config.json",
                 }
 
         new_profile = {

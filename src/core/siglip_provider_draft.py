@@ -1,19 +1,17 @@
 import os
 
+import cv2
 import numpy as np
 import onnxruntime as ort
-from PIL import Image
 
 from src.app.config import load_config
+from src.core.onnx_session import build_session_options, resolve_embedding_batch_size
+from src.core.onnx_vision_engine import INFERENCE_LOCK, OnnxVisionBatchMixin
 from src.storage.config_store import get_effective_prefer_gpu
-from src.utils import free_memory
 
 
-class SigLIP2OnnxEngine:
-    """
-    Draft provider for local SigLIP2 ONNX models.
-    This file is intentionally not wired into the main runtime yet.
-    """
+class SigLIP2OnnxEngine(OnnxVisionBatchMixin):
+    """Local SigLIP2 ONNX inference provider."""
 
     def __init__(self, model_dir, prefer_gpu=None, image_size=224):
         self.model_dir = os.path.normpath(os.path.abspath(os.fspath(model_dir)))
@@ -38,43 +36,68 @@ class SigLIP2OnnxEngine:
         # Keep text on CPU by default for compatibility; make this configurable later if needed.
         text_providers = ["CPUExecutionProvider"]
 
-        self.vision_session = ort.InferenceSession(self._vision_path, providers=vision_providers)
-        self.text_session = ort.InferenceSession(self._text_path, providers=text_providers)
+        self.vision_session = ort.InferenceSession(
+            self._vision_path,
+            sess_options=build_session_options(effective_prefer_gpu),
+            providers=vision_providers,
+        )
+        self.text_session = ort.InferenceSession(
+            self._text_path,
+            sess_options=build_session_options(False),
+            providers=text_providers,
+        )
         self.active_providers = {
-            "vision": list(self.vision_session.get_providers()),
+            "visual": list(self.vision_session.get_providers()),
             "text": list(self.text_session.get_providers()),
         }
-        self.using_gpu = "DmlExecutionProvider" in self.active_providers["vision"]
-        self.backend_label = (
-            "GPU"
-            if self.using_gpu
-            else "CPU"
-        )
+        self.using_gpu = "DmlExecutionProvider" in self.active_providers["visual"]
         self.prefer_gpu = configured_prefer_gpu
-        self.embedding_batch_size = _resolve_embedding_batch_size(runtime_config)
-        self.runtime_warning = ""
+        self.provider_id = "siglip2_onnx"
+        self.init_vision_batch_state(
+            visual_session=self.vision_session,
+            embedding_batch_size=resolve_embedding_batch_size(runtime_config),
+            image_size=self.image_size,
+            using_gpu=self.using_gpu,
+            backend_label="GPU" if self.using_gpu else "CPU",
+            active_providers=self.active_providers,
+        )
         self.runtime_issue = ""
         self.runtime_diagnostics = {}
-        self._feature_dim = None
         self._tokenizer_backend = "unknown"
+        self._vision_input_name = self.vision_session.get_inputs()[0].name
 
-    def _preprocess_image(self, image_source):
-        if isinstance(image_source, str):
-            image = Image.open(image_source).convert("RGB")
-        else:
-            array = np.asarray(image_source)
-            if array.ndim != 3 or array.shape[2] != 3:
-                raise RuntimeError("Unsupported image frame format for SigLIP preprocessing.")
-            # Main pipeline frames are BGR ndarray.
-            image = Image.fromarray(array[:, :, ::-1]).convert("RGB")
-        image = image.resize(
-            (self.image_size, self.image_size),
-            Image.Resampling.BICUBIC,
-        )
-        array = np.asarray(image, dtype=np.float32)
-        array = (array / 255.0 - 0.5) / 0.5
-        array = array.transpose(2, 0, 1)
-        return array[np.newaxis, :]
+    def visual_model_path(self):
+        return self._vision_path
+
+    def visual_input_name(self):
+        return self._vision_input_name
+
+    def _on_visual_session_recreated(self):
+        self._vision_input_name = self.visual_session.get_inputs()[0].name
+
+    def preprocess_into(self, img_bgr, out_chw):
+        """Normalize one BGR frame into CHW float32 ``out_chw`` shaped (3, image_size, image_size)."""
+        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        h, w = int(img.shape[0]), int(img.shape[1])
+        size = self.image_size
+        if h != size or w != size:
+            interp = cv2.INTER_AREA if (h > size or w > size) else cv2.INTER_LINEAR
+            img = cv2.resize(img, (size, size), interpolation=interp)
+        tensor = img.astype(np.float32, copy=False)
+        tensor *= 2.0 / 255.0
+        tensor -= 1.0
+        out_chw[:] = np.transpose(tensor, (2, 0, 1))
+
+    def extract_visual_features(self, outputs):
+        for tensor in outputs:
+            if getattr(tensor, "ndim", 0) == 2:
+                return tensor.astype(np.float32)
+        first = outputs[0].astype(np.float32)
+        if first.ndim == 3:
+            return np.mean(first, axis=1)
+        if first.ndim == 2:
+            return first
+        raise RuntimeError(f"Unsupported SigLIP output shape: {tuple(first.shape)}")
 
     @staticmethod
     def _build_tokenizer(model_dir):
@@ -94,40 +117,11 @@ class SigLIP2OnnxEngine:
             "instance": tokenizer,
         }
 
-    def _normalize(self, vectors):
-        norms = np.linalg.norm(vectors, axis=-1, keepdims=True) + 1e-10
-        return vectors / norms
-
-    def _select_feature_tensor(self, outputs):
-        # Prefer a pooled 2D output (batch, dim), fallback to sequence mean-pooling.
-        for tensor in outputs:
-            if getattr(tensor, "ndim", 0) == 2:
-                return tensor.astype(np.float32)
-        first = outputs[0].astype(np.float32)
-        if first.ndim == 3:
-            return np.mean(first, axis=1)
-        if first.ndim == 2:
-            return first
-        raise RuntimeError(f"Unsupported SigLIP output shape: {tuple(first.shape)}")
-
-    def encode_images(self, image_paths):
-        vectors = []
-        input_name = self.vision_session.get_inputs()[0].name
-        for image_path in image_paths:
-            image_blob = self._preprocess_image(image_path)
-            outputs = self.vision_session.run(None, {input_name: image_blob})
-            features = self._select_feature_tensor(outputs)
-            vectors.append(features)
-        if not vectors:
-            dim = int(self._feature_dim or 0)
-            return np.empty((0, dim), dtype=np.float32)
-        merged = np.vstack(vectors).astype(np.float32)
-        merged = self._normalize(merged)
-        self._feature_dim = int(merged.shape[1])
-        free_memory()
-        return merged
-
     def encode_text(self, text):
+        with INFERENCE_LOCK:
+            return self._encode_text_locked(text)
+
+    def _encode_text_locked(self, text):
         encoded = self._encode_text_inputs(str(text or ""))
         feed = {}
         text_inputs = self.text_session.get_inputs()
@@ -135,15 +129,14 @@ class SigLIP2OnnxEngine:
             if node.name in encoded:
                 feed[node.name] = encoded[node.name].astype(np.int64)
         if not feed and text_inputs:
-            # Some exports use generic names (e.g. "input"), map the first tensor.
             first_name = text_inputs[0].name
             if "input_ids" in encoded:
                 feed[first_name] = encoded["input_ids"].astype(np.int64)
         if not feed:
             raise RuntimeError("SigLIP text encoder inputs could not be prepared for ONNX session.")
         outputs = self.text_session.run(None, feed)
-        features = self._select_feature_tensor(outputs).astype(np.float32)
-        features = self._normalize(features)
+        features = self.extract_visual_features(outputs).astype(np.float32)
+        features /= np.linalg.norm(features, axis=-1, keepdims=True) + 1e-10
         self._feature_dim = int(features.shape[1])
         return features
 
@@ -165,9 +158,7 @@ class SigLIP2OnnxEngine:
 
 
 def build_siglip_profile_manifest(variant="base-patch16-224"):
-    """
-    Return a draft model_manifest payload for SigLIP package parsing.
-    """
+    """Return a draft model_manifest payload for SigLIP package parsing."""
     variant_text = str(variant or "").strip() or "base-patch16-224"
     return {
         "id": f"siglip2_{variant_text.replace('-', '_')}",
@@ -188,12 +179,3 @@ def build_siglip_profile_manifest(variant="base-patch16-224"):
             "tokenizer_config": "tokenizer_config.json",
         },
     }
-
-
-def _resolve_embedding_batch_size(config):
-    runtime_config = dict(config or {})
-    try:
-        batch_size = int(runtime_config.get("embedding_batch_size", 16))
-    except (TypeError, ValueError):
-        return 16
-    return max(1, batch_size)

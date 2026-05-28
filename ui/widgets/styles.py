@@ -396,6 +396,109 @@ QPushButton:disabled {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
 }
+#PresetChipButton {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    color: __HEADLINE__;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 0 10px;
+    min-height: 22px;
+    max-height: 24px;
+}
+#PresetChipButton:hover {
+    background: __ACCENT__;
+    color: __INVERSE_TEXT__;
+}
+#SearchPresetsTrack {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#SearchPresetsScroll {
+    background: transparent;
+    border: none;
+}
+#SearchPresetsViewport {
+    background: transparent;
+}
+#SearchPresetsHost {
+    background: transparent;
+}
+#SearchPresetsScroll QScrollBar:horizontal {
+    height: 0px;
+    background: transparent;
+    margin: 0 2px;
+}
+#SearchPresetsScroll QScrollBar::handle:horizontal {
+    background: transparent;
+    min-width: 0px;
+}
+#SearchPresetsScroll[trackHover="true"] QScrollBar:horizontal {
+    height: 4px;
+}
+#SearchPresetsScroll[trackHover="true"] QScrollBar::handle:horizontal {
+    background: __SCROLL__;
+    border-radius: 2px;
+    min-width: 28px;
+    margin: 0 1px;
+}
+#SearchPresetsScroll QScrollBar::add-line, #SearchPresetsScroll QScrollBar::sub-line {
+    width: 0;
+    height: 0;
+    border: none;
+}
+#PresetChip {
+    background: transparent;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 999px;
+}
+#PresetChip:hover {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
+#PresetChipLabel {
+    color: __HEADLINE__;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+}
+#PresetTrackEmpty {
+    color: __MUTED__;
+    font-size: 12px;
+    background: transparent;
+}
+#PresetManageButton {
+    background: transparent;
+    color: __ACCENT__;
+    border: 1px solid __ACCENT__;
+    font-weight: 600;
+}
+#PresetManageButton:hover {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT_HOVER__;
+    color: __ACCENT_HOVER__;
+}
+#PresetManageButton:pressed {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
+#SearchResultsActions {
+    background: transparent;
+}
+#PresetImageThumb {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+}
+#PresetImageThumb[selected="true"] {
+    background: __ACCENT_SOFT__;
+    border: 2px solid __ACCENT__;
+}
+#PresetImagePreview {
+    background: transparent;
+    border: none;
+}
 #AccentGhostButton {
     background: transparent;
     border-color: __ACCENT__;
@@ -1041,6 +1144,107 @@ ClickableLabel[detailActive="true"] {
     font-weight: 600;
     line-height: 1.45em;
     background: transparent;
+}
+#SearchScopeEditorDialog {
+    background: __WINDOW__;
+}
+#SearchScopeScroll {
+    background: transparent;
+    border: none;
+}
+#SearchScopeList {
+    background: transparent;
+}
+#SearchScopeLibRow {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+}
+#SearchScopeLibRow:hover {
+    background: __ACCENT_SOFT__;
+    border-color: __LINE_STRONG__;
+}
+#SearchScopeLibRow[selectedRow="true"] {
+    border-color: __ACCENT__;
+    background: __FIELD__;
+}
+#SearchScopeLibTitle {
+    color: __HEADLINE__;
+    font-size: 14px;
+    font-weight: 700;
+    background: transparent;
+}
+#SearchScopeLibPath {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+}
+#SearchScopeLibBadge {
+    background: transparent;
+    border: none;
+    padding: 0 4px;
+    font-size: 12px;
+    font-weight: 700;
+}
+#SearchScopeLibBadge[libState="ready"] {
+    color: __SUCCESS__;
+}
+#SearchScopeLibBadge[libState="offline"] {
+    color: __MUTED__;
+}
+#SearchPresetManageScroll {
+    background: transparent;
+    border: none;
+}
+#SearchPresetManageList {
+    background: transparent;
+}
+#SearchPresetManageRow {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+}
+#SearchPresetManageRow:hover {
+    background: __ACCENT_SOFT__;
+    border-color: __LINE_STRONG__;
+}
+#SearchPresetManageAccent {
+    background: __ACCENT__;
+    border-radius: 2px;
+}
+#SearchPresetManageTitle {
+    color: __HEADLINE__;
+    font-size: 14px;
+    font-weight: 700;
+    background: transparent;
+}
+#SearchPresetManageDesc {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+}
+#SearchPresetManageBadge {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+#SearchPresetManageBadge[kind="text"] {
+    color: __ACCENT__;
+    border-color: __ACCENT__;
+    background: __ACCENT_SOFT__;
+}
+#SearchPresetManageBadge[kind="image"] {
+    color: __SUCCESS__;
+    border-color: __SUCCESS__;
+    background: transparent;
+}
+#SearchPresetManageBadge[kind="fusion"] {
+    color: __MUTED__;
 }
 #RemixScopeScroll {
     background: transparent;

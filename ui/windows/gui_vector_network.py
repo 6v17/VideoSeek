@@ -145,6 +145,12 @@ class VectorNetworkGuiMixin:
                 vector_dir=detail["vector_dir"],
                 index_dir=detail["index_dir"],
             )
+            library_summary = self._format_library_search_index_summary(detail.get("library_summaries") or [])
+            if library_summary:
+                subtitle = (
+                    f"{subtitle}\n"
+                    f"{self.texts['library_vectors_library_index_line'].format(root=detail.get('library_index_root') or '-', summary=library_summary)}"
+                )
             dialog = ResourceTableDialog(
                 parent=self,
                 is_dark=self.is_dark_mode,
@@ -253,6 +259,22 @@ class VectorNetworkGuiMixin:
         if not reason_key:
             return ""
         return self.texts.get(f"library_sync_failure_reason_{reason_key}", reason_key)
+
+    def _format_library_search_index_summary(self, summaries):
+        if not summaries:
+            return ""
+        status_keys = (
+            ("ready", "library_search_index_summary_ready"),
+            ("stale", "library_search_index_summary_stale"),
+            ("needs_upgrade", "library_search_index_summary_needs_upgrade"),
+            ("not_applicable", "library_search_index_summary_not_applicable"),
+        )
+        parts = []
+        for status, text_key in status_keys:
+            count = sum(1 for item in summaries if str(item.get("status", "")).strip().lower() == status)
+            if count:
+                parts.append(self.texts.get(text_key, f"{status} {count}").format(count=count))
+        return ", ".join(parts)
 
     def _open_vector_detail_payload(self, dialog, payload, item=None):
         column = item.column() if item is not None else 3

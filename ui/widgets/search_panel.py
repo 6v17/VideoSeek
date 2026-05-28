@@ -1,10 +1,51 @@
 """Local search query controls (text, image drop, mode, mobile bridge, actions)."""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QWidget
 
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.scaffold import VSCard
+
+
+class SearchScopeSelect(QComboBox):
+    """Read-only combobox look; click opens the library scope editor."""
+
+    editor_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SearchModeSelect")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def set_display_text(self, text: str) -> None:
+        blocked = self.blockSignals(True)
+        self.clear()
+        if text:
+            self.addItem(text)
+            self.setCurrentIndex(0)
+        self.blockSignals(blocked)
+
+    def showPopup(self) -> None:
+        self.editor_requested.emit()
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in (
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Down,
+            Qt.Key.Key_PageUp,
+            Qt.Key.Key_PageDown,
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        ):
+            self.editor_requested.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class SearchPanel(VSCard):
@@ -29,16 +70,36 @@ class SearchPanel(VSCard):
         self.text_search = QLineEdit()
         self.text_search.setObjectName("SearchInput")
 
+        combo_width = int(COMPONENT_SIZES.get("search_option_combo_width", 96))
+        combo_policy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
         self.search_mode = QComboBox()
         self.search_mode.setObjectName("SearchModeSelect")
-        self.search_mode.setFixedWidth(COMPONENT_SIZES["settings_input_width"] + 36)
+        self.search_mode.setFixedWidth(combo_width)
+        self.search_mode.setSizePolicy(combo_policy)
         self.search_mode_label = QLabel()
         self.search_mode_label.setObjectName("CardHint")
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-        mode_row.addWidget(self.search_mode_label)
-        mode_row.addWidget(self.search_mode)
-        mode_row.addStretch()
+        self.search_scope_label = QLabel()
+        self.search_scope_label.setObjectName("CardHint")
+        self.search_scope_select = SearchScopeSelect()
+        self.search_scope_select.setFixedWidth(combo_width)
+        self.search_scope_select.setSizePolicy(combo_policy)
+
+        self.search_scope_cluster = QWidget()
+        self.search_scope_cluster.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        scope_cluster = QHBoxLayout(self.search_scope_cluster)
+        scope_cluster.setContentsMargins(0, 0, 0, 0)
+        scope_cluster.setSpacing(8)
+        scope_cluster.addWidget(self.search_scope_label)
+        scope_cluster.addWidget(self.search_scope_select)
+
+        options_row = QHBoxLayout()
+        options_row.setSpacing(8)
+        options_row.addWidget(self.search_mode_label)
+        options_row.addWidget(self.search_mode)
+        options_row.addSpacing(12)
+        options_row.addWidget(self.search_scope_cluster)
+        options_row.addStretch(1)
 
         mobile_row = QHBoxLayout()
         mobile_row.setSpacing(8)
@@ -68,6 +129,6 @@ class SearchPanel(VSCard):
         layout.addWidget(self.controls_hint)
         layout.addWidget(self.img_label)
         layout.addWidget(self.text_search)
-        layout.addLayout(mode_row)
+        layout.addLayout(options_row)
         layout.addLayout(mobile_row)
         layout.addLayout(action_row)

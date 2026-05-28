@@ -30,6 +30,7 @@ from ui.widgets.remix_scope_tree import RemixScopeTreeWidget
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import LinkResultTable, RemixResultTable, ResultTable
 from ui.widgets.result_view import ResultView
+from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
     PageHeader,
     PageScaffold,
@@ -446,6 +447,9 @@ class SearchPage(QWidget):
         self.btn_mobile_qr = self.search_panel.btn_mobile_qr
         self.btn_search = self.search_panel.btn_search
         self.btn_clear = self.search_panel.btn_clear
+        self.search_scope_cluster = self.search_panel.search_scope_cluster
+        self.search_scope_label = self.search_panel.search_scope_label
+        self.search_scope_select = self.search_panel.search_scope_select
 
         self.preview_panel = PreviewPanel()
         self.preview_card = self.preview_panel
@@ -460,21 +464,37 @@ class SearchPage(QWidget):
 
         self.results_card = VSCard()
         results_layout = self.results_card.content_layout
-        results_header = QHBoxLayout()
-        results_header.setContentsMargins(0, 0, 0, 0)
-        results_header.setSpacing(10)
         self.results_title = QLabel()
         self.results_title.setObjectName("CardTitle")
+
+        results_toolbar = QHBoxLayout()
+        results_toolbar.setContentsMargins(0, 0, 0, 0)
+        results_toolbar.setSpacing(10)
+        results_toolbar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.search_presets_bar = SearchPresetsBar()
+        self.btn_manage_presets = QPushButton()
+        self.btn_manage_presets.setObjectName("PresetManageButton")
         self.btn_expand_preview = QPushButton()
         self.btn_expand_preview.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
-        results_header.addWidget(self.results_title, 1)
-        results_header.addWidget(self.btn_expand_preview)
-        results_header.addWidget(self.btn_export_tasks)
+
+        self.results_actions = QWidget()
+        self.results_actions.setObjectName("SearchResultsActions")
+        actions_layout = QHBoxLayout(self.results_actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(6)
+        actions_layout.addWidget(self.btn_manage_presets)
+        actions_layout.addWidget(self.btn_expand_preview)
+        actions_layout.addWidget(self.btn_export_tasks)
+
+        results_toolbar.addWidget(self.search_presets_bar, 1)
+        results_toolbar.addWidget(self.results_actions, 0)
+
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
         self.result_table = self.result_view.table
-        results_layout.addLayout(results_header)
+        results_layout.addWidget(self.results_title)
+        results_layout.addLayout(results_toolbar)
         results_layout.addWidget(self.result_view)
         page_body.addWidget(self.results_card, 4)
 

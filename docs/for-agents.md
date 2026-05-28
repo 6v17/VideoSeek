@@ -4,7 +4,7 @@ This document is for **external agents** (Cursor, Claude Code, custom scripts, M
 
 > **Status:** **In development** — on `http://127.0.0.1:8765` when the desktop app is running **and** Agent API is enabled in **Settings → General → Agent API (localhost)** (`src/web/agent_api.py`). Default: **off**.
 >
-> Endpoints: `GET /api/v1/health` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `POST /api/v1/export/manifest`
+> Endpoints: `GET /api/v1/health` · `GET /api/v1/search/presets` · `GET /api/v1/search/presets/{id}` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `POST /api/v1/export/manifest`
 >
 > Request/response fields may still change before a public freeze. Treat this doc as the current draft, not a permanent contract.
 
@@ -16,7 +16,7 @@ The Agent API is a thin wrapper over `search_service` (not GUI automation). When
 
 ### Hit fields (minimum stable subset)
 
-Production search responses include **additional fields** — see §5.1 (`duration_sec`, `start_timecode`, `clip_window`, etc.). Do not parse §0 alone.
+Production search responses include **additional fields** — see §5.2 (`duration_sec`, `start_timecode`, `clip_window`, etc.). Do not parse §0 alone.
 
 ```json
 {
@@ -46,7 +46,7 @@ Responses include **`api_version": "1"`**; bump only when breaking shapes intent
 
 ## 1. What VideoSeek Is Good At
 
-VideoSeek indexes local videos with **CLIP / SigLIP-style embeddings** and retrieves **time ranges** by:
+VideoSeek indexes local videos with **CLIP / SigLIP / Chinese CLIP** (and other registered ONNX profile) embeddings and retrieves **time ranges** by:
 
 - **Text** — “red jersey celebration”, “product close-up on desk”
 - **Image** — find shots similar to a reference frame
@@ -63,13 +63,21 @@ Each successful search returns **where** (file path + seconds), not a finished e
 
 ---
 
-## 2. Tags = Search Queries
+## 2. Query label on hits (not video tags, not saved presets)
 
-You do **not** need a separate tagging system for v1.
+**Terminology (avoid confusion):**
 
-- Every `search` call includes a `query` string.
-- That string is the **tag name** for all hits returned in that call.
-- When exporting a cut list, copy `query` into each row so downstream steps know *why* this segment was chosen.
+| Term | Meaning | Status |
+|------|---------|--------|
+| **Query label** | The `query` string on a search request; copied into each hit / manifest row as *why this clip was chosen* | **Today** — use on every `/search` |
+| **Search preset** | A **named, saved bundle** created in the desktop app (text and/or reference images, optional fusion weights). Run via `preset_id` on `/search` — same vectors and filters as clicking a chip in the GUI | **Today** — §5.1 |
+| **Video metadata tag** | Permanent `tags: ["高燃"]` on each file/segment in the library | **Out of scope** — not this product direction |
+
+For Agent API v1 you do **not** need a separate tagging database or full-library auto-labeling.
+
+- Every `search` call returns a **query label** in the top-level `query` field (preset name when using `preset_id`).
+- Copy that string into each manifest row so downstream steps know *why* this segment was chosen.
+- Agents may pass **`preset_id`** (§5.1–5.2) for user-saved conditions, or inline `query` / `query_type` for ad-hoc searches.
 
 Example row:
 
@@ -155,7 +163,7 @@ Or set `end_sec = start_sec + preview_seconds` (desktop default **6**). Clamp to
 ### 4.2 Choosing hits per query
 
 1. Sort by `rank` ascending (1 = best).
-2. Drop hits below `min_score` if set (§5.4 presets — calibrate per library).
+2. Drop hits below `min_score` if set (§5.5 — calibrate per library).
 3. Prefer **diverse** files: do not take five hits from the same minute unless the script asks for it.
 4. For rough cut, **`top_k` request 3–5**, keep **1–2** per script line.
 
@@ -166,12 +174,12 @@ Merge when:
 - Same `video_path`, and
 - Intervals overlap more than **50%** of the shorter segment, or start times within **2 s** in frame mode.
 
-Keep the higher rank (lower `rank` number). **`POST /export/manifest` with `dedupe: true` applies the same rules server-side** (§5.3).
+Keep the higher rank (lower `rank` number). **`POST /export/manifest` with `dedupe: true` applies the same rules server-side** (§5.4).
 
 ### 4.4 Screenshot folder workflow (end-to-end)
 
 1. `GET /api/v1/health` — check `index_ready`, read `ffmpeg.ffmpeg_path`
-2. `POST /api/v1/search/batch` — e.g. `{ "image_folder": "C:/shots", "top_k": 3, "mode": "chunk", "scope": { "video_paths": ["D:/film.mp4"] } }`
+2. `POST /api/v1/search/batch` — e.g. `{ "image_folder": "C:/shots", "top_k": 3, "mode": "chunk", "scope": { "library_paths": ["D:/film_lib"] } }`
 3. `POST /api/v1/export/manifest` — `{ "sources": <batch.results>, "keep_per_source": 2, "dedupe": true, "write_path": "D:/cuts.json" }`
 4. Shell out to `ffmpeg.ffmpeg_path` per manifest item
 
@@ -223,6 +231,7 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
     "frame_search": true,
     "chunk_search": true,
     "batch_search": true,
+    "search_presets": true,
     "export_manifest": true,
     "export_clip": false,
     "local_ffmpeg_clip": true
@@ -244,8 +253,9 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `index_ready` | If `false`, do not spam `/search` — ask user to sync index in VideoSeek |
 | `index_stale` | If `true`, results may be outdated until user rebuilds global index |
 | `index_id` | Cache key — confirm later searches use the same index snapshot / model |
+| `model` / `provider` / `dimension` | Reflect the **active model profile** (e.g. `chinese_clip_vit_base_patch16`, `chinese_clip_onnx`, `512`) — not always `clip_onnx` |
 | `embedding_space` | Embedding namespace in `index_id`; useful when comparing snapshots across runs |
-| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `batch_search: false` → loop `/search`) |
+| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `search_presets: false` → use inline `query` only) |
 | `ffmpeg.ffmpeg_path` | **Do not search the disk** — use this executable for `-ss/-to` clip export |
 | `ffmpeg.ffmpeg_available` | If `false`, ask user to install/import FFmpeg in VideoSeek settings |
 | `ffmpeg.ffmpeg_source` | `configured` / `managed` / `bundled` / `system` / `missing` (debug) |
@@ -253,13 +263,75 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `video_count` | Files tracked in library metadata |
 | `vector_count` | Vectors in the active global index for `search_mode_checked` |
 | `frame_vector_count` / `chunk_vector_count` | Per-mode vector totals (even when only one mode is checked) |
+| `search_index_schema_version` | `1` = global-only search; `2` = per-library indexes available |
+| `library_indexes_upgrade_needed` | If `true`, per-library indexes are still building — restart VideoSeek and wait for startup migration |
+| `library_indexes_ready` / `library_indexes_stale` | Count of per-library indexes ready vs stale (v2 only) |
+| `saved_search_scope_mode` | Desktop setting: `all` or `selected` (used when `scope.use_saved_scope: true`) |
 | `max_batch_queries` / `batch_timeout_sec` | Batch limits — size `queries[]` and expect HTTP 503 if exceeded |
 
-### 5.1 `POST /api/v1/search`
+### 5.1 Search presets (`GET`)
+
+Presets are **shared with the desktop app** (same JSON store). They can be text-only, image-only, or mixed (text + helper images with optional fusion weights). Reference image files stay on disk — the API exposes counts and summaries, not absolute ref paths.
+
+#### `GET /api/v1/search/presets`
+
+List all presets (newest order follows desktop storage).
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "presets": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "name": "Night City",
+      "query": "anime night skyline",
+      "reference_image_count": 2,
+      "summary": "anime night skyline + [2 image(s)] + (50:50)",
+      "fusion": { "text_weight": 0.5, "image_weight": 0.5 }
+    }
+  ],
+  "meta": { "count": 1 }
+}
+```
+
+#### `GET /api/v1/search/presets/{preset_id}`
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "preset": {
+    "id": "a1b2c3d4e5f6",
+    "name": "Night City",
+    "query": "anime night skyline",
+    "reference_image_count": 2,
+    "summary": "anime night skyline + [2 image(s)] + (50:50)"
+  }
+}
+```
+
+| HTTP | Meaning |
+|------|---------|
+| 404 | Unknown `preset_id` |
+
+**Agent workflow:** `GET /presets` → let user pick a name → `POST /search` with `preset_id`. Or skip listing if the user already gave you an id from the desktop UI.
+
+**Live settings (same as GUI chip click):**
+
+| Setting | Preset search behavior |
+|---------|------------------------|
+| **Search mode** (`frame` / `chunk`) | Uses request `mode` if set; otherwise desktop `search_mode` at request time — **not** frozen inside the preset |
+| **Library scope** | If `scope` is omitted, uses desktop **Search scope** (`selected` libraries when configured); pass `scope` to override |
+| **top_k / min_score** | Request fields override; otherwise preset defaults, then app defaults |
+
+### 5.2 `POST /api/v1/search`
 
 Find segments in the **currently indexed local library** on the machine where VideoSeek is running.
 
-#### Request
+Provide **`preset_id` or `query`**, not both.
+
+#### Request (inline text query)
 
 ```json
 {
@@ -269,26 +341,44 @@ Find segments in the **currently indexed local library** on the machine where Vi
   "mode": "chunk",
   "min_score": null,
   "client_request_id": "beat-03",
-  "scope": { "video_paths": ["D:/library/it2017.mp4"] },
+  "scope": { "library_paths": ["D:/Videos/MyLibrary"] },
   "expand_frame_hits": true,
   "pad_before_sec": 3,
   "pad_after_sec": 3
 }
 ```
 
+#### Request (saved preset)
+
+```json
+{
+  "preset_id": "a1b2c3d4e5f6",
+  "mode": "chunk",
+  "top_k": 10,
+  "client_request_id": "beat-03"
+}
+```
+
+When `preset_id` is set, omit `query` and `query_type`. The server uses the preset’s cached query vector (including mixed text+image fusion). Response `query` is the **preset name** (query label for manifests).
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `query` | string | yes* | Visual search text; also used as the **tag** for these hits. |
-| `query_type` | `"text"` \| `"image_path"` | yes | `text` for language queries; `image_path` for absolute path to a reference image on the same machine. |
-| `top_k` | integer | no | Max hits to return. Bounds **1–200** (app config). Default: desktop `search_top_k` (**20**). |
-| `mode` | `"frame"` \| `"chunk"` | no | Override desktop `search_mode`. Default: follow app settings (`frame` in fresh installs). |
+| `preset_id` | string | yes* | Id from `GET /api/v1/search/presets`. Mutually exclusive with `query`. |
+| `query` | string | yes* | Visual search text or image path; also echoed as the **query label** on hits / manifest rows (§2). |
+| `query_type` | `"text"` \| `"image_path"` | no | Required semantics when using `query` (default `text`). Ignored when `preset_id` is set. |
+| `top_k` | integer | no | Max hits to return. Bounds **1–200** (app config). Default: preset `top_k`, else desktop `search_top_k` (**20**). |
+| `mode` | `"frame"` \| `"chunk"` | no | Override desktop `search_mode`. Default: follow app settings at request time. |
 | `min_score` | number \| null | no | Optional post-filter; implementation may compare against inner-product style scores. When unsure, omit and filter by rank only. |
 | `client_request_id` | string | no | Echoed back for correlating script beats. |
-| `scope.video_paths` | string[] | no | Limit hits to these absolute video paths (over-fetch then filter). |
+| `scope.video_paths` | string[] | no | Limit hits to these absolute video paths (global index over-fetch then filter). |
+| `scope.library_paths` | string[] | no | Limit hits to videos under these library root folders. With v2 per-library indexes, queries those indexes directly (same as desktop **Selected libraries**). |
+| `scope.use_saved_scope` | boolean | no | Default `false`. If `true`, use desktop **Search scope** when `search_scope_mode` is `selected`. **Preset searches with no `scope` block mirror the desktop chip** (saved scope when active). |
 | `expand_frame_hits` | boolean | no | Default `true`. Pad frame point hits by `pad_*`. |
 | `pad_before_sec` / `pad_after_sec` | number | no | Default **3** / **3** when expanding frame hits. |
 
-\* For `query_type: "image_path"`, `query` is the file path.
+\* Provide **`preset_id` or `query`**, not both.
+
+For `query_type: "image_path"`, `query` is the file path.
 
 #### Response `200`
 
@@ -300,6 +390,8 @@ Find segments in the **currently indexed local library** on the machine where Vi
   "query_type": "text",
   "mode": "chunk",
   "client_request_id": "beat-03",
+  "preset_id": "a1b2c3d4e5f6",
+  "preset_name": "Night City",
   "hits": [
     {
       "rank": 1,
@@ -332,6 +424,7 @@ Find segments in the **currently indexed local library** on the machine where Vi
 
 | Field | Description |
 |-------|-------------|
+| `preset_id` / `preset_name` | Present when the request used `preset_id` |
 | `hits[].rank` | 1-based order after server-side ranking |
 | `hits[].video_path` | Absolute path to source media |
 | `hits[].start_sec` / `end_sec` | Clip window (after pad when `expand_frame_hits: true`) |
@@ -340,8 +433,12 @@ Find segments in the **currently indexed local library** on the machine where Vi
 | `hits[].start_timecode` / `end_timecode` | `HH:MM:SS` for human review |
 | `hits[].clip_window` | `raw_start_sec`, `raw_end_sec`, `padding_applied` |
 | `hits[].video_duration_sec` | Present when container duration is known |
-| `meta.fetch_top_k` | Internal over-fetch size when `scope` is set (then trimmed to `top_k`) |
-| `meta.scope_applied` | `true` when `scope.video_paths` filtered results |
+| `meta.fetch_top_k` | Over-fetch size for global+filter scope; equals `top_k` when `scope_uses_per_library_indexes` |
+| `meta.scope_applied` | `true` when any scope limit was applied |
+| `meta.scope_library_paths` | Resolved library roots (explicit or from saved scope) |
+| `meta.scope_uses_per_library_indexes` | `true` when v2 per-library indexes were queried directly |
+| `meta.scope_use_saved_scope` | Echo of `scope.use_saved_scope` |
+| `meta.saved_search_scope_mode` | Desktop `all` / `selected` at request time |
 
 #### Error responses
 
@@ -367,7 +464,7 @@ All errors use the same JSON body (§0):
 
 Empty `hits` is **not** an error — try a more visual query (§3).
 
-### 5.2 `POST /api/v1/search/batch`
+### 5.3 `POST /api/v1/search/batch`
 
 Run many searches in one HTTP call (screenshot folders, storyboard beats). **Limit:** 64 items per request; **timeout:** 600s for the whole batch. Each item still respects the global search concurrency cap (2).
 
@@ -378,7 +475,7 @@ Run many searches in one HTTP call (screenshot folders, storyboard beats). **Lim
   "image_folder": "D:/storyboard/beat03",
   "top_k": 3,
   "mode": "chunk",
-  "scope": { "video_paths": ["D:/library/it2017.mp4"] },
+  "scope": { "library_paths": ["D:/Videos/MyLibrary"] },
   "expand_frame_hits": true,
   "pad_before_sec": 3,
   "pad_after_sec": 3,
@@ -401,6 +498,10 @@ Batch-level **`top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*
       "client_request_id": "a"
     },
     {
+      "preset_id": "a1b2c3d4e5f6",
+      "client_request_id": "night-city"
+    },
+    {
       "query": "黄衣 男孩 拖行",
       "query_type": "text",
       "client_request_id": "b"
@@ -416,7 +517,7 @@ Batch-level `top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*` 
 
 | Field | Description |
 |-------|-------------|
-| `queries` | List of single-search bodies (same shape as §5.1) |
+| `queries` | List of single-search bodies (same shape as §5.2). Each entry may use `preset_id` **or** `query`. |
 | `image_folder` | Optional directory of reference images (agent does not need to list files) |
 | `scope` / `expand_frame_hits` / `pad_*` | Batch defaults inherited by all items (see folder example above) |
 | `continue_on_error` | If `true` (default), one bad path does not stop the rest |
@@ -457,7 +558,7 @@ Batch-level `top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*` 
 
 Top-level `ok` is `false` if any item failed, but `results` still contains per-item payloads.
 
-### 5.3 `POST /api/v1/export/manifest`
+### 5.4 `POST /api/v1/export/manifest`
 
 Turn search/batch results into a standard `cuts.json` (dedupe + optional write to disk). **`dedupe: true` uses §4.3 rules server-side.**
 
@@ -497,7 +598,7 @@ Or pass explicit `items` (same shape as manifest rows). Response:
 
 `write_path` is optional — omit to receive JSON only.
 
-### 5.4 Presets (copy into agent config)
+### 5.5 Suggested request parameters (copy into agent config)
 
 **Rough-cut material pass (recommended starting point)**
 
@@ -524,17 +625,17 @@ Keep **1–2** hits per script beat.
 
 Server pads frame points by default; set `expand_frame_hits: false` only if you pad manually (§4.1).
 
-### 5.5 Planned follow-ups (v1.1+)
+### 5.6 Planned follow-ups (v1.1+)
 
-| Endpoint | Purpose |
-|----------|---------|
+| Item | Purpose |
+|------|---------|
 | `POST /api/v1/export/clip` | FFmpeg subclip (side effect — gate carefully) |
 
 ---
 
 ## 6. `cuts.json` Manifest (shape reference)
 
-**Preferred:** `POST /api/v1/export/manifest` (§5.3) after search/batch.  
+**Preferred:** `POST /api/v1/export/manifest` (§5.4) after search/batch.  
 **Fallback:** build the same JSON yourself if the API is unavailable.
 
 ```json
@@ -575,8 +676,9 @@ VideoSeek finds video shots by VISUAL meaning, not dialogue.
 Default pipeline:
 1. Rewrite each script beat into a short visual query (§3). Never search literal dialogue.
 2. GET http://127.0.0.1:8765/api/v1/health — stop if index_ready is false; save ffmpeg.ffmpeg_path.
-3. POST /api/v1/search or /search/batch with expand_frame_hits=true, mode=chunk, top_k=5; add scope.video_paths when working on one film.
-4. POST /api/v1/export/manifest with sources=<results>, dedupe=true, keep_per_source=2 (optional write_path).
+3. Optional: GET /api/v1/search/presets if the user maintains named presets in VideoSeek.
+4. POST /api/v1/search or /search/batch — use preset_id for saved conditions, or inline query; expand_frame_hits=true, mode=chunk, top_k=5; add scope.library_paths or scope.use_saved_scope=true to mirror the desktop picker (preset searches omit scope to follow desktop saved scope automatically).
+5. POST /api/v1/export/manifest with sources=<results>, dedupe=true, keep_per_source=2 (optional write_path).
 5. To render clips, use health.ffmpeg.ffmpeg_path with -ss/-to from manifest items (never bare "ffmpeg").
 
 Do not manually pad frame hits unless expand_frame_hits=false.
@@ -642,3 +744,6 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | 2026-05-25 | P0: scope filter, enriched hits, `export/manifest` |
 | 2026-05-25 | Doc sync: Status, §4–§9, batch/manifest params, screenshot workflow |
 | 2026-05-25 | §5 numbering, `/health` contract fields, manifest `sources` note, §10 mapping |
+| 2026-05-26 | v2: `scope.library_paths`, `scope.use_saved_scope`, per-library index health fields |
+| 2026-05-26 | §2: clarify query label vs search presets vs video metadata tags; §5.5 preset sketch; plan in `docs/planned_features.md` |
+| 2026-05-27 | Search presets API: `GET /search/presets`, `GET /search/presets/{id}`, `POST /search` + `preset_id`; §5 renumbered; `capabilities.search_presets` |

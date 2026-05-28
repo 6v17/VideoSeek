@@ -15,6 +15,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.services.library_service import resolve_library_card_status
+from src.storage.asset_store import load_model_metadata
+from src.app.config import load_config
 from src.domain.remote_search_hit import coerce_remote_search_hit
 from src.domain.remix_search_hit import coerce_remix_search_hit
 from src.domain.search_hit import coerce_search_hit
@@ -55,6 +58,9 @@ def populate_library_table(library_list_host, libraries, is_indexing, on_sync, o
         layout.addStretch(1)
         return
 
+    config = load_config()
+    meta = load_model_metadata(config=config)
+
     for index, (path, data) in enumerate(libraries.items(), start=1):
         layout.addWidget(
             _build_library_row_card(
@@ -66,6 +72,8 @@ def populate_library_table(library_list_host, libraries, is_indexing, on_sync, o
                 on_remove,
                 on_open,
                 texts,
+                meta=meta,
+                config=config,
             )
         )
     layout.addStretch(1)
@@ -308,7 +316,9 @@ def populate_network_result_table(table, results, texts):
     table.setUpdatesEnabled(True)
 
 
-def _build_library_row_card(index, path, data, is_indexing, on_sync, on_remove, on_open, texts):
+def _build_library_row_card(
+    index, path, data, is_indexing, on_sync, on_remove, on_open, texts, meta=None, config=None
+):
     card = QFrame()
     card.setObjectName("LibraryCard")
     root = QHBoxLayout(card)
@@ -341,10 +351,10 @@ def _build_library_row_card(index, path, data, is_indexing, on_sync, on_remove, 
         sub.setToolTip(norm)
         path_col.addWidget(sub)
 
-    status_text = _library_status_text(path, data, texts)
+    status_text, lib_state = resolve_library_card_status(path, data, texts, meta=meta, config=config)
     status = QLabel(status_text)
     status.setObjectName("LibraryCardStatus")
-    status.setProperty("libState", _library_status_lib_state(path, data))
+    status.setProperty("libState", lib_state)
     repolish_widget(status)
     status.setAlignment(Qt.AlignCenter)
     status.setWordWrap(True)
@@ -359,32 +369,6 @@ def _build_library_row_card(index, path, data, is_indexing, on_sync, on_remove, 
     root.addWidget(status, 0, Qt.AlignVCenter)
     root.addWidget(actions, 0, Qt.AlignVCenter)
     return card
-
-
-def _library_status_text(path, data, texts):
-    exists = os.path.exists(path)
-    has_index = len(data.get("files", {})) > 0
-    state = str(data.get("index_state", "")).strip().lower()
-    if exists and state == "partial":
-        return _fallback_text(texts, "lib_partial", "部分完成", "Partial")
-    if exists and has_index:
-        return texts["lib_ready"]
-    if exists:
-        return texts["lib_pending"]
-    return _fallback_text(texts, "lib_offline", "离线/不可用", "Offline")
-
-
-def _library_status_lib_state(path, data):
-    exists = os.path.exists(path)
-    has_index = len(data.get("files", {})) > 0
-    state = str(data.get("index_state", "")).strip().lower()
-    if exists and state == "partial":
-        return "partial"
-    if exists and has_index:
-        return "ready"
-    if exists:
-        return "pending"
-    return "offline"
 
 
 def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts):

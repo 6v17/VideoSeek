@@ -3,7 +3,7 @@ import os
 from src.app.app_meta import get_app_meta
 from src.app.config import load_config
 from src.services.model_service import get_required_model_files
-from src.storage.config_store import get_active_model_profile, get_active_model_resource_dir
+from src.storage.config_store import get_active_model_profile, get_active_model_resource_dir, resolve_provider_dir
 from src.utils import (
     get_app_data_dir,
     get_configured_ffmpeg_target_path,
@@ -36,7 +36,7 @@ def _resolve_runtime_model_root_dir(config):
         runtime = dict(profile.get("runtime") or {})
         variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
         if provider and variant:
-            provider_dir = "openai-clip" if provider == "clip_onnx" else ("siglip2" if provider == "siglip2_onnx" else provider.replace("_", "-"))
+            provider_dir = resolve_provider_dir(provider)
             expected_tail = os.path.normcase(os.path.normpath(os.path.join(provider_dir, variant)))
             if os.path.normcase(model_root_dir).endswith(expected_tail):
                 candidate = os.path.dirname(os.path.dirname(model_root_dir))
@@ -47,7 +47,7 @@ def _resolve_runtime_model_root_dir(config):
     # Fallback heuristic: if path itself looks like "<root>/<provider>/<variant>", trim to "<root>".
     # This protects against stale configs that accidentally persist a profile leaf as model_dir.
     provider_leaf = os.path.basename(os.path.dirname(model_root_dir)).strip().lower()
-    if provider_leaf in {"openai-clip", "siglip2", "clip-onnx", "siglip2-onnx"}:
+    if provider_leaf in {"openai-clip", "siglip2", "chinese-clip", "chinese-clip-onnx", "clip-onnx", "siglip2-onnx"}:
         candidate = os.path.dirname(os.path.dirname(model_root_dir))
         if candidate:
             model_root_dir = candidate

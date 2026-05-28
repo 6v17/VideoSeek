@@ -112,5 +112,66 @@ class StartupMigrationGateTests(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(backup_dir, "meta.json")))
 
 
+    def test_needs_background_true_when_search_index_schema_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = os.path.join(tmp, "profile")
+            data_dir = os.path.join(data_root, "data")
+            model_assets = os.path.join(
+                data_dir, "model_assets", "openai-clip", "vit-base-patch32"
+            )
+            for path in (
+                os.path.join(model_assets, "vector"),
+                os.path.join(model_assets, "index"),
+                os.path.join(model_assets, "global"),
+                os.path.join(model_assets, "remote"),
+            ):
+                os.makedirs(path, exist_ok=True)
+            meta_file = os.path.join(model_assets, "meta.json")
+            with open(meta_file, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "libraries": {
+                            "D:\\videos": {
+                                "files": {"clip.mp4": {"asset_state": "ready", "vid": "abc"}},
+                            }
+                        },
+                        "schema_version": 2,
+                        "search_index_schema_version": 1,
+                    },
+                    handle,
+                )
+            state_file = os.path.join(data_dir, "migration_state.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                json.dump({"completed": True, "schema_version": 2}, handle)
+            config = {
+                "schema_version": 2,
+                "data_root": data_root,
+                "model_dir": os.path.join(data_root, "models"),
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "model_dir": os.path.join(data_root, "models"),
+                                "model_variant": "vit-base-patch32",
+                            },
+                            "files": {
+                                "visual": "clip_visual.onnx",
+                                "text": "clip_text.onnx",
+                            },
+                        }
+                    ],
+                },
+            }
+            with (
+                patch.object(migration_runner_module, "load_config", return_value=config),
+                patch.object(migration_runner_module, "_trust_fast_video_id_check", return_value=True),
+                patch.object(migration_runner_module, "_legacy_video_ids_pending_fast", return_value=False),
+            ):
+                self.assertTrue(migration_runner_module.needs_background_startup_migration(config))
+
+
 if __name__ == "__main__":
     unittest.main()

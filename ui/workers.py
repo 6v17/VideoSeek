@@ -50,14 +50,45 @@ class SearchWorker(QThread):
     error_signal = Signal(str)
     finished = Signal()
 
-    def __init__(self, query, is_text):
+    def __init__(
+        self,
+        query=None,
+        is_text=True,
+        scope_library_paths=None,
+        scope_video_paths=None,
+        query_vector=None,
+        search_mode=None,
+        top_k=None,
+        min_score=None,
+    ):
         super().__init__()
         self.query = query
-        self.is_text = is_text
+        self.is_text = bool(is_text)
+        self.scope_library_paths = list(scope_library_paths or [])
+        self.scope_video_paths = list(scope_video_paths or [])
+        self.query_vector = query_vector
+        self.search_mode = search_mode
+        self.top_k = top_k
+        self.min_score = min_score
 
     def run(self):
         try:
-            results = run_search(self.query, self.is_text)
+            from src.services.search_service import filter_hits_by_min_score, run_chunk_search, run_search
+
+            mode = str(self.search_mode or "").strip().lower()
+            kwargs = {
+                "query_data": self.query,
+                "is_text": self.is_text,
+                "top_k": self.top_k,
+                "scope_video_paths": self.scope_video_paths or None,
+                "scope_library_paths": self.scope_library_paths or None,
+                "query_vector": self.query_vector,
+            }
+            if mode == "chunk":
+                results = run_chunk_search(**kwargs)
+            else:
+                results = run_search(search_mode=mode or None, **kwargs)
+            results = filter_hits_by_min_score(results, self.min_score)
             self.result_ready.emit(list(results) if results is not None else [])
         except Exception as exc:
             traceback.print_exc()

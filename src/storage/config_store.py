@@ -1,11 +1,48 @@
 import os
 
+from typing import List
+
 from src.app.config import CONFIG_ENUMS, DEFAULT_CONFIG, get_data_storage_paths, load_config, save_config
+from src.utils import canonicalize_library_path
 
 _PROVIDER_DEFAULT_DIMENSION = {
     "clip_onnx": 512,
+    "chinese_clip_onnx": 512,
     "siglip2_onnx": 768,
 }
+
+
+def resolve_provider_dir(provider):
+    provider = str(provider or "").strip()
+    if provider == "clip_onnx":
+        return "openai-clip"
+    if provider == "siglip2_onnx":
+        return "siglip2"
+    if provider == "chinese_clip_onnx":
+        return "chinese-clip"
+    return provider.replace("_", "-")
+
+
+def iter_provider_resource_dir_candidates(provider):
+    primary = resolve_provider_dir(provider)
+    yield primary
+    # Early imports used provider.replace("_", "-") -> chinese-clip-onnx.
+    if provider == "chinese_clip_onnx" and primary != "chinese-clip-onnx":
+        yield "chinese-clip-onnx"
+
+
+def resolve_model_resource_dir(model_root, provider, variant):
+    root = os.path.normpath(os.path.abspath(os.fspath(str(model_root or "").strip())))
+    variant_text = str(variant or "").strip() or "vit-base-patch32"
+    last_candidate = os.path.join(root, resolve_provider_dir(provider), variant_text)
+    if not root:
+        return last_candidate
+    for provider_dir in iter_provider_resource_dir_candidates(provider):
+        candidate = os.path.join(root, provider_dir, variant_text)
+        last_candidate = candidate
+        if os.path.isdir(candidate):
+            return candidate
+    return last_candidate
 
 
 def get_app_config():
@@ -111,12 +148,7 @@ def get_local_model_asset_dirs(config=None):
     model_variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
     if not model_variant:
         model_variant = "vit-base-patch32"
-    if provider == "clip_onnx":
-        provider_dir = "openai-clip"
-    elif provider == "siglip2_onnx":
-        provider_dir = "siglip2"
-    else:
-        provider_dir = provider.replace("_", "-")
+    provider_dir = resolve_provider_dir(provider)
     base_dir = os.path.join(data_paths["data_dir"], "model_assets", provider_dir, model_variant)
     return {
         "base_dir": base_dir,
@@ -167,16 +199,10 @@ def get_active_model_resource_dir(config=None):
     provider = str(profile.get("provider", "") or "").strip()
     if not provider:
         raise RuntimeError("Missing profile provider for model resource directory")
-    if provider == "clip_onnx":
-        provider_dir = "openai-clip"
-    elif provider == "siglip2_onnx":
-        provider_dir = "siglip2"
-    else:
-        provider_dir = provider.replace("_", "-")
     model_variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
     if not model_variant:
         model_variant = "vit-base-patch32"
-    return os.path.join(model_root, provider_dir, model_variant)
+    return resolve_model_resource_dir(model_root, provider, model_variant)
 
 
 def get_active_embedding_spec(config=None):
@@ -307,3 +333,37 @@ def get_chunk_similarity_mode(config=None) -> str:
     mode = str(cfg.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"]) or "").strip().lower()
     allowed = CONFIG_ENUMS["chunk_similarity_mode"]
     return mode if mode in allowed else str(DEFAULT_CONFIG["chunk_similarity_mode"])
+
+
+def get_search_scope_mode(config=None) -> str:
+    cfg = _app_cfg(config)
+    mode = str(cfg.get("search_scope_mode", DEFAULT_CONFIG["search_scope_mode"]) or "").strip().lower()
+    allowed = CONFIG_ENUMS["search_scope_mode"]
+    return mode if mode in allowed else str(DEFAULT_CONFIG["search_scope_mode"])
+
+
+def get_search_scope_library_paths(config=None) -> List[str]:
+    cfg = _app_cfg(config)
+    raw_paths = cfg.get("search_scope_library_paths", DEFAULT_CONFIG["search_scope_library_paths"])
+    if not isinstance(raw_paths, list):
+        return []
+    paths = []
+    for item in raw_paths:
+        text = str(item or "").strip()
+        if text:
+            paths.append(canonicalize_library_path(text))
+    return paths
+
+
+def save_search_scope(mode, library_paths, config=None) -> dict:
+    cfg = dict(config or load_config())
+    normalized_mode = str(mode or "").strip().lower()
+    cfg["search_scope_mode"] = normalized_mode if normalized_mode in CONFIG_ENUMS["search_scope_mode"] else "all"
+    normalized_paths = []
+    for item in library_paths or []:
+        text = str(item or "").strip()
+        if text:
+            normalized_paths.append(canonicalize_library_path(text))
+    cfg["search_scope_library_paths"] = normalized_paths
+    save_config(cfg)
+    return cfg

@@ -36,6 +36,7 @@ COMPONENT_SIZES = {
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
     "settings_input_width": 116,
+    "search_option_combo_width": 96,
     "settings_path_input_width": 520,
 }
 

@@ -14,6 +14,7 @@ from src.storage.config_store import (
     get_local_model_asset_dirs,
     get_model_profile_storage_paths,
     get_remote_model_asset_paths,
+    resolve_provider_dir,
 )
 from src.storage.video_id_migration import (
     VIDEO_ID_FORMAT_VERSION,
@@ -384,8 +385,10 @@ def _migrate_model_resource_files(config):
     provider = str(profile.get("provider", "") or "").strip()
     profile_id = str(profile.get("id", "") or "").strip()
     model_variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip() or "vit-base-patch32"
-    provider_dir = "openai-clip" if provider == "clip_onnx" else provider.replace("_", "-")
+    provider_dir = resolve_provider_dir(provider)
     legacy_provider_dirs = {provider_dir, provider.replace("_", "-"), provider}
+    if provider == "chinese_clip_onnx":
+        legacy_provider_dirs.add("chinese-clip-onnx")
     legacy_candidate_dirs = []
     if legacy_root:
         for item in legacy_provider_dirs:
@@ -580,6 +583,75 @@ def _write_migration_state(config, backup_dir):
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
+def needs_search_index_schema_migration(config=None):
+    """True when v2 per-library search indexes must be built from cached vectors."""
+    runtime_config = config or load_config()
+    try:
+        meta = _load_meta_for_startup(runtime_config)
+        from src.services.search_index_schema import needs_search_index_upgrade
+
+        return needs_search_index_upgrade(meta, config=runtime_config)
+    except Exception:
+        logger.warning("Failed to evaluate search index schema migration need", exc_info=True)
+        return False
+
+
+def _migrate_search_index_v2(config, progress_callback=None):
+    from src.services.search_index_schema import needs_search_index_upgrade
+    from src.workflows.update_video import upgrade_search_index_flow
+
+    meta = _load_meta_for_startup(config)
+    if not needs_search_index_upgrade(meta, config=config):
+        logger.info("Search index schema migration skipped: already up to date")
+        return {
+            "upgraded": False,
+            "libraries_built": 0,
+            "libraries_cleared": 0,
+            "libraries_skipped": 0,
+            "global_built": False,
+        }
+
+    logger.info("Running forced search index schema migration during startup")
+    _emit(progress_callback, 97, "正在升级搜索索引结构")
+
+    def _upgrade_progress(value, text):
+        mapped = 97 + max(0, min(2, int(int(value) * 2 / 100)))
+        _emit(progress_callback, mapped, text or "正在升级搜索索引结构")
+
+    stats = upgrade_search_index_flow(
+        progress_callback=_upgrade_progress,
+        rebuild_global=True,
+    )
+    return {
+        "upgraded": True,
+        "libraries_built": int(stats.get("libraries_built", 0) or 0),
+        "libraries_cleared": int(stats.get("libraries_cleared", 0) or 0),
+        "libraries_skipped": int(stats.get("libraries_skipped", 0) or 0),
+        "global_built": bool(stats.get("global_built")),
+    }
+
+
+def _apply_post_schema_maintenance(config, progress_callback=None):
+    _emit(progress_callback, 8, "正在检查视频索引 ID")
+    video_id_result = migrate_legacy_video_ids(config=config, progress_callback=progress_callback)
+    search_index_result = _migrate_search_index_v2(config, progress_callback=progress_callback)
+    return video_id_result, search_index_result
+
+
+def _attach_maintenance_summary(payload, video_id_result, search_index_result):
+    merged = dict(payload or {})
+    merged["migrated_video_ids"] = int(video_id_result.get("migrated_video_ids", 0) or 0)
+    merged["failed_video_ids"] = int(video_id_result.get("failed_video_ids", 0) or 0)
+    merged["video_id_format"] = int(video_id_result.get("video_id_format", VIDEO_ID_FORMAT_VERSION))
+    merged["pending_legacy"] = bool(video_id_result.get("pending_legacy"))
+    merged["search_index_upgraded"] = bool(search_index_result.get("upgraded"))
+    merged["search_index_libraries_built"] = int(search_index_result.get("libraries_built", 0) or 0)
+    merged["search_index_global_built"] = bool(search_index_result.get("global_built"))
+    if search_index_result.get("upgraded"):
+        merged["migrated"] = True
+    return merged
+
+
 def _load_meta_for_startup(config):
     config_version = _read_schema_version(config.get("schema_version"), default=1)
     if config_version >= TARGET_SCHEMA_VERSION:
@@ -606,7 +678,9 @@ def needs_background_startup_migration(config=None):
         return True
     if not _trust_fast_video_id_check(runtime_config):
         return True
-    return bool(_legacy_video_ids_pending_fast(runtime_config, verify_saved_ids=False))
+    if _legacy_video_ids_pending_fast(runtime_config, verify_saved_ids=False):
+        return True
+    return needs_search_index_schema_migration(runtime_config)
 
 
 def run_startup_migration_quick(progress_callback=None):
@@ -638,23 +712,25 @@ def run_startup_migration_quick(progress_callback=None):
         logger.warning("Failed to backfill default CLIP model manifest on quick startup check", exc_info=True)
     logger.info("Startup migration quick path: schema_version=%s", TARGET_SCHEMA_VERSION)
     latest_config = load_config()
-    _emit(progress_callback, 8, "正在检查视频索引 ID")
-    video_id_result = migrate_legacy_video_ids(config=latest_config, progress_callback=progress_callback)
+    video_id_result, search_index_result = _apply_post_schema_maintenance(
+        latest_config,
+        progress_callback=progress_callback,
+    )
     _emit(progress_callback, 100, "数据结构检查完成")
-    return {
-        "needs_background": False,
-        "migrated": bool(video_id_result.get("migrated")),
-        "schema_version": TARGET_SCHEMA_VERSION,
-        "backup_dir": "",
-        "migrated_local_payloads": 0,
-        "migrated_local_asset_files": 0,
-        "migrated_global_payloads": 0,
-        "migrated_remote_payloads": 0,
-        "migrated_video_ids": int(video_id_result.get("migrated_video_ids", 0) or 0),
-        "failed_video_ids": int(video_id_result.get("failed_video_ids", 0) or 0),
-        "video_id_format": int(video_id_result.get("video_id_format", VIDEO_ID_FORMAT_VERSION)),
-        "pending_legacy": bool(video_id_result.get("pending_legacy")),
-    }
+    return _attach_maintenance_summary(
+        {
+            "needs_background": False,
+            "migrated": bool(video_id_result.get("migrated")),
+            "schema_version": TARGET_SCHEMA_VERSION,
+            "backup_dir": "",
+            "migrated_local_payloads": 0,
+            "migrated_local_asset_files": 0,
+            "migrated_global_payloads": 0,
+            "migrated_remote_payloads": 0,
+        },
+        video_id_result,
+        search_index_result,
+    )
 
 
 def run_startup_migration(progress_callback=None):
@@ -669,21 +745,23 @@ def run_startup_migration(progress_callback=None):
             logger.warning("Failed to backfill default CLIP model manifest on already-migrated config", exc_info=True)
         logger.info("Startup migration skipped: already at schema_version=%s", TARGET_SCHEMA_VERSION)
         latest_config = load_config()
-        _emit(progress_callback, 8, "正在检查视频索引 ID")
-        video_id_result = migrate_legacy_video_ids(config=latest_config, progress_callback=progress_callback)
-        return {
-            "migrated": bool(video_id_result.get("migrated")),
-            "schema_version": TARGET_SCHEMA_VERSION,
-            "backup_dir": "",
-            "migrated_local_payloads": 0,
-            "migrated_local_asset_files": 0,
-            "migrated_global_payloads": 0,
-            "migrated_remote_payloads": 0,
-            "migrated_video_ids": int(video_id_result.get("migrated_video_ids", 0) or 0),
-            "failed_video_ids": int(video_id_result.get("failed_video_ids", 0) or 0),
-            "video_id_format": int(video_id_result.get("video_id_format", VIDEO_ID_FORMAT_VERSION)),
-            "pending_legacy": bool(video_id_result.get("pending_legacy")),
-        }
+        video_id_result, search_index_result = _apply_post_schema_maintenance(
+            latest_config,
+            progress_callback=progress_callback,
+        )
+        return _attach_maintenance_summary(
+            {
+                "migrated": bool(video_id_result.get("migrated")),
+                "schema_version": TARGET_SCHEMA_VERSION,
+                "backup_dir": "",
+                "migrated_local_payloads": 0,
+                "migrated_local_asset_files": 0,
+                "migrated_global_payloads": 0,
+                "migrated_remote_payloads": 0,
+            },
+            video_id_result,
+            search_index_result,
+        )
 
     prior_state = _read_migration_state(config)
     prior_schema_done = bool(prior_state.get("completed")) and _read_schema_version(
@@ -751,31 +829,35 @@ def run_startup_migration(progress_callback=None):
     _write_migration_state(latest_config, backup_dir)
     _prune_backup_dirs(latest_config, keep_count=1)
 
-    _emit(progress_callback, 96, "正在迁移视频索引 ID")
-    video_id_result = migrate_legacy_video_ids(config=latest_config, progress_callback=progress_callback)
+    video_id_result, search_index_result = _apply_post_schema_maintenance(
+        latest_config,
+        progress_callback=progress_callback,
+    )
 
     _emit(progress_callback, 100, "数据结构迁移完成")
     logger.info(
-        "Startup migration finished: schema_version=%s migrated_local=%s migrated_global=%s migrated_remote=%s",
+        "Startup migration finished: schema_version=%s migrated_local=%s migrated_global=%s migrated_remote=%s search_index_upgraded=%s",
         TARGET_SCHEMA_VERSION,
         local_count,
         global_count,
         remote_count,
+        bool(search_index_result.get("upgraded")),
     )
-    return {
-        "migrated": True,
-        "schema_version": TARGET_SCHEMA_VERSION,
-        "backup_dir": backup_dir,
-        "migrated_video_ids": int(video_id_result.get("migrated_video_ids", 0) or 0),
-        "failed_video_ids": int(video_id_result.get("failed_video_ids", 0) or 0),
-        "migrated_local_payloads": int(local_count),
-        "migrated_meta_file": int(migrated_meta_file),
-        "migrated_local_asset_files": int(local_asset_files),
-        "migrated_global_asset_files": int(global_asset_files),
-        "migrated_remote_asset_files": int(remote_asset_files),
-        "migrated_model_resource_files": int(model_resource_files),
-        "migrated_global_payloads": int(global_count),
-        "migrated_remote_payloads": int(remote_count),
-        "cleaned_legacy_dirs": int(cleaned_legacy_dirs),
-        "pending_legacy": bool(video_id_result.get("pending_legacy")),
-    }
+    return _attach_maintenance_summary(
+        {
+            "migrated": True,
+            "schema_version": TARGET_SCHEMA_VERSION,
+            "backup_dir": backup_dir,
+            "migrated_local_payloads": int(local_count),
+            "migrated_meta_file": int(migrated_meta_file),
+            "migrated_local_asset_files": int(local_asset_files),
+            "migrated_global_asset_files": int(global_asset_files),
+            "migrated_remote_asset_files": int(remote_asset_files),
+            "migrated_model_resource_files": int(model_resource_files),
+            "migrated_global_payloads": int(global_count),
+            "migrated_remote_payloads": int(remote_count),
+            "cleaned_legacy_dirs": int(cleaned_legacy_dirs),
+        },
+        video_id_result,
+        search_index_result,
+    )

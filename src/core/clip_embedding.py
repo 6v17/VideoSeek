@@ -18,6 +18,13 @@ from src.app.indexing_progress import IndexingProgressReporter
 from src.app.logging_utils import get_logger
 from src.core.inference_registry import build_inference_engine, register_inference_engine
 from src.core.extract_frames import stream_frames_with_ffmpeg, terminate_ffmpeg_process
+from src.core.onnx_session import build_session_options as _build_session_options, resolve_embedding_batch_size as _resolve_embedding_batch_size
+from src.core.onnx_vision_engine import (
+    INFERENCE_LOCK as _INFERENCE_LOCK,
+    OnnxVisionBatchMixin,
+    format_exception_detail as _format_exception_detail,
+    truncate_log_text as _truncate_log_text,
+)
 from src.core.faiss_index import create_clip_index
 from src.core.semantic_chunking import SemanticChunkStreamBuilder, chunk_config_payload
 from src.storage.asset_store import save_vector_payload
@@ -41,7 +48,7 @@ _GPU_PROBE_CACHE = None
 _HARD_GPU_RUNTIME_ISSUES = {"windows", "windows_version", "directml", "directx", "msvc"}
 
 
-class CLIPOnnxEngine:
+class CLIPOnnxEngine(OnnxVisionBatchMixin):
     def __init__(self):
         runtime_config = load_config()
         config_prefer_gpu = get_effective_prefer_gpu(config=runtime_config)
@@ -71,7 +78,15 @@ class CLIPOnnxEngine:
             "DmlExecutionProvider" in provider_list for provider_list in self.active_providers.values()
         )
         self.prefer_gpu = config_prefer_gpu
-        self.embedding_batch_size = _resolve_embedding_batch_size(runtime_config)
+        self.provider_id = "clip_onnx"
+        self.init_vision_batch_state(
+            visual_session=self.visual_session,
+            embedding_batch_size=_resolve_embedding_batch_size(runtime_config),
+            image_size=224,
+            using_gpu=self.using_gpu,
+            backend_label="GPU" if self.using_gpu else "CPU",
+            active_providers=self.active_providers,
+        )
         self.runtime_warning = runtime_plan["warning"]
         self.runtime_issue = runtime_plan["issue"]
         self.runtime_diagnostics = dict(runtime_plan.get("diagnostics") or {})
@@ -94,11 +109,14 @@ class CLIPOnnxEngine:
         )
         self.mean = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array([0.26862954, 0.26130258, 0.27577711], dtype=np.float32).reshape(1, 1, 3)
-        self._feature_dim = None
-        self._cpu_visual_session = None
-        self._visual_force_cpu = False
 
-    def _preprocess_into(self, img_bgr, out_chw):
+    def visual_model_path(self):
+        return self.model_paths["clip_visual.onnx"]
+
+    def visual_input_name(self):
+        return "input"
+
+    def preprocess_into(self, img_bgr, out_chw):
         """Normalize one BGR frame into CHW float32 ``out_chw`` shaped (3, 224, 224).
 
         Frames from ``stream_frames_with_ffmpeg`` are already 224×224; skip resize there.
@@ -117,152 +135,8 @@ class CLIPOnnxEngine:
 
     def _preprocess(self, img_bgr):
         out = np.empty((3, 224, 224), dtype=np.float32)
-        self._preprocess_into(img_bgr, out)
+        self.preprocess_into(img_bgr, out)
         return out.reshape(1, 3, 224, 224)
-
-    def imread_chinese(self, path):
-        from src.core.image_io import load_image_bgr
-
-        return load_image_bgr(path)
-
-    def encode_images(self, frames):
-        # Retained intentionally: this public image-encoding entrypoint is
-        # reached via helper wrappers and may be missed by static analysis.
-        with _INFERENCE_LOCK:
-            return self._encode_images_locked(frames)
-
-    def _encode_images_locked(self, frames):
-        if self._feature_dim is None:
-            dummy = np.zeros((1, 3, 224, 224), dtype=np.float32)
-            dummy_feat = self.visual_session.run(None, {"input": dummy})[0]
-            self._feature_dim = dummy_feat.shape[1] if dummy_feat.ndim > 1 else dummy_feat.shape[0]
-
-        embeddings = []
-        batch_size = self.embedding_batch_size
-        work = np.empty((batch_size, 3, 224, 224), dtype=np.float32)
-        filled = 0
-
-        def flush():
-            nonlocal filled
-            if filled == 0:
-                return
-            embeddings.append(self._run_visual_batch(work[:filled]))
-            filled = 0
-
-        for frame in frames:
-            image = self.imread_chinese(frame) if isinstance(frame, str) else frame
-            if image is None:
-                continue
-            self._preprocess_into(image, work[filled])
-            filled += 1
-            if filled < batch_size:
-                continue
-            flush()
-
-        if filled:
-            embeddings.append(self._run_visual_batch(work[:filled]))
-            filled = 0
-
-        if not embeddings:
-            return np.empty((0, self._feature_dim), dtype=np.float32)
-        free_memory()
-        return np.vstack(embeddings)
-
-    def _run_visual_batch(self, input_blob):
-        """Run visual model on ``input_blob`` (N, 3, 224, 224) float32, or a list of (3,224,224) arrays."""
-        if isinstance(input_blob, list):
-            if not input_blob:
-                feature_dim = self._feature_dim or 0
-                return np.empty((0, feature_dim), dtype=np.float32)
-            input_blob = np.stack(input_blob, axis=0)
-
-        if input_blob is None or getattr(input_blob, "size", 0) == 0 or input_blob.shape[0] == 0:
-            feature_dim = self._feature_dim or 0
-            return np.empty((0, feature_dim), dtype=np.float32)
-
-        if input_blob.dtype != np.float32:
-            input_blob = np.ascontiguousarray(input_blob.astype(np.float32, copy=False))
-        elif not input_blob.flags["C_CONTIGUOUS"]:
-            input_blob = np.ascontiguousarray(input_blob)
-
-        feat = self._run_visual_batch_with_recovery(input_blob).astype(np.float32)
-        feat /= (np.linalg.norm(feat, axis=-1, keepdims=True) + 1e-10)
-        return feat
-
-    def _run_visual_batch_with_recovery(self, input_blob):
-        try:
-            return self._run_visual_batch_once(input_blob)
-        except Exception as exc:
-            batch_size = int(input_blob.shape[0]) if getattr(input_blob, "ndim", 0) > 0 else 0
-            logger.warning(
-                "Visual batch inference failed: backend=%s forced_cpu=%s batch_size=%s detail=%s",
-                self.backend_label,
-                self._visual_force_cpu,
-                batch_size,
-                _truncate_log_text(exc),
-            )
-            if batch_size > 1:
-                midpoint = max(1, batch_size // 2)
-                left = self._run_visual_batch_with_recovery(input_blob[:midpoint])
-                right = self._run_visual_batch_with_recovery(input_blob[midpoint:])
-                if left.size == 0:
-                    return right
-                if right.size == 0:
-                    return left
-                return np.vstack([left, right])
-            return self._handle_single_frame_visual_failure(input_blob, exc)
-
-    def _run_visual_batch_once(self, input_blob):
-        session = self._get_visual_session_for_run()
-        return session.run(None, {"input": input_blob})[0]
-
-    def _get_visual_session_for_run(self):
-        if self._visual_force_cpu:
-            return self._get_cpu_visual_session()
-        return self.visual_session
-
-    def _get_cpu_visual_session(self):
-        if self._cpu_visual_session is None:
-            self._cpu_visual_session = self._create_cpu_visual_session()
-        return self._cpu_visual_session
-
-    def _create_cpu_visual_session(self):
-        logger.warning("Creating CPU fallback visual session after GPU visual inference failure")
-        return ort.InferenceSession(
-            self.model_paths["clip_visual.onnx"],
-            sess_options=_build_session_options(False),
-            providers=["CPUExecutionProvider"],
-        )
-
-    def _handle_single_frame_visual_failure(self, input_blob, original_exc):
-        if not self.using_gpu and not self._visual_force_cpu:
-            raise RuntimeError(
-                f"Visual inference failed on CPU for batch size 1: {_format_exception_detail(original_exc)}"
-            ) from original_exc
-
-        try:
-            cpu_feat = self._get_cpu_visual_session().run(None, {"input": input_blob})[0]
-        except Exception as cpu_exc:
-            raise RuntimeError(
-                "Visual inference failed after batch reduction and CPU fallback. "
-                f"GPU error: {_format_exception_detail(original_exc)}. "
-                f"CPU fallback error: {_format_exception_detail(cpu_exc)}"
-            ) from cpu_exc
-
-        self._visual_force_cpu = True
-        self.using_gpu = False
-        self.backend_label = "CPU"
-        self.active_providers["visual"] = ["CPUExecutionProvider"]
-        fallback_warning = (
-            "GPU visual inference became unstable during indexing and fell back to CPU for the remaining frames."
-        )
-        if fallback_warning not in self.runtime_warning:
-            self.runtime_warning = f"{self.runtime_warning} {fallback_warning}".strip()
-        logger.warning(
-            "GPU visual inference fell back to CPU for remaining frames after batch reduction failure: %s",
-            _truncate_log_text(original_exc),
-        )
-        return cpu_feat
 
     def encode_text(self, text):
         # Retained intentionally: this public text-encoding entrypoint is
@@ -275,18 +149,47 @@ class CLIPOnnxEngine:
 
 
 engine = None
-_INFERENCE_LOCK = threading.RLock()
 
 
 def get_engine():
     global engine
     with _INFERENCE_LOCK:
+        config = load_config()
+        profile = get_active_model_profile(config=config)
+        provider = str(profile.get("provider", "") or "").strip() or "clip_onnx"
+        profile_id = str(profile.get("id", "") or "").strip()
+        if engine is not None:
+            cached_provider = str(getattr(engine, "provider_id", "") or "").strip()
+            cached_profile_id = str(getattr(engine, "model_profile_id", "") or "").strip()
+            if cached_provider and cached_provider != provider:
+                logger.info(
+                    "Active inference provider changed (%s -> %s); rebuilding engine",
+                    cached_provider,
+                    provider,
+                )
+                engine = None
+            elif profile_id and cached_profile_id and cached_profile_id != profile_id:
+                logger.info(
+                    "Active model profile changed (%s -> %s); rebuilding engine",
+                    cached_profile_id,
+                    profile_id,
+                )
+                engine = None
         if engine is None:
             logger.info("Inference engine is not initialized; creating a new runtime instance")
-            config = load_config()
-            profile = get_active_model_profile(config=config)
-            provider = str(profile.get("provider", "") or "").strip() or "clip_onnx"
             engine = build_inference_engine(provider)
+            engine.provider_id = provider
+            engine.model_profile_id = profile_id
+            if getattr(engine, "visual_session", None) is None:
+                raise RuntimeError(
+                    f"Inference engine '{provider}' initialized without a visual ONNX session."
+                )
+            logger.info(
+                "Inference engine ready: provider=%s profile=%s backend=%s",
+                provider,
+                profile_id or "-",
+                getattr(engine, "backend_label", ""),
+            )
         return engine
 
 
@@ -730,37 +633,12 @@ def _is_gpu_probe_child():
     return os.environ.get("VIDEOSEEK_GPU_PROBE_CHILD") == "1"
 
 
-def _truncate_log_text(text, limit=240):
-    normalized = " ".join(str(text or "").split())
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[:limit]}..."
-
-
-def _format_exception_detail(exc):
-    if exc is None:
-        return ""
-    message = str(exc).strip()
-    if message:
-        return f"{exc.__class__.__name__}: {message}"
-    return exc.__class__.__name__
-
-
 def _should_disable_gpu_for_probe_issue(probe, config=None):
     issue = str((probe or {}).get("issue") or "").strip().lower()
     if issue == "unknown":
         runtime_config = dict(config or load_config())
         return not bool(runtime_config.get("gpu_probe_unknown_keep_gpu", False))
     return issue in _HARD_GPU_RUNTIME_ISSUES
-
-
-def _resolve_embedding_batch_size(config=None):
-    runtime_config = dict(config or load_config())
-    try:
-        batch_size = int(runtime_config.get("embedding_batch_size", 16))
-    except (TypeError, ValueError):
-        return 16
-    return max(1, batch_size)
 
 
 def detect_gpu_runtime_issue():
@@ -827,42 +705,6 @@ def _get_windows_build_number():
         return int(sys.getwindowsversion().build)
     except AttributeError:
         return None
-
-
-def _build_session_options(prefer_gpu, disable_optimizations=False):
-    """ONNX Runtime session tuning.
-
-    DirectML keeps sequential execution and mem_pattern off for stability. Graph optimizations are
-    enabled by default unless ``disable_optimizations`` is set.
-
-    When ``prefer_gpu`` is true, ``intra_op_num_threads`` is capped so ORT's CPU-side work does not
-    starve FFmpeg frame decoding. Override with env ``VIDEOSEEK_ORT_INTRA_OP_THREADS`` (integer 1–32).
-    """
-    session_options = ort.SessionOptions()
-    if not disable_optimizations:
-        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-    if prefer_gpu:
-        # DirectML sessions require sequential execution and are more stable with memory pattern disabled.
-        session_options.enable_mem_pattern = False
-        session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        session_options.inter_op_num_threads = 1
-        raw_threads = os.environ.get("VIDEOSEEK_ORT_INTRA_OP_THREADS", "").strip()
-        if raw_threads:
-            try:
-                intra = int(raw_threads)
-                intra = max(1, min(32, intra))
-            except ValueError:
-                cores = os.cpu_count() or 4
-                intra = max(1, min(4, cores // 4))
-        else:
-            cores = os.cpu_count() or 4
-            intra = max(1, min(4, cores // 4))
-        session_options.intra_op_num_threads = intra
-    if disable_optimizations:
-        # Some third-party exported graphs can fail specific ORT graph fusions
-        # on certain builds. Keep runtime stable by disabling graph optimizations.
-        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
-    return session_options
 
 
 def _is_directml_provider_available():
@@ -1067,7 +909,7 @@ def _encode_batched_from_frame_stream(
         timestamp_batch.append(timestamp)
         if len(frame_batch) < frame_batch_size:
             continue
-        batch_vectors = engine_instance.encode_images(frame_batch)
+        batch_vectors = get_engine().encode_images(frame_batch)
         if len(batch_vectors) > 0:
             added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
             timestamps.extend(timestamp_batch[:added])
@@ -1078,7 +920,7 @@ def _encode_batched_from_frame_stream(
         frame_batch = []
         timestamp_batch = []
     if frame_batch:
-        batch_vectors = engine_instance.encode_images(frame_batch)
+        batch_vectors = get_engine().encode_images(frame_batch)
         if len(batch_vectors) > 0:
             added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
             timestamps.extend(timestamp_batch[:added])
@@ -1188,7 +1030,7 @@ def generate_vectors_and_index_for_video(
                 timestamp_batch.append(timestamp)
                 if len(frame_batch) < frame_batch_size:
                     continue
-                batch_vectors = engine_instance.encode_images(frame_batch)
+                batch_vectors = get_engine().encode_images(frame_batch)
                 if len(batch_vectors) > 0:
                     added = _accumulate_inference_batch(
                         vector_parts, chunk_builder, batch_vectors, timestamp_batch
@@ -1200,7 +1042,7 @@ def generate_vectors_and_index_for_video(
                 timestamp_batch = []
 
             if frame_batch:
-                batch_vectors = engine_instance.encode_images(frame_batch)
+                batch_vectors = get_engine().encode_images(frame_batch)
                 if len(batch_vectors) > 0:
                     added = _accumulate_inference_batch(
                         vector_parts, chunk_builder, batch_vectors, timestamp_batch
@@ -1304,6 +1146,14 @@ def _register_default_inference_engines():
         return SigLIP2OnnxEngine(get_active_model_resource_dir(config=runtime_config))
 
     register_inference_engine("siglip2_onnx", _siglip_factory)
+
+    def _chinese_clip_factory():
+        from src.core.chinese_clip_provider import ChineseCLIPOnnxEngine
+
+        runtime_config = load_config()
+        return ChineseCLIPOnnxEngine(get_active_model_resource_dir(config=runtime_config))
+
+    register_inference_engine("chinese_clip_onnx", _chinese_clip_factory)
 
 
 _register_default_inference_engines()
