@@ -6,6 +6,7 @@ onnxruntime-directml; sys_platform == "win32"
 onnxruntime; sys_platform != "win32"
 
 opencv-python
+scenedetect>=0.6.4
 PySide6
 faiss-cpu
 numpy

@@ -32,7 +32,7 @@ COMPONENT_SIZES = {
     "preview_host_min_height": 300,
     "link_query_preview_min_height": 210,
     "result_table_min_height": 520,
-    "remix_scope_tree_min_height": 200,
+    "video_scope_tree_min_height": 200,
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
     "settings_input_width": 116,

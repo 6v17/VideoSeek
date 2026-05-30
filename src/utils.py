@@ -27,6 +27,15 @@ def format_timecode_seconds(seconds) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+def format_timecode_range(start_sec, end_sec, *, min_range_sec: float = 0.2) -> str:
+    """Format one timecode or a start–end range for display."""
+    start_text = format_timecode_seconds(start_sec)
+    end_text = format_timecode_seconds(end_sec)
+    if abs(float(end_sec) - float(start_sec)) < float(min_range_sec):
+        return start_text
+    return f"{start_text}–{end_text}"
+
+
 #
 def measure_time(message=""):
     def decorator(func):

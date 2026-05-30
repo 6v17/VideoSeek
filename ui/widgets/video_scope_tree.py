@@ -1,4 +1,4 @@
-"""Remix match scope: per-library cards; inside each, a tree mirroring indexed video_rel_path segments."""
+"""Video search scope: per-library cards; inside each, a tree mirroring indexed video_rel_path segments."""
 from __future__ import annotations
 
 import os
@@ -56,12 +56,12 @@ class _LibBlock:
         self.video_items = video_items
 
 
-class RemixScopeTreeWidget(QWidget):
+class VideoScopeTreeWidget(QWidget):
     """Card list of libraries; each card contains a path tree aligned with vector index video_rel_path."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("RemixScopeTree")
+        self.setObjectName("VideoScopeTree")
         self._silent = False
         self._blocks: list[_LibBlock] = []
 
@@ -70,13 +70,13 @@ class RemixScopeTreeWidget(QWidget):
         root.setSpacing(8)
 
         self._scroll = QScrollArea()
-        self._scroll.setObjectName("RemixScopeScroll")
+        self._scroll.setObjectName("VideoScopeScroll")
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._list_host = QWidget()
-        self._list_host.setObjectName("RemixScopeList")
+        self._list_host.setObjectName("VideoScopeList")
         self._vbox = QVBoxLayout(self._list_host)
         self._vbox.setContentsMargins(0, 0, 4, 0)
         self._vbox.setSpacing(10)
@@ -331,7 +331,7 @@ class RemixScopeTreeWidget(QWidget):
 
     def _build_library_card(self, lib_path: str, vids: list[dict], default_on: bool, *, body_expanded: bool = False) -> tuple[_LibBlock, QFrame]:
         card = QFrame()
-        card.setObjectName("RemixScopeLibCard")
+        card.setObjectName("VideoScopeLibCard")
         outer = QVBoxLayout(card)
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(8)
@@ -339,24 +339,24 @@ class RemixScopeTreeWidget(QWidget):
         top = QHBoxLayout()
         top.setSpacing(10)
         lib_cb = QCheckBox()
-        lib_cb.setObjectName("RemixScopeLibCheck")
+        lib_cb.setObjectName("VideoScopeLibCheck")
         lib_cb.setTristate(True)
         lib_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         title = _ClickLabel(os.path.basename(os.path.normpath(lib_path)) or lib_path)
         lib_cb.setAccessibleName(title.text())
-        title.setObjectName("RemixScopeLibTitle")
+        title.setObjectName("VideoScopeLibTitle")
         title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         title.setToolTip(lib_path)
         title.setCursor(Qt.CursorShape.PointingHandCursor)
 
         collapse = QToolButton()
-        collapse.setObjectName("RemixScopeCollapseBtn")
+        collapse.setObjectName("VideoScopeCollapseBtn")
         collapse.setAutoRaise(True)
         collapse.setCursor(Qt.CursorShape.PointingHandCursor)
         collapse.setArrowType(Qt.ArrowType.DownArrow if body_expanded else Qt.ArrowType.RightArrow)
 
         body = QWidget()
-        body.setObjectName("RemixScopeLibBody")
+        body.setObjectName("VideoScopeLibBody")
         body_l = QVBoxLayout(body)
         body_l.setContentsMargins(0, 0, 0, 0)
         body_l.setSpacing(0)
@@ -365,7 +365,7 @@ class RemixScopeTreeWidget(QWidget):
         trie = self._build_trie(vids, lib_norm)
 
         tree = QTreeWidget()
-        tree.setObjectName("RemixScopeLibTree")
+        tree.setObjectName("VideoScopeLibTree")
         tree.setColumnCount(1)
         tree.setHeaderLabels([""])
         tree.setRootIsDecorated(True)

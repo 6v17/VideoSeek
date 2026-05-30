@@ -3,7 +3,6 @@ import webbrowser
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,12 +18,10 @@ from src.services.library_service import resolve_library_card_status
 from src.storage.asset_store import load_model_metadata
 from src.app.config import load_config
 from src.domain.remote_search_hit import coerce_remote_search_hit
-from src.domain.remix_search_hit import coerce_remix_search_hit
 from src.domain.search_hit import coerce_search_hit
-from ui.widgets.table_specs import LocalSearchCol, NetworkLinkCol, RemixCol
+from ui.widgets.table_specs import LocalSearchCol, NetworkLinkCol
 from ui.widgets.thumb_cell import make_thumb_label
 from ui.widgets.styles import repolish_widget
-
 
 def _fallback_text(texts, key, zh_text, en_text):
     if key in texts:
@@ -136,98 +133,6 @@ def populate_result_table(table, results, on_preview, on_locate, on_export, text
         )
 
     table.setUpdatesEnabled(True)
-
-
-def populate_remix_result_table(table, results, remix_video_path, on_compare, on_locate, on_export, texts):
-    table.setRowCount(0)
-    if hasattr(table, "apply_header_labels"):
-        table.apply_header_labels(texts)
-    else:
-        table.setHorizontalHeaderLabels(texts["remix_result_headers"])
-    table.setUpdatesEnabled(False)
-    remix_path = os.fspath(remix_video_path or "").strip()
-
-    for row, raw in enumerate(results):
-        hit = coerce_remix_search_hit(raw)
-        start_sec = hit.start_sec
-        end_sec = hit.end_sec
-        score = hit.score
-        video_path = hit.video_path
-        remix_start = float(hit.remix_start_sec)
-        remix_end = float(hit.remix_end_sec)
-        speed_k = float(getattr(hit, "speed_k", 1.0))
-        match_conf = float(getattr(hit, "match_confidence", 1.0))
-        table.insertRow(row)
-
-        order_item = QTableWidgetItem(str(row + 1))
-        order_item.setTextAlignment(Qt.AlignCenter)
-        order_item.setData(
-            Qt.UserRole,
-            {
-                "video_path": video_path,
-                "start_sec": float(start_sec),
-                "end_sec": float(end_sec),
-                "score": float(score),
-                "remix_start_sec": remix_start,
-                "remix_end_sec": remix_end,
-                "remix_video_path": remix_path,
-                "speed_k": speed_k,
-                "match_confidence": match_conf,
-            },
-        )
-        table.setItem(row, RemixCol.ORDER, order_item)
-
-        table.setCellWidget(row, RemixCol.PREVIEW, make_thumb_label(text=texts["thumb_loading"]))
-
-        name_item = QTableWidgetItem(os.path.basename(video_path))
-        name_item.setTextAlignment(Qt.AlignCenter)
-        name_item.setToolTip(video_path)
-        table.setItem(row, RemixCol.VIDEO, name_item)
-
-        source_time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec))
-        source_time_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, RemixCol.SOURCE_TIME, source_time_item)
-
-        remix_time_item = QTableWidgetItem(_format_time_range(remix_start, remix_end))
-        remix_time_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, RemixCol.REMIX_TIME, remix_time_item)
-
-        speed_item = QTableWidgetItem(f"{speed_k:.2f}x")
-        speed_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, RemixCol.SPEED, speed_item)
-
-        match_item = QTableWidgetItem(f"{int(score * 100)}% · {int(match_conf * 100)}%")
-        match_item.setToolTip(
-            _fallback_text(
-                texts,
-                "remix_match_tooltip",
-                "相似度（CLIP 均值）· 线拟合置信度",
-                "CLIP mean · line-fit confidence",
-            )
-        )
-        match_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, RemixCol.MATCH, match_item)
-
-        table.setCellWidget(
-            row,
-            RemixCol.ACTIONS,
-            _build_remix_result_actions(
-                remix_path,
-                remix_start,
-                remix_end,
-                video_path,
-                start_sec,
-                end_sec,
-                on_compare,
-                on_locate,
-                on_export,
-                texts,
-            ),
-        )
-
-    table.setUpdatesEnabled(True)
-
-
 def populate_link_result_table(table, results, source_link, on_preview, on_locate, texts):
     table.setRowCount(0)
     table.setHorizontalHeaderLabels(texts["link_result_headers"])
@@ -440,69 +345,6 @@ def _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate,
     layout.addWidget(locate_button)
     layout.addWidget(export_button)
     return container
-
-
-def _build_remix_result_actions(
-    remix_path,
-    remix_start_sec,
-    remix_end_sec,
-    video_path,
-    start_sec,
-    end_sec,
-    on_compare,
-    on_locate,
-    on_export,
-    texts,
-):
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(8, 0, 8, 0)
-    layout.setSpacing(6)
-    layout.setAlignment(Qt.AlignCenter)
-
-    compare_button = QPushButton(_fallback_text(texts, "remix_compare", "对比", "Compare"))
-    compare_button.setProperty("class", "TableBtn")
-    compare_button.setFixedSize(58, 30)
-    compare_button.setCursor(Qt.PointingHandCursor)
-    compare_button.setToolTip(
-        _fallback_text(
-            texts,
-            "remix_compare_tip",
-            "并排对比：混剪与原片各自播放本行匹配时长（不再截到较短的一边）",
-            "Side-by-side: remix and source each play their full matched span",
-        )
-    )
-    compare_button.clicked.connect(
-        lambda _,
-        rp=remix_path,
-        rs=remix_start_sec,
-        re=remix_end_sec,
-        sp=video_path,
-        ss=start_sec,
-        se=end_sec: on_compare(rp, rs, re, sp, ss, se)
-    )
-
-    locate_button = QPushButton(texts["locate"])
-    locate_button.setProperty("class", "TableLocateBtn")
-    locate_button.setFixedSize(58, 30)
-    locate_button.setCursor(Qt.PointingHandCursor)
-    locate_button.setToolTip(texts["locate_tip"])
-    locate_button.clicked.connect(lambda _, path=video_path: on_locate(path))
-
-    export_button = QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
-    export_button.setProperty("class", "TableBtn")
-    export_button.setFixedSize(58, 30)
-    export_button.setCursor(Qt.PointingHandCursor)
-    export_button.setToolTip(_fallback_text(texts, "export_clip_tip", "导出原画质片段", "Export original-quality clip"))
-    export_button.clicked.connect(
-        lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_export(path, clip_start, clip_end)
-    )
-
-    layout.addWidget(compare_button)
-    layout.addWidget(locate_button)
-    layout.addWidget(export_button)
-    return container
-
 
 def _format_time_range(start_sec, end_sec):
     start_text = f"{int(start_sec // 60):02d}:{int(start_sec % 60):02d}"

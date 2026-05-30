@@ -8,7 +8,7 @@ from ui.widgets.scaffold import VSCard
 
 
 class SearchScopeSelect(QComboBox):
-    """Read-only combobox look; click opens the library scope editor."""
+    """Read-only combobox look; click opens the video scope editor."""
 
     editor_requested = Signal()
 
@@ -79,6 +79,14 @@ class SearchPanel(VSCard):
         self.search_mode.setSizePolicy(combo_policy)
         self.search_mode_label = QLabel()
         self.search_mode_label.setObjectName("CardHint")
+        self.search_precision_label = QLabel()
+        self.search_precision_label.setObjectName("CardHint")
+        self.search_precision_toggle = QPushButton()
+        self.search_precision_toggle.setObjectName("SearchPrecisionToggle")
+        self.search_precision_toggle.setCursor(Qt.PointingHandCursor)
+        self.search_precision_toggle.setCheckable(True)
+        self.search_precision_toggle.setFixedWidth(52)
+        self.search_precision_toggle.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.search_scope_label = QLabel()
         self.search_scope_label.setObjectName("CardHint")
         self.search_scope_select = SearchScopeSelect()
@@ -92,6 +100,14 @@ class SearchPanel(VSCard):
         scope_cluster.setSpacing(8)
         scope_cluster.addWidget(self.search_scope_label)
         scope_cluster.addWidget(self.search_scope_select)
+
+        self.search_precision_cluster = QWidget()
+        self.search_precision_cluster.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        precision_cluster = QHBoxLayout(self.search_precision_cluster)
+        precision_cluster.setContentsMargins(0, 0, 0, 0)
+        precision_cluster.setSpacing(8)
+        precision_cluster.addWidget(self.search_precision_label)
+        precision_cluster.addWidget(self.search_precision_toggle)
 
         options_row = QHBoxLayout()
         options_row.setSpacing(8)
@@ -114,6 +130,8 @@ class SearchPanel(VSCard):
         mobile_row.addWidget(self.mobile_toggle_label)
         mobile_row.addWidget(self.btn_mobile_toggle)
         mobile_row.addWidget(self.btn_mobile_qr)
+        mobile_row.addSpacing(12)
+        mobile_row.addWidget(self.search_precision_cluster)
         mobile_row.addStretch()
 
         action_row = QHBoxLayout()

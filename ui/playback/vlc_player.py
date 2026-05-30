@@ -113,13 +113,23 @@ class VlcPreviewPlayer:
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
 
         self._reset_for_replay()
-        media = self._instance.media_new(os.fspath(video_path), f":start-time={start_sec:.3f}")
-        self._player.set_media(media)
-        self._bind_output_window()
+        if not self.is_available():
+            return False
+        try:
+            media = self._instance.media_new(os.fspath(video_path), f":start-time={start_sec:.3f}")
+            self._player.set_media(media)
+            self._bind_output_window()
+        except Exception:
+            return False
         self._stop_at_ms = -1 if stop_sec is None else int(stop_sec * 1000)
         self._locked_stop_at_ms = self._stop_at_ms
         self._user_unlocked = False
-        result = self._player.play()
+        try:
+            result = self._player.play()
+        except Exception:
+            self._stop_at_ms = -1
+            self._locked_stop_at_ms = -1
+            return False
         if result == -1:
             self._stop_at_ms = -1
             self._locked_stop_at_ms = -1
@@ -272,7 +282,10 @@ class VlcPreviewPlayer:
     def _bind_output_window(self):
         if self._player is None or self._released:
             return
-        window_id = int(self.host_widget.winId())
+        try:
+            window_id = int(self.host_widget.winId())
+        except Exception:
+            return
         if sys.platform == "win32":
             self._player.set_hwnd(window_id)
         elif sys.platform == "darwin":

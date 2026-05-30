@@ -648,6 +648,16 @@ def describe_preset_content(preset: dict, config=None) -> str:
     return " + ".join(parts) if parts else ""
 
 
+def _resolve_preset_video_scope(preset: dict, config=None) -> list[str] | None:
+    from src.services.search_scope import normalize_scope_path, resolve_active_search_video_scope
+
+    raw_paths = preset.get("video_paths") or []
+    if raw_paths:
+        paths = [normalize_scope_path(path) for path in raw_paths if str(path or "").strip()]
+        return paths or None
+    return resolve_active_search_video_scope(config=config)
+
+
 def build_preset_search_plan(preset_id: str, config=None) -> dict[str, Any]:
     preset = get_preset(preset_id, config=config)
     if preset is None:
@@ -667,7 +677,9 @@ def build_preset_search_plan(preset_id: str, config=None) -> dict[str, Any]:
         "top_k": int(top_k),
         "min_score": preset.get("min_score"),
         "scope_library_paths": None,
-        "scope_video_paths": None,
+        "scope_video_paths": _resolve_preset_video_scope(preset, config=cfg),
         "is_text": bool(query) and not ref_paths,
+        "has_image": bool(ref_paths),
         "query_data": query or (ref_paths[0] if ref_paths else ""),
+        "pixel_query_data": ref_paths[0] if ref_paths else None,
     }

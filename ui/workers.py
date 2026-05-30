@@ -16,9 +16,8 @@ from src.services.model_package_service import import_model_package_zip, import_
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
 from src.services.remote_library_service import build_remote_library_from_links
-from src.services.remix_match_service import run_remix_match
-from src.services.search_service import warmup_search_runtime
 from src.services.remote_search_service import run_remote_search
+from src.services.search_service import warmup_search_runtime
 from src.services.version_service import get_version_status
 from ui.playback.vlc_player import warmup_vlc_runtime
 
@@ -60,6 +59,8 @@ class SearchWorker(QThread):
         search_mode=None,
         top_k=None,
         min_score=None,
+        search_precision_mode=None,
+        pixel_query_data=None,
     ):
         super().__init__()
         self.query = query
@@ -70,13 +71,15 @@ class SearchWorker(QThread):
         self.search_mode = search_mode
         self.top_k = top_k
         self.min_score = min_score
+        self.search_precision_mode = search_precision_mode
+        self.pixel_query_data = pixel_query_data
 
     def run(self):
         try:
-            from src.services.search_service import filter_hits_by_min_score, run_chunk_search, run_search
+            from src.services.search_service import filter_hits_by_min_score, run_search
 
             mode = str(self.search_mode or "").strip().lower()
-            kwargs = {
+            base_kwargs = {
                 "query_data": self.query,
                 "is_text": self.is_text,
                 "top_k": self.top_k,
@@ -84,93 +87,18 @@ class SearchWorker(QThread):
                 "scope_library_paths": self.scope_library_paths or None,
                 "query_vector": self.query_vector,
             }
-            if mode == "chunk":
-                results = run_chunk_search(**kwargs)
-            else:
-                results = run_search(search_mode=mode or None, **kwargs)
+            results = run_search(
+                search_mode=mode or None,
+                search_precision_mode=self.search_precision_mode,
+                pixel_query_data=self.pixel_query_data,
+                **base_kwargs,
+            )
             results = filter_hits_by_min_score(results, self.min_score)
             self.result_ready.emit(list(results) if results is not None else [])
         except Exception as exc:
             traceback.print_exc()
             error_text = str(exc).strip() or repr(exc)
             print(f"Search Error: {error_text}")
-            self.error_signal.emit(error_text)
-        finally:
-            self.finished.emit()
-
-
-class RemixMatchWorker(QThread):
-    result_ready = Signal(list)
-    error_signal = Signal(str)
-    stopped_signal = Signal()
-    finished = Signal()
-    progress_signal = Signal(int, str)
-
-    def __init__(
-        self,
-        mix_path,
-        scope_paths,
-        sample_fps,
-        score_threshold,
-        merge_gap_sec,
-        min_segment_sec,
-        remix_cluster_gap_sec,
-        faiss_top_k,
-        speed_min,
-        speed_max,
-        ransac_iterations,
-        min_line_points,
-    ):
-        super().__init__()
-        self.mix_path = mix_path
-        self.scope_paths = scope_paths
-        self.sample_fps = float(sample_fps)
-        self.score_threshold = float(score_threshold)
-        self.merge_gap_sec = float(merge_gap_sec)
-        self.min_segment_sec = float(min_segment_sec)
-        self.remix_cluster_gap_sec = float(remix_cluster_gap_sec)
-        self.faiss_top_k = int(faiss_top_k)
-        self.speed_min = float(speed_min)
-        self.speed_max = float(speed_max)
-        self.ransac_iterations = int(ransac_iterations)
-        self.min_line_points = int(min_line_points)
-        self._stop_requested = False
-
-    def stop(self):
-        self._stop_requested = True
-
-    def run(self):
-        try:
-            def on_progress(pct, msg):
-                if msg:
-                    self.progress_signal.emit(int(pct), str(msg))
-
-            def should_stop():
-                return self._stop_requested
-
-            results = run_remix_match(
-                self.mix_path,
-                scope_paths=self.scope_paths,
-                sample_fps=self.sample_fps,
-                score_threshold=self.score_threshold,
-                merge_gap_sec=self.merge_gap_sec,
-                min_segment_sec=self.min_segment_sec,
-                remix_cluster_gap_sec=self.remix_cluster_gap_sec,
-                faiss_top_k=self.faiss_top_k,
-                speed_min=self.speed_min,
-                speed_max=self.speed_max,
-                ransac_iterations=self.ransac_iterations,
-                min_line_points=self.min_line_points,
-                progress_callback=on_progress,
-                should_stop=should_stop,
-            )
-            self.result_ready.emit(list(results) if results is not None else [])
-        except InterruptedError:
-            self.stopped_signal.emit()
-        except Exception as exc:
-            traceback.print_exc()
-            error_text = str(exc).strip() or repr(exc)
-            print(f"Remix match error: {error_text}")
             self.error_signal.emit(error_text)
         finally:
             self.finished.emit()
@@ -308,8 +236,17 @@ class IndexUpdateWorker(QThread):
                 os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = previous_system_debug
 
 
+def _iter_thumb_jobs(results):
+    """Yield (table_row, hit_payload). Entries may be hits or (row, hit) pairs."""
+    for default_row, entry in enumerate(results or []):
+        if isinstance(entry, (tuple, list)) and len(entry) >= 2:
+            yield int(entry[0]), entry[1]
+        else:
+            yield default_row, entry
+
+
 class ThumbLoader(QThread):
-    thumb_ready = Signal(int, QPixmap)
+    thumb_ready = Signal(int, object)
 
     def __init__(self, results):
         super().__init__()
@@ -325,33 +262,37 @@ class ThumbLoader(QThread):
         thumb_width = config.get("thumb_width", 130)
         thumb_height = config.get("thumb_height", 75)
 
-        for row, raw in enumerate(self.results):
-            if not self._running:
+        for table_row, raw in _iter_thumb_jobs(self.results):
+            if not self._running or self.isInterruptionRequested():
                 break
 
             hit = coerce_search_hit(raw)
-            start_sec, end_sec, _, video_path = hit.start_sec, hit.end_sec, hit.score, hit.video_path
+            video_path = str(hit.video_path or "").strip()
+            if not video_path:
+                self.thumb_ready.emit(table_row, None)
+                continue
 
-            thumb_time = float(start_sec)
-            if float(end_sec) > float(start_sec):
-                thumb_time = (float(start_sec) + float(end_sec)) / 2.0
+            thumb_time = float(hit.start_sec)
+            if float(hit.end_sec) > float(hit.start_sec):
+                thumb_time = (float(hit.start_sec) + float(hit.end_sec)) / 2.0
 
             frame = get_single_thumbnail(video_path, thumb_time)
+            if not self._running or self.isInterruptionRequested():
+                break
             if frame is None:
-                self.msleep(15)
+                self.thumb_ready.emit(table_row, None)
                 continue
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             height, width, _ = rgb_frame.shape
-            image = QImage(rgb_frame.data, width, height, width * 3, QImage.Format_RGB888)
+            image = QImage(rgb_frame.data, width, height, width * 3, QImage.Format_RGB888).copy()
             pixmap = QPixmap.fromImage(image).scaled(
                 thumb_width,
                 thumb_height,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             )
-            self.thumb_ready.emit(row, pixmap)
-            self.msleep(15)
+            self.thumb_ready.emit(table_row, pixmap)
 
 
 class VersionCheckWorker(QThread):

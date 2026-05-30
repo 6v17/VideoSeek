@@ -341,6 +341,43 @@ class SearchPresetServiceTests(unittest.TestCase):
         plan = preset_service.build_preset_search_plan(created["id"], config=self.config)
         self.assertEqual(plan["search_mode"], "chunk")
 
+    @patch("src.services.search_preset_service.load_config")
+    @patch("src.services.search_preset_service.get_active_embedding_spec")
+    @patch("src.services.search_preset_service.get_active_model_profile")
+    @patch("src.services.search_preset_service.get_configured_data_root")
+    def test_build_preset_search_plan_mixed_uses_ref_for_pixel_query(
+        self,
+        mock_data_root,
+        mock_profile,
+        mock_embedding_spec,
+        mock_load_config,
+    ):
+        mock_data_root.return_value = self._tmp.name
+        mock_load_config.return_value = self.config
+        mock_profile.return_value = self.config["models"]["profiles"][0]
+        mock_embedding_spec.return_value = {
+            "model_id": "clip_test",
+            "provider": "clip_onnx",
+            "embedding_space": "clip_test",
+            "dimension": 3,
+            "metric": "ip",
+        }
+        source_image = os.path.join(self._tmp.name, "ref.png")
+        with open(source_image, "wb") as handle:
+            handle.write(b"fake-image")
+
+        created = preset_service.create_preset(
+            name="Mixed",
+            query="blue night",
+            source_image_paths=[source_image],
+            config=self.config,
+        )
+        plan = preset_service.build_preset_search_plan(created["id"], config=self.config)
+        self.assertFalse(plan["is_text"])
+        self.assertTrue(plan["has_image"])
+        self.assertEqual(plan["query_data"], "blue night")
+        self.assertTrue(os.path.isfile(plan["pixel_query_data"]))
+
 
 if __name__ == "__main__":
     unittest.main()

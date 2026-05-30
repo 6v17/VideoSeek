@@ -102,7 +102,6 @@ class StartupMigrationGuiMixin:
             self.search_page.btn_search,
             self.library_page.btn_sync_db,
             self.library_page.btn_rebuild_index_vectors,
-            self.remix_page.btn_run,
             self.link_page.btn_run,
             self.link_page.btn_build,
             self.settings_page.btn_save,
@@ -115,7 +114,7 @@ class StartupMigrationGuiMixin:
         hint.setText(self.texts["startup_migration_banner"].format(percent=int(value), message=text))
         hint.setProperty("state", "warn")
         hint.show()
-        for page in (self.search_page, self.library_page, self.remix_page, self.link_page):
+        for page in (self.search_page, self.library_page, self.link_page):
             banner = page.header.runtime_banner
             banner_text = page.header.runtime_banner_text
             action = page.header.runtime_banner_action
@@ -126,7 +125,7 @@ class StartupMigrationGuiMixin:
 
     def _hide_startup_migration_banner(self):
         self.sidebar.runtime_hint.hide()
-        for page in (self.search_page, self.library_page, self.remix_page, self.link_page):
+        for page in (self.search_page, self.library_page, self.link_page):
             page.header.runtime_banner.hide()
             page.header.runtime_banner_action.show()
         if hasattr(self, "push_resources_status"):

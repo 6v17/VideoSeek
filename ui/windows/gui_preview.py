@@ -80,7 +80,7 @@ class PreviewGuiMixin:
             self.search_page.btn_expand_preview,
             "PrimaryButton" if has_preview else "GhostButton",
         )
-        for btn in (self.search_page.btn_export_tasks, self.remix_page.btn_export_tasks):
+        for btn in (self.search_page.btn_export_tasks,):
             self._set_button_object_name(
                 btn,
                 "PrimaryButton" if has_export_tasks else "GhostButton",

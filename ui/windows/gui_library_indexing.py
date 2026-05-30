@@ -45,10 +45,6 @@ class LibraryIndexingGuiMixin:
         except Exception as exc:
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
-        try:
-            self._refresh_remix_scope_tree()
-        except Exception:
-            pass
 
     def sync_library(self, path):
         self.start_update_index(target_lib=path, rebuild_global_assets=False)

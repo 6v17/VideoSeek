@@ -47,75 +47,6 @@ QMenu::separator {
 #PageHeader, #PanelCard, #SubPanelCard {
     background: __PANEL__;
 }
-#RemixSectionDivider {
-    color: __LINE__;
-    background: __LINE__;
-    border: none;
-    max-height: 1px;
-    min-height: 1px;
-    margin-top: 2px;
-    margin-bottom: 2px;
-}
-/* Remix compare dialog: role labels above each player (must not use #CardHint — it inherits muted body text). */
-#RemixComparePanelRemix, #RemixComparePanelSource {
-    color: __HEADLINE__;
-    font-size: 16px;
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    padding: 10px 12px 12px 14px;
-    min-height: 26px;
-    background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 10px;
-}
-#RemixComparePanelRemix {
-    border-left: 5px solid __ACCENT__;
-}
-#RemixComparePanelSource {
-    border-left: 5px solid __SUCCESS__;
-}
-#RemixMixPathRow {
-    background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 12px;
-}
-#RemixMixPathEdit {
-    border: none;
-    background: transparent;
-    border-top-left-radius: 11px;
-    border-bottom-left-radius: 11px;
-    padding: 10px 12px;
-    min-height: 40px;
-    color: __HEADLINE__;
-    font-size: 13px;
-    font-weight: 500;
-    selection-background-color: __ACCENT__;
-    selection-color: __INVERSE_TEXT__;
-}
-#RemixMixPathEdit:focus {
-    background: __ACCENT_SOFT__;
-    border: none;
-    outline: none;
-}
-#RemixMixBrowseBtn {
-    border: none;
-    border-left: 1px solid __LINE__;
-    border-top-right-radius: 11px;
-    border-bottom-right-radius: 11px;
-    background: transparent;
-    color: __ACCENT__;
-    font-weight: 700;
-    font-size: 13px;
-    padding: 0 16px;
-    min-width: 108px;
-    min-height: 40px;
-}
-#RemixMixBrowseBtn:hover {
-    background: __ACCENT_SOFT__;
-}
-#RemixMixBrowseBtn:pressed {
-    background: __TRACK__;
-}
 #NoticeCard {
     background: __NOTICE_BG__;
     border: 1px solid __NOTICE_LINE__;
@@ -140,16 +71,6 @@ QMenu::separator {
     color: __WARN__;
     font-size: 12px;
     font-weight: 700;
-}
-#RemixScopeHint {
-    color: __ACCENT__;
-    background: __ACCENT_SOFT__;
-    border: 1px solid __ACCENT__;
-    border-radius: 12px;
-    padding: 10px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.45em;
 }
 #NoticeTitle {
     color: __NOTICE_TEXT__;
@@ -363,6 +284,42 @@ QPushButton:disabled {
 }
 #MobileBridgeToggle[bridgeState="off"]:hover {
     background: __BUTTON_SOFT_HOVER__;
+}
+#SearchPrecisionToggle {
+    min-width: 52px;
+    max-width: 52px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
+    border-radius: 15px;
+    border: 1px solid __LINE_STRONG__;
+    background: __TRACK__;
+    color: __MUTED__;
+    font-weight: 700;
+    text-align: center;
+}
+#SearchPrecisionToggle[precisionState="off"] {
+    background: __BUTTON_SOFT__;
+    border-color: __LINE_STRONG__;
+    color: __MUTED__;
+}
+#SearchPrecisionToggle[precisionState="on"] {
+    background: __SUCCESS_SOFT__;
+    border-color: __SUCCESS__;
+    color: __SUCCESS__;
+}
+#SearchPrecisionToggle:hover {
+    border-color: currentColor;
+    background: __BUTTON_SOFT_HOVER__;
+}
+#SearchPrecisionToggle[precisionState="on"]:hover {
+    background: __SUCCESS_SOFT__;
+}
+#SearchPrecisionToggle[precisionState="off"]:hover {
+    background: __BUTTON_SOFT_HOVER__;
+}
+#SearchPrecisionToggle:disabled {
+    opacity: 0.45;
 }
 #MobileBridgeQrButton {
     background: __ACCENT_SOFT__;
@@ -805,6 +762,50 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #ResultTable::item:selected:active {
     background: __ACCENT_SOFT__;
 }
+#ThumbPreview[gapFrameRow="true"] {
+    background: __WARN_SOFT__;
+    border: 2px solid __ACCENT__;
+    border-radius: 10px;
+    color: __ACCENT__;
+    font-weight: 700;
+}
+#ThumbPreview[gapChainRow="true"] {
+    background: __WARN_SOFT__;
+    border: 2px solid __WARN__;
+    border-radius: 10px;
+    color: __WARN__;
+    font-weight: 700;
+}
+QWidget[gapFrameRow="true"] {
+    background: __WARN_SOFT__;
+    border-radius: 10px;
+}
+QWidget[gapChainRow="true"] {
+    background: __WARN_SOFT__;
+    border-radius: 10px;
+}
+#ThumbPreview[strongCoherentRow="true"] {
+    background: __SUCCESS_SOFT__;
+    border: 2px solid __SUCCESS__;
+    border-radius: 10px;
+    color: __SUCCESS__;
+    font-weight: 700;
+}
+#ThumbPreview[strongJumpRow="true"] {
+    background: __DANGER_SOFT__;
+    border: 2px solid __DANGER__;
+    border-radius: 10px;
+    color: __DANGER__;
+    font-weight: 700;
+}
+QWidget[strongCoherentRow="true"] {
+    background: __SUCCESS_SOFT__;
+    border-radius: 10px;
+}
+QWidget[strongJumpRow="true"] {
+    background: __DANGER_SOFT__;
+    border-radius: 10px;
+}
 #ResultTable QHeaderView::section {
     background: __PANEL__;
     border: none;
@@ -1246,66 +1247,36 @@ ClickableLabel[detailActive="true"] {
 #SearchPresetManageBadge[kind="fusion"] {
     color: __MUTED__;
 }
-#RemixScopeScroll {
+#VideoScopeScroll {
     background: transparent;
     border: none;
 }
-#RemixScopeList {
+#VideoScopeList {
     background: transparent;
 }
-#RemixScopeLibCard {
+#VideoScopeLibCard {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 14px;
 }
-#RemixScopeLibTitle {
+#VideoScopeLibTitle {
     color: __HEADLINE__;
     font-size: 14px;
     font-weight: 700;
 }
-#RemixScopeVideoRow {
-    background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 10px;
-}
-#RemixScopeVideoName {
-    color: __HEADLINE__;
-    font-size: 13px;
-    font-weight: 600;
-}
-#RemixScopePathHint {
-    color: __MUTED__;
-    font-size: 12px;
-    font-weight: 500;
-}
-#RemixScopeCollapseBtn {
+#VideoScopeCollapseBtn {
     background: transparent;
     border: none;
     padding: 4px;
 }
-#RemixDisclosureHeader {
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-}
-#RemixDisclosureHeader:hover {
-    background: __ACCENT_SOFT__;
-}
-#RemixDisclosureChevronBtn {
-    background: transparent;
-    border: none;
-    padding: 2px;
-    min-width: 28px;
-    min-height: 28px;
-}
-#RemixScopeLibTree {
+#VideoScopeLibTree {
     outline: none;
     border: 1px solid __LINE__;
     border-radius: 12px;
     padding: 4px 2px 8px 2px;
     background: __PANEL__;
 }
-#RemixScopeLibTree QHeaderView::section {
+#VideoScopeLibTree QHeaderView::section {
     background: __PANEL__;
     border: none;
     border-bottom: 2px solid __LINE_STRONG__;
@@ -1314,7 +1285,7 @@ ClickableLabel[detailActive="true"] {
     font-weight: 700;
     font-size: 12px;
 }
-#RemixScopeLibTree::item {
+#VideoScopeLibTree::item {
     min-height: 30px;
     padding: 8px 10px;
     border: none;
@@ -1323,19 +1294,19 @@ ClickableLabel[detailActive="true"] {
     margin: 0 2px;
     font-size: 13px;
 }
-#RemixScopeLibTree::item:hover {
+#VideoScopeLibTree::item:hover {
     background: __ACCENT_SOFT__;
 }
-#RemixScopeLibTree::item:selected {
+#VideoScopeLibTree::item:selected {
     background: __TRACK__;
     color: __HEADLINE__;
     border-bottom: 1px solid __LINE__;
 }
-#RemixScopeLibTree::item:selected:active {
+#VideoScopeLibTree::item:selected:active {
     background: __ACCENT_SOFT__;
     border-bottom: 1px solid __LINE__;
 }
-#RemixScopeLibBody {
+#VideoScopeLibBody {
     background: transparent;
 }
 QHeaderView::section {

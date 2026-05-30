@@ -18,6 +18,7 @@ class SearchController(QObject):
         self._scope_library_paths = []
         self._gpu_warning_shown = False
         self._warmup_started = False
+        self._is_shutdown = False
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
@@ -32,6 +33,8 @@ class SearchController(QObject):
         search_mode=None,
         top_k=None,
         min_score=None,
+        search_precision_mode=None,
+        pixel_query_data=None,
     ):
         self.stop_thumbnail_loading()
         self.start_time = time.time()
@@ -49,6 +52,8 @@ class SearchController(QObject):
             search_mode=search_mode,
             top_k=top_k,
             min_score=min_score,
+            search_precision_mode=search_precision_mode,
+            pixel_query_data=pixel_query_data,
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
@@ -57,22 +62,35 @@ class SearchController(QObject):
 
     def start_preset_search(self, preset_id):
         from src.services.search_preset_service import build_preset_search_plan
-        from src.services.search_scope import resolve_active_search_library_scope, resolve_active_search_mode
+        from src.services.search_scope import (
+            resolve_active_search_library_scope,
+            resolve_active_search_mode,
+            resolve_active_search_video_scope,
+        )
 
         plan = build_preset_search_plan(preset_id)
         preset = plan["preset"]
-        scope_library_paths = resolve_active_search_library_scope()
+        scope_video_paths = plan.get("scope_video_paths") or resolve_active_search_video_scope()
+        scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope()
+        is_text = bool(plan.get("is_text"))
+        has_image = bool(plan.get("has_image"))
+        search_precision_mode = self.parent_window._resolve_search_precision_mode(
+            is_text=is_text,
+            has_image=has_image,
+        )
         if hasattr(self.parent_window, "apply_search_preset_to_ui"):
             self.parent_window.apply_search_preset_to_ui(preset)
         self.start_search(
             query=plan.get("query_data"),
-            is_text=bool(plan.get("is_text")),
+            is_text=is_text,
             scope_library_paths=scope_library_paths,
-            scope_video_paths=None,
+            scope_video_paths=scope_video_paths,
             query_vector=plan.get("query_vector"),
             search_mode=resolve_active_search_mode(),
             top_k=plan.get("top_k"),
             min_score=plan.get("min_score"),
+            search_precision_mode=search_precision_mode,
+            pixel_query_data=plan.get("pixel_query_data"),
         )
 
     def clear_results(self):
@@ -80,9 +98,35 @@ class SearchController(QObject):
         self._result_view().clear()
 
     def shutdown(self):
+        self._is_shutdown = True
         self.stop_thumbnail_loading()
-        shutdown_thread(self.worker)
-        shutdown_thread(self.warmup_worker)
+        self._disconnect_search_worker(self.worker)
+        shutdown_thread(self.worker, allow_terminate=False)
+        self.worker = None
+        self._disconnect_warmup_worker(self.warmup_worker)
+        shutdown_thread(self.warmup_worker, allow_terminate=False)
+        self.warmup_worker = None
+
+    def _disconnect_search_worker(self, worker):
+        if worker is None:
+            return
+        for signal, slot in (
+            (worker.result_ready, self._display_results),
+            (worker.error_signal, self._handle_search_error),
+            (worker.finished, self._finish_search),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _disconnect_warmup_worker(self, worker):
+        if worker is None:
+            return
+        try:
+            worker.finished.disconnect(self._finish_warmup)
+        except (RuntimeError, TypeError):
+            pass
 
     def start_warmup(self):
         if self._warmup_started:
@@ -93,9 +137,24 @@ class SearchController(QObject):
         self.warmup_worker.start()
 
     def stop_thumbnail_loading(self):
-        shutdown_thread(self.thumb_thread, stop_first=True)
+        thread = self.thumb_thread
+        self.thumb_thread = None
+        if thread is None:
+            return
+        try:
+            thread.thumb_ready.disconnect(self._on_thumb_ready)
+        except (RuntimeError, TypeError):
+            pass
+        shutdown_thread(thread, stop_first=True, allow_terminate=False)
+
+    def _on_thumb_ready(self, row, pixmap):
+        if self._is_shutdown:
+            return
+        self._result_view().set_thumbnail(row, pixmap)
 
     def _display_results(self, results):
+        if self._is_shutdown:
+            return
         self.parent_window.push_inference_status()
         result_view = self._result_view()
         if not results:
@@ -115,17 +174,23 @@ class SearchController(QObject):
         self.parent_window.search_page.lbl_status.setText(status_text)
 
         self.thumb_thread = ThumbLoader(results)
-        self.thumb_thread.thumb_ready.connect(result_view.set_thumbnail)
+        self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
 
     def _finish_search(self):
+        if self._is_shutdown:
+            return
         self.parent_window.search_page.btn_search.setEnabled(True)
 
     def _finish_warmup(self):
+        if self._is_shutdown:
+            return
         self.warmup_worker = None
         self.parent_window.push_inference_status()
 
     def _handle_search_error(self, error_text):
+        if self._is_shutdown:
+            return
         self.parent_window.push_inference_status()
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["search_failed"])
         runtime_warning = get_engine_runtime_warning()

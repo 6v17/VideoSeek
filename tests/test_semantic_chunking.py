@@ -405,7 +405,155 @@ class ChunkSearchTests(unittest.TestCase):
         result = search_service.run_search("query", is_text=True, top_k=5)
 
         self.assertEqual(result, [SearchHit(0.0, 0.0, 0.0, "chunk.mp4")])
-        mock_run_chunk_search.assert_called_once_with("query", is_text=True, top_k=5)
+        mock_run_chunk_search.assert_called_once_with(
+            "query",
+            is_text=True,
+            top_k=5,
+            scope_video_paths=None,
+            scope_library_paths=None,
+            query_vector=None,
+            search_precision_mode=None,
+            pixel_query_data=None,
+        )
+
+    def test_aggregate_frame_hits_to_chunks_groups_by_segment(self):
+        from src.services.search_scope import normalize_scope_path
+
+        video_path = "D:/lib/a.mp4"
+        range_index = {
+            normalize_scope_path(video_path): [
+                (0.0, 4.0),
+                (4.0, 10.0),
+            ]
+        }
+        frame_hits = [
+            SearchHit(1.0, 1.0, 0.7, video_path),
+            SearchHit(2.0, 2.0, 0.9, video_path),
+            SearchHit(6.0, 6.0, 0.8, video_path),
+        ]
+        with patch("src.services.search_service._load_global_chunk_ranges_by_path", return_value=range_index):
+            aggregated = search_service._aggregate_frame_hits_to_chunks(frame_hits, 5, {})
+        self.assertEqual(len(aggregated), 2)
+        self.assertAlmostEqual(float(aggregated[0].score), 0.9)
+        self.assertAlmostEqual(float(aggregated[0].start_sec), 2.0)
+        self.assertAlmostEqual(float(aggregated[0].end_sec), 4.0)
+        self.assertAlmostEqual(float(aggregated[1].score), 0.8)
+        self.assertAlmostEqual(float(aggregated[1].start_sec), 6.0)
+
+    @patch("src.services.search_service._aggregate_frame_hits_to_chunks", return_value=[])
+    @patch("src.services.search_service._collect_frame_candidates_for_chunk_search")
+    def test_chunk_image_search_falls_back_to_frame_hits(self, mock_collect, _mock_aggregate):
+        mock_collect.return_value = [SearchHit(12.0, 12.0, 0.91, "D:/lib/a.mp4")]
+        results = search_service._run_chunk_search_via_frames(
+            "D:/query.jpg",
+            is_text=False,
+            top_k=5,
+            precise_image=True,
+            config={"search_top_k": 5},
+        )
+        self.assertEqual(len(results), 1)
+        self.assertAlmostEqual(float(results[0].start_sec), 12.0)
+        self.assertAlmostEqual(float(results[0].score), 0.91)
+
+    def test_prepare_frame_candidates_keeps_neighbor_pool_for_aggregate(self):
+        video_path = "D:/lib/a.mp4"
+        neighbor_hit = SearchHit(2.0, 2.0, 0.95, video_path)
+        seed_hit = SearchHit(1.0, 1.0, 0.7, video_path)
+        fillers = [
+            SearchHit(float(i + 10), float(i + 10), 0.96, f"D:/lib/filler{i}.mp4")
+            for i in range(120)
+        ]
+        hits = [seed_hit, neighbor_hit, *fillers]
+        prepared = search_service._prepare_frame_candidates_for_chunk_aggregate(hits)
+        prepared_by_video = {
+            (str(hit.video_path), float(hit.start_sec))
+            for hit in prepared
+        }
+        self.assertIn((video_path, 1.0), prepared_by_video)
+        self.assertIn((video_path, 2.0), prepared_by_video)
+
+    @patch("src.services.search_service.load_search_assets")
+    @patch("src.services.search_service._search_frame_results_with_ids")
+    def test_collect_frame_candidates_expands_neighbors_for_chunk_aggregate(
+        self,
+        mock_search,
+        mock_load_assets,
+    ):
+        class DummyIndex:
+            def reconstruct(self, idx):
+                vectors = {
+                    0: np.array([0.8, 0.2], dtype=np.float32),
+                    1: np.array([1.0, 0.0], dtype=np.float32),
+                    2: np.array([0.2, 0.8], dtype=np.float32),
+                }
+                return vectors[int(idx)]
+
+        video_path = "D:/lib/a.mp4"
+        timestamps = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        paths = np.array([video_path, video_path, video_path], dtype=object)
+        mock_load_assets.return_value = (DummyIndex(), timestamps, paths)
+        mock_search.return_value = (
+            [SearchHit(1.0, 1.0, 0.8, video_path)],
+            [0],
+        )
+        config = {
+            "frame_neighbor_rerank_enabled": True,
+            "frame_neighbor_rerank_top_n": 5,
+            "frame_neighbor_rerank_window": 2,
+            "fps": 1.0,
+        }
+        query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
+        hits = search_service._collect_frame_candidates_for_chunk_search(
+            "D:/query.jpg",
+            is_text=False,
+            top_k=5,
+            query_vector=query_vector,
+            precise_image=True,
+            config=config,
+        )
+        hit_times = sorted(float(hit.start_sec) for hit in hits if hit.video_path == video_path)
+        self.assertIn(1.0, hit_times)
+        self.assertIn(2.0, hit_times)
+        self.assertGreaterEqual(
+            max(float(hit.score) for hit in hits if float(hit.start_sec) == 2.0),
+            0.99,
+        )
+
+    def test_expand_neighbor_rerank_candidates_keeps_neighbor_frames(self):
+        class DummyIndex:
+            def reconstruct(self, idx):
+                vectors = {
+                    0: np.array([1.0, 0.0], dtype=np.float32),
+                    1: np.array([0.9, 0.1], dtype=np.float32),
+                    2: np.array([0.2, 0.8], dtype=np.float32),
+                }
+                return vectors[int(idx)]
+
+        results = [SearchHit(0.0, 0.0, 0.8, "a.mp4")]
+        frame_ids = [0]
+        query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+        paths = np.array(["a.mp4", "a.mp4", "a.mp4"], dtype=object)
+        config = {
+            "frame_neighbor_rerank_enabled": True,
+            "frame_neighbor_rerank_top_n": 5,
+            "frame_neighbor_rerank_window": 2,
+            "fps": 1.0,
+        }
+        expanded = search_service._expand_neighbor_rerank_candidates(
+            results,
+            frame_ids,
+            query_vector,
+            DummyIndex(),
+            timestamps,
+            paths,
+            config,
+            precise_image=True,
+            seed_top_n=1,
+        )
+        self.assertGreaterEqual(len(expanded), 2)
+        self.assertAlmostEqual(float(expanded[0].score), 1.0)
+        self.assertAlmostEqual(float(expanded[0].start_sec), 0.0)
 
 
 if __name__ == "__main__":

@@ -116,7 +116,7 @@ Zip layout: `chinese-clip/vit-base-patch16/model_manifest.json` plus `chinese_cl
 
 Authoritative validation and defaults: `import_model_packages` / `_install_extracted_packages` in `src/services/model_package_service.py`.
 
-**Switching the active model profile** (Settings → current model): embeddings and FAISS indexes are stored under `data/model_assets/<provider_folder>/<variant>/`. After you change profile, **re-sync / rebuild the library index** for that profile before search, remix trace, or Agent API calls. Search presets and remix embed caches also key off `embedding_spec` / `model_profile_id`.
+**Switching the active model profile** (Settings → current model): embeddings and FAISS indexes are stored under `data/model_assets/<provider_folder>/<variant>/`. After you change profile, **re-sync / rebuild the library index** for that profile before search or Agent API calls. Search presets also key off `embedding_spec` / `model_profile_id`.
 
 ### 3.4 FFmpeg
 

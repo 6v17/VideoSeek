@@ -8,15 +8,13 @@ from PySide6.QtWidgets import QLabel, QStackedWidget, QTableWidget, QVBoxLayout,
 
 from ui.views.table_views import (
     populate_network_result_table,
-    populate_remix_result_table,
     populate_result_table,
 )
 from ui.widgets.result_table import ResultTable
-from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC, REMIX_TABLE_SPEC
+from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
 from ui.widgets.thumb_cell import make_thumb_label
 
 THUMB_COLUMN = int(LOCAL_SEARCH_TABLE_SPEC.thumb_column or 1)
-REMIX_THUMB_COLUMN = int(REMIX_TABLE_SPEC.thumb_column or 1)
 
 
 class ResultView(QWidget):
@@ -96,33 +94,18 @@ class ResultView(QWidget):
         populate_result_table(self.table, results, on_preview, on_locate, on_export, texts)
         self._sync_empty_overlay()
 
-    def populate_remix(
-        self,
-        results,
-        remix_video_path,
-        on_compare,
-        on_locate,
-        on_export,
-        texts,
-    ) -> None:
-        populate_remix_result_table(
-            self.table,
-            results,
-            remix_video_path,
-            on_compare,
-            on_locate,
-            on_export,
-            texts,
-        )
-        self._sync_empty_overlay()
-
     def populate_network(self, results, texts) -> None:
         populate_network_result_table(self.table, results, texts)
         self._sync_empty_overlay()
 
-    def set_thumbnail(self, row: int, pixmap: QPixmap, column: int | None = None) -> None:
+    def set_thumbnail(self, row: int, pixmap, column: int | None = None) -> None:
+        if row < 0 or row >= self.table.rowCount():
+            return
         if column is None:
             spec = getattr(self.table, "spec", None)
             thumb = getattr(spec, "thumb_column", None) if spec is not None else None
             column = int(thumb if thumb is not None else THUMB_COLUMN)
-        self.table.setCellWidget(row, column, make_thumb_label(pixmap=pixmap))
+        if pixmap is None or (isinstance(pixmap, QPixmap) and pixmap.isNull()):
+            self.table.setCellWidget(row, column, make_thumb_label(text="—"))
+        else:
+            self.table.setCellWidget(row, column, make_thumb_label(pixmap=pixmap))

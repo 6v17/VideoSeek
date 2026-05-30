@@ -55,6 +55,7 @@ class SearchPresetsGuiMixin:
         else:
             self.current_img_path = None
             self.search_page.img_label.clear()
+            self._refresh_search_precision_controls()
 
     def run_search_preset(self, preset_id: str):
         if not self._ensure_startup_migration_idle("feature_search"):

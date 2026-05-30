@@ -173,9 +173,7 @@ class TrayGuiMixin:
         self.network_search_controller.shutdown()
         from ui.threading_utils import shutdown_thread
 
-        shutdown_thread(getattr(self, "remix_worker", None))
-        self.remix_worker = None
-        self._stop_remix_thumbnail_loading()
+        shutdown_thread(getattr(self, "_model_package_import_worker", None), stop_first=True)
         self.mobile_bridge_controller.shutdown()
         if hasattr(self, "agent_api_controller"):
             self.agent_api_controller.shutdown()

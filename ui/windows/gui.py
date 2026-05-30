@@ -40,7 +40,12 @@ from src.utils import (
 )
 from src.services.version_service import get_local_version_status
 from ui.controllers.app_meta_controller import AppMetaController
-from ui.widgets.components import LibraryPage, LinkSearchPage, NavigationSidebar, RemixMatchPage, SearchPage
+from ui.widgets.components import (
+    LibraryPage,
+    LinkSearchPage,
+    NavigationSidebar,
+    SearchPage,
+)
 from ui.widgets.settings import SettingsPage
 from ui.dialogs import AboutDialog, AppMessageDialog, MobileBridgeDialog, NoticeDialog
 from ui.controllers.indexing_controller import IndexingController
@@ -52,7 +57,6 @@ from ui.controllers.preview_controller import PreviewController
 from ui.controllers.runtime_resource_controller import RuntimeResourceController
 from ui.controllers.search_controller import SearchController
 from ui.widgets.styles import DARK_STYLE, LIGHT_STYLE
-from ui.windows.gui_remix import RemixGuiMixin
 from ui.windows.gui_settings import SettingsGuiMixin
 from ui.windows.gui_preview import PreviewGuiMixin
 from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
@@ -62,15 +66,15 @@ from ui.windows.gui_model_packages import ModelPackagesGuiMixin
 from ui.windows.gui_ui_state import AppUiStateMixin
 from ui.windows.gui_tray import TrayGuiMixin
 from ui.windows.gui_startup_migration import StartupMigrationGuiMixin
-from ui.windows.gui_search_presets import SearchPresetsGuiMixin
 from ui.windows.gui_search_scope import SearchScopeGuiMixin
+from ui.windows.gui_search_presets import SearchPresetsGuiMixin
+from ui.windows.gui_search_precision import SearchPrecisionGuiMixin
 
 
 class MainWindow(
     QMainWindow,
     StartupMigrationGuiMixin,
     TrayGuiMixin,
-    RemixGuiMixin,
     SettingsGuiMixin,
     PreviewGuiMixin,
     LibraryIndexingGuiMixin,
@@ -80,10 +84,11 @@ class MainWindow(
     ModelPackagesGuiMixin,
     SearchScopeGuiMixin,
     SearchPresetsGuiMixin,
+    SearchPrecisionGuiMixin,
 ):
-    """Sidebar / stacked widget order: local search → library → remix → remote link → settings."""
+    """Sidebar / stacked widget order: local search → library → remote link → settings."""
 
-    _NAV_PAGE_ORDER = ("search", "library", "remix", "link", "settings")
+    _NAV_PAGE_ORDER = ("search", "library", "link", "settings")
 
     def __init__(self):
         super().__init__()
@@ -105,10 +110,6 @@ class MainWindow(
         self._preview_export_tasks = []
         self._local_vector_detail_worker = None
         self._model_package_import_worker = None
-        self.remix_worker = None
-        self._remix_thumb_thread = None
-        self._remix_scope_restore_selection = False
-        self._remix_scope_entries_cache: list = []
         self._ffmpeg_imported_with_package = False
         self._settings_dirty = False
         self._settings_loading = False
@@ -159,6 +160,7 @@ class MainWindow(
         self.apply_texts()
         self._bind_settings_dirty_tracking()
         self.load_settings_values()
+        self._set_search_precision_mode_ui("fast")
         self._set_settings_dirty(False)
         self.check_runtime_resources(show_dialog=False)
         if self.startup_cancelled:
@@ -195,12 +197,10 @@ class MainWindow(
         self.pages = QStackedWidget()
         self.search_page = SearchPage()
         self.link_page = LinkSearchPage()
-        self.remix_page = RemixMatchPage()
         self.library_page = LibraryPage()
         self.settings_page = SettingsPage()
         self.pages.addWidget(self._build_scroll_page(self.search_page))
         self.pages.addWidget(self._build_scroll_page(self.library_page))
-        self.pages.addWidget(self._build_scroll_page(self.remix_page))
         self.pages.addWidget(self._build_scroll_page(self.link_page))
         self.pages.addWidget(self.settings_page)
         content_layout.addWidget(self.pages)
@@ -225,7 +225,6 @@ class MainWindow(
 
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
-        self.sidebar.btn_page_remix.clicked.connect(lambda: self.switch_page("remix"))
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)
@@ -240,7 +239,9 @@ class MainWindow(
         self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
         self.search_page.btn_expand_preview.clicked.connect(self.open_current_preview_dialog)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
-        self.search_page.search_mode.currentIndexChanged.connect(self._save_search_mode)
+        self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
+        self.search_page.search_precision_toggle.toggled.connect(self._on_search_precision_toggled)
+        self.search_page.text_search.textChanged.connect(self._refresh_search_precision_controls)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self._init_search_scope_state()
         self.link_page.query_image_label.mousePressEvent = lambda e: self.upload_network_query_image()
@@ -251,16 +252,6 @@ class MainWindow(
         self.link_page.btn_clear.clicked.connect(self.clear_link_search_content)
         self.link_page.btn_link_details.clicked.connect(self.show_network_link_details)
         self.link_page.btn_open_cache.clicked.connect(self.open_network_download_cache_folder)
-
-        self.remix_page.btn_browse_mix.clicked.connect(self._browse_remix_mix_video)
-        self.remix_page.btn_run.clicked.connect(self.start_remix_match)
-        self.remix_page.btn_stop.clicked.connect(self.stop_remix_match)
-        self.remix_page.btn_clear.clicked.connect(self.clear_remix_match_ui)
-        self.remix_page.btn_scope_all.clicked.connect(self._remix_scope_select_all)
-        self.remix_page.btn_scope_none.clicked.connect(self._remix_scope_select_none)
-        self.remix_page.btn_open_remix_cache.clicked.connect(self.open_remix_embed_cache_folder)
-        self.remix_page.btn_edit_scope.clicked.connect(self.open_remix_scope_editor)
-        self.remix_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
@@ -288,7 +279,7 @@ class MainWindow(
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
 
         self.setAcceptDrops(True)
-        for page in (self.search_page, self.link_page, self.remix_page, self.library_page, self.settings_page):
+        for page in (self.search_page, self.link_page, self.library_page, self.settings_page):
             page.header.runtime_banner_action.clicked.connect(self.open_runtime_resource_dialog)
 
     def _build_scroll_page(self, page_widget):
@@ -313,8 +304,6 @@ class MainWindow(
             dlg = getattr(self, "_preview_dialog", None)
             if dlg is not None:
                 dlg.dismiss_for_page_switch()
-        if page_name == "remix":
-            self._refresh_remix_scope_tree()
         if page_name == "settings":
             self._refresh_agent_api_status()
 
@@ -345,7 +334,6 @@ class MainWindow(
         self.sidebar.hero_body.setText(t["hero_body"])
         self.sidebar.btn_page_search.setText(t["nav_search"])
         self.sidebar.btn_page_link.setText(t["nav_link"])
-        self.sidebar.btn_page_remix.setText(t["nav_remix"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
         self.sidebar.btn_notice.setText(t["notice_short"])
@@ -375,6 +363,8 @@ class MainWindow(
         self.search_page.search_mode.addItem(t["setting_search_mode_chunk"], "chunk")
         self.search_page.search_mode.setCurrentIndex(1 if current_mode == "chunk" else 0)
         self.search_page.search_mode.blockSignals(False)
+        self.search_page.search_precision_label.setText(t["search_precision_label"])
+        self._refresh_search_precision_controls()
         self.search_page.session_title.setText(t["workspace_label"])
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_session_hint()
@@ -382,7 +372,6 @@ class MainWindow(
         self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
-        self.remix_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_expand_preview_button()
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
         self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))
@@ -430,22 +419,6 @@ class MainWindow(
         self.link_page.result_table.apply_header_labels(t)
         self.link_page.result_view.set_empty_message(t["no_results"])
 
-        self.remix_page.header.title.setText(t["remix_page_title"])
-        self.remix_page.header.subtitle.setText(t["remix_page_desc"])
-        self.remix_page.mix_label.setText(t.get("remix_source_card_title", t["remix_mix_video"]))
-        self.remix_page.section_params_title.setText(t.get("remix_section_params", ""))
-        self.remix_page.mix_hint.setText(t["remix_mix_hint"])
-        self.remix_page.input_mix_path.setPlaceholderText(t.get("remix_mix_path_placeholder", ""))
-        self.remix_page.btn_browse_mix.setText(t["remix_browse"])
-        self.remix_page.configure_remix_params(t)
-        self.remix_page.configure_remix_scope_section(t)
-        self.remix_page.btn_run.setText(t["remix_run"])
-        self.remix_page.btn_stop.setText(t["remix_stop"])
-        self.remix_page.btn_clear.setText(t["remix_clear"])
-        self.remix_page.results_title.setText(t["remix_results_title"])
-        self.remix_page.result_table.apply_header_labels(t)
-        self.remix_page.result_view.set_empty_message(t.get("remix_no_results", t["no_results"]))
-
         self.library_page.header.title.setText(t["library_page_title"])
         self.library_page.header.subtitle.setText(t["library_page_desc"])
         self.library_page.table_title.setText(t["library_table_title"])
@@ -479,7 +452,6 @@ class MainWindow(
         self.search_page.lbl_status.setText(t["ready"])
         self.link_page.lbl_build_status.setText(t["ready"])
         self.link_page.lbl_search_status.setText(t["ready"])
-        self.remix_page.lbl_status.setText(t["ready"])
         self.library_page.lbl_status.setText(t["ready"])
         self.settings_page.lbl_status.setText(t["settings_hint"])
         self._bind_sampling_preview_signals()
@@ -549,10 +521,22 @@ class MainWindow(
             return
 
         self.switch_page("search")
-        from src.services.search_scope import resolve_active_search_library_scope
+        from src.services.search_scope import resolve_active_search_library_scope, resolve_active_search_video_scope
 
-        scope_library_paths = resolve_active_search_library_scope()
-        self.search_controller.start_search(query, bool(text_query), scope_library_paths=scope_library_paths)
+        scope_video_paths = resolve_active_search_video_scope()
+        scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope()
+        # Manual search uses text when both are present; image-only path when text is empty.
+        search_precision_mode = self._resolve_search_precision_mode(
+            is_text=bool(text_query),
+            has_image=bool(self.current_img_path) and not bool(text_query),
+        )
+        self.search_controller.start_search(
+            query,
+            bool(text_query),
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            search_precision_mode=search_precision_mode,
+        )
 
     def toggle_mobile_bridge(self):
         try:
@@ -621,6 +605,9 @@ class MainWindow(
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
 
+    def _on_search_precision_toggled(self, _checked=False):
+        self._update_search_precision_toggle_ui()
+
     def clear_all_content(self):
         self.current_img_path = None
         self.search_page.text_search.clear()
@@ -629,6 +616,8 @@ class MainWindow(
         self.search_controller.clear_results()
         self.preview_controller.stop_preview()
         self._update_expand_preview_button()
+        self._set_search_precision_mode_ui("fast")
+        self._refresh_search_precision_controls()
         self.search_page.lbl_status.setText(self.texts["ready"])
 
     def clear_link_search_content(self):
@@ -874,4 +863,4 @@ class MainWindow(
         if clear_text:
             self.search_page.text_search.clear()
         self.search_page.lbl_status.setText(self.texts["image_loaded"])
-
+        self._refresh_search_precision_controls()

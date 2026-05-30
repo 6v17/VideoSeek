@@ -1198,6 +1198,29 @@ class SearchServiceTests(unittest.TestCase):
         mock_build_query_vector.assert_not_called()
         mock_search_results_with_ids.assert_not_called()
 
+    @patch("src.services.search_service._run_frame_search_per_videos")
+    @patch("src.services.search_service.load_config")
+    def test_run_search_uses_per_video_route_when_video_scope_set(
+        self,
+        mock_load_config,
+        mock_per_video_search,
+    ):
+        from src.domain.search_hit import SearchHit
+
+        mock_load_config.return_value = {}
+        expected = [SearchHit(1.0, 1.0, 0.8, "D:/clip.mp4")]
+        mock_per_video_search.return_value = expected
+
+        result = search_service.run_search(
+            "query",
+            is_text=True,
+            top_k=5,
+            scope_video_paths=["D:/clip.mp4"],
+        )
+
+        self.assertEqual(result, expected)
+        mock_per_video_search.assert_called_once()
+
     @patch("src.services.search_service.get_active_model_profile")
     def test_check_asset_profile_compatibility_rejects_mismatched_model_id(self, mock_get_profile):
         mock_get_profile.return_value = {"id": "siglip2_default", "provider": "siglip2_onnx"}
@@ -1243,8 +1266,40 @@ class SearchServiceTests(unittest.TestCase):
             timestamps,
             paths,
             config={},
+            is_text=True,
         )
         self.assertEqual(reranked, results)
+
+    def test_neighbor_rerank_auto_enabled_for_image_search(self):
+        self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=True))
+
+    def test_neighbor_rerank_respects_text_default(self):
+        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=True))
+
+    def test_neighbor_rerank_disabled_for_fast_image_search(self):
+        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
+
+    @patch("src.services.search_service.apply_image_pixel_rerank")
+    def test_finalize_frame_hits_prefers_pixel_query_data(self, mock_pixel):
+        mock_pixel.return_value = []
+        hits = [SearchHit(1.0, 1.0, 0.9, "a.mp4")]
+        search_service._finalize_frame_hits(
+            "text query",
+            False,
+            hits,
+            5,
+            {},
+            precise_image=True,
+            pixel_query_data="/path/to/ref.jpg",
+        )
+        mock_pixel.assert_called_once()
+        self.assertEqual(mock_pixel.call_args[0][0], "/path/to/ref.jpg")
+
+    def test_collect_neighbor_frame_ids_uses_time_window(self):
+        timestamps = np.array([10.0, 11.0, 12.0, 13.0, 20.0], dtype=np.float32)
+        paths = np.array(["a.mp4"] * 4 + ["b.mp4"], dtype=object)
+        ids = search_service._collect_neighbor_frame_ids(2, timestamps, paths, window_sec=1.5)
+        self.assertEqual(ids, [2, 1, 3])
 
     def test_apply_frame_neighbor_rerank_snaps_to_better_neighbor(self):
         class DummyIndex:

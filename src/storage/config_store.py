@@ -267,6 +267,18 @@ def get_search_mode(config=None) -> str:
     return mode if mode in allowed else str(DEFAULT_CONFIG["search_mode"])
 
 
+def get_search_precision_mode(config=None) -> str:
+    # Session-only UI toggle; never read persisted config.
+    return str(DEFAULT_CONFIG["search_precision_mode"])
+
+
+def is_precise_image_search(config=None, search_precision_mode: str | None = None) -> bool:
+    if search_precision_mode is None:
+        return False
+    mode = str(search_precision_mode).strip().lower()
+    return mode == "precise"
+
+
 def get_frame_neighbor_rerank_enabled(config=None) -> bool:
     return bool(_app_cfg(config).get("frame_neighbor_rerank_enabled", DEFAULT_CONFIG["frame_neighbor_rerank_enabled"]))
 
@@ -355,15 +367,42 @@ def get_search_scope_library_paths(config=None) -> List[str]:
     return paths
 
 
-def save_search_scope(mode, library_paths, config=None) -> dict:
+def get_search_scope_video_paths(config=None) -> List[str]:
+    from src.services.search_scope import normalize_scope_path
+
+    cfg = _app_cfg(config)
+    raw_paths = cfg.get("search_scope_video_paths", DEFAULT_CONFIG.get("search_scope_video_paths", []))
+    if not isinstance(raw_paths, list):
+        return []
+    paths = []
+    for item in raw_paths:
+        text = str(item or "").strip()
+        if text:
+            paths.append(normalize_scope_path(text))
+    return paths
+
+
+def save_search_scope(mode, library_paths=None, config=None, *, video_paths=None) -> dict:
     cfg = dict(config or load_config())
     normalized_mode = str(mode or "").strip().lower()
     cfg["search_scope_mode"] = normalized_mode if normalized_mode in CONFIG_ENUMS["search_scope_mode"] else "all"
-    normalized_paths = []
-    for item in library_paths or []:
-        text = str(item or "").strip()
-        if text:
-            normalized_paths.append(canonicalize_library_path(text))
-    cfg["search_scope_library_paths"] = normalized_paths
+    if library_paths is not None:
+        normalized_library_paths = []
+        for item in library_paths or []:
+            text = str(item or "").strip()
+            if text:
+                normalized_library_paths.append(canonicalize_library_path(text))
+        cfg["search_scope_library_paths"] = normalized_library_paths
+    if video_paths is not None:
+        from src.services.search_scope import normalize_scope_path
+
+        normalized_video_paths = []
+        for item in video_paths or []:
+            text = str(item or "").strip()
+            if text:
+                normalized_video_paths.append(normalize_scope_path(text))
+        cfg["search_scope_video_paths"] = normalized_video_paths
+        if normalized_video_paths:
+            cfg["search_scope_library_paths"] = []
     save_config(cfg)
     return cfg

@@ -333,11 +333,20 @@ def _scope_library_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[s
     return normalized or None
 
 
-def _resolve_scope_video_paths(scope: Optional[AgentSearchScope]) -> Optional[List[str]]:
-    if scope is None or not scope.video_paths:
+def _resolve_scope_video_paths(scope: Optional[AgentSearchScope], config=None) -> Optional[List[str]]:
+    if scope is not None and scope.video_paths:
+        paths = [str(item).strip() for item in scope.video_paths if str(item or "").strip()]
+        if paths:
+            return paths
+    if scope is None or not bool(getattr(scope, "use_saved_scope", False)):
         return None
-    paths = [str(item).strip() for item in scope.video_paths if str(item or "").strip()]
-    return paths or None
+    cfg = config or load_config()
+    if get_search_scope_mode(cfg) != "selected":
+        return None
+    from src.storage.config_store import get_search_scope_video_paths
+
+    saved = [str(item).strip() for item in get_search_scope_video_paths(cfg) if str(item or "").strip()]
+    return saved or None
 
 
 def _resolve_scope_library_paths(scope: Optional[AgentSearchScope], config=None) -> Optional[List[str]]:
@@ -350,6 +359,10 @@ def _resolve_scope_library_paths(scope: Optional[AgentSearchScope], config=None)
         return None
     cfg = config or load_config()
     if get_search_scope_mode(cfg) != "selected":
+        return None
+    from src.storage.config_store import get_search_scope_video_paths
+
+    if get_search_scope_video_paths(cfg):
         return None
     saved = [str(item).strip() for item in get_search_scope_library_paths(cfg) if str(item or "").strip()]
     return saved or None
@@ -371,7 +384,9 @@ def _search_index_ready_for_request(mode: str, scope: Optional[AgentSearchScope]
     cfg = config or load_config()
     snapshot = _index_snapshot(mode, config=cfg)
     scope_library_paths = _resolve_scope_library_paths(scope, config=cfg)
-    scope_video_paths = _resolve_scope_video_paths(scope)
+    scope_video_paths = _resolve_scope_video_paths(scope, config=cfg)
+    if scope_video_paths:
+        return True
     if scope_library_paths and not scope_video_paths and _per_library_indexes_ready(scope_library_paths, config=cfg):
         return True
     return bool(snapshot["index_ready"])

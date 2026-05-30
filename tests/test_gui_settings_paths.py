@@ -235,9 +235,6 @@ def _build_stub_modules():
     def _stub_class(name):
         return type(name, (), {})
 
-    gui_remix_stub = types.ModuleType("ui.windows.gui_remix")
-    gui_remix_stub.RemixGuiMixin = type("RemixGuiMixin", (), {})
-
     stubs = {
         "PySide6": pyside6,
         "PySide6.QtCore": qtcore,
@@ -245,7 +242,6 @@ def _build_stub_modules():
         "PySide6.QtMultimedia": qtmultimedia,
         "PySide6.QtMultimediaWidgets": qtmultimediawidgets,
         "PySide6.QtWidgets": qtwidgets,
-        "ui.windows.gui_remix": gui_remix_stub,
         "src.services.model_package_service": model_package_module,
         "src.app.config": config_module,
         "src.app.i18n": i18n_module,
@@ -270,8 +266,8 @@ def _build_stub_modules():
             "LibraryPage": _stub_class("LibraryPage"),
             "LinkSearchPage": _stub_class("LinkSearchPage"),
             "NavigationSidebar": _stub_class("NavigationSidebar"),
-            "RemixMatchPage": _stub_class("RemixMatchPage"),
             "SearchPage": _stub_class("SearchPage"),
+            "TraceViewerPage": _stub_class("TraceViewerPage"),
         },
         "ui.widgets.settings": {
             "SettingsPage": _stub_class("SettingsPage"),

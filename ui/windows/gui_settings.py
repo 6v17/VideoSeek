@@ -148,6 +148,8 @@ class SettingsGuiMixin:
         self._settings_loading = False
         self._set_settings_dirty(False)
         self._refresh_agent_api_status()
+        if hasattr(self, "_refresh_search_precision_controls"):
+            self._refresh_search_precision_controls()
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:

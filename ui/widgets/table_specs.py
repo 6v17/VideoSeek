@@ -19,17 +19,6 @@ class LocalSearchCol(IntEnum):
     ACTIONS = 6
 
 
-class RemixCol(IntEnum):
-    ORDER = 0
-    PREVIEW = 1
-    VIDEO = 2
-    SOURCE_TIME = 3
-    REMIX_TIME = 4
-    SPEED = 5
-    MATCH = 6
-    ACTIONS = 7
-
-
 class NetworkLinkCol(IntEnum):
     ORDER = 0
     TITLE = 1
@@ -78,22 +67,7 @@ LOCAL_SEARCH_TABLE_SPEC = TableSpec(
         TableColumnSpec("range", width=108),
         TableColumnSpec("mode", width=74),
         TableColumnSpec("score", width=74),
-        TableColumnSpec("actions", width=236),
-    ),
-)
-
-REMIX_TABLE_SPEC = TableSpec(
-    texts_header_key="remix_result_headers",
-    row_height=88,
-    columns=(
-        TableColumnSpec("order", width=46),
-        TableColumnSpec("preview", width=164),
-        TableColumnSpec("video", resize="stretch"),
-        TableColumnSpec("source_time", width=108),
-        TableColumnSpec("remix_time", width=108),
-        TableColumnSpec("speed", width=56),
-        TableColumnSpec("match", width=100),
-        TableColumnSpec("actions", width=250),
+        TableColumnSpec("actions", width=300),
     ),
 )
 

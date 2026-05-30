@@ -289,7 +289,7 @@ class RuntimeGuiMixin:
             missing_text = self.texts.get("models_missing_generic_unknown", "Runtime resources are incomplete.")
         banner_text = self.texts.get("runtime_banner_missing", "Runtime resources are not ready: {missing}").format(missing=missing_text)
         action_text = self.texts.get("runtime_banner_open_import", "Go Import")
-        for page in (self.search_page, self.link_page, self.library_page, self.settings_page, self.remix_page):
+        for page in (self.search_page, self.link_page, self.library_page, self.settings_page):
             banner = page.header.runtime_banner
             banner_label = page.header.runtime_banner_text
             banner_btn = page.header.runtime_banner_action
