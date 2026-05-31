@@ -25,7 +25,7 @@ except ImportError as exc:
 else:
     _IMPORT_ERROR = None
 
-from src.app.config import load_config
+from src.app.config import DEFAULT_CONFIG, load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
 from src.services.search_index_schema import (
@@ -56,8 +56,11 @@ logger = get_logger("agent_api")
 API_VERSION = "1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-SEARCH_TIMEOUT_SEC = 120.0
-BATCH_TIMEOUT_SEC = 600.0
+# Fallbacks when config keys are missing (see agent_api_* in config.json).
+_SEARCH_TIMEOUT_FAST_FALLBACK_SEC = 90.0
+_SEARCH_TIMEOUT_PRECISE_FALLBACK_SEC = 180.0
+_BATCH_TIMEOUT_FALLBACK_SEC = 1200.0
+_BATCH_TIMEOUT_MAX_SEC = 7200.0
 MAX_CONCURRENT_SEARCHES = 2
 MAX_BATCH_QUERIES = 64
 _BATCH_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
@@ -283,6 +286,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     mode = _normalize_mode(mode)
     spec = get_active_embedding_spec(config=config)
     snapshot = _index_snapshot(mode)
+    timeouts = _agent_timeout_settings(config)
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -312,9 +316,11 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "library_indexes_stale": snapshot["library_indexes_stale"],
         "saved_search_scope_mode": get_search_scope_mode(config),
         "max_concurrent_searches": MAX_CONCURRENT_SEARCHES,
-        "search_timeout_sec": SEARCH_TIMEOUT_SEC,
+        "search_timeout_sec": timeouts["search_timeout_fast_sec"],
+        "search_timeout_precise_sec": timeouts["search_timeout_precise_sec"],
+        "agent_api_default_image_precision": _default_image_precision_mode(config),
         "max_batch_queries": MAX_BATCH_QUERIES,
-        "batch_timeout_sec": BATCH_TIMEOUT_SEC,
+        "batch_timeout_sec": timeouts["batch_timeout_sec"],
     }
 
 
@@ -467,14 +473,89 @@ def _resolve_agent_search_scope(
     return _resolve_default_active_scope(config=cfg)
 
 
+def _agent_timeout_settings(config=None) -> Dict[str, float]:
+    cfg = config or load_config()
+    try:
+        fast = float(cfg.get("agent_api_search_timeout_fast_sec", DEFAULT_CONFIG["agent_api_search_timeout_fast_sec"]))
+    except (TypeError, ValueError):
+        fast = _SEARCH_TIMEOUT_FAST_FALLBACK_SEC
+    try:
+        precise = float(cfg.get("agent_api_search_timeout_precise_sec", DEFAULT_CONFIG["agent_api_search_timeout_precise_sec"]))
+    except (TypeError, ValueError):
+        precise = _SEARCH_TIMEOUT_PRECISE_FALLBACK_SEC
+    try:
+        batch = float(cfg.get("agent_api_batch_timeout_sec", DEFAULT_CONFIG["agent_api_batch_timeout_sec"]))
+    except (TypeError, ValueError):
+        batch = _BATCH_TIMEOUT_FALLBACK_SEC
+    return {
+        "search_timeout_fast_sec": max(30.0, fast),
+        "search_timeout_precise_sec": max(30.0, precise),
+        "batch_timeout_sec": max(60.0, batch),
+    }
+
+
+def _default_image_precision_mode(config=None) -> str:
+    cfg = config or load_config()
+    value = str(cfg.get("agent_api_default_image_precision", DEFAULT_CONFIG["agent_api_default_image_precision"])).strip().lower()
+    return value if value in {"fast", "precise"} else "fast"
+
+
+def _resolve_search_timeout_sec(body: AgentSearchRequest, config=None) -> float:
+    cfg = config or load_config()
+    timeouts = _agent_timeout_settings(cfg)
+    try:
+        resolved = _resolve_agent_search_inputs(body, config=cfg)
+        if resolved["search_precision_mode"] == "precise":
+            return timeouts["search_timeout_precise_sec"]
+    except Exception:
+        if str(body.search_precision_mode or "").strip().lower() == "precise":
+            return timeouts["search_timeout_precise_sec"]
+    return timeouts["search_timeout_fast_sec"]
+
+
+def _batch_requests_precise_mode(body: AgentBatchSearchRequest, config=None) -> bool:
+    cfg = config or load_config()
+    try:
+        queries = _resolve_batch_queries(body)
+    except ValueError:
+        return False
+    for item in queries:
+        try:
+            resolved = _resolve_agent_search_inputs(item, config=cfg)
+        except ValueError:
+            continue
+        if resolved["search_precision_mode"] == "precise":
+            return True
+    return False
+
+
+def _resolve_batch_timeout_sec(body: AgentBatchSearchRequest, config=None) -> float:
+    cfg = config or load_config()
+    timeouts = _agent_timeout_settings(cfg)
+    per_item = (
+        timeouts["search_timeout_precise_sec"]
+        if _batch_requests_precise_mode(body, config=cfg)
+        else timeouts["search_timeout_fast_sec"]
+    )
+    try:
+        query_count = len(_resolve_batch_queries(body))
+    except ValueError:
+        query_count = len(body.queries or [])
+    estimated = max(1, query_count) * per_item
+    return min(_BATCH_TIMEOUT_MAX_SEC, max(timeouts["batch_timeout_sec"], estimated * 1.1))
+
+
 def _normalize_search_precision_mode(
     mode: Optional[str],
     *,
     is_text: bool,
     has_image: bool,
+    config=None,
 ) -> str:
     if is_text and not has_image:
         return "fast"
+    if mode is None and has_image:
+        mode = _default_image_precision_mode(config)
     normalized = str(mode or "fast").strip().lower()
     if normalized not in {"fast", "precise"}:
         normalized = "fast"
@@ -869,6 +950,7 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         body.search_precision_mode,
         is_text=is_text,
         has_image=has_image,
+        config=cfg,
     )
     scope_video_paths, scope_library_paths = _resolve_agent_search_scope(
         body,
@@ -1243,16 +1325,20 @@ class AgentApiService:
 
     async def _search(self, body: AgentSearchRequest):
         started = time.perf_counter()
+        timeout_sec = _resolve_search_timeout_sec(body)
         try:
             payload = await asyncio.wait_for(
                 asyncio.to_thread(execute_agent_search, body),
-                timeout=SEARCH_TIMEOUT_SEC,
+                timeout=timeout_sec,
             )
         except asyncio.TimeoutError:
             raise_api_error(
                 503,
                 "engine_busy",
-                f"Search timed out after {int(SEARCH_TIMEOUT_SEC)} seconds.",
+                (
+                    f"Search timed out after {int(timeout_sec)} seconds. "
+                    "For precise image search, allow more time or reduce top_k / pixel rerank settings."
+                ),
             )
         except IndexNotReadyError as exc:
             raise_api_error(409, "index_not_ready", str(exc))
@@ -1267,20 +1353,25 @@ class AgentApiService:
 
         payload.setdefault("meta", {})
         payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        payload["meta"]["search_timeout_sec"] = int(timeout_sec)
         return JSONResponse(payload)
 
     async def _search_batch(self, body: AgentBatchSearchRequest):
         started = time.perf_counter()
+        timeout_sec = _resolve_batch_timeout_sec(body)
         try:
             payload = await asyncio.wait_for(
                 asyncio.to_thread(execute_agent_batch_search, body),
-                timeout=BATCH_TIMEOUT_SEC,
+                timeout=timeout_sec,
             )
         except asyncio.TimeoutError:
             raise_api_error(
                 503,
                 "engine_busy",
-                f"Batch search timed out after {int(BATCH_TIMEOUT_SEC)} seconds.",
+                (
+                    f"Batch search timed out after {int(timeout_sec)} seconds. "
+                    "Reduce batch size, use search_precision_mode=fast, or raise agent_api_batch_timeout_sec."
+                ),
             )
         except IndexNotReadyError as exc:
             raise_api_error(409, "index_not_ready", str(exc))
@@ -1292,6 +1383,7 @@ class AgentApiService:
 
         payload.setdefault("meta", {})
         payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        payload["meta"]["batch_timeout_sec"] = int(timeout_sec)
         return JSONResponse(payload)
 
     async def _export_manifest(self, body: AgentManifestRequest):

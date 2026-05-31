@@ -79,6 +79,48 @@ class SettingsGuiMixin:
                 )
             )
         )
+        self.settings_page.input_image_pixel_rerank_top_n.setValue(
+            int(
+                config.get(
+                    "image_pixel_rerank_top_n",
+                    DEFAULT_CONFIG["image_pixel_rerank_top_n"],
+                )
+            )
+        )
+        probe_mode = str(
+            config.get(
+                "image_pixel_rerank_probe_mode",
+                DEFAULT_CONFIG["image_pixel_rerank_probe_mode"],
+            )
+        ).strip().lower()
+        probe_mode_index = self.settings_page.input_image_pixel_rerank_probe_mode.findData(probe_mode)
+        self.settings_page.input_image_pixel_rerank_probe_mode.setCurrentIndex(
+            0 if probe_mode_index < 0 else probe_mode_index
+        )
+        self.settings_page.input_image_pixel_rerank_time_window_sec.setValue(
+            float(
+                config.get(
+                    "image_pixel_rerank_time_window_sec",
+                    DEFAULT_CONFIG["image_pixel_rerank_time_window_sec"],
+                )
+            )
+        )
+        self.settings_page.input_image_pixel_rerank_probe_step_sec.setValue(
+            float(
+                config.get(
+                    "image_pixel_rerank_probe_step_sec",
+                    DEFAULT_CONFIG["image_pixel_rerank_probe_step_sec"],
+                )
+            )
+        )
+        self.settings_page.input_image_search_fetch_multiplier.setValue(
+            int(
+                config.get(
+                    "image_search_fetch_multiplier",
+                    DEFAULT_CONFIG["image_search_fetch_multiplier"],
+                )
+            )
+        )
         self.settings_page.input_preview_seconds.setValue(
             config.get("preview_seconds", DEFAULT_CONFIG["preview_seconds"])
         )
@@ -161,6 +203,11 @@ class SettingsGuiMixin:
             self.settings_page.input_frame_neighbor_rerank_enabled,
             self.settings_page.input_frame_neighbor_rerank_top_n,
             self.settings_page.input_frame_neighbor_rerank_window,
+            self.settings_page.input_image_pixel_rerank_top_n,
+            self.settings_page.input_image_pixel_rerank_probe_mode,
+            self.settings_page.input_image_pixel_rerank_time_window_sec,
+            self.settings_page.input_image_pixel_rerank_probe_step_sec,
+            self.settings_page.input_image_search_fetch_multiplier,
             self.settings_page.input_preview_seconds,
             self.settings_page.input_preview_width,
             self.settings_page.input_preview_height,
@@ -337,6 +384,21 @@ class SettingsGuiMixin:
             )
             config["frame_neighbor_rerank_window"] = int(
                 self.settings_page.input_frame_neighbor_rerank_window.value()
+            )
+            config["image_pixel_rerank_top_n"] = int(
+                self.settings_page.input_image_pixel_rerank_top_n.value()
+            )
+            config["image_pixel_rerank_probe_mode"] = str(
+                self.settings_page.input_image_pixel_rerank_probe_mode.currentData() or "index"
+            )
+            config["image_pixel_rerank_time_window_sec"] = float(
+                self.settings_page.input_image_pixel_rerank_time_window_sec.value()
+            )
+            config["image_pixel_rerank_probe_step_sec"] = float(
+                self.settings_page.input_image_pixel_rerank_probe_step_sec.value()
+            )
+            config["image_search_fetch_multiplier"] = int(
+                self.settings_page.input_image_search_fetch_multiplier.value()
             )
             config["preview_seconds"] = self.settings_page.input_preview_seconds.value()
             config["preview_width"] = self.settings_page.input_preview_width.value()

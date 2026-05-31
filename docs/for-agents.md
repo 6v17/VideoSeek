@@ -243,9 +243,11 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
     "ffmpeg_source": "managed"
   },
   "max_concurrent_searches": 2,
-  "search_timeout_sec": 120,
+  "search_timeout_sec": 90,
+  "search_timeout_precise_sec": 180,
+  "agent_api_default_image_precision": "fast",
   "max_batch_queries": 64,
-  "batch_timeout_sec": 600
+  "batch_timeout_sec": 1200
 }
 ```
 
@@ -268,7 +270,10 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `library_indexes_upgrade_needed` | If `true`, per-library indexes are still building — restart VideoSeek and wait for startup migration |
 | `library_indexes_ready` / `library_indexes_stale` | Count of per-library indexes ready vs stale (v2 only) |
 | `saved_search_scope_mode` | Desktop setting: `all` or `selected`. When you **omit** `scope` on `/search`, the server mirrors this saved picker (same as the desktop Search button) |
-| `max_batch_queries` / `batch_timeout_sec` | Batch limits — size `queries[]` and expect HTTP 503 if exceeded |
+| `max_batch_queries` / `batch_timeout_sec` | Batch limits — size `queries[]` and expect HTTP 503 if exceeded. Batch timeout scales with item count × per-item timeout (fast vs precise), capped at 7200s |
+| `search_timeout_sec` | Per-request timeout for **fast** searches (text or image). Default **90s** |
+| `search_timeout_precise_sec` | Per-request timeout when `search_precision_mode: "precise"` (image / preset ref-image). Default **180s** — pixel rerank can take ~10–20s per query |
+| `agent_api_default_image_precision` | Default when image queries omit `search_precision_mode`: `"fast"` or `"precise"`. Text-only always `"fast"` |
 
 ### 5.1 Search presets (`GET`)
 
@@ -324,7 +329,7 @@ List all presets (newest order follows desktop storage).
 |---------|----------------------------------|
 | **Search mode** (`frame` / `chunk`) | Uses request `mode` if set; otherwise desktop `search_mode` at request time — **not** frozen inside the preset |
 | **Search scope** | If `scope` is **omitted**, mirrors desktop **Search scope** (selected videos first, else selected libraries, else all indexed). Preset-owned `video_paths` apply before the desktop picker. Pass `scope` to override |
-| **Image precision** | Request `search_precision_mode: "precise"` for image / preset-with-ref-image searches (desktop **精搜** toggle). Default `"fast"`. Text-only queries always use `"fast"` |
+| **Image precision** | Request `search_precision_mode: "precise"` for image / preset-with-ref-image searches (desktop **精搜** toggle). Default follows `agent_api_default_image_precision` from `/health` (usually `"fast"`). Text-only queries always use `"fast"` |
 | **Reference-image rerank** | Preset searches pass `pixel_query_data` internally (same as GUI preset chip) — no extra request field |
 | **top_k / min_score** | Request fields override; otherwise preset defaults, then app defaults |
 
@@ -387,7 +392,7 @@ When `preset_id` is set, omit `query` and `query_type`. The server uses the pres
 | `top_k` | integer | no | Max hits to return. Bounds **1–200** (app config). Default: preset `top_k`, else desktop `search_top_k` (**20**). |
 | `mode` | `"frame"` \| `"chunk"` | no | Override desktop `search_mode`. Default: follow app settings at request time. |
 | `min_score` | number \| null | no | Optional post-filter; implementation may compare against inner-product style scores. When unsure, omit and filter by rank only. |
-| `search_precision_mode` | `"fast"` \| `"precise"` | no | Image-search precision (desktop **精搜**). Default `"fast"`. Ignored for text-only queries. Preset ref-image searches honor `"precise"` |
+| `search_precision_mode` | `"fast"` \| `"precise"` | no | Image-search precision (desktop **精搜**). Default: `agent_api_default_image_precision` from `/health` when omitted. Ignored for text-only queries. Preset ref-image searches honor `"precise"` |
 | `client_request_id` | string | no | Echoed back for correlating script beats. |
 | `scope` | object | no | Optional override. **When omitted**, server mirrors desktop **Search scope** (same as GUI Search button). See scope fields below |
 | `scope.video_paths` | string[] | no | Limit hits to these absolute video paths (global index over-fetch then filter). |
@@ -456,6 +461,8 @@ For `query_type: "image_path"`, `query` is the file path.
 | `hits[].video_duration_sec` | Present when container duration is known |
 | `meta.fetch_top_k` | Over-fetch size for global+filter scope; equals `top_k` when `scope_uses_per_library_indexes` |
 | `meta.search_precision_mode` | `"fast"` or `"precise"` actually used (`"fast"` for text-only) |
+| `meta.search_timeout_sec` | Per-request timeout budget applied by the server (fast vs precise) |
+| `meta.batch_timeout_sec` | Batch-only: total timeout budget for `/search/batch` |
 | `meta.scope_applied` | `true` when any scope limit was applied |
 | `meta.scope_video_paths` | Resolved video paths (explicit, preset-owned, or from desktop picker) |
 | `meta.scope_library_paths` | Resolved library roots (explicit or from desktop picker) |
@@ -489,7 +496,7 @@ Empty `hits` is **not** an error — try a more visual query (§3).
 
 ### 5.3 `POST /api/v1/search/batch`
 
-Run many searches in one HTTP call (screenshot folders, storyboard beats). **Limit:** 64 items per request; **timeout:** 600s for the whole batch. Each item still respects the global search concurrency cap (2).
+Run many searches in one HTTP call (screenshot folders, storyboard beats). **Limit:** 64 items per request. **Timeout:** at least `batch_timeout_sec` from `/health` (default **1200s**), or `query_count × per_item_timeout × 1.1` when larger (per-item timeout is **180s** if any item uses precise mode, else **90s**). Each item still respects the global search concurrency cap (2).
 
 #### Request (screenshot folder)
 
@@ -774,3 +781,4 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | 2026-05-26 | §2: clarify query label vs search presets vs video metadata tags; §5.5 preset sketch; plan in `docs/planned_features.md` |
 | 2026-05-27 | Search presets API: `GET /search/presets`, `GET /search/presets/{id}`, `POST /search` + `preset_id`; §5 renumbered; `capabilities.search_presets` |
 | 2026-05-31 | GUI parity: default scope mirrors desktop picker (omit `scope`); preset `video_paths`; `search_precision_mode`; preset `pixel_query_data` rerank; `capabilities.search_precision` |
+| 2026-05-31 | Agent timeouts: fast **90s** / precise **180s** per search; batch **1200s** floor with dynamic scaling; `search_timeout_precise_sec` + `agent_api_default_image_precision` on `/health`; `meta.search_timeout_sec` / `meta.batch_timeout_sec` on responses |

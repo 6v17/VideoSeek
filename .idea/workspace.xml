@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -373,10 +373,17 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/image_search_rerank.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_image_search_rerank.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/settings/page.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/settings/page.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -733,15 +740,7 @@
       <workItem from="1779868751165" duration="27144000" />
       <workItem from="1779934180261" duration="31540000" />
       <workItem from="1780014228624" duration="79859000" />
-      <workItem from="1780190591134" duration="837000" />
-    </task>
-    <task id="LOCAL-00042" summary="使用vlc进行预览视频">
-      <option name="closed" value="true" />
-      <created>1776353814860</created>
-      <option name="number" value="00042" />
-      <option name="presentableId" value="LOCAL-00042" />
-      <option name="project" value="LOCAL" />
-      <updated>1776353814860</updated>
+      <workItem from="1780190591134" duration="6594000" />
     </task>
     <task id="LOCAL-00043" summary="使用vlc进行预览视频">
       <option name="closed" value="true" />
@@ -1127,7 +1126,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780159069437</updated>
     </task>
-    <option name="localTasksCounter" value="91" />
+    <task id="LOCAL-00091" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1780191449495</created>
+      <option name="number" value="00091" />
+      <option name="presentableId" value="LOCAL-00091" />
+      <option name="project" value="LOCAL" />
+      <updated>1780191449496</updated>
+    </task>
+    <option name="localTasksCounter" value="92" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1175,14 +1182,14 @@
     <MESSAGE value="抽帧、向量生成稳定性提高，部分逻辑bug修复" />
     <MESSAGE value="局域网HEIC格式图片上传Bug修复" />
     <MESSAGE value="迁移数据非阻塞" />
-    <MESSAGE value="更新说明" />
     <MESSAGE value="移除远古旧版本迁移代码" />
     <MESSAGE value="增加GPU解码抽帧（试验性）" />
     <MESSAGE value="给agent调用api的说明书" />
     <MESSAGE value="加了搜索接口，供agent使用（beta）" />
     <MESSAGE value="引入chinese-clip模型，优化核心链路，增加预设标签" />
     <MESSAGE value="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配" />
-    <option name="LAST_COMMIT_MESSAGE" value="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配" />
+    <MESSAGE value="更新说明" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新说明" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

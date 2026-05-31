@@ -7,8 +7,14 @@ from src.web.agent_api import (
     AgentBatchSearchRequest,
     AgentSearchRequest,
     AgentSearchScope,
+    _agent_timeout_settings,
+    _batch_requests_precise_mode,
+    _default_image_precision_mode,
     _hits_to_payload,
+    _normalize_search_precision_mode,
+    _resolve_batch_timeout_sec,
     _resolve_scope_library_paths,
+    _resolve_search_timeout_sec,
     api_error_payload,
     build_health_payload,
     execute_agent_batch_search,
@@ -73,6 +79,105 @@ class AgentApiHelperTests(unittest.TestCase):
         )
         resolved = _resolve_scope_library_paths(scope)
         self.assertEqual(resolved, ["D:/explicit"])
+
+    @patch("src.web.agent_api.load_config")
+    def test_agent_timeout_settings_from_config(self, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 75,
+            "agent_api_search_timeout_precise_sec": 240,
+            "agent_api_batch_timeout_sec": 900,
+        }
+        timeouts = _agent_timeout_settings()
+        self.assertEqual(timeouts["search_timeout_fast_sec"], 75.0)
+        self.assertEqual(timeouts["search_timeout_precise_sec"], 240.0)
+        self.assertEqual(timeouts["batch_timeout_sec"], 900.0)
+
+    @patch("src.web.agent_api.load_config")
+    def test_default_image_precision_mode(self, mock_load_config):
+        mock_load_config.return_value = {"agent_api_default_image_precision": "precise"}
+        self.assertEqual(_default_image_precision_mode(), "precise")
+        self.assertEqual(
+            _normalize_search_precision_mode(None, is_text=False, has_image=True),
+            "precise",
+        )
+        self.assertEqual(
+            _normalize_search_precision_mode(None, is_text=True, has_image=False),
+            "fast",
+        )
+
+    @patch("src.web.agent_api.load_config")
+    @patch("src.web.agent_api.os.path.isfile", return_value=True)
+    def test_resolve_search_timeout_precise(self, _mock_isfile, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 90,
+            "agent_api_search_timeout_precise_sec": 200,
+        }
+        body = AgentSearchRequest(
+            query="D:/ref.png",
+            query_type="image_path",
+            search_precision_mode="precise",
+        )
+        self.assertEqual(_resolve_search_timeout_sec(body), 200.0)
+
+    @patch("src.web.agent_api.load_config")
+    def test_resolve_batch_timeout_scales_with_query_count(self, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 90,
+            "agent_api_search_timeout_precise_sec": 180,
+            "agent_api_batch_timeout_sec": 1200,
+        }
+        body = AgentBatchSearchRequest(
+            queries=[
+                AgentSearchRequest(query="a", query_type="text"),
+                AgentSearchRequest(query="b", query_type="text"),
+            ],
+        )
+        timeout = _resolve_batch_timeout_sec(body)
+        self.assertGreaterEqual(timeout, 1200.0)
+        self.assertFalse(_batch_requests_precise_mode(body))
+
+    @patch("src.web.agent_api.load_config")
+    @patch("src.web.agent_api.os.path.isfile", return_value=True)
+    def test_batch_precise_mode_detected(self, _mock_isfile, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 90,
+            "agent_api_search_timeout_precise_sec": 180,
+            "agent_api_batch_timeout_sec": 1200,
+        }
+        body = AgentBatchSearchRequest(
+            queries=[
+                AgentSearchRequest(
+                    query="D:/ref.png",
+                    query_type="image_path",
+                    search_precision_mode="precise",
+                ),
+            ],
+        )
+        self.assertTrue(_batch_requests_precise_mode(body))
+        timeout = _resolve_batch_timeout_sec(body)
+        self.assertGreaterEqual(timeout, 180.0)
+
+    @patch("src.web.agent_api._index_snapshot")
+    def test_build_health_payload_includes_timeout_fields(self, mock_snapshot):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "index_stale": False,
+            "global_index_state": "fresh",
+            "vector_count": 10,
+            "indexed_video_paths": 1,
+            "frame_vector_count": 10,
+            "chunk_vector_count": 0,
+            "search_index_schema_version": 1,
+            "library_indexes_upgrade_needed": False,
+            "library_index_count": 0,
+            "library_indexes_ready": 0,
+            "library_indexes_stale": 0,
+        }
+        payload = build_health_payload()
+        self.assertEqual(payload["search_timeout_sec"], 90)
+        self.assertEqual(payload["search_timeout_precise_sec"], 180)
+        self.assertEqual(payload["agent_api_default_image_precision"], "fast")
+        self.assertEqual(payload["batch_timeout_sec"], 1200)
 
 
 class AgentApiSearchTests(unittest.TestCase):

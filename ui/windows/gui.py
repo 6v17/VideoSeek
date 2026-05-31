@@ -616,7 +616,6 @@ class MainWindow(
         self.search_controller.clear_results()
         self.preview_controller.stop_preview()
         self._update_expand_preview_button()
-        self._set_search_precision_mode_ui("fast")
         self._refresh_search_precision_controls()
         self.search_page.lbl_status.setText(self.texts["ready"])
 

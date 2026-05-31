@@ -36,7 +36,14 @@ from src.storage.config_store import (
     get_search_top_k,
     is_precise_image_search,
 )
-from src.services.image_search_rerank import apply_image_pixel_rerank
+from src.services.image_search_rerank import apply_image_pixel_rerank, merge_index_step_lookup, reset_index_step_lookup
+from src.services.search_profiling import (
+    build_profile_meta_from_config,
+    is_profiling_enabled,
+    profile_phase,
+    record_search_profile_result_count,
+    search_profile_session,
+)
 
 logger = get_logger("search_service")
 _FRAME_ASSET_CACHE = {"key": None, "value": (None, None, None)}
@@ -304,27 +311,31 @@ def _run_frame_search_per_videos(
         per_k = _resolve_frame_fetch_top_k(per_k, scoped=True, is_text=False, config=config, precise_image=True)
     merged_hits: List[SearchHit] = []
     for abs_path, video_id in targets:
-        search_index, timestamps, video_paths = _load_per_video_frame_assets(video_id, abs_path, config)
+        with profile_phase("load_assets"):
+            search_index, timestamps, video_paths = _load_per_video_frame_assets(video_id, abs_path, config)
+        _merge_search_index_steps(video_paths, timestamps)
         if search_index is None:
             continue
-        matched_results, matched_ids = _search_frame_results_with_ids(
-            query_vector,
-            search_index,
-            timestamps,
-            video_paths,
-            top_k=per_k,
-        )
-        matched_results = _apply_frame_neighbor_rerank(
-            matched_results,
-            matched_ids,
-            query_vector,
-            search_index,
-            timestamps,
-            video_paths,
-            config,
-            is_text=is_text,
-            precise_image=precise_image,
-        )
+        with profile_phase("faiss_search"):
+            matched_results, matched_ids = _search_frame_results_with_ids(
+                query_vector,
+                search_index,
+                timestamps,
+                video_paths,
+                top_k=per_k,
+            )
+        with profile_phase("neighbor_rerank"):
+            matched_results = _apply_frame_neighbor_rerank(
+                matched_results,
+                matched_ids,
+                query_vector,
+                search_index,
+                timestamps,
+                video_paths,
+                config,
+                is_text=is_text,
+                precise_image=precise_image,
+            )
         merged_hits.extend(matched_results)
     return _finalize_frame_hits(
         query_data,
@@ -458,6 +469,16 @@ def _resolve_frame_fetch_top_k(
     return min(200, expanded)
 
 
+def _reset_search_index_steps() -> None:
+    reset_index_step_lookup()
+
+
+def _merge_search_index_steps(video_paths, timestamps) -> None:
+    if video_paths is None or timestamps is None:
+        return
+    merge_index_step_lookup(video_paths, timestamps)
+
+
 def _finalize_frame_hits(
     query_data,
     is_text: bool,
@@ -470,8 +491,12 @@ def _finalize_frame_hits(
     if is_text or not precise_image:
         return _merge_search_hits(hits, top_k)
     rerank_query = pixel_query_data if pixel_query_data is not None else query_data
-    reranked = apply_image_pixel_rerank(rerank_query, hits, config=config, top_k=top_k)
-    deduped = _dedupe_nearby_hits(reranked, bucket_sec=1.0)
+    with profile_phase("pre_pixel_dedupe"):
+        prepared = _dedupe_nearby_hits(hits, bucket_sec=1.0)
+    with profile_phase("pixel_rerank"):
+        reranked = apply_image_pixel_rerank(rerank_query, prepared, config=config, top_k=top_k)
+    with profile_phase("post_pixel_dedupe"):
+        deduped = _dedupe_nearby_hits(reranked, bucket_sec=1.0)
     return _merge_search_hits(deduped, top_k)
 
 
@@ -528,6 +553,37 @@ def _collect_neighbor_frame_ids(base_id: int, timestamps, video_paths, window_se
     return neighbor_ids
 
 
+def _reconstruct_index_vector(search_index, candidate_id: int, cache: dict[int, np.ndarray]) -> np.ndarray | None:
+    key = int(candidate_id)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        vector = np.asarray(search_index.reconstruct(key), dtype=np.float32).reshape(-1)
+    except Exception:
+        return None
+    cache[key] = vector
+    return vector
+
+
+def _neighbor_candidate_score(
+    query: np.ndarray,
+    search_index,
+    candidate_id: int,
+    vector_cache: dict[int, np.ndarray],
+    score_cache: dict[int, float],
+) -> float | None:
+    key = int(candidate_id)
+    if key in score_cache:
+        return score_cache[key]
+    candidate_vector = _reconstruct_index_vector(search_index, key, vector_cache)
+    if candidate_vector is None:
+        return None
+    score = float(np.dot(query, candidate_vector))
+    score_cache[key] = score
+    return score
+
+
 def _apply_frame_neighbor_rerank(
     results,
     frame_ids,
@@ -556,6 +612,8 @@ def _apply_frame_neighbor_rerank(
 
     reranked = list(results)
     max_index = min(len(results), len(frame_ids), max_top_n)
+    vector_cache: dict[int, np.ndarray] = {}
+    score_cache: dict[int, float] = {}
     for rank in range(max_index):
         base_id = frame_ids[rank]
         if base_id < 0 or base_id >= len(video_paths):
@@ -569,16 +627,19 @@ def _apply_frame_neighbor_rerank(
         for candidate_id in _collect_neighbor_frame_ids(base_id, timestamps, video_paths, window_sec):
             if not _same_scope_video_path(video_paths[candidate_id], base_path):
                 continue
-            try:
-                candidate_vector = np.asarray(search_index.reconstruct(int(candidate_id)), dtype=np.float32).reshape(-1)
-            except Exception as exc:
+            score = _neighbor_candidate_score(
+                query,
+                search_index,
+                int(candidate_id),
+                vector_cache,
+                score_cache,
+            )
+            if score is None:
                 logger.debug(
-                    "Neighbor rerank reconstruct failed for id=%s: %s",
+                    "Neighbor rerank reconstruct failed for id=%s",
                     candidate_id,
-                    exc,
                 )
                 continue
-            score = float(np.dot(query, candidate_vector))
             if score > best_score:
                 best_score = score
                 best_timestamp = float(timestamps[candidate_id])
@@ -619,6 +680,8 @@ def _expand_neighbor_rerank_candidates(
         return list(results or [])
 
     candidates: dict[tuple[str, int], SearchHit] = {}
+    vector_cache: dict[int, np.ndarray] = {}
+    score_cache: dict[int, float] = {}
     for rank in range(max_top_n):
         base_id = frame_ids[rank]
         if base_id < 0 or base_id >= len(video_paths):
@@ -627,16 +690,19 @@ def _expand_neighbor_rerank_candidates(
         for candidate_id in _collect_neighbor_frame_ids(base_id, timestamps, video_paths, window_sec):
             if not _same_scope_video_path(video_paths[candidate_id], base_path):
                 continue
-            try:
-                candidate_vector = np.asarray(search_index.reconstruct(int(candidate_id)), dtype=np.float32).reshape(-1)
-            except Exception as exc:
+            score = _neighbor_candidate_score(
+                query,
+                search_index,
+                int(candidate_id),
+                vector_cache,
+                score_cache,
+            )
+            if score is None:
                 logger.debug(
-                    "Neighbor candidate reconstruct failed for id=%s: %s",
+                    "Neighbor candidate reconstruct failed for id=%s",
                     candidate_id,
-                    exc,
                 )
                 continue
-            score = float(np.dot(query, candidate_vector))
             ts = float(timestamps[candidate_id])
             key = (base_path, int(round(ts * 1000)))
             hit = SearchHit(ts, ts, score, base_path)
@@ -706,6 +772,7 @@ def _collect_frame_candidates_for_chunk_search(
             search_index, timestamps, video_paths = _load_per_video_frame_assets(video_id, abs_path, config)
             if search_index is None:
                 continue
+            _merge_search_index_steps(video_paths, timestamps)
             matched_results, matched_ids = _search_frame_results_with_ids(
                 query_vector,
                 search_index,
@@ -739,6 +806,7 @@ def _collect_frame_candidates_for_chunk_search(
             search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
             if search_index is None:
                 continue
+            _merge_search_index_steps(video_paths, timestamps)
             matched_results, matched_ids = _search_frame_results_with_ids(
                 query_vector,
                 search_index,
@@ -765,6 +833,7 @@ def _collect_frame_candidates_for_chunk_search(
         search_index, timestamps, video_paths = load_search_assets(config)
         if search_index is None:
             return []
+        _merge_search_index_steps(video_paths, timestamps)
         _check_asset_profile_compatibility(config, _FRAME_ASSET_INFO, asset_label="frame")
         matched_results, matched_ids = _search_frame_results_with_ids(
             query_vector,
@@ -953,7 +1022,8 @@ def _run_chunk_search_via_frames(
         precise_image=precise_image,
         config=config,
     )
-    aggregated = _aggregate_frame_hits_to_chunks(frame_hits, top_k, config)
+    with profile_phase("chunk_aggregate"):
+        aggregated = _aggregate_frame_hits_to_chunks(frame_hits, top_k, config)
     if aggregated:
         return _finalize_frame_hits(
             query_data,
@@ -1009,6 +1079,7 @@ def run_search(
     query_vector=None,
     search_precision_mode=None,
     pixel_query_data=None,
+    profile: bool | None = None,
 ) -> List[SearchHit]:
     # Retained intentionally: exported via src.core.core and reached by
     # worker-side runtime imports that static analysis can miss.
@@ -1017,54 +1088,120 @@ def run_search(
     mode = str(search_mode or get_search_mode(config)).strip().lower()
     if mode not in {"frame", "chunk"}:
         mode = get_search_mode(config)
+    profile_enabled = profile if profile is not None else is_profiling_enabled(config)
+    profile_meta = build_profile_meta_from_config(
+        config,
+        precise_image=precise_image,
+        search_precision_mode=search_precision_mode,
+    )
     logger.info("Running %s search (is_text=%s, precise_image=%s)", mode, is_text, precise_image)
-    if mode == "chunk":
-        return run_chunk_search(
-            query_data,
-            is_text=is_text,
-            top_k=top_k,
-            scope_video_paths=scope_video_paths,
-            scope_library_paths=scope_library_paths,
-            query_vector=query_vector,
-            search_precision_mode=search_precision_mode,
-            pixel_query_data=pixel_query_data,
-        )
-    if top_k is None:
-        top_k = get_search_top_k(config)
-    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
-    query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
-
-    if scoped and scope_video_paths:
-        return _run_frame_search_per_videos(
-            query_vector,
-            scope_video_paths,
-            top_k,
-            config,
-            query_data=query_data,
-            is_text=is_text,
-            precise_image=precise_image,
-            pixel_query_data=pixel_query_data,
-        )
-
-    if (
-        scoped
-        and scope_library_paths
-        and not scope_video_paths
-        and _library_indexes_ready(config, scope_library_paths)
+    _reset_search_index_steps()
+    with search_profile_session(
+        enabled=profile_enabled,
+        search_mode=mode,
+        precise_image=precise_image,
+        meta=profile_meta,
     ):
-        merged_hits: List[SearchHit] = []
-        library_fetch_k = _resolve_frame_fetch_top_k(top_k, True, is_text, config, precise_image=precise_image)
-        for library_path in scope_library_paths:
-            search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
-            if search_index is None:
-                continue
+        if mode == "chunk":
+            results = run_chunk_search(
+                query_data,
+                is_text=is_text,
+                top_k=top_k,
+                scope_video_paths=scope_video_paths,
+                scope_library_paths=scope_library_paths,
+                query_vector=query_vector,
+                search_precision_mode=search_precision_mode,
+                pixel_query_data=pixel_query_data,
+            )
+            record_search_profile_result_count(len(results))
+            return results
+        if top_k is None:
+            top_k = get_search_top_k(config)
+        scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+        with profile_phase("query_vector"):
+            query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
+
+        if scoped and scope_video_paths:
+            results = _run_frame_search_per_videos(
+                query_vector,
+                scope_video_paths,
+                top_k,
+                config,
+                query_data=query_data,
+                is_text=is_text,
+                precise_image=precise_image,
+                pixel_query_data=pixel_query_data,
+            )
+            record_search_profile_result_count(len(results))
+            return results
+
+        if (
+            scoped
+            and scope_library_paths
+            and not scope_video_paths
+            and _library_indexes_ready(config, scope_library_paths)
+        ):
+            merged_hits: List[SearchHit] = []
+            library_fetch_k = _resolve_frame_fetch_top_k(top_k, True, is_text, config, precise_image=precise_image)
+            for library_path in scope_library_paths:
+                with profile_phase("load_assets"):
+                    search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
+                _merge_search_index_steps(video_paths, timestamps)
+                if search_index is None:
+                    continue
+                with profile_phase("faiss_search"):
+                    matched_results, matched_ids = _search_frame_results_with_ids(
+                        query_vector,
+                        search_index,
+                        timestamps,
+                        video_paths,
+                        top_k=library_fetch_k,
+                    )
+                with profile_phase("neighbor_rerank"):
+                    matched_results = _apply_frame_neighbor_rerank(
+                        matched_results,
+                        matched_ids,
+                        query_vector,
+                        search_index,
+                        timestamps,
+                        video_paths,
+                        config,
+                        is_text=is_text,
+                        precise_image=precise_image,
+                    )
+                merged_hits.extend(matched_results)
+            with profile_phase("scope_filter"):
+                scoped_hits = _merge_search_hits(merged_hits, library_fetch_k)
+            results = _finalize_frame_hits(
+                query_data,
+                is_text,
+                scoped_hits,
+                top_k,
+                config,
+                precise_image=precise_image,
+                pixel_query_data=pixel_query_data,
+            )
+            record_search_profile_result_count(len(results))
+            return results
+
+        fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text, config, precise_image=precise_image)
+        with profile_phase("load_assets"):
+            search_index, timestamps, video_paths = load_search_assets(config)
+        _merge_search_index_steps(video_paths, timestamps)
+        if search_index is None:
+            record_search_profile_result_count(0)
+            return []
+        _check_asset_profile_compatibility(config, _FRAME_ASSET_INFO, asset_label="frame")
+
+        with profile_phase("faiss_search"):
             matched_results, matched_ids = _search_frame_results_with_ids(
                 query_vector,
                 search_index,
                 timestamps,
                 video_paths,
-                top_k=library_fetch_k,
+                top_k=fetch_k,
             )
+        with profile_phase("neighbor_rerank"):
             matched_results = _apply_frame_neighbor_rerank(
                 matched_results,
                 matched_ids,
@@ -1076,9 +1213,14 @@ def run_search(
                 is_text=is_text,
                 precise_image=precise_image,
             )
-            merged_hits.extend(matched_results)
-        scoped_hits = _merge_search_hits(merged_hits, library_fetch_k)
-        return _finalize_frame_hits(
+        with profile_phase("scope_filter"):
+            scoped_hits = apply_search_scope(
+                matched_results,
+                video_paths=scope_video_paths,
+                library_paths=scope_library_paths,
+                top_k=fetch_k if precise_image else top_k,
+            )
+        results = _finalize_frame_hits(
             query_data,
             is_text,
             scoped_hits,
@@ -1087,46 +1229,8 @@ def run_search(
             precise_image=precise_image,
             pixel_query_data=pixel_query_data,
         )
-
-    fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text, config, precise_image=precise_image)
-    search_index, timestamps, video_paths = load_search_assets(config)
-    if search_index is None:
-        return []
-    _check_asset_profile_compatibility(config, _FRAME_ASSET_INFO, asset_label="frame")
-
-    matched_results, matched_ids = _search_frame_results_with_ids(
-        query_vector,
-        search_index,
-        timestamps,
-        video_paths,
-        top_k=fetch_k,
-    )
-    matched_results = _apply_frame_neighbor_rerank(
-        matched_results,
-        matched_ids,
-        query_vector,
-        search_index,
-        timestamps,
-        video_paths,
-        config,
-        is_text=is_text,
-        precise_image=precise_image,
-    )
-    scoped_hits = apply_search_scope(
-        matched_results,
-        video_paths=scope_video_paths,
-        library_paths=scope_library_paths,
-        top_k=fetch_k if precise_image else top_k,
-    )
-    return _finalize_frame_hits(
-        query_data,
-        is_text,
-        scoped_hits,
-        top_k,
-        config,
-        precise_image=precise_image,
-        pixel_query_data=pixel_query_data,
-    )
+        record_search_profile_result_count(len(results))
+        return results
 
 
 def run_chunk_search(
@@ -1138,95 +1242,125 @@ def run_chunk_search(
     query_vector=None,
     search_precision_mode=None,
     pixel_query_data=None,
+    profile: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
-    if not is_text:
-        return _run_chunk_search_via_frames(
-            query_data,
-            is_text=is_text,
-            top_k=top_k,
-            scope_video_paths=scope_video_paths,
-            scope_library_paths=scope_library_paths,
-            query_vector=query_vector,
-            search_precision_mode=search_precision_mode,
-            pixel_query_data=pixel_query_data,
-            precise_image=precise_image,
-            config=config,
-        )
-    if top_k is None:
-        top_k = get_search_top_k(config)
-    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
-    query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
-
-    if scoped and scope_video_paths:
-        return _run_chunk_search_per_videos(query_vector, scope_video_paths, top_k, config)
-
-    if (
-        scoped
-        and scope_library_paths
-        and not scope_video_paths
-        and _library_indexes_ready(config, scope_library_paths)
-    ):
-        merged_hits: List[SearchHit] = []
-        for library_path in scope_library_paths:
-            search_index, ranges, video_paths = load_library_chunk_search_assets(library_path, config)
-            if search_index is None:
-                continue
-            actual_k = min(top_k, search_index.ntotal)
-            if actual_k <= 0:
-                continue
-            distances, indices = search_index.search(query_vector, actual_k)
-            for rank, index_value in enumerate(indices[0]):
-                if index_value == -1 or index_value >= len(video_paths):
-                    continue
-                time_range = ranges[index_value]
-                merged_hits.append(
-                    SearchHit(
-                        float(time_range[0]),
-                        float(time_range[1]),
-                        float(distances[0][rank]),
-                        video_paths[index_value],
-                    )
-                )
-        return _merge_search_hits(merged_hits, top_k)
-
-    fetch_k = resolve_fetch_top_k(top_k, scoped)
-    search_index, ranges, video_paths = load_chunk_search_assets(config)
-    if search_index is None:
-        return []
-    _check_asset_profile_compatibility(config, _CHUNK_ASSET_INFO, asset_label="chunk")
-
-    actual_k = min(fetch_k, search_index.ntotal)
-    if actual_k <= 0:
-        return []
-    if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
-        raise RuntimeError("Invalid query vector. Please retry the search.")
-    query_dim = int(query_vector.shape[1])
-    index_dim = int(getattr(search_index, "d", 0))
-    if index_dim > 0 and query_dim != index_dim:
-        raise RuntimeError(
-            f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
-            "Current model uses a different embedding space. Please rebuild the index for the active model."
-        )
-
-    distances, indices = search_index.search(query_vector, actual_k)
-    matched_results = []
-    for rank, index_value in enumerate(indices[0]):
-        if index_value == -1 or index_value >= len(video_paths):
-            continue
-        time_range = ranges[index_value]
-        start_time = float(time_range[0])
-        end_time = float(time_range[1])
-        matched_results.append(
-            SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
-        )
-    return apply_search_scope(
-        matched_results,
-        video_paths=scope_video_paths,
-        library_paths=scope_library_paths,
-        top_k=top_k,
+    profile_enabled = profile if profile is not None else is_profiling_enabled(config)
+    profile_meta = build_profile_meta_from_config(
+        config,
+        precise_image=precise_image,
+        search_precision_mode=search_precision_mode,
     )
+    _reset_search_index_steps()
+    with search_profile_session(
+        enabled=profile_enabled,
+        search_mode="chunk",
+        precise_image=precise_image,
+        meta=profile_meta,
+    ):
+        if not is_text:
+            results = _run_chunk_search_via_frames(
+                query_data,
+                is_text=is_text,
+                top_k=top_k,
+                scope_video_paths=scope_video_paths,
+                scope_library_paths=scope_library_paths,
+                query_vector=query_vector,
+                search_precision_mode=search_precision_mode,
+                pixel_query_data=pixel_query_data,
+                precise_image=precise_image,
+                config=config,
+            )
+            record_search_profile_result_count(len(results))
+            return results
+        if top_k is None:
+            top_k = get_search_top_k(config)
+        scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+        with profile_phase("query_vector"):
+            query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
+
+        if scoped and scope_video_paths:
+            results = _run_chunk_search_per_videos(query_vector, scope_video_paths, top_k, config)
+            record_search_profile_result_count(len(results))
+            return results
+
+        if (
+            scoped
+            and scope_library_paths
+            and not scope_video_paths
+            and _library_indexes_ready(config, scope_library_paths)
+        ):
+            merged_hits: List[SearchHit] = []
+            for library_path in scope_library_paths:
+                with profile_phase("load_assets"):
+                    search_index, ranges, video_paths = load_library_chunk_search_assets(library_path, config)
+                if search_index is None:
+                    continue
+                actual_k = min(top_k, search_index.ntotal)
+                if actual_k <= 0:
+                    continue
+                with profile_phase("faiss_search"):
+                    distances, indices = search_index.search(query_vector, actual_k)
+                for rank, index_value in enumerate(indices[0]):
+                    if index_value == -1 or index_value >= len(video_paths):
+                        continue
+                    time_range = ranges[index_value]
+                    merged_hits.append(
+                        SearchHit(
+                            float(time_range[0]),
+                            float(time_range[1]),
+                            float(distances[0][rank]),
+                            video_paths[index_value],
+                        )
+                    )
+            results = _merge_search_hits(merged_hits, top_k)
+            record_search_profile_result_count(len(results))
+            return results
+
+        fetch_k = resolve_fetch_top_k(top_k, scoped)
+        with profile_phase("load_assets"):
+            search_index, ranges, video_paths = load_chunk_search_assets(config)
+        if search_index is None:
+            record_search_profile_result_count(0)
+            return []
+        _check_asset_profile_compatibility(config, _CHUNK_ASSET_INFO, asset_label="chunk")
+
+        actual_k = min(fetch_k, search_index.ntotal)
+        if actual_k <= 0:
+            record_search_profile_result_count(0)
+            return []
+        if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
+            raise RuntimeError("Invalid query vector. Please retry the search.")
+        query_dim = int(query_vector.shape[1])
+        index_dim = int(getattr(search_index, "d", 0))
+        if index_dim > 0 and query_dim != index_dim:
+            raise RuntimeError(
+                f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
+                "Current model uses a different embedding space. Please rebuild the index for the active model."
+            )
+
+        with profile_phase("faiss_search"):
+            distances, indices = search_index.search(query_vector, actual_k)
+        matched_results = []
+        for rank, index_value in enumerate(indices[0]):
+            if index_value == -1 or index_value >= len(video_paths):
+                continue
+            time_range = ranges[index_value]
+            start_time = float(time_range[0])
+            end_time = float(time_range[1])
+            matched_results.append(
+                SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
+            )
+        with profile_phase("scope_filter"):
+            results = apply_search_scope(
+                matched_results,
+                video_paths=scope_video_paths,
+                library_paths=scope_library_paths,
+                top_k=top_k,
+            )
+        record_search_profile_result_count(len(results))
+        return results
 
 
 def warmup_search_runtime():

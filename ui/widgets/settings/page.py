@@ -97,6 +97,19 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_frame_neighbor_rerank_top_n.setRange(1, 100)
         self.input_frame_neighbor_rerank_window = NoWheelSpinBox()
         self.input_frame_neighbor_rerank_window.setRange(1, 12)
+        self.input_image_pixel_rerank_top_n = NoWheelSpinBox()
+        self.input_image_pixel_rerank_top_n.setRange(1, 100)
+        self.input_image_pixel_rerank_probe_mode = NoWheelComboBox()
+        self.input_image_pixel_rerank_time_window_sec = NoWheelDoubleSpinBox()
+        self.input_image_pixel_rerank_time_window_sec.setRange(0.5, 10.0)
+        self.input_image_pixel_rerank_time_window_sec.setSingleStep(0.5)
+        self.input_image_pixel_rerank_time_window_sec.setDecimals(1)
+        self.input_image_pixel_rerank_probe_step_sec = NoWheelDoubleSpinBox()
+        self.input_image_pixel_rerank_probe_step_sec.setRange(0.25, 0.5)
+        self.input_image_pixel_rerank_probe_step_sec.setSingleStep(0.05)
+        self.input_image_pixel_rerank_probe_step_sec.setDecimals(2)
+        self.input_image_search_fetch_multiplier = NoWheelSpinBox()
+        self.input_image_search_fetch_multiplier.setRange(1, 8)
         self.input_preview_seconds = NoWheelSpinBox()
         self.input_preview_seconds.setRange(2, 20)
         self.input_preview_width = NoWheelSpinBox()
@@ -153,6 +166,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_browse_model_dir = QPushButton()
         self.btn_migrate_model_dir = QPushButton()
         self.section_search_title = QLabel()
+        self.section_precise_search_title = QLabel()
         self.section_preview_title = QLabel()
         self.section_index_title = QLabel()
         self.section_model_gpu_title = QLabel()
@@ -162,6 +176,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_frame_neighbor_rerank_enabled = ClickableLabel()
         self.label_frame_neighbor_rerank_top_n = ClickableLabel()
         self.label_frame_neighbor_rerank_window = ClickableLabel()
+        self.label_image_pixel_rerank_top_n = ClickableLabel()
+        self.label_image_pixel_rerank_probe_mode = ClickableLabel()
+        self.label_image_pixel_rerank_time_window_sec = ClickableLabel()
+        self.label_image_pixel_rerank_probe_step_sec = ClickableLabel()
+        self.label_image_search_fetch_multiplier = ClickableLabel()
         self.label_preview_seconds = ClickableLabel()
         self.label_preview_width = ClickableLabel()
         self.label_preview_height = ClickableLabel()
@@ -194,6 +213,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_frame_neighbor_rerank_enabled = QLabel()
         self.hint_frame_neighbor_rerank_top_n = QLabel()
         self.hint_frame_neighbor_rerank_window = QLabel()
+        self.hint_image_pixel_rerank_top_n = QLabel()
+        self.hint_image_pixel_rerank_probe_mode = QLabel()
+        self.hint_image_pixel_rerank_time_window_sec = QLabel()
+        self.hint_image_pixel_rerank_probe_step_sec = QLabel()
+        self.hint_image_search_fetch_multiplier = QLabel()
         self.hint_preview_seconds = QLabel()
         self.hint_preview_width = QLabel()
         self.hint_preview_height = QLabel()
@@ -238,6 +262,26 @@ class SettingsPage(QWidget, SettingsFormMixin):
         )
         self._configure_setting_input(
             self.input_frame_neighbor_rerank_window,
+            width=COMPONENT_SIZES["settings_input_width"],
+        )
+        self._configure_setting_input(
+            self.input_image_pixel_rerank_top_n,
+            width=COMPONENT_SIZES["settings_input_width"],
+        )
+        self._configure_setting_input(
+            self.input_image_pixel_rerank_probe_mode,
+            width=COMPONENT_SIZES["settings_input_width"] + 36,
+        )
+        self._configure_setting_input(
+            self.input_image_pixel_rerank_time_window_sec,
+            width=COMPONENT_SIZES["settings_input_width"],
+        )
+        self._configure_setting_input(
+            self.input_image_pixel_rerank_probe_step_sec,
+            width=COMPONENT_SIZES["settings_input_width"],
+        )
+        self._configure_setting_input(
+            self.input_image_search_fetch_multiplier,
             width=COMPONENT_SIZES["settings_input_width"],
         )
         self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
@@ -334,6 +378,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_rules.hide()
 
         self.section_search_card, self.section_search_form = self._create_settings_section(self.section_search_title)
+        self.section_precise_search_card, self.section_precise_search_form = self._create_settings_section(
+            self.section_precise_search_title
+        )
         self.section_preview_card, self.section_preview_form = self._create_settings_section(self.section_preview_title)
         self.section_index_card, self.section_index_form = self._create_settings_section(self.section_index_title)
         self.section_model_gpu_card, self.section_model_gpu_form = self._create_settings_section(self.section_model_gpu_title)
@@ -358,30 +405,65 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(
             self.section_search_form,
             2,
+            self.label_remote_max_frames,
+            self.input_remote_max_frames,
+            self.hint_remote_max_frames,
+        )
+        self._add_setting_row(
+            self.section_precise_search_form,
+            0,
             self.label_frame_neighbor_rerank_enabled,
             self.input_frame_neighbor_rerank_enabled,
             self.hint_frame_neighbor_rerank_enabled,
         )
         self.frame_neighbor_rerank_top_n_row = self._add_setting_row(
-            self.section_search_form,
-            3,
+            self.section_precise_search_form,
+            1,
             self.label_frame_neighbor_rerank_top_n,
             self.input_frame_neighbor_rerank_top_n,
             self.hint_frame_neighbor_rerank_top_n,
         )
         self.frame_neighbor_rerank_window_row = self._add_setting_row(
-            self.section_search_form,
-            4,
+            self.section_precise_search_form,
+            2,
             self.label_frame_neighbor_rerank_window,
             self.input_frame_neighbor_rerank_window,
             self.hint_frame_neighbor_rerank_window,
         )
         self._add_setting_row(
-            self.section_search_form,
+            self.section_precise_search_form,
+            3,
+            self.label_image_pixel_rerank_top_n,
+            self.input_image_pixel_rerank_top_n,
+            self.hint_image_pixel_rerank_top_n,
+        )
+        self._add_setting_row(
+            self.section_precise_search_form,
+            4,
+            self.label_image_pixel_rerank_probe_mode,
+            self.input_image_pixel_rerank_probe_mode,
+            self.hint_image_pixel_rerank_probe_mode,
+        )
+        self.image_pixel_rerank_time_window_row = self._add_setting_row(
+            self.section_precise_search_form,
             5,
-            self.label_remote_max_frames,
-            self.input_remote_max_frames,
-            self.hint_remote_max_frames,
+            self.label_image_pixel_rerank_time_window_sec,
+            self.input_image_pixel_rerank_time_window_sec,
+            self.hint_image_pixel_rerank_time_window_sec,
+        )
+        self.image_pixel_rerank_probe_step_row = self._add_setting_row(
+            self.section_precise_search_form,
+            6,
+            self.label_image_pixel_rerank_probe_step_sec,
+            self.input_image_pixel_rerank_probe_step_sec,
+            self.hint_image_pixel_rerank_probe_step_sec,
+        )
+        self._add_setting_row(
+            self.section_precise_search_form,
+            7,
+            self.label_image_search_fetch_multiplier,
+            self.input_image_search_fetch_multiplier,
+            self.hint_image_search_fetch_multiplier,
         )
 
         self._add_setting_row(self.section_preview_form, 0, self.label_preview_seconds, self.input_preview_seconds, self.hint_preview_seconds)
@@ -483,6 +565,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         search_preview_layout.setContentsMargins(0, 0, 0, 0)
         search_preview_layout.setSpacing(12)
         search_preview_layout.addWidget(self.section_search_card)
+        search_preview_layout.addWidget(self.section_precise_search_card)
         search_preview_layout.addWidget(self.section_preview_card)
         self.card_search_preview.content_layout.addWidget(search_preview_host)
 
@@ -550,8 +633,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_frame_neighbor_rerank_enabled.currentIndexChanged.connect(
             self._handle_frame_neighbor_rerank_enabled_changed
         )
+        self.input_image_pixel_rerank_probe_mode.currentIndexChanged.connect(
+            self._handle_image_pixel_probe_mode_changed
+        )
         self._update_sampling_mode_visibility()
         self._update_frame_neighbor_rerank_visibility()
+        self._update_image_pixel_probe_mode_visibility()
 
     def _handle_sampling_mode_changed(self, *_args):
         self._update_sampling_mode_visibility()
@@ -568,6 +655,16 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_sampling_fps_mode.setVisible(False)
         self.hint_sampling_fps_rules.setVisible(False)
         self.hint_sampling_fps_preview.setVisible(False)
+
+    def _handle_image_pixel_probe_mode_changed(self, *_args):
+        self._update_image_pixel_probe_mode_visibility()
+
+    def _update_image_pixel_probe_mode_visibility(self):
+        is_fixed = str(self.input_image_pixel_rerank_probe_mode.currentData() or "index") == "fixed"
+        if hasattr(self, "image_pixel_rerank_time_window_row"):
+            self.image_pixel_rerank_time_window_row.setVisible(is_fixed)
+        if hasattr(self, "image_pixel_rerank_probe_step_row"):
+            self.image_pixel_rerank_probe_step_row.setVisible(is_fixed)
 
     def _update_frame_neighbor_rerank_visibility(self):
         enabled = bool(self.input_frame_neighbor_rerank_enabled.currentData())
@@ -643,6 +740,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
     def configure_form_labels(self, texts):
         self._current_texts = texts
         self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索与采样", "Search & Sampling"))
+        self.section_precise_search_title.setText(
+            _fallback_text(texts, "settings_section_precise_search", "图搜精搜", "Precise Image Search")
+        )
         self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview & Thumbnails"))
         self.section_index_title.setText(_fallback_text(texts, "settings_section_indexing", "索引与分段", "Indexing & Chunking"))
         self.section_model_gpu_title.setText(
@@ -668,6 +768,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_frame_neighbor_rerank_enabled.setText(texts["setting_frame_neighbor_rerank_enabled"])
         self.label_frame_neighbor_rerank_top_n.setText(texts["setting_frame_neighbor_rerank_top_n"])
         self.label_frame_neighbor_rerank_window.setText(texts["setting_frame_neighbor_rerank_window"])
+        self.label_image_pixel_rerank_top_n.setText(texts["setting_image_pixel_rerank_top_n"])
+        self.label_image_pixel_rerank_probe_mode.setText(texts["setting_image_pixel_rerank_probe_mode"])
+        self.label_image_pixel_rerank_time_window_sec.setText(texts["setting_image_pixel_rerank_time_window_sec"])
+        self.label_image_pixel_rerank_probe_step_sec.setText(texts["setting_image_pixel_rerank_probe_step_sec"])
+        self.label_image_search_fetch_multiplier.setText(texts["setting_image_search_fetch_multiplier"])
         self.label_preview_seconds.setText(texts["setting_preview_seconds"])
         self.label_preview_width.setText(texts["setting_preview_width"])
         self.label_preview_height.setText(texts["setting_preview_height"])
@@ -762,6 +867,14 @@ class SettingsPage(QWidget, SettingsFormMixin):
         restore_index = self.input_frame_neighbor_rerank_enabled.findData(current_neighbor_rerank_enabled)
         self.input_frame_neighbor_rerank_enabled.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_frame_neighbor_rerank_enabled.blockSignals(False)
+        current_image_pixel_probe_mode = self.input_image_pixel_rerank_probe_mode.currentData()
+        self.input_image_pixel_rerank_probe_mode.blockSignals(True)
+        self.input_image_pixel_rerank_probe_mode.clear()
+        self.input_image_pixel_rerank_probe_mode.addItem(texts["setting_image_pixel_rerank_probe_mode_index"], "index")
+        self.input_image_pixel_rerank_probe_mode.addItem(texts["setting_image_pixel_rerank_probe_mode_fixed"], "fixed")
+        restore_index = self.input_image_pixel_rerank_probe_mode.findData(current_image_pixel_probe_mode)
+        self.input_image_pixel_rerank_probe_mode.setCurrentIndex(0 if restore_index < 0 else restore_index)
+        self.input_image_pixel_rerank_probe_mode.blockSignals(False)
         self.label_data_root.setText(texts["setting_data_root"])
         self.btn_browse_data_root.setText(texts["browse_data_root"])
         self.btn_browse_ffmpeg_path.setText(texts["browse_file"])
@@ -783,6 +896,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_frame_neighbor_rerank_enabled.setText(texts["setting_frame_neighbor_rerank_enabled_hint"])
         self.hint_frame_neighbor_rerank_top_n.setText(texts["setting_frame_neighbor_rerank_top_n_hint"])
         self.hint_frame_neighbor_rerank_window.setText(texts["setting_frame_neighbor_rerank_window_hint"])
+        self.hint_image_pixel_rerank_top_n.setText(texts["setting_image_pixel_rerank_top_n_hint"])
+        self.hint_image_pixel_rerank_probe_mode.setText(texts["setting_image_pixel_rerank_probe_mode_hint"])
+        self.hint_image_pixel_rerank_time_window_sec.setText(texts["setting_image_pixel_rerank_time_window_sec_hint"])
+        self.hint_image_pixel_rerank_probe_step_sec.setText(texts["setting_image_pixel_rerank_probe_step_sec_hint"])
+        self.hint_image_search_fetch_multiplier.setText(texts["setting_image_search_fetch_multiplier_hint"])
         self.hint_preview_seconds.setText(texts["setting_preview_seconds_hint"])
         self.hint_preview_width.setText(texts["setting_preview_width_hint"])
         self.hint_preview_height.setText(texts["setting_preview_height_hint"])
@@ -825,12 +943,18 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_model_dir.setText(texts["setting_model_dir_hint"])
         self._update_sampling_mode_visibility()
         self._update_frame_neighbor_rerank_visibility()
+        self._update_image_pixel_probe_mode_visibility()
         for label in [
             self.label_fps,
             self.label_top_k,
             self.label_frame_neighbor_rerank_enabled,
             self.label_frame_neighbor_rerank_top_n,
             self.label_frame_neighbor_rerank_window,
+            self.label_image_pixel_rerank_top_n,
+            self.label_image_pixel_rerank_probe_mode,
+            self.label_image_pixel_rerank_time_window_sec,
+            self.label_image_pixel_rerank_probe_step_sec,
+            self.label_image_search_fetch_multiplier,
             self.label_preview_seconds,
             self.label_preview_width,
             self.label_preview_height,
@@ -871,5 +995,4 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.runtime_status_backend.setText(backend_text or "")
         self.runtime_status_ffmpeg.setText(ffmpeg_text or "")
         self.runtime_status_data.setText(data_text or "")
-
 
