@@ -117,9 +117,117 @@ def resolve_active_search_video_scope(config=None) -> list[str] | None:
         return list(video_paths)
     library_paths = get_search_scope_library_paths(config)
     if library_paths:
+        if per_library_indexes_ready(library_paths, config=config):
+            return None
         expanded = list_ready_video_paths_for_libraries(library_paths, config=config)
         return expanded or None
     return None
+
+
+def resolve_default_active_search_scope(
+    config=None,
+) -> tuple[list[str] | None, list[str] | None]:
+    """Mirror desktop Search scope picker: selected videos, else selected libraries, else all."""
+    scope_video_paths = resolve_active_search_video_scope(config=config)
+    scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope(config=config)
+    return scope_video_paths, scope_library_paths
+
+
+def _read_scope_fields(scope) -> tuple[Optional[List[str]], Optional[List[str]], bool]:
+    if scope is None:
+        return None, None, False
+    if isinstance(scope, dict):
+        video_paths = scope.get("video_paths")
+        library_paths = scope.get("library_paths")
+        use_saved_scope = bool(scope.get("use_saved_scope", False))
+    else:
+        video_paths = getattr(scope, "video_paths", None)
+        library_paths = getattr(scope, "library_paths", None)
+        use_saved_scope = bool(getattr(scope, "use_saved_scope", False))
+    videos = [str(item).strip() for item in (video_paths or []) if str(item or "").strip()] or None
+    libraries = [str(item).strip() for item in (library_paths or []) if str(item or "").strip()] or None
+    return videos, libraries, use_saved_scope
+
+
+def scope_request_is_explicit(scope) -> bool:
+    videos, libraries, use_saved_scope = _read_scope_fields(scope)
+    if videos or libraries:
+        return True
+    return use_saved_scope
+
+
+def resolve_explicit_scope_video_paths(scope, config=None) -> Optional[List[str]]:
+    videos, _libraries, use_saved_scope = _read_scope_fields(scope)
+    if videos:
+        return videos
+    if scope is None or not use_saved_scope:
+        return None
+    from src.app.config import load_config
+    from src.storage.config_store import get_search_scope_mode, get_search_scope_video_paths
+
+    cfg = config or load_config()
+    if get_search_scope_mode(cfg) != "selected":
+        return None
+    saved = [str(item).strip() for item in get_search_scope_video_paths(cfg) if str(item or "").strip()]
+    return saved or None
+
+
+def resolve_explicit_scope_library_paths(scope, config=None) -> Optional[List[str]]:
+    _videos, libraries, use_saved_scope = _read_scope_fields(scope)
+    if libraries:
+        return libraries
+    if scope is None or not use_saved_scope:
+        return None
+    from src.app.config import load_config
+    from src.storage.config_store import (
+        get_search_scope_library_paths,
+        get_search_scope_mode,
+        get_search_scope_video_paths,
+    )
+
+    cfg = config or load_config()
+    if get_search_scope_mode(cfg) != "selected":
+        return None
+    if get_search_scope_video_paths(cfg):
+        return None
+    saved = [str(item).strip() for item in get_search_scope_library_paths(cfg) if str(item or "").strip()]
+    return saved or None
+
+
+def resolve_effective_search_scope(
+    scope,
+    *,
+    preset_scope_video_paths: Optional[Sequence[str]] = None,
+    config=None,
+) -> tuple[Optional[List[str]], Optional[List[str]]]:
+    """Explicit request scope, else preset-owned videos, else desktop active scope."""
+    if scope_request_is_explicit(scope):
+        return (
+            resolve_explicit_scope_video_paths(scope, config=config),
+            resolve_explicit_scope_library_paths(scope, config=config),
+        )
+    preset_videos = [str(item).strip() for item in (preset_scope_video_paths or []) if str(item or "").strip()]
+    if preset_videos:
+        return preset_videos, None
+    return resolve_default_active_search_scope(config=config)
+
+
+def per_library_indexes_ready(library_paths: Optional[Sequence[str]], config=None) -> bool:
+    if not library_paths:
+        return False
+    from src.app.config import load_config
+    from src.services.search_index_schema import (
+        TARGET_SEARCH_INDEX_SCHEMA_VERSION,
+        get_search_index_schema_version,
+        library_index_is_ready,
+    )
+    from src.storage.asset_store import load_model_metadata
+
+    cfg = config or load_config()
+    meta = load_model_metadata(config=cfg)
+    if get_search_index_schema_version(meta) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
+        return False
+    return all(library_index_is_ready(path, config=cfg) for path in library_paths)
 
 
 def resolve_active_search_mode(config=None) -> str:
@@ -139,7 +247,7 @@ def resolve_fetch_top_k(top_k: int, scoped: bool) -> int:
 def resolve_per_video_fetch_top_k(top_k: int, video_count: int) -> int:
     normalized_top_k = max(1, int(top_k))
     if int(video_count) <= 1:
-        return normalized_top_k
+        return min(200, max(normalized_top_k * 5, normalized_top_k + 10))
     return min(200, max(normalized_top_k * 2, normalized_top_k + 5))
 
 

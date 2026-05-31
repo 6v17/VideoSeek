@@ -76,7 +76,7 @@ def populate_library_table(library_list_host, libraries, is_indexing, on_sync, o
     layout.addStretch(1)
 
 
-def populate_result_table(table, results, on_preview, on_locate, on_export, texts):
+def populate_result_table(table, results, on_preview, on_locate, on_export, texts, on_deep_locate=None):
     table.setRowCount(0)
     if hasattr(table, "apply_header_labels"):
         table.apply_header_labels(texts)
@@ -103,6 +103,7 @@ def populate_result_table(table, results, on_preview, on_locate, on_export, text
                 "start_sec": float(start_sec),
                 "end_sec": float(end_sec),
                 "score": float(score),
+                "match_kind": str(getattr(hit, "match_kind", "frame") or "frame"),
             },
         )
         table.setItem(row, LocalSearchCol.ORDER, order_item)
@@ -114,11 +115,11 @@ def populate_result_table(table, results, on_preview, on_locate, on_export, text
         name_item.setToolTip(video_path)
         table.setItem(row, LocalSearchCol.VIDEO, name_item)
 
-        time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec))
+        time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=getattr(hit, "match_kind", "frame")))
         time_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, LocalSearchCol.RANGE, time_item)
 
-        mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts))
+        mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts, match_kind=getattr(hit, "match_kind", "frame")))
         mode_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, LocalSearchCol.MODE, mode_item)
 
@@ -129,7 +130,17 @@ def populate_result_table(table, results, on_preview, on_locate, on_export, text
         table.setCellWidget(
             row,
             LocalSearchCol.ACTIONS,
-            _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate, on_export, texts),
+            _build_result_actions(
+                video_path,
+                start_sec,
+                end_sec,
+                on_preview,
+                on_locate,
+                on_export,
+                texts,
+                match_kind=getattr(hit, "match_kind", "frame"),
+                on_deep_locate=on_deep_locate,
+            ),
         )
 
     table.setUpdatesEnabled(True)
@@ -309,7 +320,17 @@ def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts
     return container
 
 
-def _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate, on_export, texts):
+def _build_result_actions(
+    video_path,
+    start_sec,
+    end_sec,
+    on_preview,
+    on_locate,
+    on_export,
+    texts,
+    match_kind="frame",
+    on_deep_locate=None,
+):
     container = QWidget()
     layout = QHBoxLayout(container)
     layout.setContentsMargins(10, 0, 10, 0)
@@ -332,6 +353,21 @@ def _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate,
     locate_button.setToolTip(texts["locate_tip"])
     locate_button.clicked.connect(lambda _, path=video_path: on_locate(path))
 
+    layout.addWidget(preview_button)
+
+    if str(match_kind or "") == "video" and on_deep_locate is not None:
+        deep_button = QPushButton(_fallback_text(texts, "deep_locate", "定位镜头", "Find shot"))
+        deep_button.setProperty("class", "TableBtn")
+        deep_button.setFixedSize(80, 32)
+        deep_button.setCursor(Qt.PointingHandCursor)
+        deep_button.setToolTip(_fallback_text(texts, "deep_locate_tip", "", ""))
+        deep_button.clicked.connect(
+            lambda _, path=video_path, anchor=start_sec: on_deep_locate(path, anchor)
+        )
+        layout.addWidget(deep_button)
+        layout.addWidget(locate_button)
+        return container
+
     export_button = QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
     export_button.setProperty("class", "TableBtn")
     export_button.setFixedSize(74, 32)
@@ -341,20 +377,24 @@ def _build_result_actions(video_path, start_sec, end_sec, on_preview, on_locate,
         lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_export(path, clip_start, clip_end)
     )
 
-    layout.addWidget(preview_button)
     layout.addWidget(locate_button)
     layout.addWidget(export_button)
     return container
 
-def _format_time_range(start_sec, end_sec):
+def _format_time_range(start_sec, end_sec, texts=None, match_kind="frame"):
     start_text = f"{int(start_sec // 60):02d}:{int(start_sec % 60):02d}"
+    if str(match_kind or "") == "video":
+        template = (texts or {}).get("time_preview_label", "Preview ~{time}")
+        return template.format(time=start_text)
     end_text = f"{int(end_sec // 60):02d}:{int(end_sec % 60):02d}"
     if abs(float(end_sec) - float(start_sec)) < 1e-3:
         return start_text
     return f"{start_text}-{end_text}"
 
 
-def _result_mode_label(start_sec, end_sec, texts):
+def _result_mode_label(start_sec, end_sec, texts, match_kind="frame"):
+    if str(match_kind or "") == "video":
+        return texts.get("result_mode_video", texts["result_mode_frame"])
     if abs(float(end_sec) - float(start_sec)) < 1e-3:
         return texts["result_mode_frame"]
     return texts["result_mode_chunk"]

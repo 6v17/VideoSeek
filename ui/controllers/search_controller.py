@@ -35,6 +35,7 @@ class SearchController(QObject):
         min_score=None,
         search_precision_mode=None,
         pixel_query_data=None,
+        preview_anchor_sec=None,
     ):
         self.stop_thumbnail_loading()
         self.start_time = time.time()
@@ -54,6 +55,7 @@ class SearchController(QObject):
             min_score=min_score,
             search_precision_mode=search_precision_mode,
             pixel_query_data=pixel_query_data,
+            preview_anchor_sec=preview_anchor_sec,
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
@@ -61,19 +63,17 @@ class SearchController(QObject):
         self.worker.start()
 
     def start_preset_search(self, preset_id):
-        from src.services.search_preset_service import build_preset_search_plan
-        from src.services.search_scope import (
-            resolve_active_search_library_scope,
-            resolve_active_search_mode,
-            resolve_active_search_video_scope,
-        )
+        from src.services.search_request_service import resolve_search_query_inputs
+        from src.services.search_scope import resolve_active_search_mode, resolve_effective_search_scope
 
-        plan = build_preset_search_plan(preset_id)
-        preset = plan["preset"]
-        scope_video_paths = plan.get("scope_video_paths") or resolve_active_search_video_scope()
-        scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope()
-        is_text = bool(plan.get("is_text"))
-        has_image = bool(plan.get("has_image"))
+        query_part = resolve_search_query_inputs(preset_id=preset_id)
+        preset = query_part["preset"]
+        scope_video_paths, scope_library_paths = resolve_effective_search_scope(
+            None,
+            preset_scope_video_paths=query_part.get("preset_scope_video_paths"),
+        )
+        is_text = bool(query_part["is_text"])
+        has_image = bool(query_part["has_image"])
         search_precision_mode = self.parent_window._resolve_search_precision_mode(
             is_text=is_text,
             has_image=has_image,
@@ -81,16 +81,16 @@ class SearchController(QObject):
         if hasattr(self.parent_window, "apply_search_preset_to_ui"):
             self.parent_window.apply_search_preset_to_ui(preset)
         self.start_search(
-            query=plan.get("query_data"),
+            query=query_part.get("query_data"),
             is_text=is_text,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
-            query_vector=plan.get("query_vector"),
+            query_vector=query_part.get("query_vector"),
             search_mode=resolve_active_search_mode(),
-            top_k=plan.get("top_k"),
-            min_score=plan.get("min_score"),
+            top_k=query_part.get("default_top_k"),
+            min_score=query_part.get("default_min_score"),
             search_precision_mode=search_precision_mode,
-            pixel_query_data=plan.get("pixel_query_data"),
+            pixel_query_data=query_part.get("pixel_query_data"),
         )
 
     def clear_results(self):
@@ -168,6 +168,7 @@ class SearchController(QObject):
             self.parent_window.open_result_in_explorer,
             self.parent_window.handle_export_clip,
             self.parent_window.texts,
+            on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
         )
         duration = time.time() - self.start_time
         status_text = self.parent_window.texts["search_done"].format(duration=duration, count=len(results))

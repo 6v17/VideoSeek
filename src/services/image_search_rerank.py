@@ -20,7 +20,12 @@ _PROBE_STEP_MIN_SEC = 0.25
 _PROBE_STEP_MAX_SEC = 0.5
 _PROBE_WINDOW_MIN_SEC = 0.5
 _PROBE_WINDOW_MAX_SEC = 2.0
+_PROBE_POINT_WINDOW_MIN_SEC = 3.0
+_PROBE_POINT_WINDOW_MAX_SEC = 6.0
 _INDEX_STEP_FALLBACK_SEC = 1.0
+# CLIP leads; pixel only nudges when it is clearly confident.
+_CLIP_SCORE_WEIGHT = 0.6
+_PIXEL_SCORE_WEIGHT = 0.4
 
 _index_step_lookup_local = threading.local()
 
@@ -234,7 +239,13 @@ def _hit_probe_plan(hit: SearchHit, config, lookup: Mapping[str, float] | None =
     index_step = resolve_index_step_for_video(hit.video_path, config, lookup=lookup)
     window, step = resolve_probe_params(index_step, config)
     if chunk_span > 0.5:
-        window = max(window, chunk_span / 2.0)
+        window = min(window, max(index_step, chunk_span / 4.0))
+    else:
+        point_window = max(
+            _PROBE_POINT_WINDOW_MIN_SEC,
+            min(_PROBE_POINT_WINDOW_MAX_SEC, index_step * 0.5),
+        )
+        window = max(window, point_window)
     return window, step
 
 
@@ -275,6 +286,7 @@ def apply_image_pixel_rerank(
     *,
     config=None,
     top_k: int | None = None,
+    rerank_limit: int | None = None,
     index_step_lookup: Mapping[str, float] | None = None,
 ) -> List[SearchHit]:
     if not hits or not _image_pixel_rerank_enabled(config):
@@ -288,21 +300,25 @@ def apply_image_pixel_rerank(
     if query_hash <= 0:
         return list(hits)
 
-    top_n = _image_pixel_rerank_top_n(config, len(hits))
+    if rerank_limit is not None and rerank_limit > 0:
+        top_n = min(len(hits), int(rerank_limit))
+    else:
+        top_n = _image_pixel_rerank_top_n(config, len(hits))
     if top_n <= 0:
         return list(hits)
 
     lookup = index_step_lookup if index_step_lookup is not None else get_index_step_lookup()
     min_similarity = _image_pixel_min_similarity(config)
     head = list(hits[:top_n])
-    tail = list(hits[top_n:])
-    reranked_head: List[SearchHit] = []
-    deferred: List[SearchHit] = []
+    reranked: List[tuple[int, SearchHit]] = []
     thumbnail_cache: dict[tuple[str, int], object | None] = {}
     probe_hash_cache: dict[tuple[str, int], int] = {}
 
-    for hit in head:
+    for rank, hit in enumerate(head):
         clip_score = float(getattr(hit, "score", 0.0) or 0.0)
+        span_end = float(hit.end_sec)
+        span_start = float(hit.start_sec)
+        is_chunk_span = span_end > span_start + 0.5
         center = _hit_probe_center(hit)
         window, step = _hit_probe_plan(hit, config, lookup=lookup)
         best_time, pixel_sim = _best_pixel_match(
@@ -315,24 +331,19 @@ def apply_image_pixel_rerank(
             thumbnail_cache=thumbnail_cache,
             probe_hash_cache=probe_hash_cache,
         )
-        span_end = float(hit.end_sec)
-        span_start = float(hit.start_sec)
-        is_chunk_span = span_end > span_start + 0.5
-        if pixel_sim < 0.0:
-            reranked_head.append(SearchHit(hit.start_sec, hit.end_sec, clip_score, hit.video_path))
-            continue
 
         if pixel_sim < min_similarity:
-            end_sec = span_end if is_chunk_span else best_time
-            deferred.append(SearchHit(best_time, end_sec, clip_score * 0.5, hit.video_path))
+            reranked.append((rank, SearchHit(span_start, span_end, clip_score, hit.video_path)))
             continue
 
-        combined = (0.35 * clip_score) + (0.65 * pixel_sim)
-        end_sec = span_end if is_chunk_span else best_time
-        reranked_head.append(SearchHit(best_time, end_sec, combined, hit.video_path))
+        combined = (_CLIP_SCORE_WEIGHT * clip_score) + (_PIXEL_SCORE_WEIGHT * pixel_sim)
+        if is_chunk_span:
+            reranked.append((rank, SearchHit(span_start, span_end, combined, hit.video_path)))
+        else:
+            reranked.append((rank, SearchHit(best_time, best_time, combined, hit.video_path)))
 
-    reranked_head.sort(key=lambda item: float(item.score), reverse=True)
-    merged = reranked_head + deferred + tail
+    reranked.sort(key=lambda item: (-float(item[1].score), item[0]))
+    merged = [hit for _rank, hit in reranked]
     if top_k is not None and top_k > 0:
         return merged[: int(top_k)]
     return merged

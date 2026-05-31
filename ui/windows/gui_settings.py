@@ -124,12 +124,6 @@ class SettingsGuiMixin:
         self.settings_page.input_preview_seconds.setValue(
             config.get("preview_seconds", DEFAULT_CONFIG["preview_seconds"])
         )
-        self.settings_page.input_preview_width.setValue(
-            config.get("preview_width", DEFAULT_CONFIG["preview_width"])
-        )
-        self.settings_page.input_preview_height.setValue(
-            config.get("preview_height", DEFAULT_CONFIG["preview_height"])
-        )
         self.settings_page.input_thumb_width.setValue(
             config.get("thumb_width", DEFAULT_CONFIG["thumb_width"])
         )
@@ -209,8 +203,6 @@ class SettingsGuiMixin:
             self.settings_page.input_image_pixel_rerank_probe_step_sec,
             self.settings_page.input_image_search_fetch_multiplier,
             self.settings_page.input_preview_seconds,
-            self.settings_page.input_preview_width,
-            self.settings_page.input_preview_height,
             self.settings_page.input_thumb_width,
             self.settings_page.input_thumb_height,
             self.settings_page.input_export_video_silent,
@@ -401,8 +393,6 @@ class SettingsGuiMixin:
                 self.settings_page.input_image_search_fetch_multiplier.value()
             )
             config["preview_seconds"] = self.settings_page.input_preview_seconds.value()
-            config["preview_width"] = self.settings_page.input_preview_width.value()
-            config["preview_height"] = self.settings_page.input_preview_height.value()
             config["thumb_width"] = self.settings_page.input_thumb_width.value()
             config["thumb_height"] = self.settings_page.input_thumb_height.value()
             config["export_video_silent"] = bool(self.settings_page.input_export_video_silent.currentData())
@@ -530,7 +520,7 @@ class SettingsGuiMixin:
             if not url:
                 self.show_info_dialog(
                     self.texts["error_title"],
-                    self.texts.get("setting_agent_api_start_failed", "Failed to start Agent API."),
+                    self.texts.get("setting_agent_api_start_failed", "Failed to start local API."),
                     kind="warning",
                 )
         else:
@@ -545,17 +535,48 @@ class SettingsGuiMixin:
             url = self.agent_api_controller.get_base_url()
             text = self.texts.get("setting_agent_api_status_running", "Running: {url}").format(url=url)
             self.settings_page.btn_copy_agent_api_url.setEnabled(True)
+            self.settings_page.btn_copy_agent_starter.setEnabled(True)
         else:
             text = self.texts.get("setting_agent_api_status_stopped", "Stopped")
             self.settings_page.btn_copy_agent_api_url.setEnabled(False)
+            self.settings_page.btn_copy_agent_starter.setEnabled(False)
         self.settings_page.lbl_agent_api_status.setText(text)
+
+    def _build_agent_starter_text(self) -> str:
+        if not hasattr(self, "agent_api_controller") or not self.agent_api_controller.is_running():
+            return ""
+        from src.services.agent_starter_service import build_agent_starter_text
+        from src.web.agent_api import build_health_payload
+
+        base_url = self.agent_api_controller.get_base_url()
+        health = build_health_payload()
+        locale = getattr(self, "language", "zh") or "zh"
+        return build_agent_starter_text(base_url, health, locale=locale)
 
     def copy_agent_api_url(self):
         if not hasattr(self, "agent_api_controller") or not self.agent_api_controller.is_running():
             return
         QApplication.clipboard().setText(self.agent_api_controller.get_base_url())
         self.settings_page.lbl_status.setText(
-            self.texts.get("setting_agent_api_copy_url_done", "Agent API base URL copied.")
+            self.texts.get("setting_agent_api_copy_url_done", "Interface URL copied.")
+        )
+
+    def copy_agent_starter(self):
+        starter = self._build_agent_starter_text()
+        if not starter:
+            self.settings_page.lbl_status.setText(
+                self.texts.get(
+                    "setting_agent_api_starter_unavailable",
+                    "API is not running; cannot build setup notes.",
+                )
+            )
+            return
+        QApplication.clipboard().setText(starter)
+        self.settings_page.lbl_status.setText(
+            self.texts.get(
+                "setting_agent_api_copy_starter_done",
+                "Setup notes copied.",
+            )
         )
 
     def reset_settings(self):

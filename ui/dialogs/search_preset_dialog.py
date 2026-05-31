@@ -4,29 +4,22 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent, QPixmap
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
-    QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSlider,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from src.app.i18n import get_texts
-from src.services.query_text_service import prepare_text_query
 from src.services.search_preset_service import (
     create_preset,
     delete_preset,
@@ -35,73 +28,8 @@ from src.services.search_preset_service import (
     update_preset,
 )
 from ui.widgets.scaffold import VSCard
+from ui.widgets.search_compose_form import SearchComposeFormWidget
 from ui.widgets.styles import repolish_widget
-
-
-class PresetImageChip(QWidget):
-    selection_changed = Signal()
-
-    def __init__(self, image_path: str, parent=None):
-        super().__init__(parent)
-        self.image_path = str(image_path or "").strip()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        self.thumb_wrap = QWidget()
-        self.thumb_wrap.setObjectName("PresetImageThumb")
-        self.thumb_wrap.setFixedSize(96, 96)
-        self.thumb_wrap.setCursor(Qt.CursorShape.PointingHandCursor)
-        thumb_grid = QGridLayout(self.thumb_wrap)
-        thumb_grid.setContentsMargins(0, 0, 0, 0)
-
-        self.thumb = QLabel(self.thumb_wrap)
-        self.thumb.setObjectName("PresetImagePreview")
-        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumb.setFixedSize(88, 88)
-        pixmap = QPixmap(self.image_path)
-        if not pixmap.isNull():
-            self.thumb.setPixmap(
-                pixmap.scaled(84, 84, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            )
-        else:
-            self.thumb.setText(os.path.basename(self.image_path))
-
-        self.checkbox = QCheckBox(self.thumb_wrap)
-        self.checkbox.stateChanged.connect(lambda _state: self._on_selection_changed())
-
-        thumb_grid.addWidget(self.thumb, 0, 0, Qt.AlignmentFlag.AlignCenter)
-        thumb_grid.addWidget(self.checkbox, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        caption = QLabel(os.path.basename(self.image_path))
-        caption.setObjectName("CardHint")
-        caption.setWordWrap(True)
-        caption.setFixedWidth(96)
-        caption.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-
-        layout.addWidget(self.thumb_wrap, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.thumb_wrap.mousePressEvent = self._handle_thumb_press
-        self.thumb.mousePressEvent = self._handle_thumb_press
-        self._on_selection_changed()
-
-    def _handle_thumb_press(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.checkbox.setChecked(not self.checkbox.isChecked())
-            event.accept()
-            return
-        event.ignore()
-
-    def _on_selection_changed(self):
-        selected = self.checkbox.isChecked()
-        self.thumb_wrap.setProperty("selected", selected)
-        self.style().unpolish(self.thumb_wrap)
-        self.style().polish(self.thumb_wrap)
-        self.thumb_wrap.update()
-        self.selection_changed.emit()
-
-    def is_selected(self) -> bool:
-        return self.checkbox.isChecked()
 
 
 class SearchPresetFormDialog(QDialog):
@@ -123,9 +51,6 @@ class SearchPresetFormDialog(QDialog):
         self.draft = dict(draft or {})
         self.save_context = dict(save_context or {})
         self._result_preset = None
-        self._image_paths: list[str] = []
-        self._initial_image_paths: list[str] = []
-        self._image_chips: list[PresetImageChip] = []
         self._is_edit = bool(self.preset.get("id"))
 
         title_key = "search_presets_edit_title" if self._is_edit else "search_presets_save_title"
@@ -136,82 +61,12 @@ class SearchPresetFormDialog(QDialog):
         card = VSCard(variant="dialog")
         form = QFormLayout()
         default_name = str(self.preset.get("name", "") or self.draft.get("name", "") or "")
-        default_query = str(self.preset.get("query", "") or self.draft.get("query", "") or "")
         self.input_name = QLineEdit(default_name)
-        self.input_description = QTextEdit()
-        self.input_description.setPlaceholderText(self.texts.get("search_presets_field_description_hint", ""))
-        self.input_description.setPlainText(default_query)
-        self.input_description.setFixedHeight(96)
         form.addRow(self.texts.get("search_presets_field_name", "Name"), self.input_name)
-        form.addRow(self.texts.get("search_presets_field_description", "Description"), self.input_description)
         card.content_layout.addLayout(form)
 
-        images_title = QLabel(self.texts.get("search_presets_field_images", "Reference images"))
-        images_title.setObjectName("CardTitle")
-        card.content_layout.addWidget(images_title)
-
-        self.images_hint = QLabel(self.texts.get("search_presets_images_hint", ""))
-        self.images_hint.setObjectName("CardHint")
-        self.images_hint.setWordWrap(True)
-        card.content_layout.addWidget(self.images_hint)
-
-        self.images_scroll = QScrollArea()
-        self.images_scroll.setWidgetResizable(True)
-        self.images_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.images_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.images_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.images_scroll.setFixedHeight(138)
-        self.images_host = QWidget()
-        self.images_layout = QHBoxLayout(self.images_host)
-        self.images_layout.setContentsMargins(0, 0, 0, 0)
-        self.images_layout.setSpacing(10)
-        self.images_layout.addStretch(1)
-        self.images_scroll.setWidget(self.images_host)
-        card.content_layout.addWidget(self.images_scroll)
-
-        image_actions = QHBoxLayout()
-        self.btn_add_images = QPushButton(self.texts.get("search_presets_add_images", "Add images"))
-        self.btn_remove_selected = QPushButton(self.texts.get("search_presets_remove_selected", "Delete selected"))
-        self.btn_remove_selected.setObjectName("DangerGhostButton")
-        self.btn_remove_selected.setEnabled(False)
-        self.btn_add_images.clicked.connect(self._add_images)
-        self.btn_remove_selected.clicked.connect(self._remove_selected_images)
-        image_actions.addWidget(self.btn_add_images)
-        image_actions.addWidget(self.btn_remove_selected)
-        image_actions.addStretch(1)
-        card.content_layout.addLayout(image_actions)
-
-        self.fusion_block = QWidget()
-        fusion_layout = QVBoxLayout(self.fusion_block)
-        fusion_layout.setContentsMargins(0, 8, 0, 0)
-        fusion_layout.setSpacing(6)
-        self.fusion_title = QLabel(self.texts.get("search_presets_fusion_title", "Text / image balance"))
-        self.fusion_title.setObjectName("CardTitle")
-        self.fusion_hint = QLabel(self.texts.get("search_presets_fusion_hint", ""))
-        self.fusion_hint.setObjectName("CardHint")
-        self.fusion_hint.setWordWrap(True)
-        fusion_slider_row = QHBoxLayout()
-        fusion_slider_row.setSpacing(10)
-        self.lbl_fusion_text = QLabel(self.texts.get("search_presets_fusion_text", "Text"))
-        self.lbl_fusion_text.setObjectName("CardHint")
-        self.slider_fusion = QSlider(Qt.Orientation.Horizontal)
-        self.slider_fusion.setRange(0, 100)
-        self.slider_fusion.setSingleStep(5)
-        self.slider_fusion.setPageStep(10)
-        self.lbl_fusion_image = QLabel(self.texts.get("search_presets_fusion_image", "Image"))
-        self.lbl_fusion_image.setObjectName("CardHint")
-        self.lbl_fusion_value = QLabel()
-        self.lbl_fusion_value.setObjectName("CardHint")
-        self.lbl_fusion_value.setMinimumWidth(120)
-        self.lbl_fusion_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        fusion_slider_row.addWidget(self.lbl_fusion_text)
-        fusion_slider_row.addWidget(self.slider_fusion, 1)
-        fusion_slider_row.addWidget(self.lbl_fusion_image)
-        fusion_slider_row.addWidget(self.lbl_fusion_value)
-        fusion_layout.addWidget(self.fusion_title)
-        fusion_layout.addWidget(self.fusion_hint)
-        fusion_layout.addLayout(fusion_slider_row)
-        card.content_layout.addWidget(self.fusion_block)
+        self.compose_form = SearchComposeFormWidget(texts=self.texts)
+        card.content_layout.addWidget(self.compose_form)
 
         root.addWidget(card)
 
@@ -227,118 +82,16 @@ class SearchPresetFormDialog(QDialog):
         root.addLayout(buttons)
 
         if self._is_edit:
-            self._image_paths = resolve_preset_ref_paths(self.preset)
+            self.compose_form.load_preset(self.preset)
+            self._initial_image_paths = resolve_preset_ref_paths(self.preset)
         else:
-            self._image_paths = [
-                str(path or "").strip()
-                for path in (self.draft.get("source_image_paths") or [])
-                if str(path or "").strip()
-            ]
-        self._initial_image_paths = list(self._image_paths)
-        fusion = dict(self.preset.get("fusion") or self.draft.get("fusion") or {})
-        text_pct = int(round(float(fusion.get("text_weight", 0.5)) * 100))
-        self.slider_fusion.blockSignals(True)
-        self.slider_fusion.setValue(max(0, min(100, text_pct)))
-        self.slider_fusion.blockSignals(False)
-        self.input_description.textChanged.connect(self._refresh_fusion_controls)
-        self.slider_fusion.valueChanged.connect(self._update_fusion_value_label)
-        self._rebuild_image_strip()
-
-    def _has_mixed_content(self) -> bool:
-        return bool(self.input_description.toPlainText().strip() and self._image_paths)
-
-    def _refresh_fusion_controls(self):
-        mixed = self._has_mixed_content()
-        self.fusion_block.setVisible(mixed)
-        if mixed:
-            self._update_fusion_value_label(self.slider_fusion.value())
-
-    def _update_fusion_value_label(self, text_pct: int):
-        text_pct = max(0, min(100, int(text_pct)))
-        image_pct = 100 - text_pct
-        self.lbl_fusion_value.setText(
-            self.texts.get("search_presets_fusion_value", "Text {text}% · Image {image}%").format(
-                text=text_pct,
-                image=image_pct,
-            )
-        )
-
-    def _current_fusion(self) -> dict | None:
-        if not self._has_mixed_content():
-            return None
-        text_weight = float(self.slider_fusion.value()) / 100.0
-        return {
-            "text_weight": text_weight,
-            "image_weight": 1.0 - text_weight,
-        }
-
-    def _rebuild_image_strip(self):
-        while self.images_layout.count():
-            item = self.images_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._image_chips = []
-        for image_path in self._image_paths:
-            chip = PresetImageChip(image_path, parent=self.images_host)
-            chip.selection_changed.connect(self._update_remove_selected_state)
-            self._image_chips.append(chip)
-            self.images_layout.addWidget(chip)
-        self.images_layout.addStretch(1)
-        self.images_scroll.setVisible(bool(self._image_paths))
-        self._update_remove_selected_state()
-        self._refresh_fusion_controls()
-
-    def _update_remove_selected_state(self):
-        selected_count = sum(1 for chip in self._image_chips if chip.is_selected())
-        self.btn_remove_selected.setEnabled(selected_count > 0)
-        if selected_count:
-            label = self.texts.get("search_presets_remove_selected", "Delete selected")
-            self.btn_remove_selected.setText(f"{label} ({selected_count})")
-        else:
-            self.btn_remove_selected.setText(self.texts.get("search_presets_remove_selected", "Delete selected"))
-
-    def _selected_image_paths(self) -> list[str]:
-        return [chip.image_path for chip in self._image_chips if chip.is_selected()]
-
-    def _remove_selected_images(self):
-        selected = set(self._selected_image_paths())
-        if not selected:
-            QMessageBox.information(
-                self,
-                self.texts.get("warning_title", "Warning"),
-                self.texts.get("search_presets_remove_selected_empty", ""),
-            )
-            return
-        self._image_paths = [path for path in self._image_paths if path not in selected]
-        self._rebuild_image_strip()
-
-    def _add_images(self):
-        paths, _selected = QFileDialog.getOpenFileNames(
-            self,
-            self.texts.get("search_presets_add_images", "Add images"),
-            "",
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)",
-        )
-        for path in paths:
-            cleaned = str(path or "").strip()
-            if cleaned and cleaned not in self._image_paths:
-                self._image_paths.append(cleaned)
-        self._rebuild_image_strip()
+            self.compose_form.load_draft(self.draft)
+            self._initial_image_paths = list(self.compose_form.image_paths())
 
     def _images_changed(self) -> bool:
-        current = [os.path.normpath(path) for path in self._image_paths]
+        current = [os.path.normpath(path) for path in self.compose_form.image_paths()]
         initial = [os.path.normpath(path) for path in self._initial_image_paths]
         return current != initial
-
-    def _normalized_query(self) -> str:
-        query = self.input_description.toPlainText().strip()
-        if not query:
-            return ""
-        query_info = prepare_text_query(query)
-        if query_info["too_short"]:
-            raise ValueError(self.texts.get("query_too_short", "Query is too short"))
-        return str(query_info["normalized"] or "").strip()
 
     def _save(self):
         name = self.input_name.text().strip()
@@ -350,11 +103,12 @@ class SearchPresetFormDialog(QDialog):
             )
             return
         try:
-            query = self._normalized_query()
+            query = self.compose_form.normalized_query()
         except ValueError as exc:
             QMessageBox.warning(self, self.texts.get("warning_title", "Warning"), str(exc))
             return
-        if not query and not self._image_paths:
+        image_paths = self.compose_form.image_paths()
+        if not query and not image_paths:
             QMessageBox.warning(
                 self,
                 self.texts.get("warning_title", "Warning"),
@@ -362,7 +116,7 @@ class SearchPresetFormDialog(QDialog):
             )
             return
         try:
-            fusion = self._current_fusion()
+            fusion = self.compose_form.current_fusion()
             if self._is_edit:
                 payload = {
                     "name": name,
@@ -371,14 +125,14 @@ class SearchPresetFormDialog(QDialog):
                 if fusion is not None:
                     payload["fusion"] = fusion
                 if self._images_changed():
-                    payload["source_image_paths"] = list(self._image_paths)
+                    payload["source_image_paths"] = list(image_paths)
                     payload["replace_reference_images"] = True
                 self._result_preset = update_preset(self.preset["id"], **payload)
             else:
                 payload = {
                     "name": name,
                     "query": query,
-                    "source_image_paths": list(self._image_paths),
+                    "source_image_paths": list(image_paths),
                 }
                 if fusion is not None:
                     payload["fusion"] = fusion
@@ -572,21 +326,12 @@ class SearchPresetManageDialog(QDialog):
         self._list_layout.addStretch(1)
 
     def _create_preset(self):
-        draft = {}
-        save_context = {}
         parent = self.parent()
-        if parent is not None and hasattr(parent, "build_search_preset_draft"):
-            draft, save_context = parent.build_search_preset_draft()
-        dialog = SearchPresetFormDialog(
-            self,
-            draft=draft,
-            save_context=save_context,
-            language=self.language,
-            is_dark=self.is_dark,
-        )
-        if dialog.exec():
-            self.reload()
-            self._refresh_parent_presets_bar()
+        if parent is not None and hasattr(parent, "open_compose_search_tab"):
+            self.accept()
+            parent.open_compose_search_tab()
+            return
+        self.reload()
 
     def _refresh_parent_presets_bar(self):
         parent = self.parent()

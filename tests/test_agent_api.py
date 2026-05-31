@@ -2,18 +2,18 @@ import os
 import unittest
 from unittest.mock import patch
 
+import src.storage.config_store as config_store_module
 from src.domain.search_hit import SearchHit
+from src.services.search_scope import resolve_explicit_scope_library_paths
+from src.services.search_request_service import default_agent_image_precision_mode
 from src.web.agent_api import (
     AgentBatchSearchRequest,
     AgentSearchRequest,
     AgentSearchScope,
     _agent_timeout_settings,
     _batch_requests_precise_mode,
-    _default_image_precision_mode,
     _hits_to_payload,
-    _normalize_search_precision_mode,
     _resolve_batch_timeout_sec,
-    _resolve_scope_library_paths,
     _resolve_search_timeout_sec,
     api_error_payload,
     build_health_payload,
@@ -65,11 +65,12 @@ class AgentApiHelperTests(unittest.TestCase):
             self.assertEqual(_clamp_top_k(999), 200)
             self.assertEqual(_clamp_top_k("bad"), 20)
 
-    @patch("src.web.agent_api.get_search_scope_library_paths", return_value=["D:/saved_lib"])
-    @patch("src.web.agent_api.get_search_scope_mode", return_value="selected")
-    def test_resolve_scope_library_paths_use_saved_scope(self, _mock_mode, _mock_paths):
+    @patch.object(config_store_module, "get_search_scope_video_paths", return_value=[])
+    @patch.object(config_store_module, "get_search_scope_library_paths", return_value=["D:/saved_lib"])
+    @patch.object(config_store_module, "get_search_scope_mode", return_value="selected")
+    def test_resolve_scope_library_paths_use_saved_scope(self, _mock_mode, _mock_paths, _mock_videos):
         scope = AgentSearchScope(use_saved_scope=True)
-        resolved = _resolve_scope_library_paths(scope)
+        resolved = resolve_explicit_scope_library_paths(scope)
         self.assertEqual(resolved, ["D:/saved_lib"])
 
     def test_resolve_scope_library_paths_explicit_wins(self):
@@ -77,7 +78,7 @@ class AgentApiHelperTests(unittest.TestCase):
             library_paths=["D:/explicit"],
             use_saved_scope=True,
         )
-        resolved = _resolve_scope_library_paths(scope)
+        resolved = resolve_explicit_scope_library_paths(scope)
         self.assertEqual(resolved, ["D:/explicit"])
 
     @patch("src.web.agent_api.load_config")
@@ -92,18 +93,10 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(timeouts["search_timeout_precise_sec"], 240.0)
         self.assertEqual(timeouts["batch_timeout_sec"], 900.0)
 
-    @patch("src.web.agent_api.load_config")
+    @patch("src.services.search_request_service.load_config")
     def test_default_image_precision_mode(self, mock_load_config):
         mock_load_config.return_value = {"agent_api_default_image_precision": "precise"}
-        self.assertEqual(_default_image_precision_mode(), "precise")
-        self.assertEqual(
-            _normalize_search_precision_mode(None, is_text=False, has_image=True),
-            "precise",
-        )
-        self.assertEqual(
-            _normalize_search_precision_mode(None, is_text=True, has_image=False),
-            "fast",
-        )
+        self.assertEqual(default_agent_image_precision_mode(), "precise")
 
     @patch("src.web.agent_api.load_config")
     @patch("src.web.agent_api.os.path.isfile", return_value=True)
@@ -178,6 +171,33 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(payload["search_timeout_precise_sec"], 180)
         self.assertEqual(payload["agent_api_default_image_precision"], "fast")
         self.assertEqual(payload["batch_timeout_sec"], 1200)
+
+
+class AgentStarterApiTests(unittest.TestCase):
+    @patch("src.web.agent_api._index_snapshot")
+    def test_build_agent_starter_payload(self, mock_snapshot):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "index_stale": False,
+            "global_index_state": "fresh",
+            "vector_count": 10,
+            "indexed_video_paths": 1,
+            "frame_vector_count": 10,
+            "chunk_vector_count": 0,
+            "search_index_schema_version": 1,
+            "library_indexes_upgrade_needed": False,
+            "library_index_count": 0,
+            "library_indexes_ready": 0,
+            "library_indexes_stale": 0,
+        }
+        from src.services.agent_starter_service import build_agent_starter_payload
+
+        health = build_health_payload()
+        payload = build_agent_starter_payload("http://127.0.0.1:8765", health, locale="zh")
+        self.assertTrue(payload["ok"])
+        self.assertIn("starter_text", payload)
+        self.assertIn("/api/v1/health", payload["starter_text"])
+        self.assertLess(payload["meta"]["line_count"], 120)
 
 
 class AgentApiSearchTests(unittest.TestCase):

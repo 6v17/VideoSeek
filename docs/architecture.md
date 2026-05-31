@@ -1,328 +1,204 @@
 # VideoSeek Architecture
 
-This document summarizes module responsibilities and configuration boundaries.
+This document describes **how the code actually runs**, not an idealized “enterprise layer cake.”  
+If a diagram shows seven boxes but the hot path only touches three modules, the diagram is wrong — see [Reality check](#reality-check) below.
 
-## System Diagram
+## Public entry points (use these)
 
-```mermaid
-flowchart LR
-    A[UI Layer\nui/windows/gui.py + controllers + presenters + workers] --> B[Service Layer\nsrc/services/*]
-    B --> C[Core Layer\nsrc/core/*]
-    C --> D[Storage Layer\nFAISS index + vectors + metadata]
-    B --> E[Runtime Resources\nModels + FFmpeg + VLC runtime]
-    B --> F[Remote Endpoints\nmanifest/version/notice + source links]
-    G[Config Layer\nconfig.json + src/app/app_meta.py] --> A
-    G --> B
-    B --> D
-```
+| Task | Import / call |
+|------|----------------|
+| Local search | `from src.services.search_service import run_search, run_chunk_search` |
+| Search scope (desktop + Agent default) | `from src.services.search_scope import resolve_default_active_search_scope, resolve_effective_search_scope` |
+| Preset / inline query (Agent + preset chip) | `from src.services.search_request_service import resolve_search_query_inputs` |
+| Image precision (Agent / shared) | `from src.services.search_request_service import normalize_search_precision_mode` |
+| Index rebuild orchestration | `from src.workflows.update_video import update_videos_flow` |
+| Embedding / ONNX | `from src.core.clip_embedding import get_engine` |
+| Agent HTTP | `src/web/agent_api.py` → `execute_agent_search` (calls `search_service` directly) |
 
-### Layered architecture (detail)
+**Removed:** `src/core/core.py` was a 4-line re-export shim (`run_search` → `search_service`). Do not add it back.
 
-The diagram below is a **logical** view: the UI talks only to **services** and **Qt widgets**; services orchestrate **core** routines and **storage**, and pass **domain DTOs** back into the table/view layer for rendering (compatibility shims may still accept legacy tuple/dict at the view boundary).
+## Reality check
+
+Gemini-style critiques often assume: *UI → Service → Core → Storage × 7* for every change.
+
+**Actual local search (desktop):**
 
 ```mermaid
 flowchart TB
-  subgraph client ["Desktop UI"]
-    GUI["gui + controllers + presenters + workers"]
-    TV["table_views + dialogs"]
-  end
+  GUI["gui.start_search()"]
+  SC["SearchController"]
+  SW["SearchWorker"]
+  SS["search_service.run_search()"]
+  CE["clip_embedding.get_engine()"]
+  RR["image_search_rerank / search_scope"]
+  DISK[("FAISS + npy on disk")]
 
-  subgraph svc ["Services (src/services)"]
-    SVC["search, indexing, library, remote, model, ..."]
-  end
-
-  subgraph domain ["Domain (src/domain)"]
-    DTO["SearchHit, RemoteSearchHit"]
-  end
-
-  subgraph core ["Core (src/core)"]
-    IR["inference_registry"]
-    CE["clip_embedding, extract_frames, faiss_index, semantic_chunking"]
-  end
-
-  subgraph data ["Storage and files (src/storage + data/)"]
-    CFG["config_store, asset_store, migration"]
-    DISK[("FAISS / npy / meta on disk")]
-  end
-
-  GUI -->|user actions| SVC
-  SVC -->|embed / index| CE
-  SVC -->|resolve provider| IR
-  IR -->|build engine| CE
-  SVC -->|paths, schema, getters| CFG
-  CE -->|read/write artifacts| DISK
-  CFG -->|metadata| DISK
-  SVC -->|ranked hits| DTO
-  DTO -->|populate rows| TV
-  TV --> GUI
+  GUI --> SC --> SW --> SS
+  SS --> CE
+  SS --> RR
+  SS --> DISK
+  SS --> |"List[SearchHit]"| SC
 ```
 
-### Local search path (simplified)
+**Actual Agent search (no UI hop):**
+
+```mermaid
+flowchart LR
+  HTTP["POST /api/v1/search"] --> AA["agent_api.execute_agent_search"]
+  AA --> SS["search_service.run_search"]
+  SS --> CE["clip_embedding"]
+```
+
+**Actual indexing:**
+
+```mermaid
+flowchart TB
+  GL["gui_library_indexing"] --> IC["IndexingController — thread wiring only"]
+  IC --> IW["IndexUpdateWorker"]
+  IW --> WF["workflows/update_video"]
+  WF --> IS["indexing_service"]
+  IS --> CE["clip_embedding + extract_frames + faiss_index"]
+```
+
+### Layer verdict (where complexity really lives)
+
+| Module | Role | Verdict |
+|--------|------|---------|
+| `search_service.py` | FAISS load, scope, neighbor/pixel rerank, chunk/frame branches | **Main search brain** |
+| `indexing_service.py` | Frame extract, embed, chunk, write indexes | **Main index brain** |
+| `clip_embedding.py` | ONNX sessions, batch encode, engine singleton | **Inference core** |
+| `search_request_service.py` | Precision mode + inline image validation + preset/inline query resolution | Shared GUI + Agent |
+| `search_scope.py` | Active scope, filters, `resolve_effective_search_scope` | Shared GUI + Agent |
+| `agent_api.py` | HTTP, preset/scope resolution, timeouts | Own subsystem; ends at `search_service` |
+| `IndexingController` / `AgentApiController` / `MobileBridgeController` | Start/stop background services | Thin — OK |
+| `src/domain/search_hit.py` | `SearchHit` dataclass | Boundary type only |
+| `inference_registry.py` | 3 provider factories (~25 lines) | Small plug-in table |
+
+This is **not** “FAISS + cosine only”: frame/chunk modes, per-library indexes, scoped over-fetch, neighbor rerank, precise image pixel rerank, presets, and Agent batching all live in **services**, with **core** doing inference and low-level index I/O.
+
+## System overview
+
+```mermaid
+flowchart LR
+  UI["ui/ — Qt GUI + workers"]
+  SVC["src/services/ — business logic"]
+  WF["src/workflows/ — long job orchestration"]
+  CORE["src/core/ — inference + frame/chunk primitives"]
+  WEB["src/web/ — Agent API + optional mobile bridge"]
+  STO["src/storage/ + data/ — config + artifacts"]
+  CFG["config.json + app_meta"]
+
+  UI --> SVC
+  UI --> WF
+  WEB --> SVC
+  SVC --> CORE
+  SVC --> STO
+  WF --> SVC
+  CORE --> STO
+  CFG --> UI
+  CFG --> SVC
+```
+
+## Local search sequence
 
 ```mermaid
 sequenceDiagram
-  participant UI as "Search UI"
-  participant W as "SearchWorker"
-  participant SS as "search_service"
-  participant CE as "Core (embedding + query vector)"
-  participant IX as "FAISS index + npy on disk"
-  UI->>W: start search query
-  W->>SS: run_search
-  SS->>CE: build query vector
-  SS->>IX: load index + sidecar npy
-  SS->>SS: top-K + optional rerank
-  SS-->>W: list of SearchHit
-  W-->>UI: result_ready
+  participant UI as Search UI
+  participant W as SearchWorker
+  participant SS as search_service
+  participant CE as clip_embedding
+  participant IX as FAISS + npy
+  UI->>W: query + scope + precision
+  W->>SS: run_search(...)
+  SS->>CE: query vector (unless preset vector passed)
+  SS->>IX: load index / per-library indexes
+  SS->>SS: top-K, scope filter, rerank
+  SS-->>W: List[SearchHit]
+  W-->>UI: result_ready → table + thumbs
 ```
 
-## High-Level Design
+Inside `run_search`, major branches:
 
-- UI layer (`ui/`): receives user actions, updates widgets, and delegates heavy work to background workers; presenters coordinate multi-step network build/precheck flows.
-- Service layer (`src/services/`): central business logic for indexing, search, local/remote libraries, runtime resources, model download/packaging, storage orchestration, and notice/version/about.
-- Core layer (`src/core/`): embedding inference, frame extraction, tokenizer, semantic chunking, and FAISS-related core operations.
-- Storage layer (`src/storage/` + data files): persists vectors, index artifacts, library metadata, and profile/config state.
-- Config layer (`config.json` + `src/app/app_meta.py`): separates user-tunable runtime settings from product/distribution metadata.
-- Auxiliary HTTP (`src/web/`): local FastAPI mobile bridge and QR display helpers; wired from UI when the companion flow is used.
+1. **Chunk mode** → `run_chunk_search`.
+2. **Scoped video list** → per-video frame search.
+3. **Scoped libraries + v2 per-library index ready** → query each library index, merge.
+4. **Else** → global index, optional over-fetch + `apply_search_scope`, neighbor/pixel rerank.
 
-### Domain models (`src/domain/`)
+See also `docs/ai/pipelines.md` for the same flow in Chinese.
 
-Small shared types used across services and UI:
+## Domain models (`src/domain/`)
 
-- **`SearchHit`**: one local frame/chunk search match (`start_sec`, `end_sec`, `score`, `video_path`). Built in `search_service`; tables and thumbnail loaders accept **`SearchHit` or legacy 4-tuples** via `coerce_search_hit`.
-- **`RemoteSearchHit`**: one remote (network) vector search match (`title`, `time_sec`, `score`, `source_link`). Built in `remote_search_service`; `populate_network_result_table` accepts **`RemoteSearchHit` or legacy dicts** via `coerce_remote_search_hit`.
+- **`SearchHit`**: one local match (`start_sec`, `end_sec`, `score`, `video_path`). Built in `search_service`; returned to UI and Agent.
+- **`RemoteSearchHit`**: remote vector search row; built in `remote_search_service`.
 
-Re-export for convenience: `from src.core.core import run_search, SearchHit, RemoteSearchHit`.
+**Legacy:** `coerce_search_hit()` still accepts old 4-tuples at the **view boundary** (`table_views`, `ThumbLoader`). New code should pass `SearchHit` only; do not emit tuples from services.
 
-### Inference engines (`src/core/inference_registry.py`)
+## Inference engines (`src/core/inference_registry.py`)
 
 - Providers register with `register_inference_engine(provider_id, factory)`.
-- `clip_embedding.get_engine()` resolves the active model profile’s `provider` through **`build_inference_engine`**. Unknown providers raise at runtime (no silent fallback).
-- Built-in engines registered when `clip_embedding` loads: **`clip_onnx`**, **`siglip2_onnx`**, **`chinese_clip_onnx`**.
-- On-disk weight folders use **`resolve_provider_dir()`** in `config_store` (e.g. `openai-clip`, `siglip2`, `chinese-clip`). Index/vector assets live under `data/model_assets/<provider_dir>/<variant>/`.
-- **Chinese CLIP** reuses the same indexing/search pipeline as CLIP (FFmpeg frame stream → `encode_images` → semantic chunks → FAISS). Only `ChineseCLIPOnnxEngine` + Bert `vocab.txt` differ from OpenAI CLIP.
-- Unknown `provider` values **fail fast** in `build_inference_engine` (no silent fallback to `clip_onnx`).
+- `clip_embedding.get_engine()` resolves the active profile’s `provider` via `build_inference_engine`.
+- Built-in: **`clip_onnx`**, **`siglip2_onnx`**, **`chinese_clip_onnx`**.
+- Unknown `provider` **fail fast** (no silent fallback to another model — wrong fallback would corrupt search results).
+- Disk layout: `resolve_provider_dir()` in `config_store`; vectors under `data/model_assets/<provider_dir>/<variant>/`.
 
-### Adding a model provider (plug-in checklist)
+### Adding a model provider
 
-New ONNX backends should only touch the **entry layer**; indexing, search, and Agent API stay on `get_engine()` / `get_active_embedding_spec()`:
-
-1. Implement `*OnnxEngine` (usually subclass `OnnxVisionBatchMixin` for video frames).
+1. Implement `*OnnxEngine` (often `OnnxVisionBatchMixin`).
 2. `register_inference_engine("<provider>_onnx", factory)` in `clip_embedding._register_default_inference_engines`.
-3. Map disk folder via `resolve_provider_dir()` in `config_store.py` (e.g. `chinese_clip_onnx` → `chinese-clip`).
-4. Add `PROVIDER_REQUIRED_MODEL_FILES` + manifest defaults in `model_package_service.py` / `model_service.py`.
-5. Add default `dimension` in `_PROVIDER_DEFAULT_DIMENSION`.
-6. Ship `model_manifest.json` inside `<provider_dir>/<variant>/` zips for **Import and Parse**.
+3. Map folder in `resolve_provider_dir()`.
+4. Manifest defaults in `model_package_service` / `model_service`.
+5. Users must **rebuild the library index** after switching profile.
 
-After users switch profile, they must **rebuild the library index** (vectors live under `data/model_assets/<provider_dir>/<variant>/`).
+## Configuration
 
-### Configuration reads (`src/storage/config_store.py`)
+- **User:** `config.json` (theme, fps, search knobs, agent timeouts, …).
+- **Product:** `src/app/app_meta.py` (version URLs, manifest endpoints).
+- **Reads:** prefer `src/storage/config_store.py` getters (`get_search_mode`, `get_search_top_k`, rerank getters, …).
 
-Beyond schema v2 profiles and paths, **read-only helpers** centralize defaults for options that were previously scattered `config.get(...)` calls, for example:
+## Auxiliary HTTP (`src/web/`)
 
-- Search: `get_search_mode`, `get_search_top_k`, frame-neighbor rerank getters.
-- Remote build: `get_remote_max_frames`, `get_config_fps`.
-- Chunk pipeline: `get_similarity_threshold`, `get_max_chunk_duration`, `get_min_chunk_size`, `get_chunk_similarity_mode`.
+| Module | Purpose | Weight in architecture |
+|--------|---------|-------------------------|
+| `agent_api.py` | Localhost Agent API (health, search, batch, presets) | **Primary** automation surface |
+| `mobile_bridge.py` | Phone upload companion | Optional; thin controller wrapper |
+| `display_qr.py` | QR for mobile pairing | Optional UI helper |
 
-New code should prefer these getters; remaining legacy reads can be migrated gradually.
+## Main flows (short)
 
-## Main Flows
+### Indexing
 
-### Local indexing and search
+1. UI → `IndexingController` → `IndexUpdateWorker`.
+2. `workflows/update_video.update_videos_flow` orchestrates scan, embed, global/per-library indexes.
+3. `indexing_service` calls `clip_embedding`, `extract_frames`, `faiss_index`.
 
-1. UI triggers indexing/search from controller/workers.
-2. Services validate settings and resolve runtime resources; user-entered search text may be normalized via `query_text_service` before embedding.
-3. Core pipeline extracts frames, computes embeddings, and reads/writes index artifacts.
-4. Services return ranked results and metadata to UI for rendering and preview.
+### Remote library
 
-### Remote library build
+Presenters/controllers on Remote Library page → `remote_library_service` staged pipeline; search via `remote_search_service`.
 
-1. UI submits source links and build mode (presenters/controllers orchestrate the Remote Library page).
-2. `remote_link_precheck_service` summarizes link risk before heavy work; `remote_library_service` runs staged build: `resolve/download -> extract -> embed -> merge -> index`.
-3. Built vectors and FAISS artifacts are written under the configured remote asset paths (`asset_store`, `config_store` helpers). Separately, when `remote_index_manifest_url` is set, `remote_index_service` can download a **packaged** remote index from the network; `remote_search_service` performs query-time vector search against the active remote index state.
-
-High-level layout (Python modules). Generated paths mirror the repository; prefer this section over memorizing filenames.
+## Repository layout (logical)
 
 ```text
 main.py
 src/
-  domain/
-    __init__.py
-    remote_search_hit.py
-    search_hit.py
-  app/
-    __init__.py
-    app_meta.py
-    config.py
-    copy_overrides.py
-    i18n.py
-    logging_utils.py
-  core/
-    __init__.py
-    clip_embedding.py
-    core.py
-    extract_frames.py
-    faiss_index.py
-    inference_registry.py
-    semantic_chunking.py
-    chinese_clip_provider.py
-    siglip_provider_draft.py
-    tokenizer.py
-  services/
-    __init__.py
-    about_service.py
-    download_utils.py
-    ffmpeg_service.py
-    indexing_service.py
-    library_service.py
-    model_package_service.py
-    model_service.py
-    notice_service.py
-    query_text_service.py
-    remote_index_service.py
-    remote_library_service.py
-    remote_link_precheck_service.py
-    remote_search_service.py
-    runtime_resource_service.py
-    search_index_schema.py
-    search_preset_service.py
-    search_scope.py
-    search_service.py
-    image_search_rerank.py
-    storage_service.py
-    version_service.py
-  storage/
-    __init__.py
-    asset_store.py
-    config_store.py
-    migration_runner.py
-  web/
-    display_qr.py
-    mobile_bridge.py
-  workflows/
-    __init__.py
-    update_video.py
-  utils.py
+  app/           config, i18n, logging
+  domain/        SearchHit, RemoteSearchHit
+  services/      search_service, indexing_service, search_scope, search_request_service, …
+  core/          clip_embedding, extract_frames, faiss_index, inference_registry, …
+  storage/       config_store, asset_store, migration_runner
+  web/           agent_api, mobile_bridge, display_qr
+  workflows/     update_video (index job orchestration)
 ui/
-  __init__.py
-  workers.py
-  threading_utils.py
-  windows/
-    __init__.py
-    gui.py
-    gui_settings.py
-    gui_preview.py
-    gui_library_indexing.py
-    gui_vector_network.py
-    gui_runtime.py
-    gui_model_packages.py
-    gui_search_precision.py
-    gui_search_presets.py
-    gui_search_scope.py
-  controllers/
-    __init__.py
-    app_meta_controller.py
-    indexing_controller.py
-    mobile_bridge_controller.py
-    network_search_controller.py
-    preview_controller.py
-    runtime_resource_controller.py
-    search_controller.py
-  playback/
-    __init__.py
-    vlc_player.py
-    preview_dialog.py
-  views/
-    __init__.py
-    table_views.py
-  presenters/
-    __init__.py
-    network_build_presenter.py
-    network_precheck_presenter.py
-  widgets/
-    __init__.py
-    styles.py
-    components.py
-    layout.py
-    search_panel.py
-    video_scope_tree.py
-  dialogs/
-    __init__.py
-    about.py
-    app_message.py
-    common.py
-    legacy_resource_table.py
-    link_editor.py
-    mobile_bridge.py
-    model_download.py
-    notice.py
-    resource_table.py
-    sampling_rules.py
-    search_scope_editor.py
-    search_preset_dialog.py
-tests/
-  test_clip_embedding_runtime.py
-  test_config.py
-  test_controllers.py
-  test_download_services.py
-  test_extract_frames.py
-  test_gui_settings_paths.py
-  test_mobile_bridge.py
-  test_network_presenters.py
-  test_notice_version_utils.py
-  test_query_text_service.py
-  test_image_search_rerank.py
-  test_runtime_resource_service.py
-  test_semantic_chunking.py
-  test_services.py
-  test_storage_service.py
-  test_workers.py
+  windows/       gui + feature mixins
+  controllers/   thread lifecycle (search, indexing, agent, mobile, …)
+  workers.py     QThread wrappers → services / workflows
+docs/
+  architecture.md    (this file)
+  for-agents.md      Agent HTTP contract
+  ai/pipelines.md    pipeline notes (ZH)
 ```
 
-## Configuration Layers
+## Changelog
 
-### User-facing config (`config.json`)
-
-Typical local runtime options:
-- `theme`
-- `language`
-- `fps`
-- `remote_max_frames`
-- `preview_seconds`
-- `ffmpeg_path`
-- `model_dir`
-
-This file is intended to be safe for end-user edits.
-
-### Product/distribution config (`src/app/app_meta.py`)
-
-Built-in metadata and remote endpoints:
-- `version`
-- `notice_url`
-- `about_url`
-- `version_url`
-- `model_manifest_url`
-- `remote_index_manifest_url`
-- `remote_timeout`
-
-This file is intended for product/distribution control rather than user edits.
-
-## Runtime Resource Strategy
-
-- Prefer external runtime resources instead of bundling large artifacts in each release.
-- Default external model directory on Windows: `%LOCALAPPDATA%\VideoSeek\models`
-- Default managed ffmpeg path: `%LOCALAPPDATA%\VideoSeek\bin\ffmpeg.exe`
-- **Documented user path:** maintainer-built **zip** from cloud storage → **Import and Parse** in-app (`model_package_service`).
-- **Optional HTTP path:** if `model_manifest_url` points to a **JSON manifest** listing file sources, legacy workers can download ONNX/FFmpeg entries; if the URL is a normal download page instead, use zip import—do not assume automatic weight download.
-- Model file requirements come from the active model profile (default profile is `clip_onnx`).
-
-## Remote Library Notes
-
-- Remote Library page separates build and search operations (`network_search_controller`, `network_build_presenter`, `network_precheck_presenter`).
-- Build supports both download-based and stream-url matching modes.
-- Link precheck (`remote_link_precheck_service`) summarizes accepted/blocked/risky links and avoids heavy work on obvious duplicates.
-- Build status reports staged progress: `resolve/download -> extract -> embed -> merge -> index`.
-
-## Mobile bridge (optional)
-
-- `src/web/mobile_bridge.py` exposes a small local HTTP API; `ui/controllers/mobile_bridge_controller.py` and `ui/dialogs/mobile_bridge.py` start/stop the server and surface connection UI.
-- `src/web/display_qr.py` renders QR payloads for pairing alongside the bridge UI.
+| Date | Change |
+|------|--------|
+| 2026-05-31 | Consolidate Agent scope/query parsing into `search_scope` + `search_request_service`; slim `agent_api` wrappers |

@@ -1272,6 +1272,7 @@ class SearchServiceTests(unittest.TestCase):
 
     def test_neighbor_rerank_auto_enabled_for_image_search(self):
         self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=True))
+        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
 
     def test_neighbor_rerank_respects_text_default(self):
         self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=True))
@@ -1507,6 +1508,28 @@ class UtilsTests(unittest.TestCase):
             result = utils.resolve_resource_path("models/clip_text.onnx", "D:/missing-models")
 
         self.assertEqual(result, packaged_path)
+
+    def test_is_standalone_app_detects_packaged_exe_without_sys_frozen(self):
+        with patch.object(utils.sys, "executable", r"D:\Release\main.dist\VideoSeek.exe"), patch.object(
+            utils.sys, "frozen", False, create=True
+        ):
+            self.assertTrue(utils._is_standalone_app())
+
+    def test_get_resource_path_uses_app_install_dir(self):
+        with patch.object(utils, "get_app_install_dir", return_value=r"D:\Release\main.dist"):
+            resolved = utils.get_resource_path("docs/for-agents.md")
+        self.assertEqual(
+            os.path.normpath(resolved),
+            os.path.normpath(r"D:\Release\main.dist\docs\for-agents.md"),
+        )
+
+    def test_get_app_install_dir_dev_uses_repo_root(self):
+        with patch.object(utils, "_is_standalone_app", return_value=False):
+            install_dir = utils.get_app_install_dir()
+        self.assertEqual(
+            os.path.normpath(install_dir),
+            os.path.normpath(os.path.dirname(os.path.dirname(os.path.abspath(utils.__file__)))),
+        )
 
     def test_get_missing_model_files_reports_missing_entries(self):
         with patch("src.utils.get_model_path", side_effect=lambda filename: f"D:/models/{filename}"), patch(

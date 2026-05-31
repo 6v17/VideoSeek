@@ -1025,13 +1025,30 @@ def load_meta(meta_file):
     return data
 
 
-def get_resource_path(relative_path):
+def _is_standalone_app() -> bool:
+    """True for PyInstaller/Nuitka builds and other non-interpreter launches."""
+    if getattr(sys, "frozen", False):
+        return True
     if hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, relative_path)
+        return True
+    executable = str(getattr(sys, "executable", "") or "").strip()
+    if not executable:
+        return False
+    exe_name = os.path.basename(executable).lower()
+    return exe_name.endswith(".exe") and exe_name not in {"python.exe", "pythonw.exe", "py.exe"}
 
-    if getattr(sys, "frozen", False) and hasattr(sys, "executable"):
-        base_path = os.path.dirname(sys.executable)
-    else:
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    return os.path.join(base_path, relative_path)
+def get_app_install_dir() -> str:
+    """Directory containing the app entrypoint (repo root in dev, exe dir when packaged)."""
+    if _is_standalone_app():
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_resource_path(relative_path):
+    relative_path = str(relative_path or "").replace("/", os.sep)
+    if hasattr(sys, "_MEIPASS"):
+        bundled = os.path.join(sys._MEIPASS, relative_path)
+        if os.path.exists(bundled):
+            return bundled
+    return os.path.join(get_app_install_dir(), relative_path)

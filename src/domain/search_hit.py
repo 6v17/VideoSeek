@@ -12,6 +12,7 @@ class SearchHit:
     end_sec: float
     score: float
     video_path: str
+    match_kind: str = "frame"
 
     def as_tuple(self) -> Tuple[float, float, float, str]:
         return (self.start_sec, self.end_sec, self.score, self.video_path)
@@ -21,10 +22,12 @@ RowLike = Union[SearchHit, Tuple[Any, Any, Any, Any]]
 
 
 def coerce_search_hit(row: RowLike) -> SearchHit:
+    """Deprecated at call sites: prefer SearchHit end-to-end; tuple input is legacy-only."""
     if isinstance(row, SearchHit):
         return row
     if isinstance(row, tuple) and len(row) >= 4:
-        return SearchHit(float(row[0]), float(row[1]), float(row[2]), str(row[3]))
+        match_kind = str(row[4]) if len(row) >= 5 else "frame"
+        return SearchHit(float(row[0]), float(row[1]), float(row[2]), str(row[3]), match_kind=match_kind)
     raise TypeError(f"Expected SearchHit or 4-tuple, got {type(row).__name__}")
 
 

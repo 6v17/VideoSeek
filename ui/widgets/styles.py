@@ -446,11 +446,17 @@ QPushButton:disabled {
 #PresetImageThumb {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
+}
+#PresetImageThumb[compact="true"] {
+    border-radius: 6px;
 }
 #PresetImageThumb[selected="true"] {
     background: __ACCENT_SOFT__;
     border: 2px solid __ACCENT__;
+}
+#PresetImageThumb[compact="true"][selected="true"] {
+    border-width: 1px;
 }
 #PresetImagePreview {
     background: transparent;
@@ -469,6 +475,12 @@ QPushButton:disabled {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
 }
+#AccentGhostButton:disabled {
+    background: transparent;
+    border-color: __LINE__;
+    color: __MUTED__;
+    font-weight: 600;
+}
 #SuccessGhostButton {
     background: transparent;
     border-color: __SUCCESS__;
@@ -481,6 +493,12 @@ QPushButton:disabled {
 #SuccessGhostButton:pressed {
     background: __SUCCESS_SOFT__;
     border-color: __SUCCESS__;
+}
+#SuccessGhostButton:disabled {
+    background: transparent;
+    border-color: __LINE__;
+    color: __MUTED__;
+    font-weight: 600;
 }
 #DangerGhostButton {
     background: transparent;
@@ -696,6 +714,34 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     font-size: 12px;
     font-weight: 600;
     padding: 0 2px;
+}
+#SearchQueryTabs::pane {
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+    background: __FIELD__;
+    top: -1px;
+}
+#SearchQueryTabs QTabBar::tab {
+    background: __BUTTON_SOFT__;
+    border: 1px solid __LINE__;
+    border-bottom: none;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    padding: 8px 18px;
+    margin-right: 4px;
+    color: __MUTED__;
+    font-weight: 600;
+}
+#SearchQueryTabs QTabBar::tab:selected {
+    background: __FIELD__;
+    color: __TEXT__;
+    border-color: __LINE_STRONG__;
+}
+#SearchQueryTabs QTabBar::tab:hover {
+    background: __BUTTON_SOFT_HOVER__;
+}
+#SearchMobileRow {
+    background: transparent;
 }
 #ImageDropZone, #PreviewPlaceholder {
     background: __FIELD__;

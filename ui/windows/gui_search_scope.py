@@ -94,7 +94,7 @@ class SearchScopeGuiMixin:
         if dialog.exec():
             self._search_scope_mode, self._search_scope_video_paths = dialog.result_scope()
             save_search_scope(self._search_scope_mode, video_paths=self._search_scope_video_paths)
-            self._refresh_search_scope_ui()
+            self._refresh_search_panel_state()
 
     def _resolve_active_search_video_scope(self):
         from src.services.search_scope import resolve_active_search_video_scope

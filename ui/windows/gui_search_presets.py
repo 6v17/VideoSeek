@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.services.search_preset_service import list_presets, resolve_preset_ref_paths
+from src.services.search_preset_service import list_presets
 from ui.dialogs.search_preset_dialog import SearchPresetManageDialog
 
 
@@ -27,7 +27,10 @@ class SearchPresetsGuiMixin:
             btn_manage.setText(self.texts.get("search_presets_manage", "Manage presets"))
 
     def build_search_preset_draft(self) -> tuple[dict, dict]:
-        text_query = self.search_page.text_search.text().strip()
+        if self._search_active_tab() == self.SEARCH_TAB_COMPOSE:
+            return self.search_page.search_panel.compose_form.to_draft(), {}
+
+        text_query = self.search_page.search_panel.text_query()
         image_path = str(getattr(self, "current_img_path", "") or "").strip()
         default_name = text_query[:24] if text_query else self.texts.get("search_presets_default_image_name", "Preset")
         if not default_name:
@@ -44,18 +47,11 @@ class SearchPresetsGuiMixin:
 
     def apply_search_preset_to_ui(self, preset):
         preset = dict(preset or {})
-        query = str(preset.get("query", "") or "").strip()
-        ref_paths = resolve_preset_ref_paths(preset)
-        if query:
-            self.search_page.text_search.setText(query)
-        else:
-            self.search_page.text_search.clear()
-        if ref_paths:
-            self._set_image_query(ref_paths[0], clear_text=not query)
-        else:
-            self.current_img_path = None
-            self.search_page.img_label.clear()
-            self._refresh_search_precision_controls()
+        self._set_search_query_tab(self.SEARCH_TAB_COMPOSE)
+        self.current_img_path = None
+        self.search_page.img_label.clear()
+        self.search_page.search_panel.compose_form.load_preset(preset)
+        self._refresh_search_panel_state()
 
     def run_search_preset(self, preset_id: str):
         if not self._ensure_startup_migration_idle("feature_search"):

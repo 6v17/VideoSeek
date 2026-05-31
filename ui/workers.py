@@ -7,8 +7,7 @@ from PySide6.QtGui import QImage, QPixmap
 from src.app.config import load_config
 from src.app.i18n import get_texts
 from src.app.logging_utils import get_logger
-from src.core.core import run_search
-from src.domain.search_hit import coerce_search_hit
+from src.domain.search_hit import SearchHit, coerce_search_hit
 from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
 from src.services.library_service import list_local_vector_details
@@ -61,6 +60,7 @@ class SearchWorker(QThread):
         min_score=None,
         search_precision_mode=None,
         pixel_query_data=None,
+        preview_anchor_sec=None,
     ):
         super().__init__()
         self.query = query
@@ -73,6 +73,7 @@ class SearchWorker(QThread):
         self.min_score = min_score
         self.search_precision_mode = search_precision_mode
         self.pixel_query_data = pixel_query_data
+        self.preview_anchor_sec = preview_anchor_sec
 
     def run(self):
         try:
@@ -91,6 +92,7 @@ class SearchWorker(QThread):
                 search_mode=mode or None,
                 search_precision_mode=self.search_precision_mode,
                 pixel_query_data=self.pixel_query_data,
+                preview_anchor_sec=self.preview_anchor_sec,
                 **base_kwargs,
             )
             results = filter_hits_by_min_score(results, self.min_score)

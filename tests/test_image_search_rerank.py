@@ -6,6 +6,7 @@ import numpy as np
 from src.core.frame_hash import compute_dhash, dhash_similarity
 from src.domain.search_hit import SearchHit
 from src.services.image_search_rerank import (
+    _hit_probe_plan,
     apply_image_pixel_rerank,
     build_index_step_by_video,
     median_index_step,
@@ -94,6 +95,31 @@ class ImageSearchRerankTests(unittest.TestCase):
         )
         self.assertEqual(reranked[0].start_sec, 54.5)
 
+    @unittest.mock.patch("src.services.image_search_rerank.compute_dhash", return_value=123456)
+    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    def test_pixel_rerank_does_not_promote_unreranked_tail(self, mock_thumb, _mock_dhash):
+        query = np.full((80, 80, 3), 128, dtype=np.uint8)
+        bad_frame = np.zeros((80, 80, 3), dtype=np.uint8)
+        mock_thumb.return_value = bad_frame
+
+        hits = [
+            SearchHit(1.0, 1.0, 0.95, "a.mp4"),
+            SearchHit(2.0, 2.0, 0.94, "a.mp4"),
+            SearchHit(99.0, 99.0, 0.50, "tail.mp4"),
+        ]
+        reranked = apply_image_pixel_rerank(
+            query,
+            hits,
+            config=_fixed_probe_config(
+                image_pixel_rerank_top_n=2,
+                image_pixel_rerank_time_window_sec=0.0,
+                image_pixel_rerank_min_similarity=0.99,
+            ),
+            top_k=2,
+        )
+        self.assertEqual(len(reranked), 2)
+        self.assertTrue(all(hit.video_path != "tail.mp4" for hit in reranked))
+
     @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
     def test_pixel_rerank_reuses_thumbnail_cache_for_overlapping_probes(self, mock_thumb):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)
@@ -168,6 +194,14 @@ class DynamicProbeTests(unittest.TestCase):
         self.assertAlmostEqual(step, 0.5)
         self.assertLess(step, 2.0)
 
+    def test_point_hit_probe_window_reaches_sparse_neighbors(self):
+        from src.services.search_scope import normalize_scope_path
+
+        hit = SearchHit(3265.0, 3265.0, 0.91, "a.mp4")
+        lookup = {normalize_scope_path("a.mp4"): 15.0}
+        window, _step = _hit_probe_plan(hit, {"image_pixel_rerank_probe_mode": "index"}, lookup=lookup)
+        self.assertGreaterEqual(window, 6.0)
+
     @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
     def test_index_mode_uses_lookup_step(self, mock_thumb):
         from src.services.search_scope import normalize_scope_path
@@ -185,8 +219,8 @@ class DynamicProbeTests(unittest.TestCase):
             top_k=1,
             index_step_lookup={normalize_scope_path("a.mp4"): 1.0},
         )
-        # window=1.0, step=0.5 => center + (±0.5, ±1.0) => 5 probes
-        self.assertEqual(mock_thumb.call_count, 5)
+        # point hit widens window to 3.0 with step=0.5 => center + (±0.5..±3.0) => 13 probes
+        self.assertEqual(mock_thumb.call_count, 13)
 
 
 class NeighborScoreCacheTests(unittest.TestCase):

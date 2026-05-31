@@ -325,30 +325,16 @@ class SearchPage(QWidget):
         self.indexing_notice.hide()
         page_body.addWidget(self.indexing_notice)
 
-        self.session_card = VSCard(margins=(18, 12, 18, 12), spacing=12)
-        session_layout = QHBoxLayout()
-        session_layout.setSpacing(12)
-        self.session_title = QLabel()
-        self.session_title.setObjectName("CardTitle")
-        self.session_hint = QLabel()
-        self.session_hint.setObjectName("CardHint")
-        self.session_hint.setWordWrap(True)
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("StatusLabel")
         self.lbl_status.setWordWrap(True)
-        session_layout.addWidget(self.session_title, 0)
-        session_layout.addWidget(self.session_hint, 1)
-        session_layout.addWidget(self.lbl_status, 1)
-        self.session_card.content_layout.addLayout(session_layout)
-        page_body.addWidget(self.session_card)
 
         compare_row = QHBoxLayout()
         compare_row.setSpacing(12)
 
         self.search_panel = SearchPanel()
         self.query_card = self.search_panel
-        self.controls_title = self.search_panel.controls_title
-        self.controls_hint = self.search_panel.controls_hint
+        self.search_query_tabs = self.search_panel.search_query_tabs
         self.img_label = self.search_panel.img_label
         self.text_search = self.search_panel.text_search
         self.search_mode = self.search_panel.search_mode
@@ -356,6 +342,7 @@ class SearchPage(QWidget):
         self.search_precision_toggle = self.search_panel.search_precision_toggle
         self.search_precision_label = self.search_panel.search_precision_label
         self.search_precision_cluster = self.search_panel.search_precision_cluster
+        self.text_granularity_cluster = self.search_panel.text_granularity_cluster
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
         self.btn_mobile_qr = self.search_panel.btn_mobile_qr
@@ -364,6 +351,11 @@ class SearchPage(QWidget):
         self.search_scope_cluster = self.search_panel.search_scope_cluster
         self.search_scope_label = self.search_panel.search_scope_label
         self.search_scope_select = self.search_panel.search_scope_select
+        self.options_block = self.search_panel.options_block
+        self.options_title = self.search_panel.options_title
+        self.mobile_row = self.search_panel.mobile_row
+        self.compose_form = self.search_panel.compose_form
+        self.btn_save_preset = self.search_panel.btn_save_preset
 
         self.preview_panel = PreviewPanel()
         self.preview_card = self.preview_panel
@@ -372,8 +364,8 @@ class SearchPage(QWidget):
         self.preview_host_layout = self.preview_panel.preview_host_layout
         self.preview_placeholder = self.preview_panel.preview_placeholder
 
-        compare_row.addWidget(self.search_panel, 5)
-        compare_row.addWidget(self.preview_panel, 7)
+        compare_row.addWidget(self.search_panel, 5, Qt.AlignmentFlag.AlignTop)
+        compare_row.addWidget(self.preview_panel, 7, Qt.AlignmentFlag.AlignTop)
         page_body.addLayout(compare_row, 3)
 
         self.results_card = VSCard()
@@ -402,7 +394,8 @@ class SearchPage(QWidget):
         actions_layout.addWidget(self.btn_expand_preview)
         actions_layout.addWidget(self.btn_export_tasks)
 
-        results_toolbar.addWidget(self.search_presets_bar, 1)
+        results_toolbar.addWidget(self.lbl_status, 2)
+        results_toolbar.addWidget(self.search_presets_bar, 3)
         results_toolbar.addWidget(self.results_actions, 0)
 
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])

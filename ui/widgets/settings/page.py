@@ -112,10 +112,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_image_search_fetch_multiplier.setRange(1, 8)
         self.input_preview_seconds = NoWheelSpinBox()
         self.input_preview_seconds.setRange(2, 20)
-        self.input_preview_width = NoWheelSpinBox()
-        self.input_preview_width.setRange(160, 1920)
-        self.input_preview_height = NoWheelSpinBox()
-        self.input_preview_height.setRange(90, 1080)
         self.input_thumb_width = NoWheelSpinBox()
         self.input_thumb_width.setRange(80, 480)
         self.input_thumb_height = NoWheelSpinBox()
@@ -147,13 +143,22 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_copy_agent_api_url = QPushButton()
         self.btn_copy_agent_api_url.setObjectName("AccentGhostButton")
         self.btn_copy_agent_api_url.setMinimumHeight(34)
+        self.btn_copy_agent_starter = QPushButton()
+        self.btn_copy_agent_starter.setObjectName("SuccessGhostButton")
+        self.btn_copy_agent_starter.setMinimumHeight(34)
         self.input_agent_api_bundle = QWidget()
         agent_api_bundle_layout = QHBoxLayout(self.input_agent_api_bundle)
         agent_api_bundle_layout.setContentsMargins(0, 0, 0, 0)
         agent_api_bundle_layout.setSpacing(8)
         agent_api_bundle_layout.addWidget(self.input_agent_api_enabled, 0)
         agent_api_bundle_layout.addWidget(self.lbl_agent_api_status, 1)
-        agent_api_bundle_layout.addWidget(self.btn_copy_agent_api_url, 0)
+        agent_api_buttons = QWidget()
+        agent_api_buttons_layout = QHBoxLayout(agent_api_buttons)
+        agent_api_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        agent_api_buttons_layout.setSpacing(6)
+        agent_api_buttons_layout.addWidget(self.btn_copy_agent_api_url, 0)
+        agent_api_buttons_layout.addWidget(self.btn_copy_agent_starter, 0)
+        agent_api_bundle_layout.addWidget(agent_api_buttons, 0)
         self.input_export_video_silent = NoWheelComboBox()
         self.input_active_model_profile = NoWheelComboBox()
         self.btn_download_runtime_resources = QPushButton()
@@ -182,8 +187,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_image_pixel_rerank_probe_step_sec = ClickableLabel()
         self.label_image_search_fetch_multiplier = ClickableLabel()
         self.label_preview_seconds = ClickableLabel()
-        self.label_preview_width = ClickableLabel()
-        self.label_preview_height = ClickableLabel()
         self.label_thumb_width = ClickableLabel()
         self.label_thumb_height = ClickableLabel()
         self.label_export_video_silent = ClickableLabel()
@@ -219,8 +222,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_image_pixel_rerank_probe_step_sec = QLabel()
         self.hint_image_search_fetch_multiplier = QLabel()
         self.hint_preview_seconds = QLabel()
-        self.hint_preview_width = QLabel()
-        self.hint_preview_height = QLabel()
         self.hint_thumb_width = QLabel()
         self.hint_thumb_height = QLabel()
         self.hint_export_video_silent = QLabel()
@@ -285,8 +286,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
             width=COMPONENT_SIZES["settings_input_width"],
         )
         self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_preview_width, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_preview_height, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_remote_max_frames, width=COMPONENT_SIZES["settings_input_width"])
@@ -467,13 +466,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         )
 
         self._add_setting_row(self.section_preview_form, 0, self.label_preview_seconds, self.input_preview_seconds, self.hint_preview_seconds)
-        self._add_setting_row(self.section_preview_form, 1, self.label_preview_width, self.input_preview_width, self.hint_preview_width)
-        self._add_setting_row(self.section_preview_form, 2, self.label_preview_height, self.input_preview_height, self.hint_preview_height)
-        self._add_setting_row(self.section_preview_form, 3, self.label_thumb_width, self.input_thumb_width, self.hint_thumb_width)
-        self._add_setting_row(self.section_preview_form, 4, self.label_thumb_height, self.input_thumb_height, self.hint_thumb_height)
+        self._add_setting_row(self.section_preview_form, 1, self.label_thumb_width, self.input_thumb_width, self.hint_thumb_width)
+        self._add_setting_row(self.section_preview_form, 2, self.label_thumb_height, self.input_thumb_height, self.hint_thumb_height)
         self._add_setting_row(
             self.section_preview_form,
-            5,
+            3,
             self.label_export_video_silent,
             self.input_export_video_silent,
             self.hint_export_video_silent,
@@ -774,8 +771,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_image_pixel_rerank_probe_step_sec.setText(texts["setting_image_pixel_rerank_probe_step_sec"])
         self.label_image_search_fetch_multiplier.setText(texts["setting_image_search_fetch_multiplier"])
         self.label_preview_seconds.setText(texts["setting_preview_seconds"])
-        self.label_preview_width.setText(texts["setting_preview_width"])
-        self.label_preview_height.setText(texts["setting_preview_height"])
         self.label_thumb_width.setText(texts["setting_thumb_width"])
         self.label_thumb_height.setText(texts["setting_thumb_height"])
         self.label_export_video_silent.setText(texts["setting_export_video_silent"])
@@ -792,6 +787,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_close_window_action.setText(texts["setting_close_window_action"])
         self.label_agent_api_enabled.setText(texts["setting_agent_api_enabled"])
         self.btn_copy_agent_api_url.setText(texts["setting_agent_api_copy_url"])
+        self.btn_copy_agent_starter.setText(texts["setting_agent_api_copy_starter"])
         current_agent_api_enabled = self.input_agent_api_enabled.currentData()
         self.input_agent_api_enabled.blockSignals(True)
         self.input_agent_api_enabled.clear()
@@ -902,8 +898,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_image_pixel_rerank_probe_step_sec.setText(texts["setting_image_pixel_rerank_probe_step_sec_hint"])
         self.hint_image_search_fetch_multiplier.setText(texts["setting_image_search_fetch_multiplier_hint"])
         self.hint_preview_seconds.setText(texts["setting_preview_seconds_hint"])
-        self.hint_preview_width.setText(texts["setting_preview_width_hint"])
-        self.hint_preview_height.setText(texts["setting_preview_height_hint"])
         self.hint_thumb_width.setText(texts["setting_thumb_width_hint"])
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
         self.hint_export_video_silent.setText(texts["setting_export_video_silent_hint"])
@@ -956,8 +950,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_image_pixel_rerank_probe_step_sec,
             self.label_image_search_fetch_multiplier,
             self.label_preview_seconds,
-            self.label_preview_width,
-            self.label_preview_height,
             self.label_thumb_width,
             self.label_thumb_height,
             self.label_export_video_silent,

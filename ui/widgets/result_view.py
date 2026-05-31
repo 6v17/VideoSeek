@@ -90,8 +90,9 @@ class ResultView(QWidget):
         on_locate,
         on_export,
         texts,
+        on_deep_locate=None,
     ) -> None:
-        populate_result_table(self.table, results, on_preview, on_locate, on_export, texts)
+        populate_result_table(self.table, results, on_preview, on_locate, on_export, texts, on_deep_locate)
         self._sync_empty_overlay()
 
     def populate_network(self, results, texts) -> None:

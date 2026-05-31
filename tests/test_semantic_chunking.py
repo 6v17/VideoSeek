@@ -435,10 +435,10 @@ class ChunkSearchTests(unittest.TestCase):
             aggregated = search_service._aggregate_frame_hits_to_chunks(frame_hits, 5, {})
         self.assertEqual(len(aggregated), 2)
         self.assertAlmostEqual(float(aggregated[0].score), 0.9)
-        self.assertAlmostEqual(float(aggregated[0].start_sec), 2.0)
+        self.assertAlmostEqual(float(aggregated[0].start_sec), 0.0)
         self.assertAlmostEqual(float(aggregated[0].end_sec), 4.0)
         self.assertAlmostEqual(float(aggregated[1].score), 0.8)
-        self.assertAlmostEqual(float(aggregated[1].start_sec), 6.0)
+        self.assertAlmostEqual(float(aggregated[1].start_sec), 4.0)
 
     @patch("src.services.search_service._aggregate_frame_hits_to_chunks", return_value=[])
     @patch("src.services.search_service._collect_frame_candidates_for_chunk_search")

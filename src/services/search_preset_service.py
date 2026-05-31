@@ -393,24 +393,36 @@ def _encode_image_branch(ref_paths: list[str]) -> np.ndarray:
     return _normalize_query_vector(mean_vector)
 
 
-def _encode_preset_query_vector(preset: dict, config=None) -> np.ndarray:
+def _resolve_compose_ref_paths(source_image_paths) -> list[str]:
+    paths = []
+    for path in source_image_paths or []:
+        cleaned = str(path or "").strip()
+        if cleaned and os.path.isfile(cleaned):
+            paths.append(cleaned)
+    return paths
+
+
+def encode_mixed_query_vector(
+    *,
+    query: str = "",
+    source_image_paths=None,
+    fusion=None,
+    config=None,
+) -> np.ndarray:
     from src.services.search_service import build_query_vector
 
-    normalized = normalize_preset_record(preset)
-    if not normalized:
-        raise RuntimeError("Invalid preset record")
-    query = str(normalized.get("query", "") or "").strip()
-    ref_paths = resolve_preset_ref_paths(normalized, config=config)
+    query = str(query or "").strip()
+    ref_paths = _resolve_compose_ref_paths(source_image_paths)
     branches = []
     if query:
         branches.append(("text", _normalize_query_vector(build_query_vector(query, is_text=True))))
     if ref_paths:
         branches.append(("image", _encode_image_branch(ref_paths)))
     if not branches:
-        raise RuntimeError("Preset must include query text and/or reference images")
+        raise RuntimeError("Compose query must include text and/or reference images")
     if len(branches) == 1:
         return branches[0][1]
-    fusion = _normalize_fusion(normalized.get("fusion"))
+    fusion = _normalize_fusion(fusion)
     text_vector = next((vector for kind, vector in branches if kind == "text"), None)
     image_vector = next((vector for kind, vector in branches if kind == "image"), None)
     if text_vector is None or image_vector is None:
@@ -420,6 +432,18 @@ def _encode_preset_query_vector(preset: dict, config=None) -> np.ndarray:
         + fusion["image_weight"] * image_vector.reshape(1, -1)
     ).astype(np.float32)
     return _normalize_query_vector(merged)
+
+
+def _encode_preset_query_vector(preset: dict, config=None) -> np.ndarray:
+    normalized = normalize_preset_record(preset)
+    if not normalized:
+        raise RuntimeError("Invalid preset record")
+    return encode_mixed_query_vector(
+        query=str(normalized.get("query", "") or "").strip(),
+        source_image_paths=resolve_preset_ref_paths(normalized, config=config),
+        fusion=normalized.get("fusion"),
+        config=config,
+    )
 
 
 def resolve_preset_query_vector(preset: dict, config=None, *, force_refresh: bool = False) -> np.ndarray:
@@ -656,6 +680,38 @@ def _resolve_preset_video_scope(preset: dict, config=None) -> list[str] | None:
         paths = [normalize_scope_path(path) for path in raw_paths if str(path or "").strip()]
         return paths or None
     return resolve_active_search_video_scope(config=config)
+
+
+def build_compose_search_plan(
+    *,
+    query: str = "",
+    source_image_paths=None,
+    fusion=None,
+    config=None,
+) -> dict[str, Any]:
+    cfg = config or load_config()
+    query = str(query or "").strip()
+    ref_paths = _resolve_compose_ref_paths(source_image_paths)
+    if not query and not ref_paths:
+        raise ValueError("Compose query must include text and/or reference images")
+    query_vector = encode_mixed_query_vector(
+        query=query,
+        source_image_paths=ref_paths,
+        fusion=fusion,
+        config=cfg,
+    )
+    mode = get_search_mode(cfg)
+    top_k = get_search_top_k(cfg)
+    return {
+        "query_vector": query_vector,
+        "search_mode": mode,
+        "top_k": int(top_k),
+        "min_score": None,
+        "is_text": bool(query) and not ref_paths,
+        "has_image": bool(ref_paths),
+        "query_data": query or (ref_paths[0] if ref_paths else ""),
+        "pixel_query_data": ref_paths[0] if ref_paths else None,
+    }
 
 
 def build_preset_search_plan(preset_id: str, config=None) -> dict[str, Any]:

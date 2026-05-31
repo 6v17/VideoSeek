@@ -1,13 +1,18 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.domain.search_hit import SearchHit
 from src.services.search_scope import (
     apply_search_scope,
     filter_hits_by_library_paths,
     filter_hits_by_video_paths,
+    resolve_default_active_search_scope,
+    resolve_effective_search_scope,
+    resolve_explicit_scope_library_paths,
     resolve_fetch_top_k,
+    scope_request_is_explicit,
     video_path_under_library_root,
 )
 
@@ -48,6 +53,64 @@ class SearchScopeTests(unittest.TestCase):
         ]
         trimmed = apply_search_scope(hits, top_k=2)
         self.assertEqual(len(trimmed), 2)
+
+    @patch("src.services.search_scope.resolve_active_search_video_scope", return_value=["D:/a.mp4"])
+    def test_resolve_default_active_search_scope_prefers_videos(self, _mock_videos):
+        videos, libraries = resolve_default_active_search_scope()
+        self.assertEqual(videos, ["D:/a.mp4"])
+        self.assertIsNone(libraries)
+
+    @patch("src.storage.config_store.get_search_scope_video_paths", return_value=[])
+    @patch("src.storage.config_store.get_search_scope_library_paths", return_value=["D:/lib"])
+    @patch("src.storage.config_store.get_search_scope_mode", return_value="selected")
+    @patch("src.services.library_service.needs_search_index_schema_upgrade", return_value=False)
+    @patch("src.services.search_scope.per_library_indexes_ready", return_value=True)
+    def test_resolve_active_search_video_scope_uses_library_index_when_ready(
+        self,
+        _mock_ready,
+        _mock_upgrade,
+        _mock_mode,
+        _mock_libs,
+        _mock_videos,
+    ):
+        from src.services.search_scope import resolve_active_search_video_scope
+
+        self.assertIsNone(resolve_active_search_video_scope())
+
+    @patch("src.storage.config_store.get_search_scope_video_paths", return_value=[])
+    @patch("src.storage.config_store.get_search_scope_library_paths", return_value=["D:/lib"])
+    @patch("src.storage.config_store.get_search_scope_mode", return_value="selected")
+    @patch("src.services.library_service.needs_search_index_schema_upgrade", return_value=False)
+    @patch("src.services.search_scope.per_library_indexes_ready", return_value=False)
+    @patch("src.services.search_scope.list_ready_video_paths_for_libraries", return_value=["D:/lib/a.mp4"])
+    def test_resolve_active_search_video_scope_expands_library_when_index_not_ready(
+        self,
+        _mock_expand,
+        _mock_ready,
+        _mock_upgrade,
+        _mock_mode,
+        _mock_libs,
+        _mock_videos,
+    ):
+        from src.services.search_scope import resolve_active_search_video_scope
+
+        self.assertEqual(resolve_active_search_video_scope(), ["D:/lib/a.mp4"])
+
+    def test_resolve_explicit_scope_library_paths_explicit_wins(self):
+        scope = {
+            "library_paths": ["D:/explicit"],
+            "use_saved_scope": True,
+        }
+        resolved = resolve_explicit_scope_library_paths(scope)
+        self.assertEqual(resolved, ["D:/explicit"])
+
+    def test_resolve_effective_search_scope_uses_preset_videos(self):
+        videos, libraries = resolve_effective_search_scope(
+            None,
+            preset_scope_video_paths=["D:/preset.mp4"],
+        )
+        self.assertEqual(videos, ["D:/preset.mp4"])
+        self.assertIsNone(libraries)
 
 
 if __name__ == "__main__":

@@ -2,9 +2,9 @@
 
 This document is for **external agents** (Cursor, Claude Code, custom scripts, MCP tools) that help users turn **scripts / copy** into **rough-cut material lists** using VideoSeek’s **visual semantic search**.
 
-> **Status:** **In development** — on `http://127.0.0.1:8765` when the desktop app is running **and** Agent API is enabled in **Settings → General → Agent API (localhost)** (`src/web/agent_api.py`). Default: **off**.
+> **Status:** **In development** — on `http://127.0.0.1:8765` when the desktop app is running **and** **Settings → General → 本机搜索接口** is enabled (`src/web/agent_api.py`). Default: **off**.
 >
-> Endpoints: `GET /api/v1/health` · `GET /api/v1/search/presets` · `GET /api/v1/search/presets/{id}` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `POST /api/v1/export/manifest`
+> Endpoints: `GET /api/v1/health` · `GET /api/v1/agent-starter` · `GET /api/v1/libraries` · `GET /api/v1/libraries/videos` · `GET /api/v1/search/presets` · `GET /api/v1/search/presets/{id}` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `POST /api/v1/export/manifest` · `POST /api/v1/export/clip`
 >
 > Request/response fields may still change before a public freeze. Treat this doc as the current draft, not a permanent contract.
 
@@ -12,7 +12,7 @@ This document is for **external agents** (Cursor, Claude Code, custom scripts, M
 
 ## 0. Protocol notes (draft)
 
-The Agent API is a thin wrapper over `search_service` (not GUI automation). When the API stabilizes for external tools, these shapes are the intended baseline:
+The Agent API is a thin HTTP layer over **`search_service`** (same pipeline as the desktop Search button). Request normalization is shared with the GUI via **`search_request_service`** (preset/inline query, image precision) and **`search_scope`** (effective scope: request → preset videos → desktop picker). When the API stabilizes for external tools, these shapes are the intended baseline:
 
 ### Hit fields (minimum stable subset)
 
@@ -38,7 +38,7 @@ Production search responses include **additional fields** — see §5.2 (`durati
 }
 ```
 
-Stable codes today: `invalid_request`, `index_not_ready`, `query_failed`, `engine_busy`.
+Stable codes today: `invalid_request`, `index_not_ready`, `query_failed`, `export_failed`, `engine_busy`.
 
 Responses include **`api_version": "1"`**; bump only when breaking shapes intentionally.
 
@@ -134,12 +134,13 @@ Agents **must** rewrite user script lines into **short, visible descriptions** b
 
 ```
 User script / screenshot folder
+    → GET /libraries (discover library_path — do not guess folders)
     → split into beats OR batch image_folder
     → for each beat: rewrite to visual query (§3)
-    → POST /search or POST /search/batch (expand_frame_hits: true; scope if single film)
+    → POST /search or POST /search/batch (expand_frame_hits: true; scope.library_paths from /libraries)
     → keep top 1–3 hits per beat
     → POST /export/manifest (sources=results, dedupe: true) → cuts.json
-    → ffmpeg using health.ffmpeg.ffmpeg_path
+    → POST /export/clip per item (preferred) or shell ffmpeg using health.ffmpeg.ffmpeg_path
 ```
 
 ### 4.1 Frame mode vs chunk mode
@@ -178,10 +179,11 @@ Keep the higher rank (lower `rank` number). **`POST /export/manifest` with `dedu
 
 ### 4.4 Screenshot folder workflow (end-to-end)
 
-1. `GET /api/v1/health` — check `index_ready`, read `ffmpeg.ffmpeg_path`
-2. `POST /api/v1/search/batch` — e.g. `{ "image_folder": "C:/shots", "top_k": 3, "mode": "chunk", "scope": { "library_paths": ["D:/film_lib"] } }`
-3. `POST /api/v1/export/manifest` — `{ "sources": <batch.results>, "keep_per_source": 2, "dedupe": true, "write_path": "D:/cuts.json" }`
-4. Shell out to `ffmpeg.ffmpeg_path` per manifest item
+1. `GET /api/v1/health` — check `index_ready`, read `capabilities.export_clip` and `ffmpeg.ffmpeg_path`
+2. `GET /api/v1/libraries` — pick `library_path` values for `scope.library_paths` (no directory guessing)
+3. `POST /api/v1/search/batch` — e.g. `{ "image_folder": "C:/shots", "top_k": 3, "mode": "chunk", "scope": { "library_paths": ["D:/film_lib"] } }`
+4. `POST /api/v1/export/manifest` — `{ "sources": <batch.results>, "keep_per_source": 2, "dedupe": true, "write_path": "D:/cuts.json" }`
+5. `POST /api/v1/export/clip` per manifest row — or shell out to `ffmpeg.ffmpeg_path` if `export_clip` is false
 
 Or run: `python scripts/search_from_image_folder.py "C:/shots"` (steps 2–3 in one script).
 
@@ -194,9 +196,9 @@ Or run: `python scripts/search_from_image_folder.py "C:/shots"` (steps 2–3 in 
 **Binding:** localhost only by default — not exposed to LAN.  
 **Auth:** none in v1 (local trust boundary).
 
-**Safety boundary:** no index rebuild, no library/config mutation, no video export via API. Search is read-only against the index. **`export/manifest` may write a JSON file only when you pass `write_path`** (user/agent explicit).
+**Safety boundary:** no index rebuild, no library/config mutation. Search is read-only against the index. **`export/manifest` may write a JSON file only when you pass `write_path`**. **`export/clip` writes the mp4/mkv/mov at `output_path`** (explicit agent side effect; rejected if output falls inside an indexed library root).
 
-**Concurrency:** up to **2** concurrent searches; additional requests wait on a queue. **Timeout:** 120s per search → HTTP 503 `engine_busy`.
+**Concurrency:** up to **2** concurrent searches; additional requests wait on a queue. **Per-search timeout:** read `search_timeout_sec` / `search_timeout_precise_sec` from `/health` (defaults **90s** fast, **180s** precise) → HTTP 503 `engine_busy` if exceeded. Response `meta.search_timeout_sec` echoes the budget used.
 
 ### 5.0 `GET /api/v1/health` (call before batch search)
 
@@ -234,7 +236,8 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
     "search_presets": true,
     "search_precision": true,
     "export_manifest": true,
-    "export_clip": false,
+    "export_clip": true,
+    "library_discovery": true,
     "local_ffmpeg_clip": true
   },
   "ffmpeg": {
@@ -247,7 +250,13 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
   "search_timeout_precise_sec": 180,
   "agent_api_default_image_precision": "fast",
   "max_batch_queries": 64,
-  "batch_timeout_sec": 1200
+  "batch_timeout_sec": 1200,
+  "search_index_schema_version": 2,
+  "library_indexes_upgrade_needed": false,
+  "library_index_count": 3,
+  "library_indexes_ready": 3,
+  "library_indexes_stale": 0,
+  "saved_search_scope_mode": "all"
 }
 ```
 
@@ -258,8 +267,10 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `index_id` | Cache key — confirm later searches use the same index snapshot / model |
 | `model` / `provider` / `dimension` | Reflect the **active model profile** (e.g. `chinese_clip_vit_base_patch16`, `chinese_clip_onnx`, `512`) — not always `clip_onnx` |
 | `embedding_space` | Embedding namespace in `index_id`; useful when comparing snapshots across runs |
-| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `search_presets: false` → use inline `query` only; `search_precision: false` → omit `search_precision_mode`) |
-| `ffmpeg.ffmpeg_path` | **Do not search the disk** — use this executable for `-ss/-to` clip export |
+| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `search_presets: false` → use inline `query` only; `search_precision: false` → omit `search_precision_mode`; `library_discovery: false` → ask user for paths; `export_clip: false` → shell ffmpeg manually) |
+| `capabilities.library_discovery` | If `true`, call `GET /libraries` before search — do not scan disk for library folders |
+| `capabilities.export_clip` | If `true`, prefer `POST /export/clip` over hand-built ffmpeg commands |
+| `ffmpeg.ffmpeg_path` | Returned on `/health` and `/export/clip` responses — use for manual ffmpeg fallback only |
 | `ffmpeg.ffmpeg_available` | If `false`, ask user to install/import FFmpeg in VideoSeek settings |
 | `ffmpeg.ffmpeg_source` | `configured` / `managed` / `bundled` / `system` / `missing` (debug) |
 | `capabilities.local_ffmpeg_clip` | If `true`, agent may shell out to `ffmpeg.ffmpeg_path` after search |
@@ -274,6 +285,47 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `search_timeout_sec` | Per-request timeout for **fast** searches (text or image). Default **90s** |
 | `search_timeout_precise_sec` | Per-request timeout when `search_precision_mode: "precise"` (image / preset ref-image). Default **180s** — pixel rerank can take ~10–20s per query |
 | `agent_api_default_image_precision` | Default when image queries omit `search_precision_mode`: `"fast"` or `"precise"`. Text-only always `"fast"` |
+
+### 5.0.1 `GET /api/v1/agent-starter` (paste onboarding)
+
+Optional query: `?locale=zh|en` (default `zh`), `?mode=frame|chunk` (same as `/health` index probe).
+
+Returns a **short paste block** (~80 lines): intro + live `/health` snapshot + 7-step workflow. Does **not** embed the full `for-agents.md`.
+
+#### Response `200`
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "starter_text": "你是本机 VideoSeek 的粗剪编排助手。\n...",
+  "full_doc_rel": "docs/for-agents.md",
+  "full_doc_path": "D:/Release/VideoSeek/docs/for-agents.md",
+  "meta": {
+    "locale": "zh",
+    "line_count": 52,
+    "doc_on_disk": true
+  }
+}
+```
+
+| Field | Agent use |
+|-------|-----------|
+| `starter_text` | Paste into Cursor / Claude as system context |
+| `full_doc_rel` | **Preferred** — relative to VideoSeek install root; works across machines |
+| `full_doc_path` | Absolute path when the file exists on disk (`null` if missing); for “open in editor” only |
+| `meta.doc_on_disk` | If `false`, full contract file was not shipped beside the app |
+
+Settings UI **「复制接入说明」** uses the same `starter_text` builder (locale follows app language).
+
+**Packaged (Nuitka) layout:** ship `docs/for-agents.md` next to the executable (same rule as `vlc_lib/`). After build:
+
+```powershell
+New-Item -ItemType Directory -Force -Path .\dist\main.dist\docs | Out-Null
+Copy-Item -Force .\docs\for-agents.md .\dist\main.dist\docs\for-agents.md
+```
+
+Resolution uses `get_resource_path("docs/for-agents.md")` → `dirname(VideoSeek.exe)` when launched as a packaged `.exe` (Nuitka does not always set `sys.frozen`).
 
 ### 5.1 Search presets (`GET`)
 
@@ -329,7 +381,7 @@ List all presets (newest order follows desktop storage).
 |---------|----------------------------------|
 | **Search mode** (`frame` / `chunk`) | Uses request `mode` if set; otherwise desktop `search_mode` at request time — **not** frozen inside the preset |
 | **Search scope** | If `scope` is **omitted**, mirrors desktop **Search scope** (selected videos first, else selected libraries, else all indexed). Preset-owned `video_paths` apply before the desktop picker. Pass `scope` to override |
-| **Image precision** | Request `search_precision_mode: "precise"` for image / preset-with-ref-image searches (desktop **精搜** toggle). Default follows `agent_api_default_image_precision` from `/health` (usually `"fast"`). Text-only queries always use `"fast"` |
+| **Image precision** | Request `search_precision_mode: "precise"` for image / preset-with-ref-image searches (same pipeline as desktop **精搜**). Agent default when omitted: `agent_api_default_image_precision` from `/health` — **not** the live desktop toggle. Text-only always `"fast"` |
 | **Reference-image rerank** | Preset searches pass `pixel_query_data` internally (same as GUI preset chip) — no extra request field |
 | **top_k / min_score** | Request fields override; otherwise preset defaults, then app defaults |
 
@@ -392,7 +444,7 @@ When `preset_id` is set, omit `query` and `query_type`. The server uses the pres
 | `top_k` | integer | no | Max hits to return. Bounds **1–200** (app config). Default: preset `top_k`, else desktop `search_top_k` (**20**). |
 | `mode` | `"frame"` \| `"chunk"` | no | Override desktop `search_mode`. Default: follow app settings at request time. |
 | `min_score` | number \| null | no | Optional post-filter; implementation may compare against inner-product style scores. When unsure, omit and filter by rank only. |
-| `search_precision_mode` | `"fast"` \| `"precise"` | no | Image-search precision (desktop **精搜**). Default: `agent_api_default_image_precision` from `/health` when omitted. Ignored for text-only queries. Preset ref-image searches honor `"precise"` |
+| `search_precision_mode` | `"fast"` \| `"precise"` | no | Image-search precision (same as desktop **精搜** pipeline). Default: `agent_api_default_image_precision` from `/health` when omitted — Agent does **not** read the desktop toggle per request. Ignored for text-only. Preset ref-image searches honor `"precise"` |
 | `client_request_id` | string | no | Echoed back for correlating script beats. |
 | `scope` | object | no | Optional override. **When omitted**, server mirrors desktop **Search scope** (same as GUI Search button). See scope fields below |
 | `scope.video_paths` | string[] | no | Limit hits to these absolute video paths (global index over-fetch then filter). |
@@ -441,6 +493,7 @@ For `query_type: "image_path"`, `query` is the file path.
     "top_k": 5,
     "fetch_top_k": 15,
     "search_precision_mode": "fast",
+    "search_timeout_sec": 90,
     "scope_applied": true,
     "index_ready": true,
     "elapsed_ms": 240
@@ -461,8 +514,8 @@ For `query_type: "image_path"`, `query` is the file path.
 | `hits[].video_duration_sec` | Present when container duration is known |
 | `meta.fetch_top_k` | Over-fetch size for global+filter scope; equals `top_k` when `scope_uses_per_library_indexes` |
 | `meta.search_precision_mode` | `"fast"` or `"precise"` actually used (`"fast"` for text-only) |
-| `meta.search_timeout_sec` | Per-request timeout budget applied by the server (fast vs precise) |
-| `meta.batch_timeout_sec` | Batch-only: total timeout budget for `/search/batch` |
+| `meta.search_timeout_sec` | Per-request timeout budget applied by the server (fast vs precise); present on **`POST /search`** only |
+| `meta.batch_timeout_sec` | Total timeout budget for **`POST /search/batch`** (may exceed `/health` `batch_timeout_sec` when scaled by query count) |
 | `meta.scope_applied` | `true` when any scope limit was applied |
 | `meta.scope_video_paths` | Resolved video paths (explicit, preset-owned, or from desktop picker) |
 | `meta.scope_library_paths` | Resolved library roots (explicit or from desktop picker) |
@@ -513,7 +566,7 @@ Run many searches in one HTTP call (screenshot folders, storyboard beats). **Lim
 }
 ```
 
-`image_folder` scans `*.png`, `*.jpg`, `*.jpeg`, `*.webp`, `*.bmp`, `*.gif` (sorted by filename). Each file becomes one search; `client_request_id` defaults to the filename.
+`image_folder` scans `*.png`, `*.jpg`, `*.jpeg`, `*.webp`, `*.bmp`, `*.gif` (sorted by filename). Each file becomes one search; `client_request_id` defaults to the filename. Image-folder items inherit batch `search_precision_mode` when set; otherwise they follow `agent_api_default_image_precision` from `/health` (same as inline `image_path` searches).
 
 Batch-level **`top_k`, `mode`, `min_score`, `search_precision_mode`, `scope`, `expand_frame_hits`, `pad_*`** apply to every item (including folder-expanded images) unless an entry in `queries` overrides (scope per-item only).
 
@@ -581,7 +634,8 @@ Batch-level `top_k`, `mode`, `min_score`, `search_precision_mode`, `scope`, `exp
     "processed": 2,
     "succeeded": 1,
     "failed": 1,
-    "elapsed_ms": 1200
+    "elapsed_ms": 1200,
+    "batch_timeout_sec": 1200
   }
 }
 ```
@@ -628,7 +682,135 @@ Or pass explicit `items` (same shape as manifest rows). Response:
 
 `write_path` is optional — omit to receive JSON only.
 
-### 5.5 Suggested request parameters (copy into agent config)
+### 5.5 `GET /api/v1/libraries` (call before search)
+
+Lists indexed library roots registered in VideoSeek. Use returned `library_path` values in `scope.library_paths` — **do not guess or scan the user's disk**.
+
+#### Response `200`
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "libraries": [
+    {
+      "library_path": "D:/Videos/AnimeS1",
+      "display_name": "AnimeS1",
+      "index_state": "ready",
+      "video_count_total": 120,
+      "video_count_indexed_ready": 118,
+      "video_count_missing_source": 2,
+      "per_library_index_ready": true,
+      "offline": false
+    }
+  ],
+  "meta": {
+    "count": 1,
+    "search_index_schema_version": 2,
+    "saved_search_scope_mode": "selected"
+  }
+}
+```
+
+| Field | Agent use |
+|-------|-----------|
+| `library_path` | Pass to `scope.library_paths` on `/search` and `/search/batch` |
+| `video_count_indexed_ready` | How many files are searchable (`asset_state=ready` and source exists) |
+| `per_library_index_ready` | v2 per-library FAISS ready — scoped search is faster when `true` |
+| `offline` | Root folder missing on disk — warn user before searching |
+
+### 5.6 `GET /api/v1/libraries/videos`
+
+Paginated video inventory for one library. Query parameters:
+
+| Param | Default | Notes |
+|-------|---------|-------|
+| `library_path` | — | **Required** — absolute root from `GET /libraries` |
+| `ready_only` | `true` | When `true`, only `asset_state=ready` with existing source file |
+| `limit` | `500` | Max **2000** |
+| `offset` | `0` | Page offset |
+
+#### Response `200`
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "library_path": "D:/Videos/AnimeS1",
+  "videos": [
+    {
+      "video_path": "D:/Videos/AnimeS1/ep01.mp4",
+      "video_rel_path": "ep01.mp4",
+      "video_id": "abc123",
+      "asset_state": "ready",
+      "source_exists": true
+    }
+  ],
+  "meta": {
+    "returned": 1,
+    "total_listed": 118,
+    "total_ready": 118,
+    "offset": 0,
+    "limit": 500,
+    "ready_only": true
+  }
+}
+```
+
+Use `video_path` directly in `scope.video_paths` when you need single-file scope. Unknown library → HTTP **404** `invalid_request`.
+
+### 5.7 `POST /api/v1/export/clip`
+
+Server-side FFmpeg subclip — same window rules and **libx264 re-encode** as desktop preview export (`export_original_clip`). **One clip at a time** (semaphore=1); concurrent requests may get HTTP **503** `engine_busy`.
+
+#### Request
+
+```json
+{
+  "video_path": "D:/Videos/library/match_01.mp4",
+  "start_sec": 120.5,
+  "end_sec": 125.0,
+  "output_path": "D:/exports/beat-03-take-1.mp4",
+  "client_request_id": "beat-03",
+  "silent": false
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `video_path` | yes | Absolute path; must exist |
+| `start_sec` / `end_sec` | yes | From search hit; `end_sec > start_sec` |
+| `output_path` | yes | Destination `.mp4`, `.mkv`, or `.mov` — must **not** lie inside any indexed `library_path` |
+| `client_request_id` | no | Echoed in response for your manifest correlation |
+| `silent` | no | Default follows app `export_video_silent` |
+
+#### Response `200`
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "output_path": "D:/exports/beat-03-take-1.mp4",
+  "video_path": "D:/Videos/library/match_01.mp4",
+  "start_sec": 120.5,
+  "end_sec": 125.0,
+  "duration_sec": 4.5,
+  "ffmpeg_path": "C:/Users/you/AppData/Local/VideoSeek/bin/ffmpeg.exe",
+  "client_request_id": "beat-03",
+  "meta": { "elapsed_ms": 820, "encode_mode": "libx264_crf18", "silent": false }
+}
+```
+
+| HTTP | code | When |
+|------|------|------|
+| 400 | `invalid_request` | Bad times, bad extension, output inside library root |
+| 404 | `invalid_request` | Source video missing |
+| 422 | `export_failed` | FFmpeg non-zero exit (stderr summary in `message`) |
+| 503 | `engine_busy` | Timeout (**120s**) or export queue busy |
+
+Check `capabilities.export_clip` on `/health` first. If `false`, fall back to manual ffmpeg (§6).
+
+### 5.8 Suggested request parameters (copy into agent config)
 
 **Rough-cut material pass (recommended starting point)**
 
@@ -656,12 +838,6 @@ Keep **1–2** hits per script beat.
 
 Use with `query_type: "image_path"` or a preset that includes reference images. Server pads frame points by default; set `expand_frame_hits: false` only if you pad manually (§4.1).
 
-### 5.6 Planned follow-ups (v1.1+)
-
-| Item | Purpose |
-|------|---------|
-| `POST /api/v1/export/clip` | FFmpeg subclip (side effect — gate carefully) |
-
 ---
 
 ## 6. `cuts.json` Manifest (shape reference)
@@ -688,7 +864,9 @@ Use with `query_type: "image_path"` or a preset that includes reference images. 
 }
 ```
 
-**FFmpeg example** (one item) — read `ffmpeg.ffmpeg_path` from `/health` first:
+**FFmpeg example** (manual fallback when `export_clip` is false) — read `ffmpeg.ffmpeg_path` from `/health` first:
+
+**Preferred:** loop manifest items through `POST /api/v1/export/clip` (§5.7) when `capabilities.export_clip` is true.
 
 ```bash
 "C:/Users/you/AppData/Local/VideoSeek/bin/ffmpeg.exe" -y -ss 120.5 -to 125.0 -i "D:/Videos/library/match_01.mp4" -c copy "beat-03-take-1.mp4"
@@ -706,11 +884,12 @@ You are a rough-cut assistant using VideoSeek on the user's PC.
 VideoSeek finds video shots by VISUAL meaning, not dialogue.
 Default pipeline:
 1. Rewrite each script beat into a short visual query (§3). Never search literal dialogue.
-2. GET http://127.0.0.1:8765/api/v1/health — stop if index_ready is false; save ffmpeg.ffmpeg_path.
-3. Optional: GET /api/v1/search/presets if the user maintains named presets in VideoSeek.
-4. POST /api/v1/search or /search/batch — use preset_id for saved conditions, or inline query; expand_frame_hits=true, mode=chunk, top_k=5. Omit scope to mirror the desktop Search scope picker; override with scope.library_paths / scope.video_paths when needed. For image queries, set search_precision_mode=precise when the user enabled 精搜 in the app.
-5. POST /api/v1/export/manifest with sources=<results>, dedupe=true, keep_per_source=2 (optional write_path).
-5. To render clips, use health.ffmpeg.ffmpeg_path with -ss/-to from manifest items (never bare "ffmpeg").
+2. GET http://127.0.0.1:8765/api/v1/health — stop if index_ready is false; note export_clip and ffmpeg.ffmpeg_path.
+3. GET http://127.0.0.1:8765/api/v1/libraries — use library_path for scope; never guess library folders.
+4. Optional: GET /api/v1/search/presets if the user maintains named presets in VideoSeek.
+5. POST /api/v1/search or /search/batch — use preset_id for saved conditions, or inline query; expand_frame_hits=true, mode=chunk, top_k=5. scope.library_paths from step 3 when narrowing; omit scope to mirror desktop picker. For image queries, set search_precision_mode=precise, or rely on agent_api_default_image_precision from /health.
+6. POST /api/v1/export/manifest with sources=<results>, dedupe=true, keep_per_source=2 (optional write_path).
+7. POST /api/v1/export/clip per kept hit (output_path outside library roots), or ffmpeg fallback if export_clip is false.
 
 Do not manually pad frame hits unless expand_frame_hits=false.
 Do not rebuild indexes or change VideoSeek settings unless the user asks.
@@ -725,11 +904,27 @@ Run API calls in the user's local terminal when the IDE cannot reach 127.0.0.1:8
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `agent_api_enabled` (config) | `false` | Persistent toggle in Settings UI |
+| `agent_api_search_timeout_fast_sec` (config) | `90` | Per-search timeout for fast / text queries (seconds) |
+| `agent_api_search_timeout_precise_sec` (config) | `180` | Per-search timeout when precise image mode is used |
+| `agent_api_batch_timeout_sec` (config) | `1200` | Minimum batch timeout floor (seconds); actual batch budget may scale up |
+| `agent_api_default_image_precision` (config) | `"fast"` | Default for image queries when `search_precision_mode` is omitted |
 | `VIDEOSEEK_AGENT_API` | *(unset)* | `0` = force off; `1` = force on (overrides config) |
 | `VIDEOSEEK_AGENT_API_HOST` | `127.0.0.1` | Bind address |
 | `VIDEOSEEK_AGENT_API_PORT` | `8765` | TCP port |
 
-Enable in the app: **Settings → General → Agent API (localhost) → On → Save**. Service applies after save (and on next startup if already enabled).
+Enable in the app: **Settings → General → 本机搜索接口 → On → Save**. Service applies after save (and on next startup if already enabled).
+
+### Packaged app (Nuitka)
+
+Ship these **relative to the executable directory** (same as `get_resource_path()`):
+
+```
+VideoSeek.exe
+docs/for-agents.md    ← Agent full contract + this guide
+vlc_lib/
+```
+
+The Agent API exposes `full_doc_rel: "docs/for-agents.md"` on `/agent-starter`; `full_doc_path` is the resolved absolute path when the file exists.
 
 ### Prerequisites checklist
 
@@ -759,12 +954,16 @@ v1 Agent API is designed for **orchestration, not library administration**:
 |-------------|------|
 | HTTP server | `src/web/agent_api.py` → `AgentApiService` |
 | GUI lifecycle | `ui/controllers/agent_api_controller.py` → start after startup |
-| Search | `src/services/search_service.py` → `run_search(..., search_mode=...)` / `run_chunk_search` |
-| Scope parity | `src/web/agent_api.py` → `_resolve_agent_search_scope`, `_resolve_default_active_scope` (mirrors `resolve_active_search_*_scope`) |
-| Image precision | `search_precision_mode` + `pixel_query_data` forwarded to `run_search` / `run_chunk_search` |
+| Search execution | `src/services/search_service.py` → `run_search` / `run_chunk_search` |
+| Query + preset resolution | `src/services/search_request_service.py` → `resolve_search_query_inputs` |
+| Scope parity (GUI + Agent) | `src/services/search_scope.py` → `resolve_effective_search_scope`, `resolve_default_active_search_scope` |
+| Image precision default | `search_request_service.normalize_search_precision_mode` + `agent_api_default_image_precision` in config |
 | Hit shape | `src/domain/search_hit.py` → `SearchHit` → JSON in `_hits_to_payload` |
-| Enriched hit fields | `src/web/agent_api.py` → `_enrich_hit_payload` (time range, paths, scores on each hit) |
+| Enriched hit fields | `src/web/agent_api.py` → `_enrich_hit_payload` |
 | `POST /export/manifest` | `src/web/agent_api.py` → `execute_export_manifest` |
+| Library discovery | `src/services/agent_library_service.py` → `list_agent_libraries`, `list_agent_library_videos` |
+| Agent starter paste | `src/services/agent_starter_service.py` → `build_agent_starter_text` (`get_resource_path` for doc lookup) |
+| `POST /export/clip` | `src/services/agent_clip_service.py` → `execute_agent_export_clip` |
 
 ---
 
@@ -782,3 +981,7 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | 2026-05-27 | Search presets API: `GET /search/presets`, `GET /search/presets/{id}`, `POST /search` + `preset_id`; §5 renumbered; `capabilities.search_presets` |
 | 2026-05-31 | GUI parity: default scope mirrors desktop picker (omit `scope`); preset `video_paths`; `search_precision_mode`; preset `pixel_query_data` rerank; `capabilities.search_precision` |
 | 2026-05-31 | Agent timeouts: fast **90s** / precise **180s** per search; batch **1200s** floor with dynamic scaling; `search_timeout_precise_sec` + `agent_api_default_image_precision` on `/health`; `meta.search_timeout_sec` / `meta.batch_timeout_sec` on responses |
+| 2026-05-31 | Doc/code alignment: shared `search_request_service` + `search_scope`; fix stale **120s** timeout text; §8 config keys; §10 mapping |
+| 2026-05-31 | v1.1: `GET /libraries`, `GET /libraries/videos`, `POST /export/clip`; `library_discovery` + `export_clip` capabilities; workflow §4 uses library discovery before search |
+| 2026-05-31 | `GET /agent-starter` + Settings「复制 Agent 说明」— short paste onboarding (not full for-agents.md) |
+| 2026-05-31 | `full_doc_rel` + Nuitka-friendly doc lookup via `get_resource_path("docs/for-agents.md")` |

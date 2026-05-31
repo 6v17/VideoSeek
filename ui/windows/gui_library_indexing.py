@@ -329,7 +329,8 @@ class LibraryIndexingGuiMixin:
             self.close()
 
     def _refresh_search_session_hint(self):
-        self.search_page.session_hint.setText(self.texts.get("workspace_hint", ""))
+        if hasattr(self, "_refresh_search_panel_state"):
+            self._refresh_search_panel_state()
         indexing_running = self.ui_state.indexing_running
         self.search_page.indexing_notice.setVisible(indexing_running)
         if indexing_running:

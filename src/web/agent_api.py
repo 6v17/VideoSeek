@@ -1,4 +1,4 @@
-"""Localhost Agent API (v1): health + visual search only."""
+"""Localhost Agent API (v1): health, search, library discovery, clip export."""
 
 from __future__ import annotations
 
@@ -25,13 +25,15 @@ except ImportError as exc:
 else:
     _IMPORT_ERROR = None
 
-from src.app.config import DEFAULT_CONFIG, load_config
+from src.services.agent_clip_service import execute_agent_export_clip
+from src.services.agent_starter_service import build_agent_starter_payload
+from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
+from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
 from src.services.search_index_schema import (
     TARGET_SEARCH_INDEX_SCHEMA_VERSION,
     get_search_index_schema_version,
-    library_index_is_ready,
     list_library_search_index_summaries,
     needs_search_index_upgrade,
 )
@@ -39,14 +41,22 @@ from src.services.search_service import load_chunk_search_assets, load_search_as
 from src.services.search_scope import (
     is_search_scoped,
     normalize_scope_path,
-    resolve_active_search_library_scope,
-    resolve_active_search_video_scope,
+    per_library_indexes_ready,
+    resolve_default_active_search_scope,
+    resolve_effective_search_scope,
+    resolve_explicit_scope_library_paths,
+    resolve_explicit_scope_video_paths,
     resolve_fetch_top_k,
+    scope_request_is_explicit,
+)
+from src.services.search_request_service import (
+    default_agent_image_precision_mode,
+    normalize_search_precision_mode,
+    resolve_search_query_inputs,
 )
 from src.storage.config_store import (
     get_active_embedding_spec,
     get_search_mode,
-    get_search_scope_library_paths,
     get_search_scope_mode,
     get_search_top_k,
 )
@@ -133,6 +143,15 @@ class AgentManifestRequest(BaseModel):
     pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
     pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
     mode: Optional[str] = None
+
+
+class AgentExportClipRequest(BaseModel):
+    video_path: str
+    start_sec: float
+    end_sec: float
+    output_path: str
+    client_request_id: Optional[str] = None
+    silent: Optional[bool] = None
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
@@ -246,7 +265,8 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "frame_search": bool(snapshot.get("frame_index_ready")),
         "chunk_search": bool(snapshot.get("chunk_index_ready")),
         "export_manifest": True,
-        "export_clip": False,
+        "export_clip": bool(ffmpeg_info.get("ffmpeg_available")),
+        "library_discovery": True,
         "local_ffmpeg_clip": bool(ffmpeg_info.get("ffmpeg_available")),
         "batch_search": True,
         "search_presets": True,
@@ -318,7 +338,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "max_concurrent_searches": MAX_CONCURRENT_SEARCHES,
         "search_timeout_sec": timeouts["search_timeout_fast_sec"],
         "search_timeout_precise_sec": timeouts["search_timeout_precise_sec"],
-        "agent_api_default_image_precision": _default_image_precision_mode(config),
+        "agent_api_default_image_precision": default_agent_image_precision_mode(config),
         "max_batch_queries": MAX_BATCH_QUERIES,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
     }
@@ -329,65 +349,31 @@ def _normalize_agent_path(path: str) -> str:
 
 
 def _scope_video_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[str]]:
-    if scope is None or not scope.video_paths:
+    paths = resolve_explicit_scope_video_paths(scope)
+    if not paths:
         return None
-    normalized = {_normalize_agent_path(item) for item in scope.video_paths if str(item or "").strip()}
+    normalized = {_normalize_agent_path(item) for item in paths}
     return normalized or None
 
 
 def _scope_library_path_set(scope: Optional[AgentSearchScope]) -> Optional[set[str]]:
-    library_paths = _resolve_scope_library_paths(scope)
-    if not library_paths:
+    paths = resolve_explicit_scope_library_paths(scope)
+    if not paths:
         return None
-    normalized = {_normalize_agent_path(item) for item in library_paths}
+    normalized = {_normalize_agent_path(item) for item in paths}
     return normalized or None
 
 
 def _resolve_scope_video_paths(scope: Optional[AgentSearchScope], config=None) -> Optional[List[str]]:
-    if scope is not None and scope.video_paths:
-        paths = [str(item).strip() for item in scope.video_paths if str(item or "").strip()]
-        if paths:
-            return paths
-    if scope is None or not bool(getattr(scope, "use_saved_scope", False)):
-        return None
-    cfg = config or load_config()
-    if get_search_scope_mode(cfg) != "selected":
-        return None
-    from src.storage.config_store import get_search_scope_video_paths
-
-    saved = [str(item).strip() for item in get_search_scope_video_paths(cfg) if str(item or "").strip()]
-    return saved or None
+    return resolve_explicit_scope_video_paths(scope, config=config)
 
 
 def _resolve_scope_library_paths(scope: Optional[AgentSearchScope], config=None) -> Optional[List[str]]:
-    if scope is None:
-        return None
-    explicit = [str(item).strip() for item in (scope.library_paths or []) if str(item or "").strip()]
-    if explicit:
-        return explicit
-    if not bool(getattr(scope, "use_saved_scope", False)):
-        return None
-    cfg = config or load_config()
-    if get_search_scope_mode(cfg) != "selected":
-        return None
-    from src.storage.config_store import get_search_scope_video_paths
-
-    if get_search_scope_video_paths(cfg):
-        return None
-    saved = [str(item).strip() for item in get_search_scope_library_paths(cfg) if str(item or "").strip()]
-    return saved or None
+    return resolve_explicit_scope_library_paths(scope, config=config)
 
 
 def _per_library_indexes_ready(library_paths: Optional[List[str]], config=None) -> bool:
-    if not library_paths:
-        return False
-    from src.storage.asset_store import load_model_metadata
-
-    cfg = config or load_config()
-    meta = load_model_metadata(config=cfg)
-    if get_search_index_schema_version(meta) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
-        return False
-    return all(library_index_is_ready(path, config=cfg) for path in library_paths)
+    return per_library_indexes_ready(library_paths, config=config)
 
 
 def _search_index_ready_for_request(mode: str, scope: Optional[AgentSearchScope], config=None) -> bool:
@@ -428,18 +414,11 @@ def _resolve_fetch_top_k_for_paths(
 
 
 def _scope_request_is_explicit(scope: Optional[AgentSearchScope]) -> bool:
-    if scope is None:
-        return False
-    if scope.video_paths or scope.library_paths:
-        return True
-    return bool(scope.use_saved_scope)
+    return scope_request_is_explicit(scope)
 
 
 def _resolve_default_active_scope(config=None) -> tuple[Optional[List[str]], Optional[List[str]]]:
-    cfg = config or load_config()
-    scope_video_paths = resolve_active_search_video_scope(config=cfg)
-    scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope(config=cfg)
-    return scope_video_paths, scope_library_paths
+    return resolve_default_active_search_scope(config=config)
 
 
 def _scope_from_resolved_paths(
@@ -459,32 +438,25 @@ def _resolve_agent_search_scope(
     preset_scope_video_paths: Optional[List[str]] = None,
     config=None,
 ) -> tuple[Optional[List[str]], Optional[List[str]]]:
-    """Mirror desktop search scope: explicit request scope, else active saved scope."""
-    cfg = config or load_config()
-    if _scope_request_is_explicit(body.scope):
-        scope_library_paths = _resolve_scope_library_paths(body.scope, config=cfg)
-        scope_video_paths = _resolve_scope_video_paths(body.scope, config=cfg)
-        return scope_video_paths, scope_library_paths
-
-    scope_video_paths = list(preset_scope_video_paths) if preset_scope_video_paths else None
-    if scope_video_paths:
-        return scope_video_paths, None
-
-    return _resolve_default_active_scope(config=cfg)
+    return resolve_effective_search_scope(
+        body.scope,
+        preset_scope_video_paths=preset_scope_video_paths,
+        config=config,
+    )
 
 
 def _agent_timeout_settings(config=None) -> Dict[str, float]:
     cfg = config or load_config()
     try:
-        fast = float(cfg.get("agent_api_search_timeout_fast_sec", DEFAULT_CONFIG["agent_api_search_timeout_fast_sec"]))
+        fast = float(cfg.get("agent_api_search_timeout_fast_sec", _SEARCH_TIMEOUT_FAST_FALLBACK_SEC))
     except (TypeError, ValueError):
         fast = _SEARCH_TIMEOUT_FAST_FALLBACK_SEC
     try:
-        precise = float(cfg.get("agent_api_search_timeout_precise_sec", DEFAULT_CONFIG["agent_api_search_timeout_precise_sec"]))
+        precise = float(cfg.get("agent_api_search_timeout_precise_sec", _SEARCH_TIMEOUT_PRECISE_FALLBACK_SEC))
     except (TypeError, ValueError):
         precise = _SEARCH_TIMEOUT_PRECISE_FALLBACK_SEC
     try:
-        batch = float(cfg.get("agent_api_batch_timeout_sec", DEFAULT_CONFIG["agent_api_batch_timeout_sec"]))
+        batch = float(cfg.get("agent_api_batch_timeout_sec", _BATCH_TIMEOUT_FALLBACK_SEC))
     except (TypeError, ValueError):
         batch = _BATCH_TIMEOUT_FALLBACK_SEC
     return {
@@ -492,12 +464,6 @@ def _agent_timeout_settings(config=None) -> Dict[str, float]:
         "search_timeout_precise_sec": max(30.0, precise),
         "batch_timeout_sec": max(60.0, batch),
     }
-
-
-def _default_image_precision_mode(config=None) -> str:
-    cfg = config or load_config()
-    value = str(cfg.get("agent_api_default_image_precision", DEFAULT_CONFIG["agent_api_default_image_precision"])).strip().lower()
-    return value if value in {"fast", "precise"} else "fast"
 
 
 def _resolve_search_timeout_sec(body: AgentSearchRequest, config=None) -> float:
@@ -543,23 +509,6 @@ def _resolve_batch_timeout_sec(body: AgentBatchSearchRequest, config=None) -> fl
         query_count = len(body.queries or [])
     estimated = max(1, query_count) * per_item
     return min(_BATCH_TIMEOUT_MAX_SEC, max(timeouts["batch_timeout_sec"], estimated * 1.1))
-
-
-def _normalize_search_precision_mode(
-    mode: Optional[str],
-    *,
-    is_text: bool,
-    has_image: bool,
-    config=None,
-) -> str:
-    if is_text and not has_image:
-        return "fast"
-    if mode is None and has_image:
-        mode = _default_image_precision_mode(config)
-    normalized = str(mode or "fast").strip().lower()
-    if normalized not in {"fast", "precise"}:
-        normalized = "fast"
-    return normalized
 
 
 def _build_scope_meta(scope: Optional[AgentSearchScope], config=None) -> Dict[str, Any]:
@@ -898,76 +847,38 @@ def get_agent_search_preset(preset_id: str, config=None) -> Dict[str, Any]:
 
 def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[str, Any]:
     cfg = config or load_config()
-    preset_id = str(body.preset_id or "").strip()
-    query = str(body.query or "").strip()
-    if preset_id and query:
-        raise ValueError("Provide either preset_id or query, not both.")
-    if not preset_id and not query:
-        raise ValueError("Provide preset_id or query.")
-
-    preset = None
-    query_vector = None
-    default_top_k = None
-    default_min_score = None
-    preset_scope_video_paths = None
-    pixel_query_data = None
-    has_image = False
-
-    if preset_id:
-        from src.services.search_preset_service import build_preset_search_plan
-
-        try:
-            plan = build_preset_search_plan(preset_id, config=cfg)
-        except KeyError as exc:
-            raise ValueError(str(exc)) from exc
-        preset = dict(plan.get("preset") or {})
-        query_vector = plan.get("query_vector")
-        query_data = plan.get("query_data")
-        is_text = bool(plan.get("is_text"))
-        has_image = bool(plan.get("has_image"))
-        query_label = str(preset.get("name") or preset_id)
-        default_top_k = plan.get("top_k")
-        default_min_score = plan.get("min_score")
-        preset_scope_video_paths = plan.get("scope_video_paths")
-        pixel_query_data = plan.get("pixel_query_data")
-        query_type = "text" if is_text else "image_path"
-    else:
-        query_type = str(body.query_type or "text").strip().lower()
-        if query_type not in {"text", "image_path"}:
-            raise ValueError("query_type must be 'text' or 'image_path'")
-        is_text = query_type == "text"
-        has_image = not is_text
-        if not is_text and not os.path.isfile(query):
-            raise ValueError(f"image_path does not exist: {query}")
-        query_data = query
-        query_label = query
-        query_type = query_type
-
-    mode = _normalize_mode(body.mode)
-    top_k = _clamp_top_k(body.top_k if body.top_k is not None else default_top_k)
-    min_score = body.min_score if body.min_score is not None else default_min_score
-    search_precision_mode = _normalize_search_precision_mode(
-        body.search_precision_mode,
-        is_text=is_text,
-        has_image=has_image,
+    query_part = resolve_search_query_inputs(
+        preset_id=body.preset_id,
+        query=body.query,
+        query_type=body.query_type,
         config=cfg,
     )
-    scope_video_paths, scope_library_paths = _resolve_agent_search_scope(
-        body,
-        preset_scope_video_paths=preset_scope_video_paths,
+    mode = _normalize_mode(body.mode)
+    top_k = _clamp_top_k(body.top_k if body.top_k is not None else query_part.get("default_top_k"))
+    min_score = body.min_score if body.min_score is not None else query_part.get("default_min_score")
+    search_precision_mode = normalize_search_precision_mode(
+        body.search_precision_mode,
+        is_text=bool(query_part["is_text"]),
+        has_image=bool(query_part["has_image"]),
+        config=cfg,
+        use_agent_default=True,
+    )
+    scope_video_paths, scope_library_paths = resolve_effective_search_scope(
+        body.scope,
+        preset_scope_video_paths=query_part.get("preset_scope_video_paths"),
         config=cfg,
     )
 
     return {
-        "preset": preset,
-        "preset_id": preset_id or None,
-        "query_label": query_label,
-        "query_data": query_data,
-        "query_type": query_type,
-        "is_text": is_text,
-        "has_image": has_image,
-        "query_vector": query_vector,
-        "pixel_query_data": pixel_query_data,
+        "preset": query_part.get("preset"),
+        "preset_id": query_part.get("preset_id"),
+        "query_label": query_part["query_label"],
+        "query_data": query_part["query_data"],
+        "query_type": query_part["query_type"],
+        "is_text": query_part["is_text"],
+        "has_image": query_part["has_image"],
+        "query_vector": query_part.get("query_vector"),
+        "pixel_query_data": query_part.get("pixel_query_data"),
         "mode": mode,
         "top_k": top_k,
         "min_score": min_score,
@@ -1213,11 +1124,15 @@ class AgentApiService:
         self.app = FastAPI(title="VideoSeek Agent API", version=API_VERSION)
         self._register_exception_handlers()
         self.app.get("/api/v1/health")(self._health)
+        self.app.get("/api/v1/agent-starter")(self._agent_starter)
+        self.app.get("/api/v1/libraries")(self._libraries)
+        self.app.get("/api/v1/libraries/videos")(self._library_videos)
         self.app.get("/api/v1/search/presets")(self._search_presets)
         self.app.get("/api/v1/search/presets/{preset_id}")(self._search_preset_detail)
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
+        self.app.post("/api/v1/export/clip")(self._export_clip)
 
     def _register_exception_handlers(self):
         from fastapi.exceptions import RequestValidationError
@@ -1305,12 +1220,48 @@ class AgentApiService:
     async def _health(self, mode: Optional[str] = None):
         return build_health_payload(mode=mode)
 
+    async def _agent_starter(self, mode: Optional[str] = None, locale: Optional[str] = None):
+        health = build_health_payload(mode=mode)
+        base_url = f"http://{self.host}:{self.port}"
+        return build_agent_starter_payload(base_url, health, locale=locale or "zh")
+
     async def _search_presets(self):
         try:
             return await asyncio.to_thread(list_agent_search_presets)
         except Exception as exc:
             logger.exception("Agent preset list failed.")
             raise_api_error(500, "query_failed", str(exc))
+
+    async def _libraries(self):
+        try:
+            return await asyncio.to_thread(list_agent_libraries)
+        except Exception as exc:
+            logger.exception("Agent library list failed.")
+            raise_api_error(500, "query_failed", str(exc))
+
+    async def _library_videos(
+        self,
+        library_path: str,
+        ready_only: bool = True,
+        limit: int = 500,
+        offset: int = 0,
+    ):
+        try:
+            payload = await asyncio.to_thread(
+                list_agent_library_videos,
+                library_path,
+                ready_only=ready_only,
+                limit=limit,
+                offset=offset,
+            )
+        except KeyError as exc:
+            raise_api_error(404, "invalid_request", str(exc))
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent library videos failed.")
+            raise_api_error(500, "query_failed", str(exc))
+        return JSONResponse(payload)
 
     async def _search_preset_detail(self, preset_id: str):
         try:
@@ -1398,6 +1349,41 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent manifest export failed.")
             raise_api_error(422, "query_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
+    async def _export_clip(self, body: AgentExportClipRequest):
+        started = time.perf_counter()
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(
+                    execute_agent_export_clip,
+                    video_path=body.video_path,
+                    start_sec=body.start_sec,
+                    end_sec=body.end_sec,
+                    output_path=body.output_path,
+                    client_request_id=body.client_request_id,
+                    silent=body.silent,
+                ),
+                timeout=120.0,
+            )
+        except asyncio.TimeoutError:
+            raise_api_error(503, "engine_busy", "Clip export timed out after 120 seconds.")
+        except FileNotFoundError as exc:
+            raise_api_error(404, "invalid_request", str(exc))
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except RuntimeError as exc:
+            message = str(exc)
+            if "queue is busy" in message.lower():
+                raise_api_error(503, "engine_busy", message)
+            logger.exception("Agent clip export failed.")
+            raise_api_error(422, "export_failed", message)
+        except Exception as exc:
+            logger.exception("Agent clip export failed.")
+            raise_api_error(422, "export_failed", str(exc))
 
         payload.setdefault("meta", {})
         payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
