@@ -40,6 +40,7 @@ from src.services.search_scope import (
     is_search_scoped,
     normalize_scope_path,
     resolve_active_search_library_scope,
+    resolve_active_search_video_scope,
     resolve_fetch_top_k,
 )
 from src.storage.config_store import (
@@ -82,6 +83,7 @@ class AgentSearchRequest(BaseModel):
     top_k: Optional[int] = None
     mode: Optional[str] = None
     min_score: Optional[float] = None
+    search_precision_mode: Optional[str] = None
     client_request_id: Optional[str] = None
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
@@ -97,6 +99,7 @@ class AgentBatchSearchRequest(BaseModel):
     top_k: Optional[int] = None
     mode: Optional[str] = None
     min_score: Optional[float] = None
+    search_precision_mode: Optional[str] = None
     continue_on_error: bool = True
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
@@ -244,6 +247,7 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "local_ffmpeg_clip": bool(ffmpeg_info.get("ffmpeg_available")),
         "batch_search": True,
         "search_presets": True,
+        "search_precision": True,
     }
 
 
@@ -396,10 +400,85 @@ def _resolve_fetch_top_k(top_k: int, scope: Optional[AgentSearchScope], config=N
     cfg = config or load_config()
     scope_library_paths = _resolve_scope_library_paths(scope, config=cfg)
     scope_video_paths = _resolve_scope_video_paths(scope)
+    return _resolve_fetch_top_k_for_paths(
+        top_k,
+        scope_video_paths,
+        scope_library_paths,
+        config=cfg,
+    )
+
+
+def _resolve_fetch_top_k_for_paths(
+    top_k: int,
+    scope_video_paths: Optional[List[str]],
+    scope_library_paths: Optional[List[str]],
+    config=None,
+) -> int:
+    cfg = config or load_config()
     scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
     if scoped and scope_library_paths and not scope_video_paths and _per_library_indexes_ready(scope_library_paths, config=cfg):
         return top_k
     return resolve_fetch_top_k(top_k, scoped)
+
+
+def _scope_request_is_explicit(scope: Optional[AgentSearchScope]) -> bool:
+    if scope is None:
+        return False
+    if scope.video_paths or scope.library_paths:
+        return True
+    return bool(scope.use_saved_scope)
+
+
+def _resolve_default_active_scope(config=None) -> tuple[Optional[List[str]], Optional[List[str]]]:
+    cfg = config or load_config()
+    scope_video_paths = resolve_active_search_video_scope(config=cfg)
+    scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope(config=cfg)
+    return scope_video_paths, scope_library_paths
+
+
+def _scope_from_resolved_paths(
+    scope_video_paths: Optional[List[str]],
+    scope_library_paths: Optional[List[str]],
+) -> Optional[AgentSearchScope]:
+    if scope_video_paths:
+        return AgentSearchScope(video_paths=list(scope_video_paths))
+    if scope_library_paths:
+        return AgentSearchScope(library_paths=list(scope_library_paths))
+    return None
+
+
+def _resolve_agent_search_scope(
+    body: AgentSearchRequest,
+    *,
+    preset_scope_video_paths: Optional[List[str]] = None,
+    config=None,
+) -> tuple[Optional[List[str]], Optional[List[str]]]:
+    """Mirror desktop search scope: explicit request scope, else active saved scope."""
+    cfg = config or load_config()
+    if _scope_request_is_explicit(body.scope):
+        scope_library_paths = _resolve_scope_library_paths(body.scope, config=cfg)
+        scope_video_paths = _resolve_scope_video_paths(body.scope, config=cfg)
+        return scope_video_paths, scope_library_paths
+
+    scope_video_paths = list(preset_scope_video_paths) if preset_scope_video_paths else None
+    if scope_video_paths:
+        return scope_video_paths, None
+
+    return _resolve_default_active_scope(config=cfg)
+
+
+def _normalize_search_precision_mode(
+    mode: Optional[str],
+    *,
+    is_text: bool,
+    has_image: bool,
+) -> str:
+    if is_text and not has_image:
+        return "fast"
+    normalized = str(mode or "fast").strip().lower()
+    if normalized not in {"fast", "precise"}:
+        normalized = "fast"
+    return normalized
 
 
 def _build_scope_meta(scope: Optional[AgentSearchScope], config=None) -> Dict[str, Any]:
@@ -749,6 +828,9 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
     query_vector = None
     default_top_k = None
     default_min_score = None
+    preset_scope_video_paths = None
+    pixel_query_data = None
+    has_image = False
 
     if preset_id:
         from src.services.search_preset_service import build_preset_search_plan
@@ -761,15 +843,19 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         query_vector = plan.get("query_vector")
         query_data = plan.get("query_data")
         is_text = bool(plan.get("is_text"))
+        has_image = bool(plan.get("has_image"))
         query_label = str(preset.get("name") or preset_id)
         default_top_k = plan.get("top_k")
         default_min_score = plan.get("min_score")
+        preset_scope_video_paths = plan.get("scope_video_paths")
+        pixel_query_data = plan.get("pixel_query_data")
         query_type = "text" if is_text else "image_path"
     else:
         query_type = str(body.query_type or "text").strip().lower()
         if query_type not in {"text", "image_path"}:
             raise ValueError("query_type must be 'text' or 'image_path'")
         is_text = query_type == "text"
+        has_image = not is_text
         if not is_text and not os.path.isfile(query):
             raise ValueError(f"image_path does not exist: {query}")
         query_data = query
@@ -779,13 +865,16 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
     mode = _normalize_mode(body.mode)
     top_k = _clamp_top_k(body.top_k if body.top_k is not None else default_top_k)
     min_score = body.min_score if body.min_score is not None else default_min_score
-
-    if preset_id and body.scope is None:
-        scope_library_paths = resolve_active_search_library_scope(config=cfg)
-        scope_video_paths = None
-    else:
-        scope_library_paths = _resolve_scope_library_paths(body.scope, config=cfg)
-        scope_video_paths = _resolve_scope_video_paths(body.scope)
+    search_precision_mode = _normalize_search_precision_mode(
+        body.search_precision_mode,
+        is_text=is_text,
+        has_image=has_image,
+    )
+    scope_video_paths, scope_library_paths = _resolve_agent_search_scope(
+        body,
+        preset_scope_video_paths=preset_scope_video_paths,
+        config=cfg,
+    )
 
     return {
         "preset": preset,
@@ -794,10 +883,13 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         "query_data": query_data,
         "query_type": query_type,
         "is_text": is_text,
+        "has_image": has_image,
         "query_vector": query_vector,
+        "pixel_query_data": pixel_query_data,
         "mode": mode,
         "top_k": top_k,
         "min_score": min_score,
+        "search_precision_mode": search_precision_mode,
         "scope_library_paths": scope_library_paths,
         "scope_video_paths": scope_video_paths,
     }
@@ -806,11 +898,10 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
 def _scope_for_request_meta(body: AgentSearchRequest, resolved: Dict[str, Any]) -> Optional[AgentSearchScope]:
     if body.scope is not None:
         return body.scope
-    if resolved.get("preset_id"):
-        if resolved.get("scope_library_paths"):
-            return AgentSearchScope(library_paths=list(resolved["scope_library_paths"]))
-        return AgentSearchScope(use_saved_scope=True)
-    return None
+    return _scope_from_resolved_paths(
+        resolved.get("scope_video_paths"),
+        resolved.get("scope_library_paths"),
+    )
 
 
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
@@ -820,7 +911,12 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     top_k = resolved["top_k"]
     scope_video_paths = resolved["scope_video_paths"]
     scope_library_paths = resolved["scope_library_paths"]
-    fetch_k = _resolve_fetch_top_k(top_k, body.scope, config=config)
+    fetch_k = _resolve_fetch_top_k_for_paths(
+        top_k,
+        scope_video_paths,
+        scope_library_paths,
+        config=config,
+    )
     snapshot = _index_snapshot(mode, config=config)
     if not _search_index_ready_for_request(mode, _scope_for_request_meta(body, resolved), config=config):
         if scope_library_paths and snapshot.get("library_indexes_upgrade_needed"):
@@ -830,24 +926,26 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
     with _search_semaphore:
+        search_kwargs = {
+            "top_k": top_k,
+            "scope_video_paths": scope_video_paths,
+            "scope_library_paths": scope_library_paths,
+            "query_vector": resolved["query_vector"],
+            "search_precision_mode": resolved["search_precision_mode"],
+            "pixel_query_data": resolved["pixel_query_data"],
+        }
         if mode == "chunk":
             hits = run_chunk_search(
                 resolved["query_data"],
                 is_text=bool(resolved["is_text"]),
-                top_k=top_k,
-                scope_video_paths=scope_video_paths,
-                scope_library_paths=scope_library_paths,
-                query_vector=resolved["query_vector"],
+                **search_kwargs,
             )
         else:
             hits = run_search(
                 resolved["query_data"],
                 is_text=bool(resolved["is_text"]),
-                top_k=top_k,
                 search_mode="frame",
-                scope_video_paths=scope_video_paths,
-                scope_library_paths=scope_library_paths,
-                query_vector=resolved["query_vector"],
+                **search_kwargs,
             )
 
     hits = _filter_hits(hits, resolved["min_score"])
@@ -870,6 +968,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "returned": len(hits),
             "top_k": top_k,
             "fetch_top_k": fetch_k,
+            "search_precision_mode": resolved["search_precision_mode"],
             "index_ready": True,
             "global_index_state": snapshot["global_index_state"],
             "search_index_schema_version": snapshot.get("search_index_schema_version"),
@@ -892,6 +991,11 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         top_k=item.top_k if item.top_k is not None else batch.top_k,
         mode=item.mode if item.mode is not None else batch.mode,
         min_score=item.min_score if item.min_score is not None else batch.min_score,
+        search_precision_mode=(
+            item.search_precision_mode
+            if item.search_precision_mode is not None
+            else batch.search_precision_mode
+        ),
         client_request_id=item.client_request_id,
         scope=item.scope if item.scope is not None else batch.scope,
         expand_frame_hits=batch.expand_frame_hits,
@@ -958,8 +1062,14 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
     config = load_config()
     default_mode = _normalize_mode(body.mode)
     snapshot = _index_snapshot(default_mode, config=config)
-    if not _search_index_ready_for_request(default_mode, body.scope, config=config):
-        if _resolve_scope_library_paths(body.scope, config=config) and snapshot.get("library_indexes_upgrade_needed"):
+    if _scope_request_is_explicit(body.scope):
+        batch_scope = body.scope
+        batch_library_paths = _resolve_scope_library_paths(body.scope, config=config)
+    else:
+        batch_video_paths, batch_library_paths = _resolve_default_active_scope(config=config)
+        batch_scope = _scope_from_resolved_paths(batch_video_paths, batch_library_paths)
+    if not _search_index_ready_for_request(default_mode, batch_scope, config=config):
+        if batch_library_paths and snapshot.get("library_indexes_upgrade_needed"):
             raise IndexNotReadyError(
                 "Per-library search indexes are not ready. Restart VideoSeek and wait for startup data migration to finish."
             )

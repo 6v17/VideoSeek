@@ -232,6 +232,7 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
     "chunk_search": true,
     "batch_search": true,
     "search_presets": true,
+    "search_precision": true,
     "export_manifest": true,
     "export_clip": false,
     "local_ffmpeg_clip": true
@@ -255,7 +256,7 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `index_id` | Cache key — confirm later searches use the same index snapshot / model |
 | `model` / `provider` / `dimension` | Reflect the **active model profile** (e.g. `chinese_clip_vit_base_patch16`, `chinese_clip_onnx`, `512`) — not always `clip_onnx` |
 | `embedding_space` | Embedding namespace in `index_id`; useful when comparing snapshots across runs |
-| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `search_presets: false` → use inline `query` only) |
+| `capabilities` | Skip unsupported modes (e.g. `chunk_search: false` → use `frame`; `search_presets: false` → use inline `query` only; `search_precision: false` → omit `search_precision_mode`) |
 | `ffmpeg.ffmpeg_path` | **Do not search the disk** — use this executable for `-ss/-to` clip export |
 | `ffmpeg.ffmpeg_available` | If `false`, ask user to install/import FFmpeg in VideoSeek settings |
 | `ffmpeg.ffmpeg_source` | `configured` / `managed` / `bundled` / `system` / `missing` (debug) |
@@ -266,7 +267,7 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `search_index_schema_version` | `1` = global-only search; `2` = per-library indexes available |
 | `library_indexes_upgrade_needed` | If `true`, per-library indexes are still building — restart VideoSeek and wait for startup migration |
 | `library_indexes_ready` / `library_indexes_stale` | Count of per-library indexes ready vs stale (v2 only) |
-| `saved_search_scope_mode` | Desktop setting: `all` or `selected` (used when `scope.use_saved_scope: true`) |
+| `saved_search_scope_mode` | Desktop setting: `all` or `selected`. When you **omit** `scope` on `/search`, the server mirrors this saved picker (same as the desktop Search button) |
 | `max_batch_queries` / `batch_timeout_sec` | Batch limits — size `queries[]` and expect HTTP 503 if exceeded |
 
 ### 5.1 Search presets (`GET`)
@@ -317,12 +318,14 @@ List all presets (newest order follows desktop storage).
 
 **Agent workflow:** `GET /presets` → let user pick a name → `POST /search` with `preset_id`. Or skip listing if the user already gave you an id from the desktop UI.
 
-**Live settings (same as GUI chip click):**
+**Live settings (same as GUI Search button / preset chip):**
 
-| Setting | Preset search behavior |
-|---------|------------------------|
+| Setting | Preset / inline search behavior |
+|---------|----------------------------------|
 | **Search mode** (`frame` / `chunk`) | Uses request `mode` if set; otherwise desktop `search_mode` at request time — **not** frozen inside the preset |
-| **Library scope** | If `scope` is omitted, uses desktop **Search scope** (`selected` libraries when configured); pass `scope` to override |
+| **Search scope** | If `scope` is **omitted**, mirrors desktop **Search scope** (selected videos first, else selected libraries, else all indexed). Preset-owned `video_paths` apply before the desktop picker. Pass `scope` to override |
+| **Image precision** | Request `search_precision_mode: "precise"` for image / preset-with-ref-image searches (desktop **精搜** toggle). Default `"fast"`. Text-only queries always use `"fast"` |
+| **Reference-image rerank** | Preset searches pass `pixel_query_data` internally (same as GUI preset chip) — no extra request field |
 | **top_k / min_score** | Request fields override; otherwise preset defaults, then app defaults |
 
 ### 5.2 `POST /api/v1/search`
@@ -359,6 +362,21 @@ Provide **`preset_id` or `query`**, not both.
 }
 ```
 
+#### Request (image + precise mode)
+
+```json
+{
+  "query": "D:/refs/hero_frame.png",
+  "query_type": "image_path",
+  "search_precision_mode": "precise",
+  "top_k": 8,
+  "mode": "frame",
+  "expand_frame_hits": true
+}
+```
+
+Omit `scope` to follow the desktop **Search scope** picker automatically.
+
 When `preset_id` is set, omit `query` and `query_type`. The server uses the preset’s cached query vector (including mixed text+image fusion). Response `query` is the **preset name** (query label for manifests).
 
 | Field | Type | Required | Description |
@@ -369,10 +387,12 @@ When `preset_id` is set, omit `query` and `query_type`. The server uses the pres
 | `top_k` | integer | no | Max hits to return. Bounds **1–200** (app config). Default: preset `top_k`, else desktop `search_top_k` (**20**). |
 | `mode` | `"frame"` \| `"chunk"` | no | Override desktop `search_mode`. Default: follow app settings at request time. |
 | `min_score` | number \| null | no | Optional post-filter; implementation may compare against inner-product style scores. When unsure, omit and filter by rank only. |
+| `search_precision_mode` | `"fast"` \| `"precise"` | no | Image-search precision (desktop **精搜**). Default `"fast"`. Ignored for text-only queries. Preset ref-image searches honor `"precise"` |
 | `client_request_id` | string | no | Echoed back for correlating script beats. |
+| `scope` | object | no | Optional override. **When omitted**, server mirrors desktop **Search scope** (same as GUI Search button). See scope fields below |
 | `scope.video_paths` | string[] | no | Limit hits to these absolute video paths (global index over-fetch then filter). |
 | `scope.library_paths` | string[] | no | Limit hits to videos under these library root folders. With v2 per-library indexes, queries those indexes directly (same as desktop **Selected libraries**). |
-| `scope.use_saved_scope` | boolean | no | Default `false`. If `true`, use desktop **Search scope** when `search_scope_mode` is `selected`. **Preset searches with no `scope` block mirror the desktop chip** (saved scope when active). |
+| `scope.use_saved_scope` | boolean | no | Default `false`. Set `true` (with an otherwise empty `scope` object) to **explicitly** read desktop saved scope from config. Usually unnecessary — omitting `scope` already mirrors the desktop picker |
 | `expand_frame_hits` | boolean | no | Default `true`. Pad frame point hits by `pad_*`. |
 | `pad_before_sec` / `pad_after_sec` | number | no | Default **3** / **3** when expanding frame hits. |
 
@@ -415,6 +435,7 @@ For `query_type: "image_path"`, `query` is the file path.
     "returned": 1,
     "top_k": 5,
     "fetch_top_k": 15,
+    "search_precision_mode": "fast",
     "scope_applied": true,
     "index_ready": true,
     "elapsed_ms": 240
@@ -434,8 +455,10 @@ For `query_type: "image_path"`, `query` is the file path.
 | `hits[].clip_window` | `raw_start_sec`, `raw_end_sec`, `padding_applied` |
 | `hits[].video_duration_sec` | Present when container duration is known |
 | `meta.fetch_top_k` | Over-fetch size for global+filter scope; equals `top_k` when `scope_uses_per_library_indexes` |
+| `meta.search_precision_mode` | `"fast"` or `"precise"` actually used (`"fast"` for text-only) |
 | `meta.scope_applied` | `true` when any scope limit was applied |
-| `meta.scope_library_paths` | Resolved library roots (explicit or from saved scope) |
+| `meta.scope_video_paths` | Resolved video paths (explicit, preset-owned, or from desktop picker) |
+| `meta.scope_library_paths` | Resolved library roots (explicit or from desktop picker) |
 | `meta.scope_uses_per_library_indexes` | `true` when v2 per-library indexes were queried directly |
 | `meta.scope_use_saved_scope` | Echo of `scope.use_saved_scope` |
 | `meta.saved_search_scope_mode` | Desktop `all` / `selected` at request time |
@@ -485,7 +508,7 @@ Run many searches in one HTTP call (screenshot folders, storyboard beats). **Lim
 
 `image_folder` scans `*.png`, `*.jpg`, `*.jpeg`, `*.webp`, `*.bmp`, `*.gif` (sorted by filename). Each file becomes one search; `client_request_id` defaults to the filename.
 
-Batch-level **`top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*`** apply to every item (including folder-expanded images) unless an entry in `queries` overrides (scope per-item only).
+Batch-level **`top_k`, `mode`, `min_score`, `search_precision_mode`, `scope`, `expand_frame_hits`, `pad_*`** apply to every item (including folder-expanded images) unless an entry in `queries` overrides (scope per-item only).
 
 #### Request (explicit list)
 
@@ -513,7 +536,7 @@ Batch-level **`top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*
 }
 ```
 
-Batch-level `top_k`, `mode`, `min_score`, `scope`, `expand_frame_hits`, `pad_*` apply to all items unless overridden in `queries`. You may combine `queries` + `image_folder` in one request.
+Batch-level `top_k`, `mode`, `min_score`, `search_precision_mode`, `scope`, `expand_frame_hits`, `pad_*` apply to all items unless overridden in `queries`. You may combine `queries` + `image_folder` in one request.
 
 | Field | Description |
 |-------|-------------|
@@ -619,11 +642,12 @@ Keep **1–2** hits per script beat.
   "top_k": 8,
   "mode": "frame",
   "min_score": null,
+  "search_precision_mode": "precise",
   "expand_frame_hits": true
 }
 ```
 
-Server pads frame points by default; set `expand_frame_hits: false` only if you pad manually (§4.1).
+Use with `query_type: "image_path"` or a preset that includes reference images. Server pads frame points by default; set `expand_frame_hits: false` only if you pad manually (§4.1).
 
 ### 5.6 Planned follow-ups (v1.1+)
 
@@ -677,7 +701,7 @@ Default pipeline:
 1. Rewrite each script beat into a short visual query (§3). Never search literal dialogue.
 2. GET http://127.0.0.1:8765/api/v1/health — stop if index_ready is false; save ffmpeg.ffmpeg_path.
 3. Optional: GET /api/v1/search/presets if the user maintains named presets in VideoSeek.
-4. POST /api/v1/search or /search/batch — use preset_id for saved conditions, or inline query; expand_frame_hits=true, mode=chunk, top_k=5; add scope.library_paths or scope.use_saved_scope=true to mirror the desktop picker (preset searches omit scope to follow desktop saved scope automatically).
+4. POST /api/v1/search or /search/batch — use preset_id for saved conditions, or inline query; expand_frame_hits=true, mode=chunk, top_k=5. Omit scope to mirror the desktop Search scope picker; override with scope.library_paths / scope.video_paths when needed. For image queries, set search_precision_mode=precise when the user enabled 精搜 in the app.
 5. POST /api/v1/export/manifest with sources=<results>, dedupe=true, keep_per_source=2 (optional write_path).
 5. To render clips, use health.ffmpeg.ffmpeg_path with -ss/-to from manifest items (never bare "ffmpeg").
 
@@ -729,6 +753,8 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | HTTP server | `src/web/agent_api.py` → `AgentApiService` |
 | GUI lifecycle | `ui/controllers/agent_api_controller.py` → start after startup |
 | Search | `src/services/search_service.py` → `run_search(..., search_mode=...)` / `run_chunk_search` |
+| Scope parity | `src/web/agent_api.py` → `_resolve_agent_search_scope`, `_resolve_default_active_scope` (mirrors `resolve_active_search_*_scope`) |
+| Image precision | `search_precision_mode` + `pixel_query_data` forwarded to `run_search` / `run_chunk_search` |
 | Hit shape | `src/domain/search_hit.py` → `SearchHit` → JSON in `_hits_to_payload` |
 | Enriched hit fields | `src/web/agent_api.py` → `_enrich_hit_payload` (time range, paths, scores on each hit) |
 | `POST /export/manifest` | `src/web/agent_api.py` → `execute_export_manifest` |
@@ -747,3 +773,4 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | 2026-05-26 | v2: `scope.library_paths`, `scope.use_saved_scope`, per-library index health fields |
 | 2026-05-26 | §2: clarify query label vs search presets vs video metadata tags; §5.5 preset sketch; plan in `docs/planned_features.md` |
 | 2026-05-27 | Search presets API: `GET /search/presets`, `GET /search/presets/{id}`, `POST /search` + `preset_id`; §5 renumbered; `capabilities.search_presets` |
+| 2026-05-31 | GUI parity: default scope mirrors desktop picker (omit `scope`); preset `video_paths`; `search_precision_mode`; preset `pixel_query_data` rerank; `capabilities.search_precision` |

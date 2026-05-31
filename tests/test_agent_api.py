@@ -235,7 +235,63 @@ class AgentApiPresetTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             get_agent_search_preset("missing")
 
-    @patch("src.services.search_scope.resolve_active_search_library_scope", return_value=["D:/lib"])
+    @patch("src.web.agent_api.resolve_active_search_video_scope", return_value=None)
+    @patch("src.web.agent_api.resolve_active_search_library_scope", return_value=["D:/saved_lib"])
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_execute_agent_search_uses_active_scope_by_default(
+        self,
+        mock_run_search,
+        mock_snapshot,
+        _mock_library_scope,
+        _mock_video_scope,
+    ):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/clip.mp4")]
+        body = AgentSearchRequest(query="goal", mode="frame")
+        payload = execute_agent_search(body)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["meta"]["scope_applied"])
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("scope_library_paths"), ["D:/saved_lib"])
+        self.assertIsNone(kwargs.get("scope_video_paths"))
+
+    @patch("src.web.agent_api.resolve_active_search_video_scope", return_value=["D:/scoped.mp4"])
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_execute_agent_search_uses_active_video_scope(
+        self,
+        mock_run_search,
+        mock_snapshot,
+        _mock_video_scope,
+    ):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/scoped.mp4")]
+        body = AgentSearchRequest(query="goal", mode="frame")
+        payload = execute_agent_search(body)
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("scope_video_paths"), ["D:/scoped.mp4"])
+        self.assertIsNone(kwargs.get("scope_library_paths"))
+
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_execute_agent_search_passes_search_precision_mode(self, mock_run_search, mock_snapshot):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/clip.mp4")]
+        with patch("src.web.agent_api.os.path.isfile", return_value=True):
+            body = AgentSearchRequest(
+                query="D:/ref.png",
+                query_type="image_path",
+                search_precision_mode="precise",
+                mode="frame",
+            )
+            payload = execute_agent_search(body)
+        self.assertEqual(payload["meta"]["search_precision_mode"], "precise")
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("search_precision_mode"), "precise")
+
+    @patch("src.web.agent_api.resolve_active_search_library_scope", return_value=["D:/lib"])
+    @patch("src.web.agent_api.resolve_active_search_video_scope", return_value=None)
     @patch("src.services.search_preset_service.build_preset_search_plan")
     @patch("src.web.agent_api._index_snapshot")
     @patch("src.web.agent_api.run_search")
@@ -244,6 +300,7 @@ class AgentApiPresetTests(unittest.TestCase):
         mock_run_search,
         mock_snapshot,
         mock_build_plan,
+        _mock_video_scope,
         _mock_scope,
     ):
         import numpy as np
@@ -257,7 +314,10 @@ class AgentApiPresetTests(unittest.TestCase):
             "top_k": 12,
             "min_score": None,
             "is_text": True,
+            "has_image": False,
             "query_data": "anime night",
+            "scope_video_paths": None,
+            "pixel_query_data": None,
         }
         body = AgentSearchRequest(preset_id="p1", mode="frame")
         payload = execute_agent_search(body)
@@ -268,6 +328,40 @@ class AgentApiPresetTests(unittest.TestCase):
         kwargs = mock_run_search.call_args.kwargs
         self.assertIsNotNone(kwargs.get("query_vector"))
         self.assertEqual(kwargs.get("scope_library_paths"), ["D:/lib"])
+
+    @patch("src.services.search_preset_service.build_preset_search_plan")
+    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.run_search")
+    def test_execute_agent_search_preset_uses_video_scope_and_pixel_query(
+        self,
+        mock_run_search,
+        mock_snapshot,
+        mock_build_plan,
+    ):
+        import numpy as np
+
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [SearchHit(10.0, 10.0, 0.7, "D:/clip.mp4")]
+        mock_build_plan.return_value = {
+            "preset": {"id": "p2", "name": "Ref Shot", "query": ""},
+            "query_vector": np.array([[0.1, 0.2]], dtype=np.float32),
+            "search_mode": "frame",
+            "top_k": 8,
+            "min_score": None,
+            "is_text": False,
+            "has_image": True,
+            "query_data": "D:/ref.png",
+            "scope_video_paths": ["D:/clip.mp4"],
+            "pixel_query_data": "D:/ref.png",
+        }
+        body = AgentSearchRequest(preset_id="p2", mode="frame", search_precision_mode="precise")
+        payload = execute_agent_search(body)
+        self.assertTrue(payload["ok"])
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("scope_video_paths"), ["D:/clip.mp4"])
+        self.assertIsNone(kwargs.get("scope_library_paths"))
+        self.assertEqual(kwargs.get("pixel_query_data"), "D:/ref.png")
+        self.assertEqual(kwargs.get("search_precision_mode"), "precise")
 
     def test_execute_agent_search_rejects_query_and_preset(self):
         body = AgentSearchRequest(query="test", preset_id="p1")
