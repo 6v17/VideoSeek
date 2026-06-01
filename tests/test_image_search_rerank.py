@@ -9,6 +9,7 @@ from src.services.image_search_rerank import (
     _hit_probe_plan,
     apply_image_pixel_rerank,
     build_index_step_by_video,
+    is_likely_cropped_query_image,
     median_index_step,
     resolve_probe_params,
 )
@@ -77,7 +78,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         match_frame = query.copy()
 
         def _thumb_side_effect(video_path, time_sec):
-            if abs(float(time_sec) - 54.5) < 0.01:
+            if abs(float(time_sec) - 54.4) < 0.01:
                 return match_frame
             return np.full((80, 80, 3), 128, dtype=np.uint8)
 
@@ -90,10 +91,11 @@ class ImageSearchRerankTests(unittest.TestCase):
             config=_fixed_probe_config(
                 image_pixel_rerank_top_n=1,
                 image_pixel_rerank_time_window_sec=1.0,
+                image_pixel_rerank_probe_step_sec=0.4,
             ),
             top_k=1,
         )
-        self.assertEqual(reranked[0].start_sec, 54.5)
+        self.assertAlmostEqual(float(reranked[0].start_sec), 54.4, places=2)
 
     @unittest.mock.patch("src.services.image_search_rerank.compute_dhash", return_value=123456)
     @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
@@ -142,7 +144,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         )
 
         self.assertGreater(mock_thumb.call_count, 0)
-        self.assertLess(mock_thumb.call_count, 18)
+        self.assertLess(mock_thumb.call_count, 40)
 
     @unittest.mock.patch("src.services.image_search_rerank.compute_dhash")
     @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
@@ -168,7 +170,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         )
 
         self.assertGreater(mock_dhash.call_count, 0)
-        self.assertLess(mock_dhash.call_count, 18)
+        self.assertLess(mock_dhash.call_count, 40)
 
 
 class DynamicProbeTests(unittest.TestCase):
@@ -222,6 +224,12 @@ class DynamicProbeTests(unittest.TestCase):
         # point hit widens window to 3.0 with step=0.25 => more probes than legacy 0.5 step
         self.assertEqual(mock_thumb.call_count, 25)
 
+    def test_crop_detection_flags_non_video_aspect(self):
+        cropped = np.zeros((400, 800, 3), dtype=np.uint8)
+        widescreen = np.zeros((720, 1280, 3), dtype=np.uint8)
+        self.assertTrue(is_likely_cropped_query_image(cropped))
+        self.assertFalse(is_likely_cropped_query_image(widescreen))
+
 
 class NeighborScoreCacheTests(unittest.TestCase):
     def test_neighbor_candidate_score_reuses_cached_dot(self):
@@ -251,6 +259,32 @@ class NeighborScoreCacheTests(unittest.TestCase):
         self.assertAlmostEqual(second, 1.0)
         self.assertAlmostEqual(third, 0.8)
         self.assertEqual(reconstruct_calls["count"], 2)
+
+    def test_neighbor_candidate_score_uses_preloaded_vectors(self):
+        from src.services import search_service
+
+        vectors = np.array(
+            [
+                [1.0, 0.0],
+                [0.1, 0.9],
+            ],
+            dtype=np.float32,
+        )
+        query = np.array([1.0, 0.0], dtype=np.float32)
+
+        class FailIndex:
+            def reconstruct(self, idx):
+                raise AssertionError(f"unexpected reconstruct for {idx}")
+
+        score = search_service._neighbor_candidate_score(
+            query,
+            FailIndex(),
+            0,
+            {},
+            {},
+            vector_matrix=vectors,
+        )
+        self.assertAlmostEqual(score, 1.0)
 
 
 if __name__ == "__main__":

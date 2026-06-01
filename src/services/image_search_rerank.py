@@ -134,10 +134,52 @@ def _probe_time_key(video_path: str, time_sec: float) -> tuple[str, int]:
     return normalized_path, quantized_ms
 
 
+class VideoThumbnailSession:
+    """Reuse one VideoCapture per video during a pixel probe batch."""
+
+    def __init__(self):
+        self._captures: dict[str, object] = {}
+
+    def read(self, video_path: str, time_sec: float) -> Optional[np.ndarray]:
+        import cv2
+
+        path = str(video_path or "").strip()
+        if not path:
+            return None
+        capture = self._captures.get(path)
+        if capture is None or not capture.isOpened():
+            if capture is not None:
+                try:
+                    capture.release()
+                except Exception:
+                    pass
+            capture = cv2.VideoCapture(path)
+            self._captures[path] = capture
+        if capture.isOpened():
+            try:
+                capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(time_sec)) * 1000.0)
+                ok, frame = capture.read()
+                if ok and frame is not None and frame.size > 0:
+                    return frame
+            except Exception:
+                pass
+        return get_single_thumbnail(path, time_sec)
+
+    def close(self) -> None:
+        for capture in self._captures.values():
+            try:
+                capture.release()
+            except Exception:
+                pass
+        self._captures.clear()
+
+
 def _get_thumbnail_cached(
     video_path: str,
     time_sec: float,
     cache: dict[tuple[str, int], object | None],
+    *,
+    decode_session: "VideoThumbnailSession | None" = None,
 ) -> Optional[np.ndarray]:
     key = _probe_time_key(video_path, time_sec)
     if key in cache:
@@ -148,7 +190,10 @@ def _get_thumbnail_cached(
     from time import perf_counter
 
     started = perf_counter()
-    frame = get_single_thumbnail(video_path, time_sec)
+    if decode_session is not None:
+        frame = decode_session.read(video_path, time_sec)
+    else:
+        frame = get_single_thumbnail(video_path, time_sec)
     if profiling_active():
         add_profile_ms("pixel_decode", int((perf_counter() - started) * 1000))
         add_profile_counter("thumb_decode", 1)
@@ -161,13 +206,20 @@ def _get_probe_dhash_cached(
     time_sec: float,
     thumbnail_cache: dict[tuple[str, int], object | None],
     probe_hash_cache: dict[tuple[str, int], int],
+    *,
+    decode_session: "VideoThumbnailSession | None" = None,
 ) -> int:
     key = _probe_time_key(video_path, time_sec)
     if key in probe_hash_cache:
         return probe_hash_cache[key]
     from time import perf_counter
 
-    frame = _get_thumbnail_cached(video_path, time_sec, thumbnail_cache)
+    frame = _get_thumbnail_cached(
+        video_path,
+        time_sec,
+        thumbnail_cache,
+        decode_session=decode_session,
+    )
     if frame is None or frame.size <= 0:
         probe_hash_cache[key] = 0
         return 0
@@ -179,6 +231,10 @@ def _get_probe_dhash_cached(
     return value
 
 
+_COMMON_VIDEO_ASPECTS = (16 / 9, 4 / 3, 3 / 4, 9 / 16, 2.35, 1.0)
+_CROP_ASPECT_TOLERANCE = 0.18
+
+
 def _load_query_image_bgr(query_data) -> Optional[np.ndarray]:
     if isinstance(query_data, str):
         from src.core.image_io import load_image_bgr
@@ -187,6 +243,23 @@ def _load_query_image_bgr(query_data) -> Optional[np.ndarray]:
     if isinstance(query_data, np.ndarray) and query_data.size > 0:
         return query_data
     return None
+
+
+def is_likely_cropped_query_image(
+    query_data,
+    *,
+    tolerance: float = _CROP_ASPECT_TOLERANCE,
+) -> bool:
+    """Heuristic: non-standard aspect ratios usually mean a cropped screenshot."""
+    image = _load_query_image_bgr(query_data)
+    if image is None:
+        return False
+    height, width = image.shape[:2]
+    if height <= 1 or width <= 1:
+        return False
+    aspect = float(width) / float(height)
+    best_delta = min(abs(aspect - reference) for reference in _COMMON_VIDEO_ASPECTS)
+    return best_delta > float(tolerance)
 
 
 def _image_pixel_rerank_enabled(config) -> bool:
@@ -269,6 +342,7 @@ def _best_pixel_match(
     probe_hash_cache: dict[tuple[str, int], int] | None = None,
     seed_time_sec: float | None = None,
     max_time_shift_sec: float | None = None,
+    decode_session: "VideoThumbnailSession | None" = None,
 ) -> tuple[float, float]:
     seed = float(seed_time_sec if seed_time_sec is not None else center_sec)
     max_shift = max_time_shift_sec
@@ -287,6 +361,7 @@ def _best_pixel_match(
             probe_time,
             frame_cache,
             hash_cache,
+            decode_session=decode_session,
         )
         if probe_hash <= 0:
             continue
@@ -329,16 +404,21 @@ def refine_hit_time_with_pixel(
     center = _clamp_time_near_seed(_hit_probe_center(hit), seed, max_time_shift_sec)
     window, step = _hit_probe_plan(hit, config, lookup=lookup)
     window = min(float(window), float(max_time_shift_sec))
-    best_time, pixel_sim = _best_pixel_match(
-        query_hash,
-        hit.video_path,
-        center,
-        config,
-        window_sec=window,
-        step_sec=step,
-        seed_time_sec=seed,
-        max_time_shift_sec=max_time_shift_sec,
-    )
+    decode_session = VideoThumbnailSession()
+    try:
+        best_time, pixel_sim = _best_pixel_match(
+            query_hash,
+            hit.video_path,
+            center,
+            config,
+            window_sec=window,
+            step_sec=step,
+            seed_time_sec=seed,
+            max_time_shift_sec=max_time_shift_sec,
+            decode_session=decode_session,
+        )
+    finally:
+        decode_session.close()
     min_similarity = _image_pixel_min_similarity(config)
     if pixel_sim < min_similarity:
         return SearchHit(seed, seed, clip_score, str(hit.video_path))
@@ -384,43 +464,47 @@ def apply_image_pixel_rerank(
     reranked: List[tuple[int, SearchHit]] = []
     thumbnail_cache: dict[tuple[str, int], object | None] = {}
     probe_hash_cache: dict[tuple[str, int], int] = {}
-
-    for rank, hit in enumerate(head):
-        clip_score = float(getattr(hit, "score", 0.0) or 0.0)
-        span_end = float(hit.end_sec)
-        span_start = float(hit.start_sec)
-        is_chunk_span = span_end > span_start + 0.5
-        seed_time = float(seed_values[rank]) if rank < len(seed_values) else float(span_start)
-        center = _hit_probe_center(hit)
-        if max_time_shift_sec is not None and max_time_shift_sec > 0:
-            center = _clamp_time_near_seed(center, seed_time, max_time_shift_sec)
-        window, step = _hit_probe_plan(hit, config, lookup=lookup)
-        if max_time_shift_sec is not None and max_time_shift_sec > 0:
-            window = min(float(window), float(max_time_shift_sec))
-        best_time, pixel_sim = _best_pixel_match(
-            query_hash,
-            hit.video_path,
-            center,
-            config,
-            window_sec=window,
-            step_sec=step,
-            thumbnail_cache=thumbnail_cache,
-            probe_hash_cache=probe_hash_cache,
-            seed_time_sec=seed_time,
-            max_time_shift_sec=max_time_shift_sec,
-        )
-
-        if pixel_sim < min_similarity:
-            reranked.append((rank, SearchHit(span_start, span_end, clip_score, hit.video_path)))
-            continue
-
-        combined = (_CLIP_SCORE_WEIGHT * clip_score) + (_PIXEL_SCORE_WEIGHT * pixel_sim)
-        if is_chunk_span:
-            reranked.append((rank, SearchHit(span_start, span_end, combined, hit.video_path)))
-        else:
+    decode_session = VideoThumbnailSession()
+    try:
+        for rank, hit in enumerate(head):
+            clip_score = float(getattr(hit, "score", 0.0) or 0.0)
+            span_end = float(hit.end_sec)
+            span_start = float(hit.start_sec)
+            is_chunk_span = span_end > span_start + 0.5
+            seed_time = float(seed_values[rank]) if rank < len(seed_values) else float(span_start)
+            center = _hit_probe_center(hit)
             if max_time_shift_sec is not None and max_time_shift_sec > 0:
-                best_time = _clamp_time_near_seed(best_time, seed_time, max_time_shift_sec)
-            reranked.append((rank, SearchHit(best_time, best_time, combined, hit.video_path)))
+                center = _clamp_time_near_seed(center, seed_time, max_time_shift_sec)
+            window, step = _hit_probe_plan(hit, config, lookup=lookup)
+            if max_time_shift_sec is not None and max_time_shift_sec > 0:
+                window = min(float(window), float(max_time_shift_sec))
+            best_time, pixel_sim = _best_pixel_match(
+                query_hash,
+                hit.video_path,
+                center,
+                config,
+                window_sec=window,
+                step_sec=step,
+                thumbnail_cache=thumbnail_cache,
+                probe_hash_cache=probe_hash_cache,
+                seed_time_sec=seed_time,
+                max_time_shift_sec=max_time_shift_sec,
+                decode_session=decode_session,
+            )
+
+            if pixel_sim < min_similarity:
+                reranked.append((rank, SearchHit(span_start, span_end, clip_score, hit.video_path)))
+                continue
+
+            combined = (_CLIP_SCORE_WEIGHT * clip_score) + (_PIXEL_SCORE_WEIGHT * pixel_sim)
+            if is_chunk_span:
+                reranked.append((rank, SearchHit(span_start, span_end, combined, hit.video_path)))
+            else:
+                if max_time_shift_sec is not None and max_time_shift_sec > 0:
+                    best_time = _clamp_time_near_seed(best_time, seed_time, max_time_shift_sec)
+                reranked.append((rank, SearchHit(best_time, best_time, combined, hit.video_path)))
+    finally:
+        decode_session.close()
 
     if preserve_order:
         merged = [hit for _rank, hit in reranked]

@@ -4,6 +4,7 @@ from unittest import mock
 from src.app.config import DEFAULT_CONFIG, _sanitize_general_settings
 from src.services.image_search_rerank import (
     _image_pixel_rerank_top_n,
+    is_likely_cropped_query_image,
     resolve_probe_params,
 )
 from src.services.search_scope import resolve_per_video_fetch_top_k
@@ -14,9 +15,12 @@ from src.services.search_service import (
     _locate_frames_in_recalled_videos,
     _neighbor_rerank_enabled,
     _precise_pixel_localize_top_n,
+    _refine_precise_seed_hits,
     _resolve_frame_fetch_top_k,
+    _resolve_locate_result_top_k,
     _resolve_stage1_global_fetch_k,
     _search_frame_results_in_time_window,
+    _search_locate_anchor_window_hits,
     _top_video_paths_from_hits,
     _use_video_discovery_results,
 )
@@ -190,6 +194,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
             object(),
             np.array([20.0], dtype=np.float32),
             np.array(["D:/runner-up.mp4"], dtype=object),
+            None,
         )
         mock_search_with_ids.return_value = (
             [SearchHit(21.0, 21.0, 0.97, "D:/runner-up.mp4")],
@@ -230,6 +235,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
             object(),
             np.array([64.0, 200.0], dtype=np.float32),
             np.array(["D:/a.mp4", "D:/a.mp4"], dtype=object),
+            None,
         )
         mock_search_with_ids.return_value = (
             [SearchHit(200.0, 200.0, 0.97, "D:/a.mp4")],
@@ -293,6 +299,131 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertEqual(ids, [0, 1])
         self.assertEqual(len(hits), 2)
         self.assertTrue(all(abs(float(hit.start_sec) - 64.0) <= 10.0 for hit in hits))
+
+    def test_search_frame_results_in_time_window_prefers_high_scores_when_truncating(self):
+        import numpy as np
+
+        class DummyIndex:
+            d = 2
+            ntotal = 60
+
+            def reconstruct(self, idx):
+                if int(idx) == 25:
+                    return np.array([1.0, 0.0], dtype=np.float32)
+                return np.array([0.1, 0.9], dtype=np.float32)
+
+        timestamps = np.array([float(34 + idx) for idx in range(60)], dtype=np.float32)
+        paths = np.array(["D:/a.mp4"] * 60, dtype=object)
+        query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
+
+        hits, ids = _search_frame_results_in_time_window(
+            query_vector,
+            DummyIndex(),
+            timestamps,
+            paths,
+            center_sec=64.0,
+            window_sec=30.0,
+            top_k=1,
+        )
+
+        self.assertEqual(len(hits), 1)
+        self.assertAlmostEqual(float(hits[0].start_sec), 59.0)
+        self.assertIn(25, ids)
+
+    @mock.patch("src.services.search_service._apply_bounded_neighbor_refine", side_effect=lambda hits, *_args, **_kwargs: hits)
+    @mock.patch("src.services.search_service._search_frame_results_with_ids")
+    @mock.patch("src.services.search_service.load_search_assets")
+    def test_search_locate_anchor_window_uses_global_hits(self, mock_load_assets, mock_search_with_ids, _mock_neighbor):
+        import numpy as np
+
+        class DummyIndex:
+            ntotal = 2
+
+        mock_load_assets.return_value = (
+            DummyIndex(),
+            np.array([64.0, 200.0], dtype=np.float32),
+            np.array(["D:/a.mp4", "D:/a.mp4"], dtype=object),
+        )
+        mock_search_with_ids.return_value = (
+            [
+                SearchHit(64.0, 64.0, 0.99, "D:/a.mp4"),
+                SearchHit(200.0, 200.0, 0.95, "D:/b.mp4"),
+            ],
+            [0, 1],
+        )
+
+        hits = _search_locate_anchor_window_hits(
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            "D:/a.mp4",
+            64.0,
+            20,
+            {},
+        )
+
+        self.assertEqual(len(hits), 1)
+        self.assertAlmostEqual(float(hits[0].start_sec), 64.0)
+        mock_search_with_ids.assert_called_once()
+
+    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=False)
+    def test_refine_locate_pixels_only_top_three(self, _mock_crop, mock_pixel):
+        hits = [
+            SearchHit(float(idx), float(idx), 0.9 - idx * 0.01, "D:/a.mp4")
+            for idx in range(5)
+        ]
+        mock_pixel.return_value = hits[:3]
+
+        refined = _refine_precise_seed_hits(
+            object(),
+            hits,
+            20,
+            {},
+            locate_anchor_sec=64.0,
+        )
+
+        self.assertEqual(len(refined), 5)
+        mock_pixel.assert_called_once()
+        passed_hits = mock_pixel.call_args.args[1]
+        self.assertEqual(len(passed_hits), 3)
+
+    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=True)
+    def test_refine_locate_skips_pixel_for_cropped_query(self, _mock_crop, mock_pixel):
+        hits = [SearchHit(64.0, 64.0, 0.99, "D:/a.mp4")]
+
+        refined = _refine_precise_seed_hits(
+            object(),
+            hits,
+            20,
+            {},
+            locate_anchor_sec=64.0,
+        )
+
+        self.assertEqual(len(refined), 1)
+        self.assertAlmostEqual(float(refined[0].start_sec), 64.0)
+        mock_pixel.assert_not_called()
+
+    def test_resolve_locate_result_top_k_caps_to_three(self):
+        self.assertEqual(_resolve_locate_result_top_k(20), 3)
+        self.assertEqual(_resolve_locate_result_top_k(1), 1)
+
+    def test_emit_search_progress_invokes_callback(self):
+        from src.services.search_progress import clear_search_progress_callback, emit_search_progress, set_search_progress_callback
+
+        seen = []
+
+        def _capture(phase, message=""):
+            seen.append((phase, message))
+
+        set_search_progress_callback(_capture)
+        try:
+            emit_search_progress("locate_progress_clip")
+            emit_search_progress("locate_progress_pixel", "locate_progress_pixel")
+        finally:
+            clear_search_progress_callback()
+
+        self.assertEqual(seen[0], ("locate_progress_clip", ""))
+        self.assertEqual(seen[1], ("locate_progress_pixel", "locate_progress_pixel"))
 
 
 if __name__ == "__main__":

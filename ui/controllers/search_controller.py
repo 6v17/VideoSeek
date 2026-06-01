@@ -23,6 +23,10 @@ class SearchController(QObject):
     def _result_view(self):
         return self.parent_window.search_page.result_view
 
+    def is_search_running(self) -> bool:
+        worker = self.worker
+        return worker is not None and worker.isRunning()
+
     def start_search(
         self,
         query,
@@ -59,6 +63,7 @@ class SearchController(QObject):
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
+        self.worker.progress_signal.connect(self._on_search_progress)
         self.worker.finished.connect(self._finish_search)
         self.worker.start()
 
@@ -113,6 +118,7 @@ class SearchController(QObject):
         for signal, slot in (
             (worker.result_ready, self._display_results),
             (worker.error_signal, self._handle_search_error),
+            (worker.progress_signal, self._on_search_progress),
             (worker.finished, self._finish_search),
         ):
             try:
@@ -151,6 +157,16 @@ class SearchController(QObject):
         if self._is_shutdown:
             return
         self._result_view().set_thumbnail(row, pixmap)
+
+    def _on_search_progress(self, progress_key: str):
+        if self._is_shutdown:
+            return
+        key = str(progress_key or "").strip()
+        if not key:
+            return
+        texts = self.parent_window.texts
+        label = texts.get(key, key)
+        self.parent_window.search_page.lbl_status.setText(label)
 
     def _display_results(self, results):
         if self._is_shutdown:

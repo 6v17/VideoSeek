@@ -429,12 +429,16 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"index_dir": "index", "vector_dir": "vector"})
     @patch("src.services.indexing_service.get_video_duration_seconds", return_value=60.0)
     @patch("src.services.indexing_service.generate_vectors_and_index_for_video", return_value=([], [], None))
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_marks_sync_failed_when_generation_returns_empty_data(
         self,
         _mock_stream,
         _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
         _mock_generate,
         _mock_duration,
         _mock_model_dirs,
@@ -460,12 +464,16 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"index_dir": "index", "vector_dir": "vector"})
     @patch("src.services.indexing_service.get_video_duration_seconds", return_value=0.6)
     @patch("src.services.indexing_service.generate_vectors_and_index_for_video", return_value=([], [], None))
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_marks_too_short_reason_for_subsecond_video(
         self,
         _mock_stream,
         _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
         _mock_generate,
         _mock_duration,
         _mock_model_dirs,
@@ -488,22 +496,25 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"index_dir": "index", "vector_dir": "vector"})
     @patch("src.services.indexing_service.create_clip_index")
-    @patch("src.services.indexing_service.os.path.exists", return_value=False)
-    @patch("src.services.indexing_service.load_video_vectors_by_id")
+    @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_rebuilds_missing_per_video_index_when_reusing_vectors(
         self,
         _mock_stream,
         _mock_getmtime,
-        mock_load_vectors,
-        _mock_exists,
+        mock_reuse,
         mock_create_index,
         _mock_model_dirs,
     ):
         vectors = np.array([[1.0, 0.0]], dtype=np.float32)
         timestamps = np.array([0.0], dtype=np.float32)
-        mock_load_vectors.return_value = (vectors, timestamps)
+        mock_reuse.return_value = {
+            "canonical_vid": "vid_a",
+            "disk_vid": "vid_a",
+            "vectors": vectors,
+            "timestamps": timestamps,
+        }
         lib_files = {"clip.mp4": {"vid": "vid_a", "mod_time": 123.0}}
 
         reused_vectors, reused_timestamps, metadata_updated, search_assets_changed = indexing_service.process_single_video(
@@ -527,12 +538,16 @@ class IndexingServiceTests(unittest.TestCase):
         "src.services.indexing_service.generate_vectors_and_index_for_video",
         return_value=(np.array([[1.0]], dtype=np.float32), [0.0, 1.0], None),
     )
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_marks_sync_failed_when_vector_timestamp_counts_mismatch(
         self,
         _mock_stream,
         _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
         _mock_generate,
         _mock_model_dirs,
     ):
@@ -558,12 +573,16 @@ class IndexingServiceTests(unittest.TestCase):
         "src.services.indexing_service.generate_vectors_and_index_for_video",
         side_effect=RuntimeError("DirectML device lost: GPU out of memory"),
     )
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_classifies_gpu_oom_exception(
         self,
         _mock_stream,
         _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
         _mock_generate,
         _mock_model_dirs,
     ):
@@ -600,12 +619,16 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch.dict("src.services.indexing_service.os.environ", {"VIDEOSEEK_DEBUG_FORCE_GPU_OOM": "1"}, clear=False)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_supports_debug_forced_gpu_oom(
         self,
         _mock_stream,
         _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
         _mock_model_dirs,
     ):
         lib_files = {}
@@ -631,12 +654,16 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch.dict("src.services.indexing_service.os.environ", {"VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM": "1"}, clear=False)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     def test_process_single_video_supports_debug_forced_system_oom(
         self,
         _mock_stream,
         _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
         _mock_model_dirs,
     ):
         lib_files = {}
@@ -1195,7 +1222,7 @@ class SearchServiceTests(unittest.TestCase):
         result = search_service.run_search("query", is_text=True)
 
         self.assertEqual(result, [])
-        mock_build_query_vector.assert_not_called()
+        mock_build_query_vector.assert_called_once()
         mock_search_results_with_ids.assert_not_called()
 
     @patch("src.services.search_service._run_frame_search_per_videos")
@@ -1221,12 +1248,14 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(result, expected)
         mock_per_video_search.assert_called_once()
 
+    @patch("src.services.search_service.build_query_vector", return_value=np.array([[1.0, 0.0]], dtype=np.float32))
     @patch("src.services.search_service._run_frame_search_per_videos")
     @patch("src.services.search_service.load_config")
     def test_run_search_uses_per_video_route_for_precise_scoped_image(
         self,
         mock_load_config,
         mock_per_video_search,
+        _mock_build_query_vector,
     ):
         from src.domain.search_hit import SearchHit
 

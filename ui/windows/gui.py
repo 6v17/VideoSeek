@@ -689,6 +689,9 @@ class MainWindow(
         target = str(video_path or "").strip()
         if not target:
             return
+        if self.search_controller.is_search_running():
+            self.search_page.lbl_status.setText(self.texts.get("search_busy", self.texts["searching"]))
+            return
 
         self.switch_page("search")
         self._set_search_precision_mode_ui("precise")

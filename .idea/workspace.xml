@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="搜索界面重构">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="搜索优化">
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -379,6 +379,9 @@
       <change beforePath="$PROJECT_DIR$/tests/test_image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_image_search_rerank.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -736,15 +739,7 @@
       <workItem from="1779934180261" duration="31540000" />
       <workItem from="1780014228624" duration="79859000" />
       <workItem from="1780190591134" duration="36366000" />
-      <workItem from="1780279559713" duration="6934000" />
-    </task>
-    <task id="LOCAL-00045" summary="修复bug">
-      <option name="closed" value="true" />
-      <created>1776601448022</created>
-      <option name="number" value="00045" />
-      <option name="presentableId" value="LOCAL-00045" />
-      <option name="project" value="LOCAL" />
-      <updated>1776601448022</updated>
+      <workItem from="1780279559713" duration="8295000" />
     </task>
     <task id="LOCAL-00046" summary="修复bug">
       <option name="closed" value="true" />
@@ -1130,7 +1125,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780246088632</updated>
     </task>
-    <option name="localTasksCounter" value="94" />
+    <task id="LOCAL-00094" summary="搜索优化">
+      <option name="closed" value="true" />
+      <created>1780288276151</created>
+      <option name="number" value="00094" />
+      <option name="presentableId" value="LOCAL-00094" />
+      <option name="project" value="LOCAL" />
+      <updated>1780288276151</updated>
+    </task>
+    <option name="localTasksCounter" value="95" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1160,7 +1163,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="重新提交" />
     <MESSAGE value="增加同步异常状态" />
     <MESSAGE value="小bug" />
     <MESSAGE value="GPU降级处理、数据迁移、BUG修复" />
@@ -1185,7 +1187,8 @@
     <MESSAGE value="更新说明" />
     <MESSAGE value="精搜优化" />
     <MESSAGE value="搜索界面重构" />
-    <option name="LAST_COMMIT_MESSAGE" value="搜索界面重构" />
+    <MESSAGE value="搜索优化" />
+    <option name="LAST_COMMIT_MESSAGE" value="搜索优化" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

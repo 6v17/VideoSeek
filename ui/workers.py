@@ -46,6 +46,7 @@ class StartupMigrationWorker(QThread):
 class SearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
+    progress_signal = Signal(str)
     finished = Signal()
 
     def __init__(
@@ -75,6 +76,11 @@ class SearchWorker(QThread):
         self.pixel_query_data = pixel_query_data
         self.preview_anchor_sec = preview_anchor_sec
 
+    def _emit_progress(self, phase: str, message: str = "") -> None:
+        key = str(message or phase or "").strip()
+        if key:
+            self.progress_signal.emit(key)
+
     def run(self):
         try:
             from src.services.search_service import filter_hits_by_min_score, run_search
@@ -93,6 +99,7 @@ class SearchWorker(QThread):
                 search_precision_mode=self.search_precision_mode,
                 pixel_query_data=self.pixel_query_data,
                 preview_anchor_sec=self.preview_anchor_sec,
+                progress_callback=self._emit_progress,
                 **base_kwargs,
             )
             results = filter_hits_by_min_score(results, self.min_score)
