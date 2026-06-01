@@ -45,18 +45,23 @@ class PreviewGuiMixin:
 
         start_sec = float(payload.get("start_sec", 0.0))
         end_sec = float(payload.get("end_sec", start_sec))
-        self.preview_controller.stop_preview()
+        suggested_sec = float(payload.get("suggested_sec", start_sec))
+        self.preview_controller.stop_preview(skip_telemetry=True)
         self._update_expand_preview_button()
         self._preview_dialog_opening = True
         self._preview_dialog_cooldown_until = now + 0.8
 
         try:
             if not hasattr(self, "_preview_dialog") or self._preview_dialog is None:
-                self._preview_dialog = PreviewDialog(self, video_path, start_sec, end_sec, self.texts)
+                self._preview_dialog = PreviewDialog(
+                    self, video_path, start_sec, end_sec, self.texts, suggested_sec=suggested_sec
+                )
                 self._preview_dialog.export_requested.connect(self._queue_preview_export)
                 self._preview_dialog.export_status_changed.connect(self._handle_preview_export_status)
             else:
-                self._preview_dialog.load_preview(video_path, start_sec, end_sec)
+                self._preview_dialog.load_preview(
+                    video_path, start_sec, end_sec, suggested_sec=suggested_sec
+                )
             self._preview_dialog.show()
             self._preview_dialog.raise_()
             self._preview_dialog.activateWindow()

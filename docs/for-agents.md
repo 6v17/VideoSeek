@@ -4,7 +4,7 @@ This document is for **external agents** (Cursor, Claude Code, custom scripts, M
 
 > **Status:** **In development** — on `http://127.0.0.1:8765` when the desktop app is running **and** **Settings → General → 本机搜索接口** is enabled (`src/web/agent_api.py`). Default: **off**.
 >
-> Endpoints: `GET /api/v1/health` · `GET /api/v1/agent-starter` · `GET /api/v1/libraries` · `GET /api/v1/libraries/videos` · `GET /api/v1/search/presets` · `GET /api/v1/search/presets/{id}` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `POST /api/v1/export/manifest` · `POST /api/v1/export/clip`
+> Endpoints: `GET /api/v1/health` · `GET /api/v1/agent-starter` · `GET /api/v1/libraries` · `GET /api/v1/libraries/videos` · `GET /api/v1/search/presets` · `GET /api/v1/search/presets/{id}` · `POST /api/v1/search` · `POST /api/v1/search/batch` · `GET /api/v1/search/telemetry` · `POST /api/v1/export/manifest` · `POST /api/v1/export/clip`
 >
 > Request/response fields may still change before a public freeze. Treat this doc as the current draft, not a permanent contract.
 
@@ -283,7 +283,8 @@ Optional query: `?mode=frame` or `?mode=chunk` (which index to probe; default fo
 | `saved_search_scope_mode` | Desktop setting: `all` or `selected`. When you **omit** `scope` on `/search`, the server mirrors this saved picker (same as the desktop Search button) |
 | `max_batch_queries` / `batch_timeout_sec` | Batch limits — size `queries[]` and expect HTTP 503 if exceeded. Batch timeout scales with item count × per-item timeout (fast vs precise), capped at 7200s |
 | `search_timeout_sec` | Per-request timeout for **fast** searches (text or image). Default **90s** |
-| `search_timeout_precise_sec` | Per-request timeout when `search_precision_mode: "precise"` (image / preset ref-image). Default **180s** — pixel rerank can take ~10–20s per query |
+| `search_timeout_precise_sec` | Per-request timeout when `search_precision_mode: "precise"` (image / preset ref-image / crop locate). Default **180s** |
+| `search_telemetry_enabled` | Local screenshot metrics (default **true**); same JSON as desktop **Settings → 截图搜索诊断** |
 | `agent_api_default_image_precision` | Default when image queries omit `search_precision_mode`: `"fast"` or `"precise"`. Text-only always `"fast"` |
 
 ### 5.0.1 `GET /api/v1/agent-starter` (paste onboarding)
@@ -452,6 +453,7 @@ When `preset_id` is set, omit `query` and `query_type`. The server uses the pres
 | `scope.use_saved_scope` | boolean | no | Default `false`. Set `true` (with an otherwise empty `scope` object) to **explicitly** read desktop saved scope from config. Usually unnecessary — omitting `scope` already mirrors the desktop picker |
 | `expand_frame_hits` | boolean | no | Default `true`. Pad frame point hits by `pad_*`. |
 | `pad_before_sec` / `pad_after_sec` | number | no | Default **3** / **3** when expanding frame hits. |
+| `preview_anchor_sec` | number | no | **Screenshot locate-in-video** (same as desktop **定位镜头**). Requires image query + `scope.video_paths` with **exactly one** video. Server forces `search_precision_mode: "precise"`. Refines around this anchor (±5s CLIP, anchor stability); returns up to 1 crop hit. Omit for normal fast/precise search. |
 
 \* Provide **`preset_id` or `query`**, not both.
 
@@ -522,6 +524,67 @@ For `query_type: "image_path"`, `query` is the file path.
 | `meta.scope_uses_per_library_indexes` | `true` when v2 per-library indexes were queried directly |
 | `meta.scope_use_saved_scope` | Echo of `scope.use_saved_scope` |
 | `meta.saved_search_scope_mode` | Desktop `all` / `selected` at request time |
+| `meta.preview_anchor_sec` | Echo when crop locate was requested |
+| `meta.crop_locate` | `true` when `preview_anchor_sec` was used (screenshot locate-in-video pipeline) |
+
+#### Screenshot locate workflow (`preview_anchor_sec`)
+
+Same two-step semantics as the desktop **定位镜头** button:
+
+1. **Fast recall** — image search without `preview_anchor_sec` → get `video_path` + `start_sec` (anchor).
+2. **Locate** — same image + `scope.video_paths: [that video]` + `preview_anchor_sec: <anchor>` + forced precise mode.
+
+```json
+{
+  "query": "D:/refs/crop.png",
+  "query_type": "image_path",
+  "scope": { "video_paths": ["D:/Videos/library/match_01.mp4"] },
+  "preview_anchor_sec": 64.0,
+  "top_k": 1,
+  "mode": "frame",
+  "expand_frame_hits": true
+}
+```
+
+Crop screenshots skip pixel rerank; anchor moves only when CLIP gain ≥ 0.03 over the nearest anchor frame. Agent crop searches increment **confidence** telemetry; locate calls also increment **anchor retention** (via shared `search_service`).
+
+**Playback bias** (user scrub vs suggested time) is recorded from the **desktop preview UI only** — agents do not have a playback surface. Use `GET /search/telemetry` to read aggregated stats after the user reviews hits in VideoSeek.
+
+#### `GET /api/v1/search/telemetry`
+
+Read-only local screenshot-search diagnostics (same counters as desktop Settings panel).
+
+Optional query: `?locale=zh|en` (default `zh`).
+
+```json
+{
+  "api_version": "1",
+  "ok": true,
+  "enabled": true,
+  "file_path": "C:/Users/.../VideoSeek/telemetry/search_telemetry.json",
+  "panel_text": "Anchor 保留率\n92.4%\n\n播放平均绝对偏差\n0.8s\n...",
+  "summary": {
+    "crop_locate": { "total": 10, "anchor_kept": 9, "anchor_moved": 1, "retention_rate": 0.9 },
+    "confidence_tiers": { "clip_confidence_very_high": 6, "clip_confidence_high": 3 },
+    "playback_bias": {
+      "samples": 5,
+      "mean_abs_delta_sec": 0.8,
+      "within_1s_rate": 0.8,
+      "p50_abs_delta_sec": 0.6,
+      "p90_abs_delta_sec": 2.1,
+      "p95_abs_delta_sec": 3.4
+    }
+  }
+}
+```
+
+| Field | Agent use |
+|-------|-----------|
+| `enabled` | Respects `search_telemetry_enabled` in config (default on) |
+| `summary.playback_bias` | **Primary accuracy signal** when user previews in desktop UI |
+| `summary.crop_locate.retention_rate` | Validates “fast anchor is already good” design |
+| `summary.confidence_tiers` | Health monitor for CLIP / screenshot quality |
+| `panel_text` | Human-readable block for support tickets |
 
 #### Error responses
 
@@ -908,6 +971,7 @@ Run API calls in the user's local terminal when the IDE cannot reach 127.0.0.1:8
 | `agent_api_search_timeout_precise_sec` (config) | `180` | Per-search timeout when precise image mode is used |
 | `agent_api_batch_timeout_sec` (config) | `1200` | Minimum batch timeout floor (seconds); actual batch budget may scale up |
 | `agent_api_default_image_precision` (config) | `"fast"` | Default for image queries when `search_precision_mode` is omitted |
+| `search_telemetry_enabled` (config) | `true` | Local screenshot metrics; disable only if you must stop counter writes |
 | `VIDEOSEEK_AGENT_API` | *(unset)* | `0` = force off; `1` = force on (overrides config) |
 | `VIDEOSEEK_AGENT_API_HOST` | `127.0.0.1` | Bind address |
 | `VIDEOSEEK_AGENT_API_PORT` | `8765` | TCP port |
@@ -964,6 +1028,8 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | Library discovery | `src/services/agent_library_service.py` → `list_agent_libraries`, `list_agent_library_videos` |
 | Agent starter paste | `src/services/agent_starter_service.py` → `build_agent_starter_text` (`get_resource_path` for doc lookup) |
 | `POST /export/clip` | `src/services/agent_clip_service.py` → `execute_agent_export_clip` |
+| Crop locate (`preview_anchor_sec`) | `src/web/agent_api.py` → `execute_agent_search` → `run_search(..., preview_anchor_sec=…)` |
+| Screenshot telemetry | `src/services/search_telemetry.py` — shared by GUI + Agent; `GET /search/telemetry` → `get_agent_search_telemetry` |
 
 ---
 
@@ -985,3 +1051,4 @@ v1 Agent API is designed for **orchestration, not library administration**:
 | 2026-05-31 | v1.1: `GET /libraries`, `GET /libraries/videos`, `POST /export/clip`; `library_discovery` + `export_clip` capabilities; workflow §4 uses library discovery before search |
 | 2026-05-31 | `GET /agent-starter` + Settings「复制 Agent 说明」— short paste onboarding (not full for-agents.md) |
 | 2026-05-31 | `full_doc_rel` + Nuitka-friendly doc lookup via `get_resource_path("docs/for-agents.md")` |
+| 2026-06-01 | Screenshot locate: `preview_anchor_sec` on `POST /search`; `GET /search/telemetry`; shared `search_telemetry` with desktop; `capabilities.crop_locate` + `search_telemetry` |

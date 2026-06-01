@@ -334,6 +334,8 @@ class SearchPage(QWidget):
 
         self.search_panel = SearchPanel()
         self.query_card = self.search_panel
+        self.lbl_active_model = self.search_panel.lbl_active_model
+        self.lbl_text_model_hint = self.search_panel.lbl_text_model_hint
         self.search_query_tabs = self.search_panel.search_query_tabs
         self.img_label = self.search_panel.img_label
         self.text_search = self.search_panel.text_search

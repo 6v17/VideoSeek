@@ -475,7 +475,7 @@ def ensure_default_clip_manifest(config=None):
         "id": str(target_profile.get("id", "") or "clip_onnx_default"),
         "provider": "clip_onnx",
         "variant": variant,
-        "display_name": str(target_profile.get("display_name", "") or "CLIP ONNX"),
+        "display_name": str(target_profile.get("display_name", "") or "OpenAI CLIP"),
         "prefer_gpu": bool(runtime.get("prefer_gpu", True)),
         "required_files": list(REQUIRED_MODEL_FILES),
         "files": dict(target_profile.get("files") or {}),

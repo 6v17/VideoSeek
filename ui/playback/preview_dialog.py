@@ -92,12 +92,13 @@ class PreviewDialog(QDialog):
     export_requested = Signal(str, float, float, str)
     export_status_changed = Signal(str, str)
 
-    def __init__(self, parent, video_path, start_sec, end_sec, texts):
+    def __init__(self, parent, video_path, start_sec, end_sec, texts, suggested_sec=None):
         super().__init__(parent)
         self.texts = texts
         self.video_path = ""
         self.start_sec = 0.0
         self.end_sec = 0.0
+        self.suggested_sec = 0.0
         self._slider_dragging = False
         self._closing = False
         self._close_requested = False
@@ -211,7 +212,7 @@ class PreviewDialog(QDialog):
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
-        self.load_preview(video_path, start_sec, end_sec)
+        self.load_preview(video_path, start_sec, end_sec, suggested_sec=suggested_sec)
 
     def closeEvent(self, event):
         if self._close_requested:
@@ -234,7 +235,7 @@ class PreviewDialog(QDialog):
     def is_export_running(self):
         return False
 
-    def load_preview(self, video_path, start_sec, end_sec):
+    def load_preview(self, video_path, start_sec, end_sec, suggested_sec=None):
         self._closing = False
         self._close_requested = False
         self._close_after_export = False
@@ -253,6 +254,7 @@ class PreviewDialog(QDialog):
         self.video_path = str(video_path)
         self.start_sec = float(start_sec)
         self.end_sec = float(end_sec)
+        self.suggested_sec = float(suggested_sec if suggested_sec is not None else start_sec)
         self._known_total_ms = self._resolve_known_total_ms(video_path)
         self._pending_ui_seek_ms = None
         self._slider_dragging = False
@@ -267,6 +269,16 @@ class PreviewDialog(QDialog):
         self.fullscreen_button.setEnabled(True)
         self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         self._update_segment_ui()
+        try:
+            from src.services.search_telemetry import begin_playback_session
+
+            begin_playback_session(
+                video_path=self.video_path,
+                suggested_sec=self.suggested_sec,
+                playback_start_sec=float(self.start_sec),
+            )
+        except Exception:
+            pass
         self._start_playback()
 
     def shutdown_player(self, fast=False):
@@ -313,6 +325,12 @@ class PreviewDialog(QDialog):
         self._pending_close = False
         if self.export_worker is None or not self.export_worker.isRunning():
             self._close_after_export = False
+        try:
+            from src.services.search_telemetry import finish_playback_session
+
+            finish_playback_session(actual_sec=self._current_time_seconds(), source="dialog")
+        except Exception:
+            pass
         self._dispose_player()
         if self.isFullScreen():
             self.showNormal()
@@ -378,6 +396,12 @@ class PreviewDialog(QDialog):
     def _unlock_full_playback(self):
         if self._closing:
             return
+        try:
+            from src.services.search_telemetry import mark_playback_user_adjusted
+
+            mark_playback_user_adjusted()
+        except Exception:
+            pass
         player = self._ensure_player()
         player.unlock_full_playback()
         self._apply_detail_label()
@@ -397,6 +421,12 @@ class PreviewDialog(QDialog):
     def _on_slider_released(self):
         if self._closing:
             return
+        try:
+            from src.services.search_telemetry import mark_playback_user_adjusted
+
+            mark_playback_user_adjusted()
+        except Exception:
+            pass
         player = self._ensure_player()
         length = self._effective_total_ms(player)
         if length > 0:

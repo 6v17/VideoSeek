@@ -276,6 +276,7 @@ class MainWindow(
         self.settings_page.btn_remove_model_profile.clicked.connect(self.remove_current_model_profile)
         self.settings_page.input_active_model_profile.currentIndexChanged.connect(self._on_active_model_profile_changed)
         self.settings_page.btn_show_runtime_diagnostics.clicked.connect(self.show_runtime_diagnostics)
+        self.settings_page.btn_refresh_search_telemetry.clicked.connect(self.refresh_search_telemetry_panel)
         self.settings_page.btn_cleanup_old_data_root.clicked.connect(self.cleanup_old_data_root)
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
@@ -309,6 +310,7 @@ class MainWindow(
                 dlg.dismiss_for_page_switch()
         if page_name == "settings":
             self._refresh_agent_api_status()
+            self.refresh_search_telemetry_panel()
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -439,6 +441,7 @@ class MainWindow(
         self.settings_page.btn_save.setText(t["save_settings"])
         self.settings_page.btn_reset.setText(t["reset_settings"])
         self.settings_page.configure_form_labels(t)
+        self.refresh_search_telemetry_panel()
         if hasattr(self, "_rebuild_tray_menu"):
             self._rebuild_tray_menu()
         self.push_inference_status()
@@ -694,7 +697,6 @@ class MainWindow(
             return
 
         self.switch_page("search")
-        self._set_search_precision_mode_ui("precise")
         self.search_page.lbl_status.setText(self.texts.get("search_in_video_running", self.texts["searching"]))
         self.search_controller.start_search(
             image_path,

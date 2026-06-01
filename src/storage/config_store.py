@@ -70,7 +70,7 @@ def _default_fallback_model_profile(cfg):
     return {
         "id": "clip_onnx_default",
         "provider": "clip_onnx",
-        "display_name": "CLIP ONNX",
+        "display_name": "OpenAI CLIP",
         "enabled": True,
         "runtime": {
             "prefer_gpu": bool(cfg.get("prefer_gpu", True)),

@@ -19,6 +19,10 @@ from src.services.search_service import (
     _resolve_frame_fetch_top_k,
     _resolve_locate_result_top_k,
     _resolve_stage1_global_fetch_k,
+    format_clip_score_percent,
+    locate_crop_confidence_warning_key,
+    resolve_clip_confidence_tier_key,
+    _apply_locate_crop_anchor_stability,
     _search_frame_results_in_time_window,
     _search_locate_anchor_window_hits,
     _top_video_paths_from_hits,
@@ -405,7 +409,47 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
 
     def test_resolve_locate_result_top_k_caps_to_three(self):
         self.assertEqual(_resolve_locate_result_top_k(20), 3)
+        self.assertEqual(_resolve_locate_result_top_k(20, crop_query=True), 1)
         self.assertEqual(_resolve_locate_result_top_k(1), 1)
+
+    @mock.patch("src.services.search_service._search_frame_results_in_time_window")
+    @mock.patch("src.services.search_service.load_search_assets", return_value=(None, None, None))
+    def test_search_locate_crop_trusted_uses_narrow_window(self, _mock_load, mock_window):
+        import numpy as np
+
+        mock_window.return_value = ([SearchHit(64.0, 64.0, 0.91, "D:/a.mp4")], [0])
+        from src.services.search_service import _search_locate_crop_trusted_hits
+
+        hits = _search_locate_crop_trusted_hits(
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            "D:/a.mp4",
+            64.0,
+            {},
+            per_video_index=object(),
+            per_video_timestamps=np.array([64.0]),
+            per_video_paths=np.array(["D:/a.mp4"], dtype=object),
+        )
+
+        self.assertEqual(len(hits), 1)
+        mock_window.assert_called_once()
+        self.assertAlmostEqual(float(mock_window.call_args.kwargs["window_sec"]), 5.0)
+        self.assertEqual(int(mock_window.call_args.kwargs["top_k"]), 12)
+
+    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    def test_refine_precise_skips_pixel_for_cropped_query(self, mock_pixel):
+        import numpy as np
+
+        hits = [SearchHit(10.0, 10.0, 0.9, "D:/a.mp4")]
+
+        refined = _refine_precise_seed_hits(
+            np.zeros((360, 640, 3), dtype=np.uint8),
+            hits,
+            5,
+            {},
+        )
+
+        self.assertEqual(len(refined), 1)
+        mock_pixel.assert_not_called()
 
     def test_emit_search_progress_invokes_callback(self):
         from src.services.search_progress import clear_search_progress_callback, emit_search_progress, set_search_progress_callback
@@ -424,6 +468,63 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
 
         self.assertEqual(seen[0], ("locate_progress_clip", ""))
         self.assertEqual(seen[1], ("locate_progress_pixel", "locate_progress_pixel"))
+
+    def test_format_clip_score_percent(self):
+        self.assertEqual(format_clip_score_percent(0.623), "62.3%")
+        self.assertEqual(format_clip_score_percent(1.0), "100%")
+        self.assertEqual(format_clip_score_percent(0.05), "5.00%")
+
+    def test_locate_crop_confidence_warning_key(self):
+        import numpy as np
+
+        crop = np.zeros((200, 400, 3), dtype=np.uint8)
+        self.assertEqual(
+            locate_crop_confidence_warning_key(
+                [SearchHit(64.0, 64.0, 0.5, "D:/a.mp4")],
+                crop,
+                preview_anchor_sec=64.0,
+            ),
+            "locate_crop_low_confidence",
+        )
+        self.assertIsNone(
+            locate_crop_confidence_warning_key(
+                [SearchHit(64.0, 64.0, 0.7, "D:/a.mp4")],
+                crop,
+                preview_anchor_sec=64.0,
+            ),
+        )
+        self.assertIsNone(
+            locate_crop_confidence_warning_key(
+                [SearchHit(64.0, 64.0, 0.5, "D:/a.mp4")],
+                crop,
+                preview_anchor_sec=None,
+            ),
+        )
+
+    def test_resolve_clip_confidence_tier_key(self):
+        self.assertEqual(resolve_clip_confidence_tier_key(0.90), "clip_confidence_very_high")
+        self.assertEqual(resolve_clip_confidence_tier_key(0.80), "clip_confidence_high")
+        self.assertEqual(resolve_clip_confidence_tier_key(0.65), "clip_confidence_medium")
+        self.assertEqual(resolve_clip_confidence_tier_key(0.50), "clip_confidence_low")
+
+    def test_apply_locate_crop_anchor_stability_keeps_preview_anchor(self):
+        hits = [
+            SearchHit(67.0, 67.0, 0.74, "D:/a.mp4"),
+            SearchHit(64.5, 64.5, 0.72, "D:/a.mp4"),
+        ]
+        stable = _apply_locate_crop_anchor_stability(hits, 64.0, "D:/a.mp4")
+        self.assertEqual(len(stable), 1)
+        self.assertAlmostEqual(float(stable[0].start_sec), 64.0)
+        self.assertAlmostEqual(float(stable[0].score), 0.72)
+
+    def test_apply_locate_crop_anchor_stability_moves_on_large_gain(self):
+        hits = [
+            SearchHit(67.0, 67.0, 0.82, "D:/a.mp4"),
+            SearchHit(64.5, 64.5, 0.70, "D:/a.mp4"),
+        ]
+        stable = _apply_locate_crop_anchor_stability(hits, 64.0, "D:/a.mp4")
+        self.assertAlmostEqual(float(stable[0].start_sec), 67.0)
+        self.assertAlmostEqual(float(stable[0].score), 0.82)
 
 
 if __name__ == "__main__":

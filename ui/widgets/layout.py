@@ -30,7 +30,7 @@ COMPONENT_SIZES = {
     "sidebar_action_height": 36,
     "image_drop_min_height": 300,
     "preview_host_min_height": 340,
-    "search_compare_baseline_height": 524,
+    "search_compare_baseline_height": 548,
     "compose_image_strip_height": 86,
     "link_query_preview_min_height": 210,
     "result_table_min_height": 520,

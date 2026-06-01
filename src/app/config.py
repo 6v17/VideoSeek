@@ -100,6 +100,7 @@ DEFAULT_CONFIG = {
     "agent_api_batch_timeout_sec": 1200,
     "agent_api_default_image_precision": "fast",
     "search_profiling_enabled": False,
+    "search_telemetry_enabled": True,
     "show_debug_test_buttons": False,
     "theme": "dark",
     "language": "zh",

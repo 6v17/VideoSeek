@@ -178,16 +178,80 @@ class SearchController(QObject):
             self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["no_results"])
             return
 
+        texts = self.parent_window.texts
+        clip_score_mode = False
+        low_confidence_threshold = None
+        image_path = str(getattr(self.parent_window, "current_img_path", "") or "").strip()
+        if image_path:
+            try:
+                from src.services.image_search_rerank import is_likely_cropped_query_image
+                from src.services.search_service import _LOCATE_CROP_MIN_CLIP_SCORE
+
+                if is_likely_cropped_query_image(image_path):
+                    clip_score_mode = True
+                    low_confidence_threshold = _LOCATE_CROP_MIN_CLIP_SCORE
+            except Exception:
+                pass
+
         result_view.populate_local(
             results,
             self.parent_window.handle_play,
             self.parent_window.open_result_in_explorer,
             self.parent_window.handle_export_clip,
-            self.parent_window.texts,
+            texts,
             on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
+            clip_score_mode=clip_score_mode,
+            low_confidence_score=low_confidence_threshold,
         )
         duration = time.time() - self.start_time
-        status_text = self.parent_window.texts["search_done"].format(duration=duration, count=len(results))
+        status_text = texts["search_done"].format(duration=duration, count=len(results))
+        if clip_score_mode:
+            try:
+                from src.domain.search_hit import coerce_search_hit
+                from src.services.search_service import (
+                    format_clip_score_percent,
+                    resolve_clip_confidence_label,
+                    resolve_clip_confidence_tier_key,
+                )
+                from src.services.search_telemetry import record_crop_confidence
+
+                hint = texts.get("search_crop_clip_only_hint", "")
+                if hint:
+                    status_text = f"{status_text} · {hint}"
+                top_score = float(coerce_search_hit(results[0]).score)
+                top_label = format_clip_score_percent(top_score)
+                tier_label = resolve_clip_confidence_label(top_score, texts)
+                tier_key = resolve_clip_confidence_tier_key(top_score)
+                is_locate = getattr(self.worker, "preview_anchor_sec", None) is not None
+                record_crop_confidence(
+                    score=top_score,
+                    tier_key=tier_key,
+                    source="crop_locate" if is_locate else "crop_search",
+                )
+                status_text = (
+                    f"{status_text} · "
+                    f"{texts.get('search_top_clip_score', 'Top1 CLIP {score}').format(score=top_label)}"
+                )
+                if tier_label:
+                    status_text = (
+                        f"{status_text} · "
+                        f"{texts.get('search_clip_confidence_level', '置信度 {level}').format(level=tier_label)}"
+                    )
+            except Exception:
+                pass
+        warning_key = getattr(self.worker, "locate_warning_key", None) if self.worker else None
+        if warning_key:
+            warn_template = texts.get(warning_key, "")
+            if warn_template:
+                if warning_key == "locate_crop_low_confidence" and results:
+                    from src.domain.search_hit import coerce_search_hit
+                    from src.services.search_service import format_clip_score_percent
+
+                    top_score = float(coerce_search_hit(results[0]).score)
+                    warn = warn_template.format(score=format_clip_score_percent(top_score))
+                else:
+                    warn = warn_template
+                status_text = f"{status_text} · {warn}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
         self.thumb_thread = ThumbLoader(results)

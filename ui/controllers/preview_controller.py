@@ -69,7 +69,19 @@ class PreviewController:
             "video_path": video_path,
             "start_sec": clip_start,
             "end_sec": clip_end,
+            "suggested_sec": float(start_sec),
         }
+
+        try:
+            from src.services.search_telemetry import begin_playback_session
+
+            begin_playback_session(
+                video_path=video_path,
+                suggested_sec=float(start_sec),
+                playback_start_sec=float(clip_start),
+            )
+        except Exception:
+            pass
 
         vlc_player = self._ensure_vlc_player()
 
@@ -104,13 +116,38 @@ class PreviewController:
     def _finish_warmup(self):
         self.warmup_worker = None
 
-    def stop_preview(self):
+    def stop_preview(self, *, skip_telemetry: bool = False):
+        if skip_telemetry:
+            try:
+                from src.services.search_telemetry import cancel_playback_session
+
+                cancel_playback_session()
+            except Exception:
+                pass
+        else:
+            self._record_playback_telemetry(source="inline")
         if self.vlc_player is not None:
             self.vlc_player.stop()
         self.parent_window.media_player.stop()
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
         self.current_preview_context = None
+
+    def record_playback_telemetry(self, *, source: str = "inline") -> None:
+        self._record_playback_telemetry(source=source)
+
+    def _record_playback_telemetry(self, *, source: str = "inline") -> None:
+        actual_sec = None
+        if self.vlc_player is not None and self.vlc_player.is_available():
+            current_ms = self.vlc_player.get_time()
+            if current_ms >= 0:
+                actual_sec = float(current_ms) / 1000.0
+        try:
+            from src.services.search_telemetry import finish_playback_session
+
+            finish_playback_session(actual_sec=actual_sec, source=source)
+        except Exception:
+            pass
 
     def get_current_preview_context(self):
         return dict(self.current_preview_context) if self.current_preview_context else None

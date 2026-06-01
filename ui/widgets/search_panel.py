@@ -71,7 +71,6 @@ class SearchPanel(VSCard):
 
         combo_width = int(COMPONENT_SIZES.get("search_option_combo_width", 96))
         combo_policy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        compare_baseline = int(COMPONENT_SIZES["search_compare_baseline_height"])
 
         self.img_label = QLabel()
         self.img_label.setObjectName("ImageDropZone")
@@ -83,8 +82,16 @@ class SearchPanel(VSCard):
 
         self.text_search = QTextEdit()
         self.text_search.setObjectName("SearchInput")
-        self.text_search.setMinimumHeight(140)
+        self.text_search.setMinimumHeight(128)
         self.text_search.setAcceptRichText(False)
+
+        self.lbl_active_model = QLabel()
+        self.lbl_active_model.setObjectName("StatusHint")
+        self.lbl_active_model.setWordWrap(True)
+
+        self.lbl_text_model_hint = QLabel()
+        self.lbl_text_model_hint.setObjectName("StatusHint")
+        self.lbl_text_model_hint.setWordWrap(True)
 
         self.search_precision_label = QLabel()
         self.search_precision_label.setObjectName("InlineFieldLabel")
@@ -124,8 +131,9 @@ class SearchPanel(VSCard):
         self.text_tab = QWidget()
         text_tab_layout = QVBoxLayout(self.text_tab)
         text_tab_layout.setContentsMargins(4, 8, 4, 4)
-        text_tab_layout.setSpacing(10)
+        text_tab_layout.setSpacing(8)
         text_tab_layout.addWidget(self.text_search)
+        text_tab_layout.addWidget(self.lbl_text_model_hint)
         text_tab_layout.addWidget(self.text_granularity_cluster)
 
         self.compose_form = SearchComposeFormWidget(fill_text=True)
@@ -188,12 +196,13 @@ class SearchPanel(VSCard):
         action_row.addWidget(self.btn_save_preset, 0)
         action_row.addWidget(self.btn_clear)
 
+        layout.addWidget(self.lbl_active_model)
         layout.addWidget(self.search_query_tabs)
         layout.addWidget(self.search_scope_cluster)
         layout.addWidget(self.mobile_row)
         layout.addLayout(action_row)
 
-        self.setFixedHeight(compare_baseline)
+        self.setFixedHeight(int(COMPONENT_SIZES["search_compare_baseline_height"]) + 24)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def text_query(self) -> str:

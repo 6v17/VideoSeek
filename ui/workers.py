@@ -75,6 +75,7 @@ class SearchWorker(QThread):
         self.search_precision_mode = search_precision_mode
         self.pixel_query_data = pixel_query_data
         self.preview_anchor_sec = preview_anchor_sec
+        self.locate_warning_key = None
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
         key = str(message or phase or "").strip()
@@ -103,6 +104,14 @@ class SearchWorker(QThread):
                 **base_kwargs,
             )
             results = filter_hits_by_min_score(results, self.min_score)
+            from src.services.search_service import locate_crop_confidence_warning_key
+
+            self.locate_warning_key = locate_crop_confidence_warning_key(
+                list(results) if results is not None else [],
+                self.query,
+                preview_anchor_sec=self.preview_anchor_sec,
+                pixel_query_data=self.pixel_query_data,
+            )
             self.result_ready.emit(list(results) if results is not None else [])
         except Exception as exc:
             traceback.print_exc()

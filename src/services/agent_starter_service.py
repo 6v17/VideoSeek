@@ -64,10 +64,11 @@ def build_agent_starter_text(
             "1. GET {api}/health — stop if index_ready is false.\n"
             "2. GET {api}/libraries — use library_path in scope.library_paths (do not guess folders).\n"
             "3. Rewrite script beats into short visual queries (concrete scene/action, not literal dialogue).\n"
-            "4. POST {api}/search or {api}/search/batch — expand_frame_hits=true; image queries: search_precision_mode=precise.\n"
-            "5. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2.\n"
-            "6. POST {api}/export/clip per kept hit (output_path must be outside indexed library roots).\n"
-            "7. If export_clip is false, shell ffmpeg using ffmpeg_path below."
+            "4. POST {api}/search or {api}/search/batch — expand_frame_hits=true; image: search_precision_mode=precise; screenshot locate: preview_anchor_sec after fast hit.\n"
+            "5. GET {api}/search/telemetry — optional; read playback_bias / anchor retention after user previews in desktop.\n"
+            "6. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2.\n"
+            "7. POST {api}/export/clip per kept hit (output_path must be outside indexed library roots).\n"
+            "8. If export_clip is false, shell ffmpeg using ffmpeg_path below."
         ).format(api=api_base)
         doc_line = f"Full API contract: {doc_rel} (relative to VideoSeek install root)."
         if not doc_on_disk:
@@ -85,10 +86,11 @@ def build_agent_starter_text(
             "1. GET {api}/health — index_ready 为 false 则停止，让用户先在 VideoSeek 同步索引。\n"
             "2. GET {api}/libraries — scope.library_paths 用返回的 library_path，不要猜目录。\n"
             "3. 把脚本改写成短视觉 query（具体画面/动作，不要搜原文台词）。\n"
-            "4. POST {api}/search 或 {api}/search/batch — expand_frame_hits=true；图搜加 search_precision_mode=precise。\n"
-            "5. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2。\n"
-            "6. POST {api}/export/clip 逐条导出（output_path 不能在已索引库目录内）。\n"
-            "7. 若 export_clip 为 false，用下方 ffmpeg_path 手动切条。"
+            "4. POST {api}/search 或 {api}/search/batch — expand_frame_hits=true；图搜加 search_precision_mode=precise；截图二次定位：先 fast 得 anchor，再 preview_anchor_sec + 单视频 scope。\n"
+            "5. GET {api}/search/telemetry — 可选；用户在本机预览后查看 playback_bias / anchor 保留率。\n"
+            "6. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2。\n"
+            "7. POST {api}/export/clip 逐条导出（output_path 不能在已索引库目录内）。\n"
+            "8. 若 export_clip 为 false，用下方 ffmpeg_path 手动切条。"
         ).format(api=api_base)
         doc_line = f"完整 API 契约：{doc_rel}（相对 VideoSeek 安装根目录）。"
         if not doc_on_disk:

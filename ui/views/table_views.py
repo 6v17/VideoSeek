@@ -19,6 +19,11 @@ from src.storage.asset_store import load_model_metadata
 from src.app.config import load_config
 from src.domain.remote_search_hit import coerce_remote_search_hit
 from src.domain.search_hit import coerce_search_hit
+from src.services.search_service import (
+    format_clip_score_percent,
+    resolve_clip_confidence_label,
+    resolve_clip_confidence_tier_key,
+)
 from ui.widgets.table_specs import LocalSearchCol, NetworkLinkCol
 from ui.widgets.thumb_cell import make_thumb_label
 from ui.widgets.styles import repolish_widget
@@ -76,12 +81,54 @@ def populate_library_table(library_list_host, libraries, is_indexing, on_sync, o
     layout.addStretch(1)
 
 
-def populate_result_table(table, results, on_preview, on_locate, on_export, texts, on_deep_locate=None):
-    table.setRowCount(0)
-    if hasattr(table, "apply_header_labels"):
-        table.apply_header_labels(texts)
+def _format_score_cell(score, texts, *, clip_mode: bool = False, low_confidence: bool = False):
+    pct_label = format_clip_score_percent(score) if clip_mode else f"{int(float(score) * 100)}%"
+    if clip_mode:
+        tier_label = resolve_clip_confidence_label(score, texts)
+        label = f"{pct_label} · {tier_label}" if tier_label else pct_label
     else:
-        table.setHorizontalHeaderLabels(texts["result_headers"])
+        label = pct_label
+    if low_confidence:
+        label = f"{label} ⚠"
+    item = QTableWidgetItem(label)
+    item.setTextAlignment(Qt.AlignCenter)
+    tip_key = "score_clip_tip" if clip_mode else "score_similarity_tip"
+    tip_template = texts.get(tip_key, "")
+    if tip_template:
+        confidence_tip = texts.get("score_clip_confidence_tip", "")
+        tier_key = resolve_clip_confidence_tier_key(score)
+        tier_label = texts.get(tier_key, "")
+        tooltip = tip_template.format(score=float(score), percent=format_clip_score_percent(score))
+        if clip_mode and confidence_tip and tier_label:
+            tooltip = f"{tooltip}\n{confidence_tip.format(level=tier_label)}"
+        item.setToolTip(tooltip)
+    return item
+
+
+def populate_result_table(
+    table,
+    results,
+    on_preview,
+    on_locate,
+    on_export,
+    texts,
+    on_deep_locate=None,
+    *,
+    clip_score_mode: bool = False,
+    low_confidence_score: float | None = None,
+):
+    table.setRowCount(0)
+    display_texts = texts
+    if clip_score_mode:
+        display_texts = dict(texts)
+        headers = list(texts.get("result_headers") or [])
+        if len(headers) > LocalSearchCol.SCORE:
+            headers[LocalSearchCol.SCORE] = texts.get("result_header_clip_score", headers[LocalSearchCol.SCORE])
+            display_texts["result_headers"] = headers
+    if hasattr(table, "apply_header_labels"):
+        table.apply_header_labels(display_texts)
+    else:
+        table.setHorizontalHeaderLabels(display_texts.get("result_headers", texts["result_headers"]))
     table.setUpdatesEnabled(False)
 
     for row, raw in enumerate(results):
@@ -123,8 +170,17 @@ def populate_result_table(table, results, on_preview, on_locate, on_export, text
         mode_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, LocalSearchCol.MODE, mode_item)
 
-        score_item = QTableWidgetItem(f"{int(score * 100)}%")
-        score_item.setTextAlignment(Qt.AlignCenter)
+        low_confidence = (
+            low_confidence_score is not None
+            and row == 0
+            and float(score) < float(low_confidence_score)
+        )
+        score_item = _format_score_cell(
+            score,
+            texts,
+            clip_mode=clip_score_mode,
+            low_confidence=low_confidence,
+        )
         table.setItem(row, LocalSearchCol.SCORE, score_item)
 
         table.setCellWidget(
@@ -365,8 +421,8 @@ def _build_result_actions(
             lambda _, path=video_path, anchor=start_sec: on_deep_locate(path, anchor)
         )
         layout.addWidget(deep_button)
-        layout.addWidget(locate_button)
-        return container
+
+    layout.addWidget(locate_button)
 
     export_button = QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
     export_button.setProperty("class", "TableBtn")
@@ -376,8 +432,6 @@ def _build_result_actions(
     export_button.clicked.connect(
         lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_export(path, clip_start, clip_end)
     )
-
-    layout.addWidget(locate_button)
     layout.addWidget(export_button)
     return container
 

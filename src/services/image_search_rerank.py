@@ -233,6 +233,7 @@ def _get_probe_dhash_cached(
 
 _COMMON_VIDEO_ASPECTS = (16 / 9, 4 / 3, 3 / 4, 9 / 16, 2.35, 1.0)
 _CROP_ASPECT_TOLERANCE = 0.18
+_CROP_SMALL_AREA_PIXELS = 640 * 360
 
 
 def _load_query_image_bgr(query_data) -> Optional[np.ndarray]:
@@ -258,6 +259,9 @@ def is_likely_cropped_query_image(
     if height <= 1 or width <= 1:
         return False
     aspect = float(width) / float(height)
+    area = float(width) * float(height)
+    if area <= float(_CROP_SMALL_AREA_PIXELS):
+        return True
     best_delta = min(abs(aspect - reference) for reference in _COMMON_VIDEO_ASPECTS)
     return best_delta > float(tolerance)
 

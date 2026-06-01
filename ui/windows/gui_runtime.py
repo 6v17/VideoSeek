@@ -64,6 +64,8 @@ class RuntimeGuiMixin:
         ffmpeg_label = self.texts["setting_ffmpeg_active"].format(path=get_ffmpeg_status_text())
         data_label = self._build_data_storage_status_text(config)
         self.settings_page.set_runtime_status_texts(backend_label, ffmpeg_label, data_label)
+        if hasattr(self, "_refresh_search_model_display"):
+            self._refresh_search_model_display()
 
     def _build_runtime_issue_summary(self, status):
         issue = str(status.get("issue") or "").strip()
@@ -211,6 +213,43 @@ class RuntimeGuiMixin:
         dialog.exec()
         if dialog.confirmed():
             self.copy_runtime_diagnostics(status)
+
+    def refresh_search_telemetry_panel(self):
+        from src.services.search_telemetry import (
+            format_telemetry_panel,
+            get_telemetry_file_path,
+            get_telemetry_summary,
+            is_telemetry_enabled,
+            reload_telemetry_state,
+        )
+
+        texts = self.texts
+        if is_telemetry_enabled():
+            reload_telemetry_state()
+            summary = get_telemetry_summary()
+            crop_total = int((summary.get("crop_locate") or {}).get("total", 0) or 0)
+            playback_samples = int((summary.get("playback_bias") or {}).get("samples", 0) or 0)
+            confidence_total = sum(int(v or 0) for v in (summary.get("confidence_tiers") or {}).values())
+            if crop_total <= 0 and playback_samples <= 0 and confidence_total <= 0:
+                body = texts.get(
+                    "search_telemetry_panel_empty",
+                    "No screenshot search data yet.",
+                )
+            else:
+                body = format_telemetry_panel(language=self.language, texts=texts)
+            updated_at = str(summary.get("updated_at") or "")
+        else:
+            body = format_telemetry_panel(language=self.language, texts=texts)
+            updated_at = ""
+
+        file_label = texts.get("search_telemetry_panel_file", "Data file: {path}").format(
+            path=get_telemetry_file_path()
+        )
+        self.settings_page.set_search_telemetry_panel(
+            body,
+            file_path=file_label,
+            updated_at=updated_at,
+        )
 
     def _build_data_storage_status_text(self, config):
         normalized_config = dict(config or {})

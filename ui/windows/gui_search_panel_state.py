@@ -147,6 +147,31 @@ class SearchPanelStateMixin:
         chunk_hint = texts.get("search_mode_hint", "")
         page.search_mode_label.setToolTip(chunk_hint)
         page.search_mode.setToolTip(chunk_hint)
+        self._refresh_search_model_display()
+
+    def _refresh_search_model_display(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        texts = getattr(self, "texts", {}) or {}
+        page = self.search_page
+        try:
+            from src.app.config import load_config
+            from src.services.model_profile_display import (
+                format_active_model_search_label,
+                format_text_search_model_hint,
+            )
+
+            config = load_config()
+            model_label = format_active_model_search_label(config)
+            page.lbl_active_model.setText(
+                texts.get("search_active_model", "Active model: {model}").format(model=model_label)
+            )
+            hint = format_text_search_model_hint(texts, config=config)
+            page.lbl_text_model_hint.setText(hint)
+            page.lbl_text_model_hint.setVisible(bool(hint))
+        except Exception:
+            page.lbl_active_model.setText("")
+            page.lbl_text_model_hint.setVisible(False)
 
     def _refresh_search_precision_controls(self) -> None:
         self._refresh_search_panel_state()

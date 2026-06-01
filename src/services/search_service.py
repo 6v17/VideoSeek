@@ -329,9 +329,17 @@ _PRECISE_SEED_MAX_SHIFT_SEC = 5.0
 _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
 _PRECISE_NEIGHBOR_BLEND = 0.1
 _LOCATE_ANCHOR_WINDOW_SEC = 30.0
+_LOCATE_CROP_ANCHOR_WINDOW_SEC = 5.0
 _LOCATE_PIXEL_MAX_SHIFT_SEC = 5.0
 _LOCATE_PIXEL_LOCALIZE_TOP_N = 3
 _LOCATE_RESULT_TOP_K = 3
+_LOCATE_CROP_RESULT_TOP_K = 1
+_LOCATE_CROP_MIN_CLIP_SCORE = 0.6
+_LOCATE_CROP_STABILITY_POOL_K = 12
+_LOCATE_CROP_ANCHOR_MIN_GAIN = 0.03
+_CLIP_CONFIDENCE_VERY_HIGH = 0.85
+_CLIP_CONFIDENCE_HIGH = 0.70
+_CLIP_CONFIDENCE_MEDIUM = 0.60
 _ANCHOR_BRUTEFORCE_MAX_FRAMES = 48
 _ANCHOR_BRUTEFORCE_PREFILTER_MULTIPLIER = 2
 
@@ -475,12 +483,113 @@ def _scope_filter_hits_with_seeds(
     return filtered_hits, filtered_seeds
 
 
-def _resolve_locate_result_top_k(top_k: int) -> int:
+def _resolve_locate_result_top_k(top_k: int, *, crop_query: bool = False) -> int:
+    if crop_query:
+        return _LOCATE_CROP_RESULT_TOP_K
     try:
         requested = int(top_k)
     except (TypeError, ValueError):
         requested = _LOCATE_RESULT_TOP_K
     return max(1, min(requested, _LOCATE_RESULT_TOP_K))
+
+
+def _resolve_rerank_query(query_data, pixel_query_data):
+    return pixel_query_data if pixel_query_data is not None else query_data
+
+
+def format_clip_score_percent(score: float) -> str:
+    pct = max(0.0, float(score)) * 100.0
+    if pct >= 100.0:
+        return "100%"
+    if pct >= 10.0:
+        return f"{pct:.1f}%"
+    return f"{pct:.2f}%"
+
+
+def resolve_clip_confidence_tier_key(score: float) -> str:
+    value = max(0.0, float(score))
+    if value >= _CLIP_CONFIDENCE_VERY_HIGH:
+        return "clip_confidence_very_high"
+    if value >= _CLIP_CONFIDENCE_HIGH:
+        return "clip_confidence_high"
+    if value >= _CLIP_CONFIDENCE_MEDIUM:
+        return "clip_confidence_medium"
+    return "clip_confidence_low"
+
+
+def resolve_clip_confidence_label(score: float, texts) -> str:
+    key = resolve_clip_confidence_tier_key(score)
+    return str((texts or {}).get(key, "") or "").strip()
+
+
+def _apply_locate_crop_anchor_stability(
+    hits: List[SearchHit],
+    anchor_sec: float,
+    target_video_path: str,
+) -> List[SearchHit]:
+    """Keep preview anchor unless CLIP gain over nearest anchor frame is meaningful."""
+    anchor = max(0.0, float(anchor_sec))
+    path = str(target_video_path or "")
+    if not hits:
+        return [SearchHit(anchor, anchor, 0.0, path)]
+
+    best = hits[0]
+    anchor_hit = min(hits, key=lambda item: abs(float(item.start_sec) - anchor))
+    best_time = float(best.start_sec)
+    best_score = float(best.score)
+    anchor_score = float(anchor_hit.score)
+
+    if abs(best_time - anchor) <= 0.05:
+        result = [best]
+        anchor_kept = True
+    elif (best_score - anchor_score) < _LOCATE_CROP_ANCHOR_MIN_GAIN:
+        stable_score = anchor_score if anchor_score > 0 else best_score
+        stable_path = str(best.video_path or path or anchor_hit.video_path)
+        result = [SearchHit(anchor, anchor, stable_score, stable_path)]
+        anchor_kept = True
+    else:
+        result = [best]
+        anchor_kept = False
+
+    try:
+        from src.services.search_telemetry import record_crop_locate_anchor
+
+        record_crop_locate_anchor(
+            anchor_sec=anchor,
+            result_sec=float(result[0].start_sec),
+            anchor_kept=anchor_kept,
+            best_sec=best_time,
+            best_score=best_score,
+            anchor_score=anchor_score,
+            clip_score=float(result[0].score),
+            video_path=path,
+        )
+    except Exception:
+        pass
+
+    return result
+
+
+def locate_crop_confidence_warning_key(
+    hits: List[SearchHit],
+    query_data,
+    *,
+    preview_anchor_sec: float | None = None,
+    pixel_query_data=None,
+    min_score: float | None = None,
+) -> str | None:
+    """Return i18n key when screenshot locate confidence is low (still returns hits)."""
+    if preview_anchor_sec is None:
+        return None
+    rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
+    if not is_likely_cropped_query_image(rerank_query):
+        return None
+    threshold = float(min_score if min_score is not None else _LOCATE_CROP_MIN_CLIP_SCORE)
+    if not hits:
+        return "locate_crop_low_confidence_empty"
+    if float(hits[0].score) < threshold:
+        return "locate_crop_low_confidence"
+    return None
 
 
 def _search_locate_anchor_window_hits(
@@ -494,11 +603,13 @@ def _search_locate_anchor_window_hits(
     per_video_timestamps=None,
     per_video_paths=None,
     per_video_vectors=None,
+    window_sec: float | None = None,
+    skip_neighbor_refine: bool = False,
 ) -> List[SearchHit]:
     """Locate stage1: global CLIP hits in anchor window, per-video fallback."""
-    locate_k = _resolve_locate_result_top_k(top_k)
+    locate_k = max(1, int(top_k))
     anchor = max(0.0, float(anchor_sec))
-    window = _LOCATE_ANCHOR_WINDOW_SEC
+    window = max(1.0, float(window_sec if window_sec is not None else _LOCATE_ANCHOR_WINDOW_SEC))
     target_key = normalize_scope_path(str(target_video_path or ""))
 
     global_index, global_ts, global_paths = load_search_assets(config)
@@ -521,15 +632,18 @@ def _search_locate_anchor_window_hits(
             in_window.append(hit)
             in_window_ids.append(int(frame_id))
         if in_window:
-            refined = _apply_bounded_neighbor_refine(
-                in_window,
-                in_window_ids,
-                query_vector,
-                global_index,
-                global_ts,
-                global_paths,
-            )
-            merged = _merge_search_hits(refined, locate_k)
+            if skip_neighbor_refine:
+                merged = _merge_search_hits(in_window, locate_k)
+            else:
+                refined = _apply_bounded_neighbor_refine(
+                    in_window,
+                    in_window_ids,
+                    query_vector,
+                    global_index,
+                    global_ts,
+                    global_paths,
+                )
+                merged = _merge_search_hits(refined, locate_k)
             if merged:
                 return merged
 
@@ -544,8 +658,40 @@ def _search_locate_anchor_window_hits(
             top_k=locate_k,
             preloaded_vectors=per_video_vectors,
         )
-        return matched_results
+        if matched_results:
+            return matched_results
+
+    if window <= _LOCATE_PIXEL_MAX_SHIFT_SEC + 1e-6:
+        return [SearchHit(anchor, anchor, 0.0, str(target_video_path))]
     return []
+
+
+def _search_locate_crop_trusted_hits(
+    query_vector,
+    target_video_path: str,
+    anchor_sec: float,
+    config,
+    *,
+    per_video_index=None,
+    per_video_timestamps=None,
+    per_video_paths=None,
+    per_video_vectors=None,
+) -> List[SearchHit]:
+    """Screenshot locate: trust fast-search anchor, only score frames within ±5s."""
+    pool = _search_locate_anchor_window_hits(
+        query_vector,
+        target_video_path,
+        anchor_sec,
+        _LOCATE_CROP_STABILITY_POOL_K,
+        config,
+        per_video_index=per_video_index,
+        per_video_timestamps=per_video_timestamps,
+        per_video_paths=per_video_paths,
+        per_video_vectors=per_video_vectors,
+        window_sec=_LOCATE_CROP_ANCHOR_WINDOW_SEC,
+        skip_neighbor_refine=True,
+    )
+    return _apply_locate_crop_anchor_stability(pool, anchor_sec, target_video_path)
 
 
 def _apply_bounded_neighbor_refine(
@@ -629,16 +775,19 @@ def _refine_precise_seed_hits(
     frozen = _merge_search_hits(prepared, top_k)
     if not frozen:
         return []
-    rerank_query = pixel_query_data if pixel_query_data is not None else query_data
+    rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
+    crop_query = is_likely_cropped_query_image(rerank_query)
     clip_seeds = [float(t) for t in (seed_times or [hit.start_sec for hit in frozen])]
     if len(clip_seeds) != len(frozen):
         clip_seeds = [float(hit.start_sec) for hit in frozen]
 
+    if crop_query:
+        limit = 1 if locate_anchor_sec is not None else max(1, int(top_k))
+        return frozen[:limit]
+
     if locate_anchor_sec is not None:
         anchor = max(0.0, float(locate_anchor_sec))
         locate_limit = max(1, min(_LOCATE_PIXEL_LOCALIZE_TOP_N, len(frozen)))
-        if is_likely_cropped_query_image(rerank_query):
-            return frozen[: max(1, int(top_k))]
         head = frozen[:locate_limit]
         clip_seeds = [
             _clamp_time_near_seed(float(hit.start_sec), anchor, _LOCATE_PIXEL_MAX_SHIFT_SEC)
@@ -699,6 +848,8 @@ def _run_frame_search_per_videos(
     per_k = resolve_per_video_fetch_top_k(top_k, len(targets))
     if precise_image:
         per_k = _resolve_frame_fetch_top_k(per_k, scoped=True, is_text=False, config=config, precise_image=True)
+    rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
+    crop_query = is_likely_cropped_query_image(rerank_query)
     merged_hits: List[SearchHit] = []
     for abs_path, video_id in targets:
         with profile_phase("load_assets"):
@@ -720,19 +871,36 @@ def _run_frame_search_per_videos(
             emit_search_progress("locate_progress_load")
         with profile_phase("faiss_search"):
             if anchor_sec is not None:
-                locate_top_k = _resolve_locate_result_top_k(top_k)
-                emit_search_progress("locate_progress_clip")
-                matched_results = _search_locate_anchor_window_hits(
-                    query_vector,
-                    abs_path,
-                    anchor_sec,
-                    locate_top_k,
-                    config,
-                    per_video_index=search_index,
-                    per_video_timestamps=timestamps,
-                    per_video_paths=video_paths,
-                    per_video_vectors=vector_matrix,
+                locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
+                progress_key = (
+                    "locate_progress_crop_clip"
+                    if crop_query
+                    else "locate_progress_clip"
                 )
+                emit_search_progress(progress_key)
+                if crop_query:
+                    matched_results = _search_locate_crop_trusted_hits(
+                        query_vector,
+                        abs_path,
+                        anchor_sec,
+                        config,
+                        per_video_index=search_index,
+                        per_video_timestamps=timestamps,
+                        per_video_paths=video_paths,
+                        per_video_vectors=vector_matrix,
+                    )
+                else:
+                    matched_results = _search_locate_anchor_window_hits(
+                        query_vector,
+                        abs_path,
+                        anchor_sec,
+                        locate_top_k,
+                        config,
+                        per_video_index=search_index,
+                        per_video_timestamps=timestamps,
+                        per_video_paths=video_paths,
+                        per_video_vectors=vector_matrix,
+                    )
             elif precise_image:
                 clip_seeds: List[float] = []
                 matched_results = []
@@ -798,8 +966,9 @@ def _run_frame_search_per_videos(
                     top_k=int(per_k),
                 )
         if anchor_sec is not None:
-            locate_top_k = _resolve_locate_result_top_k(top_k)
-            emit_search_progress("locate_progress_pixel")
+            locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
+            if not crop_query:
+                emit_search_progress("locate_progress_pixel")
             merged_hits.extend(
                 _refine_precise_seed_hits(
                     query_data,
@@ -813,7 +982,11 @@ def _run_frame_search_per_videos(
         else:
             merged_hits.extend(matched_results)
     if preview_anchor_sec is not None:
-        return _merge_search_hits(merged_hits, _resolve_locate_result_top_k(top_k))
+        crop_final = is_likely_cropped_query_image(rerank_query)
+        return _merge_search_hits(
+            merged_hits,
+            _resolve_locate_result_top_k(top_k, crop_query=crop_final),
+        )
     if precise_image:
         return _merge_search_hits(merged_hits, top_k)
     return _finalize_frame_hits(

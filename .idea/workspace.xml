@@ -373,14 +373,31 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_starter_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/image_search_rerank.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/model_package_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/model_package_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_image_search_rerank.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/preview_controller.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/playback/preview_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/playback/preview_dialog.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/layout.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/result_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/result_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/settings/page.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/settings/page.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_preview.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_preview.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_runtime.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -739,15 +756,7 @@
       <workItem from="1779934180261" duration="31540000" />
       <workItem from="1780014228624" duration="79859000" />
       <workItem from="1780190591134" duration="36366000" />
-      <workItem from="1780279559713" duration="8295000" />
-    </task>
-    <task id="LOCAL-00046" summary="修复bug">
-      <option name="closed" value="true" />
-      <created>1776601584872</created>
-      <option name="number" value="00046" />
-      <option name="presentableId" value="LOCAL-00046" />
-      <option name="project" value="LOCAL" />
-      <updated>1776601584872</updated>
+      <workItem from="1780279559713" duration="19296000" />
     </task>
     <task id="LOCAL-00047" summary="修复bug">
       <option name="closed" value="true" />
@@ -1133,7 +1142,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780288276151</updated>
     </task>
-    <option name="localTasksCounter" value="95" />
+    <task id="LOCAL-00095" summary="搜索优化">
+      <option name="closed" value="true" />
+      <created>1780289415303</created>
+      <option name="number" value="00095" />
+      <option name="presentableId" value="LOCAL-00095" />
+      <option name="project" value="LOCAL" />
+      <updated>1780289415304</updated>
+    </task>
+    <option name="localTasksCounter" value="96" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

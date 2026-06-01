@@ -493,6 +493,106 @@ class AgentApiPresetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             execute_agent_search(body)
 
+    def test_preview_anchor_sec_requires_single_video_scope(self):
+        body = AgentSearchRequest(
+            query="D:/crop.png",
+            query_type="image_path",
+            preview_anchor_sec=64.0,
+            scope=AgentSearchScope(video_paths=["D:/a.mp4", "D:/b.mp4"]),
+        )
+        with patch("src.web.agent_api._resolve_agent_search_inputs") as mock_resolve:
+            mock_resolve.return_value = {
+                "has_image": True,
+                "scope_video_paths": ["D:/a.mp4", "D:/b.mp4"],
+                "mode": "frame",
+                "top_k": 3,
+                "min_score": None,
+                "search_precision_mode": "fast",
+                "query_data": "D:/crop.png",
+                "query_vector": None,
+                "pixel_query_data": None,
+                "query_label": "crop",
+                "query_type": "image_path",
+                "is_text": False,
+                "preset_id": None,
+                "preset": None,
+                "scope_library_paths": None,
+            }
+            with self.assertRaises(ValueError):
+                execute_agent_search(body)
+
+    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api._resolve_agent_search_inputs")
+    @patch("src.web.agent_api._search_index_ready_for_request", return_value=True)
+    @patch("src.web.agent_api._index_snapshot")
+    def test_preview_anchor_sec_forces_precise_locate(
+        self,
+        mock_snapshot,
+        _mock_ready,
+        mock_resolve,
+        mock_run_search,
+    ):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "global_index_state": "fresh",
+            "library_indexes_upgrade_needed": False,
+            "search_index_schema_version": 2,
+        }
+        mock_resolve.return_value = {
+            "has_image": True,
+            "scope_video_paths": ["D:/clip.mp4"],
+            "mode": "frame",
+            "top_k": 1,
+            "min_score": None,
+            "search_precision_mode": "fast",
+            "query_data": "D:/crop.png",
+            "query_vector": None,
+            "pixel_query_data": "D:/crop.png",
+            "query_label": "crop",
+            "query_type": "image_path",
+            "is_text": False,
+            "preset_id": None,
+            "preset": None,
+            "scope_library_paths": None,
+        }
+        mock_run_search.return_value = [SearchHit(64.0, 64.0, 0.88, "D:/clip.mp4")]
+        body = AgentSearchRequest(
+            query="D:/crop.png",
+            query_type="image_path",
+            preview_anchor_sec=64.0,
+            scope=AgentSearchScope(video_paths=["D:/clip.mp4"]),
+            top_k=1,
+        )
+        payload = execute_agent_search(body)
+        self.assertTrue(payload["ok"])
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("preview_anchor_sec"), 64.0)
+        self.assertEqual(kwargs.get("search_precision_mode"), "precise")
+        self.assertTrue(payload["meta"].get("crop_locate"))
+
+    def test_get_agent_search_telemetry_shape(self):
+        with patch("src.services.search_telemetry.is_telemetry_enabled", return_value=True):
+            with patch("src.services.search_telemetry.reload_telemetry_state", return_value={}):
+                with patch(
+                    "src.services.search_telemetry.get_telemetry_summary",
+                    return_value={"crop_locate": {"total": 0}},
+                ):
+                    with patch(
+                        "src.services.search_telemetry.format_telemetry_panel",
+                        return_value="Anchor 保留率\n—",
+                    ):
+                        with patch(
+                            "src.services.search_telemetry.get_telemetry_file_path",
+                            return_value="C:/tmp/search_telemetry.json",
+                        ):
+                            from src.web.agent_api import get_agent_search_telemetry
+
+                            payload = get_agent_search_telemetry(locale="zh")
+        self.assertTrue(payload["ok"])
+        self.assertIn("summary", payload)
+        self.assertIn("panel_text", payload)
+        self.assertEqual(payload["file_path"], "C:/tmp/search_telemetry.json")
+
 
 if __name__ == "__main__":
     unittest.main()

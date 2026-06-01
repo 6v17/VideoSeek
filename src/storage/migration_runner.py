@@ -144,7 +144,7 @@ def _normalize_config_v2(config):
             {
                 "id": DEFAULT_MODEL_PROFILE_ID,
                 "provider": "clip_onnx",
-                "display_name": "CLIP ONNX",
+                "display_name": "OpenAI CLIP",
                 "enabled": True,
                 "runtime": {
                     "prefer_gpu": bool(normalized.get("prefer_gpu", True)),

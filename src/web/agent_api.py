@@ -102,6 +102,7 @@ class AgentSearchRequest(BaseModel):
     expand_frame_hits: bool = True
     pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
     pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+    preview_anchor_sec: Optional[float] = None
 
 
 class AgentBatchSearchRequest(BaseModel):
@@ -271,6 +272,8 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "batch_search": True,
         "search_presets": True,
         "search_precision": True,
+        "search_telemetry": True,
+        "crop_locate": True,
     }
 
 
@@ -307,6 +310,8 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     spec = get_active_embedding_spec(config=config)
     snapshot = _index_snapshot(mode)
     timeouts = _agent_timeout_settings(config)
+    from src.services.search_telemetry import is_telemetry_enabled
+
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -341,6 +346,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "agent_api_default_image_precision": default_agent_image_precision_mode(config),
         "max_batch_queries": MAX_BATCH_QUERIES,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
+        "search_telemetry_enabled": is_telemetry_enabled(config),
     }
 
 
@@ -897,9 +903,83 @@ def _scope_for_request_meta(body: AgentSearchRequest, resolved: Dict[str, Any]) 
     )
 
 
+def _resolve_preview_anchor_sec(body: AgentSearchRequest, resolved: Dict[str, Any]) -> Optional[float]:
+    if body.preview_anchor_sec is None:
+        return None
+    try:
+        anchor = max(0.0, float(body.preview_anchor_sec))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("preview_anchor_sec must be a number") from exc
+    if not resolved.get("has_image"):
+        raise ValueError("preview_anchor_sec requires an image query")
+    videos = [str(path or "").strip() for path in (resolved.get("scope_video_paths") or []) if str(path or "").strip()]
+    if len(videos) != 1:
+        raise ValueError("preview_anchor_sec requires scope.video_paths with exactly one video")
+    return anchor
+
+
+def _record_agent_search_telemetry(
+    resolved: Dict[str, Any],
+    hits: List[SearchHit],
+    *,
+    preview_anchor_sec: float | None = None,
+) -> None:
+    if not resolved.get("has_image") or not hits:
+        return
+    try:
+        from src.services.image_search_rerank import is_likely_cropped_query_image
+        from src.services.search_service import resolve_clip_confidence_tier_key
+        from src.services.search_telemetry import record_crop_confidence
+
+        query_data = resolved.get("query_data")
+        pixel_query_data = resolved.get("pixel_query_data")
+        rerank_query = pixel_query_data or query_data
+        if not is_likely_cropped_query_image(rerank_query):
+            return
+        top_score = float(hits[0].score)
+        tier_key = resolve_clip_confidence_tier_key(top_score)
+        source = "crop_locate" if preview_anchor_sec is not None else "crop_search"
+        record_crop_confidence(score=top_score, tier_key=tier_key, source=source)
+    except Exception:
+        logger.debug("Agent search telemetry skipped", exc_info=True)
+
+
+def get_agent_search_telemetry(*, locale: str = "zh", config=None) -> Dict[str, Any]:
+    from src.services.search_telemetry import (
+        format_telemetry_panel,
+        get_telemetry_file_path,
+        get_telemetry_summary,
+        is_telemetry_enabled,
+        reload_telemetry_state,
+    )
+
+    cfg = config or load_config()
+    enabled = is_telemetry_enabled(cfg)
+    language = "en" if str(locale or "").lower().startswith("en") else "zh"
+    if enabled:
+        reload_telemetry_state()
+        summary = get_telemetry_summary()
+        panel_text = format_telemetry_panel(language=language)
+    else:
+        summary = {}
+        panel_text = format_telemetry_panel(language=language)
+
+    return {
+        "api_version": API_VERSION,
+        "ok": True,
+        "enabled": enabled,
+        "summary": summary,
+        "panel_text": panel_text,
+        "file_path": get_telemetry_file_path(),
+    }
+
+
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     config = load_config()
     resolved = _resolve_agent_search_inputs(body, config=config)
+    preview_anchor_sec = _resolve_preview_anchor_sec(body, resolved)
+    if preview_anchor_sec is not None:
+        resolved["search_precision_mode"] = "precise"
     mode = resolved["mode"]
     top_k = resolved["top_k"]
     scope_video_paths = resolved["scope_video_paths"]
@@ -927,6 +1007,8 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "search_precision_mode": resolved["search_precision_mode"],
             "pixel_query_data": resolved["pixel_query_data"],
         }
+        if preview_anchor_sec is not None:
+            search_kwargs["preview_anchor_sec"] = preview_anchor_sec
         if mode == "chunk":
             hits = run_chunk_search(
                 resolved["query_data"],
@@ -942,6 +1024,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             )
 
     hits = _filter_hits(hits, resolved["min_score"])
+    _record_agent_search_telemetry(resolved, hits, preview_anchor_sec=preview_anchor_sec)
     scope_meta = _build_scope_meta(_scope_for_request_meta(body, resolved), config=config)
     response = {
         "api_version": API_VERSION,
@@ -968,6 +1051,9 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             **scope_meta,
         },
     }
+    if preview_anchor_sec is not None:
+        response["meta"]["preview_anchor_sec"] = preview_anchor_sec
+        response["meta"]["crop_locate"] = True
     if resolved["preset_id"]:
         response["preset_id"] = resolved["preset_id"]
         preset = resolved.get("preset") or {}
@@ -994,6 +1080,7 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         expand_frame_hits=batch.expand_frame_hits,
         pad_before_sec=batch.pad_before_sec,
         pad_after_sec=batch.pad_after_sec,
+        preview_anchor_sec=item.preview_anchor_sec,
     )
 
 
@@ -1131,6 +1218,7 @@ class AgentApiService:
         self.app.get("/api/v1/search/presets/{preset_id}")(self._search_preset_detail)
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
+        self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
         self.app.post("/api/v1/export/clip")(self._export_clip)
 
@@ -1272,6 +1360,13 @@ class AgentApiService:
             raise_api_error(400, "invalid_request", str(exc))
         except Exception as exc:
             logger.exception("Agent preset detail failed.")
+            raise_api_error(500, "query_failed", str(exc))
+
+    async def _search_telemetry(self, locale: Optional[str] = None):
+        try:
+            return await asyncio.to_thread(get_agent_search_telemetry, locale=locale or "zh")
+        except Exception as exc:
+            logger.exception("Agent search telemetry failed.")
             raise_api_error(500, "query_failed", str(exc))
 
     async def _search(self, body: AgentSearchRequest):

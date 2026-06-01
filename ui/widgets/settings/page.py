@@ -84,6 +84,31 @@ class SettingsPage(QWidget, SettingsFormMixin):
         runtime_status_header_layout.addStretch(1)
         runtime_status_header_layout.addWidget(self.btn_show_runtime_diagnostics, 0)
 
+        self.search_telemetry_title = QLabel()
+        self.search_telemetry_title.setObjectName("CardTitle")
+        self.search_telemetry_header = QWidget()
+        search_telemetry_header_layout = QHBoxLayout(self.search_telemetry_header)
+        search_telemetry_header_layout.setContentsMargins(0, 0, 0, 0)
+        search_telemetry_header_layout.setSpacing(8)
+        self.btn_refresh_search_telemetry = QPushButton()
+        self.btn_refresh_search_telemetry.setObjectName("AccentGhostButton")
+        self.btn_refresh_search_telemetry.setMinimumHeight(30)
+        self.btn_refresh_search_telemetry.setMinimumWidth(120)
+        self.search_telemetry_body = QLabel()
+        self.search_telemetry_body.setObjectName("StatusHint")
+        self.search_telemetry_body.setWordWrap(True)
+        self.search_telemetry_body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.search_telemetry_hint = QLabel()
+        self.search_telemetry_hint.setObjectName("StatusHint")
+        self.search_telemetry_hint.setWordWrap(True)
+        self.search_telemetry_file = QLabel()
+        self.search_telemetry_file.setObjectName("StatusHint")
+        self.search_telemetry_file.setWordWrap(True)
+        self.search_telemetry_file.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        search_telemetry_header_layout.addWidget(self.search_telemetry_title, 0)
+        search_telemetry_header_layout.addStretch(1)
+        search_telemetry_header_layout.addWidget(self.btn_refresh_search_telemetry, 0)
+
         self.input_fps = NoWheelDoubleSpinBox()
         self.input_fps.setRange(0.01, 24.0)
         self.input_fps.setDecimals(2)
@@ -584,8 +609,15 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.card_runtime_status.content_layout.addWidget(self.runtime_status_ffmpeg)
         self.card_runtime_status.content_layout.addWidget(self.runtime_status_data)
 
+        self.card_search_telemetry = VSCard()
+        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_header)
+        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_body)
+        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_hint)
+        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_file)
+
         for card in (
             self.card_runtime_status,
+            self.card_search_telemetry,
             self.card_general,
             self.card_search_preview,
             self.card_model_gpu,
@@ -749,6 +781,18 @@ class SettingsPage(QWidget, SettingsFormMixin):
             _fallback_text(texts, "settings_section_paths", "路径与 FFmpeg", "Paths & FFmpeg")
         )
         self.runtime_status_title.setText(_fallback_text(texts, "settings_runtime_status", "当前运行状态", "Current Runtime"))
+        self.search_telemetry_title.setText(
+            _fallback_text(texts, "search_telemetry_panel_title", "截图搜索诊断", "Screenshot Search Stats")
+        )
+        self.btn_refresh_search_telemetry.setText(
+            texts.get("search_telemetry_panel_refresh", "Refresh stats")
+        )
+        self.search_telemetry_hint.setText(
+            texts.get(
+                "search_telemetry_panel_hint",
+                "Read-only product metrics from local screenshot searches. Use playback bias first when judging accuracy.",
+            )
+        )
         self.label_fps.setText(texts["setting_fps"])
         current_mode = self.get_sampling_fps_mode()
         self.input_sampling_fps_mode.blockSignals(True)
@@ -987,4 +1031,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.runtime_status_backend.setText(backend_text or "")
         self.runtime_status_ffmpeg.setText(ffmpeg_text or "")
         self.runtime_status_data.setText(data_text or "")
+
+    def set_search_telemetry_panel(self, body_text, *, file_path="", updated_at=""):
+        self.search_telemetry_body.setText(body_text or "")
+        if file_path:
+            suffix = f" ({updated_at})" if updated_at else ""
+            self.search_telemetry_file.setText(f"{file_path}{suffix}")
+        else:
+            self.search_telemetry_file.setText("")
 
