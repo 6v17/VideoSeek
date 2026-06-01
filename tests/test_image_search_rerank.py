@@ -185,13 +185,13 @@ class DynamicProbeTests(unittest.TestCase):
     def test_resolve_probe_params_follow_index(self):
         window, step = resolve_probe_params(1.0, {"image_pixel_rerank_probe_mode": "index"})
         self.assertAlmostEqual(window, 1.0)
-        self.assertAlmostEqual(step, 0.5)
+        self.assertAlmostEqual(step, 0.25)
         self.assertLess(step, 1.0)
 
     def test_resolve_probe_params_sparse_index_uses_fine_step(self):
         window, step = resolve_probe_params(2.0, {"image_pixel_rerank_probe_mode": "index"})
         self.assertAlmostEqual(window, 2.0)
-        self.assertAlmostEqual(step, 0.5)
+        self.assertAlmostEqual(step, 0.4)
         self.assertLess(step, 2.0)
 
     def test_point_hit_probe_window_reaches_sparse_neighbors(self):
@@ -219,8 +219,8 @@ class DynamicProbeTests(unittest.TestCase):
             top_k=1,
             index_step_lookup={normalize_scope_path("a.mp4"): 1.0},
         )
-        # point hit widens window to 3.0 with step=0.5 => center + (±0.5..±3.0) => 13 probes
-        self.assertEqual(mock_thumb.call_count, 13)
+        # point hit widens window to 3.0 with step=0.25 => more probes than legacy 0.5 step
+        self.assertEqual(mock_thumb.call_count, 25)
 
 
 class NeighborScoreCacheTests(unittest.TestCase):

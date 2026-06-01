@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from src.app.config import DEFAULT_CONFIG, _sanitize_general_settings
 from src.services.image_search_rerank import (
@@ -15,6 +16,7 @@ from src.services.search_service import (
     _precise_pixel_localize_top_n,
     _resolve_frame_fetch_top_k,
     _resolve_stage1_global_fetch_k,
+    _search_frame_results_in_time_window,
     _top_video_paths_from_hits,
     _use_video_discovery_results,
 )
@@ -75,19 +77,22 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         config = {"image_pixel_rerank_probe_mode": "index"}
         window, step = resolve_probe_params(1.0, config)
         self.assertAlmostEqual(window, 1.0)
-        self.assertAlmostEqual(step, 0.5)
+        self.assertAlmostEqual(step, 0.25)
         self.assertLess(step, 1.0)
 
     def test_neighbor_rerank_only_when_explicitly_enabled(self):
         config = dict(DEFAULT_CONFIG)
         config["frame_neighbor_rerank_enabled"] = False
-        self.assertTrue(
+        self.assertFalse(
             _neighbor_rerank_enabled(config, is_text=False, precise_image=True)
         )
         self.assertFalse(
             _neighbor_rerank_enabled(config, is_text=False, precise_image=False)
         )
         config["frame_neighbor_rerank_enabled"] = True
+        self.assertFalse(
+            _neighbor_rerank_enabled(config, is_text=False, precise_image=True)
+        )
         self.assertTrue(
             _neighbor_rerank_enabled(config, is_text=False, precise_image=False)
         )
@@ -159,6 +164,135 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         multi_video_hits = single_video_hits + [SearchHit(1.0, 1.0, 0.5, "D:/b.mp4")]
         self.assertEqual(_precise_pixel_localize_top_n(config, single_video_hits), 12)
         self.assertEqual(_precise_pixel_localize_top_n(config, multi_video_hits), 3)
+
+    @mock.patch("src.services.search_service._top_video_paths_from_hits", return_value=["D:/runner-up.mp4"])
+    @mock.patch("src.services.search_service._apply_frame_neighbor_rerank", side_effect=lambda results, *_args, **_kwargs: results)
+    @mock.patch("src.services.search_service._search_frame_results_with_ids")
+    @mock.patch("src.services.search_service._load_per_video_frame_assets")
+    @mock.patch("src.services.search_service._resolve_scoped_video_targets")
+    def test_locate_frames_preserves_stage1_hits_outside_candidates(
+        self,
+        mock_resolve_targets,
+        mock_load_assets,
+        mock_search_with_ids,
+        _mock_neighbor,
+        _mock_top_videos,
+    ):
+        import numpy as np
+
+        stage1_hits = [
+            SearchHit(10.0, 10.0, 0.99, "D:/winner.mp4"),
+            SearchHit(20.0, 20.0, 0.95, "D:/runner-up.mp4"),
+            SearchHit(30.0, 30.0, 0.50, "D:/outside-top20.mp4"),
+        ]
+        mock_resolve_targets.return_value = [("D:/runner-up.mp4", "vid-b")]
+        mock_load_assets.return_value = (
+            object(),
+            np.array([20.0], dtype=np.float32),
+            np.array(["D:/runner-up.mp4"], dtype=object),
+        )
+        mock_search_with_ids.return_value = (
+            [SearchHit(21.0, 21.0, 0.97, "D:/runner-up.mp4")],
+            [0],
+        )
+
+        located = _locate_frames_in_recalled_videos(
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            stage1_hits,
+            {},
+        )
+
+        paths = {hit.video_path for hit in located}
+        self.assertIn("D:/runner-up.mp4", paths)
+        self.assertIn("D:/outside-top20.mp4", paths)
+        self.assertIn("D:/winner.mp4", paths)
+        refined = next(hit for hit in located if hit.video_path == "D:/runner-up.mp4")
+        self.assertAlmostEqual(float(refined.start_sec), 21.0)
+
+    @mock.patch("src.services.search_service._top_video_paths_from_hits", return_value=["D:/a.mp4"])
+    @mock.patch("src.services.search_service._apply_frame_neighbor_rerank", side_effect=lambda results, *_args, **_kwargs: results)
+    @mock.patch("src.services.search_service._search_frame_results_with_ids")
+    @mock.patch("src.services.search_service._load_per_video_frame_assets")
+    @mock.patch("src.services.search_service._resolve_scoped_video_targets")
+    def test_locate_frames_keeps_stage1_seed_when_stage2_prefers_other_times(
+        self,
+        mock_resolve_targets,
+        mock_load_assets,
+        mock_search_with_ids,
+        _mock_neighbor,
+        _mock_top_videos,
+    ):
+        import numpy as np
+
+        stage1_hits = [SearchHit(64.0, 64.0, 0.99, "D:/a.mp4")]
+        mock_resolve_targets.return_value = [("D:/a.mp4", "vid-a")]
+        mock_load_assets.return_value = (
+            object(),
+            np.array([64.0, 200.0], dtype=np.float32),
+            np.array(["D:/a.mp4", "D:/a.mp4"], dtype=object),
+        )
+        mock_search_with_ids.return_value = (
+            [SearchHit(200.0, 200.0, 0.97, "D:/a.mp4")],
+            [1],
+        )
+
+        located = _locate_frames_in_recalled_videos(
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            stage1_hits,
+            {},
+        )
+
+        anchor_hit = next(hit for hit in located if abs(float(hit.start_sec) - 64.0) < 0.01)
+        self.assertAlmostEqual(float(anchor_hit.score), 0.99)
+
+    def test_filter_scope_preserves_clip_seeds(self):
+        hits = [
+            SearchHit(64.0, 64.0, 0.99, "D:/a.mp4"),
+            SearchHit(200.0, 200.0, 0.5, "D:/b.mp4"),
+        ]
+        seeds = [64.0, 200.0]
+        from src.services.search_service import _scope_filter_hits_with_seeds
+
+        scoped, scoped_seeds = _scope_filter_hits_with_seeds(
+            hits,
+            seeds,
+            video_paths=["D:/a.mp4"],
+        )
+        self.assertEqual(len(scoped), 1)
+        self.assertAlmostEqual(scoped_seeds[0], 64.0)
+
+    def test_search_frame_results_in_time_window_limits_to_anchor_region(self):
+        import numpy as np
+
+        class DummyIndex:
+            d = 2
+            ntotal = 3
+
+            def reconstruct(self, idx):
+                vectors = {
+                    0: np.array([1.0, 0.0], dtype=np.float32),
+                    1: np.array([0.2, 0.9], dtype=np.float32),
+                    2: np.array([0.9, 0.1], dtype=np.float32),
+                }
+                return vectors[int(idx)]
+
+        timestamps = np.array([60.0, 64.0, 200.0], dtype=np.float32)
+        paths = np.array(["D:/a.mp4", "D:/a.mp4", "D:/a.mp4"], dtype=object)
+        query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
+
+        hits, ids = _search_frame_results_in_time_window(
+            query_vector,
+            DummyIndex(),
+            timestamps,
+            paths,
+            center_sec=64.0,
+            window_sec=10.0,
+            top_k=5,
+        )
+
+        self.assertEqual(ids, [0, 1])
+        self.assertEqual(len(hits), 2)
+        self.assertTrue(all(abs(float(hit.start_sec) - 64.0) <= 10.0 for hit in hits))
 
 
 if __name__ == "__main__":

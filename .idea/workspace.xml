@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="精搜优化">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="搜索界面重构">
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -373,40 +373,12 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/core.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/domain/search_hit.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/domain/search_hit.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/image_search_rerank.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_preset_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_preset_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_scope.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_image_search_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_image_search_rerank.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_semantic_chunking.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/dialogs/search_preset_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/search_preset_dialog.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/layout.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/preview_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/preview_panel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/result_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/result_view.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/settings/page.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/settings/page.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_precision.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_presets.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_presets.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -420,7 +392,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="213" />
+    <option name="cachedIndexableFilesCount" value="215" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -763,15 +735,8 @@
       <workItem from="1779868751165" duration="27144000" />
       <workItem from="1779934180261" duration="31540000" />
       <workItem from="1780014228624" duration="79859000" />
-      <workItem from="1780190591134" duration="36311000" />
-    </task>
-    <task id="LOCAL-00044" summary="使用vlc进行预览视频">
-      <option name="closed" value="true" />
-      <created>1776360715008</created>
-      <option name="number" value="00044" />
-      <option name="presentableId" value="LOCAL-00044" />
-      <option name="project" value="LOCAL" />
-      <updated>1776360715008</updated>
+      <workItem from="1780190591134" duration="36366000" />
+      <workItem from="1780279559713" duration="6934000" />
     </task>
     <task id="LOCAL-00045" summary="修复bug">
       <option name="closed" value="true" />
@@ -1157,7 +1122,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780197220513</updated>
     </task>
-    <option name="localTasksCounter" value="93" />
+    <task id="LOCAL-00093" summary="搜索界面重构">
+      <option name="closed" value="true" />
+      <created>1780246088632</created>
+      <option name="number" value="00093" />
+      <option name="presentableId" value="LOCAL-00093" />
+      <option name="project" value="LOCAL" />
+      <updated>1780246088632</updated>
+    </task>
+    <option name="localTasksCounter" value="94" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1187,7 +1160,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="加入局域网传图搜索功能" />
     <MESSAGE value="重新提交" />
     <MESSAGE value="增加同步异常状态" />
     <MESSAGE value="小bug" />
@@ -1212,7 +1184,8 @@
     <MESSAGE value="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配" />
     <MESSAGE value="更新说明" />
     <MESSAGE value="精搜优化" />
-    <option name="LAST_COMMIT_MESSAGE" value="精搜优化" />
+    <MESSAGE value="搜索界面重构" />
+    <option name="LAST_COMMIT_MESSAGE" value="搜索界面重构" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

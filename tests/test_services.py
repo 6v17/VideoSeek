@@ -1221,6 +1221,31 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(result, expected)
         mock_per_video_search.assert_called_once()
 
+    @patch("src.services.search_service._run_frame_search_per_videos")
+    @patch("src.services.search_service.load_config")
+    def test_run_search_uses_per_video_route_for_precise_scoped_image(
+        self,
+        mock_load_config,
+        mock_per_video_search,
+    ):
+        from src.domain.search_hit import SearchHit
+
+        mock_load_config.return_value = {}
+        expected = [SearchHit(12.0, 12.0, 0.91, "D:/clip.mp4")]
+        mock_per_video_search.return_value = expected
+
+        result = search_service.run_search(
+            "D:/query.jpg",
+            is_text=False,
+            top_k=5,
+            scope_video_paths=["D:/clip.mp4"],
+            search_precision_mode="precise",
+        )
+
+        self.assertEqual(result, expected)
+        mock_per_video_search.assert_called_once()
+        self.assertTrue(mock_per_video_search.call_args.kwargs.get("precise_image"))
+
     @patch("src.services.search_service.get_active_model_profile")
     def test_check_asset_profile_compatibility_rejects_mismatched_model_id(self, mock_get_profile):
         mock_get_profile.return_value = {"id": "siglip2_default", "provider": "siglip2_onnx"}
@@ -1271,7 +1296,7 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(reranked, results)
 
     def test_neighbor_rerank_auto_enabled_for_image_search(self):
-        self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=True))
+        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=True))
         self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
 
     def test_neighbor_rerank_respects_text_default(self):
