@@ -31,6 +31,27 @@ PRESET_TYPE_MIXED = "mixed"
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 _DEFAULT_FUSION = {"text_weight": 0.5, "image_weight": 0.5}
 
+# Stable ids: missing entries are auto-seeded on list_presets(); user deletes are not re-added.
+BUILTIN_SEARCH_PRESETS: tuple[dict[str, str], ...] = (
+    {"id": "builtin_smile", "name": "开心", "query": "a person with a big smile"},
+    {"id": "builtin_angry", "name": "愤怒", "query": "a person with an angry face"},
+    {
+        "id": "builtin_crying",
+        "name": "哭泣",
+        "query": "a person with a sad, crying expression, tears on cheeks",
+    },
+    {"id": "builtin_battle", "name": "战斗", "query": "a person fighting in a battle"},
+    {"id": "builtin_landscape", "name": "风景", "query": "beautiful landscape"},
+)
+BUILTIN_SEARCH_PRESET_IDS = frozenset(spec["id"] for spec in BUILTIN_SEARCH_PRESETS)
+
+
+def _suppressed_builtin_ids(document: dict) -> set[str]:
+    raw = (document or {}).get("suppressed_builtin_ids") or []
+    if not isinstance(raw, list):
+        return set()
+    return {str(item or "").strip() for item in raw if str(item or "").strip()}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -123,6 +144,7 @@ def _empty_document() -> dict:
     return {
         "version": PRESET_SCHEMA_VERSION,
         "presets": [],
+        "suppressed_builtin_ids": [],
     }
 
 
@@ -140,9 +162,15 @@ def _read_presets_payload(path: str) -> dict:
     presets = payload.get("presets")
     if not isinstance(presets, list):
         presets = []
+    suppressed = payload.get("suppressed_builtin_ids")
+    if not isinstance(suppressed, list):
+        suppressed = []
     return {
         "version": int(payload.get("version", PRESET_SCHEMA_VERSION) or PRESET_SCHEMA_VERSION),
         "presets": [item for item in presets if isinstance(item, dict)],
+        "suppressed_builtin_ids": [
+            str(item or "").strip() for item in suppressed if str(item or "").strip()
+        ],
     }
 
 
@@ -158,6 +186,7 @@ def save_presets_document(document: dict, config=None) -> None:
     if not isinstance(presets, list):
         presets = []
     payload["presets"] = presets
+    payload["suppressed_builtin_ids"] = sorted(_suppressed_builtin_ids(payload))
     payload.pop("model_profile_id", None)
     _atomic_write_json(get_presets_file(config), payload)
 
@@ -251,7 +280,53 @@ def normalize_preset_record(raw: dict) -> dict | None:
     return preset
 
 
+def ensure_builtin_search_presets(config=None) -> int:
+    """Insert built-in text presets when their stable ids are missing."""
+    document = load_presets_document(config=config)
+    presets = list(document.get("presets") or [])
+    existing_ids = {
+        str(item.get("id", "") or "").strip()
+        for item in presets
+        if isinstance(item, dict)
+    }
+    suppressed = _suppressed_builtin_ids(document)
+    added = 0
+    now = _now_iso()
+    for spec in BUILTIN_SEARCH_PRESETS:
+        preset_id = str(spec.get("id", "") or "").strip()
+        if not preset_id or preset_id in existing_ids or preset_id in suppressed:
+            continue
+        record = normalize_preset_record(
+            {
+                "id": preset_id,
+                "type": PRESET_TYPE_MIXED,
+                "name": str(spec.get("name", "") or "").strip(),
+                "query": str(spec.get("query", "") or "").strip(),
+                "ref_files": [],
+                "fusion": dict(_DEFAULT_FUSION),
+                "library_paths": [],
+                "video_paths": [],
+                "mode": None,
+                "top_k": None,
+                "min_score": None,
+                "ui": {},
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        if not record:
+            continue
+        presets.append(record)
+        existing_ids.add(preset_id)
+        added += 1
+    if added:
+        document["presets"] = presets
+        save_presets_document(document, config=config)
+    return added
+
+
 def list_presets(config=None) -> list[dict]:
+    ensure_builtin_search_presets(config=config)
     document = load_presets_document(config=config)
     presets = []
     for item in document.get("presets", []):
@@ -651,6 +726,10 @@ def delete_preset(preset_id: str, config=None) -> bool:
         return False
     _remove_preset_assets(removed, config=config)
     document["presets"] = kept
+    if preset_id in BUILTIN_SEARCH_PRESET_IDS:
+        suppressed = _suppressed_builtin_ids(document)
+        suppressed.add(preset_id)
+        document["suppressed_builtin_ids"] = sorted(suppressed)
     save_presets_document(document, config=config)
     return True
 

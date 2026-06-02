@@ -1996,6 +1996,7 @@ def run_search(
             config=config,
             profile_enabled=profile_enabled,
             profile_meta=profile_meta,
+            search_precision_mode=search_precision_mode,
             pixel_query_data=pixel_query_data,
             preview_anchor_sec=preview_anchor_sec,
         )
@@ -2016,6 +2017,7 @@ def _run_search_impl(
     config,
     profile_enabled,
     profile_meta,
+    search_precision_mode=None,
     pixel_query_data,
     preview_anchor_sec,
 ) -> List[SearchHit]:

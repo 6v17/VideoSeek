@@ -78,7 +78,7 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.assertEqual(created["query"], "anime night city")
         self.assertEqual(created["ref_files"], [])
         presets = preset_service.list_presets(config=self.config)
-        self.assertEqual(len(presets), 1)
+        self.assertEqual(len(presets), 1 + len(preset_service.BUILTIN_SEARCH_PRESETS))
 
         plan = preset_service.build_preset_search_plan(created["id"], config=self.config)
         self.assertEqual(plan["query_vector"].shape, (1, 3))
@@ -95,7 +95,9 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.assertEqual(updated["name"], "Night City")
 
         self.assertTrue(preset_service.delete_preset(created["id"], config=self.config))
-        self.assertEqual(preset_service.list_presets(config=self.config), [])
+        remaining = preset_service.list_presets(config=self.config)
+        self.assertEqual(len(remaining), len(preset_service.BUILTIN_SEARCH_PRESETS))
+        self.assertNotIn(created["id"], {item["id"] for item in remaining})
 
     @patch("src.services.search_preset_service.load_config")
     @patch("src.services.search_preset_service.get_active_embedding_spec")
@@ -219,7 +221,7 @@ class SearchPresetServiceTests(unittest.TestCase):
             config=self.config,
         )
         presets = preset_service.list_presets(config=self.config)
-        self.assertEqual(len(presets), 2)
+        self.assertEqual(len(presets), 2 + len(preset_service.BUILTIN_SEARCH_PRESETS))
         self.assertTrue(all(item["type"] == "mixed" for item in presets))
         image_preset = next(item for item in presets if item["name"] == "Old Image")
         self.assertEqual(image_preset["ref_files"], ["refs/legacy.png"])
@@ -251,7 +253,7 @@ class SearchPresetServiceTests(unittest.TestCase):
 
         mock_profile.return_value = self.config["models"]["profiles"][1]
         presets = preset_service.list_presets(config=self.config)
-        self.assertEqual(len(presets), 1)
+        self.assertEqual(len(presets), 1 + len(preset_service.BUILTIN_SEARCH_PRESETS))
         self.assertEqual(presets[0]["id"], created["id"])
         siglip_cache = preset_service._query_cache_path(created["id"], config=self.config)
         self.assertNotEqual(clip_cache.replace("\\", "/"), siglip_cache.replace("\\", "/"))
@@ -377,6 +379,34 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.assertTrue(plan["has_image"])
         self.assertEqual(plan["query_data"], "blue night")
         self.assertTrue(os.path.isfile(plan["pixel_query_data"]))
+
+    @patch("src.services.search_preset_service.load_config")
+    @patch("src.services.search_preset_service.get_active_model_profile")
+    @patch("src.services.search_preset_service.get_configured_data_root")
+    def test_builtin_presets_seeded_once(
+        self,
+        mock_data_root,
+        mock_profile,
+        mock_load_config,
+    ):
+        mock_data_root.return_value = self._tmp.name
+        mock_load_config.return_value = self.config
+        mock_profile.return_value = self.config["models"]["profiles"][0]
+
+        first = preset_service.list_presets(config=self.config)
+        self.assertEqual(len(first), len(preset_service.BUILTIN_SEARCH_PRESETS))
+        by_id = {item["id"]: item for item in first}
+        self.assertEqual(by_id["builtin_smile"]["name"], "开心")
+        self.assertEqual(by_id["builtin_smile"]["query"], "a person with a big smile")
+        self.assertEqual(by_id["builtin_landscape"]["query"], "beautiful landscape")
+
+        self.assertEqual(preset_service.ensure_builtin_search_presets(config=self.config), 0)
+        self.assertEqual(len(preset_service.list_presets(config=self.config)), len(first))
+
+        preset_service.delete_preset("builtin_smile", config=self.config)
+        self.assertEqual(preset_service.ensure_builtin_search_presets(config=self.config), 0)
+        ids = {item["id"] for item in preset_service.list_presets(config=self.config)}
+        self.assertNotIn("builtin_smile", ids)
 
 
 if __name__ == "__main__":
