@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -27,9 +28,12 @@ else:
 
 from src.services.agent_clip_service import (
     _MAX_BATCH_EXPORT_CLIPS,
+    _output_path_allowed,
+    _resolve_batch_export_timeout_sec,
     execute_agent_batch_export_clips,
     execute_agent_export_clip,
 )
+from src.utils import normalize_export_encode_mode
 from src.services.agent_starter_service import build_agent_starter_payload
 from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
 from src.app.config import load_config
@@ -109,6 +113,17 @@ class AgentSearchRequest(BaseModel):
     preview_anchor_sec: Optional[float] = None
 
 
+class AgentBatchSearchExportOptions(BaseModel):
+    """Optional: export top hits after batch search (no separate items[] glue)."""
+
+    output_dir: str
+    encode_mode: Optional[str] = "copy"
+    silent: Optional[bool] = None
+    keep_per_source: int = Field(default=1, ge=1, le=50)
+    dedupe: bool = True
+    continue_on_error: bool = True
+
+
 class AgentBatchSearchRequest(BaseModel):
     """Batch search: explicit queries and/or all images under image_folder."""
 
@@ -123,6 +138,7 @@ class AgentBatchSearchRequest(BaseModel):
     expand_frame_hits: bool = True
     pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
     pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+    export: Optional[AgentBatchSearchExportOptions] = None
 
 
 class AgentManifestItem(BaseModel):
@@ -710,6 +726,154 @@ def _should_deduplicate(item_a: Dict[str, Any], item_b: Dict[str, Any], *, mode:
     return False
 
 
+def _sanitize_export_filename_stem(stem: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(stem or "").strip())
+    cleaned = cleaned.strip(" .") or "clip"
+    return cleaned[:80]
+
+
+def _normalize_export_output_dir(output_dir: str) -> str:
+    normalized = os.path.normpath(os.path.abspath(os.path.expanduser(str(output_dir or "").strip())))
+    if not normalized:
+        raise ValueError("export.output_dir is required.")
+    if not _output_path_allowed(normalized, config=load_config()):
+        raise ValueError("export.output_dir must not be inside an indexed library root.")
+    os.makedirs(normalized, exist_ok=True)
+    return normalized
+
+
+def build_batch_export_items_from_search_results(
+    search_payload: Dict[str, Any],
+    export_opts: AgentBatchSearchExportOptions,
+    *,
+    mode: str,
+    expand_frame_hits: bool,
+    pad_before_sec: float,
+    pad_after_sec: float,
+) -> List[AgentBatchExportClipItem]:
+    output_dir = _normalize_export_output_dir(export_opts.output_dir)
+    sources = [block for block in (search_payload.get("results") or []) if block.get("ok")]
+    raw_items = _manifest_items_from_sources(
+        sources,
+        keep_per_source=int(export_opts.keep_per_source),
+        mode=mode,
+        expand_frame_hits=expand_frame_hits,
+        pad_before_sec=pad_before_sec,
+        pad_after_sec=pad_after_sec,
+    )
+    if export_opts.dedupe:
+        raw_items = dedupe_manifest_items(raw_items, mode=mode)
+    if not raw_items:
+        return []
+
+    if len(raw_items) > _MAX_BATCH_EXPORT_CLIPS:
+        raise ValueError(f"Export item count exceeds limit ({_MAX_BATCH_EXPORT_CLIPS}).")
+
+    items: List[AgentBatchExportClipItem] = []
+    used_names: set[str] = set()
+    for row in raw_items:
+        stem = _sanitize_export_filename_stem(
+            row.get("client_request_id") or row.get("query") or row.get("id") or "clip"
+        )
+        try:
+            rank = int(row.get("rank") or 1)
+        except (TypeError, ValueError):
+            rank = 1
+        filename = f"{stem}_rank{rank:02d}.mp4"
+        suffix = 1
+        while filename.lower() in used_names:
+            suffix += 1
+            filename = f"{stem}_rank{rank:02d}_{suffix}.mp4"
+        used_names.add(filename.lower())
+        output_path = os.path.join(output_dir, filename)
+        if not _output_path_allowed(output_path):
+            raise ValueError(f"export output path is not allowed: {output_path}")
+        items.append(
+            AgentBatchExportClipItem(
+                video_path=str(row["video_path"]),
+                start_sec=float(row["start_sec"]),
+                end_sec=float(row["end_sec"]),
+                output_path=output_path,
+                client_request_id=row.get("client_request_id"),
+                silent=export_opts.silent,
+                encode_mode=export_opts.encode_mode,
+            )
+        )
+    return items
+
+
+def _attach_batch_search_export(
+    search_payload: Dict[str, Any],
+    body: AgentBatchSearchRequest,
+    *,
+    mode: str,
+) -> Dict[str, Any]:
+    export_opts = body.export
+    if export_opts is None:
+        return search_payload
+
+    from src.utils import has_ffmpeg
+
+    if not has_ffmpeg():
+        raise RuntimeError("FFmpeg is not available. Install or configure FFmpeg in VideoSeek settings.")
+
+    try:
+        items = build_batch_export_items_from_search_results(
+            search_payload,
+            export_opts,
+            mode=mode,
+            expand_frame_hits=bool(body.expand_frame_hits),
+            pad_before_sec=float(body.pad_before_sec),
+            pad_after_sec=float(body.pad_after_sec),
+        )
+    except ValueError as exc:
+        search_payload["export"] = {
+            "ok": False,
+            "results": [],
+            "error": {"code": "invalid_request", "message": str(exc)},
+            "meta": {"total": 0, "succeeded": 0, "failed": 0},
+        }
+        search_payload["ok"] = False
+        return search_payload
+
+    if not items:
+        search_payload["export"] = {
+            "ok": False,
+            "results": [],
+            "error": {"code": "invalid_request", "message": "No exportable hits from batch search."},
+            "meta": {"total": 0, "succeeded": 0, "failed": 0},
+        }
+        search_payload["ok"] = False
+        return search_payload
+
+    export_payload = execute_agent_batch_export_clips(
+        AgentBatchExportClipsRequest(
+            items=items,
+            encode_mode=export_opts.encode_mode,
+            silent=export_opts.silent,
+            continue_on_error=export_opts.continue_on_error,
+        )
+    )
+    search_payload["export"] = export_payload
+    search_payload["ok"] = bool(search_payload.get("ok")) and bool(export_payload.get("ok"))
+    search_payload.setdefault("meta", {})["export_output_dir"] = _normalize_export_output_dir(export_opts.output_dir)
+    return search_payload
+
+
+def _resolve_batch_search_export_timeout_sec(body: AgentBatchSearchRequest, config=None) -> float:
+    base = _resolve_batch_timeout_sec(body, config=config)
+    if body.export is None:
+        return base
+    try:
+        query_count = len(_resolve_batch_queries(body))
+    except ValueError:
+        query_count = len(body.queries or [])
+    item_count = max(1, query_count * int(body.export.keep_per_source))
+    encode_mode = normalize_export_encode_mode(body.export.encode_mode or "copy")
+    export_sec = _resolve_batch_export_timeout_sec(item_count, encode_mode)
+    return min(_BATCH_TIMEOUT_MAX_SEC, base + export_sec)
+
+
 def _manifest_item_rank(item: Dict[str, Any]) -> int:
     try:
         return int(item.get("rank") or 9999)
@@ -1200,7 +1364,7 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
             if not body.continue_on_error:
                 break
 
-    return {
+    payload = {
         "api_version": API_VERSION,
         "ok": failed == 0,
         "results": results,
@@ -1214,6 +1378,9 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
             "continue_on_error": bool(body.continue_on_error),
         },
     }
+    if body.export is not None:
+        payload = _attach_batch_search_export(payload, body, mode=default_mode)
+    return payload
 
 
 class IndexNotReadyError(Exception):
@@ -1428,25 +1595,27 @@ class AgentApiService:
 
     async def _search_batch(self, body: AgentBatchSearchRequest):
         started = time.perf_counter()
-        timeout_sec = _resolve_batch_timeout_sec(body)
+        timeout_sec = _resolve_batch_search_export_timeout_sec(body)
         try:
             payload = await asyncio.wait_for(
                 asyncio.to_thread(execute_agent_batch_search, body),
                 timeout=timeout_sec,
             )
         except asyncio.TimeoutError:
-            raise_api_error(
-                503,
-                "engine_busy",
-                (
-                    f"Batch search timed out after {int(timeout_sec)} seconds. "
-                    "Reduce batch size, use search_precision_mode=fast, or raise agent_api_batch_timeout_sec."
-                ),
+            detail = (
+                f"Batch search/export timed out after {int(timeout_sec)} seconds. "
+                "Reduce batch size, use search_precision_mode=fast, or raise agent_api_batch_timeout_sec."
             )
+            raise_api_error(503, "engine_busy", detail)
         except IndexNotReadyError as exc:
             raise_api_error(409, "index_not_ready", str(exc))
         except ValueError as exc:
             raise_api_error(400, "invalid_request", str(exc))
+        except RuntimeError as exc:
+            message = str(exc)
+            if "ffmpeg" in message.lower() and "not available" in message.lower():
+                raise_api_error(503, "engine_busy", message)
+            raise_api_error(422, "export_failed", message)
         except Exception as exc:
             logger.exception("Agent batch search failed.")
             raise_api_error(422, "query_failed", str(exc))
@@ -1454,6 +1623,8 @@ class AgentApiService:
         payload.setdefault("meta", {})
         payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
         payload["meta"]["batch_timeout_sec"] = int(timeout_sec)
+        if body.export is not None:
+            payload["meta"]["batch_export_enabled"] = True
         return JSONResponse(payload)
 
     async def _export_manifest(self, body: AgentManifestRequest):

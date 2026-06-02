@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="块级搜索bug修复，增加默认预设">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="导出优化，新增批量快速导出接口，供agent使用">
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
@@ -372,20 +372,16 @@
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libgoom_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/agent_clip_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_clip_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/_check_needs_legacy.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/_peek_phase2.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/_split_dialogs_package.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/_test_schema_bootstrap.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/_tmp_export_clips.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/search_from_image_folder.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_starter_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_agent_api_v11.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api_v11.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_starter_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/controllers/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/preview_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/playback/preview_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/playback/preview_dialog.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_preview.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_preview.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -744,15 +740,7 @@
       <workItem from="1780014228624" duration="79859000" />
       <workItem from="1780190591134" duration="36366000" />
       <workItem from="1780279559713" duration="23358000" />
-      <workItem from="1780360358199" duration="10821000" />
-    </task>
-    <task id="LOCAL-00049" summary="修复bug">
-      <option name="closed" value="true" />
-      <created>1776604632409</created>
-      <option name="number" value="00049" />
-      <option name="presentableId" value="LOCAL-00049" />
-      <option name="project" value="LOCAL" />
-      <updated>1776604632409</updated>
+      <workItem from="1780360358199" duration="12096000" />
     </task>
     <task id="LOCAL-00050" summary="加入局域网传图搜索功能">
       <option name="closed" value="true" />
@@ -1138,7 +1126,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780367771135</updated>
     </task>
-    <option name="localTasksCounter" value="98" />
+    <task id="LOCAL-00098" summary="导出优化，新增批量快速导出接口，供agent使用">
+      <option name="closed" value="true" />
+      <created>1780374053463</created>
+      <option name="number" value="00098" />
+      <option name="presentableId" value="LOCAL-00098" />
+      <option name="project" value="LOCAL" />
+      <updated>1780374053463</updated>
+    </task>
+    <option name="localTasksCounter" value="99" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1168,7 +1164,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="小bug" />
     <MESSAGE value="GPU降级处理、数据迁移、BUG修复" />
     <MESSAGE value="适配多模型架构重构" />
     <MESSAGE value="代码解耦" />
@@ -1193,7 +1188,8 @@
     <MESSAGE value="搜索界面重构" />
     <MESSAGE value="搜索优化" />
     <MESSAGE value="块级搜索bug修复，增加默认预设" />
-    <option name="LAST_COMMIT_MESSAGE" value="块级搜索bug修复，增加默认预设" />
+    <MESSAGE value="导出优化，新增批量快速导出接口，供agent使用" />
+    <option name="LAST_COMMIT_MESSAGE" value="导出优化，新增批量快速导出接口，供agent使用" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

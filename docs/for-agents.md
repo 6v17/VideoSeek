@@ -34,10 +34,8 @@ VideoSeek 用视觉向量在**已索引的本地视频**里找时间段（路径
 ```
 GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
 → 每条脚本句：改写成视觉 query（§3）
-→ POST /search 或 /search/batch（expand_frame_hits: true，scope 见 §4）
-→ 每句保留 rank 前 1–2 条
-→ POST /export/manifest（sources=批量结果, dedupe: true）
-→ POST /export/clips/batch（items=保留项；或逐条 POST /export/clip，output 不能在库目录内）
+→ POST /search/batch（expand_frame_hits: true，scope 见 §4；截图批处理加 `export.output_dir` 则 **1 次 POST 搜+导出**）
+→ 或分步：manifest → export/clips/batch（output 不能在库目录内）
 ```
 
 **`mode`：** `chunk` = 语义段起止；`frame` = 时间点（默认会 ±3s 扩成片段，`expand_frame_hits: true`）。
@@ -92,6 +90,8 @@ GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
 | `capabilities.export_clip` | false → 用 `ffmpeg.ffmpeg_path` 自己裁 |
 | `capabilities.search_presets` | false → 只用 inline `query` |
 | `search_timeout_sec` / `search_timeout_precise_sec` | 单次搜索超时（默认 90 / 180） |
+| `max_batch_queries` | `POST /search/batch` 最多查询条数（默认 64） |
+| `max_batch_export_clips` | `POST /export/clips/batch` 或 `search/batch` 内 `export` 最多导出条数（默认 64） |
 | `agent_api_default_image_precision` | 图搜省略 `search_precision_mode` 时的默认 fast/precise |
 | `saved_search_scope_mode` | 桌面 `all` / `selected`；省略 scope 时与此一致 |
 
@@ -153,7 +153,34 @@ GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
 
 批量级 `top_k` / `mode` / `scope` / `search_precision_mode` 等默认作用于全部条目。`continue_on_error: true` 时单条失败不中断。
 
-响应 `results[]` 每项形状同单次搜索 → 直接喂给 `export/manifest` 的 `sources`。
+响应 `results[]` 每项形状同单次搜索。
+
+**无胶水导出（推荐截图批处理）：** 在同一请求里加 `export`，搜完自动按规则写入 `output_dir`（文件名 `{client_request_id或query}_rank{NN}.mp4`），响应多一节 `export`（同 `export/clips/batch`）。
+
+| `export` 字段 | 说明 |
+|---------------|------|
+| `output_dir` | **必填**。导出目录，勿在任一 indexed library 根下；不存在会自动创建 |
+| `encode_mode` | 默认 `copy`（流拷贝，快）；`original` 重编码慢 |
+| `keep_per_source` | 每条查询保留前 N 个 hit（默认 1） |
+| `dedupe` | 默认 `true`，按重叠去重后再导出 |
+| `continue_on_error` | 默认 `true`，单条导出失败不中断 |
+| `silent` | 可选，省略则用桌面 `export_video_silent` |
+
+```json
+{
+  "image_folder": "D:/Screenshots",
+  "search_precision_mode": "precise",
+  "expand_frame_hits": true,
+  "export": {
+    "output_dir": "D:/Screenshots/data",
+    "encode_mode": "copy",
+    "keep_per_source": 1,
+    "dedupe": true
+  }
+}
+```
+
+仍需分步时：`results` → `export/manifest` 的 `sources`，或自建 `items[]` → `export/clips/batch`。
 
 ---
 
@@ -216,7 +243,7 @@ GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
 }
 ```
 
-**Windows + 中文路径：** PowerShell 直接 `Invoke-RestMethod` 易乱码；用 **curl** 或把 JSON 写入 UTF-8 文件再 `curl -d @body.json`（见 §6）。
+**Windows + 中文路径：** PowerShell 直接 `Invoke-RestMethod` 易乱码；用 **curl** 或把 JSON 写入 UTF-8 文件再 `curl -d @body.json`（`search/batch` 的 `export` 示例见上；分步导出同理）。
 
 ---
 
@@ -233,10 +260,10 @@ GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
 1. 把脚本改写成短视觉 query，禁止搜字面台词。
 2. GET http://127.0.0.1:8765/api/v1/health — index_ready 为 false 则停。
 3. GET /libraries — scope.library_paths 用返回的 library_path。
-4. POST /search 或 /search/batch — expand_frame_hits=true；图搜用 search_precision_mode=precise（或 /health 默认）。
-5. POST /export/manifest → POST /export/clips/batch（多条一次请求；或逐条 POST /export/clip）。输出路径勿在库内。
+4. POST /search/batch — expand_frame_hits=true；图搜 precise；截图批处理加 export.output_dir（一次搜+导出，无需胶水）。
+5. 分步时才 manifest → export/clips/batch。输出路径勿在库内。
 不要重建索引、不要改用户设置，除非用户明确要求。
-IDE 访问不了 127.0.0.1 时，在用户终端用 curl 调 API；Windows 中文路径用 curl + UTF-8 JSON 文件（§ export batch）。
+IDE 访问不了 127.0.0.1 时，在用户终端用 curl 调 API；Windows 中文路径用 curl + UTF-8 JSON 文件（见 §search/batch 的 export 示例）。
 ```
 
 ---
@@ -247,5 +274,11 @@ IDE 访问不了 127.0.0.1 时，在用户终端用 curl 调 API；Windows 中�
 |----|------|
 | 开关 | 设置里 `agent_api_enabled`，或环境变量 `VIDEOSEEK_AGENT_API=1` |
 |  host / port | `127.0.0.1` / `8765`（`VIDEOSEEK_AGENT_API_HOST` / `PORT`） |
+
+**Windows 调 API：** 优先 `curl`；请求体存 UTF-8 的 `body.json`，避免 PowerShell 中文路径/编码乱码。示例：
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/api/v1/search/batch -H "Content-Type: application/json; charset=utf-8" -d @body.json
+```
 
 维护者：打包与源码映射见 `docs/ai/pipelines.md` § Agent API。

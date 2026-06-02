@@ -64,11 +64,10 @@ def build_agent_starter_text(
             "1. GET {api}/health — stop if index_ready is false.\n"
             "2. GET {api}/libraries — use library_path in scope.library_paths (do not guess folders).\n"
             "3. Rewrite script beats into short visual queries (concrete scene/action, not literal dialogue).\n"
-            "4. POST {api}/search or {api}/search/batch — expand_frame_hits=true; image: search_precision_mode=precise; screenshot locate: preview_anchor_sec after fast hit.\n"
-            "5. GET {api}/search/telemetry — optional; read playback_bias / anchor retention after user previews in desktop.\n"
-            "6. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2.\n"
-            "7. POST {api}/export/clips/batch for all kept hits (or /export/clip one-by-one) — encode_mode=copy, output outside library roots.\n"
-            "8. If export_clip is false, shell ffmpeg using ffmpeg_path below."
+            "4. POST {api}/search/batch — expand_frame_hits=true; image: search_precision_mode=precise. Screenshot batch: add export.output_dir (one POST search+export, no glue script).\n"
+            "5. GET {api}/search/telemetry — optional; read playback_bias after desktop previews.\n"
+            "6. Multi-step only: export/manifest then export/clips/batch — encode_mode=copy, paths outside library roots.\n"
+            "7. If export_clip is false, shell ffmpeg using ffmpeg_path below."
         ).format(api=api_base)
         doc_line = f"Field reference (open only when needed): {doc_rel}. Paste this starter block first — do not load the full doc into context."
         if not doc_on_disk:
@@ -86,11 +85,10 @@ def build_agent_starter_text(
             "1. GET {api}/health — index_ready 为 false 则停止，让用户先在 VideoSeek 同步索引。\n"
             "2. GET {api}/libraries — scope.library_paths 用返回的 library_path，不要猜目录。\n"
             "3. 把脚本改写成短视觉 query（具体画面/动作，不要搜原文台词）。\n"
-            "4. POST {api}/search 或 {api}/search/batch — expand_frame_hits=true；图搜加 search_precision_mode=precise；截图二次定位：先 fast 得 anchor，再 preview_anchor_sec + 单视频 scope。\n"
-            "5. GET {api}/search/telemetry — 可选；用户在本机预览后查看 playback_bias / anchor 保留率。\n"
-            "6. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2。\n"
-            "7. POST {api}/export/clips/batch 一次导出多条（或 /export/clip 逐条）— 默认 encode_mode=copy，output 勿在库目录内。\n"
-            "8. 若 export_clip 为 false，用下方 ffmpeg_path 手动切条。"
+            "4. POST {api}/search/batch — expand_frame_hits=true；图搜 search_precision_mode=precise。截图批处理：加 export.output_dir（一次搜+导出，无需胶水脚本）。\n"
+            "5. GET {api}/search/telemetry — 可选；本机预览后看 playback_bias。\n"
+            "6. 仅分步时：export/manifest → export/clips/batch — encode_mode=copy，output 勿在库目录内。\n"
+            "7. 若 export_clip 为 false，用下方 ffmpeg_path 手动切条。"
         ).format(api=api_base)
         doc_line = f"需要查字段时再打开 {doc_rel}；日常粘贴本说明即可，勿灌全文省 token。"
         if not doc_on_disk:
