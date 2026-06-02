@@ -64,9 +64,10 @@ class AgentStarterServiceTests(unittest.TestCase):
         )
         self.assertLess(len(text.splitlines()), 120)
         self.assertIn("GET http://127.0.0.1:8765/api/v1/health", text)
-        self.assertIn("export/clip", text)
+        self.assertIn("export/clips/batch", text)
         self.assertIn("chinese_clip_vit_base_patch16", text)
-        self.assertIn("完整 API 契约：docs/for-agents.md", text)
+        self.assertIn("docs/for-agents.md", text)
+        self.assertIn("勿灌全文", text)
         self.assertNotIn("D:/Release/VideoSeek/docs/for-agents.md", text)
 
     @patch("src.services.agent_starter_service.get_resource_path")
@@ -89,7 +90,8 @@ class AgentStarterServiceTests(unittest.TestCase):
             self.assertTrue(payload["meta"]["doc_on_disk"])
             self.assertIn("starter_text", payload)
             self.assertIn("Minimal workflow", payload["starter_text"])
-            self.assertIn("Full API contract: docs/for-agents.md", payload["starter_text"])
+            self.assertIn("docs/for-agents.md", payload["starter_text"])
+            self.assertIn("do not load the full doc", payload["starter_text"])
             self.assertLessEqual(payload["meta"]["line_count"], 120)
 
 

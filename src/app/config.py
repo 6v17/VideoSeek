@@ -94,6 +94,9 @@ DEFAULT_CONFIG = {
     "remote_max_frames": 2000,
     "auto_cleanup_missing_files": False,
     "export_video_silent": False,
+    "export_encode_mode": "original",
+    "export_copy_extra_sec": 4,
+    "export_copy_margin_sec": 2.0,
     "agent_api_enabled": False,
     "agent_api_search_timeout_fast_sec": 90,
     "agent_api_search_timeout_precise_sec": 180,
@@ -116,6 +119,8 @@ CONFIG_BOUNDS = {
     "image_pixel_rerank_time_window_sec": (0.5, 10.0),
     "image_pixel_rerank_probe_step_sec": (0.25, 0.5),
     "image_search_fetch_multiplier": (1, 8),
+    "export_copy_extra_sec": (0.0, 30.0),
+    "export_copy_margin_sec": (0.0, 10.0),
     "agent_api_search_timeout_fast_sec": (30, 600),
     "agent_api_search_timeout_precise_sec": (30, 900),
     "agent_api_batch_timeout_sec": (60, 7200),
@@ -153,6 +158,7 @@ CONFIG_ENUMS = {
     "search_precision_mode": {"fast", "precise"},
     "image_pixel_rerank_probe_mode": {"index", "fixed"},
     "agent_api_default_image_precision": {"fast", "precise"},
+    "export_encode_mode": {"copy", "original"},
     "search_scope_mode": {"all", "selected"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
@@ -377,6 +383,10 @@ def _sanitize_general_settings(config):
         sanitized.get("export_video_silent", DEFAULT_CONFIG["export_video_silent"]),
         DEFAULT_CONFIG["export_video_silent"],
     )
+    export_mode = str(sanitized.get("export_encode_mode", DEFAULT_CONFIG["export_encode_mode"]) or "").strip().lower()
+    if export_mode not in CONFIG_ENUMS["export_encode_mode"]:
+        export_mode = DEFAULT_CONFIG["export_encode_mode"]
+    sanitized["export_encode_mode"] = export_mode
     sanitized["show_debug_test_buttons"] = _coerce_bool(
         sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
         DEFAULT_CONFIG["show_debug_test_buttons"],

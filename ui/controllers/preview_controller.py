@@ -5,10 +5,11 @@ from PySide6.QtCore import QUrl
 from src.app.config import load_config
 from ui.threading_utils import shutdown_thread
 from src.utils import (
+    _resolve_base_clip_window,
     build_preview_cache_path,
     create_preview_clip,
     export_original_clip,
-    get_video_duration_seconds,
+    resolve_export_clip_window,
     start_export_original_clip_process,
 )
 from ui.playback.vlc_player import VlcPreviewPlayer
@@ -25,37 +26,7 @@ class PreviewController:
         self.warmup_worker = None
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
-        start_sec = float(start_sec)
-        video_duration = get_video_duration_seconds(video_path)
-        if video_duration is not None:
-            video_duration = max(0.0, float(video_duration))
-
-        if end_sec is not None and float(end_sec) > start_sec + 1e-3:
-            clip_start = max(0.0, start_sec)
-            clip_end = float(end_sec)
-            if video_duration is not None:
-                clip_end = min(clip_end, video_duration)
-            clip_duration = max(0.1, clip_end - clip_start)
-            return clip_start, clip_duration
-
-        preview_seconds = float(load_config().get("preview_seconds", 6))
-        clip_duration = max(0.1, preview_seconds)
-        half = clip_duration / 2.0
-        center = max(0.0, start_sec)
-        if video_duration is not None:
-            center = min(center, video_duration)
-
-        clip_start = center - half
-        clip_end = center + half
-        if clip_start < 0.0:
-            clip_end -= clip_start
-            clip_start = 0.0
-        if video_duration is not None and clip_end > video_duration:
-            shift = clip_end - video_duration
-            clip_start = max(0.0, clip_start - shift)
-            clip_end = video_duration
-        clip_duration = max(0.1, clip_end - clip_start)
-        return clip_start, clip_duration
+        return _resolve_base_clip_window(video_path, start_sec, end_sec=end_sec, config=load_config())
 
     def play(self, video_path, start_sec, end_sec=None):
         media_player = self.parent_window.media_player
@@ -152,16 +123,44 @@ class PreviewController:
     def get_current_preview_context(self):
         return dict(self.current_preview_context) if self.current_preview_context else None
 
-    def export_clip(self, video_path, start_sec, output_path, end_sec=None):
-        clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
-        silent = bool(load_config().get("export_video_silent", False))
-        return export_original_clip(video_path, clip_start, clip_duration, output_path, silent=silent)
+    def export_clip(self, video_path, start_sec, output_path, end_sec=None, encode_mode=None):
+        cfg = load_config()
+        silent = bool(cfg.get("export_video_silent", False))
+        mode = encode_mode if encode_mode is not None else cfg.get("export_encode_mode", "original")
+        clip_start, clip_duration = resolve_export_clip_window(
+            video_path,
+            start_sec,
+            end_sec=end_sec,
+            encode_mode=mode,
+            config=cfg,
+        )
+        return export_original_clip(
+            video_path,
+            clip_start,
+            clip_duration,
+            output_path,
+            silent=silent,
+            encode_mode=mode,
+        )
 
-    def start_export_process(self, video_path, start_sec, output_path, end_sec=None):
-        clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
-        silent = bool(load_config().get("export_video_silent", False))
+    def start_export_process(self, video_path, start_sec, output_path, end_sec=None, encode_mode=None):
+        cfg = load_config()
+        silent = bool(cfg.get("export_video_silent", False))
+        mode = encode_mode if encode_mode is not None else cfg.get("export_encode_mode", "original")
+        clip_start, clip_duration = resolve_export_clip_window(
+            video_path,
+            start_sec,
+            end_sec=end_sec,
+            encode_mode=mode,
+            config=cfg,
+        )
         return start_export_original_clip_process(
-            video_path, clip_start, clip_duration, output_path, silent=silent
+            video_path,
+            clip_start,
+            clip_duration,
+            output_path,
+            silent=silent,
+            encode_mode=mode,
         )
 
     def cleanup_previous_preview(self):

@@ -25,7 +25,11 @@ except ImportError as exc:
 else:
     _IMPORT_ERROR = None
 
-from src.services.agent_clip_service import execute_agent_export_clip
+from src.services.agent_clip_service import (
+    _MAX_BATCH_EXPORT_CLIPS,
+    execute_agent_batch_export_clips,
+    execute_agent_export_clip,
+)
 from src.services.agent_starter_service import build_agent_starter_payload
 from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
 from src.app.config import load_config
@@ -153,6 +157,24 @@ class AgentExportClipRequest(BaseModel):
     output_path: str
     client_request_id: Optional[str] = None
     silent: Optional[bool] = None
+    encode_mode: Optional[str] = "copy"
+
+
+class AgentBatchExportClipItem(BaseModel):
+    video_path: str
+    start_sec: float
+    end_sec: float
+    output_path: str
+    client_request_id: Optional[str] = None
+    silent: Optional[bool] = None
+    encode_mode: Optional[str] = None
+
+
+class AgentBatchExportClipsRequest(BaseModel):
+    items: List[AgentBatchExportClipItem] = Field(default_factory=list)
+    silent: Optional[bool] = None
+    encode_mode: Optional[str] = "copy"
+    continue_on_error: bool = True
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
@@ -345,6 +367,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "search_timeout_precise_sec": timeouts["search_timeout_precise_sec"],
         "agent_api_default_image_precision": default_agent_image_precision_mode(config),
         "max_batch_queries": MAX_BATCH_QUERIES,
+        "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
     }
@@ -1221,6 +1244,7 @@ class AgentApiService:
         self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
         self.app.post("/api/v1/export/clip")(self._export_clip)
+        self.app.post("/api/v1/export/clips/batch")(self._export_clips_batch)
 
     def _register_exception_handlers(self):
         from fastapi.exceptions import RequestValidationError
@@ -1461,6 +1485,7 @@ class AgentApiService:
                     output_path=body.output_path,
                     client_request_id=body.client_request_id,
                     silent=body.silent,
+                    encode_mode=body.encode_mode,
                 ),
                 timeout=120.0,
             )
@@ -1482,6 +1507,43 @@ class AgentApiService:
 
         payload.setdefault("meta", {})
         payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
+    async def _export_clips_batch(self, body: AgentBatchExportClipsRequest):
+        from src.services.agent_clip_service import _resolve_batch_export_timeout_sec
+        from src.utils import normalize_export_encode_mode
+
+        started = time.perf_counter()
+        default_mode = normalize_export_encode_mode(body.encode_mode or "copy")
+        timeout_sec = _resolve_batch_export_timeout_sec(len(body.items or []), default_mode)
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(execute_agent_batch_export_clips, body),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            raise_api_error(
+                503,
+                "engine_busy",
+                (
+                    f"Batch clip export timed out after {int(timeout_sec)} seconds. "
+                    "Reduce batch size or use encode_mode=copy."
+                ),
+            )
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except RuntimeError as exc:
+            message = str(exc)
+            if "ffmpeg" in message.lower() and "not available" in message.lower():
+                raise_api_error(503, "engine_busy", message)
+            raise_api_error(422, "export_failed", message)
+        except Exception as exc:
+            logger.exception("Agent batch clip export failed.")
+            raise_api_error(422, "export_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        payload["meta"]["batch_timeout_sec"] = int(timeout_sec)
         return JSONResponse(payload)
 
 

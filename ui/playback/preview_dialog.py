@@ -27,13 +27,14 @@ class ExportCancelledError(Exception):
 class ExportClipWorker(QThread):
     finished_export = Signal(object, str)
 
-    def __init__(self, preview_controller, video_path, start_sec, end_sec, save_path):
+    def __init__(self, preview_controller, video_path, start_sec, end_sec, save_path, encode_mode=None):
         super().__init__()
         self.preview_controller = preview_controller
         self.video_path = video_path
         self.start_sec = float(start_sec)
         self.end_sec = float(end_sec)
         self.save_path = save_path
+        self.encode_mode = encode_mode
         self._process = None
         self._cancel_requested = False
 
@@ -44,6 +45,7 @@ class ExportClipWorker(QThread):
                 self.start_sec,
                 self.save_path,
                 end_sec=self.end_sec,
+                encode_mode=self.encode_mode,
             )
             stdout, stderr = self._process.communicate()
         except Exception as exc:
@@ -89,7 +91,7 @@ class ExportClipWorker(QThread):
 
 
 class PreviewDialog(QDialog):
-    export_requested = Signal(str, float, float, str)
+    export_requested = Signal(str, float, float, str, str)
     export_status_changed = Signal(str, str)
 
     def __init__(self, parent, video_path, start_sec, end_sec, texts, suggested_sec=None):
@@ -580,6 +582,21 @@ class PreviewDialog(QDialog):
             return
 
         start_sec, end_sec = segment
+        segment_duration = max(0.1, float(end_sec) - float(start_sec))
+        encode_mode = None
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "_prompt_export_encode_mode"):
+            encode_mode = parent._prompt_export_encode_mode(segment_duration_sec=segment_duration)
+        else:
+            from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
+
+            encode_mode = prompt_export_encode_mode(
+                self.texts,
+                parent=self,
+                segment_duration_sec=segment_duration,
+            )
+        if encode_mode is None:
+            return
         base_name = os.path.splitext(os.path.basename(self.video_path))[0]
         suggested_name = f"{base_name}_segment_{int(start_sec):06d}.mp4"
         save_path, _ = QFileDialog.getSaveFileName(
@@ -605,6 +622,7 @@ class PreviewDialog(QDialog):
             start_sec,
             end_sec,
             save_path,
+            encode_mode,
         )
         self._set_export_busy(False)
 

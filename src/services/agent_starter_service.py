@@ -67,12 +67,12 @@ def build_agent_starter_text(
             "4. POST {api}/search or {api}/search/batch — expand_frame_hits=true; image: search_precision_mode=precise; screenshot locate: preview_anchor_sec after fast hit.\n"
             "5. GET {api}/search/telemetry — optional; read playback_bias / anchor retention after user previews in desktop.\n"
             "6. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2.\n"
-            "7. POST {api}/export/clip per kept hit (output_path must be outside indexed library roots).\n"
+            "7. POST {api}/export/clips/batch for all kept hits (or /export/clip one-by-one) — encode_mode=copy, output outside library roots.\n"
             "8. If export_clip is false, shell ffmpeg using ffmpeg_path below."
         ).format(api=api_base)
-        doc_line = f"Full API contract: {doc_rel} (relative to VideoSeek install root)."
+        doc_line = f"Field reference (open only when needed): {doc_rel}. Paste this starter block first — do not load the full doc into context."
         if not doc_on_disk:
-            doc_line += " File not found on disk — ask the user to ship docs/for-agents.md next to the app."
+            doc_line += f" ({doc_rel} not found beside the app.)"
         not_ready = "Index not ready — ask the user to sync the library in VideoSeek before searching."
     else:
         intro = (
@@ -89,12 +89,12 @@ def build_agent_starter_text(
             "4. POST {api}/search 或 {api}/search/batch — expand_frame_hits=true；图搜加 search_precision_mode=precise；截图二次定位：先 fast 得 anchor，再 preview_anchor_sec + 单视频 scope。\n"
             "5. GET {api}/search/telemetry — 可选；用户在本机预览后查看 playback_bias / anchor 保留率。\n"
             "6. POST {api}/export/manifest — sources=<batch.results>, dedupe=true, keep_per_source=1-2。\n"
-            "7. POST {api}/export/clip 逐条导出（output_path 不能在已索引库目录内）。\n"
+            "7. POST {api}/export/clips/batch 一次导出多条（或 /export/clip 逐条）— 默认 encode_mode=copy，output 勿在库目录内。\n"
             "8. 若 export_clip 为 false，用下方 ffmpeg_path 手动切条。"
         ).format(api=api_base)
-        doc_line = f"完整 API 契约：{doc_rel}（相对 VideoSeek 安装根目录）。"
+        doc_line = f"需要查字段时再打开 {doc_rel}；日常粘贴本说明即可，勿灌全文省 token。"
         if not doc_on_disk:
-            doc_line += " 磁盘上未找到该文件 — 请确认打包时已将 docs/for-agents.md 放在 exe 同目录下。"
+            doc_line += f"（未找到 {doc_rel}）"
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步库后再搜索。"
 
     snapshot = {

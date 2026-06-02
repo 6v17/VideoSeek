@@ -990,6 +990,29 @@ QFrame#Card, #DialogCard {
     background: transparent;
     line-height: 1.45em;
 }
+QFrame#ExportModeOptionCard {
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+    background: __FIELD__;
+}
+QFrame#ExportModeOptionCard:hover {
+    border-color: __ACCENT__;
+}
+QFrame#ExportModeOptionCard[selected="true"] {
+    border: 2px solid __ACCENT__;
+    background: __ACCENT_SOFT__;
+}
+#ExportModeTitle {
+    font-size: 15px;
+    font-weight: 700;
+    color: __HEADLINE__;
+    background: transparent;
+}
+#ExportModeSubtitle {
+    font-size: 12px;
+    color: __MUTED__;
+    background: transparent;
+}
 #SectionTitle {
     color: __HEADLINE__;
     font-size: 13px;

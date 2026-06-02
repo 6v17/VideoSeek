@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_explorer
+from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
 from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
 
@@ -105,7 +106,7 @@ class PreviewGuiMixin:
         if state in {"queued", "running", "succeeded", "failed", "cancelled"}:
             self.search_page.lbl_status.setText(text)
 
-    def _queue_preview_export(self, video_path, start_sec, end_sec, save_path):
+    def _queue_preview_export(self, video_path, start_sec, end_sec, save_path, encode_mode=None):
         self._preview_export_seq += 1
         task = {
             "id": self._preview_export_seq,
@@ -113,6 +114,7 @@ class PreviewGuiMixin:
             "start_sec": float(start_sec),
             "end_sec": float(end_sec),
             "save_path": str(save_path),
+            "encode_mode": encode_mode,
             "status": "queued",
             "worker": None,
             "result": None,
@@ -139,6 +141,7 @@ class PreviewGuiMixin:
                 task["start_sec"],
                 task["end_sec"],
                 task["save_path"],
+                encode_mode=task.get("encode_mode"),
             )
             task["worker"] = worker
             task["status"] = "running"
@@ -319,7 +322,20 @@ class PreviewGuiMixin:
         QApplication.clipboard().setText(output_path)
         dialog.status_hint.setText(self.texts["details_copy_done"])
 
+    def _prompt_export_encode_mode(self, *, segment_duration_sec: float | None = None) -> str | None:
+        return prompt_export_encode_mode(
+            self.texts,
+            parent=self,
+            segment_duration_sec=segment_duration_sec,
+        )
+
     def handle_export_clip(self, path, sec, end_sec=None):
+        segment_duration = None
+        if end_sec is not None and float(end_sec) > float(sec) + 1e-3:
+            segment_duration = float(end_sec) - float(sec)
+        encode_mode = self._prompt_export_encode_mode(segment_duration_sec=segment_duration)
+        if encode_mode is None:
+            return
         base_name = os.path.splitext(os.path.basename(path))[0]
         suggested_name = f"{base_name}_clip_{int(float(sec)):06d}.mp4"
         save_path, _ = QFileDialog.getSaveFileName(
@@ -330,4 +346,10 @@ class PreviewGuiMixin:
         )
         if not save_path:
             return
-        self._queue_preview_export(path, float(sec), float(end_sec if end_sec is not None else sec), save_path)
+        self._queue_preview_export(
+            path,
+            float(sec),
+            float(end_sec if end_sec is not None else sec),
+            save_path,
+            encode_mode=encode_mode,
+        )

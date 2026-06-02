@@ -1673,7 +1673,7 @@ class UtilsTests(unittest.TestCase):
     @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
     @patch("src.utils.ensure_folder_exists")
     @patch("src.utils.os.path.exists", return_value=False)
-    def test_export_original_clip_uses_stream_copy(
+    def test_export_original_clip_reencode_mode(
         self,
         _mock_exists,
         _mock_ensure_folder_exists,
@@ -1689,6 +1689,31 @@ class UtilsTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-crf") + 1], "18")
         self.assertEqual(cmd[cmd.index("-c:a") + 1], "aac")
         self.assertEqual(cmd[cmd.index("-t") + 1], "3.500")
+
+    @patch("src.utils.subprocess.run")
+    @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
+    @patch("src.utils.ensure_folder_exists")
+    @patch("src.utils.os.path.exists", return_value=False)
+    def test_export_original_clip_copy_mode(
+        self,
+        _mock_exists,
+        _mock_ensure_folder_exists,
+        _mock_get_ffmpeg,
+        mock_run,
+    ):
+        mock_run.return_value = unittest.mock.Mock(returncode=0)
+
+        utils.export_original_clip(
+            "D:/videos/clip.mp4",
+            8.0,
+            3.5,
+            "D:/out/clip.mp4",
+            encode_mode="copy",
+        )
+
+        cmd = mock_run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("-c") + 1], "copy")
+        self.assertNotIn("-c:v", cmd)
 
     @patch("src.utils.subprocess.run")
     @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
