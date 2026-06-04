@@ -70,6 +70,7 @@ Full suite: `python -m unittest discover -s tests -p "test_*.py"` (see `docs/qui
 
 - Detailed setup and troubleshooting: `docs/quickstart.md`
 - Architecture and module map: `docs/architecture.md`
+- Experimental NVIDIA CUDA indexing (conda lab env; not the default release path): `docs/cuda-experiment.md`
 
 ## License
 
