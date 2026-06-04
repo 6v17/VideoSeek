@@ -6,6 +6,7 @@ import numpy as np
 import onnxruntime as ort
 
 from src.app.config import load_config
+from src.core.inference_providers import is_gpu_provider_active, resolve_ort_providers
 from src.core.onnx_session import build_session_options, resolve_embedding_batch_size
 from src.core.onnx_vision_engine import INFERENCE_LOCK, OnnxVisionBatchMixin
 from src.storage.config_store import get_effective_prefer_gpu
@@ -32,9 +33,7 @@ class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
             if not os.path.isfile(file_path):
                 raise RuntimeError(f"Missing Chinese CLIP model file: {file_path}")
 
-        vision_providers = ["CPUExecutionProvider"]
-        if effective_prefer_gpu:
-            vision_providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        vision_providers = resolve_ort_providers(prefer_gpu=effective_prefer_gpu)
         text_providers = ["CPUExecutionProvider"]
 
         self.visual_session = ort.InferenceSession(
@@ -51,7 +50,7 @@ class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
             "visual": list(self.visual_session.get_providers()),
             "text": list(self.text_session.get_providers()),
         }
-        self.using_gpu = "DmlExecutionProvider" in self.active_providers["visual"]
+        self.using_gpu = is_gpu_provider_active(self.active_providers["visual"])
         self.prefer_gpu = configured_prefer_gpu
         self.provider_id = "chinese_clip_onnx"
         self.init_vision_batch_state(

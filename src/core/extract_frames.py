@@ -21,14 +21,39 @@ logger = get_logger("extract_frames")
 _VF_CPU = "fps={fps:.6f},scale=224:224:flags=fast_bilinear"
 _VF_HW = "hwdownload,format=nv12," + _VF_CPU
 _VF_HW_10BIT = "hwdownload,format=p010le,format=yuv420p," + _VF_CPU
+# NVDEC: scale on GPU first, then download small 224×224 frames (CUDA experiment path).
+_VF_NVDEC_GPU_SCALE = "scale_cuda=224:224,hwdownload,format=nv12,fps={fps:.6f},format=bgr24"
+_VF_NVDEC_GPU_SCALE_10BIT = (
+    "scale_cuda=224:224,hwdownload,format=p010le,fps={fps:.6f},format=yuv420p,format=bgr24"
+)
 _FRAME_SIZE = 224 * 224 * 3
 _DEFAULT_READ_TIMEOUT_SEC = 600.0
 _DECODE_BACKEND_CPU = "cpu"
 _DECODE_BACKEND_D3D11VA = "d3d11va"
 _DECODE_BACKEND_D3D11VA_10BIT = "d3d11va_p010"
+_DECODE_BACKEND_NVDEC = "nvdec"
+_DECODE_BACKEND_NVDEC_10BIT = "nvdec_p010"
+_DECODE_BACKEND_NVDEC_CUDA_SCALE = "nvdec_cuda_scale"
+_DECODE_BACKEND_NVDEC_CUDA_SCALE_10BIT = "nvdec_cuda_scale_p010"
+_DECODE_BACKEND_NVDEC_CUDA_NATIVE = "nvdec_cuda_native"
+_DECODE_BACKEND_NVDEC_CUDA_NATIVE_P010 = "nvdec_cuda_native_p010"
+_HW_DECODE_BACKENDS = {
+    _DECODE_BACKEND_D3D11VA,
+    _DECODE_BACKEND_D3D11VA_10BIT,
+    _DECODE_BACKEND_NVDEC,
+    _DECODE_BACKEND_NVDEC_10BIT,
+    _DECODE_BACKEND_NVDEC_CUDA_SCALE,
+    _DECODE_BACKEND_NVDEC_CUDA_SCALE_10BIT,
+    _DECODE_BACKEND_NVDEC_CUDA_NATIVE,
+    _DECODE_BACKEND_NVDEC_CUDA_NATIVE_P010,
+}
 
 _D3D11VA_PROBE_CACHE = None
+_CUDA_HWACCEL_PROBE_CACHE = None
+_SCALE_CUDA_PROBE_CACHE = None
 _NVIDIA_GPU_PROBE_CACHE = None
+_PYNVVC_PROBE_CACHE = None
+_CUPY_PROBE_CACHE = None
 _LAST_FRAME_DECODE_BACKEND = _DECODE_BACKEND_CPU
 
 
@@ -43,28 +68,130 @@ class FrameExtractionError(RuntimeError):
 
 
 def get_last_frame_decode_backend():
-    """Backend used by the most recent completed frame extraction (``cpu`` or ``d3d11va``)."""
+    """Backend used by the most recent completed frame extraction."""
     return _LAST_FRAME_DECODE_BACKEND
+
+
+def _is_cuda_inference_mode():
+    try:
+        from src.core.inference_providers import is_cuda_inference_mode
+
+        return is_cuda_inference_mode()
+    except Exception:
+        return False
+
+
+def is_gpu_decode_experiment_active(config=None):
+    """True when GPU decode paths may be attempted (CUDA lab mode or settings toggle)."""
+    if platform.system().lower() != "windows":
+        return False
+
+    force = os.environ.get("VIDEOSEEK_FORCE_HW_DECODE", "").strip().lower()
+    if force in {"1", "true", "yes", "on"}:
+        return True
+    if force in {"0", "false", "no", "off"}:
+        return False
+
+    if _is_cuda_inference_mode():
+        return True
+
+    runtime_config = config or load_config()
+    return bool(runtime_config.get("experimental_hw_decode", False))
 
 
 def get_frame_decode_status(config=None):
     """Snapshot for settings diagnostics."""
     runtime_config = config or load_config()
+    gpu_decode_active = is_gpu_decode_experiment_active(config=runtime_config)
     requested = is_experimental_hw_decode_enabled(config=runtime_config)
-    available = ffmpeg_supports_d3d11va() if requested else False
+    cuda_mode = _is_cuda_inference_mode()
+    zero_copy = cuda_zero_copy_indexing_enabled(config=runtime_config) if gpu_decode_active else False
+    full_gpu = False
+    if zero_copy:
+        try:
+            from src.core.gpu_vector_ops import full_gpu_indexing_enabled
+
+            full_gpu = full_gpu_indexing_enabled(config=runtime_config)
+        except Exception:
+            full_gpu = False
     return {
         "requested": requested,
-        "d3d11va_available": available,
-        "nvidia_gpu_detected": system_has_nvidia_gpu() if requested else False,
+        "cuda_experiment_mode": cuda_mode,
+        "gpu_decode_active": gpu_decode_active,
+        "cuda_zero_copy_enabled": zero_copy,
+        "full_gpu_indexing_enabled": full_gpu,
+        "pynvvideocodec_available": pynvvideocodec_available() if gpu_decode_active else False,
+        "cupy_available": cupy_available() if gpu_decode_active else False,
+        "d3d11va_available": ffmpeg_supports_d3d11va() if gpu_decode_active else False,
+        "cuda_hwaccel_available": ffmpeg_supports_cuda_hwaccel() if gpu_decode_active else False,
+        "scale_cuda_available": ffmpeg_supports_scale_cuda() if gpu_decode_active else False,
+        "gpu_scale_decode_enabled": gpu_scale_decode_enabled() if gpu_decode_active else False,
+        "nvidia_gpu_detected": system_has_nvidia_gpu() if gpu_decode_active else False,
         "last_backend": get_last_frame_decode_backend(),
         "platform": platform.system(),
     }
 
 
+def pynvvideocodec_available(*, force_refresh=False):
+    """Return whether PyNvVideoCodec can be imported (CUDA 12 runtime DLLs present)."""
+    global _PYNVVC_PROBE_CACHE
+    if not force_refresh and _PYNVVC_PROBE_CACHE is not None:
+        return _PYNVVC_PROBE_CACHE
+    available = False
+    try:
+        from src.core.nvdec_dll_bootstrap import ensure_pynvvideocodec_dll_paths
+
+        ensure_pynvvideocodec_dll_paths()
+        import PyNvVideoCodec  # noqa: F401
+
+        available = True
+    except Exception as exc:
+        logger.info("PyNvVideoCodec is unavailable: %s", exc)
+        available = False
+    _PYNVVC_PROBE_CACHE = available
+    return available
+
+
+def cupy_available(*, force_refresh=False):
+    """Return whether CuPy is importable."""
+    global _CUPY_PROBE_CACHE
+    if not force_refresh and _CUPY_PROBE_CACHE is not None:
+        return _CUPY_PROBE_CACHE
+    try:
+        from src.core.gpu_clip_preprocess import cupy_available as _gpu_cupy_available
+
+        available = _gpu_cupy_available(force_refresh=force_refresh)
+    except Exception as exc:
+        logger.info("CuPy is unavailable: %s", exc)
+        available = False
+    _CUPY_PROBE_CACHE = available
+    return available
+
+
+def cuda_zero_copy_indexing_enabled(config=None):
+    """True when NVDEC native GPU decode + GPU preprocess + ORT CUDA input may be used."""
+    force = os.environ.get("VIDEOSEEK_CUDA_ZERO_COPY", "").strip().lower()
+    if force in {"0", "false", "no", "off"}:
+        return False
+    if force in {"1", "true", "yes", "on"}:
+        return pynvvideocodec_available() and cupy_available()
+    if not _is_cuda_inference_mode():
+        return False
+    if not is_gpu_decode_experiment_active(config=config):
+        return False
+    if platform.system().lower() != "windows":
+        return False
+    return (
+        pynvvideocodec_available()
+        and cupy_available()
+        and system_has_nvidia_gpu()
+    )
+
+
 def _set_last_frame_decode_backend(backend):
     global _LAST_FRAME_DECODE_BACKEND
     normalized = str(backend or "").strip().lower()
-    allowed = {_DECODE_BACKEND_CPU, _DECODE_BACKEND_D3D11VA, _DECODE_BACKEND_D3D11VA_10BIT}
+    allowed = {_DECODE_BACKEND_CPU, *_HW_DECODE_BACKENDS}
     if normalized not in allowed:
         normalized = _DECODE_BACKEND_CPU
     _LAST_FRAME_DECODE_BACKEND = normalized
@@ -159,7 +286,51 @@ def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False):
     ]
 
 
+def _build_nvdec_extract_command(video_path, fps, *, ten_bit=False, gpu_scale=False):
+    ffmpeg_bin = get_ffmpeg_path()
+    if gpu_scale and ten_bit:
+        vf_template = _VF_NVDEC_GPU_SCALE_10BIT
+    elif gpu_scale:
+        vf_template = _VF_NVDEC_GPU_SCALE
+    elif ten_bit:
+        vf_template = _VF_HW_10BIT
+    else:
+        vf_template = _VF_HW
+    return [
+        ffmpeg_bin,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-hwaccel",
+        "cuda",
+        "-hwaccel_output_format",
+        "cuda",
+        "-threads",
+        _ffmpeg_thread_count_token(),
+        "-i",
+        video_path,
+        "-vf",
+        vf_template.format(fps=float(fps)),
+        "-sn",
+        "-f",
+        "image2pipe",
+        "-pix_fmt",
+        "bgr24",
+        "-vcodec",
+        "rawvideo",
+        "-",
+    ]
+
+
 def _build_extract_command(video_path, fps, *, decode_backend=_DECODE_BACKEND_CPU):
+    if decode_backend == _DECODE_BACKEND_NVDEC_CUDA_SCALE_10BIT:
+        return _build_nvdec_extract_command(video_path, fps, ten_bit=True, gpu_scale=True)
+    if decode_backend == _DECODE_BACKEND_NVDEC_CUDA_SCALE:
+        return _build_nvdec_extract_command(video_path, fps, ten_bit=False, gpu_scale=True)
+    if decode_backend == _DECODE_BACKEND_NVDEC_10BIT:
+        return _build_nvdec_extract_command(video_path, fps, ten_bit=True)
+    if decode_backend == _DECODE_BACKEND_NVDEC:
+        return _build_nvdec_extract_command(video_path, fps, ten_bit=False)
     if decode_backend == _DECODE_BACKEND_D3D11VA_10BIT:
         return _build_d3d11va_extract_command(video_path, fps, ten_bit=True)
     if decode_backend == _DECODE_BACKEND_D3D11VA:
@@ -214,8 +385,93 @@ def ffmpeg_supports_d3d11va(*, force_refresh=False):
     return supported
 
 
+def ffmpeg_supports_cuda_hwaccel(*, force_refresh=False):
+    """Return whether the configured FFmpeg binary advertises ``cuda`` hwaccel."""
+    global _CUDA_HWACCEL_PROBE_CACHE
+    if platform.system().lower() != "windows":
+        return False
+    if not force_refresh and _CUDA_HWACCEL_PROBE_CACHE is not None:
+        return _CUDA_HWACCEL_PROBE_CACHE
+
+    supported = False
+    try:
+        result = subprocess.run(
+            [get_ffmpeg_path(), "-hide_banner", "-hwaccels"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+            startupinfo=_build_startupinfo(),
+        )
+        haystack = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+        tokens = haystack.replace("\r", "\n").replace(",", " ").split()
+        supported = result.returncode == 0 and "cuda" in tokens
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        logger.warning("Failed to probe FFmpeg cuda hwaccel: %s", exc)
+        supported = False
+
+    _CUDA_HWACCEL_PROBE_CACHE = supported
+    if not supported:
+        logger.info("FFmpeg cuda hwaccel is unavailable; NVDEC decode will use fallback backends")
+    return supported
+
+
+def ffmpeg_supports_scale_cuda(*, force_refresh=False):
+    """Return whether FFmpeg exposes the ``scale_cuda`` filter."""
+    global _SCALE_CUDA_PROBE_CACHE
+    if platform.system().lower() != "windows":
+        return False
+    if not force_refresh and _SCALE_CUDA_PROBE_CACHE is not None:
+        return _SCALE_CUDA_PROBE_CACHE
+
+    supported = False
+    try:
+        result = subprocess.run(
+            [get_ffmpeg_path(), "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+            startupinfo=_build_startupinfo(),
+        )
+        haystack = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+        supported = result.returncode == 0 and "scale_cuda" in haystack
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        logger.warning("Failed to probe FFmpeg scale_cuda filter: %s", exc)
+        supported = False
+
+    _SCALE_CUDA_PROBE_CACHE = supported
+    if not supported:
+        logger.info("FFmpeg scale_cuda filter is unavailable; NVDEC will download full frames before CPU scale")
+    return supported
+
+
+def gpu_scale_decode_enabled():
+    """True when NVDEC should scale on GPU before hwdownload."""
+    force = os.environ.get("VIDEOSEEK_GPU_SCALE", "").strip().lower()
+    if force in {"0", "false", "no", "off"}:
+        return False
+    if force in {"1", "true", "yes", "on"}:
+        return ffmpeg_supports_scale_cuda()
+    return _is_cuda_inference_mode() and ffmpeg_supports_scale_cuda()
+
+
 def _should_attempt_hw_decode(config=None):
-    return is_experimental_hw_decode_enabled(config=config) and ffmpeg_supports_d3d11va()
+    if not is_gpu_decode_experiment_active(config=config):
+        return False
+    return ffmpeg_supports_d3d11va()
+
+
+def _should_attempt_nvdec(config=None):
+    if not is_gpu_decode_experiment_active(config=config):
+        return False
+    if not _is_cuda_inference_mode():
+        return False
+    return system_has_nvidia_gpu() and ffmpeg_supports_cuda_hwaccel()
 
 
 def system_has_nvidia_gpu(*, force_refresh=False):
@@ -306,16 +562,11 @@ def video_likely_supports_d3d11va_decode(video_path):
     return not _d3d11va_hard_skip_reason(stream_info) and not _d3d11va_10bit_reason(stream_info)
 
 
-def _resolve_decode_backends(video_path, config=None):
-    backends = [_DECODE_BACKEND_CPU]
-    if not _should_attempt_hw_decode(config=config):
-        return backends
-
-    stream_info = get_video_stream_info(video_path)
+def _append_d3d11va_backends(backends, stream_info, video_path):
     hard_skip = _d3d11va_hard_skip_reason(stream_info)
     if hard_skip:
         logger.info(
-            "Skipping experimental D3D11VA for %s (%s); using CPU decode",
+            "Skipping experimental D3D11VA for %s (%s)",
             os.path.basename(video_path),
             hard_skip,
         )
@@ -331,14 +582,102 @@ def _resolve_decode_backends(video_path, config=None):
                 ten_bit_reason,
             )
             return backends
-        return [_DECODE_BACKEND_D3D11VA_10BIT, _DECODE_BACKEND_CPU]
+        backends.append(_DECODE_BACKEND_D3D11VA_10BIT)
+        return backends
 
-    hw_backends = [_DECODE_BACKEND_D3D11VA]
+    backends.append(_DECODE_BACKEND_D3D11VA)
     if has_nvidia:
-        # ffprobe often omits 10-bit fields for HEVC/MKV (e.g. plain "1.mkv"); try p010 after nv12 fails.
-        hw_backends.append(_DECODE_BACKEND_D3D11VA_10BIT)
-    hw_backends.append(_DECODE_BACKEND_CPU)
-    return hw_backends
+        backends.append(_DECODE_BACKEND_D3D11VA_10BIT)
+    return backends
+
+
+def _append_nvdec_cuda_native_backends(backends, stream_info, video_path, *, config=None):
+    if not cuda_zero_copy_indexing_enabled(config=config):
+        return backends
+
+    hard_skip = _d3d11va_hard_skip_reason(stream_info)
+    if hard_skip:
+        logger.info(
+            "Skipping NVDEC native for %s (%s)",
+            os.path.basename(video_path),
+            hard_skip,
+        )
+        return backends
+
+    ten_bit_reason = _d3d11va_10bit_reason(stream_info, video_path)
+    if ten_bit_reason:
+        backends.append(_DECODE_BACKEND_NVDEC_CUDA_NATIVE_P010)
+    backends.append(_DECODE_BACKEND_NVDEC_CUDA_NATIVE)
+    return backends
+
+
+def _append_nvdec_backends(backends, stream_info, video_path, *, config=None):
+    hard_skip = _d3d11va_hard_skip_reason(stream_info)
+    if hard_skip:
+        logger.info(
+            "Skipping NVDEC for %s (%s)",
+            os.path.basename(video_path),
+            hard_skip,
+        )
+        return backends
+
+    ten_bit_reason = _d3d11va_10bit_reason(stream_info, video_path)
+    use_gpu_scale = gpu_scale_decode_enabled()
+    if ten_bit_reason:
+        if use_gpu_scale:
+            backends.append(_DECODE_BACKEND_NVDEC_CUDA_SCALE_10BIT)
+        backends.append(_DECODE_BACKEND_NVDEC_10BIT)
+        return backends
+
+    if use_gpu_scale:
+        backends.append(_DECODE_BACKEND_NVDEC_CUDA_SCALE)
+    backends.append(_DECODE_BACKEND_NVDEC)
+    backends.append(_DECODE_BACKEND_NVDEC_10BIT)
+    return backends
+
+
+def _resolve_decode_backends(video_path, config=None):
+    decode_override = os.environ.get("VIDEOSEEK_DECODE_BACKEND", "").strip().lower()
+    if decode_override == "cpu":
+        return [_DECODE_BACKEND_CPU]
+    if decode_override in {
+        _DECODE_BACKEND_NVDEC,
+        _DECODE_BACKEND_NVDEC_10BIT,
+        _DECODE_BACKEND_NVDEC_CUDA_SCALE,
+        _DECODE_BACKEND_NVDEC_CUDA_SCALE_10BIT,
+        _DECODE_BACKEND_NVDEC_CUDA_NATIVE,
+        _DECODE_BACKEND_NVDEC_CUDA_NATIVE_P010,
+    }:
+        return [decode_override, _DECODE_BACKEND_CPU]
+    if decode_override in {_DECODE_BACKEND_D3D11VA, _DECODE_BACKEND_D3D11VA_10BIT}:
+        return [decode_override, _DECODE_BACKEND_CPU]
+
+    if not is_gpu_decode_experiment_active(config=config):
+        return [_DECODE_BACKEND_CPU]
+
+    stream_info = get_video_stream_info(video_path)
+    backends = []
+
+    if _should_attempt_nvdec(config=config):
+        _append_nvdec_cuda_native_backends(backends, stream_info, video_path, config=config)
+        _append_nvdec_backends(backends, stream_info, video_path, config=config)
+
+    if _should_attempt_hw_decode(config=config):
+        _append_d3d11va_backends(backends, stream_info, video_path)
+
+    if not backends:
+        return [_DECODE_BACKEND_CPU]
+
+    deduped = []
+    seen = set()
+    for backend in backends:
+        if backend in seen:
+            continue
+        seen.add(backend)
+        deduped.append(backend)
+    if _DECODE_BACKEND_CPU not in deduped:
+        deduped.append(_DECODE_BACKEND_CPU)
+    return deduped
 
 
 def _signed_subprocess_code(code: int) -> int:
@@ -444,6 +783,7 @@ def _stream_rawvideo_frames(
             if not process.stdout:
                 break
 
+            decode_t0 = time.perf_counter()
             in_bytes = _read_pipe_bytes(
                 process.stdout,
                 _FRAME_SIZE,
@@ -455,6 +795,12 @@ def _stream_rawvideo_frames(
                 break
 
             frame = np.frombuffer(in_bytes, np.uint8).reshape((224, 224, 3))
+            try:
+                from src.core.pipeline_profiler import record_decode
+
+                record_decode(time.perf_counter() - decode_t0)
+            except Exception:
+                pass
             timestamp = count / float(fps)
             count += 1
             yield frame, timestamp
@@ -468,7 +814,7 @@ def _stream_rawvideo_frames(
             )
             log_fn = (
                 logger.warning
-                if decode_backend in {_DECODE_BACKEND_D3D11VA, _DECODE_BACKEND_D3D11VA_10BIT} and count == 0
+                if decode_backend in _HW_DECODE_BACKENDS and count == 0
                 else logger.error
             )
             log_fn(message)
@@ -479,9 +825,9 @@ def _stream_rawvideo_frames(
                 frame_count=count,
             )
         if count == 0:
-            if decode_backend in {_DECODE_BACKEND_D3D11VA, _DECODE_BACKEND_D3D11VA_10BIT}:
+            if decode_backend in _HW_DECODE_BACKENDS:
                 message = (
-                    f"D3D11VA frame extraction produced no frames for {video_path} at {float(fps):.3f} FPS "
+                    f"Hardware frame extraction produced no frames for {video_path} at {float(fps):.3f} FPS "
                     f"[{decode_backend}]"
                 )
                 logger.warning(message)
@@ -570,14 +916,17 @@ def stream_frames_with_ffmpeg(
     If ``fps_override`` is set (remix / explicit sampling), it is used as the ``fps=`` filter rate.
     Otherwise the active config sampling rules are used (library indexing).
 
-    Default path uses CPU decode. When ``experimental_hw_decode`` is enabled on Windows and FFmpeg
-    advertises ``d3d11va``, D3D11VA is tried first (8-bit ``nv12`` chain; 10-bit ``p010`` chain on
-    detected NVIDIA GPUs) and failures fall back to the CPU command.
+    Default path uses CPU decode. When GPU decode is active (``VIDEOSEEK_INFERENCE_EP=cuda`` or
+    ``experimental_hw_decode``) on Windows, FFmpeg tries NVDEC with GPU-side ``scale_cuda`` first,
+    then legacy NVDEC (full-frame hwdownload), then D3D11VA, then CPU.
 
     Optional env:
     - ``VIDEOSEEK_FFMPEG_THREADS``: FFmpeg ``-threads`` (capped at 16)
     - ``VIDEOSEEK_FFMPEG_READ_TIMEOUT_SEC``: per-read stall timeout (default 600; ``0`` disables)
-    - ``VIDEOSEEK_FORCE_HW_DECODE``: force-enable (``1``) or force-disable (``0``) lab hw decode
+    - ``VIDEOSEEK_FORCE_HW_DECODE``: force-enable (``1``) or force-disable (``0``) GPU decode
+    - ``VIDEOSEEK_GPU_SCALE``: ``auto`` (CUDA mode + scale_cuda), ``1`` force on, ``0`` force off
+    - ``VIDEOSEEK_DECODE_BACKEND``: ``auto`` (default), ``nvdec_cuda_native``, ``nvdec_cuda_scale``, ``nvdec``, ``d3d11va``, or ``cpu``
+    - ``VIDEOSEEK_CUDA_ZERO_COPY``: ``auto`` (CUDA mode on), ``1`` force on, ``0`` force off
     """
     config = load_config()
     if fps_override is not None:

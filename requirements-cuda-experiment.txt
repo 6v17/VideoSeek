@@ -1,0 +1,17 @@
+# Optional CUDA experiment stack (conda env VideoSeek-CUDA).
+# Install: pip install -r requirements-cuda-experiment.txt
+#
+# Requires NVIDIA GPU + driver with NVDEC/NVENC. PyNvVideoCodec links against
+# CUDA 12 runtime (cudart64_12.dll) — install nvidia-cuda-runtime-cu12 even if
+# the system CUDA toolkit is 13.x. VideoSeek calls ensure_pynvvideocodec_dll_paths()
+# before import; no manual PATH tweak is needed inside the app.
+
+onnxruntime-gpu
+PyNvVideoCodec
+nvidia-cuda-runtime-cu12
+cupy-cuda12x
+
+# FAISS-GPU: NOT on PyPI (pip install faiss-gpu will fail on Windows). Use conda in VideoSeek-CUDA:
+#   conda install "faiss=*=*cuda130*"   # Python 3.10 + CUDA 13.x on win-64 (Anaconda defaults)
+# Verify: python -c "import faiss; print(hasattr(faiss,'GpuIndexFlatIP'))"
+# Without GPU FAISS, indexing still works; build falls back to faiss-cpu after the final D2H.

@@ -17,7 +17,20 @@ from src.app.config import load_config
 from src.app.indexing_progress import IndexingProgressReporter
 from src.app.logging_utils import get_logger
 from src.core.inference_registry import build_inference_engine, register_inference_engine
-from src.core.extract_frames import stream_frames_with_ffmpeg, terminate_ffmpeg_process
+from src.core.inference_providers import (
+    gpu_runtime_fallback_hint,
+    is_cuda_inference_mode,
+    is_gpu_provider_active,
+    preferred_gpu_provider_name,
+    resolve_ort_providers,
+)
+from src.core.extract_frames import (
+    cuda_zero_copy_indexing_enabled,
+    get_last_frame_decode_backend,
+    stream_frames_with_ffmpeg,
+    terminate_ffmpeg_process,
+)
+from src.core.pipeline_profiler import log_pipeline_summary, pipeline_profile_run
 from src.core.onnx_session import build_session_options as _build_session_options, resolve_embedding_batch_size as _resolve_embedding_batch_size
 from src.core.onnx_vision_engine import (
     INFERENCE_LOCK as _INFERENCE_LOCK,
@@ -26,7 +39,7 @@ from src.core.onnx_vision_engine import (
     truncate_log_text as _truncate_log_text,
 )
 from src.core.faiss_index import create_clip_index
-from src.core.semantic_chunking import SemanticChunkStreamBuilder, chunk_config_payload
+from src.core.semantic_chunking import SemanticChunkStreamBuilder, build_semantic_chunks, chunk_config_payload
 from src.storage.asset_store import save_vector_payload
 from src.storage.config_store import (
     get_active_embedding_spec,
@@ -54,9 +67,7 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
         config_prefer_gpu = get_effective_prefer_gpu(config=runtime_config)
         runtime_plan = prepare_inference_runtime(prefer_gpu=config_prefer_gpu, provider="clip_onnx")
         prefer_gpu = runtime_plan["effective_prefer_gpu"]
-        providers = ["CPUExecutionProvider"]
-        if prefer_gpu:
-            providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        providers = resolve_ort_providers(prefer_gpu=prefer_gpu)
 
         model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
         self.model_paths = dict(model_paths)
@@ -75,7 +86,7 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
             "text": self.text_session.get_providers(),
         }
         self.using_gpu = all(
-            "DmlExecutionProvider" in provider_list for provider_list in self.active_providers.values()
+            is_gpu_provider_active(provider_list) for provider_list in self.active_providers.values()
         )
         self.prefer_gpu = config_prefer_gpu
         self.provider_id = "clip_onnx"
@@ -95,7 +106,7 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
             self.runtime_issue = self.runtime_diagnostics.get("issue", "unknown")
             self.runtime_warning = (
                 "GPU execution is unavailable. ONNX Runtime fell back to CPU. "
-                "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
+                + gpu_runtime_fallback_hint()
             )
         self.backend_label = "GPU" if self.using_gpu else "CPU"
         logger.info(
@@ -285,6 +296,15 @@ def prepare_inference_runtime(prefer_gpu=None, provider=None):
         except Exception:
             resolved_provider = "clip_onnx"
     logger.info("Preparing inference runtime: configured_prefer_gpu=%s", configured_prefer_gpu)
+    if is_cuda_inference_mode():
+        logger.info("Inference runtime preparation skipped DirectML probe (CUDA experiment mode)")
+        return {
+            "configured_prefer_gpu": configured_prefer_gpu,
+            "effective_prefer_gpu": configured_prefer_gpu,
+            "warning": "",
+            "issue": "",
+            "diagnostics": {"inference_ep": "cuda"},
+        }
     if not configured_prefer_gpu:
         logger.info("Inference runtime preparation selected CPU because GPU preference is disabled")
         return {
@@ -513,9 +533,10 @@ def _parse_gpu_probe_payload(stdout_text):
 
 def _run_isolated_gpu_probe():
     try:
-        logger.info("GPU probe child starting DirectML validation")
+        preferred = preferred_gpu_provider_name()
+        logger.info("GPU probe child starting validation for provider=%s", preferred)
         model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
-        providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        providers = resolve_ort_providers(prefer_gpu=True)
         visual_session = ort.InferenceSession(
             model_paths["clip_visual.onnx"],
             sess_options=_build_session_options(True),
@@ -533,21 +554,22 @@ def _run_isolated_gpu_probe():
         diagnostics = _build_gpu_runtime_diagnostics()
         diagnostics["probe_stage"] = "provider_activation"
         diagnostics["active_providers"] = dict(active_providers)
+        diagnostics["preferred_gpu_provider"] = preferred
         logger.info("GPU probe child initialized sessions with providers: visual=%s text=%s", active_providers["visual"], active_providers["text"])
-        using_gpu = all("DmlExecutionProvider" in provider_list for provider_list in active_providers.values())
+        using_gpu = all(is_gpu_provider_active(provider_list) for provider_list in active_providers.values())
         if not using_gpu:
-            if "DmlExecutionProvider" not in active_providers["visual"]:
+            if not is_gpu_provider_active(active_providers["visual"]):
                 issue = "visual_provider_not_activated"
-            elif "DmlExecutionProvider" not in active_providers["text"]:
+            elif not is_gpu_provider_active(active_providers["text"]):
                 issue = "text_provider_not_activated"
             else:
                 issue = diagnostics.get("issue") or "provider_not_activated"
             diagnostics["failure_kind"] = issue
-            logger.warning("GPU probe child did not activate DirectML provider: issue=%s", issue or "unknown")
+            logger.warning("GPU probe child did not activate preferred provider: issue=%s preferred=%s", issue or "unknown", preferred)
             return {
                 "ok": False,
                 "issue": issue or "unknown",
-                "detail": "DirectML provider was not activated during GPU runtime probe.",
+                "detail": f"{preferred} was not activated during GPU runtime probe.",
                 "diagnostics": diagnostics,
             }
 
@@ -581,7 +603,7 @@ def _run_isolated_gpu_probe():
                 "detail": str(exc),
                 "diagnostics": diagnostics,
             }
-        logger.info("GPU probe child completed DirectML validation successfully")
+        logger.info("GPU probe child completed GPU validation successfully for provider=%s", preferred)
         diagnostics.pop("probe_stage", None)
         diagnostics.pop("failure_kind", None)
         diagnostics.pop("probe_exception_type", None)
@@ -599,7 +621,7 @@ def _run_isolated_gpu_probe():
         diagnostics["probe_exception_type"] = exc.__class__.__name__
         diagnostics["probe_exception_message"] = str(exc)
         issue = diagnostics.get("issue") or "session_init_failed"
-        logger.exception("GPU probe child failed during DirectML validation")
+        logger.exception("GPU probe child failed during GPU validation")
         return {
             "ok": False,
             "issue": issue or "unknown",
@@ -611,7 +633,7 @@ def _run_isolated_gpu_probe():
 def _build_gpu_runtime_warning(detail):
     base = (
         "GPU execution is unavailable. ONNX Runtime fell back to CPU. "
-        "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
+        + gpu_runtime_fallback_hint()
     )
     detail_text = str(detail or "").strip()
     if not detail_text:
@@ -656,6 +678,10 @@ def _build_gpu_runtime_diagnostics():
         "missing_msvc_dlls": [],
         "windows_build": None,
     }
+    if is_cuda_inference_mode():
+        if preferred_gpu_provider_name() not in diagnostics["available_providers"]:
+            diagnostics["issue"] = "cuda"
+        return diagnostics
     if not _is_windows():
         diagnostics["issue"] = "windows"
         return diagnostics
@@ -844,14 +870,115 @@ def _run_indexing_frame_reader(
             logger.warning("Indexing frame queue still full while sending end sentinel for %s", video_path)
 
 
+def _run_indexing_nvdec_frame_reader(
+    video_path,
+    frame_queue,
+    stop_event,
+    reader_error,
+    stream_kwargs,
+):
+    """Background thread: PyNvVideoCodec NVDEC decode yields GPU RGB frames."""
+    from src.core.nvdec_cuda_decoder import stream_frames_nvdec_cuda_with_fallback
+
+    fps = float(stream_kwargs.get("fps") or 1.0)
+    should_stop = stream_kwargs.get("should_stop")
+    try:
+        for frame, timestamp in stream_frames_nvdec_cuda_with_fallback(
+            video_path,
+            fps,
+            should_stop=should_stop,
+        ):
+            if stop_event.is_set():
+                return
+            while True:
+                if stop_event.is_set():
+                    return
+                try:
+                    frame_queue.put((frame, timestamp), timeout=0.25)
+                    break
+                except queue.Full:
+                    continue
+    except InterruptedError:
+        logger.info("NVDEC indexing frame reader stopped for %s", os.path.basename(video_path))
+    except Exception as exc:
+        logger.exception("NVDEC indexing frame reader failed for %s", video_path)
+        reader_error.append(exc)
+    finally:
+        try:
+            frame_queue.put(None, timeout=30.0)
+        except queue.Full:
+            logger.warning(
+                "NVDEC indexing frame queue still full while sending end sentinel for %s",
+                video_path,
+            )
+
+
+def _indexing_use_cuda_zero_copy(config=None):
+    runtime_config = config or load_config()
+    return cuda_zero_copy_indexing_enabled(config=runtime_config)
+
+
+def _resolve_index_stream_fps(video_path, config=None):
+    runtime_config = config or load_config()
+    duration = get_video_duration_seconds(video_path)
+    return resolve_sampling_fps(duration, config=runtime_config)
+
+
+def _encode_gpu_frame_batch(frame_batch, engine_instance):
+    from src.core.gpu_clip_preprocess import load_mean_std_from_engine, preprocess_batch_gpu
+
+    mean, std = load_mean_std_from_engine(engine_instance)
+    pre_t0 = time.perf_counter()
+    gpu_batch = preprocess_batch_gpu(
+        frame_batch,
+        image_size=int(getattr(engine_instance, "image_size", 224) or 224),
+        mean=mean,
+        std=std,
+    )
+    try:
+        from src.core.pipeline_profiler import record_preprocess
+
+        record_preprocess(time.perf_counter() - pre_t0)
+    except Exception:
+        pass
+    return get_engine().encode_preprocessed_batch_gpu(gpu_batch)
+
+
 def _indexing_use_overlap_frame_reader():
     """Overlap decode (reader thread) with encode (main thread). Disable via VIDEOSEEK_DISABLE_INDEX_FRAME_OVERLAP=1 for A/B."""
     v = os.environ.get("VIDEOSEEK_DISABLE_INDEX_FRAME_OVERLAP", "").strip().lower()
     return v not in ("1", "true", "yes")
 
 
-def _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch):
-    if batch_vectors is None or len(batch_vectors) == 0:
+def _embedding_batch_nonempty(batch_vectors) -> bool:
+    from src.core.gpu_vector_ops import is_cupy_array
+
+    if batch_vectors is None:
+        return False
+    if is_cupy_array(batch_vectors):
+        shape = getattr(batch_vectors, "shape", None)
+        return shape is not None and int(shape[0]) > 0
+    try:
+        return len(batch_vectors) > 0
+    except TypeError:
+        return False
+
+
+def _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch, *, defer_chunks=False):
+    from src.core.gpu_vector_ops import gpu_to_numpy, is_cupy_array
+
+    if batch_vectors is None:
+        return 0
+    if is_cupy_array(batch_vectors):
+        count = int(batch_vectors.shape[0]) if getattr(batch_vectors, "ndim", 0) > 1 else 0
+        if count <= 0:
+            return 0
+        vector_parts.append(batch_vectors)
+        if chunk_builder is not None and not defer_chunks:
+            chunk_builder.extend(gpu_to_numpy(batch_vectors), timestamp_batch[:count])
+        return count
+
+    if len(batch_vectors) == 0:
         return 0
     batch_arr = np.asarray(batch_vectors, dtype=np.float32)
     if batch_arr.ndim == 1:
@@ -936,6 +1063,77 @@ def _encode_batched_from_frame_stream(
     return timestamps
 
 
+def _encode_batched_from_gpu_frame_stream(
+    frame_stream,
+    engine_instance,
+    frame_batch_size,
+    *,
+    should_stop_callback=None,
+    stop_event=None,
+    progress_reporter=None,
+    estimated_frame_total=0,
+    vector_parts=None,
+    chunk_builder=None,
+):
+    """Pull GPU RGB frames from ``frame_stream`` and run zero-copy GPU preprocess + ORT."""
+    from src.core.gpu_vector_ops import full_gpu_indexing_enabled
+
+    defer_chunks = full_gpu_indexing_enabled()
+    frame_batch = []
+    timestamp_batch = []
+    vector_parts = [] if vector_parts is None else vector_parts
+    timestamps = []
+    frames_decoded = 0
+    frames_encoded = 0
+    estimated_total = max(0, int(estimated_frame_total or 0))
+
+    if progress_reporter is not None:
+        progress_reporter.emit("decode", 0, estimated_total, force=True)
+
+    for frame, timestamp in frame_stream:
+        if _indexing_should_stop(should_stop_callback, stop_event):
+            raise InterruptedError("Index update stopped during frame extraction")
+        frames_decoded += 1
+        if progress_reporter is not None:
+            total = max(estimated_total, frames_decoded)
+            progress_reporter.emit("decode", frames_decoded, total)
+        frame_batch.append(frame)
+        timestamp_batch.append(timestamp)
+        if len(frame_batch) < frame_batch_size:
+            continue
+        batch_vectors = _encode_gpu_frame_batch(frame_batch, engine_instance)
+        if _embedding_batch_nonempty(batch_vectors):
+            added = _accumulate_inference_batch(
+                vector_parts, chunk_builder, batch_vectors, timestamp_batch, defer_chunks=defer_chunks
+            )
+            timestamps.extend(timestamp_batch[:added])
+            frames_encoded += added
+            if progress_reporter is not None:
+                total = max(estimated_total, frames_decoded, frames_encoded)
+                progress_reporter.emit("encode", frames_encoded, total)
+        frame_batch = []
+        timestamp_batch = []
+
+    if frame_batch:
+        batch_vectors = _encode_gpu_frame_batch(frame_batch, engine_instance)
+        if _embedding_batch_nonempty(batch_vectors):
+            added = _accumulate_inference_batch(
+                vector_parts, chunk_builder, batch_vectors, timestamp_batch, defer_chunks=defer_chunks
+            )
+            timestamps.extend(timestamp_batch[:added])
+            frames_encoded += added
+            if progress_reporter is not None:
+                total = max(estimated_total, frames_decoded, frames_encoded)
+                progress_reporter.emit("encode", frames_encoded, total, force=True)
+
+    if progress_reporter is not None:
+        total = max(estimated_total, frames_decoded, frames_encoded)
+        progress_reporter.emit("decode", frames_decoded, total, force=True)
+        progress_reporter.emit("encode", frames_encoded, total, force=True)
+
+    return timestamps
+
+
 def generate_vectors_and_index_for_video(
     video_path,
     video_id,
@@ -997,90 +1195,137 @@ def generate_vectors_and_index_for_video(
     stream_kwargs = {
         "should_stop": _should_stop,
         "process_holder": process_holder,
+        "fps": _resolve_index_stream_fps(video_path, config=runtime_config),
     }
+    use_zero_copy = _indexing_use_cuda_zero_copy(config=runtime_config)
+    from src.core.gpu_vector_ops import full_gpu_indexing_enabled
+
+    use_full_gpu = bool(use_zero_copy and full_gpu_indexing_enabled(config=runtime_config))
+    if use_zero_copy:
+        from src.core.gpu_clip_preprocess import _ensure_cupy_cuda_context
+
+        _ensure_cupy_cuda_context(0)
+        logger.info(
+            "Per-video index %s: CUDA zero-copy NVDEC decode enabled%s",
+            log_tag,
+            " + full GPU vectors" if use_full_gpu else "",
+        )
 
     if progress_reporter is not None:
         progress_reporter.emit("decode", 0, estimated_frame_total, force=True)
 
-    if _indexing_use_overlap_frame_reader():
-        frame_queue = queue.Queue(maxsize=max(32, frame_batch_size * 4))
-        reader_error = []
-        reader_thread = threading.Thread(
-            target=_run_indexing_frame_reader,
-            args=(video_path, frame_queue, stop_event, reader_error, stream_kwargs),
-            name="VSIndexFrameReader",
-            daemon=True,
-        )
-        reader_thread.start()
-        try:
-            while True:
-                if _should_stop():
-                    _kill_indexing_ffmpeg(process_holder)
-                    raise InterruptedError("Index update stopped during frame extraction")
-                try:
-                    item = frame_queue.get(timeout=0.5)
-                except queue.Empty:
-                    continue
-                if item is None:
-                    break
-                frame, timestamp = item
-                frames_decoded += 1
-                _report_decode()
-                frame_batch.append(frame)
-                timestamp_batch.append(timestamp)
-                if len(frame_batch) < frame_batch_size:
-                    continue
-                batch_vectors = get_engine().encode_images(frame_batch)
-                if len(batch_vectors) > 0:
-                    added = _accumulate_inference_batch(
-                        vector_parts, chunk_builder, batch_vectors, timestamp_batch
-                    )
-                    timestamps.extend(timestamp_batch[:added])
-                    frames_encoded += added
-                    _report_encode()
-                frame_batch = []
-                timestamp_batch = []
+    with pipeline_profile_run():
+        if _indexing_use_overlap_frame_reader():
+            frame_queue = queue.Queue(maxsize=max(32, frame_batch_size * 4))
+            reader_error = []
+            reader_target = _run_indexing_nvdec_frame_reader if use_zero_copy else _run_indexing_frame_reader
+            reader_thread = threading.Thread(
+                target=reader_target,
+                args=(video_path, frame_queue, stop_event, reader_error, stream_kwargs),
+                name="VSIndexFrameReader",
+                daemon=True,
+            )
+            reader_thread.start()
+            try:
+                while True:
+                    if _should_stop():
+                        _kill_indexing_ffmpeg(process_holder)
+                        raise InterruptedError("Index update stopped during frame extraction")
+                    try:
+                        item = frame_queue.get(timeout=0.5)
+                    except queue.Empty:
+                        continue
+                    if item is None:
+                        break
+                    frame, timestamp = item
+                    frames_decoded += 1
+                    _report_decode()
+                    frame_batch.append(frame)
+                    timestamp_batch.append(timestamp)
+                    if len(frame_batch) < frame_batch_size:
+                        continue
+                    if use_zero_copy:
+                        batch_vectors = _encode_gpu_frame_batch(frame_batch, engine_instance)
+                    else:
+                        batch_vectors = get_engine().encode_images(frame_batch)
+                    if _embedding_batch_nonempty(batch_vectors):
+                        added = _accumulate_inference_batch(
+                            vector_parts, chunk_builder, batch_vectors, timestamp_batch, defer_chunks=use_full_gpu
+                        )
+                        timestamps.extend(timestamp_batch[:added])
+                        frames_encoded += added
+                        _report_encode()
+                    frame_batch = []
+                    timestamp_batch = []
 
-            if frame_batch:
-                batch_vectors = get_engine().encode_images(frame_batch)
-                if len(batch_vectors) > 0:
-                    added = _accumulate_inference_batch(
-                        vector_parts, chunk_builder, batch_vectors, timestamp_batch
-                    )
-                    timestamps.extend(timestamp_batch[:added])
-                    frames_encoded += added
-                    _report_encode(force=True)
-            _report_decode(force=True)
-            _report_encode(force=True)
+                if frame_batch:
+                    if use_zero_copy:
+                        batch_vectors = _encode_gpu_frame_batch(frame_batch, engine_instance)
+                    else:
+                        batch_vectors = get_engine().encode_images(frame_batch)
+                    if _embedding_batch_nonempty(batch_vectors):
+                        added = _accumulate_inference_batch(
+                            vector_parts, chunk_builder, batch_vectors, timestamp_batch, defer_chunks=use_full_gpu
+                        )
+                        timestamps.extend(timestamp_batch[:added])
+                        frames_encoded += added
+                        _report_encode(force=True)
+                _report_decode(force=True)
+                _report_encode(force=True)
 
-            if reader_error:
-                raise reader_error[0]
-        finally:
-            stop_event.set()
-            _drain_index_frame_queue(frame_queue)
-            reader_thread.join(timeout=600.0)
-            if reader_thread.is_alive():
-                logger.warning("Indexing frame reader thread did not stop within join timeout for %s", video_path)
-    else:
-        logger.info(
-            "Per-video index %s: overlap reader disabled (VIDEOSEEK_DISABLE_INDEX_FRAME_OVERLAP)",
-            log_tag,
-        )
-        timestamps = _encode_batched_from_frame_stream(
-            stream_frames_with_ffmpeg(video_path, **stream_kwargs),
-            engine_instance,
-            frame_batch_size,
-            should_stop_callback=should_stop_callback,
-            process_holder=process_holder,
-            stop_event=stop_event,
-            progress_reporter=progress_reporter,
-            estimated_frame_total=estimated_frame_total,
-            vector_parts=vector_parts,
-            chunk_builder=chunk_builder,
-        )
+                if reader_error:
+                    raise reader_error[0]
+            finally:
+                stop_event.set()
+                _drain_index_frame_queue(frame_queue)
+                reader_thread.join(timeout=600.0)
+                if reader_thread.is_alive():
+                    logger.warning("Indexing frame reader thread did not stop within join timeout for %s", video_path)
+        else:
+            logger.info(
+                "Per-video index %s: overlap reader disabled (VIDEOSEEK_DISABLE_INDEX_FRAME_OVERLAP)",
+                log_tag,
+            )
+            if use_zero_copy:
+                from src.core.nvdec_cuda_decoder import stream_frames_nvdec_cuda_with_fallback
+
+                timestamps = _encode_batched_from_gpu_frame_stream(
+                    stream_frames_nvdec_cuda_with_fallback(
+                        video_path,
+                        stream_kwargs["fps"],
+                        should_stop=_should_stop,
+                    ),
+                    engine_instance,
+                    frame_batch_size,
+                    should_stop_callback=should_stop_callback,
+                    stop_event=stop_event,
+                    progress_reporter=progress_reporter,
+                    estimated_frame_total=estimated_frame_total,
+                    vector_parts=vector_parts,
+                    chunk_builder=chunk_builder,
+                )
+            else:
+                timestamps = _encode_batched_from_frame_stream(
+                    stream_frames_with_ffmpeg(video_path, **stream_kwargs),
+                    engine_instance,
+                    frame_batch_size,
+                    should_stop_callback=should_stop_callback,
+                    process_holder=process_holder,
+                    stop_event=stop_event,
+                    progress_reporter=progress_reporter,
+                    estimated_frame_total=estimated_frame_total,
+                    vector_parts=vector_parts,
+                    chunk_builder=chunk_builder,
+                )
 
     pipe_s = time.perf_counter() - pipe_start
     logger.info("Per-video index %s: decode_queue+encode_batches %.2fs", log_tag, pipe_s)
+    log_pipeline_summary(
+        logger,
+        log_tag=log_tag,
+        wall_pipe_sec=pipe_s,
+        decode_backend=get_last_frame_decode_backend(),
+    )
 
     if not vector_parts:
         logger.info("Per-video index %s: total %.2fs (no vectors)", log_tag, time.perf_counter() - wall_start)
@@ -1089,13 +1334,23 @@ def generate_vectors_and_index_for_video(
     if progress_reporter is not None:
         progress_reporter.emit("chunk", force=True)
     t_chunks = time.perf_counter()
-    chunks = chunk_builder.finish()
-    chunks_s = time.perf_counter() - t_chunks
+    from src.core.gpu_vector_ops import gpu_to_numpy, is_cupy_array, vstack_gpu
+    from src.core.faiss_index import faiss_gpu_available
 
-    t_stack = time.perf_counter()
-    vectors = np.vstack(vector_parts).astype(np.float32)
-    del vector_parts
-    stack_s = time.perf_counter() - t_stack
+    if use_full_gpu and vector_parts and is_cupy_array(vector_parts[0]):
+        t_stack = time.perf_counter()
+        vectors = gpu_to_numpy(vstack_gpu(vector_parts))
+        del vector_parts
+        stack_s = time.perf_counter() - t_stack
+        chunks = build_semantic_chunks(vectors, timestamps, **chunk_config)
+        chunks_s = time.perf_counter() - t_chunks
+    else:
+        chunks = chunk_builder.finish()
+        chunks_s = time.perf_counter() - t_chunks
+        t_stack = time.perf_counter()
+        vectors = np.vstack(vector_parts).astype(np.float32)
+        del vector_parts
+        stack_s = time.perf_counter() - t_stack
     free_memory()
 
     vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
@@ -1117,7 +1372,11 @@ def generate_vectors_and_index_for_video(
 
     ensure_folder_exists(index_file)
     t_faiss = time.perf_counter()
-    index = create_clip_index(vectors, index_file)
+    index = create_clip_index(
+        vectors,
+        index_file,
+        prefer_gpu=bool(use_full_gpu and faiss_gpu_available()),
+    )
     faiss_s = time.perf_counter() - t_faiss
 
     total_s = time.perf_counter() - wall_start

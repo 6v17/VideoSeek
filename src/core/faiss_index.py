@@ -120,10 +120,38 @@ class IncrementalClipIndex:
 
 
 @measure_time("Index build time:")
-def create_clip_index(vectors_list, index_file):
+def create_clip_index(vectors_list, index_file, *, prefer_gpu=False):
+    vectors = _normalize_vectors(vectors_list)
+    if prefer_gpu and faiss_gpu_available():
+        return _create_clip_index_gpu(vectors, index_file)
     builder = IncrementalClipIndex()
-    builder.add(vectors_list)
+    builder.add(vectors)
     return builder.save(index_file)
+
+
+def faiss_gpu_available(*, force_refresh=False):
+    try:
+        from src.core.gpu_vector_ops import faiss_gpu_available as _probe
+
+        return _probe(force_refresh=force_refresh)
+    except Exception:
+        return False
+
+
+def _create_clip_index_gpu(vectors, index_file):
+    import faiss
+
+    vectors = np.ascontiguousarray(np.asarray(vectors, dtype=np.float32))
+    if vectors.size == 0:
+        raise ValueError("Cannot build an empty GPU FAISS index")
+    dim = int(vectors.shape[1])
+    resources = faiss.StandardGpuResources()
+    gpu_index = faiss.GpuIndexFlatIP(resources, dim)
+    gpu_index.add(vectors)
+    cpu_index = faiss.index_gpu_to_cpu(gpu_index)
+    _atomic_write_faiss_index(cpu_index, index_file)
+    logger.info("GPU FAISS index saved to %s (%s vectors)", index_file, int(vectors.shape[0]))
+    return cpu_index
 
 
 def load_clip_index(index_file):

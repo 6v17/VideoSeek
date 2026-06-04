@@ -211,9 +211,11 @@ class ExtractFramesTests(unittest.TestCase):
     @patch("src.core.extract_frames.load_config", return_value={"fps": 1, "experimental_hw_decode": True})
     @patch("src.core.extract_frames.resolve_sampling_fps", return_value=2.0)
     @patch("src.core.extract_frames.get_video_duration_seconds", return_value=10.0)
+    @patch("src.core.extract_frames._is_cuda_inference_mode", return_value=False)
     def test_stream_frames_nvidia_tries_p010_after_nv12_failure(
         self,
         _mock_duration,
+        _mock_cuda_mode,
         _mock_resolve_fps,
         _mock_load_config,
         _mock_enabled,
@@ -241,9 +243,11 @@ class ExtractFramesTests(unittest.TestCase):
     @patch("src.core.extract_frames.load_config", return_value={"fps": 1, "experimental_hw_decode": True})
     @patch("src.core.extract_frames.resolve_sampling_fps", return_value=2.0)
     @patch("src.core.extract_frames.get_video_duration_seconds", return_value=10.0)
+    @patch("src.core.extract_frames._is_cuda_inference_mode", return_value=False)
     def test_stream_frames_falls_back_to_cpu_after_d3d11va_failure(
         self,
         _mock_duration,
+        _mock_cuda_mode,
         _mock_resolve_fps,
         _mock_load_config,
         _mock_enabled,
@@ -303,9 +307,11 @@ class ExtractFramesTests(unittest.TestCase):
     @patch("src.core.extract_frames.load_config", return_value={"fps": 1, "experimental_hw_decode": True})
     @patch("src.core.extract_frames.resolve_sampling_fps", return_value=2.0)
     @patch("src.core.extract_frames.get_video_duration_seconds", return_value=10.0)
+    @patch("src.core.extract_frames._is_cuda_inference_mode", return_value=False)
     def test_stream_frames_uses_d3d11va_p010_for_10bit_on_nvidia(
         self,
         _mock_duration,
+        _mock_cuda_mode,
         _mock_resolve_fps,
         _mock_load_config,
         _mock_enabled,
@@ -345,6 +351,60 @@ class ExtractFramesTests(unittest.TestCase):
 
         self.assertNotIn("-hwaccel", command)
         self.assertIn("fps=1.500000,scale=224:224:flags=fast_bilinear", command)
+
+    @patch("src.core.extract_frames.get_ffmpeg_path", return_value="ffmpeg")
+    def test_build_nvdec_command_uses_cuda_hwaccel(self, _mock_ffmpeg):
+        from src.core.extract_frames import _build_nvdec_extract_command
+
+        command = _build_nvdec_extract_command("D:/video.mp4", 1.5)
+
+        self.assertIn("-hwaccel", command)
+        self.assertIn("cuda", command)
+        self.assertIn("hwdownload,format=nv12,fps=1.500000,scale=224:224:flags=fast_bilinear", command)
+
+    @patch.dict(os.environ, {"VIDEOSEEK_INFERENCE_EP": "cuda"}, clear=False)
+    @patch("src.core.extract_frames.cuda_zero_copy_indexing_enabled", return_value=False)
+    @patch("src.core.extract_frames._stream_rawvideo_frames")
+    @patch("src.core.extract_frames.get_video_stream_info", return_value={"pix_fmt": "yuv420p", "profile": "main"})
+    @patch("src.core.extract_frames.gpu_scale_decode_enabled", return_value=True)
+    @patch("src.core.extract_frames.ffmpeg_supports_cuda_hwaccel", return_value=True)
+    @patch("src.core.extract_frames.ffmpeg_supports_d3d11va", return_value=True)
+    @patch("src.core.extract_frames.system_has_nvidia_gpu", return_value=True)
+    @patch("src.core.extract_frames.load_config", return_value={"fps": 1, "experimental_hw_decode": False})
+    @patch("src.core.extract_frames.resolve_sampling_fps", return_value=2.0)
+    @patch("src.core.extract_frames.get_video_duration_seconds", return_value=10.0)
+    def test_stream_frames_cuda_mode_tries_nvdec_cuda_scale_first(
+        self,
+        _mock_duration,
+        _mock_resolve_fps,
+        _mock_load_config,
+        _mock_nvidia,
+        _mock_d3d11,
+        _mock_cuda,
+        _mock_gpu_scale,
+        _mock_stream_info,
+        mock_stream,
+        _mock_zero_copy,
+    ):
+        mock_stream.return_value = iter([])
+
+        list(stream_frames_with_ffmpeg("D:/video.mp4"))
+
+        self.assertEqual(mock_stream.call_args.kwargs["decode_backend"], "nvdec_cuda_scale")
+
+    @patch("src.core.extract_frames.get_ffmpeg_path", return_value="ffmpeg")
+    def test_build_nvdec_cuda_scale_command_scales_before_hwdownload(self, _mock_ffmpeg):
+        from src.core.extract_frames import _build_nvdec_extract_command
+
+        command = _build_nvdec_extract_command("D:/video.mp4", 1.5, gpu_scale=True)
+
+        self.assertIn("scale_cuda=224:224,hwdownload,format=nv12,fps=1.500000,format=bgr24", command)
+
+    @patch.dict(os.environ, {"VIDEOSEEK_INFERENCE_EP": "cuda"}, clear=False)
+    def test_gpu_decode_experiment_active_in_cuda_mode(self):
+        from src.core.extract_frames import is_gpu_decode_experiment_active
+
+        self.assertTrue(is_gpu_decode_experiment_active(config={"experimental_hw_decode": False}))
 
 
 class VideoProbeTests(unittest.TestCase):
