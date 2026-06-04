@@ -357,6 +357,48 @@ def get_video_hash(video_path):
     return digest.hexdigest()
 
 
+def _commit_meta_file(temp_path, meta_file):
+    """Commit a finished temp JSON file to ``meta_file`` with Windows-friendly retries."""
+    if os.path.normcase(os.path.abspath(temp_path)) == os.path.normcase(os.path.abspath(meta_file)):
+        return
+
+    attempts = 8 if os.name == "nt" else 3
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            if os.path.exists(meta_file):
+                try:
+                    os.chmod(meta_file, 0o666)
+                except OSError:
+                    pass
+            os.replace(temp_path, meta_file)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 5:
+                last_exc = exc
+            else:
+                raise
+        if attempt < attempts:
+            logger.warning(
+                "Retrying metadata commit (%s/%s): %s",
+                attempt,
+                attempts,
+                meta_file,
+            )
+            time.sleep(min(0.05 * attempt, 0.4))
+
+    try:
+        shutil.copy2(temp_path, meta_file)
+        logger.warning("Metadata commit used copy fallback: %s", meta_file)
+        return
+    except Exception as copy_exc:
+        if last_exc is not None:
+            raise last_exc from copy_exc
+        raise
+
+
 def save_meta(meta, meta_file):
     import tempfile
 
@@ -365,11 +407,12 @@ def save_meta(meta, meta_file):
     fd, temp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".json", dir=folder)
     os.close(fd)
     try:
-        with open(temp_path, "w", encoding="utf-8") as handle:
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(meta, handle, indent=4, ensure_ascii=False)
-        os.replace(temp_path, meta_file)
+        _commit_meta_file(temp_path, meta_file)
+        temp_path = ""
     finally:
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
             except OSError:
@@ -1189,7 +1232,7 @@ def load_meta(meta_file):
         return {"libraries": {}}
 
     try:
-        with open(meta_file, "r", encoding="utf-8") as handle:
+        with open(meta_file, "r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
     except Exception as exc:
         raise RuntimeError(f"Failed to load metadata file: {meta_file}") from exc
