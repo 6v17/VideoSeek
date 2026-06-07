@@ -4,7 +4,7 @@
 
 **不是：** 仓库开发文档、打包说明、源码索引。字段以运行中的 `GET /api/v1/health` 为准。
 
-**省 token：** 粘贴进模型时优先用 `GET /api/v1/agent-starter`（~80 行）；本文只在需要查完整字段时打开 **§4 API**。
+**省 token：** 粘贴进模型时优先用 `GET /api/v1/agent-starter`（~80 行）；返回的 `starter_text` 含 **`GET /agent-doc` 提示**与 `full_doc_path` 绝对路径（Nuitka 为 exe 旁 `docs/`，开发为仓库根下），并写明勿扫盘。需要完整字段时 `GET /api/v1/agent-doc`，勿读盘扫目录。
 
 | 前提 | 动作 |
 |------|------|
@@ -12,7 +12,7 @@
 | `GET /health` → `index_ready: true` | 否则让用户先在软件里同步/更新索引 |
 | 默认地址 | `http://127.0.0.1:8765/api/v1`（仅本机，无鉴权） |
 
-**端点：** `GET /health` · `GET /agent-starter` · `GET /libraries` · `GET /libraries/videos` · `GET /search/presets` · `GET /search/presets/{id}` · `POST /search` · `POST /search/batch` · `GET /search/telemetry` · `POST /export/manifest` · `POST /export/clip` · `POST /export/clips/batch`
+**端点：** `GET /health` · `GET /agent-starter` · `GET /agent-doc` · `GET /libraries` · `GET /libraries/videos` · `GET /search/presets` · `GET /search/presets/{id}` · `POST /search` · `POST /search/batch` · `GET /search/telemetry` · `POST /export/manifest` · `POST /export/clip` · `POST /export/clips/batch`
 
 ---
 
@@ -99,7 +99,25 @@ GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
 
 ### `GET /agent-starter`
 
-返回短文本 `starter_text` + `full_doc_rel`。**给模型粘贴用这一份即可**，不必全文灌本文。
+返回短文本 `starter_text` + `full_doc_rel` + `full_doc_path`。**给模型粘贴用 `starter_text` 即可**（内含 `GET /agent-doc` 提示、`full_doc_path` 绝对路径与「勿扫盘」说明），不必全文灌本文。
+
+---
+
+### `GET /agent-doc`
+
+返回完整 `for-agents.md` 正文。**需要查 §4 API 字段时优先 HTTP 拉取**，勿扫盘、勿 `@` 猜路径。
+
+| 参数 | 说明 |
+|------|------|
+| `format=json` | 默认。`{ ok, content, full_doc_rel, full_doc_path, meta }` |
+| `format=text` | 纯 Markdown 正文（`Content-Type: text/markdown`） |
+
+```bash
+curl -s http://127.0.0.1:8765/api/v1/agent-doc
+curl -s "http://127.0.0.1:8765/api/v1/agent-doc?format=text"
+```
+
+404 `doc_not_found`：安装旁无 `docs/for-agents.md`（检查 Nuitka 是否带上 `docs/`）。
 
 ---
 

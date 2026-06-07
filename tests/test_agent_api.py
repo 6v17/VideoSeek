@@ -196,8 +196,61 @@ class AgentStarterApiTests(unittest.TestCase):
         payload = build_agent_starter_payload("http://127.0.0.1:8765", health, locale="zh")
         self.assertTrue(payload["ok"])
         self.assertIn("starter_text", payload)
-        self.assertIn("/api/v1/health", payload["starter_text"])
-        self.assertLess(payload["meta"]["line_count"], 120)
+        self.assertIn("/api/v1/libraries", payload["starter_text"])
+        self.assertIn("/api/v1/agent-doc", payload["starter_text"])
+        self.assertLess(payload["meta"]["line_count"], 80)
+
+
+class AgentDocApiTests(unittest.TestCase):
+    def _sample_doc_payload(self):
+        return {
+            "api_version": "1",
+            "ok": True,
+            "content": "# Agent doc\n",
+            "full_doc_rel": "docs/for-agents.md",
+            "full_doc_path": "D:/Release/main.dist/docs/for-agents.md",
+            "meta": {"line_count": 2, "byte_size": 12, "doc_on_disk": True},
+        }
+
+    @patch("src.web.agent_api.build_agent_doc_payload")
+    def test_agent_doc_json(self, mock_build):
+        mock_build.return_value = self._sample_doc_payload()
+        from fastapi.testclient import TestClient
+        from src.web.agent_api import AgentApiService
+
+        client = TestClient(AgentApiService(host="127.0.0.1", port=8765).app)
+        response = client.get("/api/v1/agent-doc")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("# Agent doc", payload["content"])
+
+    @patch("src.web.agent_api.build_agent_doc_payload")
+    def test_agent_doc_text(self, mock_build):
+        mock_build.return_value = self._sample_doc_payload()
+        from fastapi.testclient import TestClient
+        from src.web.agent_api import AgentApiService
+
+        client = TestClient(AgentApiService(host="127.0.0.1", port=8765).app)
+        response = client.get("/api/v1/agent-doc", params={"format": "text"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/markdown", response.headers.get("content-type", ""))
+        self.assertIn("# Agent doc", response.text)
+        self.assertIn(
+            "D:/Release/main.dist/docs/for-agents.md",
+            response.headers.get("X-VideoSeek-Doc-Path", ""),
+        )
+
+    @patch("src.web.agent_api.build_agent_doc_payload")
+    def test_agent_doc_not_found(self, mock_build):
+        mock_build.side_effect = FileNotFoundError("docs/for-agents.md")
+        from fastapi.testclient import TestClient
+        from src.web.agent_api import AgentApiService
+
+        client = TestClient(AgentApiService(host="127.0.0.1", port=8765).app)
+        response = client.get("/api/v1/agent-doc")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "doc_not_found")
 
 
 class AgentApiSearchTests(unittest.TestCase):

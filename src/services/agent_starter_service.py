@@ -24,16 +24,22 @@ def resolve_full_agent_doc_path() -> Optional[str]:
     return None
 
 
-def _cap_lines(capabilities: Dict[str, Any]) -> str:
-    if not capabilities:
-        return "- (unknown)"
-    enabled = [key for key, value in sorted(capabilities.items()) if value]
-    disabled = [key for key, value in sorted(capabilities.items()) if not value]
-    lines = [f"- enabled: {', '.join(enabled) or 'none'}"]
-    if disabled:
-        lines.append(f"- disabled: {', '.join(disabled)}")
-    return "\n".join(lines)
+def read_agent_doc_content() -> Optional[str]:
+    """Full markdown text of docs/for-agents.md when present beside the install."""
+    doc_path = resolve_full_agent_doc_path()
+    if not doc_path:
+        return None
+    with open(doc_path, encoding="utf-8") as handle:
+        return handle.read()
 
+
+def _format_doc_reference(*, locale: str, api_base: str) -> str:
+    """One-line pointer to full API doc over HTTP (no disk scan)."""
+    lang = "en" if str(locale).lower().startswith("en") else "zh"
+    doc_url = f"{api_base}/agent-doc?format=text"
+    if lang == "en":
+        return f"Full API fields: GET {doc_url} — do not scan the disk."
+    return f"查 API 字段：GET {doc_url}（勿扫盘）。"
 
 def build_agent_starter_text(
     base_url: str,
@@ -45,8 +51,7 @@ def build_agent_starter_text(
     lang = "en" if str(locale).lower().startswith("en") else "zh"
     base = str(base_url or "").rstrip("/")
     api_base = f"{base}/api/v1" if base else "http://127.0.0.1:8765/api/v1"
-    doc_rel = agent_doc_rel_path()
-    doc_on_disk = resolve_full_agent_doc_path() is not None
+    doc_abs = resolve_full_agent_doc_path()
 
     caps = health.get("capabilities") or {}
     ffmpeg = health.get("ffmpeg") or {}
@@ -54,62 +59,49 @@ def build_agent_starter_text(
 
     if lang == "en":
         intro = (
-            "You are a rough-cut assistant using VideoSeek on this PC.\n"
-            "VideoSeek finds shots by VISUAL meaning (not dialogue). API is localhost-only.\n"
-            "Do not rebuild indexes or change VideoSeek settings unless the user asks."
+            "You are VideoSeek's rough-cut assistant on this PC: find shots by VISUAL meaning "
+            "(not dialogue) via localhost API. Do not rebuild indexes or change settings unless asked."
         )
-        snapshot_title = "## This instance (from /health)"
-        workflow_title = "## Minimal workflow"
+        snapshot_title = "## Instance"
+        workflow_title = "## Workflow"
         workflow = (
-            "1. GET {api}/health — stop if index_ready is false.\n"
-            "2. GET {api}/libraries — use library_path in scope.library_paths (do not guess folders).\n"
-            "3. Rewrite script beats into short visual queries (concrete scene/action, not literal dialogue).\n"
-            "4. POST {api}/search/batch — expand_frame_hits=true; image: search_precision_mode=precise. Screenshot batch: add export.output_dir (one POST search+export, no glue script).\n"
-            "5. GET {api}/search/telemetry — optional; read playback_bias after desktop previews.\n"
-            "6. Multi-step only: export/manifest then export/clips/batch — encode_mode=copy, paths outside library roots.\n"
-            "7. If export_clip is false, shell ffmpeg using ffmpeg_path below."
+            "1. If index_ready is false (below), stop and ask the user to sync the library.\n"
+            "2. GET {api}/libraries — scope.library_paths from library_path; do not guess folders.\n"
+            "3. Rewrite script beats into short visual queries (scene/action, not literal dialogue).\n"
+            "4. POST {api}/search/batch — expand_frame_hits=true; image: search_precision_mode=precise; "
+            "screenshot batch: add export.output_dir.\n"
+            "5. Export only if needed: export/manifest → export/clips/batch (encode_mode=copy, paths outside libraries)."
         ).format(api=api_base)
-        doc_line = f"Field reference (open only when needed): {doc_rel}. Paste this starter block first — do not load the full doc into context."
-        if not doc_on_disk:
-            doc_line += f" ({doc_rel} not found beside the app.)"
+        doc_line = _format_doc_reference(locale=locale, api_base=api_base)
         not_ready = "Index not ready — ask the user to sync the library in VideoSeek before searching."
     else:
         intro = (
-            "你是本机 VideoSeek 的粗剪编排助手。\n"
-            "VideoSeek 按画面语义找镜头（不能按台词/剧情搜）。API 仅本机 localhost。\n"
-            "除非用户明确要求，不要重建索引或修改 VideoSeek 设置。"
+            "你是本机 VideoSeek 粗剪助手：通过 localhost API 按画面语义找镜头（非台词），代用户搜索/导出。"
+            "勿重建索引或改设置，除非用户明确要求。"
         )
-        snapshot_title = "## 当前实例（/health 快照）"
-        workflow_title = "## 最小流程"
+        snapshot_title = "## 当前实例"
+        workflow_title = "## 流程"
         workflow = (
-            "1. GET {api}/health — index_ready 为 false 则停止，让用户先在 VideoSeek 同步索引。\n"
-            "2. GET {api}/libraries — scope.library_paths 用返回的 library_path，不要猜目录。\n"
-            "3. 把脚本改写成短视觉 query（具体画面/动作，不要搜原文台词）。\n"
-            "4. POST {api}/search/batch — expand_frame_hits=true；图搜 search_precision_mode=precise。截图批处理：加 export.output_dir（一次搜+导出，无需胶水脚本）。\n"
-            "5. GET {api}/search/telemetry — 可选；本机预览后看 playback_bias。\n"
-            "6. 仅分步时：export/manifest → export/clips/batch — encode_mode=copy，output 勿在库目录内。\n"
-            "7. 若 export_clip 为 false，用下方 ffmpeg_path 手动切条。"
+            "1. 下方 index_ready 为 false 则停止，让用户在 VideoSeek 同步索引。\n"
+            "2. GET {api}/libraries — scope.library_paths 用返回的 library_path，勿猜目录。\n"
+            "3. 脚本改写成短视觉 query（画面/动作，勿搜原文台词）。\n"
+            "4. POST {api}/search/batch — expand_frame_hits=true；图搜 precise；截图批处理加 export.output_dir。\n"
+            "5. 需导出时分步：export/manifest → export/clips/batch（copy，output 勿在库内）。"
         ).format(api=api_base)
-        doc_line = f"需要查字段时再打开 {doc_rel}；日常粘贴本说明即可，勿灌全文省 token。"
-        if not doc_on_disk:
-            doc_line += f"（未找到 {doc_rel}）"
+        doc_line = _format_doc_reference(locale=locale, api_base=api_base)
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步库后再搜索。"
 
     snapshot = {
-        "base_url": base or api_base.replace("/api/v1", ""),
+        "api_base": api_base,
         "index_ready": index_ready,
         "index_stale": health.get("index_stale"),
         "model": health.get("model"),
-        "provider": health.get("provider"),
         "search_mode_default": health.get("search_mode_default"),
         "video_count": health.get("video_count"),
-        "vector_count": health.get("vector_count"),
         "saved_search_scope_mode": health.get("saved_search_scope_mode"),
-        "search_timeout_sec": health.get("search_timeout_sec"),
-        "search_timeout_precise_sec": health.get("search_timeout_precise_sec"),
-        "agent_api_default_image_precision": health.get("agent_api_default_image_precision"),
-        "ffmpeg_path": ffmpeg.get("ffmpeg_path"),
-        "ffmpeg_available": ffmpeg.get("ffmpeg_available"),
+        "ffmpeg_path": ffmpeg.get("ffmpeg_path") if ffmpeg.get("ffmpeg_available") else None,
+        "capabilities": caps if isinstance(caps, dict) else {},
+        "full_doc_path": doc_abs,
     }
 
     parts = [
@@ -117,9 +109,6 @@ def build_agent_starter_text(
         "",
         snapshot_title,
         json.dumps(snapshot, ensure_ascii=False, indent=2),
-        "",
-        "capabilities:",
-        _cap_lines(caps if isinstance(caps, dict) else {}),
         "",
         workflow_title,
         workflow,
@@ -148,5 +137,25 @@ def build_agent_starter_payload(
             "locale": "en" if str(locale).lower().startswith("en") else "zh",
             "line_count": starter_text.count("\n") + 1,
             "doc_on_disk": resolve_full_agent_doc_path() is not None,
+        },
+    }
+
+
+def build_agent_doc_payload(*, api_version: str = "1") -> Dict[str, Any]:
+    doc_rel = agent_doc_rel_path()
+    doc_abs = resolve_full_agent_doc_path()
+    content = read_agent_doc_content()
+    if content is None:
+        raise FileNotFoundError(doc_rel)
+    return {
+        "api_version": api_version,
+        "ok": True,
+        "content": content,
+        "full_doc_rel": doc_rel,
+        "full_doc_path": doc_abs,
+        "meta": {
+            "line_count": content.count("\n") + 1,
+            "byte_size": len(content.encode("utf-8")),
+            "doc_on_disk": True,
         },
     }
