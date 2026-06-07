@@ -4,384 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="导出优化，新增批量快速导出接口，供agent使用">
-      <change afterPath="$PROJECT_DIR$/vlc_lib/libvlc.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/libvlccore.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_concat_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_imem_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_mms_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_realrtsp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_srt_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libaccess_wasapi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libattachment_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libbluray-awt-j2se-1.4.0.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libbluray-j2se-1.4.0.jar" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libcdda_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libdcp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libdshow_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libdtv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libdvdnav_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libdvdread_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libfilesystem_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libftp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libhttp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libhttps_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libidummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libimem_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/liblibbluray_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/liblive555_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libnfs_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/librist_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/librtp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libsatip_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libscreen_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libsdp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libsftp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libshm_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libsmb_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libtcp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libtimecode_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libudp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libvcd_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libvdr_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access/libvnc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_dummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_file_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_http_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_livehttp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_rist_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_shout_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_srt_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/access_output/libaccess_output_udp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libaudio_format_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libaudiobargraph_a_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libchorus_flanger_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libcompressor_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libdolby_surround_decoder_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libequalizer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libgain_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libheadphone_channel_mixer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libkaraoke_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libmad_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libmono_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libnormvol_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libparam_eq_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libremap_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libsamplerate_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libscaletempo_pitch_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libscaletempo_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libsimple_channel_mixer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libspatialaudio_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libspatializer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libspeex_resampler_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libstereo_widen_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libtospdif_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libtrivial_channel_mixer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_filter/libugly_resampler_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_mixer/libfloat_mixer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_mixer/libinteger_mixer_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libadummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libafile_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libamem_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libdirectsound_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libmmdevice_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libwasapi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/audio_output/libwaveout_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libadpcm_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libaes3_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libaom_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libaraw_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libaribsub_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libavcodec_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libcc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libcdg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libcrystalhd_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libcvdsub_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libd3d11va_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libdav1d_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libddummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libdmo_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libdvbsub_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libdxva2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libedummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libfaad_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libflac_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libfluidsynth_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libg711_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libjpeg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libkate_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/liblibass_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/liblpcm_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libmft_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libmpg123_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/liboggspots_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libopus_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libpng_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libqsv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/librawvideo_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/librtpvideo_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libschroedinger_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libscte18_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libscte27_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libsdl_image_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libspdif_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libspeex_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libspudec_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libstl_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libsubsdec_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libsubstx3g_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libsubsusf_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libsvcdsub_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libt140_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libtextst_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libtheora_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libttml_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libtwolame_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libuleaddvaudio_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libvorbis_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libvpx_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libwebvtt_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libx26410b_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libx264_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libx265_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/codec/libzvbi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libdummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libgestures_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libhotkeys_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libnetsync_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libntservice_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/liboldrc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libwin_hotkeys_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/control/libwin_msg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/d3d11/libdirect3d11_filters_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/d3d9/libdirect3d9_filters_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libadaptive_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libaiff_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libasf_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libau_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libavi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libcaf_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdemux_cdg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdemux_chromecast_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdemux_stl_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdemuxdump_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdiracsys_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdirectory_demux_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libdmxmus_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libes_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libflacsys_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libgme_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libh26x_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libimage_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libmjpeg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libmkv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libmod_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libmp4_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libmpc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libmpgv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libnoseek_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libnsc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libnsv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libnuv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libogg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libplaylist_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libps_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libpva_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/librawaud_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/librawdv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/librawvid_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libreal_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libsid_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libsmf_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libsubtitle_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libts_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libtta_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libty_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libvc1_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libvobsub_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libvoc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libwav_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/demux/libxa_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/gui/libqt_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/gui/libskins2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/keystore/libfile_keystore_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/keystore/libmemory_keystore_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/logger/libconsole_logger_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/logger/libfile_logger_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/lua/liblua_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/meta_engine/libfolder_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/meta_engine/libtaglib_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libaddonsfsstorage_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libaddonsvorepository_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libaudioscrobbler_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libexport_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libfingerprinter_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libgnutls_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/liblogger_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libstats_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libvod_rtsp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/misc/libxml_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_asf_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_avi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_dummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_mp4_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_mpjpeg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_ogg_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_ps_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_ts_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/mux/libmux_wav_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_a52_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_av1_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_copy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_dirac_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_dts_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_flac_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_h264_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_hevc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_mlp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_mpeg4audio_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_mpeg4video_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_mpegaudio_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_mpegvideo_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/packetizer/libpacketizer_vc1_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/services_discovery/libmediadirs_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/services_discovery/libmicrodns_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/services_discovery/libpodcast_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/services_discovery/libsap_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/services_discovery/libupnp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/services_discovery/libwindrive_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/libaudiobargraph_v_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/liblogo_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/libmarq_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/libmosaic_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/libremoteosd_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/librss_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/spu/libsubsdelay_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_extractor/libarchive_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libadf_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libaribcam_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libcache_block_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libcache_read_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libhds_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libinflate_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libprefetch_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/librecord_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_filter/libskiptags_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_autodel_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_bridge_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_chromaprint_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_chromecast_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_cycle_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_delay_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_description_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_display_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_dummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_duplicate_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_es_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_gather_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_mosaic_bridge_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_record_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_rtp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_setid_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_smem_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_standard_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_stats_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/stream_out/libstream_out_transcode_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/text_renderer/libfreetype_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/text_renderer/libsapi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/text_renderer/libtdummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libchain_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libgrey_yuv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_10_p010_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_nv12_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_rgb_mmx_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_rgb_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_rgb_sse2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_yuy2_mmx_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_yuy2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi420_yuy2_sse2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi422_i420_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi422_yuy2_mmx_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi422_yuy2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libi422_yuy2_sse2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/librv32_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libswscale_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libyuvp_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libyuy2_i420_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_chroma/libyuy2_i422_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libadjust_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libalphamask_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libanaglyph_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libantiflicker_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libball_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libblend_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libblendbench_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libbluescreen_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libcanvas_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libcolorthres_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libcroppadd_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libdeinterlace_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libedgedetection_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/liberase_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libextract_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libfps_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libfreeze_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libgaussianblur_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libgradfun_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libgradient_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libgrain_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libhqdn3d_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libinvert_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libmagnify_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libmirror_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libmotionblur_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libmotiondetect_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/liboldmovie_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libposterize_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libpostproc_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libpsychedelic_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libpuzzle_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libripple_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/librotate_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libscale_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libscene_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libsepia_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libsharpen_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libtransform_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libvhs_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_filter/libwave_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libcaca_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libdirect3d11_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libdirect3d9_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libdirectdraw_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libdrawable_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libflaschen_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libgl_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libglinterop_dxva2_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libglwin32_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libvdummy_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libvmem_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libwgl_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libwingdi_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libwinhibit_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_output/libyuv_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_splitter/libclone_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_splitter/libpanoramix_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/video_splitter/libwall_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libglspectrum_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libgoom_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libprojectm_plugin.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vlc_lib/plugins/visualization/libvisual_plugin.dll" afterDir="false" />
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除无用说明">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/_check_needs_legacy.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/_peek_phase2.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/_split_dialogs_package.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/_test_schema_bootstrap.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/_tmp_export_clips.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/search_from_image_folder.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_starter_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_starter_service.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -395,7 +22,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="220" />
+    <option name="cachedIndexableFilesCount" value="216" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -406,6 +33,11 @@
     </option>
   </component>
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="feat/cuda-experiment" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
@@ -435,7 +67,7 @@
 }</component>
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;git@github.com:liuvgg/VideoSeek.git&quot;,
+    &quot;url&quot;: &quot;git@github.com:6v17/VideoSeek.git&quot;,
     &quot;accountId&quot;: &quot;32fc49d4-fcb0-4bb7-b27a-3eaf6471599d&quot;
   }
 }</component>
@@ -740,39 +372,12 @@
       <workItem from="1780014228624" duration="79859000" />
       <workItem from="1780190591134" duration="36366000" />
       <workItem from="1780279559713" duration="23358000" />
-      <workItem from="1780360358199" duration="12096000" />
-    </task>
-    <task id="LOCAL-00050" summary="加入局域网传图搜索功能">
-      <option name="closed" value="true" />
-      <created>1776699002165</created>
-      <option name="number" value="00050" />
-      <option name="presentableId" value="LOCAL-00050" />
-      <option name="project" value="LOCAL" />
-      <updated>1776699002165</updated>
-    </task>
-    <task id="LOCAL-00051" summary="加入局域网传图搜索功能">
-      <option name="closed" value="true" />
-      <created>1776699235152</created>
-      <option name="number" value="00051" />
-      <option name="presentableId" value="LOCAL-00051" />
-      <option name="project" value="LOCAL" />
-      <updated>1776699235152</updated>
-    </task>
-    <task id="LOCAL-00052" summary="加入局域网传图搜索功能">
-      <option name="closed" value="true" />
-      <created>1776771841651</created>
-      <option name="number" value="00052" />
-      <option name="presentableId" value="LOCAL-00052" />
-      <option name="project" value="LOCAL" />
-      <updated>1776771841652</updated>
-    </task>
-    <task id="LOCAL-00053" summary="加入局域网传图搜索功能">
-      <option name="closed" value="true" />
-      <created>1776772268805</created>
-      <option name="number" value="00053" />
-      <option name="presentableId" value="LOCAL-00053" />
-      <option name="project" value="LOCAL" />
-      <updated>1776772268805</updated>
+      <workItem from="1780360358199" duration="14071000" />
+      <workItem from="1780536146337" duration="28440000" />
+      <workItem from="1780589950654" duration="155000" />
+      <workItem from="1780643390906" duration="646000" />
+      <workItem from="1780731246641" duration="1302000" />
+      <workItem from="1780814630487" duration="6583000" />
     </task>
     <task id="LOCAL-00054" summary="重新提交">
       <option name="closed" value="true" />
@@ -1134,7 +739,39 @@
       <option name="project" value="LOCAL" />
       <updated>1780374053463</updated>
     </task>
-    <option name="localTasksCounter" value="99" />
+    <task id="LOCAL-00099" summary="完善api调用说明">
+      <option name="closed" value="true" />
+      <created>1780375314874</created>
+      <option name="number" value="00099" />
+      <option name="presentableId" value="LOCAL-00099" />
+      <option name="project" value="LOCAL" />
+      <updated>1780375314875</updated>
+    </task>
+    <task id="LOCAL-00100" summary="减少写配置因为权限问题导致失败">
+      <option name="closed" value="true" />
+      <created>1780573325053</created>
+      <option name="number" value="00100" />
+      <option name="presentableId" value="LOCAL-00100" />
+      <option name="project" value="LOCAL" />
+      <updated>1780573325053</updated>
+    </task>
+    <task id="LOCAL-00101" summary="给本机接口说明加上了安装目录解析，避免agent找不到说明文档">
+      <option name="closed" value="true" />
+      <created>1780816433967</created>
+      <option name="number" value="00101" />
+      <option name="presentableId" value="LOCAL-00101" />
+      <option name="project" value="LOCAL" />
+      <updated>1780816433967</updated>
+    </task>
+    <task id="LOCAL-00102" summary="移除无用说明">
+      <option name="closed" value="true" />
+      <created>1780820034526</created>
+      <option name="number" value="00102" />
+      <option name="presentableId" value="LOCAL-00102" />
+      <option name="project" value="LOCAL" />
+      <updated>1780820034526</updated>
+    </task>
+    <option name="localTasksCounter" value="103" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -1164,10 +801,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="GPU降级处理、数据迁移、BUG修复" />
-    <MESSAGE value="适配多模型架构重构" />
-    <MESSAGE value="代码解耦" />
-    <MESSAGE value="init补" />
     <MESSAGE value="补充说明" />
     <MESSAGE value="加视频溯源功能beta" />
     <MESSAGE value="RANSAC 线性回归" />
@@ -1189,7 +822,11 @@
     <MESSAGE value="搜索优化" />
     <MESSAGE value="块级搜索bug修复，增加默认预设" />
     <MESSAGE value="导出优化，新增批量快速导出接口，供agent使用" />
-    <option name="LAST_COMMIT_MESSAGE" value="导出优化，新增批量快速导出接口，供agent使用" />
+    <MESSAGE value="完善api调用说明" />
+    <MESSAGE value="减少写配置因为权限问题导致失败" />
+    <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
+    <MESSAGE value="移除无用说明" />
+    <option name="LAST_COMMIT_MESSAGE" value="移除无用说明" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

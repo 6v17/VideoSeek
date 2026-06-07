@@ -12,13 +12,14 @@ from typing import Any, Dict, List, Optional
 
 try:
     from fastapi import FastAPI, HTTPException
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, PlainTextResponse
     from pydantic import BaseModel, Field
     import uvicorn
 except ImportError as exc:
     FastAPI = None
     HTTPException = None
     JSONResponse = None
+    PlainTextResponse = None
     BaseModel = object
     Field = lambda *args, **kwargs: None
     uvicorn = None
@@ -34,7 +35,7 @@ from src.services.agent_clip_service import (
     execute_agent_export_clip,
 )
 from src.utils import normalize_export_encode_mode
-from src.services.agent_starter_service import build_agent_starter_payload
+from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
 from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
@@ -1402,6 +1403,7 @@ class AgentApiService:
         self._register_exception_handlers()
         self.app.get("/api/v1/health")(self._health)
         self.app.get("/api/v1/agent-starter")(self._agent_starter)
+        self.app.get("/api/v1/agent-doc")(self._agent_doc)
         self.app.get("/api/v1/libraries")(self._libraries)
         self.app.get("/api/v1/libraries/videos")(self._library_videos)
         self.app.get("/api/v1/search/presets")(self._search_presets)
@@ -1503,6 +1505,25 @@ class AgentApiService:
         health = build_health_payload(mode=mode)
         base_url = f"http://{self.host}:{self.port}"
         return build_agent_starter_payload(base_url, health, locale=locale or "zh")
+
+    async def _agent_doc(self, format: Optional[str] = None):
+        fmt = str(format or "json").strip().lower()
+        if fmt not in {"json", "text"}:
+            raise_api_error(400, "invalid_request", "format must be json or text")
+        try:
+            payload = await asyncio.to_thread(build_agent_doc_payload, api_version=API_VERSION)
+        except FileNotFoundError as exc:
+            raise_api_error(404, "doc_not_found", str(exc))
+        except OSError as exc:
+            logger.exception("Agent doc read failed.")
+            raise_api_error(500, "query_failed", str(exc))
+        if fmt == "text":
+            return PlainTextResponse(
+                payload["content"],
+                media_type="text/markdown; charset=utf-8",
+                headers={"X-VideoSeek-Doc-Path": str(payload.get("full_doc_path") or "")},
+            )
+        return payload
 
     async def _search_presets(self):
         try:

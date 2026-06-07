@@ -1,284 +1,475 @@
 # VideoSeek — Agent 操作说明（本机 API）
 
-**读者：** 帮**用户操作 VideoSeek 桌面软件**的外部 AI（Cursor、Claude、脚本等）——通过本机 HTTP 代用户：**搜镜头 → 出粗剪清单 → 裁片段**。
+**读者：** 代用户通过本机 HTTP **搜镜头 → 出清单 → 裁片段** 的外部 AI。不是仓库开发文档。
 
-**不是：** 仓库开发文档、打包说明、源码索引。字段以运行中的 `GET /api/v1/health` 为准。
+**怎么用：**
 
-**省 token：** 粘贴进模型时优先用 `GET /api/v1/agent-starter`（~80 行）；本文只在需要查完整字段时打开 **§4 API**。
+1. 日常粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（含实例快照、`search_presets`、流程）。
+2. 查字段/默认值/响应形状 → **`GET /api/v1/agent-doc?format=json`** 读 `content`，或 `?format=text` 纯 Markdown。
+3. **勿扫盘、勿猜路径、勿猜文件名。**
 
 | 前提 | 动作 |
 |------|------|
-| VideoSeek **正在运行** | 设置 → 通用 → **本机搜索接口** → 开启 → 保存 |
-| `GET /health` → `index_ready: true` | 否则让用户先在软件里同步/更新索引 |
-| 默认地址 | `http://127.0.0.1:8765/api/v1`（仅本机，无鉴权） |
+| VideoSeek 运行中 | 设置 → 通用 → **本机搜索接口** → 开启 → 保存 |
+| `index_ready: true` | 否则让用户在软件里同步索引 |
+| 基址 | `http://127.0.0.1:8765/api/v1`（仅 `127.0.0.1`，无鉴权） |
 
-**端点：** `GET /health` · `GET /agent-starter` · `GET /libraries` · `GET /libraries/videos` · `GET /search/presets` · `GET /search/presets/{id}` · `POST /search` · `POST /search/batch` · `GET /search/telemetry` · `POST /export/manifest` · `POST /export/clip` · `POST /export/clips/batch`
+**端点一览：**
 
----
-
-## 1. 软件能做什么 / 不能做什么
-
-VideoSeek 用视觉向量在**已索引的本地视频**里找时间段（路径 + 起止秒），不负责成片剪辑逻辑。
-
-| 适合 | 不适合（除非另有字幕/ASR） |
-|------|---------------------------|
-| 画面、动作、物体、景别、色调 | 精确台词、剧情推理 |
-| 按脚本句找 B-roll、按参考图找相似镜头 | 自动成片、转场、版权音乐 |
-
-**你的角色：** 把用户文案改写成**可见画面**的短查询，调 API，整理命中，导出 manifest / 小片段。
-
----
-
-## 2. 标准流程（粗剪）
-
-```
-GET /health → GET /libraries（拿 library_path，禁止猜文件夹）
-→ 每条脚本句：改写成视觉 query（§3）
-→ POST /search/batch（expand_frame_hits: true，scope 见 §4；截图批处理加 `export.output_dir` 则 **1 次 POST 搜+导出**）
-→ 或分步：manifest → export/clips/batch（output 不能在库目录内）
-```
-
-**`mode`：** `chunk` = 语义段起止；`frame` = 时间点（默认会 ±3s 扩成片段，`expand_frame_hits: true`）。
-
-**`scope`：** 省略 = 跟桌面「搜索范围」一致；或 `scope.library_paths` / `scope.video_paths` 覆盖。库路径必须来自 `/libraries`。
-
-**分库索引：** `/health` 里 `library_indexes_upgrade_needed: false` 且 `per_library_index_ready: true` 时，指定库搜索最快；未完成升级时仍可搜（全局索引 + 过滤）。
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| GET | `/health` | 索引/能力/超时/上限 |
+| GET | `/agent-starter` | 粘贴块 + 实时快照 |
+| GET | `/agent-doc` | 完整本文 |
+| GET | `/libraries` | 库列表 → `scope.library_paths` |
+| GET | `/libraries/videos` | 库内视频 → `scope.video_paths` |
+| GET | `/search/presets` | 预设列表 |
+| GET | `/search/presets/{preset_id}` | 单个预设 |
+| POST | `/search` | 单次搜索 |
+| POST | `/search/batch` | 批量搜索（可内嵌导出） |
+| GET | `/search/telemetry` | 截图搜诊断（可选） |
+| POST | `/export/manifest` | 生成剪辑清单 JSON |
+| POST | `/export/clip` | 导出单个片段 |
+| POST | `/export/clips/batch` | 批量导出片段 |
 
 ---
 
-## 3. 查询怎么写（必做）
+## 1. 能力与边界
 
-1. 一句脚本 ≈ **一个可见镜头**（中文约 4–20 字，英文 3–12 词）。
-2. 写**镜头里能看见的**，不要整段粘贴台词/内心戏。
-3. 只有对话时，推断机位（如「主持人 半身 访谈」）或问用户。
-
-| 用户文案 | 差 | 好 |
-|----------|----|----|
-| 他进球后激动地拥抱队友 | （原文） | 足球进球 庆祝 球员拥抱 |
-| Host introduces the topic | literal quote | host medium shot talking to camera |
-
-空 `hits` 不是错误——改写后再搜，最多试 2 次。
-
-**`query` 字段：** 每次搜索的查询串；会作为 manifest 行的「为何选中」。可用桌面 **`preset_id`** 代替手写 query。
+- **能做：** 在已索引视频里按**画面语义**找时间段（`video_path` + 起止秒）；导出 manifest / mp4 片段。
+- **不能：** 按精确台词/剧情搜、自动成片、改索引或用户设置（除非用户明确要求）。
+- **你的事：** 脚本拆镜头 → **优先 `preset_id`** → 配不上再 inline `query` → `search/batch` → 按需导出。
 
 ---
 
-## 4. API 参考
+## 2. 全局约定
 
-**错误体（统一）：** `{ "api_version":"1", "ok":false, "error":{ "code","message" } }`
+### 2.1 成功 / 错误体
 
-| HTTP | code | 你该做什么 |
-|------|------|------------|
-| 400 | `invalid_request` | 改请求体 |
-| 409 | `index_not_ready` | 让用户在 VideoSeek 里建索引/等升级完成 |
-| 422 | `query_failed` | 重试一次，仍失败则汇报 |
-| 503 | `engine_busy` | 退避重试（搜索并发上限 2；导出 `copy` 最多 3 路并行，`original` 1 路；batch 亦同） |
+成功：`{ "api_version": "1", "ok": true, ... }`
 
-**安全：** 不能删文件、不能重建索引、不能改配置。`export/manifest` 仅在你传 `write_path` 时写 JSON；`export/clip` 写你指定的 mp4/mkv/mov。
+错误：`{ "api_version": "1", "ok": false, "error": { "code", "message" } }`
 
----
+| HTTP | code | 含义 |
+|------|------|------|
+| 400 | `invalid_request` | 请求体/参数不合法（含 Pydantic 校验失败） |
+| 404 | `invalid_request` / `doc_not_found` | 库/视频/源文件不存在；或 `agent-doc` 缺 md |
+| 409 | `index_not_ready` | 索引未就绪或 per-library 索引升级中 |
+| 422 | `query_failed` / `export_failed` | 搜索/导出执行失败 |
+| 503 | `engine_busy` | 超时、并发满、FFmpeg 不可用、导出队列忙 |
 
-### `GET /health`（每次任务开头）
+### 2.2 路径规则（必读）
 
-可选 `?mode=frame|chunk`。重点字段：
+- **`video_path`**：必须**原样**来自 `hits[]`、`/libraries/videos`，或导出响应；禁止按显示名/语义/终端乱码猜中文文件名。
+- **`library_path`**：必须来自 `/libraries` 的 `library_path`。
+- **写出路径**（`output_path`、`export.output_dir`、`write_path`）：**不得**落在已索引库根目录内（防覆盖源媒体）。
+- Python 写 JSON：`ensure_ascii=False`；POST body 用 UTF-8。
 
-| 字段 | 含义 |
-|------|------|
-| `index_ready` | false → 不要批量搜 |
-| `index_stale` | true → 结果可能旧，提示用户更新索引 |
-| `library_indexes_upgrade_needed` | true 且你要 `scope.library_paths` → 等启动迁移或让用户点「升级搜索索引」 |
-| `capabilities.export_clip` | false → 用 `ffmpeg.ffmpeg_path` 自己裁 |
-| `capabilities.search_presets` | false → 只用 inline `query` |
-| `search_timeout_sec` / `search_timeout_precise_sec` | 单次搜索超时（默认 90 / 180） |
-| `max_batch_queries` | `POST /search/batch` 最多查询条数（默认 64） |
-| `max_batch_export_clips` | `POST /export/clips/batch` 或 `search/batch` 内 `export` 最多导出条数（默认 64） |
-| `agent_api_default_image_precision` | 图搜省略 `search_precision_mode` 时的默认 fast/precise |
-| `saved_search_scope_mode` | 桌面 `all` / `selected`；省略 scope 时与此一致 |
-
----
-
-### `GET /agent-starter`
-
-返回短文本 `starter_text` + `full_doc_rel`。**给模型粘贴用这一份即可**，不必全文灌本文。
-
----
-
-### `GET /libraries` · `GET /libraries/videos`
-
-- `library_path` → 填入 `scope.library_paths`
-- `per_library_index_ready` → 分库直查是否可用
-- `/libraries/videos?library_path=...&ready_only=true` → 单库视频列表，路径可进 `scope.video_paths`
-
----
-
-### `GET /search/presets` · `GET /search/presets/{id}`
-
-桌面保存的快捷搜索（文/图/混合）。搜索时用 `preset_id`，与 `query` 二选一。响应含 `reference_image_count`、`summary`，无本地 ref 绝对路径。
-
----
-
-### `POST /search`
-
-**二选一：** `preset_id` **或** `query`（+ 可选 `query_type: text|image_path`）。
-
-| 常用字段 | 说明 |
-|----------|------|
-| `top_k` | 1–200，默认 20 |
-| `mode` | `frame` \| `chunk`，默认跟桌面 |
-| `search_precision_mode` | 图搜：`fast` \| `precise`（精搜管线）；文搜忽略 |
-| `scope.library_paths` / `scope.video_paths` | 限制范围；省略=桌面范围 |
-| `expand_frame_hits` | 默认 true，frame 点扩 ±3s |
-| `preview_anchor_sec` | 截图二次定位：图搜 + **仅 1 个** `scope.video_paths`；强制 precise |
+### 2.3 搜索范围 `scope`
 
 ```json
 {
-  "query": "足球进球 庆祝",
-  "query_type": "text",
-  "top_k": 5,
-  "mode": "chunk",
-  "scope": { "library_paths": ["D:/Videos/MyLibrary"] },
-  "expand_frame_hits": true
-}
-```
-
-**响应：** `query`（标签）、`hits[]`（`rank`, `video_path`, `start_sec`, `end_sec`, `score`, `clip_window`, `start_timecode`…）、`meta.scope_uses_per_library_indexes`、`meta.search_precision_mode`。
-
-**截图定位两步：** ① 无 `preview_anchor_sec` 图搜得 anchor → ② 同图 + `scope.video_paths:[该视频]` + `preview_anchor_sec: anchor`。
-
----
-
-### `POST /search/batch`
-
-最多 **64** 条；`image_folder` 自动扫 png/jpg/…；或 `queries[]` 每项同单次搜索。
-
-批量级 `top_k` / `mode` / `scope` / `search_precision_mode` 等默认作用于全部条目。`continue_on_error: true` 时单条失败不中断。
-
-响应 `results[]` 每项形状同单次搜索。
-
-**无胶水导出（推荐截图批处理）：** 在同一请求里加 `export`，搜完自动按规则写入 `output_dir`（文件名 `{client_request_id或query}_rank{NN}.mp4`），响应多一节 `export`（同 `export/clips/batch`）。
-
-| `export` 字段 | 说明 |
-|---------------|------|
-| `output_dir` | **必填**。导出目录，勿在任一 indexed library 根下；不存在会自动创建 |
-| `encode_mode` | 默认 `copy`（流拷贝，快）；`original` 重编码慢 |
-| `keep_per_source` | 每条查询保留前 N 个 hit（默认 1） |
-| `dedupe` | 默认 `true`，按重叠去重后再导出 |
-| `continue_on_error` | 默认 `true`，单条导出失败不中断 |
-| `silent` | 可选，省略则用桌面 `export_video_silent` |
-
-```json
-{
-  "image_folder": "D:/Screenshots",
-  "search_precision_mode": "precise",
-  "expand_frame_hits": true,
-  "export": {
-    "output_dir": "D:/Screenshots/data",
-    "encode_mode": "copy",
-    "keep_per_source": 1,
-    "dedupe": true
+  "scope": {
+    "library_paths": ["D:/Videos/MyLibrary"],
+    "video_paths": ["D:/Videos/MyLibrary/ep01.mp4"],
+    "use_saved_scope": false
   }
 }
 ```
 
-仍需分步时：`results` → `export/manifest` 的 `sources`，或自建 `items[]` → `export/clips/batch`。
-
----
-
-### `POST /export/manifest`
-
-把搜索/批量结果整理成 `cuts.json`（可 `dedupe: true` 按重叠去重）。
-
-```json
-{
-  "project": "ep01",
-  "sources": [ "... 粘贴 batch.results 或单次响应 ..." ],
-  "keep_per_source": 2,
-  "dedupe": true,
-  "write_path": "D:/cuts.json"
-}
-```
-
-或传 `items[]` 显式行。省略 `write_path` 则只在响应体返回 manifest。
-
----
-
-### `POST /export/clip`
-
-用本机 FFmpeg 按命中时间裁片段。**一次一条**；`encode_mode: copy` 时最多 **3** 路并行，`original` 仍为 1 路。
-
-| 字段 | 要求 |
+| 情况 | 行为 |
 |------|------|
-| `video_path` | 源文件存在 |
-| `start_sec` / `end_sec` | 来自命中，`end > start` |
-| `output_path` | `.mp4`/`.mkv`/`.mov`，**不能在任一 indexed library 根目录下** |
-| `encode_mode` | `copy`（默认，流拷贝，快，切点近关键帧）或 `original`（重编码 libx264，慢，兼容性好） |
+| **省略 `scope`** | 使用 VideoSeek 桌面当前保存的搜索范围 |
+| `library_paths` | 只搜这些库（路径来自 `/libraries`） |
+| `video_paths` | 只搜这些绝对路径（来自 `/libraries/videos` 或 hits） |
+| `use_saved_scope: true` | 显式使用桌面保存的范围（无 paths 时） |
+| 同时给 paths | **显式 paths 优先**于 `use_saved_scope` |
 
-先查 `/health` 的 `capabilities.export_clip`。单条调试可用本端点；**多条请用 batch**。
+响应 `meta` 会回显：`scope_applied`、`scope_library_paths`、`scope_video_paths`、`scope_uses_per_library_indexes`、`saved_search_scope_mode`。
 
 ---
 
-### `POST /export/clips/batch`
+## 3. 脚本 → preset / query
 
-一次请求导出多条（最多 **64**，见 `/health` 的 `max_batch_export_clips`）。默认 `continue_on_error: true` 时并行导出；`copy` 模式仍受 3 路并发限制。
+预设以 **`agent-starter.search_presets`** 或 **`GET /search/presets`** 为准（含用户自建）；**不要在 md 或对话里硬编码 id**。
+
+1. 一句脚本 ≈ 一个镜头任务（batch 里一条 `queries[]` 条目）。
+2. 能映射预设 → **`preset_id`**；勿对同一语义重复手写 `query`。
+3. 无合适预设 → inline **`query`**，风格对齐 preset 的 `query`/`summary`（景别 + 主体 + 可见动作；非台词、非剧情）。
+4. **`preset_id` 与 `query` 二选一**，不可同时出现；两者都缺 → 400。
+5. 空 `hits`：换 preset、改 query、放宽 scope；最多重试 2 次。
+6. **要 N 个片段** = **1 次** search/batch + **`top_k: N`**（+ 可选 `dedupe`）；**不要**发 N 条相同 `preset_id`/`query`。
+
+---
+
+## 4. 端点参考
+
+### 4.1 `GET /health`
+
+**Query：** `mode`（可选，`frame` | `chunk`；默认读桌面配置）
+
+**主要字段：**
 
 | 字段 | 说明 |
 |------|------|
-| `items[]` | 每项同单条：`video_path`, `start_sec`, `end_sec`, `output_path`；可选 `client_request_id`, `encode_mode`, `silent` |
-| `encode_mode` | 批次默认（单项可覆盖），建议 `copy` |
-| `continue_on_error` | 默认 `true`：失败项记入 `results`，其余继续；`false` 时遇错即停 |
-| 响应 | `ok` 为是否全部成功；`results[]` 与单条结构相同，失败项含 `error.code` / `error.message` |
+| `index_ready` | 当前 mode 下全局索引是否可用 |
+| `index_stale` / `global_index_state` | 索引新鲜度 |
+| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate` 等 |
+| `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
+| `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
+| `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
+| `max_concurrent_searches` | 搜索并发上限（2） |
+| `search_timeout_sec` / `search_timeout_precise_sec` | 单次搜索超时（可配置） |
+| `max_batch_queries` | 64 |
+| `max_batch_export_clips` | 64 |
+| `batch_timeout_sec` | batch 基础超时 |
+| `library_indexes_upgrade_needed` | true 时需重启并完成迁移 |
+| `agent_api_default_image_precision` | 图搜默认 `fast` 或 `precise` |
+| `search_telemetry_enabled` | 遥测开关 |
+
+---
+
+### 4.2 `GET /agent-starter`
+
+**Query：** `locale`（`zh` | `en`，默认 `zh`）；`mode`（同 health）
+
+**响应：**
+
+| 字段 | 说明 |
+|------|------|
+| `starter_text` | **粘贴给外部 AI 的主文本** |
+| `full_doc_path` | 本机 `docs/for-agents.md` 绝对路径（可读文件） |
+| `full_doc_rel` | `docs/for-agents.md` |
+| `meta.search_preset_count` | 快照里预设条数 |
+
+`starter_text` 内嵌 JSON 快照含：`api_base`, `index_ready`, `capabilities`, `search_presets[]`（id/name/query/summary）等。
+
+---
+
+### 4.3 `GET /agent-doc`
+
+**Query：** `format` = `json`（默认，返回 `{ content, full_doc_path, meta }`）| `text`（纯 Markdown，`Content-Type: text/markdown`）
+
+缺文件 → 404 `doc_not_found`。
+
+---
+
+### 4.4 `GET /libraries`
+
+**响应 `libraries[]` 每项：**
+
+| 字段 | 说明 |
+|------|------|
+| `library_path` | 用于 `scope.library_paths` |
+| `display_name` | 展示名 |
+| `index_state` | 库索引状态 |
+| `video_count_total` / `video_count_indexed_ready` / `video_count_missing_source` | 计数 |
+| `per_library_index_ready` | 该库 per-library 索引是否就绪 |
+| `offline` | 库目录是否存在 |
+
+---
+
+### 4.5 `GET /libraries/videos`
+
+**Query（必填/可选）：**
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `library_path` | **必填** | 来自 `/libraries` |
+| `ready_only` | `true` | 只返回 `asset_state=ready` 且源文件存在 |
+| `limit` | 500 | 最大 2000 |
+| `offset` | 0 | 分页 |
+
+**响应 `videos[]` 每项：** `video_path`（绝对路径）, `video_rel_path`, `video_id`, `asset_state`, `source_exists`
+
+**meta：** `returned`, `total_listed`, `total_ready`, `offset`, `limit`, `ready_only`
+
+库不存在 → 404。
+
+---
+
+### 4.6 `GET /search/presets` · `GET /search/presets/{preset_id}`
+
+**列表 `presets[]`：** `id`, `name`, `query`, `summary`, `reference_image_count`；可选 `fusion`, `top_k`, `min_score`
+
+**详情：** `{ "preset": { ...同上 } }`
+
+未知 id → 404。
+
+---
+
+### 4.7 `POST /search`
+
+**Body（`AgentSearchRequest`）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `preset_id` | 二选一 | — | 与 `query` 互斥 |
+| `query` | 二选一 | — | 文本或图片路径 |
+| `query_type` | 否 | `text` | `text` \| `image_path`（`image_path` 时 `query` 为本地图片绝对路径） |
+| `top_k` | 否 | 桌面配置，clamp **1–200** | 返回 hit 数上限 |
+| `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk` |
+| `min_score` | 否 | preset 默认或不过滤 | 过滤低分 hit |
+| `search_precision_mode` | 否 | 图搜见 health | `fast` \| `precise`；**纯文搜忽略** |
+| `client_request_id` | 否 | — | 原样回显，便于对账 |
+| `scope` | 否 | 桌面范围 | 见 §2.3 |
+| `expand_frame_hits` | 否 | `true` | frame 模式下点命中扩成段 |
+| `pad_before_sec` / `pad_after_sec` | 否 | **3.0** | 扩段 padding（秒） |
+| `preview_anchor_sec` | 否 | — | **图搜 + scope 内恰好 1 个 video** 时二次定位；强制 `precise` |
+
+**成功响应：**
 
 ```json
 {
-  "encode_mode": "copy",
-  "items": [
+  "ok": true,
+  "query": "…",
+  "query_type": "text",
+  "mode": "chunk",
+  "client_request_id": "beat-1",
+  "preset_id": "builtin_smile",
+  "preset_name": "…",
+  "hits": [
     {
-      "client_request_id": "hit-1",
+      "rank": 1,
       "video_path": "D:/lib/ep01.mp4",
-      "start_sec": 120.5,
-      "end_sec": 126.5,
-      "output_path": "D:/cuts/ep01_0120.mp4"
+      "start_sec": 619.5,
+      "end_sec": 625.5,
+      "score": 0.87,
+      "duration_sec": 6.0,
+      "start_timecode": "00:10:19",
+      "end_timecode": "00:10:25",
+      "clip_window": {
+        "start_sec": 619.5,
+        "end_sec": 625.5,
+        "padding_applied": false,
+        "raw_start_sec": 619.5,
+        "raw_end_sec": 625.5
+      },
+      "video_duration_sec": 3600.0
     }
-  ]
+  ],
+  "meta": {
+    "returned": 1,
+    "top_k": 5,
+    "fetch_top_k": 5,
+    "search_precision_mode": "fast",
+    "index_ready": true,
+    "global_index_state": "fresh",
+    "scope_applied": true,
+    "scope_library_paths": ["D:/lib"],
+    "elapsed_ms": 1200,
+    "search_timeout_sec": 90
+  }
 }
 ```
 
-**Windows + 中文路径：** PowerShell 直接 `Invoke-RestMethod` 易乱码；用 **curl** 或把 JSON 写入 UTF-8 文件再 `curl -d @body.json`（`search/batch` 的 `export` 示例见上；分步导出同理）。
+**注意：** 搜索返回的 `start_sec`/`end_sec` 已含 frame 扩段（若开启）；**不含** copy 导出的 FFmpeg 边距。
 
 ---
 
-### `GET /search/telemetry`
+### 4.8 `POST /search/batch`
 
-只读本地截图搜诊断（用户曾在桌面预览时才有 playback 偏差意义）。可选 `?locale=zh|en`。
+**Body（`AgentBatchSearchRequest`）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `queries` | 与 folder 二选一 | `[]` | 最多 **64** 条；每项同单次 search，可单独 override `top_k`/`mode`/`scope` 等 |
+| `image_folder` | 与 queries 二选一 | — | 扫描目录下 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每条图一条 query（`query_type=image_path`） |
+| `top_k`, `mode`, `min_score`, `search_precision_mode` | 否 | — | **批量默认**，单条未设时继承 |
+| `continue_on_error` | 否 | `true` | 单条失败是否继续 |
+| `scope`, `expand_frame_hits`, `pad_before_sec`, `pad_after_sec` | 否 | 同单次 | 批量级默认 |
+| `export` | 否 | — | 内嵌导出，见下 |
+
+**`export`（可选，搜完自动写 mp4）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `output_dir` | **是** | — | 输出目录；勿在库根内 |
+| `encode_mode` | 否 | `copy` | `copy` \| `original` |
+| `silent` | 否 | 桌面 `export_video_silent` | 无声导出 |
+| `keep_per_source` | 否 | **1** | 每条成功 query 保留前 N 个 hit |
+| `dedupe` | 否 | `true` | 导出前去重 |
+| `continue_on_error` | 否 | `true` | 导出项失败是否继续 |
+
+内嵌导出文件名规则：`{client_request_id或query}_rank{NN}.mp4`（冲突加后缀）。导出条目数 > 64 → 400。
+
+**成功响应：**
+
+```json
+{
+  "ok": true,
+  "results": [
+    {
+      "ok": true,
+      "query": "…",
+      "query_type": "text",
+      "mode": "chunk",
+      "client_request_id": "beat-1",
+      "hits": [ "…同单次…" ],
+      "meta": { "returned": 3, "top_k": 5, "…": "…" }
+    },
+    {
+      "ok": false,
+      "client_request_id": "bad",
+      "query": "…",
+      "hits": [],
+      "error": { "code": "invalid_request", "message": "…" }
+    }
+  ],
+  "meta": {
+    "total": 2,
+    "processed": 2,
+    "succeeded": 1,
+    "failed": 1,
+    "continue_on_error": true,
+    "elapsed_ms": 5000,
+    "batch_timeout_sec": 1200
+  },
+  "export": { "ok": true, "results": [ "…见 export/clips/batch…" ], "meta": { "…": "…" } }
+}
+```
+
+顶层 `ok`：全部 query 成功且（若有 export）导出全部成功才为 true。
 
 ---
 
-## 5. 系统提示词（可复制）
+### 4.9 `POST /export/manifest`
 
-```text
-你是本机 VideoSeek 粗剪助手：帮用户用视觉搜索找镜头，不是改 VideoSeek 源码。
-1. 把脚本改写成短视觉 query，禁止搜字面台词。
-2. GET http://127.0.0.1:8765/api/v1/health — index_ready 为 false 则停。
-3. GET /libraries — scope.library_paths 用返回的 library_path。
-4. POST /search/batch — expand_frame_hits=true；图搜 precise；截图批处理加 export.output_dir（一次搜+导出，无需胶水）。
-5. 分步时才 manifest → export/clips/batch。输出路径勿在库内。
-不要重建索引、不要改用户设置，除非用户明确要求。
-IDE 访问不了 127.0.0.1 时，在用户终端用 curl 调 API；Windows 中文路径用 curl + UTF-8 JSON 文件（见 §search/batch 的 export 示例）。
+**Body（`AgentManifestRequest`）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `items` | 与 sources 二选一 | — | **推荐 agent 使用**；自定义片段列表 |
+| `sources` | 与 items 二选一 | — | 粘贴 **`search/batch` 的 `results[]` 整段**（含 `ok`, `query`, `hits[]`…） |
+| `project` | 否 | `rough-cut` | 写入 manifest |
+| `keep_per_source` | 否 | **2** | 仅 **sources** 模式：每条 result 取前 N hit |
+| `dedupe` | 否 | `true` | 同视频区间重叠 >50%（frame 模式另：起点差 ≤2s）则去重 |
+| `write_path` | 否 | — | 若提供则写入磁盘 JSON |
+| `expand_frame_hits`, `pad_*`, `mode` | 否 | 同搜索默认 | 仅 **sources** 模式重新解析 hit 时用 |
+
+**`items[]` 每项必填：** `video_path`, `start_sec`, `end_sec`；可选 `id`, `query`, `client_request_id`, `score`, `rank`, `notes`
+
+**`items[]` 示例：**
+
+```json
+{
+  "project": "rough-cut",
+  "items": [
+    {
+      "id": "clip-01",
+      "video_path": "D:/lib/episode02.mp4",
+      "start_sec": 619.5,
+      "end_sec": 625.5,
+      "notes": "from search hit rank 1"
+    }
+  ],
+  "dedupe": false,
+  "write_path": "D:/Exports/manifest.json"
+}
+```
+
+**易错 400：**
+
+- 只给 `{video_path,start_sec,end_sec}` 当 `sources` → **错**；应放 `items[]`。
+- `items` 与 `sources` 都缺 / 解析后无条目 → 400。
+
+**成功响应：** `{ "manifest": { "version": 1, "project": "…", "items": […] }, "meta": { "item_count", "dedupe", "write_path" } }`
+
+---
+
+### 4.10 `POST /export/clip` · `POST /export/clips/batch`
+
+**单条 `export/clip` Body：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `video_path` | 是 | — | 源视频绝对路径 |
+| `start_sec` / `end_sec` | 是 | — | `end_sec` **必须大于** `start_sec` |
+| `output_path` | 是 | — | 必须以 **`.mp4` / `.mkv` / `.mov`** 结尾；勿在库根内 |
+| `encode_mode` | 否 | `copy` | `copy`（流复制，快）\| `original`（libx264 重编码，慢，时长准） |
+| `silent` | 否 | 桌面配置 | 无声 |
+| `client_request_id` | 否 | — | 回显 |
+
+**`encode_mode=copy` 时长（必读）：** 在 `[start_sec, end_sec]` **两侧各加约 2s**（`export_copy_margin_sec`，默认 2），避免关键帧切不准。
+
+| 请求区间 | copy 导出大约时长 |
+|----------|-------------------|
+| 6.0s（619.5–625.5） | **~10s**（+4s） |
+| 2.0s（621.5–623.5） | **~6s** |
+
+- 期望成片 **N 秒** → 请求区间约 **`N − 4` 秒**（默认边距），或以 hit 为中心缩短窗口。
+- 要**精确时长** → `encode_mode: "original"`。
+
+**单条成功响应：** `output_path`, `video_path`, `start_sec`, `end_sec`（**实际裁切窗口，已含 copy 边距**）, `duration_sec`, `encode_mode`
+
+**批量 `export/clips/batch`：**
+
+| 字段 | 说明 |
+|------|------|
+| `items[]` | 必填，最多 **64** 条；字段同单条；单项可 override `encode_mode`/`silent` |
+| `encode_mode` / `silent` | 批量默认 |
+| `continue_on_error` | 默认 `true` |
+
+**批量响应：** `{ "ok", "results": [ { "ok", "output_path", … } | { "ok": false, "error": {code,message} } ], "meta": { total, succeeded, failed, batch_timeout_sec } }`
+
+超时：单条 120s；批量按条数估算（copy 最多 3 路并行）。
+
+---
+
+### 4.11 `GET /search/telemetry`
+
+**Query：** `locale`（`zh` | `en`）
+
+**响应：** `enabled`, `summary`, `panel_text`, `file_path`（本地遥测文件路径）
+
+---
+
+## 5. 推荐工作流
+
+```
+health (index_ready?) → libraries → search/batch
+  → [export/manifest + export/clips/batch] 或 batch.export 一步完成
+```
+
+| 目标 | 做法 |
+|------|------|
+| 只要命中列表 | `search/batch`，不调用 export |
+| 清单 + 手控导出 | manifest（`items[]` 或 `sources`）→ `clips/batch` |
+| 截图文件夹批处理 | `image_folder` + `export.output_dir` |
+| 精确秒数成片 | `encode_mode: "original"` |
+
+---
+
+## 6. 本机调 API（Windows / Cursor）
+
+VideoSeek 接口正常；**IDE 里 curl 无回显是终端/别名问题，不是服务挂了。**
+
+| 情况 | 做法 |
+|------|------|
+| PowerShell / Cursor | 用 **`curl.exe`**，勿用裸 `curl` |
+| GET 自测 | `curl.exe http://127.0.0.1:8765/api/v1/health` |
+| POST | JSON 存 **UTF-8** 的 `body.json` |
+| curl 无输出 | 写 **`.py` 文件**再执行（勿拼长 `python -c`） |
+| 读文档 | 优先 `GET /agent-doc` JSON 的 `content` |
+
+```powershell
+curl.exe -s http://127.0.0.1:8765/api/v1/health
+curl.exe -s -X POST http://127.0.0.1:8765/api/v1/search/batch `
+  -H "Content-Type: application/json; charset=utf-8" `
+  -d "@body.json"
+```
+
+```python
+import json, urllib.request
+req = urllib.request.Request(
+    "http://127.0.0.1:8765/api/v1/search/batch",
+    data=json.dumps({"queries": [{"preset_id": "builtin_smile"}], "top_k": 3}, ensure_ascii=False).encode("utf-8"),
+    headers={"Content-Type": "application/json; charset=utf-8"},
+    method="POST",
+)
+print(json.loads(urllib.request.urlopen(req, timeout=120).read()))
 ```
 
 ---
 
-## 6. 环境（仅操作相关）
-
-| 项 | 默认 |
-|----|------|
-| 开关 | 设置里 `agent_api_enabled`，或环境变量 `VIDEOSEEK_AGENT_API=1` |
-|  host / port | `127.0.0.1` / `8765`（`VIDEOSEEK_AGENT_API_HOST` / `PORT`） |
-
-**Windows 调 API：** 优先 `curl`；请求体存 UTF-8 的 `body.json`，避免 PowerShell 中文路径/编码乱码。示例：
-
-```bash
-curl -s -X POST http://127.0.0.1:8765/api/v1/search/batch -H "Content-Type: application/json; charset=utf-8" -d @body.json
-```
-
-维护者：打包与源码映射见 `docs/ai/pipelines.md` § Agent API。
+维护者：打包与实现见 `docs/ai/pipelines.md` § Agent API。
