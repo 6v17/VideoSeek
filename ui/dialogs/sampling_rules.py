@@ -161,7 +161,7 @@ class SamplingRulesDialog(QDialog):
             parts.append(rule_text)
 
         normalized_rules = normalize_sampling_fps_rules_text("; ".join(parts))
-        normalized_rules = ensure_sampling_fps_rules_open_tail(normalized_rules, default_tail_fps=0.5)
+        normalized_rules = ensure_sampling_fps_rules_open_tail(normalized_rules, default_tail_fps=1)
         all_valid, invalid_ref = validate_sampling_fps_rules_full_coverage(normalized_rules)
         if not all_valid:
             invalid_row = None

@@ -49,6 +49,11 @@ class SearchScopeGuiMixin:
             rel_path = str(ent.get("video_rel_path", "") or "").strip()
             if lib_path and rel_path:
                 known_paths.add(normalize_scope_path(os.path.join(lib_path, rel_path)))
+        self._search_scope_video_paths = [
+            normalize_scope_path(path)
+            for path in self._search_scope_video_paths
+            if str(path or "").strip()
+        ]
         pruned_paths = [path for path in self._search_scope_video_paths if path in known_paths]
         if pruned_paths != self._search_scope_video_paths:
             self._search_scope_video_paths = pruned_paths
@@ -94,6 +99,8 @@ class SearchScopeGuiMixin:
         if dialog.exec():
             self._search_scope_mode, self._search_scope_video_paths = dialog.result_scope()
             save_search_scope(self._search_scope_mode, video_paths=self._search_scope_video_paths)
+            self._search_scope_mode = get_search_scope_mode()
+            self._search_scope_video_paths = get_search_scope_video_paths()
             self._refresh_search_panel_state()
 
     def _resolve_active_search_video_scope(self):

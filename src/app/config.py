@@ -55,7 +55,7 @@ def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
 DEFAULT_CONFIG = {
     "fps": 1,
     "sampling_fps_mode": "dynamic",
-    "sampling_fps_rules": "0-10m=2; 10m-60m=1; 60m-=0.5",
+    "sampling_fps_rules": "0-10m=2; 10m-=1",
     "search_top_k": 20,
     "frame_neighbor_rerank_enabled": False,
     "frame_neighbor_rerank_top_n": 10,
@@ -315,6 +315,9 @@ def _sanitize_sampling_settings(config):
     sanitized["sampling_fps_rules"] = normalize_sampling_fps_rules_text(
         sanitized.get("sampling_fps_rules", DEFAULT_CONFIG["sampling_fps_rules"])
     )
+    legacy_sampling_rules = "0-10m=2; 10m-60m=1; 60m-=0.5"
+    if sanitized["sampling_fps_rules"] == legacy_sampling_rules:
+        sanitized["sampling_fps_rules"] = DEFAULT_CONFIG["sampling_fps_rules"]
     return sanitized
 
 

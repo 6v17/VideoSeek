@@ -340,7 +340,7 @@ class SettingsGuiMixin:
             )
             new_sampling_fps_rules = user_sampling_fps_rules
             if new_sampling_fps_mode == "dynamic":
-                new_sampling_fps_rules = ensure_sampling_fps_rules_open_tail(new_sampling_fps_rules, default_tail_fps=0.5)
+                new_sampling_fps_rules = ensure_sampling_fps_rules_open_tail(new_sampling_fps_rules, default_tail_fps=1)
             auto_tail_rule = ""
             if (
                 new_sampling_fps_mode == "dynamic"
@@ -957,7 +957,7 @@ class SettingsGuiMixin:
         rules_text = normalize_sampling_fps_rules_text(current_rules_text)
         sampling_fps_mode = normalize_sampling_fps_mode(self.settings_page.get_sampling_fps_mode())
         if sampling_fps_mode == "dynamic":
-            rules_text = ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=0.5)
+            rules_text = ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=1)
         if current_rules_text != rules_text:
             self.settings_page.set_sampling_fps_rules_text(rules_text)
             return
@@ -977,7 +977,7 @@ class SettingsGuiMixin:
         sampling_fps_mode = normalize_sampling_fps_mode(self.settings_page.get_sampling_fps_mode())
         rules_text = normalize_sampling_fps_rules_text(self.settings_page.get_sampling_fps_rules_text())
         if sampling_fps_mode == "dynamic":
-            rules_text = ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=0.5)
+            rules_text = ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=1)
         rules_valid, _ = validate_sampling_fps_rules_full_coverage(rules_text)
         if sampling_fps_mode == "dynamic" and rules_text and not rules_valid:
             return

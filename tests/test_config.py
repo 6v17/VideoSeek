@@ -249,7 +249,7 @@ class ConfigMigrationTests(unittest.TestCase):
             self.assertEqual(loaded["sampling_fps_mode"], "dynamic")
             self.assertEqual(
                 loaded["sampling_fps_rules"],
-                "0-10m=2; 10m-60m=1; 60m-=0.5",
+                "0-10m=2; 10m-=1",
             )
 
     def test_load_config_infers_data_root_from_existing_storage_layout(self):
@@ -325,13 +325,30 @@ class ConfigMigrationTests(unittest.TestCase):
                     {
                         "fps": 1,
                         "sampling_fps_mode": "fixed",
-                        "sampling_fps_rules": "0-10m=2; 10m-60m=1; 60m-=0.5",
+                        "sampling_fps_rules": "0-10m=2; 10m-30m=1",
                     }
                 )
                 loaded = config_module.load_config()
 
             self.assertEqual(loaded["sampling_fps_mode"], "fixed")
-            self.assertEqual(loaded["sampling_fps_rules"], "0-10m=2; 10m-60m=1; 60m-=0.5")
+            self.assertEqual(loaded["sampling_fps_rules"], "0-10m=2; 10m-30m=1")
+
+    def test_load_config_migrates_legacy_default_sampling_rules(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_config_file = root / "config.json"
+
+            with patch.object(config_module, "CONFIG_FILE", str(user_config_file)):
+                config_module.save_config(
+                    {
+                        "fps": 1,
+                        "sampling_fps_mode": "dynamic",
+                        "sampling_fps_rules": "0-10m=2; 10m-60m=1; 60m-=0.5",
+                    }
+                )
+                loaded = config_module.load_config()
+
+            self.assertEqual(loaded["sampling_fps_rules"], "0-10m=2; 10m-=1")
 
     def test_save_config_clamps_settings_to_safe_ranges(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -448,7 +465,7 @@ class ConfigMigrationTests(unittest.TestCase):
             )
 
     def test_default_config_includes_sampling_rules_template(self):
-        self.assertEqual(config_module.DEFAULT_CONFIG["sampling_fps_rules"], "0-10m=2; 10m-60m=1; 60m-=0.5")
+        self.assertEqual(config_module.DEFAULT_CONFIG["sampling_fps_rules"], "0-10m=2; 10m-=1")
 
 
 if __name__ == "__main__":
