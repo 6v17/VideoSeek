@@ -77,6 +77,37 @@ def _search_preset_summaries(*, limit: int = 24) -> list[Dict[str, Any]]:
     return summaries
 
 
+def _format_client_access_hint(*, locale: str) -> str:
+    """Windows/Cursor: curl.exe vs alias; Python fallback when terminal is silent."""
+    lang = "en" if str(locale).lower().startswith("en") else "zh"
+    if lang == "en":
+        return (
+            "Client access: On Windows use curl.exe (PowerShell curl may alias to Invoke-WebRequest). "
+            "POST with UTF-8 body.json. If the IDE terminal shows no curl output, call the API with Python "
+            "(urllib/requests)—the service is OK."
+        )
+    return (
+        "本机调 API：Windows 用 curl.exe（PowerShell 的 curl 可能是别名，易无回显）。"
+        "POST 用 UTF-8 的 body.json。若 Cursor 终端 curl 没输出，改用 Python 请求即可，接口正常。"
+    )
+
+
+def _format_export_hints(*, locale: str) -> str:
+    lang = "en" if str(locale).lower().startswith("en") else "zh"
+    if lang == "en":
+        return (
+            "Export: video_path verbatim from hits (never guess filenames). "
+            "manifest items[] for custom ranges; sources = full batch results[] only. "
+            "N clips = one search + top_k (not N duplicate queries). "
+            "copy export adds ~2s padding per side (6s request -> ~10s file); use original for exact length."
+        )
+    return (
+        "导出：video_path 原样用 hits，勿猜中文名。manifest 自定义区间用 items[]；"
+        "sources 只能贴 batch 整段 results[]。要 N 个片段 = 1 次 search + top_k，勿重复 N 条 query。"
+        "copy 导出两侧各约 +2s（请求 6s 成片约变 10s）；精确时长用 encode_mode=original。"
+    )
+
+
 def build_agent_starter_text(
     base_url: str,
     health: Dict[str, Any],
@@ -112,6 +143,8 @@ def build_agent_starter_text(
             "5. Export only if needed: export/manifest → export/clips/batch (encode_mode=copy, paths outside libraries)."
         ).format(api=api_base)
         doc_line = _format_doc_reference(locale=locale, api_base=api_base)
+        client_line = _format_client_access_hint(locale=locale)
+        export_line = _format_export_hints(locale=locale)
         not_ready = "Index not ready — ask the user to sync the library in VideoSeek before searching."
     else:
         intro = (
@@ -128,6 +161,8 @@ def build_agent_starter_text(
             "5. 需导出时分步：export/manifest → export/clips/batch（copy，output 勿在库内）。"
         ).format(api=api_base)
         doc_line = _format_doc_reference(locale=locale, api_base=api_base)
+        client_line = _format_client_access_hint(locale=locale)
+        export_line = _format_export_hints(locale=locale)
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步库后再搜索。"
 
     snapshot = {
@@ -154,6 +189,8 @@ def build_agent_starter_text(
         workflow,
         "",
         doc_line,
+        client_line,
+        export_line,
     ]
     if not index_ready:
         parts.extend(["", not_ready])

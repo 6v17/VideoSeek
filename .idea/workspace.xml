@@ -4,11 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="给本机接口说明加上了安装目录解析，避免agent找不到说明文档">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除无用说明">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_starter_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_starter_service.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -378,15 +377,7 @@
       <workItem from="1780589950654" duration="155000" />
       <workItem from="1780643390906" duration="646000" />
       <workItem from="1780731246641" duration="1302000" />
-      <workItem from="1780814630487" duration="4710000" />
-    </task>
-    <task id="LOCAL-00053" summary="加入局域网传图搜索功能">
-      <option name="closed" value="true" />
-      <created>1776772268805</created>
-      <option name="number" value="00053" />
-      <option name="presentableId" value="LOCAL-00053" />
-      <option name="project" value="LOCAL" />
-      <updated>1776772268805</updated>
+      <workItem from="1780814630487" duration="6583000" />
     </task>
     <task id="LOCAL-00054" summary="重新提交">
       <option name="closed" value="true" />
@@ -772,7 +763,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780816433967</updated>
     </task>
-    <option name="localTasksCounter" value="102" />
+    <task id="LOCAL-00102" summary="移除无用说明">
+      <option name="closed" value="true" />
+      <created>1780820034526</created>
+      <option name="number" value="00102" />
+      <option name="presentableId" value="LOCAL-00102" />
+      <option name="project" value="LOCAL" />
+      <updated>1780820034526</updated>
+    </task>
+    <option name="localTasksCounter" value="103" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -802,7 +801,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="init补" />
     <MESSAGE value="补充说明" />
     <MESSAGE value="加视频溯源功能beta" />
     <MESSAGE value="RANSAC 线性回归" />
@@ -827,7 +825,8 @@
     <MESSAGE value="完善api调用说明" />
     <MESSAGE value="减少写配置因为权限问题导致失败" />
     <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
-    <option name="LAST_COMMIT_MESSAGE" value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
+    <MESSAGE value="移除无用说明" />
+    <option name="LAST_COMMIT_MESSAGE" value="移除无用说明" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
