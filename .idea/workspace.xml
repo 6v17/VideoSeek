@@ -4,19 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除无用说明">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="修复搜索范围选择功能">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/copy_overrides.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/copy_overrides.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/dialogs/sampling_rules.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/sampling_rules.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/video_scope_tree.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/video_scope_tree.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,7 +22,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="221" />
+    <option name="cachedIndexableFilesCount" value="223" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -83,6 +75,65 @@
     <commands />
     <urls />
   </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0002231033843998" />
+      <entry key="MS500" value="1.191115212754625" />
+      <entry key="S2" value="2.1088588220035738" />
+      <entry key="S5" value="3.8151701246285254" />
+      <entry key="S10" value="5.836796506991724" />
+      <entry key="S30" value="8.680990470622925" />
+      <entry key="S60" value="9.740500752719791" />
+      <entry key="M2" value="10.342802977089645" />
+      <entry key="M5" value="10.730191273022157" />
+      <entry key="M10" value="10.863910795592403" />
+      <entry key="M15" value="10.90900830577504" />
+      <entry key="M30" value="10.954370804162572" />
+      <entry key="H1" value="10.977151957623027" />
+      <entry key="H2" value="10.988567604247864" />
+      <entry key="H4" value="10.994281706799415" />
+      <entry key="D1" value="10.999046659972926" />
+      <entry key="W1" value="10.999863801435241" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.9528535017080554" />
+      <entry key="MS500" value="1.180144673293178" />
+      <entry key="S2" value="2.1045278249438355" />
+      <entry key="S5" value="3.8120100519855793" />
+      <entry key="S10" value="5.834262252779877" />
+      <entry key="S30" value="8.679674581698542" />
+      <entry key="S60" value="9.739753221095755" />
+      <entry key="M2" value="10.342403595112916" />
+      <entry key="M5" value="10.730024909593668" />
+      <entry key="M10" value="10.863826471219753" />
+      <entry key="M15" value="10.908951832487146" />
+      <entry key="M30" value="10.954342438211505" />
+      <entry key="H1" value="10.97713774217227" />
+      <entry key="H2" value="10.988560488385053" />
+      <entry key="H4" value="10.994278146831315" />
+      <entry key="D1" value="10.999046066361842" />
+      <entry key="W1" value="10.999863716626724" />
+    </decayedShown>
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 8
 }</component>
@@ -94,32 +145,32 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "DefaultHtmlFileTemplate": "HTML File",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.core.executor": "Debug",
-    "Python.main.executor": "Run",
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "master",
-    "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "D:/PycharmProjects/VideoSeek/resources",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/resources&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;ml.llm.LLMThirdPartyAiProvidersConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\resources" />
@@ -190,8 +241,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-3bd3a6803838-JavaScript-PY-261.22158.340" />
-        <option value="bundled-python-sdk-b63d5a1f7c97-b61e75351b1f-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.22158.340" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.24374.152" />
+        <option value="bundled-python-sdk-c59985aa861c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.24374.152" />
       </set>
     </attachedChunks>
   </component>
@@ -386,14 +437,15 @@
       <workItem from="1780643390906" duration="646000" />
       <workItem from="1780731246641" duration="1302000" />
       <workItem from="1780814630487" duration="6583000" />
-    </task>
-    <task id="LOCAL-00054" summary="重新提交">
-      <option name="closed" value="true" />
-      <created>1776773772314</created>
-      <option name="number" value="00054" />
-      <option name="presentableId" value="LOCAL-00054" />
-      <option name="project" value="LOCAL" />
-      <updated>1776773772314</updated>
+      <workItem from="1780839611919" duration="68000" />
+      <workItem from="1780839692487" duration="100000" />
+      <workItem from="1780839806071" duration="124000" />
+      <workItem from="1780839948298" duration="204000" />
+      <workItem from="1780840169302" duration="365000" />
+      <workItem from="1781095010291" duration="6710000" />
+      <workItem from="1781188332683" duration="199000" />
+      <workItem from="1781188755143" duration="35000" />
+      <workItem from="1781188806838" duration="51000" />
     </task>
     <task id="LOCAL-00055" summary="增加同步异常状态">
       <option name="closed" value="true" />
@@ -779,7 +831,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780820034526</updated>
     </task>
-    <option name="localTasksCounter" value="103" />
+    <task id="LOCAL-00103" summary="修复搜索范围选择功能">
+      <option name="closed" value="true" />
+      <created>1780838448828</created>
+      <option name="number" value="00103" />
+      <option name="presentableId" value="LOCAL-00103" />
+      <option name="project" value="LOCAL" />
+      <updated>1780838448828</updated>
+    </task>
+    <option name="localTasksCounter" value="104" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -809,7 +869,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="补充说明" />
     <MESSAGE value="加视频溯源功能beta" />
     <MESSAGE value="RANSAC 线性回归" />
     <MESSAGE value="混剪回源功能完善，gui相关代码拆解" />
@@ -834,7 +893,8 @@
     <MESSAGE value="减少写配置因为权限问题导致失败" />
     <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
     <MESSAGE value="移除无用说明" />
-    <option name="LAST_COMMIT_MESSAGE" value="移除无用说明" />
+    <MESSAGE value="修复搜索范围选择功能" />
+    <option name="LAST_COMMIT_MESSAGE" value="修复搜索范围选择功能" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
