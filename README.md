@@ -68,7 +68,7 @@ Full suite: `python -m unittest discover -s tests -p "test_*.py"` (see `docs/qui
 
 ## More Docs
 
-- Detailed setup and troubleshooting: `docs/quickstart.md`
+- Detailed setup and troubleshooting (Chinese): `docs/quickstart.md`
 - Architecture and module map: `docs/architecture.md`
 
 ## License

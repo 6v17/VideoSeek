@@ -1,98 +1,99 @@
-# VideoSeek Quickstart
+# VideoSeek 快速上手
 
-This guide contains detailed setup, runtime resources, and troubleshooting notes for local development and daily use.
+本地开发与日常使用的安装、运行资源与排障说明。英文摘要见 [README.md](../README.md)。
 
-## 1) Environment
+## 1) 环境
 
-- OS: Windows recommended for current packaged runtime layout.
-- Python: Use a recent Python 3.x environment.
-- Install dependencies:
+- 系统：当前打包布局以 **Windows** 为主。
+- Python：使用较新的 Python 3.x 环境。
+- 安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Or explicitly (Windows):
+或手动安装（Windows）：
 
 ```bash
 pip install onnxruntime-directml opencv-python PySide6 faiss-cpu numpy pillow tokenizers ftfy regex yt-dlp python-vlc fastapi uvicorn python-multipart "qrcode[pil]"
 ```
 
-On Linux or macOS, replace `onnxruntime-directml` with `onnxruntime`.
+Linux / macOS 请将 `onnxruntime-directml` 换成 `onnxruntime`。
 
-## 2) Run
+## 2) 启动
 
 ```bash
 python main.py
 ```
 
-Models and FFmpeg are **not** shipped with the repo. Expect the runtime-resources dialog on first launch unless everything is already configured.
+仓库**不包含**模型与 FFmpeg。首次启动通常会弹出运行资源对话框（若已配置则可跳过）。
 
-## 3) Runtime resources (models & FFmpeg)
+## 3) 运行资源（模型与 FFmpeg）
 
-**Primary workflow:** download the official **zip** from the maintainer cloud folder (see README link), then **import inside the app** (§ 3.1). Use manual file layout (§ 3.2) only for custom setups.
+**推荐流程：** 从维护者网盘下载官方 **zip**，在应用内 **导入并解析**（见 § 3.1）。仅自定义环境或调试时再用手动摆放（§ 3.2）。
 
-**Note on `src/app/app_meta.py`:** URLs there drive **notice / version / about** JSON and the **「Go to download」** browser shortcut; they may also point at the same cloud folder. Optional HTTP-based download of weights exists in code **only when** `model_manifest_url` returns a **JSON manifest**—many distributions use that field as a **human download page** instead, in which case rely on the zip import flow below.
+**关于 `src/app/app_meta.py`：** 其中的 URL 用于 **公告 / 版本 / 关于** 等 JSON，以及 **「前往下载」** 打开浏览器；也可能指向同一网盘。代码里仅在 `model_manifest_url` 返回 **JSON 清单** 时才会走 HTTP 拉权重——很多发行版把该字段当作 **人工下载页**，此时请走下方 zip 导入流程。
 
-### 3.1 Bundled model zip from 123 pan (recommended for contributors)
+### 3.1 123 云盘模型 zip（推荐）
 
-The folder linked in the README as **[123 cloud drive (models)](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)** is maintained by the project: it holds **ready-made archives**, not a loose pile of weight files you must wire up by hand. Downloads typically include a **PDF tutorial** (often Chinese) that walks through the **intended user flow**:
+README 中的 **[123 云盘（模型）](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)** 由项目维护：提供 **打包好的压缩包**，不是散落的权重文件。下载包内通常有 **PDF 教程**（多为中文），步骤如下：
 
-1. Start the app (`python main.py`).
-2. When the runtime-resources dialog appears (or open **Import runtime resources** from the banner / menu), use the **drop zone** or **Add files** to add the model `.zip`.
-3. Optionally add a sibling **`*.sha256`** next to the zip if the bundle ships one (checksum verification).
-4. Click **Import and Parse** (`导入并解析`). The app extracts the zip under your model directory and merges **`model_manifest.json`** entries into Settings (field reference: **§ 3.3**). You should **not** need to unpack manually into `%LOCALAPPDATA%\VideoSeek\models\` first.
-5. If several model profiles are registered, pick the **active model profile** under Settings.
+1. 启动应用（`python main.py`）。
+2. 出现运行资源对话框时（或从横幅 / 菜单打开 **导入运行资源**），用 **拖放区** 或 **添加文件** 选中模型 `.zip`。
+3. 若压缩包附带 **`*.sha256`**，可一并加入以校验。
+4. 点击 **导入并解析**。应用会解压到模型目录，并把 **`model_manifest.json`** 合并进设置（字段说明见 **§ 3.3**）。一般**不必**先手动解压到 `%LOCALAPPDATA%\VideoSeek\models\`。
+5. 若注册了多个模型配置，在设置里选择 **当前模型配置**。
 
-For FFmpeg, you can add **`ffmpeg.exe`** in the **same file list** and run **Import and Parse** so it is copied to the app-managed FFmpeg location.
+FFmpeg 可在**同一文件列表**中加入 **`ffmpeg.exe`**，再点 **导入并解析**，会复制到应用管理的 FFmpeg 目录。
 
-This matches how end users are expected to install models; contributors validating releases should follow the same path before diving into manual layouts.
+终端用户与贡献者验证发行版时，都应优先走此路径。
 
-### 3.2 Model files — manual layout (advanced)
+### 3.2 模型文件 — 手动摆放（进阶）
 
-Use this only when you are **not** using the official zip flow—for example custom builds or debugging.
+仅在**不用**官方 zip 时使用，例如自定义构建或调试。
 
-Place files under one of:
+可放在：
+
 - `%LOCALAPPDATA%\VideoSeek\models\`
-- `models/` under project root
+- 项目根目录下的 `models/`
 
-You must mirror the **active model profile** layout (manifest + weights next to each other). Default `clip_onnx` example filenames:
+须与 **当前激活的模型配置** 目录结构一致（manifest 与权重同级）。默认 `clip_onnx` 示例文件名：
 
 - `clip_visual.onnx`
 - `clip_text.onnx`
 - `bpe_simple_vocab_16e6.txt.gz`
 
-If you switch to another provider/profile (for example `siglip2_onnx` or `chinese_clip_onnx`), file requirements change with that profile. Runtime checks follow the active profile configuration.
+换用其他 provider（如 `siglip2_onnx`、`chinese_clip_onnx`）时，所需文件随配置变化；运行时按当前 profile 校验。
 
-Implementation reference for zip/import behavior: `src/services/model_package_service.py`.
+zip 导入实现见 `src/services/model_package_service.py`。
 
-### 3.3 `model_manifest.json` (pack layout / custom bundles)
+### 3.3 `model_manifest.json`（打包 / 自定义）
 
-Official zips from the 123 pan folder already include this file—**you only need this section when authoring or inspecting a custom package.**
+123 云盘官方 zip **已自带**此文件——**仅在你自行打包或排查自定义包时需要本节。**
 
-- **Filename:** **`model_manifest.json`** (not `manifest.json`).
-- **Placement:** In the zip (or on disk after import), the manifest must sit **in the same folder** as the model weight files. After import, that folder is under  
+- **文件名：** **`model_manifest.json`**（不是 `manifest.json`）。
+- **位置：** zip 内（或导入后磁盘上）须与模型权重 **同一文件夹**。导入后路径形如  
   `<model_dir>/<provider_folder>/<variant>/`  
-  where **`provider_folder`** is derived from `provider`, e.g. `openai-clip` for `clip_onnx`, `siglip2` for `siglip2_onnx`, `chinese-clip` for `chinese_clip_onnx` (see `resolve_provider_dir` in `src/storage/config_store.py`).
+  **`provider_folder`** 由 `provider` 推导，例如 `clip_onnx` → `openai-clip`，`siglip2_onnx` → `siglip2`，`chinese_clip_onnx` → `chinese-clip`（见 `src/storage/config_store.py` 的 `resolve_provider_dir`）。
 
-**Required fields**
+**必填字段**
 
-| Field | Meaning |
-|-------|--------|
-| `provider` | Inference backend id, e.g. `clip_onnx`, `siglip2_onnx`, `chinese_clip_onnx`. |
-| `variant` **or** `model_variant` | Subfolder name for that provider, e.g. `vit-base-patch32`. |
+| 字段 | 含义 |
+|------|------|
+| `provider` | 推理后端 id，如 `clip_onnx`、`siglip2_onnx`、`chinese_clip_onnx` |
+| `variant` 或 `model_variant` | 该 provider 下的子目录名，如 `vit-base-patch32` |
 
-**Optional fields**
+**可选字段**
 
-| Field | Meaning |
-|-------|--------|
-| `id` | Profile id in Settings; if omitted, derived from `provider` + `variant`. |
-| `display_name` | Shown in the model profile UI. |
-| `prefer_gpu` | Boolean; default `true`. |
-| `required_files` | List of filenames that must exist beside the manifest. If omitted, defaults are used per `provider` (CLIP / SigLIP2 / Chinese CLIP file lists in code). |
-| `files` | Map of logical keys → filenames for config; if omitted, built-in defaults apply for known providers. |
+| 字段 | 含义 |
+|------|------|
+| `id` | 设置里的 profile id；省略时由 `provider` + `variant` 推导 |
+| `display_name` | 模型配置 UI 显示名 |
+| `prefer_gpu` | 布尔，默认 `true` |
+| `required_files` | manifest 旁必须存在的文件名列表；省略时用各 provider 内置默认 |
+| `files` | 逻辑键 → 文件名的映射；省略时对已知 provider 用内置默认 |
 
-**Minimal example (`clip_onnx`):**
+**最小示例（`clip_onnx`）：**
 
 ```json
 {
@@ -102,7 +103,7 @@ Official zips from the 123 pan folder already include this file—**you only nee
 }
 ```
 
-**Minimal example (`chinese_clip_onnx`):**
+**最小示例（`chinese_clip_onnx`）：**
 
 ```json
 {
@@ -112,38 +113,41 @@ Official zips from the 123 pan folder already include this file—**you only nee
 }
 ```
 
-Zip layout: `chinese-clip/vit-base-patch16/model_manifest.json` plus `chinese_clip_image.onnx`, `chinese_clip_text.onnx`, `vocab.txt`, `preprocessor_config.json`, `config.json`.
+zip 内布局示例：`chinese-clip/vit-base-patch16/model_manifest.json`，以及 `chinese_clip_image.onnx`、`chinese_clip_text.onnx`、`vocab.txt`、`preprocessor_config.json`、`config.json`。
 
-Authoritative validation and defaults: `import_model_packages` / `_install_extracted_packages` in `src/services/model_package_service.py`.
+校验与默认值以 `src/services/model_package_service.py` 的 `import_model_packages` / `_install_extracted_packages` 为准。
 
-**Switching the active model profile** (Settings → current model): embeddings and FAISS indexes are stored under `data/model_assets/<provider_folder>/<variant>/`. After you change profile, **re-sync / rebuild the library index** for that profile before search or Agent API calls. Search presets also key off `embedding_spec` / `model_profile_id`.
+**切换当前模型配置**（设置 → 当前模型）：向量与 FAISS 索引在 `data/model_assets/<provider_folder>/<variant>/`。切换后须 **重新同步 / 重建媒体库索引**，再搜索或调 Agent API。搜索预设也绑定 `embedding_spec` / `model_profile_id`。
 
 ### 3.4 FFmpeg
 
-Either:
-- Put `ffmpeg.exe` into `%LOCALAPPDATA%\VideoSeek\bin\`
-- Or keep `ffmpeg` accessible from `PATH`
+任选其一：
 
-**Experimental hardware decode (Windows):** In Settings → Model/GPU, enable **Experimental: hardware decode (D3D11VA)**. Default is off (CPU decode). When on, indexing tries GPU decode with automatic fallback to CPU; 10-bit HEVC on NVIDIA may use a `p010` filter chain. See **`docs/ai/pipelines.md`** (Pipeline 1) for backend matrix and limits.
+- 将 `ffmpeg.exe` 放到 `%LOCALAPPDATA%\VideoSeek\bin\`
+- 或保证 `ffmpeg` 在 `PATH` 中
 
-### 3.5 VLC Runtime for In-App Preview
+**实验性硬件解码（Windows）：** 设置 → 模型/GPU → **实验性：硬件解码（D3D11VA）**。默认关闭（CPU 解码）。开启后索引进程尝试 GPU 解码，失败自动回退 CPU；NVIDIA 上 10-bit HEVC 可能走 `p010` 滤镜链。详见 **`docs/ai/pipelines.md`** Pipeline 1。
 
-Install `python-vlc` and ensure runtime binaries are available.
+### 3.5 VLC 运行时（应用内预览）
 
-Project-local layout on Windows:
+安装 `python-vlc`，并准备 VLC 二进制。
+
+Windows 项目内目录：
+
 - `vlc_lib/libvlc.dll`
 - `vlc_lib/libvlccore.dll`
-- `vlc_lib/plugins/` (complete plugin directory)
+- `vlc_lib/plugins/`（完整插件目录）
 
-`ui/playback/vlc_player.py` automatically:
-- Prepends `vlc_lib/` to `PATH`
-- Sets `VLC_PLUGIN_PATH` when `vlc_lib/plugins/` exists
+`ui/playback/vlc_player.py` 会自动：
 
-If VLC runtime is missing/incomplete, search and indexing can still work, but in-app preview playback may not.
+- 将 `vlc_lib/`  prepend 到 `PATH`
+- 存在 `vlc_lib/plugins/` 时设置 `VLC_PLUGIN_PATH`
 
-## 4) Tests
+VLC 缺失或不完整时，搜索与建库通常仍可用，但应用内预览可能无法播放。
 
-**Focused subset** (fast smoke checks):
+## 4) 测试
+
+**常用子集**（快速冒烟）：
 
 ```bash
 python -m unittest ^
@@ -153,25 +157,27 @@ python -m unittest ^
   tests.test_controllers
 ```
 
-**Full suite** (all modules under `tests/`):
+**全量**（`tests/` 下所有模块）：
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-## 5) Common Issues
+建议在 conda `VideoSeek` 环境中运行；UI 相关测试需要已安装 PySide6。
 
-### Unsupported URL
+## 5) 常见问题
 
-- Typically caused by search/list/channel pages instead of video detail pages.
-- Use direct video detail URLs.
+### 不支持的 URL
 
-### Fresh cookies needed
+- 常见原因：用了搜索页 / 列表页 / 频道页，而非视频详情页。
+- 请使用可直接打开的单条视频详情链接。
 
-- Usually due to source-site anti-bot or auth limits.
-- Refresh browser cookies and retry link extraction.
+### 需要刷新 Cookie
 
-### Build finished with 0 new vectors
+- 常见原因：来源站反爬或登录态限制。
+- 刷新浏览器 Cookie 后重试链接提取。
 
-- Links may have been blocked by precheck or recognized as duplicates.
-- Source videos may fail extraction/parsing; inspect build status summary in UI.
+### 构建完成但新增向量为 0
+
+- 链接可能被预检拦截或判为重复。
+- 源视频提取/解析失败；在 UI 查看构建状态摘要。
