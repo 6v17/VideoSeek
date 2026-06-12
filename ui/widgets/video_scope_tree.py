@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
+
+from src.services.search_scope import normalize_scope_path
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -141,7 +143,7 @@ class VideoScopeTreeWidget(QWidget):
         self._vbox.addStretch(1)
 
         if checked_abs_paths is not None:
-            wanted = {os.path.normpath(p) for p in checked_abs_paths if str(p).strip()}
+            wanted = {normalize_scope_path(p) for p in checked_abs_paths if str(p).strip()}
             self._apply_abs_path_checks(wanted)
 
     def _clear_cards(self) -> None:
@@ -154,7 +156,7 @@ class VideoScopeTreeWidget(QWidget):
 
     def apply_checked_paths(self, wanted_abs_paths: Iterable[str]) -> None:
         """Update checkboxes from absolute paths without rebuilding the scope UI."""
-        wanted_norm = {os.path.normpath(str(p)) for p in wanted_abs_paths if str(p).strip()}
+        wanted_norm = {normalize_scope_path(str(p)) for p in wanted_abs_paths if str(p).strip()}
         self._apply_abs_path_checks(wanted_norm)
 
     def _apply_abs_path_checks(self, wanted_norm: set[str]) -> None:
@@ -167,7 +169,7 @@ class VideoScopeTreeWidget(QWidget):
                 try:
                     for it in block.video_items:
                         ap = it.data(0, _FULL)
-                        p = os.path.normpath(str(ap)) if ap else ""
+                        p = normalize_scope_path(str(ap)) if ap else ""
                         it.setCheckState(0, Qt.CheckState.Checked if p in wanted_norm else Qt.CheckState.Unchecked)
                     self._post_sync_folder_checks(tree)
                 finally:
@@ -194,7 +196,7 @@ class VideoScopeTreeWidget(QWidget):
             parts = [p for p in rel.split("/") if p and p not in (".",)]
             if not parts:
                 continue
-            full = os.path.normpath(os.path.join(lib_norm, rel.replace("/", os.sep)))
+            full = normalize_scope_path(os.path.join(lib_norm, rel.replace("/", os.sep)))
             node = root
             for i, part in enumerate(parts):
                 if i == len(parts) - 1:
@@ -527,7 +529,7 @@ class VideoScopeTreeWidget(QWidget):
                 if it.checkState(0) == Qt.CheckState.Checked:
                     p = it.data(0, _FULL)
                     if p:
-                        out.append(os.path.normpath(str(p)))
+                        out.append(normalize_scope_path(str(p)))
         return out
 
     def scope_selection_counts(self) -> tuple[int, int]:

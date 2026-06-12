@@ -1,27 +1,42 @@
-# VideoSeek Architecture
+# VideoSeek 架构
 
-This document describes **how the code actually runs**, not an idealized “enterprise layer cake.”  
-If a diagram shows seven boxes but the hot path only touches three modules, the diagram is wrong — see [Reality check](#reality-check) below.
+桌面语义视频检索（PySide6 + ONNX + FAISS + FFmpeg）。主流程：
 
-## Public entry points (use these)
+```text
+建索引 → 语义检索 → 定位 / 预览 → 导出片段 →（可选）本机 Agent API
+```
 
-| Task | Import / call |
+主要模块：
+
+| 模块 | 职责 |
+|------|------|
+| `search_service.py` | frame/chunk 搜索、scope、rerank、预设 |
+| `indexing_service.py` | 索引构建与复用、全局/分库合并 |
+| `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
+
+`ui/` 与 `src/web/agent_api.py` 负责调度；搜索逻辑在 `search_service`，FastAPI 层不复制。Agent HTTP 契约见 `docs/for-agents.md`。已移除功能见 `docs/planned_features.md` §4。
+
+下文按实际调用关系说明。热路径与分层图不一致时，以 [热路径](#热路径) 为准。
+
+## 入口（改功能从这里找）
+
+| 任务 | 导入 / 调用 |
 |------|----------------|
-| Local search | `from src.services.search_service import run_search, run_chunk_search` |
-| Search scope (desktop + Agent default) | `from src.services.search_scope import resolve_default_active_search_scope, resolve_effective_search_scope` |
-| Preset / inline query (Agent + preset chip) | `from src.services.search_request_service import resolve_search_query_inputs` |
-| Image precision (Agent / shared) | `from src.services.search_request_service import normalize_search_precision_mode` |
-| Index rebuild orchestration | `from src.workflows.update_video import update_videos_flow` |
+| 本地搜索 | `from src.services.search_service import run_search, run_chunk_search` |
+| 搜索范围（桌面 + Agent 默认） | `from src.services.search_scope import resolve_default_active_search_scope, resolve_effective_search_scope` |
+| 预设 / 内联 query（Agent + 预设 chip） | `from src.services.search_request_service import resolve_search_query_inputs` |
+| 图搜精度（Agent / 共用） | `from src.services.search_request_service import normalize_search_precision_mode` |
+| 索引重建编排 | `from src.workflows.update_video import update_videos_flow` |
 | Embedding / ONNX | `from src.core.clip_embedding import get_engine` |
-| Agent HTTP | `src/web/agent_api.py` → `execute_agent_search` (calls `search_service` directly) |
+| Agent HTTP | `src/web/agent_api.py` → `execute_agent_search`（直接调 `search_service`） |
 
-**Removed:** `src/core/core.py` was a 4-line re-export shim (`run_search` → `search_service`). Do not add it back.
+**已删除：** `src/core/core.py` 曾是 4 行 re-export（`run_search` → `search_service`），不要加回。
 
-## Reality check
+## 热路径
 
-Gemini-style critiques often assume: *UI → Service → Core → Storage × 7* for every change.
+复杂逻辑集中在少数模块，不必按目录层级逐层改。
 
-**Actual local search (desktop):**
+**桌面本地搜索：**
 
 ```mermaid
 flowchart TB
@@ -40,7 +55,7 @@ flowchart TB
   SS --> |"List[SearchHit]"| SC
 ```
 
-**Actual Agent search (no UI hop):**
+**Agent 搜索（不经 UI）：**
 
 ```mermaid
 flowchart LR
@@ -49,43 +64,43 @@ flowchart LR
   SS --> CE["clip_embedding"]
 ```
 
-**Actual indexing:**
+**建索引：**
 
 ```mermaid
 flowchart TB
-  GL["gui_library_indexing"] --> IC["IndexingController — thread wiring only"]
+  GL["gui_library_indexing"] --> IC["IndexingController — 仅线程接线"]
   IC --> IW["IndexUpdateWorker"]
   IW --> WF["workflows/update_video"]
   WF --> IS["indexing_service"]
   IS --> CE["clip_embedding + extract_frames + faiss_index"]
 ```
 
-### Layer verdict (where complexity really lives)
+### 各层实际权重
 
-| Module | Role | Verdict |
-|--------|------|---------|
-| `search_service.py` | FAISS load, scope, neighbor/pixel rerank, chunk/frame branches | **Main search brain** |
-| `indexing_service.py` | Frame extract, embed, chunk, write indexes | **Main index brain** |
-| `clip_embedding.py` | ONNX sessions, batch encode, engine singleton | **Inference core** |
-| `search_request_service.py` | Precision mode + inline image validation + preset/inline query resolution | Shared GUI + Agent |
-| `search_scope.py` | Active scope, filters, `resolve_effective_search_scope` | Shared GUI + Agent |
-| `agent_api.py` | HTTP, preset/scope resolution, timeouts | Own subsystem; ends at `search_service` |
-| `IndexingController` / `AgentApiController` / `MobileBridgeController` | Start/stop background services | Thin — OK |
-| `src/domain/search_hit.py` | `SearchHit` dataclass | Boundary type only |
-| `inference_registry.py` | 3 provider factories (~25 lines) | Small plug-in table |
+| 模块 | 作用 | 说明 |
+|------|------|------|
+| `search_service.py` | FAISS 加载、scope、neighbor/pixel rerank、chunk/frame 分支 | **搜索主逻辑** |
+| `indexing_service.py` | 抽帧、embedding、chunk、写索引 | **索引主逻辑** |
+| `clip_embedding.py` | ONNX session、批量编码、引擎单例 | **推理核心** |
+| `search_request_service.py` | 精度模式、内联图校验、预设/query 解析 | GUI + Agent 共用 |
+| `search_scope.py` | 当前范围、过滤、`resolve_effective_search_scope` | GUI + Agent 共用 |
+| `agent_api.py` | HTTP、预设/scope、超时 | 独立子系统；止于 `search_service` |
+| `IndexingController` / `AgentApiController` / `MobileBridgeController` | 启停后台服务 | 薄层 |
+| `src/domain/search_hit.py` | `SearchHit` dataclass | 边界类型 |
+| `inference_registry.py` | 3 个 provider 工厂（约 25 行） | 小插件表 |
 
-This is **not** “FAISS + cosine only”: frame/chunk modes, per-library indexes, scoped over-fetch, neighbor rerank, precise image pixel rerank, presets, and Agent batching all live in **services**, with **core** doing inference and low-level index I/O.
+Frame/chunk、分库索引、scope over-fetch、rerank、预设与 Agent 批处理在 **services**；**core** 负责推理与索引 I/O。
 
-## System overview
+## 系统总览
 
 ```mermaid
 flowchart LR
   UI["ui/ — Qt GUI + workers"]
-  SVC["src/services/ — business logic"]
-  WF["src/workflows/ — long job orchestration"]
-  CORE["src/core/ — inference + frame/chunk primitives"]
-  WEB["src/web/ — Agent API + optional mobile bridge"]
-  STO["src/storage/ + data/ — config + artifacts"]
+  SVC["src/services/ — 业务逻辑"]
+  WF["src/workflows/ — 长任务编排"]
+  CORE["src/core/ — 推理 + 抽帧/chunk 原语"]
+  WEB["src/web/ — Agent API + 手机桥接"]
+  STO["src/storage/ + data/ — 配置与产物"]
   CFG["config.json + app_meta"]
 
   UI --> SVC
@@ -99,106 +114,108 @@ flowchart LR
   CFG --> SVC
 ```
 
-## Local search sequence
+## 本地搜索时序
 
 ```mermaid
 sequenceDiagram
-  participant UI as Search UI
+  participant UI as 搜索 UI
   participant W as SearchWorker
   participant SS as search_service
   participant CE as clip_embedding
   participant IX as FAISS + npy
   UI->>W: query + scope + precision
   W->>SS: run_search(...)
-  SS->>CE: query vector (unless preset vector passed)
-  SS->>IX: load index / per-library indexes
-  SS->>SS: top-K, scope filter, rerank
+  SS->>CE: 查询向量（除非 preset 已带向量）
+  SS->>IX: 加载全局 / 分库索引
+  SS->>SS: top-K、scope 过滤、rerank
   SS-->>W: List[SearchHit]
-  W-->>UI: result_ready → table + thumbs
+  W-->>UI: result_ready → 表格 + 缩略图
 ```
 
-Inside `run_search`, major branches:
+`run_search` 内主要分支：
 
-1. **Chunk mode** → `run_chunk_search`.
-2. **Scoped video list** → per-video frame search.
-3. **Scoped libraries + v2 per-library index ready** → query each library index, merge.
-4. **Else** → global index, optional over-fetch + `apply_search_scope`, neighbor/pixel rerank.
+1. **Chunk 模式** → `run_chunk_search`
+2. **限定视频列表** → 按视频 frame 搜
+3. **限定库 + v2 分库索引就绪** → 逐库查询后合并
+4. **其它** → 全局索引，必要时 over-fetch + `apply_search_scope`，再 rerank
 
-See also `docs/ai/pipelines.md` for the same flow in Chinese.
+逐步细节见 `docs/ai/pipelines.md` Pipeline 4。
 
-## Domain models (`src/domain/`)
+## 领域模型（`src/domain/`）
 
-- **`SearchHit`**: one local match (`start_sec`, `end_sec`, `score`, `video_path`). Built in `search_service`; returned to UI and Agent.
-- **`RemoteSearchHit`**: remote vector search row; built in `remote_search_service`.
+- **`SearchHit`**：一条本地命中（`start_sec`、`end_sec`、`score`、`video_path`）。在 `search_service` 构造；返回给 UI 与 Agent。
+- **`RemoteSearchHit`**：远程库命中行；在 `remote_search_service` 构造。
 
-**Legacy:** `coerce_search_hit()` still accepts old 4-tuples at the **view boundary** (`table_views`, `ThumbLoader`). New code should pass `SearchHit` only; do not emit tuples from services.
+**遗留：** `coerce_search_hit()` 仍在**视图边界**（`table_views`、`ThumbLoader`）接受旧 4-tuple。新代码只传 `SearchHit`；services 不要 emit tuple。
 
-## Inference engines (`src/core/inference_registry.py`)
+## 推理引擎（`src/core/inference_registry.py`）
 
-- Providers register with `register_inference_engine(provider_id, factory)`.
-- `clip_embedding.get_engine()` resolves the active profile’s `provider` via `build_inference_engine`.
-- Built-in: **`clip_onnx`**, **`siglip2_onnx`**, **`chinese_clip_onnx`**.
-- Unknown `provider` **fail fast** (no silent fallback to another model — wrong fallback would corrupt search results).
-- Disk layout: `resolve_provider_dir()` in `config_store`; vectors under `data/model_assets/<provider_dir>/<variant>/`.
+- Provider 通过 `register_inference_engine(provider_id, factory)` 注册。
+- `clip_embedding.get_engine()` 按当前 profile 的 `provider` 经 `build_inference_engine` 解析。
+- 内置：**`clip_onnx`**、**`siglip2_onnx`**、**`chinese_clip_onnx`**。
+- 未知 `provider` **直接失败**（不静默换模型，否则会污染检索结果）。
+- 磁盘布局：`config_store.resolve_provider_dir()`；向量在 `data/model_assets/<provider_dir>/<variant>/`。
 
-### Adding a model provider
+### 新增模型 provider
 
-1. Implement `*OnnxEngine` (often `OnnxVisionBatchMixin`).
-2. `register_inference_engine("<provider>_onnx", factory)` in `clip_embedding._register_default_inference_engines`.
-3. Map folder in `resolve_provider_dir()`.
-4. Manifest defaults in `model_package_service` / `model_service`.
-5. Users must **rebuild the library index** after switching profile.
+1. 实现 `*OnnxEngine`（常用 `OnnxVisionBatchMixin`）。
+2. 在 `clip_embedding._register_default_inference_engines` 里 `register_inference_engine("<provider>_onnx", factory)`。
+3. 在 `resolve_provider_dir()` 映射目录名。
+4. 在 `model_package_service` / `model_service` 补 manifest 默认值。
+5. 用户切换 profile 后须 **重建媒体库索引**。
 
-## Configuration
+## 配置
 
-- **User:** `config.json` (theme, fps, search knobs, agent timeouts, …).
-- **Product:** `src/app/app_meta.py` (version URLs, manifest endpoints).
-- **Reads:** prefer `src/storage/config_store.py` getters (`get_search_mode`, `get_search_top_k`, rerank getters, …).
+- **用户：** `config.json`（主题、fps、搜索参数、Agent 超时等）。
+- **产品：** `src/app/app_meta.py`（版本 URL、manifest 端点）。
+- **读取：** 优先用 `src/storage/config_store.py` 的 getter（`get_search_mode`、`get_search_top_k`、rerank 相关等）。
 
-## Auxiliary HTTP (`src/web/`)
+## 辅助 HTTP（`src/web/`）
 
-| Module | Purpose | Weight in architecture |
-|--------|---------|-------------------------|
-| `agent_api.py` | Localhost Agent API (health, search, batch, presets) | **Primary** automation surface |
-| `mobile_bridge.py` | Phone upload companion | Optional; thin controller wrapper |
-| `display_qr.py` | QR for mobile pairing | Optional UI helper |
+| 模块 | 用途 | 权重 |
+|------|------|------|
+| `agent_api.py` | 本机 Agent API（health、search、batch、presets） | **主要**自动化入口 |
+| `mobile_bridge.py` | 手机传图 | 可选；薄封装 |
+| `display_qr.py` | 手机配对二维码 | 可选 UI 辅助 |
 
-## Main flows (short)
+## 主流程（简）
 
-### Indexing
+### 建索引
 
-1. UI → `IndexingController` → `IndexUpdateWorker`.
-2. `workflows/update_video.update_videos_flow` orchestrates scan, embed, global/per-library indexes.
-3. `indexing_service` calls `clip_embedding`, `extract_frames`, `faiss_index`.
+1. UI → `IndexingController` → `IndexUpdateWorker`
+2. `workflows/update_video.update_videos_flow` 编排扫描、embedding、全局/分库索引
+3. `indexing_service` 调用 `clip_embedding`、`extract_frames`、`faiss_index`
 
-### Remote library
+### 远程库
 
-Presenters/controllers on Remote Library page → `remote_library_service` staged pipeline; search via `remote_search_service`.
+远程链接页 presenter/controller → `remote_library_service` 分阶段构建；检索走 `remote_search_service`。
 
-## Repository layout (logical)
+## 目录结构（逻辑）
 
 ```text
 main.py
 src/
-  app/           config, i18n, logging
+  app/           配置、i18n、日志
   domain/        SearchHit, RemoteSearchHit
-  services/      search_service, indexing_service, search_scope, search_request_service, …
-  core/          clip_embedding, extract_frames, faiss_index, inference_registry, …
+  services/      search_service, indexing_service, search_scope, …
+  core/          clip_embedding, extract_frames, faiss_index, …
   storage/       config_store, asset_store, migration_runner
   web/           agent_api, mobile_bridge, display_qr
-  workflows/     update_video (index job orchestration)
+  workflows/     update_video
 ui/
-  windows/       gui + feature mixins
-  controllers/   thread lifecycle (search, indexing, agent, mobile, …)
-  workers.py     QThread wrappers → services / workflows
+  windows/       gui + mixin
+  controllers/   搜索、索引、Agent、手机等线程生命周期
+  workers.py     QThread → services / workflows
 docs/
-  architecture.md    (this file)
-  for-agents.md      Agent HTTP contract
-  ai/pipelines.md    pipeline notes (ZH)
+  architecture.md
+  for-agents.md
+  ai/pipelines.md
 ```
 
-## Changelog
+## 变更记录
 
-| Date | Change |
-|------|--------|
-| 2026-05-31 | Consolidate Agent scope/query parsing into `search_scope` + `search_request_service`; slim `agent_api` wrappers |
+| 日期 | 变更 |
+|------|------|
+| 2026-06-12 | 全文改为中文；精简文首概览 |
+| 2026-06-10 | 增加文首中文概览 |
+| 2026-05-31 | Agent scope/query 收敛到 `search_scope` + `search_request_service` |

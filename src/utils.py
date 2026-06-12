@@ -1023,10 +1023,10 @@ def validate_sampling_fps_rules_full_coverage(rules_text):
     return True, ""
 
 
-def ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=0.5):
+def ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=1):
     """
     Auto-append an open-ended tail rule when the final range has an upper bound.
-    Example: "0-10m=2; 10m-60m=1" -> "...; 60m-=0.5"
+    Example: "0-10m=2" -> "0-10m=2; 10m-=1"
     """
     normalized = normalize_sampling_fps_rules_text(rules_text)
     if not normalized:
@@ -1057,7 +1057,7 @@ def ensure_sampling_fps_rules_open_tail(rules_text, default_tail_fps=0.5):
     try:
         tail_fps = max(0.01, float(default_tail_fps))
     except (TypeError, ValueError):
-        tail_fps = 0.5
+        tail_fps = 1.0
     tail_rule = f"{tail_start_text}-={tail_fps:g}"
     return normalize_sampling_fps_rules_text(f"{normalized}; {tail_rule}")
 

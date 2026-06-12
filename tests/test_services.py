@@ -1530,16 +1530,18 @@ class UtilsTests(unittest.TestCase):
         missing_tail_valid, _ = utils.validate_sampling_fps_rules_full_coverage("0-10m=2; 10m-60m=1")
         gapped_valid, _ = utils.validate_sampling_fps_rules_full_coverage("0-10m=2; 20m-=1")
         complete_valid, _ = utils.validate_sampling_fps_rules_full_coverage("0-10m=2; 10m-60m=1; 60m-=0.5")
+        simplified_valid, _ = utils.validate_sampling_fps_rules_full_coverage("0-10m=2; 10m-=1")
 
         self.assertFalse(missing_tail_valid)
         self.assertFalse(gapped_valid)
         self.assertTrue(complete_valid)
+        self.assertTrue(simplified_valid)
 
     def test_ensure_sampling_fps_rules_open_tail_auto_appends_default_tail(self):
-        updated = utils.ensure_sampling_fps_rules_open_tail("0-10m=2; 10m-60m=1", default_tail_fps=0.5)
-        unchanged = utils.ensure_sampling_fps_rules_open_tail("0-10m=2; 10m-=1", default_tail_fps=0.5)
+        updated = utils.ensure_sampling_fps_rules_open_tail("0-10m=2; 10m-60m=1", default_tail_fps=1)
+        unchanged = utils.ensure_sampling_fps_rules_open_tail("0-10m=2; 10m-=1", default_tail_fps=1)
 
-        self.assertEqual(updated, "0-10m=2; 10m-60m=1; 60m-=0.5")
+        self.assertEqual(updated, "0-10m=2; 10m-60m=1; 60m-=1")
         self.assertEqual(unchanged, "0-10m=2; 10m-=1")
 
     def test_resolve_resource_path_prefers_configured_directory(self):

@@ -270,7 +270,7 @@ def _resolve_scoped_video_targets(scope_video_paths, config):
     return targets
 
 
-def _load_per_video_frame_assets(video_id, abs_path, config):
+def _load_per_video_frame_assets(video_id, abs_path, config, *, include_vectors: bool = True):
     model_dirs = get_local_model_asset_dirs(config=config)
     index_file = os.path.join(model_dirs["index_dir"], f"{video_id}_index.faiss")
     if not os.path.isfile(index_file):
@@ -290,7 +290,7 @@ def _load_per_video_frame_assets(video_id, abs_path, config):
     if count < len(ts):
         ts = ts[:count]
     vector_matrix = None
-    if vectors is not None:
+    if include_vectors and vectors is not None:
         try:
             matrix = np.asarray(vectors, dtype=np.float32)
             if matrix.ndim == 2 and matrix.shape[0] >= count:
@@ -592,6 +592,43 @@ def locate_crop_confidence_warning_key(
     return None
 
 
+def _locate_anchor_window_hits_from_index(
+    query_vector,
+    anchor_sec: float,
+    locate_k: int,
+    window_sec: float,
+    *,
+    search_index,
+    timestamps,
+    video_paths,
+    preloaded_vectors=None,
+    skip_neighbor_refine: bool = False,
+) -> List[SearchHit]:
+    matched_results, matched_ids = _search_frame_results_in_time_window(
+        query_vector,
+        search_index,
+        timestamps,
+        video_paths,
+        center_sec=anchor_sec,
+        window_sec=window_sec,
+        top_k=locate_k,
+        preloaded_vectors=preloaded_vectors,
+    )
+    if not matched_results:
+        return []
+    if skip_neighbor_refine:
+        return _merge_search_hits(matched_results, locate_k)
+    refined = _apply_bounded_neighbor_refine(
+        matched_results,
+        matched_ids,
+        query_vector,
+        search_index,
+        timestamps,
+        video_paths,
+    )
+    return _merge_search_hits(refined, locate_k)
+
+
 def _search_locate_anchor_window_hits(
     query_vector,
     target_video_path: str,
@@ -606,11 +643,26 @@ def _search_locate_anchor_window_hits(
     window_sec: float | None = None,
     skip_neighbor_refine: bool = False,
 ) -> List[SearchHit]:
-    """Locate stage1: global CLIP hits in anchor window, per-video fallback."""
+    """Locate stage1: per-video anchor window first; global index only as fallback."""
     locate_k = max(1, int(top_k))
     anchor = max(0.0, float(anchor_sec))
     window = max(1.0, float(window_sec if window_sec is not None else _LOCATE_ANCHOR_WINDOW_SEC))
     target_key = normalize_scope_path(str(target_video_path or ""))
+
+    if per_video_index is not None:
+        per_video_hits = _locate_anchor_window_hits_from_index(
+            query_vector,
+            anchor,
+            locate_k,
+            window,
+            search_index=per_video_index,
+            timestamps=per_video_timestamps,
+            video_paths=per_video_paths,
+            preloaded_vectors=per_video_vectors,
+            skip_neighbor_refine=skip_neighbor_refine,
+        )
+        if per_video_hits:
+            return per_video_hits
 
     global_index, global_ts, global_paths = load_search_assets(config)
     if global_index is not None and int(getattr(global_index, "ntotal", 0) or 0) > 0:
@@ -646,20 +698,6 @@ def _search_locate_anchor_window_hits(
                 merged = _merge_search_hits(refined, locate_k)
             if merged:
                 return merged
-
-    if per_video_index is not None:
-        matched_results, _matched_ids = _search_frame_results_in_time_window(
-            query_vector,
-            per_video_index,
-            per_video_timestamps,
-            per_video_paths,
-            center_sec=anchor,
-            window_sec=window,
-            top_k=locate_k,
-            preloaded_vectors=per_video_vectors,
-        )
-        if matched_results:
-            return matched_results
 
     if window <= _LOCATE_PIXEL_MAX_SHIFT_SEC + 1e-6:
         return [SearchHit(anchor, anchor, 0.0, str(target_video_path))]
@@ -857,6 +895,7 @@ def _run_frame_search_per_videos(
                 video_id,
                 abs_path,
                 config,
+                include_vectors=preview_anchor_sec is None,
             )
         _merge_search_index_steps(video_paths, timestamps)
         if search_index is None:

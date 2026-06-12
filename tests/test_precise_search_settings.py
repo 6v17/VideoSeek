@@ -334,6 +334,29 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertAlmostEqual(float(hits[0].start_sec), 59.0)
         self.assertIn(25, ids)
 
+    @mock.patch("src.services.search_service.load_search_assets")
+    @mock.patch("src.services.search_service._search_frame_results_in_time_window")
+    def test_search_locate_anchor_window_prefers_per_video_index(self, mock_window, mock_load_assets):
+        import numpy as np
+
+        mock_window.return_value = ([SearchHit(64.0, 64.0, 0.91, "D:/a.mp4")], [0])
+
+        hits = _search_locate_anchor_window_hits(
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            "D:/a.mp4",
+            64.0,
+            20,
+            {},
+            per_video_index=object(),
+            per_video_timestamps=np.array([64.0]),
+            per_video_paths=np.array(["D:/a.mp4"], dtype=object),
+        )
+
+        self.assertEqual(len(hits), 1)
+        self.assertAlmostEqual(float(hits[0].start_sec), 64.0)
+        mock_window.assert_called_once()
+        mock_load_assets.assert_not_called()
+
     @mock.patch("src.services.search_service._apply_bounded_neighbor_refine", side_effect=lambda hits, *_args, **_kwargs: hits)
     @mock.patch("src.services.search_service._search_frame_results_with_ids")
     @mock.patch("src.services.search_service.load_search_assets")
