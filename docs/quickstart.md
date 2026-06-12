@@ -1,6 +1,6 @@
 # VideoSeek 快速上手
 
-本地开发与日常使用的安装、运行资源与排障说明。英文摘要见 [README.md](../README.md)。
+本地开发与日常使用的安装、运行资源与排障说明。英文摘要见 [README.en.md](../README.en.md)。
 
 ## 1) 环境
 
