@@ -130,18 +130,17 @@ zip 内布局示例：`chinese-clip/vit-base-patch16/model_manifest.json`，以�
 
 ### 3.5 VLC 运行时（应用内预览）
 
-安装 `python-vlc`，并准备 VLC 二进制。
+安装 `python-vlc`（见 § 1 依赖列表）。
 
-Windows 项目内目录：
+**从源码运行（Windows）：** 下载 [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip)，解压到**项目根目录**（与 `main.py` 同级）。目录结构：
 
 - `vlc_lib/libvlc.dll`
 - `vlc_lib/libvlccore.dll`
 - `vlc_lib/plugins/`（完整插件目录）
 
-`ui/playback/vlc_player.py` 会自动：
+**安装包用户：** 发布版已内置 `vlc_lib`，无需单独下载。
 
-- 将 `vlc_lib/`  prepend 到 `PATH`
-- 存在 `vlc_lib/plugins/` 时设置 `VLC_PLUGIN_PATH`
+`ui/playback/vlc_player.py` 会通过 `get_resource_path("vlc_lib")` 加载：开发时读项目根下 `vlc_lib/`，打包后读安装包内资源目录。
 
 VLC 缺失或不完整时，搜索与建库通常仍可用，但应用内预览可能无法播放。
 

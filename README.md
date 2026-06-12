@@ -44,10 +44,13 @@ python main.py
 - `ffmpeg.exe`（用于抽帧与预览）。
 - `python-vlc` + VLC 运行时（用于应用内预览播放）。
 
-Windows 项目内 VLC 目录建议：
+**从源码运行（Windows）：** 仓库不含 `vlc_lib/`。下载 [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip)，解压到**项目根目录**（与 `main.py` 同级），应得到：
+
 - `vlc_lib/libvlc.dll`
 - `vlc_lib/libvlccore.dll`
-- `vlc_lib/plugins/`
+- `vlc_lib/plugins/`（完整插件目录）
+
+**安装包用户：** 发布版已内置 VLC 运行时，一般无需单独下载。
 
 若 `vlc_lib/` 缺失或不完整，搜索/建库通常仍可用，但应用内预览播放可能不可用。
 

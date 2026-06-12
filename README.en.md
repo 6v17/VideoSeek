@@ -44,10 +44,13 @@ python main.py
 - `ffmpeg.exe` for frame extraction and preview.
 - `python-vlc` plus VLC runtime for in-app preview playback.
 
-Windows VLC runtime layout (project-local):
+**From source (Windows):** the repo does not ship `vlc_lib/`. Download [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip) and extract it at the **project root** (next to `main.py`):
+
 - `vlc_lib/libvlc.dll`
 - `vlc_lib/libvlccore.dll`
-- `vlc_lib/plugins/`
+- `vlc_lib/plugins/` (full plugin tree)
+
+**Installer users:** the packaged build already bundles VLC; no extra download needed.
 
 If `vlc_lib/` is missing or incomplete, search/indexing may still work but preview playback may be unavailable.
 
