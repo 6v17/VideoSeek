@@ -4,6 +4,12 @@
 
 VideoSeek 是一个基于 PySide6 + ONNX Runtime + FAISS + FFmpeg 的桌面语义视频检索工具。
 
+## 下载
+
+普通用户请从 **[官网发布页](https://www.lv17.top/)** 下载安装包。模型资源仍可从 [123 云盘（模型）](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) 获取，在应用内 **导入并解析**（见 `docs/quickstart.md` § 3.1）。
+
+下方「快速开始」面向 **从本仓库源码运行** 的开发者。
+
 ## 快速开始
 
 1. 安装依赖：
