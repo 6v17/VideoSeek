@@ -51,7 +51,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-UI 测试需安装 PySide6；建议在 conda `VideoSeek` 环境运行。
+UI 相关测试需已安装 PySide6（`pip install -r requirements.txt` 即可）。
 
 ## 附录 C：其它
 
