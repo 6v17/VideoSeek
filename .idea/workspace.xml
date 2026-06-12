@@ -4,11 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="修复搜索范围选择功能">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明文件">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -22,7 +19,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="223" />
+    <option name="cachedIndexableFilesCount" value="231" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -446,14 +443,9 @@
       <workItem from="1781188332683" duration="199000" />
       <workItem from="1781188755143" duration="35000" />
       <workItem from="1781188806838" duration="51000" />
-    </task>
-    <task id="LOCAL-00055" summary="增加同步异常状态">
-      <option name="closed" value="true" />
-      <created>1776780806960</created>
-      <option name="number" value="00055" />
-      <option name="presentableId" value="LOCAL-00055" />
-      <option name="project" value="LOCAL" />
-      <updated>1776780806960</updated>
+      <workItem from="1781194299556" duration="161000" />
+      <workItem from="1781266222995" duration="3773000" />
+      <workItem from="1781270042011" duration="1128000" />
     </task>
     <task id="LOCAL-00056" summary="增加同步异常状态">
       <option name="closed" value="true" />
@@ -839,7 +831,15 @@
       <option name="project" value="LOCAL" />
       <updated>1780838448828</updated>
     </task>
-    <option name="localTasksCounter" value="104" />
+    <task id="LOCAL-00104" summary="更新说明文件">
+      <option name="closed" value="true" />
+      <created>1781194406263</created>
+      <option name="number" value="00104" />
+      <option name="presentableId" value="LOCAL-00104" />
+      <option name="project" value="LOCAL" />
+      <updated>1781194406263</updated>
+    </task>
+    <option name="localTasksCounter" value="105" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -869,7 +869,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="加视频溯源功能beta" />
     <MESSAGE value="RANSAC 线性回归" />
     <MESSAGE value="混剪回源功能完善，gui相关代码拆解" />
     <MESSAGE value="完善混剪回源配置，ui文件归类" />
@@ -894,7 +893,8 @@
     <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
     <MESSAGE value="移除无用说明" />
     <MESSAGE value="修复搜索范围选择功能" />
-    <option name="LAST_COMMIT_MESSAGE" value="修复搜索范围选择功能" />
+    <MESSAGE value="更新说明文件" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新说明文件" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

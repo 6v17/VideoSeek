@@ -1,35 +1,22 @@
-# VideoSeek 架构概览
+# VideoSeek 架构
 
-**VideoSeek 是围绕「视频素材检索」打造的本地化平台：索引管理、搜索编排、定位预览、导出与 Agent 集成为一条工作流；CLIP 系模型只是底层 embedding，真正的价值在视频工程与闭环。**
-
-它不是 AI 自动剪辑器，也不是「三十行 open_clip + faiss」的 Demo。Agent API（`127.0.0.1` 本机 HTTP）是附属编排面，不是云端 SaaS。产品聚焦在：
+桌面语义视频检索（PySide6 + ONNX + FAISS + FFmpeg）。主流程：
 
 ```text
-建索引 → 语义检索 → 定位 / 预览 → 导出片段 →（可选）Agent 批量编排
+建索引 → 语义检索 → 定位 / 预览 → 导出片段 →（可选）本机 Agent API
 ```
 
-**工程化才是主体**（比换哪个 CLIP 变体更重要）：抽帧与时间戳、向量缓存与增量同步、按模型 profile 隔离的 `data/model_assets/`、v2 分库索引与 scope、全局索引重建、远程库、迁移与 `asset_state` 诊断。这些叠在一起，才构成可用的素材检索平台。
+主要模块：
 
-**运行热点**不在理论分层图上的每个方框，而在三条链：
+| 模块 | 职责 |
+|------|------|
+| `search_service.py` | frame/chunk 搜索、scope、rerank、预设 |
+| `indexing_service.py` | 索引构建与复用、全局/分库合并 |
+| `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
 
-| 模块 | 实际角色 |
-|------|----------|
-| `search_service.py` | **搜索编排引擎**（frame/chunk 双路、scope、rerank、预设融合、去重合并等；未来能力会继续堆在这里） |
-| `indexing_service.py` | 索引构建、复用、全局/分库合并 |
-| `clip_embedding.py` | 统一 ONNX 推理后端（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
+`ui/` 与 `src/web/agent_api.py` 负责调度；搜索逻辑在 `search_service`，FastAPI 层不复制。Agent HTTP 契约见 `docs/for-agents.md`。已移除功能见 `docs/planned_features.md` §4。
 
-UI 与 `src/web/agent_api.py` 是薄控制器与调用入口，不在 FastAPI 层复制搜索逻辑。
-
-**产品收敛**：混剪回源（Remix）、Trace 溯源等已移除；见 `docs/planned_features.md` §4。刻意不做索引重建、改用户配置、暴露 LAN 管理面——Agent 是编排者，不是库管理员。
-
-下文描述 **代码实际怎么跑**，不是理想的「企业七层蛋糕」。若架构图有七个框而热路径只碰三个模块，以 [Reality check](#reality-check) 为准。
-
----
-
-# VideoSeek Architecture
-
-This document describes **how the code actually runs**, not an idealized “enterprise layer cake.”  
-If a diagram shows seven boxes but the hot path only touches three modules, the diagram is wrong — see [Reality check](#reality-check) below.
+下文按实际调用关系说明。热路径与分层图不一致时，以 [Reality check](#reality-check) 为准。
 
 ## Public entry points (use these)
 
@@ -47,9 +34,9 @@ If a diagram shows seven boxes but the hot path only touches three modules, the 
 
 ## Reality check
 
-Gemini-style critiques often assume: *UI → Service → Core → Storage × 7* for every change.
+热路径通常只经过少数几个模块，不必按目录层级逐层改。
 
-**Actual local search (desktop):**
+**Local search (desktop):**
 
 ```mermaid
 flowchart TB
@@ -102,7 +89,7 @@ flowchart TB
 | `src/domain/search_hit.py` | `SearchHit` dataclass | Boundary type only |
 | `inference_registry.py` | 3 provider factories (~25 lines) | Small plug-in table |
 
-This is **not** “FAISS + cosine only”: frame/chunk modes, per-library indexes, scoped over-fetch, neighbor rerank, precise image pixel rerank, presets, and Agent batching all live in **services**, with **core** doing inference and low-level index I/O.
+Frame/chunk 模式、分库索引、scope over-fetch、neighbor/pixel rerank、预设与 Agent 批处理在 **services**；**core** 负责推理与索引 I/O。
 
 ## System overview
 
@@ -229,5 +216,6 @@ docs/
 
 | Date | Change |
 |------|--------|
-| 2026-06-10 | Add Chinese product overview at top: retrieval platform positioning, workflow闭环, search orchestration engine, product scope |
+| 2026-06-12 | 精简文首概览，去掉产品定位与防误解式声明 |
+| 2026-06-10 | 文首增加中文概览（后于 2026-06-12 精简） |
 | 2026-05-31 | Consolidate Agent scope/query parsing into `search_scope` + `search_request_service`; slim `agent_api` wrappers |
