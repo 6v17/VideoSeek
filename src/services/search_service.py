@@ -8,7 +8,7 @@ import numpy as np
 from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_text_embedding
 from src.app.config import DEFAULT_CONFIG, load_config
 from src.app.logging_utils import get_logger
-from src.domain.search_hit import SearchHit
+from src.domain.search_hit import SearchHit, coerce_search_hit
 from src.services.indexing_service import load_video_chunks_by_id
 from src.services.search_scope import (
     apply_search_scope,
@@ -330,6 +330,15 @@ _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
 _PRECISE_NEIGHBOR_BLEND = 0.1
 _LOCATE_ANCHOR_WINDOW_SEC = 30.0
 _LOCATE_CROP_ANCHOR_WINDOW_SEC = 5.0
+_LOCATE_CLIP_WINDOW_TIGHT_SEC = 10.0
+_LOCATE_CLIP_WINDOW_MEDIUM_SEC = 20.0
+_LOCATE_CLIP_WINDOW_WIDE_SEC = 40.0
+_LOCATE_CLIP_WINDOW_HIGH_SCORE = 0.85
+_LOCATE_CLIP_WINDOW_HIGH_MARGIN = 0.10
+_LOCATE_CLIP_WINDOW_MEDIUM_SCORE = 0.70
+_LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN = 0.05
+_LOCATE_CLIP_CONFIDENCE_LOW = 0.42
+_LOCATE_CLIP_CONFIDENCE_HIGH = 0.99
 _LOCATE_PIXEL_MAX_SHIFT_SEC = 5.0
 _LOCATE_PIXEL_LOCALIZE_TOP_N = 3
 _LOCATE_RESULT_TOP_K = 3
@@ -481,6 +490,107 @@ def _scope_filter_hits_with_seeds(
         filtered_hits = filtered_hits[: int(top_k)]
         filtered_seeds = filtered_seeds[: int(top_k)]
     return filtered_hits, filtered_seeds
+
+
+def compute_locate_score_margin(
+    anchor_score: float | None,
+    coarse_hits: Sequence,
+) -> float:
+    """Return top1-top2 score gap from the last coarse search."""
+    del anchor_score
+    scores: List[float] = []
+    for raw in coarse_hits or []:
+        try:
+            scores.append(float(coerce_search_hit(raw).score))
+        except (TypeError, ValueError):
+            continue
+    if not scores:
+        return 0.0
+    scores.sort(reverse=True)
+    top = scores[0]
+    second = scores[1] if len(scores) > 1 else top
+    return max(0.0, top - second)
+
+
+def compute_locate_confidence(
+    score: float | None,
+    margin: float | None,
+) -> float | None:
+    try:
+        value = max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        return None
+    try:
+        gap = max(0.0, float(margin))
+    except (TypeError, ValueError):
+        gap = 0.0
+    return value * (1.0 + gap)
+
+
+def resolve_locate_clip_window_sec(
+    *,
+    score: float | None = None,
+    margin: float | None = None,
+    is_crop: bool = False,
+    config=None,
+) -> float:
+    """Resolve CLIP anchor window from continuous confidence; pixel refine stays fixed."""
+    if is_crop:
+        return _LOCATE_CROP_ANCHOR_WINDOW_SEC
+
+    confidence = compute_locate_confidence(score, margin)
+    if confidence is None:
+        window = _LOCATE_CLIP_WINDOW_WIDE_SEC
+    elif confidence <= _LOCATE_CLIP_CONFIDENCE_LOW:
+        window = _LOCATE_CLIP_WINDOW_WIDE_SEC
+    elif confidence >= _LOCATE_CLIP_CONFIDENCE_HIGH:
+        window = _LOCATE_CLIP_WINDOW_TIGHT_SEC
+    else:
+        span = _LOCATE_CLIP_CONFIDENCE_HIGH - _LOCATE_CLIP_CONFIDENCE_LOW
+        ratio = (confidence - _LOCATE_CLIP_CONFIDENCE_LOW) / span
+        window = _LOCATE_CLIP_WINDOW_WIDE_SEC - (
+            ratio * (_LOCATE_CLIP_WINDOW_WIDE_SEC - _LOCATE_CLIP_WINDOW_TIGHT_SEC)
+        )
+
+    try:
+        gap = max(0.0, float(margin))
+    except (TypeError, ValueError):
+        gap = None
+    if gap is not None and gap < _LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN:
+        window = max(window, _LOCATE_CLIP_WINDOW_WIDE_SEC)
+
+    try:
+        from src.services.search_telemetry import get_locate_clip_window_bias_sec
+
+        window += float(get_locate_clip_window_bias_sec(config, score=score))
+    except Exception:
+        pass
+
+    return max(_LOCATE_CROP_ANCHOR_WINDOW_SEC, window)
+
+
+def should_allow_pixel_refine(
+    *,
+    is_crop: bool = False,
+    score: float | None = None,
+    margin: float | None = None,
+) -> bool:
+    """Gate pixel refine: crop and unstable/low-confidence locate hits skip alignment."""
+    if is_crop:
+        return False
+    try:
+        value = max(0.0, float(score))
+    except (TypeError, ValueError):
+        return False
+    if value < _CLIP_CONFIDENCE_HIGH:
+        return False
+    try:
+        gap = max(0.0, float(margin))
+    except (TypeError, ValueError):
+        gap = 0.0
+    if gap < _LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN:
+        return False
+    return True
 
 
 def _resolve_locate_result_top_k(top_k: int, *, crop_query: bool = False) -> int:
@@ -805,6 +915,8 @@ def _refine_precise_seed_hits(
     seed_times: Sequence[float] | None = None,
     pixel_query_data=None,
     locate_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
 ) -> List[SearchHit]:
     """Localize frozen recall seeds: pixel (and optional bounded neighbor upstream) only."""
     if not hits:
@@ -824,6 +936,13 @@ def _refine_precise_seed_hits(
         return frozen[:limit]
 
     if locate_anchor_sec is not None:
+        if not should_allow_pixel_refine(
+            is_crop=False,
+            score=locate_anchor_score,
+            margin=locate_score_margin,
+        ):
+            return frozen[: max(1, int(top_k))]
+
         anchor = max(0.0, float(locate_anchor_sec))
         locate_limit = max(1, min(_LOCATE_PIXEL_LOCALIZE_TOP_N, len(frozen)))
         head = frozen[:locate_limit]
@@ -879,6 +998,8 @@ def _run_frame_search_per_videos(
     precise_image=False,
     pixel_query_data=None,
     preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
 ) -> List[SearchHit]:
     targets = _resolve_scoped_video_targets(scope_video_paths, config)
     if not targets:
@@ -929,6 +1050,12 @@ def _run_frame_search_per_videos(
                         per_video_vectors=vector_matrix,
                     )
                 else:
+                    clip_window_sec = resolve_locate_clip_window_sec(
+                        score=locate_anchor_score,
+                        margin=locate_score_margin,
+                        is_crop=False,
+                        config=config,
+                    )
                     matched_results = _search_locate_anchor_window_hits(
                         query_vector,
                         abs_path,
@@ -939,7 +1066,28 @@ def _run_frame_search_per_videos(
                         per_video_timestamps=timestamps,
                         per_video_paths=video_paths,
                         per_video_vectors=vector_matrix,
+                        window_sec=clip_window_sec,
                     )
+                    if matched_results:
+                        try:
+                            from src.services.locate_telemetry_utils import classify_video_pace
+                            from src.services.search_telemetry import record_locate_clip_window
+
+                            record_locate_clip_window(
+                                window_sec=clip_window_sec,
+                                score=locate_anchor_score,
+                                margin=locate_score_margin,
+                                anchor_sec=anchor_sec,
+                                result_sec=float(matched_results[0].start_sec),
+                                is_crop=False,
+                                confidence=compute_locate_confidence(
+                                    locate_anchor_score,
+                                    locate_score_margin,
+                                ),
+                                video_pace=classify_video_pace(timestamps, anchor_sec),
+                            )
+                        except Exception:
+                            pass
             elif precise_image:
                 clip_seeds: List[float] = []
                 matched_results = []
@@ -1006,7 +1154,11 @@ def _run_frame_search_per_videos(
                 )
         if anchor_sec is not None:
             locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
-            if not crop_query:
+            if not crop_query and should_allow_pixel_refine(
+                is_crop=False,
+                score=locate_anchor_score,
+                margin=locate_score_margin,
+            ):
                 emit_search_progress("locate_progress_pixel")
             merged_hits.extend(
                 _refine_precise_seed_hits(
@@ -1016,6 +1168,8 @@ def _run_frame_search_per_videos(
                     config,
                     pixel_query_data=pixel_query_data,
                     locate_anchor_sec=anchor_sec,
+                    locate_anchor_score=locate_anchor_score,
+                    locate_score_margin=locate_score_margin,
                 )
             )
         else:
@@ -2005,6 +2159,8 @@ def run_search(
     search_precision_mode=None,
     pixel_query_data=None,
     preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
     profile: bool | None = None,
     progress_callback=None,
 ) -> List[SearchHit]:
@@ -2038,6 +2194,8 @@ def run_search(
             search_precision_mode=search_precision_mode,
             pixel_query_data=pixel_query_data,
             preview_anchor_sec=preview_anchor_sec,
+            locate_anchor_score=locate_anchor_score,
+            locate_score_margin=locate_score_margin,
         )
     finally:
         clear_search_progress_callback()
@@ -2059,6 +2217,8 @@ def _run_search_impl(
     search_precision_mode=None,
     pixel_query_data,
     preview_anchor_sec,
+    locate_anchor_score=None,
+    locate_score_margin=None,
 ) -> List[SearchHit]:
     with search_profile_session(
         enabled=profile_enabled,
@@ -2077,6 +2237,8 @@ def _run_search_impl(
                 search_precision_mode=search_precision_mode,
                 pixel_query_data=pixel_query_data,
                 preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
             )
             record_search_profile_result_count(len(results))
             return results
@@ -2097,6 +2259,8 @@ def _run_search_impl(
                 precise_image=precise_image,
                 pixel_query_data=pixel_query_data,
                 preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
             )
             record_search_profile_result_count(len(results))
             return results
@@ -2261,6 +2425,8 @@ def run_chunk_search(
     search_precision_mode=None,
     pixel_query_data=None,
     preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
     profile: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
@@ -2294,6 +2460,8 @@ def run_chunk_search(
                     pixel_query_data=pixel_query_data,
                     search_mode="frame",
                     preview_anchor_sec=preview_anchor_sec,
+                    locate_anchor_score=locate_anchor_score,
+                    locate_score_margin=locate_score_margin,
                 )
             else:
                 results = _run_chunk_search_via_frames(

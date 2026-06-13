@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 sys.modules.setdefault("cv2", types.SimpleNamespace())
@@ -51,6 +53,7 @@ if "fastapi" not in sys.modules:
     fastapi_module.UploadFile = object
     responses_module.HTMLResponse = str
     responses_module.JSONResponse = dict
+    responses_module.Response = lambda content="", media_type="": (content, media_type)
     staticfiles_module.StaticFiles = _StaticFiles
 
     sys.modules["fastapi"] = fastapi_module
@@ -78,10 +81,14 @@ if "uvicorn" not in sys.modules:
     uvicorn_module.Server = _Server
     sys.modules["uvicorn"] = uvicorn_module
 
-from src.web.mobile_bridge import MobileBridgeService
+from src.web import mobile_bridge
+from src.web.mobile_bridge import MobileBridgeService, cleanup_stale_mobile_uploads, read_mobile_upload_js
 
 
 class MobileBridgeServiceTests(unittest.TestCase):
+    def setUp(self):
+        mobile_bridge._MOBILE_UPLOAD_JS_CACHE = None
+
     @patch("src.web.mobile_bridge.os.path.isfile", return_value=False)
     @patch("src.web.mobile_bridge.os.path.isdir", return_value=False)
     @patch("src.web.mobile_bridge.get_resource_path")
@@ -100,13 +107,42 @@ class MobileBridgeServiceTests(unittest.TestCase):
     ):
         mock_get_resource_path.side_effect = lambda relative: f"D:/bundle/{relative}"
 
-        service = MobileBridgeService(on_image_received=lambda *_args: None)
+        service = MobileBridgeService(on_search_requested=lambda *_args: None)
 
         self.assertEqual(service.upload_dir, "D:/Migrated/data/mobile_uploads")
         html = service._load_index_html()
 
         self.assertIn("__UPLOAD_TOKEN__", html)
         self.assertIn("Upload an image", html)
+        self.assertIn("/static/mobile_upload.js", html)
+
+    def test_read_mobile_upload_js_loads_bundled_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            js_path = Path(tmp) / "static" / "mobile_upload.js"
+            js_path.parent.mkdir(parents=True)
+            js_path.write_text("function submitImage() {}", encoding="utf-8")
+            with patch("src.web.mobile_bridge.get_resource_path", return_value=str(js_path)):
+                payload = read_mobile_upload_js()
+            self.assertIn("submitImage", payload)
+
+    def test_cleanup_stale_mobile_uploads_keeps_recent_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(3):
+                path = root / f"upload_{index}.jpg"
+                path.write_bytes(b"x")
+                if index < 2:
+                    stale = path.stat().st_mtime - (8 * 24 * 3600)
+                    import os
+
+                    os.utime(path, (stale, stale))
+
+            removed = cleanup_stale_mobile_uploads(str(root), max_age_sec=7 * 24 * 3600, keep_recent=1)
+
+            remaining = sorted(root.iterdir())
+            self.assertEqual(removed, 2)
+            self.assertEqual(len(remaining), 1)
+            self.assertTrue(remaining[0].name.startswith("upload_"))
 
 
 if __name__ == "__main__":

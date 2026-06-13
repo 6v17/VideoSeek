@@ -142,7 +142,7 @@ class MainWindow(
         self.network_search_controller = NetworkSearchController(self)
         self._init_search_presets_ui()
         self.mobile_bridge_controller = MobileBridgeController(self)
-        self.mobile_bridge_controller.upload_received.connect(self._handle_mobile_upload_received)
+        self.mobile_bridge_controller.search_requested.connect(self._handle_mobile_search_requested)
         self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
         self.agent_api_controller = AgentApiController(self)
         self.runtime_resource_controller = RuntimeResourceController(self)
@@ -507,98 +507,147 @@ class MainWindow(
             if not text_query:
                 self.search_page.lbl_status.setText(self.texts.get("search_empty_text", self.texts["empty_query"]))
                 return
-            query_info = prepare_text_query(text_query)
-            if query_info["too_short"]:
-                self.search_page.lbl_status.setText(self.texts["query_too_short"])
-                return
-            if query_info["changed"]:
-                self.search_page.search_panel.set_text_query(query_info["normalized"])
-            if query_info["generic"]:
-                self.show_info_dialog(
-                    self.texts["query_generic_title"],
-                    self.texts["query_generic_hint"],
-                    kind="info",
-                )
-            query = query_info["normalized"]
-            is_text = True
-            has_image = False
-        else:
-            query = self.current_img_path
-            if not query:
-                self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
-                return
-            is_text = False
-            has_image = True
-        if not query:
-            self.search_page.lbl_status.setText(self.texts["empty_query"])
-            return
-        if not self._validate_search_scope():
-            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            self._run_text_search(text_query)
             return
 
-        self.switch_page("search")
+        if not self.current_img_path:
+            self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
+            return
+        self._run_image_search(self.current_img_path)
+
+    def _run_text_search(self, raw_query, *, sync_ui=True):
+        query_info = prepare_text_query(str(raw_query or ""))
+        if query_info["too_short"]:
+            self.search_page.lbl_status.setText(self.texts["query_too_short"])
+            return False
+        if query_info["generic"] and sync_ui:
+            self.show_info_dialog(
+                self.texts["query_generic_title"],
+                self.texts["query_generic_hint"],
+                kind="info",
+            )
+        query = str(query_info["normalized"] or "").strip()
+        if not query:
+            self.search_page.lbl_status.setText(self.texts.get("search_empty_text", self.texts["empty_query"]))
+            return False
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+
+        if sync_ui:
+            self.switch_page("search")
+            self._set_search_query_tab(self.SEARCH_TAB_TEXT)
+            self.search_page.search_panel.set_text_query(query)
+
         from src.services.search_scope import resolve_default_active_search_scope
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
-        # Manual search uses text when both are present; image-only path when text is empty.
         search_precision_mode = self._resolve_search_precision_mode(
-            is_text=is_text,
-            has_image=has_image,
+            is_text=True,
+            has_image=False,
         )
         self.search_controller.start_search(
             query,
-            is_text,
+            True,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             search_precision_mode=search_precision_mode,
         )
+        return True
 
-    def _start_compose_search(self):
+    def _run_image_search(self, image_path, *, sync_ui=True):
+        """Execute the PC image-tab search path for a concrete image file."""
+        path = str(image_path or "").strip()
+        if not path:
+            self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
+            return False
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+
+        if sync_ui:
+            self.switch_page("search")
+            self._set_image_query(path, clear_text=False)
+        elif not self.current_img_path:
+            self.current_img_path = path
+        if not self.current_img_path:
+            return False
+
+        from src.services.search_scope import resolve_default_active_search_scope
+
+        scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
+        search_precision_mode = self._resolve_search_precision_mode(
+            is_text=False,
+            has_image=True,
+        )
+        self.search_controller.start_search(
+            path,
+            False,
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            search_precision_mode=search_precision_mode,
+        )
+        return True
+
+    def _run_compose_search_with_inputs(
+        self,
+        raw_query,
+        image_paths,
+        fusion=None,
+        *,
+        sync_ui=True,
+    ):
         from src.services.search_preset_service import build_compose_search_plan
         from src.services.search_scope import resolve_active_search_mode, resolve_default_active_search_scope
 
-        compose_form = self.search_page.search_panel.compose_form
-        if not compose_form.has_content():
+        query = str(raw_query or "").strip()
+        paths = [str(path or "").strip() for path in (image_paths or []) if str(path or "").strip()]
+        if not query and not paths:
             self.search_page.lbl_status.setText(
                 self.texts.get("search_compose_empty", self.texts["empty_query"])
             )
-            return
-        try:
-            query = compose_form.normalized_query()
-        except ValueError:
-            self.search_page.lbl_status.setText(self.texts["query_too_short"])
-            return
-        image_paths = compose_form.image_paths()
-        if not query and not image_paths:
-            self.search_page.lbl_status.setText(
-                self.texts.get("search_compose_empty", self.texts["empty_query"])
-            )
-            return
+            return False
         if query:
-            query_info = prepare_text_query(query)
-            if query_info["generic"]:
+            try:
+                query_info = prepare_text_query(query)
+            except Exception:
+                query_info = {"normalized": query, "too_short": False, "generic": False, "changed": False}
+            if query_info.get("too_short"):
+                self.search_page.lbl_status.setText(self.texts["query_too_short"])
+                return False
+            if query_info.get("generic") and sync_ui:
                 self.show_info_dialog(
                     self.texts["query_generic_title"],
                     self.texts["query_generic_hint"],
                     kind="info",
                 )
-            query = str(query_info["normalized"] or query).strip()
-            if query_info["changed"]:
-                compose_form.input_description.setPlainText(query)
+            query = str(query_info.get("normalized") or query).strip()
         if not self._validate_search_scope():
             self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
-            return
+            return False
 
-        self.switch_page("search")
+        effective_fusion = fusion
+        if sync_ui:
+            self.switch_page("search")
+            compose_form = self.search_page.search_panel.compose_form
+            self._set_search_query_tab(self.SEARCH_TAB_COMPOSE)
+            compose_form.clear()
+            if query:
+                compose_form.input_description.setPlainText(query)
+            for image_path in paths:
+                compose_form.add_image(image_path)
+            if effective_fusion is None:
+                effective_fusion = compose_form.current_fusion()
+            self._refresh_search_panel_state()
         try:
             plan = build_compose_search_plan(
                 query=query,
-                source_image_paths=image_paths,
-                fusion=compose_form.current_fusion(),
+                source_image_paths=paths,
+                fusion=effective_fusion,
             )
         except Exception as exc:
             self.show_error_dialog(self.texts["search_failed"], exc)
-            return
+            return False
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
         search_precision_mode = self._resolve_search_precision_mode(
@@ -616,6 +665,61 @@ class MainWindow(
             min_score=plan.get("min_score"),
             search_precision_mode=search_precision_mode,
             pixel_query_data=plan.get("pixel_query_data"),
+        )
+        return True
+
+    def _ensure_mobile_search_ready(self) -> bool:
+        if not self._ensure_startup_migration_idle("feature_search"):
+            return False
+        if not self.check_runtime_resources():
+            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return False
+        return True
+
+    def _handle_mobile_search_requested(self, payload):
+        if not self._ensure_mobile_search_ready():
+            return
+        data = dict(payload or {})
+        kind = str(data.get("search_kind") or "image").strip().lower()
+        self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
+        if kind == "text":
+            self._run_text_search(str(data.get("query") or ""), sync_ui=True)
+            return
+        if kind == "compose":
+            image_paths = [str(path or "").strip() for path in (data.get("image_paths") or []) if str(path or "").strip()]
+            if not image_paths:
+                single = str(data.get("image_path") or "").strip()
+                if single:
+                    image_paths = [single]
+            self._run_compose_search_with_inputs(
+                str(data.get("query") or ""),
+                image_paths,
+                data.get("fusion"),
+                sync_ui=True,
+            )
+            return
+        image_paths = [str(path or "").strip() for path in (data.get("image_paths") or []) if str(path or "").strip()]
+        image_path = image_paths[0] if image_paths else str(data.get("image_path") or "").strip()
+        self._run_image_search(image_path, sync_ui=True)
+
+    def _start_compose_search(self):
+        compose_form = self.search_page.search_panel.compose_form
+        if not compose_form.has_content():
+            self.search_page.lbl_status.setText(
+                self.texts.get("search_compose_empty", self.texts["empty_query"])
+            )
+            return
+        try:
+            query = compose_form.normalized_query()
+        except ValueError:
+            self.search_page.lbl_status.setText(self.texts["query_too_short"])
+            return
+        self.switch_page("search")
+        self._run_compose_search_with_inputs(
+            query,
+            compose_form.image_paths(),
+            compose_form.current_fusion(),
+            sync_ui=False,
         )
 
     def save_compose_as_preset(self):
@@ -678,7 +782,12 @@ class MainWindow(
         self.refresh_search_presets_ui()
         self.search_page.lbl_status.setText(self.texts.get("search_presets_save_done", ""))
 
-    def start_in_video_deep_search(self, video_path: str, preview_sec: float | None = None):
+    def start_in_video_deep_search(
+        self,
+        video_path: str,
+        preview_sec: float | None = None,
+        anchor_score: float | None = None,
+    ):
         """Re-run image search inside one video with deep (moment) pipeline."""
         if not self._ensure_startup_migration_idle("feature_search"):
             return
@@ -696,6 +805,11 @@ class MainWindow(
             self.search_page.lbl_status.setText(self.texts.get("search_busy", self.texts["searching"]))
             return
 
+        from src.services.search_service import compute_locate_score_margin
+
+        coarse_results = list(getattr(self.search_controller, "_last_coarse_results", []) or [])
+        score_margin = compute_locate_score_margin(anchor_score, coarse_results)
+
         self.switch_page("search")
         self.search_page.lbl_status.setText(self.texts.get("search_in_video_running", self.texts["searching"]))
         self.search_controller.start_search(
@@ -705,6 +819,8 @@ class MainWindow(
             scope_library_paths=None,
             search_precision_mode="precise",
             preview_anchor_sec=preview_sec,
+            locate_anchor_score=anchor_score,
+            locate_score_margin=score_margin,
         )
 
     def toggle_mobile_bridge(self):
@@ -732,17 +848,6 @@ class MainWindow(
             language=self.language,
             qr_pixmap=build_qr_pixmap(url),
         ).exec()
-
-    def _handle_mobile_upload_received(self, path, _source):
-        self.switch_page("search")
-        if self._search_active_tab() == self.SEARCH_TAB_COMPOSE:
-            self.search_page.search_panel.compose_form.add_image(path)
-            self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
-            self._refresh_search_panel_state()
-            return
-        self._set_image_query(path, clear_text=True)
-        self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
-        self.start_search()
 
     def _handle_mobile_bridge_status_changed(self, _state):
         self._update_mobile_bridge_controls()

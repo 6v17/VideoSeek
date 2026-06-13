@@ -62,6 +62,8 @@ class SearchWorker(QThread):
         search_precision_mode=None,
         pixel_query_data=None,
         preview_anchor_sec=None,
+        locate_anchor_score=None,
+        locate_score_margin=None,
     ):
         super().__init__()
         self.query = query
@@ -75,6 +77,8 @@ class SearchWorker(QThread):
         self.search_precision_mode = search_precision_mode
         self.pixel_query_data = pixel_query_data
         self.preview_anchor_sec = preview_anchor_sec
+        self.locate_anchor_score = locate_anchor_score
+        self.locate_score_margin = locate_score_margin
         self.locate_warning_key = None
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
@@ -100,6 +104,8 @@ class SearchWorker(QThread):
                 search_precision_mode=self.search_precision_mode,
                 pixel_query_data=self.pixel_query_data,
                 preview_anchor_sec=self.preview_anchor_sec,
+                locate_anchor_score=self.locate_anchor_score,
+                locate_score_margin=self.locate_score_margin,
                 progress_callback=self._emit_progress,
                 **base_kwargs,
             )

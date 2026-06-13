@@ -104,6 +104,7 @@ DEFAULT_CONFIG = {
     "agent_api_default_image_precision": "fast",
     "search_profiling_enabled": False,
     "search_telemetry_enabled": True,
+    "locate_clip_bias_auto_tune_enabled": False,
     "show_debug_test_buttons": False,
     "theme": "dark",
     "language": "zh",

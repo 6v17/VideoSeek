@@ -196,6 +196,7 @@ def populate_result_table(
                 texts,
                 match_kind=getattr(hit, "match_kind", "frame"),
                 on_deep_locate=on_deep_locate,
+                anchor_score=float(score),
             ),
         )
 
@@ -386,6 +387,7 @@ def _build_result_actions(
     texts,
     match_kind="frame",
     on_deep_locate=None,
+    anchor_score=None,
 ):
     container = QWidget()
     layout = QHBoxLayout(container)
@@ -418,7 +420,9 @@ def _build_result_actions(
         deep_button.setCursor(Qt.PointingHandCursor)
         deep_button.setToolTip(_fallback_text(texts, "deep_locate_tip", "", ""))
         deep_button.clicked.connect(
-            lambda _, path=video_path, anchor=start_sec: on_deep_locate(path, anchor)
+            lambda _, path=video_path, anchor=start_sec, hit_score=float(anchor_score or 0.0): on_deep_locate(
+                path, anchor, hit_score
+            )
         )
         layout.addWidget(deep_button)
 

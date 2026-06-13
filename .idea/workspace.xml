@@ -6,6 +6,22 @@
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明文件">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_telemetry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/mobile_bridge.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/mobile_bridge.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/static/index.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/mobile_upload.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/mobile_upload.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_controllers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_mobile_bridge.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_mobile_bridge.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_search_telemetry.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_telemetry.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/mobile_bridge_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/mobile_bridge_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,7 +35,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="231" />
+    <option name="cachedIndexableFilesCount" value="239" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -74,23 +90,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0000118915657434" />
-      <entry key="MS500" value="1.1237943387432832" />
-      <entry key="S2" value="2.3072953961529405" />
-      <entry key="S5" value="3.92556755165532" />
-      <entry key="S10" value="5.100419784706337" />
-      <entry key="S30" value="6.2587876851228295" />
-      <entry key="S60" value="6.670485518691912" />
-      <entry key="M2" value="8.08254222144998" />
-      <entry key="M5" value="20.846030424074097" />
-      <entry key="M10" value="47.72051972078471" />
-      <entry key="M15" value="68.7623670343958" />
-      <entry key="M30" value="103.82601362577566" />
-      <entry key="H1" value="129.7799246910593" />
-      <entry key="H2" value="145.6956514914062" />
-      <entry key="H4" value="154.52622483961414" />
-      <entry key="D1" value="162.37426426539224" />
-      <entry key="W1" value="163.76657801246694" />
+      <entry key="MS100" value="1.000000112001791" />
+      <entry key="MS500" value="1.0523587176047926" />
+      <entry key="S2" value="2.5114500979339125" />
+      <entry key="S5" value="4.64577471012131" />
+      <entry key="S10" value="6.015490531720466" />
+      <entry key="S30" value="7.2534453131029" />
+      <entry key="S60" value="7.633651117059672" />
+      <entry key="M2" value="8.331634631100314" />
+      <entry key="M5" value="13.147446331087124" />
+      <entry key="M10" value="20.789478375512203" />
+      <entry key="M15" value="25.85922218869545" />
+      <entry key="M30" value="36.50416207505535" />
+      <entry key="H1" value="65.58027117077418" />
+      <entry key="H2" value="136.47095298652718" />
+      <entry key="H4" value="231.23153190189922" />
+      <entry key="D1" value="386.28150036443515" />
+      <entry key="W1" value="424.25332908673596" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -112,23 +128,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9592756058042249" />
-      <entry key="MS500" value="1.1146250944585592" />
-      <entry key="S2" value="2.3026599726980277" />
-      <entry key="S5" value="3.9224279215537825" />
-      <entry key="S10" value="5.098388752742815" />
-      <entry key="S30" value="6.2579598081529495" />
-      <entry key="S60" value="6.6700447479725264" />
-      <entry key="M2" value="8.082275608444453" />
-      <entry key="M5" value="20.845752702750143" />
-      <entry key="M10" value="47.72019385810794" />
-      <entry key="M15" value="68.76205023599216" />
-      <entry key="M30" value="103.8257713363851" />
-      <entry key="H1" value="129.77977226046661" />
-      <entry key="H2" value="145.69556564768126" />
-      <entry key="H4" value="154.52617924179015" />
-      <entry key="D1" value="162.37425626894597" />
-      <entry key="W1" value="163.76657686005512" />
+      <entry key="MS100" value="0.9592642267645686" />
+      <entry key="MS500" value="1.0436421160284757" />
+      <entry key="S2" value="2.506258663418787" />
+      <entry key="S5" value="4.641960625744504" />
+      <entry key="S10" value="6.013030280394049" />
+      <entry key="S30" value="7.252459234494824" />
+      <entry key="S60" value="7.633132404708675" />
+      <entry key="M2" value="8.331349313222804" />
+      <entry key="M5" value="13.147261096876862" />
+      <entry key="M10" value="20.789330199336998" />
+      <entry key="M15" value="25.85909897069389" />
+      <entry key="M30" value="36.5040757646864" />
+      <entry key="H1" value="65.58019551163888" />
+      <entry key="H2" value="136.47087478142683" />
+      <entry key="H4" value="231.23146542065027" />
+      <entry key="D1" value="386.28148175147913" />
+      <entry key="W1" value="424.2533261631495" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -142,32 +158,32 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/resources&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;ml.llm.LLMThirdPartyAiProvidersConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "DefaultHtmlFileTemplate": "HTML File",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.core.executor": "Debug",
+    "Python.main.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "master",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "D:/PycharmProjects/VideoSeek/resources",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\resources" />
@@ -446,6 +462,7 @@
       <workItem from="1781194299556" duration="161000" />
       <workItem from="1781266222995" duration="3773000" />
       <workItem from="1781270042011" duration="3444000" />
+      <workItem from="1781346717648" duration="11476000" />
     </task>
     <task id="LOCAL-00064" summary="init补">
       <option name="closed" value="true" />

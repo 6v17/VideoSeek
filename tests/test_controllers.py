@@ -420,7 +420,7 @@ class MobileBridgeControllerTests(unittest.TestCase):
 
         mock_service_cls.assert_called_once()
         kwargs = mock_service_cls.call_args.kwargs
-        self.assertTrue(callable(kwargs["on_image_received"]))
+        self.assertTrue(callable(kwargs["on_search_requested"]))
         service.start.assert_called_once()
         self.assertEqual(url, "http://192.168.1.2:8918/?token=abc")
         self.assertEqual(statuses, ["running"])
@@ -444,15 +444,21 @@ class MobileBridgeControllerTests(unittest.TestCase):
         service.start.assert_not_called()
         self.assertEqual(statuses, [])
 
-    def test_handle_upload_received_emits_forwarded_payload(self):
+    def test_handle_search_requested_emits_payload(self):
         parent = _make_parent_window()
         controller = MobileBridgeController(parent)
         received = []
-        controller.upload_received.connect(lambda path, source: received.append((path, source)))
+        controller.search_requested.connect(received.append)
 
-        controller._handle_upload_received("D:/Migrated/data/mobile_uploads/query.png", "192.168.1.10")
+        payload = {
+            "search_kind": "compose",
+            "query": "night rain",
+            "image_path": "D:/Migrated/data/mobile_uploads/query.png",
+            "source": "192.168.1.10",
+        }
+        controller._handle_search_requested(payload)
 
-        self.assertEqual(received, [("D:/Migrated/data/mobile_uploads/query.png", "192.168.1.10")])
+        self.assertEqual(received, [payload])
 
 
 class SearchControllerTests(unittest.TestCase):
@@ -469,6 +475,23 @@ class SearchControllerTests(unittest.TestCase):
         parent.search_page.lbl_status.setText.assert_called_with("Searching...")
         mock_worker_cls.assert_called_once_with("cat", True)
         worker.start.assert_called_once()
+
+    @patch("ui.controllers.search_controller.shutdown_thread")
+    @patch("ui.controllers.search_controller.SearchWorker")
+    def test_start_search_stops_previous_worker(self, mock_worker_cls, mock_shutdown_thread):
+        parent = _make_parent_window()
+        controller = SearchController(parent)
+        first_worker = MagicMock()
+        second_worker = MagicMock()
+        mock_worker_cls.side_effect = [first_worker, second_worker]
+        controller.worker = first_worker
+
+        controller.start_search("cat", True)
+        controller.start_search("dog", True)
+
+        mock_shutdown_thread.assert_called_once_with(first_worker, allow_terminate=False)
+        self.assertIs(controller.worker, second_worker)
+        second_worker.start.assert_called_once()
 
     def test_clear_results_resets_table(self):
         parent = _make_parent_window()
