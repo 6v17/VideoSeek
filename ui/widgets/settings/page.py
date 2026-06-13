@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -86,6 +87,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
 
         self.search_telemetry_title = QLabel()
         self.search_telemetry_title.setObjectName("CardTitle")
+        self.btn_search_telemetry_collapse = QToolButton()
+        self.btn_search_telemetry_collapse.setObjectName("VideoScopeCollapseBtn")
+        self.btn_search_telemetry_collapse.setAutoRaise(True)
+        self.btn_search_telemetry_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_telemetry_header = QWidget()
         search_telemetry_header_layout = QHBoxLayout(self.search_telemetry_header)
         search_telemetry_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -105,9 +110,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.search_telemetry_file.setObjectName("StatusHint")
         self.search_telemetry_file.setWordWrap(True)
         self.search_telemetry_file.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.search_telemetry_body_widget = QWidget()
+        search_telemetry_body_layout = QVBoxLayout(self.search_telemetry_body_widget)
+        search_telemetry_body_layout.setContentsMargins(0, 0, 0, 0)
+        search_telemetry_body_layout.setSpacing(8)
+        search_telemetry_body_layout.addWidget(self.search_telemetry_body)
+        search_telemetry_body_layout.addWidget(self.search_telemetry_hint)
+        search_telemetry_body_layout.addWidget(self.search_telemetry_file)
+        search_telemetry_header_layout.addWidget(self.btn_search_telemetry_collapse, 0)
         search_telemetry_header_layout.addWidget(self.search_telemetry_title, 0)
         search_telemetry_header_layout.addStretch(1)
         search_telemetry_header_layout.addWidget(self.btn_refresh_search_telemetry, 0)
+        self.btn_search_telemetry_collapse.clicked.connect(self._toggle_search_telemetry_panel)
+        self._search_telemetry_expanded = False
+        self._set_search_telemetry_expanded(False)
 
         self.input_fps = NoWheelDoubleSpinBox()
         self.input_fps.setRange(0.01, 24.0)
@@ -611,9 +627,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
 
         self.card_search_telemetry = VSCard()
         self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_header)
-        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_body)
-        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_hint)
-        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_file)
+        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_body_widget)
 
         for card in (
             self.card_runtime_status,
@@ -1039,4 +1053,14 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.search_telemetry_file.setText(f"{file_path}{suffix}")
         else:
             self.search_telemetry_file.setText("")
+
+    def _set_search_telemetry_expanded(self, expanded: bool) -> None:
+        self._search_telemetry_expanded = bool(expanded)
+        self.search_telemetry_body_widget.setVisible(self._search_telemetry_expanded)
+        self.btn_search_telemetry_collapse.setArrowType(
+            Qt.ArrowType.DownArrow if self._search_telemetry_expanded else Qt.ArrowType.RightArrow
+        )
+
+    def _toggle_search_telemetry_panel(self) -> None:
+        self._set_search_telemetry_expanded(not self._search_telemetry_expanded)
 
