@@ -1,12 +1,14 @@
-# VideoSeek — Agent 操作说明（本机 API）
+# VideoSeek — Agent API 参考
 
-**读者：** 代用户通过本机 HTTP **搜镜头 → 出清单 → 裁片段** 的外部 AI。不是仓库开发文档。
+**文档角色：** 本文仅描述 **API 能力与字段**（what exists，**non-binding**）。**唯一 binding 的执行偏好（Policy kernel）** 在 **`GET /api/v1/agent-starter`** 的 `starter_text`；本文不得用于覆盖 starter 中的策略。
+
+**读者：** 代用户通过本机 HTTP 调用 VideoSeek 的外部 AI。不是仓库开发文档。
 
 **怎么用：**
 
-1. 日常粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（含实例快照、`search_presets`、流程）。
-2. 查字段/默认值/响应形状 → **`GET /api/v1/agent-doc?format=json`** 读 `content`，或 `?format=text` 纯 Markdown。
-3. **勿扫盘、勿猜路径、勿猜文件名。**
+1. 粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（行为规则 + 实例快照 + `search_presets`）。
+2. 查字段 / 默认值 / 响应形状 → **`GET /api/v1/agent-doc?format=json`** 读 `content`，或 `?format=text` 纯 Markdown。
+3. 路径字段必须来自 API 响应（见 §2.2）；勿扫盘、勿猜路径、勿猜文件名。
 
 | 前提 | 动作 |
 |------|------|
@@ -36,9 +38,8 @@
 
 ## 1. 能力与边界
 
-- **能做：** 在已索引视频里按**画面语义**找时间段（`video_path` + 起止秒）；导出 manifest / mp4 片段。
-- **不能：** 按精确台词/剧情搜、自动成片、改索引或用户设置（除非用户明确要求）。
-- **你的事：** 脚本拆镜头 → **优先 `preset_id`** → 配不上再 inline `query` → `search/batch` → 按需导出。
+- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段。
+- **不支持：** 精确台词/剧情检索；自动成片；修改索引或用户设置（除非用户在对话中明确要求）。
 
 ---
 
@@ -89,16 +90,19 @@
 
 ---
 
-## 3. 脚本 → preset / query
+## 3. 搜索输入（preset / query）
 
-预设以 **`agent-starter.search_presets`** 或 **`GET /search/presets`** 为准（含用户自建）；**不要在 md 或对话里硬编码 id**。
+预设 id 以 **`agent-starter.search_presets`** 或 **`GET /search/presets`** 为准（含用户自建）；文档内勿硬编码 id。
 
-1. 一句脚本 ≈ 一个镜头任务（batch 里一条 `queries[]` 条目）。
-2. 能映射预设 → **`preset_id`**；勿对同一语义重复手写 `query`。
-3. 无合适预设 → inline **`query`**，风格对齐 preset 的 `query`/`summary`（景别 + 主体 + 可见动作；非台词、非剧情）。
-4. **`preset_id` 与 `query` 二选一**，不可同时出现；两者都缺 → 400。
-5. 空 `hits`：换 preset、改 query、放宽 scope；最多重试 2 次。
-6. **要 N 个片段** = **1 次** search/batch + **`top_k: N`**（+ 可选 `dedupe`）；**不要**发 N 条相同 `preset_id`/`query`。
+| 输入 | 说明 |
+|------|------|
+| `preset_id` | 与 `query` 互斥；二者都缺 → 400 |
+| `query` + `query_type` | `text` 或 `image_path`（`image_path` 时 `query` 为本地图片绝对路径） |
+| `top_k` | 每条 query 返回 hit 数上限（1–200） |
+| `image_folder` | 与 `queries` 二选一；扫描 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每张图一条 query；`client_request_id` = 文件名 |
+
+`search_precision_mode`（图搜）：`fast` \| `precise`；未传时见 `/health` 的 `agent_api_default_image_precision`；纯文搜忽略。  
+`preview_anchor_sec`：图搜且 `scope.video_paths` 恰好 1 条时可用；服务端将 `search_precision_mode` 设为 `precise`。
 
 ---
 
@@ -210,12 +214,12 @@
 | `top_k` | 否 | 桌面配置，clamp **1–200** | 返回 hit 数上限 |
 | `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk` |
 | `min_score` | 否 | preset 默认或不过滤 | 过滤低分 hit |
-| `search_precision_mode` | 否 | 图搜见 health | `fast` \| `precise`；**纯文搜忽略** |
+| `search_precision_mode` | 否 | 见 health | `fast` \| `precise`；图搜未传时用 `agent_api_default_image_precision`；纯文搜忽略 |
 | `client_request_id` | 否 | — | 原样回显，便于对账 |
 | `scope` | 否 | 桌面范围 | 见 §2.3 |
 | `expand_frame_hits` | 否 | `true` | frame 模式下点命中扩成段 |
 | `pad_before_sec` / `pad_after_sec` | 否 | **3.0** | 扩段 padding（秒） |
-| `preview_anchor_sec` | 否 | — | **图搜 + scope 内恰好 1 个 video** 时二次定位；强制 `precise` |
+| `preview_anchor_sec` | 否 | — | 图搜 + `scope.video_paths` 恰好 1 条；服务端强制 `precise` |
 
 **成功响应：**
 
@@ -339,8 +343,8 @@
 
 | 字段 | 必填 | 默认 | 说明 |
 |------|------|------|------|
-| `items` | 与 sources 二选一 | — | **推荐 agent 使用**；自定义片段列表 |
-| `sources` | 与 items 二选一 | — | 粘贴 **`search/batch` 的 `results[]` 整段**（含 `ok`, `query`, `hits[]`…） |
+| `items` | 与 sources 二选一 | — | 自定义片段列表 |
+| `sources` | 与 items 二选一 | — | `search/batch` 的 `results[]` 整段（含 `ok`, `query`, `hits[]`…） |
 | `project` | 否 | `rough-cut` | 写入 manifest |
 | `keep_per_source` | 否 | **2** | 仅 **sources** 模式：每条 result 取前 N hit |
 | `dedupe` | 否 | `true` | 同视频区间重叠 >50%（frame 模式另：起点差 ≤2s）则去重 |
@@ -424,33 +428,37 @@
 
 ---
 
-## 5. 推荐工作流
+## 5. 能力组合（字段级）
 
-```
-health (index_ready?) → libraries → search/batch
-  → [export/manifest + export/clips/batch] 或 batch.export 一步完成
-```
+### 搜索
 
-| 目标 | 做法 |
+| 端点 | 能力 |
 |------|------|
-| 只要命中列表 | `search/batch`，不调用 export |
-| 清单 + 手控导出 | manifest（`items[]` 或 `sources`）→ `clips/batch` |
-| 截图文件夹批处理 | `image_folder` + `export.output_dir` |
-| 精确秒数成片 | `encode_mode: "original"` |
+| `POST /search` | 单次 query；返回 `hits[]` |
+| `POST /search/batch` | 多 query 或 `image_folder`；返回 `results[]` |
+| `POST /search/batch` + `export` | 同上，并在 `export.output_dir` 写入 mp4；响应含 `export` 块 |
+
+### 导出（可独立调用）
+
+| 端点 | 输入 | 输出 |
+|------|------|------|
+| `POST /export/manifest` | `items[]` 或 `sources` | manifest JSON；可选 `write_path` |
+| `POST /export/clip` | 单条 `video_path` + 区间 + `output_path` | 单个 mp4 |
+| `POST /export/clips/batch` | `items[]`（每项含 `output_path`） | 多个 mp4 |
+
+内嵌 `export` 文件名：`{client_request_id或query}_rank{NN}.mp4`（冲突加后缀）。`clips/batch` 的 `items[]` 支持自定义 `output_path`。
+
+是否组合上述端点，见 **`GET /agent-starter`**。
 
 ---
 
-## 6. 本机调 API（Windows / Cursor）
+## 6. HTTP 客户端（Windows / Cursor）
 
-VideoSeek 接口正常；**IDE 里 curl 无回显是终端/别名问题，不是服务挂了。**
-
-| 情况 | 做法 |
+| 情况 | 说明 |
 |------|------|
-| PowerShell / Cursor | 用 **`curl.exe`**，勿用裸 `curl` |
-| GET 自测 | `curl.exe http://127.0.0.1:8765/api/v1/health` |
-| POST | JSON 存 **UTF-8** 的 `body.json` |
-| curl 无输出 | 写 **`.py` 文件**再执行（勿拼长 `python -c`） |
-| 读文档 | 优先 `GET /agent-doc` JSON 的 `content` |
+| PowerShell / Cursor | 使用 **`curl.exe`**（裸 `curl` 可能是 Invoke-WebRequest 别名） |
+| POST body | UTF-8 JSON 文件 |
+| 终端无 curl 回显 | 常见 IDE 终端问题；可用 Python `urllib` / `requests` 发 POST |
 
 ```powershell
 curl.exe -s http://127.0.0.1:8765/api/v1/health

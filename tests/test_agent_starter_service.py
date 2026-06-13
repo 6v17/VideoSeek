@@ -79,15 +79,23 @@ class AgentStarterServiceTests(unittest.TestCase):
                 self._sample_health(),
                 locale="zh",
             )
-        self.assertLess(len(text.splitlines()), 120)
+        self.assertLess(len(text.splitlines()), 145)
         self.assertIn("GET http://127.0.0.1:8765/api/v1/libraries", text)
         self.assertIn("search_presets", text)
         self.assertIn("builtin_smile", text)
         self.assertIn("curl.exe", text)
-        self.assertIn("items[]", text)
         self.assertIn("top_k", text)
-        self.assertIn("export/clips/batch", text)
+        self.assertIn("Policy kernel", text)
+        self.assertIn("non-binding", text)
+        self.assertIn("ONLY starter", text)
+        self.assertIn("image_folder", text)
+        self.assertIn("export.output_dir", text)
+        self.assertIn("search→manifest→clips", text)
         self.assertIn("chinese_clip_vit_base_patch16", text)
+        self.assertIn("agent_api_default_image_precision", text)
+        self.assertNotIn("图搜 precise", text)
+        self.assertNotIn("## 流程", text)
+        self.assertNotIn("黄金路径", text)
         self.assertIn("Release\\\\VideoSeek\\\\docs\\\\for-agents.md", text)
         self.assertIn("/agent-doc?format=text", text)
         self.assertIn('"full_doc_path"', text)
@@ -175,12 +183,30 @@ class AgentStarterServiceTests(unittest.TestCase):
             self.assertEqual(payload["full_doc_path"], os.path.normpath(doc_path))
             self.assertTrue(payload["meta"]["doc_on_disk"])
             self.assertIn("starter_text", payload)
-            self.assertIn("Workflow", payload["starter_text"])
+            self.assertIn("Policy kernel", payload["starter_text"])
+            self.assertIn("non-binding", payload["starter_text"])
+            self.assertNotIn("Workflow", payload["starter_text"])
             self.assertIn("preset", payload["starter_text"].lower())
             self.assertIn("/agent-doc?format=text", payload["starter_text"])
             self.assertIn("do not scan the disk", payload["starter_text"])
             self.assertEqual(payload["meta"]["search_preset_count"], 0)
-            self.assertLessEqual(payload["meta"]["line_count"], 120)
+            self.assertLessEqual(payload["meta"]["line_count"], 145)
+
+
+class ForAgentsDocTests(unittest.TestCase):
+    def test_for_agents_doc_is_capability_reference_only(self):
+        doc_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "docs", "for-agents.md")
+        )
+        with open(doc_path, encoding="utf-8") as handle:
+            content = handle.read()
+        self.assertIn("agent-starter", content)
+        self.assertIn("non-binding", content)
+        self.assertIn("Policy kernel", content)
+        self.assertNotIn("## ⭐ 默认路径", content)
+        self.assertNotIn("## 5. 推荐工作流", content)
+        self.assertNotIn("勿拆 search", content)
+        self.assertNotIn("图搜 precise", content)
 
 
 if __name__ == "__main__":
