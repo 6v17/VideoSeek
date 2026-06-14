@@ -89,6 +89,17 @@ class SettingsFormMixin:
         grid.addWidget(row_container, row, 0, 1, 2)
         return row_container
 
+    def _add_section_note(self, grid, row, note_label: QLabel):
+        note_label.setObjectName("StatusHint")
+        note_label.setWordWrap(True)
+        wrap = QWidget()
+        wrap_layout = QVBoxLayout(wrap)
+        wrap_layout.setContentsMargins(0, 0, 0, 8)
+        wrap_layout.setSpacing(0)
+        wrap_layout.addWidget(note_label)
+        grid.addWidget(wrap, row, 0, 1, 2)
+        return wrap
+
     def _build_setting_label_block(self, label, hint_label, extra_hint_labels):
         block = QWidget()
         block.setObjectName("SettingLabelBlock")

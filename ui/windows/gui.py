@@ -69,6 +69,7 @@ from ui.windows.gui_startup_migration import StartupMigrationGuiMixin
 from ui.windows.gui_search_scope import SearchScopeGuiMixin
 from ui.windows.gui_search_presets import SearchPresetsGuiMixin
 from ui.windows.gui_search_panel_state import SearchPanelStateMixin
+from ui.windows.gui_shot_list import ShotListGuiMixin
 
 
 class MainWindow(
@@ -85,6 +86,7 @@ class MainWindow(
     SearchScopeGuiMixin,
     SearchPresetsGuiMixin,
     SearchPanelStateMixin,
+    ShotListGuiMixin,
 ):
     """Sidebar / stacked widget order: local search → library → remote link → settings."""
 
@@ -141,6 +143,7 @@ class MainWindow(
         self.search_controller = SearchController(self)
         self.network_search_controller = NetworkSearchController(self)
         self._init_search_presets_ui()
+        self._init_shot_list_ui()
         self.mobile_bridge_controller = MobileBridgeController(self)
         self.mobile_bridge_controller.search_requested.connect(self._handle_mobile_search_requested)
         self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
@@ -373,6 +376,7 @@ class MainWindow(
         self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
+        self._update_shot_list_button()
         self._update_expand_preview_button()
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
         self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))

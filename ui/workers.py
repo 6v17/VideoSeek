@@ -520,3 +520,30 @@ def _ffmpeg_progress_text(current, total, label):
     if total > 0:
         return f"Downloading FFmpeg{source_text} ({current // 1024 // 1024}MB/{total // 1024 // 1024}MB)"
     return f"Downloading FFmpeg{source_text}"
+
+
+class ShotListBatchExportWorker(QThread):
+    finished_payload = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, items, output_dir, encode_mode, *, continue_on_error=True):
+        super().__init__()
+        self.items = list(items or [])
+        self.output_dir = str(output_dir or "")
+        self.encode_mode = str(encode_mode or "copy")
+        self.continue_on_error = bool(continue_on_error)
+
+    def run(self):
+        from src.services.shot_list_export_service import export_shot_list_clips
+
+        try:
+            payload = export_shot_list_clips(
+                self.items,
+                output_dir=self.output_dir,
+                encode_mode=self.encode_mode,
+                continue_on_error=self.continue_on_error,
+            )
+            self.finished_payload.emit(dict(payload or {}))
+        except Exception as exc:
+            logger.exception("Shot list batch export failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))

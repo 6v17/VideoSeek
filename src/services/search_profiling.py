@@ -70,10 +70,7 @@ class SearchProfileReport:
 
 
 def is_profiling_enabled(config=None) -> bool:
-    from src.app.config import load_config
-
-    cfg = config or load_config()
-    return bool(cfg.get("search_profiling_enabled", DEFAULT_CONFIG.get("search_profiling_enabled", False)))
+    return False
 
 
 def profiling_active() -> bool:

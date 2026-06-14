@@ -113,6 +113,7 @@ def populate_result_table(
     on_export,
     texts,
     on_deep_locate=None,
+    on_add_to_shot_list=None,
     *,
     clip_score_mode: bool = False,
     low_confidence_score: float | None = None,
@@ -196,6 +197,7 @@ def populate_result_table(
                 texts,
                 match_kind=getattr(hit, "match_kind", "frame"),
                 on_deep_locate=on_deep_locate,
+                on_add_to_shot_list=on_add_to_shot_list,
                 anchor_score=float(score),
             ),
         )
@@ -387,6 +389,7 @@ def _build_result_actions(
     texts,
     match_kind="frame",
     on_deep_locate=None,
+    on_add_to_shot_list=None,
     anchor_score=None,
 ):
     container = QWidget()
@@ -437,6 +440,19 @@ def _build_result_actions(
         lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_export(path, clip_start, clip_end)
     )
     layout.addWidget(export_button)
+
+    if on_add_to_shot_list is not None:
+        add_button = QPushButton(_fallback_text(texts, "shot_list_add", "加入", "Add"))
+        add_button.setProperty("class", "TableBtn")
+        add_button.setFixedSize(58, 32)
+        add_button.setCursor(Qt.PointingHandCursor)
+        add_button.setToolTip(_fallback_text(texts, "shot_list_add_tip", "加入素材篮", "Add to shot list"))
+        add_button.clicked.connect(
+            lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec, clip_score=float(anchor_score or 0.0), kind=str(match_kind or "frame"): on_add_to_shot_list(
+                path, clip_start, clip_end, clip_score, kind
+            )
+        )
+        layout.addWidget(add_button)
     return container
 
 def _format_time_range(start_sec, end_sec, texts=None, match_kind="frame"):

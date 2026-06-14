@@ -144,6 +144,28 @@ class AgentClipServiceTests(unittest.TestCase):
 
     @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
     @patch("src.utils.has_ffmpeg", return_value=True)
+    @patch("src.services.agent_clip_service.export_original_clip")
+    @patch("src.services.agent_clip_service.resolve_clip_window", return_value=(10.0, 6.0))
+    def test_execute_agent_export_clip_frame_point(self, mock_window, mock_export, _ffmpeg, _allowed):
+        mock_export.return_value = type("R", (), {"returncode": 0, "stderr": b""})()
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "src.mp4")
+            output = os.path.join(tmp, "out.mp4")
+            with open(source, "wb") as handle:
+                handle.write(b"0")
+            payload = execute_agent_export_clip(
+                video_path=source,
+                start_sec=12.0,
+                end_sec=12.0,
+                output_path=output,
+                encode_mode="copy",
+            )
+        self.assertTrue(payload["ok"])
+        mock_window.assert_called_once()
+        self.assertIsNone(mock_window.call_args.kwargs.get("end_sec"))
+
+    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.utils.has_ffmpeg", return_value=True)
     @patch("src.services.agent_clip_service.execute_agent_export_clip")
     def test_execute_agent_batch_export_clips(self, mock_export, _ffmpeg, _allowed):
         mock_export.side_effect = lambda **kwargs: {

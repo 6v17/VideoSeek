@@ -222,6 +222,7 @@ class SearchController(QObject):
             self.parent_window.handle_export_clip,
             texts,
             on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
+            on_add_to_shot_list=getattr(self.parent_window, "add_hit_to_shot_list", None),
             clip_score_mode=clip_score_mode,
             low_confidence_score=low_confidence_threshold,
         )
@@ -237,9 +238,11 @@ class SearchController(QObject):
                 )
                 from src.services.search_telemetry import record_crop_confidence
 
-                hint = texts.get("search_crop_clip_only_hint", "")
-                if hint:
-                    status_text = f"{status_text} · {hint}"
+                precise_mode = str(getattr(self.worker, "search_precision_mode", "") or "").strip().lower() == "precise"
+                if precise_mode:
+                    hint = texts.get("search_crop_clip_only_hint", "")
+                    if hint:
+                        status_text = f"{status_text} · {hint}"
                 top_score = float(coerce_search_hit(results[0]).score)
                 top_label = format_clip_score_percent(top_score)
                 tier_label = resolve_clip_confidence_label(top_score, texts)

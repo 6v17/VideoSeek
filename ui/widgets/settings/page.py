@@ -212,7 +212,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_browse_model_dir = QPushButton()
         self.btn_migrate_model_dir = QPushButton()
         self.section_search_title = QLabel()
+        self.section_fast_image_search_title = QLabel()
+        self.hint_fast_image_search_section = QLabel()
         self.section_precise_search_title = QLabel()
+        self.hint_precise_search_section = QLabel()
         self.section_preview_title = QLabel()
         self.section_index_title = QLabel()
         self.section_model_gpu_title = QLabel()
@@ -418,6 +421,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_rules.hide()
 
         self.section_search_card, self.section_search_form = self._create_settings_section(self.section_search_title)
+        self.section_fast_image_search_card, self.section_fast_image_search_form = self._create_settings_section(
+            self.section_fast_image_search_title
+        )
         self.section_precise_search_card, self.section_precise_search_form = self._create_settings_section(
             self.section_precise_search_title
         )
@@ -449,61 +455,63 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_remote_max_frames,
             self.hint_remote_max_frames,
         )
+        self._add_section_note(self.section_fast_image_search_form, 0, self.hint_fast_image_search_section)
         self._add_setting_row(
-            self.section_precise_search_form,
-            0,
+            self.section_fast_image_search_form,
+            1,
             self.label_frame_neighbor_rerank_enabled,
             self.input_frame_neighbor_rerank_enabled,
             self.hint_frame_neighbor_rerank_enabled,
         )
         self.frame_neighbor_rerank_top_n_row = self._add_setting_row(
-            self.section_precise_search_form,
-            1,
+            self.section_fast_image_search_form,
+            2,
             self.label_frame_neighbor_rerank_top_n,
             self.input_frame_neighbor_rerank_top_n,
             self.hint_frame_neighbor_rerank_top_n,
         )
         self.frame_neighbor_rerank_window_row = self._add_setting_row(
-            self.section_precise_search_form,
-            2,
+            self.section_fast_image_search_form,
+            3,
             self.label_frame_neighbor_rerank_window,
             self.input_frame_neighbor_rerank_window,
             self.hint_frame_neighbor_rerank_window,
         )
+        self._add_section_note(self.section_precise_search_form, 0, self.hint_precise_search_section)
         self._add_setting_row(
             self.section_precise_search_form,
-            3,
+            1,
+            self.label_image_search_fetch_multiplier,
+            self.input_image_search_fetch_multiplier,
+            self.hint_image_search_fetch_multiplier,
+        )
+        self._add_setting_row(
+            self.section_precise_search_form,
+            2,
             self.label_image_pixel_rerank_top_n,
             self.input_image_pixel_rerank_top_n,
             self.hint_image_pixel_rerank_top_n,
         )
         self._add_setting_row(
             self.section_precise_search_form,
-            4,
+            3,
             self.label_image_pixel_rerank_probe_mode,
             self.input_image_pixel_rerank_probe_mode,
             self.hint_image_pixel_rerank_probe_mode,
         )
         self.image_pixel_rerank_time_window_row = self._add_setting_row(
             self.section_precise_search_form,
-            5,
+            4,
             self.label_image_pixel_rerank_time_window_sec,
             self.input_image_pixel_rerank_time_window_sec,
             self.hint_image_pixel_rerank_time_window_sec,
         )
         self.image_pixel_rerank_probe_step_row = self._add_setting_row(
             self.section_precise_search_form,
-            6,
+            5,
             self.label_image_pixel_rerank_probe_step_sec,
             self.input_image_pixel_rerank_probe_step_sec,
             self.hint_image_pixel_rerank_probe_step_sec,
-        )
-        self._add_setting_row(
-            self.section_precise_search_form,
-            7,
-            self.label_image_search_fetch_multiplier,
-            self.input_image_search_fetch_multiplier,
-            self.hint_image_search_fetch_multiplier,
         )
 
         self._add_setting_row(self.section_preview_form, 0, self.label_preview_seconds, self.input_preview_seconds, self.hint_preview_seconds)
@@ -603,6 +611,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         search_preview_layout.setContentsMargins(0, 0, 0, 0)
         search_preview_layout.setSpacing(12)
         search_preview_layout.addWidget(self.section_search_card)
+        search_preview_layout.addWidget(self.section_fast_image_search_card)
         search_preview_layout.addWidget(self.section_precise_search_card)
         search_preview_layout.addWidget(self.section_preview_card)
         self.card_search_preview.content_layout.addWidget(search_preview_host)
@@ -783,8 +792,23 @@ class SettingsPage(QWidget, SettingsFormMixin):
     def configure_form_labels(self, texts):
         self._current_texts = texts
         self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索与采样", "Search & Sampling"))
+        self.section_fast_image_search_title.setText(
+            _fallback_text(texts, "settings_section_fast_image_search", "快速图搜", "Fast Image Search")
+        )
+        self.hint_fast_image_search_section.setText(
+            texts.get(
+                "settings_section_fast_image_search_note",
+                "Applies when Deep search is OFF on the search page.",
+            )
+        )
         self.section_precise_search_title.setText(
             _fallback_text(texts, "settings_section_precise_search", "图搜精搜", "Precise Image Search")
+        )
+        self.hint_precise_search_section.setText(
+            texts.get(
+                "settings_section_precise_search_note",
+                "Applies when Deep search is ON. Cropped queries skip pixel rerank.",
+            )
         )
         self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview & Thumbnails"))
         self.section_index_title.setText(_fallback_text(texts, "settings_section_indexing", "索引与分段", "Indexing & Chunking"))

@@ -386,6 +386,8 @@ class SearchPage(QWidget):
         self.btn_expand_preview.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
+        self.btn_shot_list = QPushButton()
+        self.btn_shot_list.setObjectName("GhostButton")
 
         self.results_actions = QWidget()
         self.results_actions.setObjectName("SearchResultsActions")
@@ -394,6 +396,7 @@ class SearchPage(QWidget):
         actions_layout.setSpacing(6)
         actions_layout.addWidget(self.btn_manage_presets)
         actions_layout.addWidget(self.btn_expand_preview)
+        actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
         results_toolbar.addWidget(self.lbl_status, 2)
