@@ -143,6 +143,14 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=True, scoped=False))
         self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=False, scoped=True))
         self.assertFalse(_use_video_discovery_results(is_text=True, precise_image=False, scoped=False))
+        self.assertFalse(
+            _use_video_discovery_results(
+                is_text=False,
+                precise_image=False,
+                scoped=False,
+                video_discovery_enabled=False,
+            )
+        )
 
     def test_aggregate_hits_to_video_discovery_marks_video_kind(self):
         hits = [

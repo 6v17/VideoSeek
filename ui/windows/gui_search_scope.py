@@ -79,9 +79,11 @@ class SearchScopeGuiMixin:
             else:
                 count = len(list_ready_video_paths_for_libraries(get_search_scope_library_paths()))
             summary = texts.get("search_scope_picker_partial", "{count}").format(count=count)
+            display = texts.get("search_scope_picker_short", "{count}").format(count=count)
         else:
             summary = texts.get("search_scope_all", "")
-        self.search_page.search_scope_select.set_display_text(summary)
+            display = texts.get("search_scope_all_short", summary)
+        self.search_page.search_scope_select.set_display_text(display, tooltip=summary)
 
     def open_search_scope_editor(self) -> None:
         self._refresh_search_scope_entries()

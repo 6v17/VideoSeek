@@ -31,6 +31,7 @@ COMPONENT_SIZES = {
     "image_drop_min_height": 300,
     "preview_host_min_height": 340,
     "search_compare_baseline_height": 548,
+    "search_panel_width_extra": 28,
     "compose_image_strip_height": 86,
     "link_query_preview_min_height": 210,
     "result_table_min_height": 520,
@@ -39,8 +40,32 @@ COMPONENT_SIZES = {
     "progress_bar_min_width": 260,
     "settings_input_width": 116,
     "search_option_combo_width": 96,
+    "search_scope_select_width": 92,
+    "mobile_bridge_qr_width": 56,
+    "search_field_label_width": 60,
+    "search_field_gap": 4,
+    "search_controls_group_gap": 12,
+    "search_panel_card_margin": 12,
     "settings_path_input_width": 520,
 }
+
+
+def compute_search_panel_width(config=None) -> int:
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    label = int(sizes.get("search_field_label_width", 72))
+    scope = int(sizes.get("search_scope_select_width", 104))
+    qr = int(sizes.get("mobile_bridge_qr_width", 56))
+    toggle = 52
+    field_gap = int(sizes.get("search_field_gap", 4))
+    group_gap = int(sizes.get("search_controls_group_gap", 12))
+    card_margin = int(sizes.get("search_panel_card_margin", 12)) * 2
+    cluster = label + field_gap + scope
+    row1 = cluster + group_gap + label + field_gap + toggle + field_gap + qr
+    row2 = cluster + group_gap + label + field_gap + toggle + field_gap + qr
+    extra = int(sizes.get("search_panel_width_extra", 0))
+    return max(row1, row2) + card_margin + extra
 
 
 def _available_size(margin):

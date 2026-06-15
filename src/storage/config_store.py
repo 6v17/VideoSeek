@@ -2,7 +2,8 @@ import os
 
 from typing import List
 
-from src.app.config import CONFIG_ENUMS, DEFAULT_CONFIG, get_data_storage_paths, load_config, save_config
+from src.app.config import CONFIG_BOUNDS, CONFIG_ENUMS, DEFAULT_CONFIG, get_data_storage_paths, load_config, save_config
+from src.core.semantic_chunking import chunk_config_payload
 from src.utils import canonicalize_library_path
 
 _PROVIDER_DEFAULT_DIMENSION = {
@@ -272,6 +273,15 @@ def get_search_precision_mode(config=None) -> str:
     return str(DEFAULT_CONFIG["search_precision_mode"])
 
 
+def get_search_video_discovery_enabled(config=None) -> bool:
+    return bool(
+        _app_cfg(config).get(
+            "search_video_discovery_enabled",
+            DEFAULT_CONFIG["search_video_discovery_enabled"],
+        )
+    )
+
+
 def is_precise_image_search(config=None, search_precision_mode: str | None = None) -> bool:
     if search_precision_mode is None:
         return False
@@ -345,6 +355,57 @@ def get_chunk_similarity_mode(config=None) -> str:
     mode = str(cfg.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"]) or "").strip().lower()
     allowed = CONFIG_ENUMS["chunk_similarity_mode"]
     return mode if mode in allowed else str(DEFAULT_CONFIG["chunk_similarity_mode"])
+
+
+def get_chunk_segmentation_strategy(config=None) -> str:
+    cfg = _app_cfg(config)
+    strategy = str(
+        cfg.get("chunk_segmentation_strategy", DEFAULT_CONFIG["chunk_segmentation_strategy"]) or ""
+    ).strip().lower()
+    allowed = CONFIG_ENUMS["chunk_segmentation_strategy"]
+    return strategy if strategy in allowed else str(DEFAULT_CONFIG["chunk_segmentation_strategy"])
+
+
+def _bounded_chunk_float(config, key, default):
+    cfg = _app_cfg(config)
+    minimum, maximum = CONFIG_BOUNDS.get(key, (0.0, 1.0))
+    try:
+        value = float(cfg.get(key, default))
+    except (TypeError, ValueError):
+        value = float(default)
+    return max(minimum, min(maximum, value))
+
+
+def _bounded_chunk_int(config, key, default):
+    cfg = _app_cfg(config)
+    minimum, maximum = CONFIG_BOUNDS.get(key, (1, 12))
+    try:
+        value = int(cfg.get(key, default))
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(minimum, min(maximum, value))
+
+
+def build_chunk_config(config=None) -> dict:
+    cfg = _app_cfg(config)
+    return chunk_config_payload(
+        similarity_threshold=get_similarity_threshold(cfg),
+        max_chunk_duration=get_max_chunk_duration(cfg),
+        min_chunk_size=get_min_chunk_size(cfg),
+        similarity_mode=get_chunk_similarity_mode(cfg),
+        segmentation_strategy=get_chunk_segmentation_strategy(cfg),
+        delta_ema_alpha=_bounded_chunk_float(cfg, "chunk_delta_ema_alpha", DEFAULT_CONFIG["chunk_delta_ema_alpha"]),
+        delta_high_threshold=_bounded_chunk_float(
+            cfg, "chunk_delta_high_threshold", DEFAULT_CONFIG["chunk_delta_high_threshold"]
+        ),
+        delta_low_threshold=_bounded_chunk_float(
+            cfg, "chunk_delta_low_threshold", DEFAULT_CONFIG["chunk_delta_low_threshold"]
+        ),
+        delta_rise_frames=_bounded_chunk_int(cfg, "chunk_delta_rise_frames", DEFAULT_CONFIG["chunk_delta_rise_frames"]),
+        delta_stable_frames=_bounded_chunk_int(
+            cfg, "chunk_delta_stable_frames", DEFAULT_CONFIG["chunk_delta_stable_frames"]
+        ),
+    )
 
 
 def get_search_scope_mode(config=None) -> str:

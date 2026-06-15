@@ -64,6 +64,7 @@ class SearchWorker(QThread):
         preview_anchor_sec=None,
         locate_anchor_score=None,
         locate_score_margin=None,
+        video_discovery_enabled=None,
     ):
         super().__init__()
         self.query = query
@@ -79,6 +80,7 @@ class SearchWorker(QThread):
         self.preview_anchor_sec = preview_anchor_sec
         self.locate_anchor_score = locate_anchor_score
         self.locate_score_margin = locate_score_margin
+        self.video_discovery_enabled = video_discovery_enabled
         self.locate_warning_key = None
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
@@ -106,6 +108,7 @@ class SearchWorker(QThread):
                 preview_anchor_sec=self.preview_anchor_sec,
                 locate_anchor_score=self.locate_anchor_score,
                 locate_score_margin=self.locate_score_margin,
+                video_discovery_enabled=self.video_discovery_enabled,
                 progress_callback=self._emit_progress,
                 **base_kwargs,
             )

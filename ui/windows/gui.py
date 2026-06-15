@@ -103,6 +103,7 @@ class MainWindow(
         self.notice_payload = None
         self.about_payload = None
         self._startup_complete = False
+        self._update_notice_auto_show_pending = False
         self._defer_runtime_warmup = False
         self._preview_dialog_cooldown_until = 0.0
         self._preview_dialog_opening = False
@@ -245,6 +246,7 @@ class MainWindow(
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
         self.search_page.search_precision_toggle.toggled.connect(self._on_search_precision_toggled)
+        self.search_page.search_video_discovery_toggle.toggled.connect(self._on_search_video_discovery_toggled)
         self.search_page.text_search.textChanged.connect(self._refresh_search_panel_state)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
@@ -318,6 +320,7 @@ class MainWindow(
     def _update_version_info(self, version_info):
         self.version_info = version_info
         self.apply_texts()
+        self._maybe_auto_show_update_notice()
 
     def _update_notice_payload(self, notice_payload):
         self.notice_payload = notice_payload
@@ -344,13 +347,20 @@ class MainWindow(
         self.sidebar.btn_page_link.setText(t["nav_link"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
-        self.sidebar.btn_notice.setText(t["notice_short"])
+        self.sidebar.btn_notice.setText(
+            t["notice_short_update"]
+            if self.version_info and self.version_info.get("has_update")
+            else t["notice_short"]
+        )
         if self.version_info and self.version_info.get("has_update"):
-            self.sidebar.btn_about.setText(t["about_short_update"])
-            self.sidebar.btn_about.setObjectName("UpdateButton")
+            self.sidebar.btn_notice.setObjectName("UpdateButton")
         else:
-            self.sidebar.btn_about.setText(t["about_short"])
-            self.sidebar.btn_about.setObjectName("SidebarFooterButton")
+            self.sidebar.btn_notice.setObjectName("SidebarFooterButton")
+        self.sidebar.btn_notice.style().unpolish(self.sidebar.btn_notice)
+        self.sidebar.btn_notice.style().polish(self.sidebar.btn_notice)
+        self.sidebar.btn_notice.update()
+        self.sidebar.btn_about.setText(t["about_short"])
+        self.sidebar.btn_about.setObjectName("SidebarFooterButton")
         self.sidebar.btn_about.style().unpolish(self.sidebar.btn_about)
         self.sidebar.btn_about.style().polish(self.sidebar.btn_about)
         self.sidebar.btn_about.update()
@@ -370,6 +380,7 @@ class MainWindow(
         self.search_page.search_mode.setCurrentIndex(1 if current_mode == "chunk" else 0)
         self.search_page.search_mode.blockSignals(False)
         self.search_page.search_precision_label.setText(t["search_precision_label"])
+        self.search_page.search_video_discovery_label.setText(t.get("search_video_discovery_label", ""))
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
@@ -380,13 +391,8 @@ class MainWindow(
         self._update_expand_preview_button()
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
         self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))
-        self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(self.mobile_bridge_controller.is_running(), texts=t))
-        self.search_page.btn_mobile_toggle.setToolTip(
-            t["mobile_bridge_stop"] if self.mobile_bridge_controller.is_running() else t["mobile_bridge_start"]
-        )
-        self.search_page.btn_mobile_toggle.setChecked(self.mobile_bridge_controller.is_running())
         self.search_page.btn_mobile_qr.setText(t["mobile_bridge_qr"])
-        self.search_page.btn_mobile_qr.setEnabled(self.mobile_bridge_controller.is_running())
+        self._update_mobile_bridge_controls()
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
@@ -483,7 +489,58 @@ class MainWindow(
         self._apply_agent_api_settings()
 
     def show_notice(self):
-        NoticeDialog(self, self.is_dark_mode, self.language, notice=self.notice_payload).exec()
+        had_update = bool(self.version_info and self.version_info.get("has_update"))
+        NoticeDialog(
+            self,
+            self.is_dark_mode,
+            self.language,
+            notice=self.notice_payload,
+            version_info=self.version_info,
+        ).exec()
+        if had_update:
+            self._mark_update_notice_seen()
+
+    def _should_auto_show_update_notice(self) -> bool:
+        if not getattr(self, "_startup_complete", False):
+            return False
+        info = self.version_info or {}
+        if not info.get("has_update"):
+            return False
+        latest = str(info.get("latest_version") or "").strip()
+        if not latest:
+            return False
+        try:
+            config = load_config()
+        except Exception:
+            return False
+        dismissed = str(config.get("update_notice_dismissed_version") or "").strip()
+        return dismissed != latest
+
+    def _mark_update_notice_seen(self) -> None:
+        info = self.version_info or {}
+        latest = str(info.get("latest_version") or "").strip()
+        if not latest:
+            return
+        try:
+            config = load_config()
+            config["update_notice_dismissed_version"] = latest
+            save_config(config)
+        except Exception:
+            return
+
+    def _maybe_auto_show_update_notice(self) -> None:
+        if not self._should_auto_show_update_notice():
+            return
+        if getattr(self, "_update_notice_auto_show_pending", False):
+            return
+        self._update_notice_auto_show_pending = True
+        QTimer.singleShot(300, self._auto_show_update_notice)
+
+    def _auto_show_update_notice(self) -> None:
+        self._update_notice_auto_show_pending = False
+        if not self._should_auto_show_update_notice():
+            return
+        self.show_notice()
 
     def show_about(self):
         AboutDialog(
@@ -590,6 +647,10 @@ class MainWindow(
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             search_precision_mode=search_precision_mode,
+            video_discovery_enabled=self._resolve_video_discovery_enabled(
+                is_text=False,
+                has_image=True,
+            ),
         )
         return True
 
@@ -669,6 +730,10 @@ class MainWindow(
             min_score=plan.get("min_score"),
             search_precision_mode=search_precision_mode,
             pixel_query_data=plan.get("pixel_query_data"),
+            video_discovery_enabled=self._resolve_video_discovery_enabled(
+                is_text=bool(plan["is_text"]),
+                has_image=bool(plan["has_image"]),
+            ),
         )
         return True
 
@@ -835,7 +900,7 @@ class MainWindow(
             return
 
         if url:
-            self.search_page.lbl_status.setText(self.texts["mobile_bridge_running"].format(url=url))
+            self.search_page.lbl_status.setText(self.texts["mobile_bridge_running"])
             self.show_mobile_bridge_qr()
         else:
             self.search_page.lbl_status.setText(self.texts["mobile_bridge_stopped"])
@@ -865,15 +930,16 @@ class MainWindow(
         self.search_page.btn_mobile_toggle.style().unpolish(self.search_page.btn_mobile_toggle)
         self.search_page.btn_mobile_toggle.style().polish(self.search_page.btn_mobile_toggle)
         self.search_page.btn_mobile_toggle.update()
-        self.search_page.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
-        self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
-        self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
-        self.search_page.btn_mobile_qr.update()
         self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(is_running))
         self.search_page.btn_mobile_toggle.setToolTip(
             self.texts["mobile_bridge_stop"] if is_running else self.texts["mobile_bridge_start"]
         )
+        self.search_page.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
+        self.search_page.btn_mobile_qr.setProperty("qrState", "visible" if is_running else "hidden")
         self.search_page.btn_mobile_qr.setEnabled(is_running)
+        self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
+        self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
+        self.search_page.btn_mobile_qr.update()
 
     def _mobile_bridge_toggle_text(self, is_running, texts=None):
         t = texts or self.texts
@@ -884,6 +950,16 @@ class MainWindow(
             config = load_config()
             search_mode = str(self.search_page.search_mode.currentData() or DEFAULT_CONFIG["search_mode"])
             config["search_mode"] = search_mode
+            save_config(config)
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _save_search_video_discovery_enabled(self):
+        try:
+            config = load_config()
+            config["search_video_discovery_enabled"] = bool(
+                self.search_page.search_video_discovery_toggle.isChecked()
+            )
             save_config(config)
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)

@@ -344,6 +344,9 @@ class SearchPage(QWidget):
         self.search_precision_toggle = self.search_panel.search_precision_toggle
         self.search_precision_label = self.search_panel.search_precision_label
         self.search_precision_cluster = self.search_panel.search_precision_cluster
+        self.search_video_discovery_toggle = self.search_panel.search_video_discovery_toggle
+        self.search_video_discovery_label = self.search_panel.search_video_discovery_label
+        self.search_video_discovery_cluster = self.search_panel.search_video_discovery_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
@@ -356,6 +359,7 @@ class SearchPage(QWidget):
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row
+        self.search_image_options_group = self.search_panel.search_image_options_group
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
 
@@ -366,8 +370,8 @@ class SearchPage(QWidget):
         self.preview_host_layout = self.preview_panel.preview_host_layout
         self.preview_placeholder = self.preview_panel.preview_placeholder
 
-        compare_row.addWidget(self.search_panel, 5, Qt.AlignmentFlag.AlignTop)
-        compare_row.addWidget(self.preview_panel, 7, Qt.AlignmentFlag.AlignTop)
+        compare_row.addWidget(self.search_panel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        compare_row.addWidget(self.preview_panel, 1, Qt.AlignmentFlag.AlignTop)
         page_body.addLayout(compare_row, 3)
 
         self.results_card = VSCard()

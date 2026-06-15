@@ -56,6 +56,7 @@ class SearchController(QObject):
         preview_anchor_sec=None,
         locate_anchor_score=None,
         locate_score_margin=None,
+        video_discovery_enabled=None,
     ):
         self._stop_active_search_worker()
         self.stop_thumbnail_loading()
@@ -79,6 +80,7 @@ class SearchController(QObject):
             preview_anchor_sec=preview_anchor_sec,
             locate_anchor_score=locate_anchor_score,
             locate_score_margin=locate_score_margin,
+            video_discovery_enabled=video_discovery_enabled,
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
@@ -115,6 +117,10 @@ class SearchController(QObject):
             min_score=query_part.get("default_min_score"),
             search_precision_mode=search_precision_mode,
             pixel_query_data=query_part.get("pixel_query_data"),
+            video_discovery_enabled=self.parent_window._resolve_video_discovery_enabled(
+                is_text=is_text,
+                has_image=has_image,
+            ),
         )
 
     def clear_results(self):

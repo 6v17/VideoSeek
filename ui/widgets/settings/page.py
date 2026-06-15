@@ -172,6 +172,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_min_chunk_size = NoWheelSpinBox()
         self.input_min_chunk_size.setRange(1, 50)
         self.input_chunk_similarity_mode = NoWheelComboBox()
+        self.input_chunk_segmentation_strategy = NoWheelComboBox()
         self.input_prefer_gpu = NoWheelComboBox()
         self.input_experimental_hw_decode = NoWheelComboBox()
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
@@ -240,6 +241,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_max_chunk_duration = ClickableLabel()
         self.label_min_chunk_size = ClickableLabel()
         self.label_chunk_similarity_mode = ClickableLabel()
+        self.label_chunk_segmentation_strategy = ClickableLabel()
         self.label_prefer_gpu = ClickableLabel()
         self.label_experimental_hw_decode = ClickableLabel()
         self.label_gpu_probe_unknown_keep_gpu = ClickableLabel()
@@ -275,6 +277,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_max_chunk_duration = QLabel()
         self.hint_min_chunk_size = QLabel()
         self.hint_chunk_similarity_mode = QLabel()
+        self.hint_chunk_segmentation_strategy = QLabel()
         self.hint_prefer_gpu = QLabel()
         self.hint_experimental_hw_decode = QLabel()
         self.hint_gpu_probe_unknown_keep_gpu = QLabel()
@@ -338,6 +341,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_max_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(
+            self.input_chunk_segmentation_strategy,
+            width=COMPONENT_SIZES["settings_input_width"] + 36,
+        )
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_experimental_hw_decode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
@@ -530,6 +537,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(self.section_index_form, 2, self.label_max_chunk_duration, self.input_max_chunk_duration, self.hint_max_chunk_duration)
         self._add_setting_row(self.section_index_form, 3, self.label_min_chunk_size, self.input_min_chunk_size, self.hint_min_chunk_size)
         self._add_setting_row(self.section_index_form, 4, self.label_chunk_similarity_mode, self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode)
+        self._add_setting_row(
+            self.section_index_form,
+            5,
+            self.label_chunk_segmentation_strategy,
+            self.input_chunk_segmentation_strategy,
+            self.hint_chunk_segmentation_strategy,
+        )
         self._add_setting_row(
             self.section_general_form,
             0,
@@ -862,6 +876,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_max_chunk_duration.setText(texts["setting_max_chunk_duration"])
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
         self.label_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode"])
+        self.label_chunk_segmentation_strategy.setText(texts["setting_chunk_segmentation_strategy"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
         self.label_experimental_hw_decode.setText(texts["setting_experimental_hw_decode"])
         self.label_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu"])
@@ -889,6 +904,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         restore_index = self.input_chunk_similarity_mode.findData(current_chunk_similarity_mode)
         self.input_chunk_similarity_mode.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_chunk_similarity_mode.blockSignals(False)
+        current_chunk_segmentation_strategy = self.input_chunk_segmentation_strategy.currentData()
+        self.input_chunk_segmentation_strategy.blockSignals(True)
+        self.input_chunk_segmentation_strategy.clear()
+        self.input_chunk_segmentation_strategy.addItem(
+            texts["setting_chunk_segmentation_strategy_legacy"],
+            "legacy",
+        )
+        self.input_chunk_segmentation_strategy.addItem(
+            texts["setting_chunk_segmentation_strategy_delta_ema"],
+            "delta_ema",
+        )
+        restore_index = self.input_chunk_segmentation_strategy.findData(current_chunk_segmentation_strategy)
+        self.input_chunk_segmentation_strategy.setCurrentIndex(0 if restore_index < 0 else restore_index)
+        self.input_chunk_segmentation_strategy.blockSignals(False)
         current_prefer_gpu = self.input_prefer_gpu.currentData()
         self.input_prefer_gpu.blockSignals(True)
         self.input_prefer_gpu.clear()
@@ -989,6 +1018,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_max_chunk_duration.setText(texts["setting_max_chunk_duration_hint"])
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
         self.hint_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode_hint"])
+        self.hint_chunk_segmentation_strategy.setText(texts["setting_chunk_segmentation_strategy_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
         self.hint_experimental_hw_decode.setText(texts["setting_experimental_hw_decode_hint"])
         self.hint_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu_hint"])
@@ -1041,6 +1071,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_max_chunk_duration,
             self.label_min_chunk_size,
             self.label_chunk_similarity_mode,
+            self.label_chunk_segmentation_strategy,
             self.label_prefer_gpu,
             self.label_experimental_hw_decode,
             self.label_gpu_probe_unknown_keep_gpu,

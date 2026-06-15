@@ -26,7 +26,8 @@ from src.core.onnx_vision_engine import (
     truncate_log_text as _truncate_log_text,
 )
 from src.core.faiss_index import create_clip_index
-from src.core.semantic_chunking import SemanticChunkStreamBuilder, chunk_config_payload
+from src.core.semantic_chunking import SemanticChunkStreamBuilder
+from src.storage.config_store import build_chunk_config
 from src.storage.asset_store import save_vector_payload
 from src.storage.config_store import (
     get_active_embedding_spec,
@@ -959,12 +960,7 @@ def generate_vectors_and_index_for_video(
     stop_event = threading.Event()
     runtime_config = load_config()
     estimated_frame_total = _estimate_index_frame_total(video_path, config=runtime_config)
-    chunk_config = chunk_config_payload(
-        similarity_threshold=runtime_config.get("similarity_threshold", 0.85),
-        max_chunk_duration=runtime_config.get("max_chunk_duration", 5.0),
-        min_chunk_size=runtime_config.get("min_chunk_size", 2),
-        similarity_mode=runtime_config.get("chunk_similarity_mode", "chunk"),
-    )
+    chunk_config = build_chunk_config(runtime_config)
     chunk_builder = SemanticChunkStreamBuilder(**chunk_config)
     progress_reporter = (
         IndexingProgressReporter(

@@ -1309,8 +1309,24 @@ def _cap_hits_per_video(hits: List[SearchHit], cap: int) -> List[SearchHit]:
     return sorted(capped, key=lambda item: float(item.score), reverse=True)
 
 
-def _use_video_discovery_results(is_text: bool, precise_image: bool, scoped: bool) -> bool:
+def _use_video_discovery_results(
+    is_text: bool,
+    precise_image: bool,
+    scoped: bool,
+    *,
+    video_discovery_enabled: bool = True,
+) -> bool:
+    if not video_discovery_enabled:
+        return False
     return (not is_text) and (not precise_image) and (not scoped)
+
+
+def _resolve_video_discovery_enabled(config, explicit: bool | None) -> bool:
+    if explicit is not None:
+        return bool(explicit)
+    from src.storage.config_store import get_search_video_discovery_enabled
+
+    return get_search_video_discovery_enabled(config)
 
 
 def _aggregate_hits_to_video_discovery(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
@@ -2163,6 +2179,7 @@ def run_search(
     locate_score_margin: float | None = None,
     profile: bool | None = None,
     progress_callback=None,
+    video_discovery_enabled: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
@@ -2196,6 +2213,7 @@ def run_search(
             preview_anchor_sec=preview_anchor_sec,
             locate_anchor_score=locate_anchor_score,
             locate_score_margin=locate_score_margin,
+            video_discovery_enabled=video_discovery_enabled,
         )
     finally:
         clear_search_progress_callback()
@@ -2219,6 +2237,7 @@ def _run_search_impl(
     preview_anchor_sec,
     locate_anchor_score=None,
     locate_score_margin=None,
+    video_discovery_enabled=None,
 ) -> List[SearchHit]:
     with search_profile_session(
         enabled=profile_enabled,
@@ -2239,12 +2258,19 @@ def _run_search_impl(
                 preview_anchor_sec=preview_anchor_sec,
                 locate_anchor_score=locate_anchor_score,
                 locate_score_margin=locate_score_margin,
+                video_discovery_enabled=video_discovery_enabled,
             )
             record_search_profile_result_count(len(results))
             return results
         if top_k is None:
             top_k = get_search_top_k(config)
         scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+        use_video_discovery = _use_video_discovery_results(
+            is_text,
+            precise_image,
+            scoped,
+            video_discovery_enabled=_resolve_video_discovery_enabled(config, video_discovery_enabled),
+        )
         with profile_phase("query_vector"):
             query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
 
@@ -2328,7 +2354,7 @@ def _run_search_impl(
 
         if precise_image:
             fetch_k = _resolve_stage1_global_fetch_k(top_k, config)
-        elif _use_video_discovery_results(is_text, precise_image, scoped):
+        elif use_video_discovery:
             fetch_k = resolve_fetch_top_k(top_k, True)
         else:
             fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text, config, precise_image=precise_image)
@@ -2409,7 +2435,7 @@ def _run_search_impl(
         results = _apply_video_discovery_presentation(
             results,
             top_k,
-            enabled=_use_video_discovery_results(is_text, precise_image, scoped),
+            enabled=use_video_discovery,
         )
         record_search_profile_result_count(len(results))
         return results
@@ -2428,6 +2454,7 @@ def run_chunk_search(
     locate_anchor_score: float | None = None,
     locate_score_margin: float | None = None,
     profile: bool | None = None,
+    video_discovery_enabled: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
@@ -2446,6 +2473,12 @@ def run_chunk_search(
     ):
         if not is_text:
             scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+            use_video_discovery = _use_video_discovery_results(
+                is_text,
+                precise_image,
+                scoped,
+                video_discovery_enabled=_resolve_video_discovery_enabled(config, video_discovery_enabled),
+            )
             if top_k is None:
                 top_k = get_search_top_k(config)
             if precise_image and scoped and scope_video_paths:
@@ -2462,6 +2495,7 @@ def run_chunk_search(
                     preview_anchor_sec=preview_anchor_sec,
                     locate_anchor_score=locate_anchor_score,
                     locate_score_margin=locate_score_margin,
+                    video_discovery_enabled=video_discovery_enabled,
                 )
             else:
                 results = _run_chunk_search_via_frames(
@@ -2479,7 +2513,7 @@ def run_chunk_search(
             results = _apply_video_discovery_presentation(
                 results,
                 top_k,
-                enabled=_use_video_discovery_results(is_text, precise_image, scoped),
+                enabled=use_video_discovery,
             )
             record_search_profile_result_count(len(results))
             return results

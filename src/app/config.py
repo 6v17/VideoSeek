@@ -82,8 +82,15 @@ DEFAULT_CONFIG = {
     "max_chunk_duration": 5.0,
     "min_chunk_size": 2,
     "chunk_similarity_mode": "chunk",
+    "chunk_segmentation_strategy": "legacy",
+    "chunk_delta_ema_alpha": 0.35,
+    "chunk_delta_high_threshold": 0.15,
+    "chunk_delta_low_threshold": 0.08,
+    "chunk_delta_rise_frames": 2,
+    "chunk_delta_stable_frames": 2,
     "search_mode": "frame",
     "search_precision_mode": "fast",
+    "search_video_discovery_enabled": True,
     "search_scope_mode": "all",
     "search_scope_library_paths": [],
     "search_scope_video_paths": [],
@@ -107,6 +114,7 @@ DEFAULT_CONFIG = {
     "show_debug_test_buttons": False,
     "theme": "dark",
     "language": "zh",
+    "update_notice_dismissed_version": "",
 }
 
 CONFIG_BOUNDS = {
@@ -134,6 +142,11 @@ CONFIG_BOUNDS = {
     "similarity_threshold": (0.1, 1.0),
     "max_chunk_duration": (1.0, 60.0),
     "min_chunk_size": (1, 50),
+    "chunk_delta_ema_alpha": (0.05, 0.95),
+    "chunk_delta_high_threshold": (0.01, 0.8),
+    "chunk_delta_low_threshold": (0.01, 0.8),
+    "chunk_delta_rise_frames": (1, 12),
+    "chunk_delta_stable_frames": (1, 12),
 }
 
 CONFIG_INT_KEYS = {
@@ -150,10 +163,13 @@ CONFIG_INT_KEYS = {
     "remote_max_frames",
     "embedding_batch_size",
     "min_chunk_size",
+    "chunk_delta_rise_frames",
+    "chunk_delta_stable_frames",
 }
 
 CONFIG_ENUMS = {
     "chunk_similarity_mode": {"chunk", "frame"},
+    "chunk_segmentation_strategy": {"legacy", "delta_ema"},
     "search_mode": {"frame", "chunk"},
     "search_precision_mode": {"fast", "precise"},
     "image_pixel_rerank_probe_mode": {"index", "fixed"},
@@ -393,6 +409,13 @@ def _sanitize_general_settings(config):
     sanitized["show_debug_test_buttons"] = _coerce_bool(
         sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
         DEFAULT_CONFIG["show_debug_test_buttons"],
+    )
+    sanitized["search_video_discovery_enabled"] = _coerce_bool(
+        sanitized.get(
+            "search_video_discovery_enabled",
+            DEFAULT_CONFIG["search_video_discovery_enabled"],
+        ),
+        DEFAULT_CONFIG["search_video_discovery_enabled"],
     )
     raw_scope_paths = sanitized.get("search_scope_library_paths", DEFAULT_CONFIG["search_scope_library_paths"])
     if not isinstance(raw_scope_paths, list):
