@@ -52,6 +52,18 @@ def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
         "remote_vector_file": os.path.join(storage_dir, "remote", "remote_vectors.npy"),
     }
 
+DEFAULT_UNDERSTANDING_CONFIG = {
+    "active_profile": "vision_baseline_v1",
+    "profiles": [
+        {
+            "id": "vision_baseline_v1",
+            "display_name": "视觉基础版",
+            "profile_dir": "vision_baseline_v1",
+            "enabled": True,
+        }
+    ],
+}
+
 DEFAULT_CONFIG = {
     "fps": 1,
     "sampling_fps_mode": "dynamic",
@@ -115,6 +127,7 @@ DEFAULT_CONFIG = {
     "theme": "dark",
     "language": "zh",
     "update_notice_dismissed_version": "",
+    "understanding": DEFAULT_UNDERSTANDING_CONFIG,
 }
 
 CONFIG_BOUNDS = {
@@ -363,6 +376,49 @@ def _coerce_bool(raw_value, default_value):
     return bool(raw_value)
 
 
+def _sanitize_understanding_settings(config):
+    sanitized = dict(config)
+    raw_understanding = sanitized.get("understanding")
+    if not isinstance(raw_understanding, dict):
+        raw_understanding = {}
+
+    profiles = raw_understanding.get("profiles")
+    if not isinstance(profiles, list) or not profiles:
+        profiles = [dict(item) for item in DEFAULT_UNDERSTANDING_CONFIG["profiles"]]
+
+    normalized_profiles = []
+    seen_ids = set()
+    for item in profiles:
+        if not isinstance(item, dict):
+            continue
+        profile_id = str(item.get("id", "") or "").strip()
+        if not profile_id or profile_id in seen_ids:
+            continue
+        profile_dir = str(item.get("profile_dir", "") or profile_id).strip() or profile_id
+        normalized_profiles.append(
+            {
+                "id": profile_id,
+                "display_name": str(item.get("display_name", "") or profile_id).strip() or profile_id,
+                "profile_dir": profile_dir,
+                "enabled": _coerce_bool(item.get("enabled", True), True),
+            }
+        )
+        seen_ids.add(profile_id)
+
+    if not normalized_profiles:
+        normalized_profiles = [dict(item) for item in DEFAULT_UNDERSTANDING_CONFIG["profiles"]]
+
+    active_profile = str(raw_understanding.get("active_profile", "") or "").strip()
+    if not active_profile or not any(item["id"] == active_profile for item in normalized_profiles):
+        active_profile = normalized_profiles[0]["id"]
+
+    sanitized["understanding"] = {
+        "active_profile": active_profile,
+        "profiles": normalized_profiles,
+    }
+    return sanitized
+
+
 def _sanitize_general_settings(config):
     sanitized = dict(config)
 
@@ -505,6 +561,7 @@ def load_config():
             is_legacy_config=os.path.normpath(config_path) == os.path.normpath(LEGACY_CONFIG_FILE),
         )
         config = _sanitize_sampling_settings(config)
+        config = _sanitize_understanding_settings(config)
         config = _sanitize_general_settings(config)
         config = _migrate_legacy_storage_if_needed(config)
         # Migrate legacy cap from old builds; 300 causes long videos to look capped at ~299s.
@@ -530,7 +587,7 @@ def save_config(config):
     raw_config = dict(config)
     has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
     has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
-    config = _sanitize_sampling_settings(_apply_default_values(raw_config))
+    config = _sanitize_understanding_settings(_sanitize_sampling_settings(_apply_default_values(raw_config)))
     if has_explicit_data_root:
         config = _normalize_data_root(config, os.path.dirname(CONFIG_FILE))
         config = _apply_data_root_storage_paths(config)
