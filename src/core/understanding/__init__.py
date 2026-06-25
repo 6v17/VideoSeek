@@ -5,6 +5,11 @@ from src.core.understanding.types import (
     UnderstandingTask,
     normalize_enum_value,
 )
+from src.core.understanding.registry import (
+    build_understanding_component,
+    infer_installed_component,
+    register_understanding_component,
+)
 
 __all__ = [
     "UnderstandingInputKind",
@@ -12,4 +17,7 @@ __all__ = [
     "UnderstandingOutputKind",
     "UnderstandingTask",
     "normalize_enum_value",
+    "build_understanding_component",
+    "infer_installed_component",
+    "register_understanding_component",
 ]

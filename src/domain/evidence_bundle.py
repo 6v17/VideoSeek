@@ -123,11 +123,18 @@ class EvidenceProvenance:
 
 
 @dataclass(frozen=True)
+class VideoSummary:
+    text: str
+    source: str = "remote_vlm"
+
+
+@dataclass(frozen=True)
 class EvidenceBundle:
     schema_version: int
     video: EvidenceVideo
     provenance: EvidenceProvenance
     chunks: tuple[EvidenceChunk, ...]
+    summary: VideoSummary | None = None
 
 
 def _parse_bbox(raw_bbox: object, field_name: str) -> tuple[float, float, float, float]:
@@ -218,6 +225,16 @@ def _parse_video(raw_value: object) -> EvidenceVideo:
     )
 
 
+def _parse_summary(raw_value: object) -> VideoSummary | None:
+    if raw_value is None:
+        return None
+    payload = _require_mapping(raw_value, "summary")
+    return VideoSummary(
+        text=_require_text(payload.get("text"), "summary.text"),
+        source=str(payload.get("source", "remote_vlm") or "remote_vlm"),
+    )
+
+
 def _parse_provenance(raw_value: object) -> EvidenceProvenance:
     payload = _require_mapping(raw_value, "provenance")
     components_payload = _require_mapping(payload.get("components"), "provenance.components")
@@ -270,6 +287,7 @@ def validate_evidence_bundle(payload: Mapping[str, Any]) -> EvidenceBundle:
         video=_parse_video(data.get("video")),
         provenance=_parse_provenance(data.get("provenance")),
         chunks=chunks,
+        summary=_parse_summary(data.get("summary")),
     )
 
 
@@ -319,12 +337,18 @@ def evidence_bundle_to_dict(bundle: EvidenceBundle) -> dict[str, Any]:
         "keyframe_strategy": bundle.provenance.keyframe_strategy,
         "generated_at": bundle.provenance.generated_at,
     }
-    return {
+    payload = {
         "schema_version": bundle.schema_version,
         "video": video_payload,
         "provenance": provenance_payload,
         "chunks": chunks,
     }
+    if bundle.summary is not None:
+        payload["summary"] = {
+            "text": bundle.summary.text,
+            "source": bundle.summary.source,
+        }
+    return payload
 
 
 def chunks_overlapping_time_window(

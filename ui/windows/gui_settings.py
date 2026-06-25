@@ -204,6 +204,8 @@ class SettingsGuiMixin:
         self._refresh_agent_api_status()
         if hasattr(self, "_refresh_search_precision_controls"):
             self._refresh_search_precision_controls()
+        if hasattr(self, "load_understanding_settings"):
+            self.load_understanding_settings()
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -518,6 +520,8 @@ class SettingsGuiMixin:
                     self.settings_page.input_ffmpeg_path.setText(synced_path)
             self.check_runtime_resources(show_dialog=False)
             self.push_inference_status()
+            if hasattr(self, "_refresh_understanding_ui"):
+                self._refresh_understanding_ui()
             self._update_sampling_preview()
             if profile_switched:
                 self.refresh_library_table()
@@ -650,6 +654,8 @@ class SettingsGuiMixin:
             synced_model_dir = sync_model_dir_to_config()
             synced_path = sync_ffmpeg_path_to_config()
             self.load_settings_values()
+            if hasattr(self, "load_understanding_settings"):
+                self.load_understanding_settings()
             if synced_model_dir:
                 self.settings_page.input_model_dir.setText(synced_model_dir)
             if synced_path:

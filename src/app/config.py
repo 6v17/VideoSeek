@@ -62,6 +62,16 @@ DEFAULT_UNDERSTANDING_CONFIG = {
             "enabled": True,
         }
     ],
+    "remote_vlm": {
+        "base_url": "http://127.0.0.1:1234/v1",
+        "model": "qwen3-vl-8b-instruct",
+        "caption_language": "zh",
+        "prompt": (
+            "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
+        ),
+        "timeout_sec": 120,
+        "max_tokens": 128,
+    },
 }
 
 DEFAULT_CONFIG = {
@@ -412,9 +422,17 @@ def _sanitize_understanding_settings(config):
     if not active_profile or not any(item["id"] == active_profile for item in normalized_profiles):
         active_profile = normalized_profiles[0]["id"]
 
+    raw_remote_vlm = raw_understanding.get("remote_vlm")
+    if not isinstance(raw_remote_vlm, dict):
+        raw_remote_vlm = {}
+    from src.services.understanding_resource_service import finalize_remote_vlm_settings
+
+    remote_vlm = finalize_remote_vlm_settings(raw_remote_vlm)
+
     sanitized["understanding"] = {
         "active_profile": active_profile,
         "profiles": normalized_profiles,
+        "remote_vlm": remote_vlm,
     }
     return sanitized
 

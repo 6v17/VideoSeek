@@ -12,6 +12,7 @@ PROFILES_DIR_NAME = "profiles"
 EVIDENCE_DIR_NAME = "evidence"
 EVIDENCE_VIDEOS_DIR_NAME = "videos"
 BUILTIN_PROFILES_RELPATH = os.path.join("resources", "understanding_profiles")
+BUILTIN_COMPONENTS_RELPATH = os.path.join("resources", "understanding_components")
 COMPONENT_ID_PATTERN = re.compile(
     r"^(?P<modality>[a-z][a-z0-9_]*)/(?P<task>[a-z][a-z0-9_]*)/(?P<model_id>[a-z0-9][a-z0-9_-]*)$"
 )
@@ -100,6 +101,27 @@ def get_profile_manifest_path(profile_id: str, model_dir: str | None = None) -> 
 
 def get_builtin_profiles_dir() -> str:
     return os.path.normpath(get_resource_path(BUILTIN_PROFILES_RELPATH))
+
+
+def get_builtin_components_dir() -> str:
+    return os.path.normpath(get_resource_path(BUILTIN_COMPONENTS_RELPATH))
+
+
+def get_builtin_component_manifest_path(component_id: str) -> str | None:
+    try:
+        modality, task, model_id = parse_component_id(component_id)
+    except ValueError:
+        return None
+    manifest_path = os.path.join(
+        get_builtin_components_dir(),
+        modality,
+        task,
+        model_id,
+        "understanding_manifest.json",
+    )
+    if os.path.isfile(manifest_path):
+        return os.path.normpath(manifest_path)
+    return None
 
 
 def get_evidence_root(config=None) -> str:

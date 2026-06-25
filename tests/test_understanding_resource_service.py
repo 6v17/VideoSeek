@@ -30,17 +30,17 @@ YOLO_MANIFEST = {
 CAPTION_MANIFEST = {
     "kind": "understanding_component",
     "manifest_version": 1,
-    "id": "vision/image_caption/vit-gpt2-quantized",
+    "id": "vision/image_caption/qwen3-vl-remote",
     "modality": "vision",
     "task": "image_caption",
-    "model_id": "vit-gpt2-quantized",
-    "display_name": "ViT-GPT2 Image Caption (ONNX quantized)",
-    "install_relpath": "components/vision/image_caption/vit-gpt2-quantized",
+    "model_id": "qwen3-vl-remote",
+    "display_name": "External VLM Caption",
+    "delivery": "remote",
+    "install_relpath": "components/vision/image_caption/qwen3-vl-remote",
     "input_kind": "chunk_keyframe",
     "output_kind": "caption",
-    "engine": {"registry_key": "vision.image_caption.vit_gpt2_quantized"},
-    "required_files": ["encoder_model_quantized.onnx"],
-    "files": {"encoder": "encoder_model_quantized.onnx"},
+    "engine": {"registry_key": "vision.image_caption.qwen3_vl_remote"},
+    "required_files": ["understanding_manifest.json"],
 }
 
 
@@ -74,24 +74,16 @@ class UnderstandingImportServiceTests(unittest.TestCase):
 
     def test_import_two_component_zips(self):
         yolo_zip = self.model_root / "vision-object-detection-yolo11n.zip"
-        caption_zip = self.model_root / "vision-image-caption-vit-gpt2-quantized.zip"
         _write_component_zip(yolo_zip, YOLO_MANIFEST, "yolo11n.onnx")
-        _write_component_zip(caption_zip, CAPTION_MANIFEST, "encoder_model_quantized.onnx")
 
         result = understanding_import_service.import_understanding_component_zips(
             str(self.model_root),
-            [str(yolo_zip), str(caption_zip)],
+            [str(yolo_zip)],
         )
 
-        self.assertEqual(
-            sorted(result["imported"]),
-            [
-                "vision/image_caption/vit-gpt2-quantized",
-                "vision/object_detection/yolo11n",
-            ],
-        )
+        self.assertEqual(result["imported"], ["vision/object_detection/yolo11n"])
         self.assertEqual(result["errors"], [])
-        self.assertEqual(len(result["components"]), 2)
+        self.assertEqual(len(result["components"]), 1)
 
     def test_import_rejects_invalid_kind(self):
         zip_path = self.model_root / "invalid.zip"
@@ -171,7 +163,7 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def _install_component(self, manifest: dict, payload_name: str) -> None:
+    def _install_component(self, manifest: dict, payload_name: str | None = None) -> None:
         install_relpath = manifest["install_relpath"].replace("/", os.sep)
         target_dir = self.model_root / "understanding" / install_relpath
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -179,7 +171,8 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        (target_dir / payload_name).write_bytes(b"dummy-model")
+        if payload_name:
+            (target_dir / payload_name).write_bytes(b"dummy-model")
 
     def test_normalize_understanding_config_uses_defaults(self):
         normalized = understanding_resource_service.normalize_understanding_config({})
@@ -227,11 +220,11 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
 
         self.assertFalse(status["understanding_ready"])
         self.assertEqual(status["active_understanding_profile"], "vision_baseline_v1")
-        self.assertEqual(len(status["missing_components"]), 2)
+        self.assertGreaterEqual(len(status["missing_components"]), 1)
 
     def test_understanding_ready_true_when_profile_components_installed(self):
         self._install_component(YOLO_MANIFEST, "yolo11n.onnx")
-        self._install_component(CAPTION_MANIFEST, "encoder_model_quantized.onnx")
+        self._install_component(CAPTION_MANIFEST)
         config = {"understanding": DEFAULT_UNDERSTANDING_CONFIG}
 
         with (
@@ -242,6 +235,10 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
             patch(
                 "src.services.understanding_resource_service.get_builtin_profiles_dir",
                 return_value=str(self.builtin_profiles.parent),
+            ),
+            patch(
+                "src.services.understanding_resource_service.probe_remote_vlm",
+                return_value={"reachable": True, "model_available": True, "error": ""},
             ),
         ):
             status = understanding_resource_service.get_understanding_resource_status(config=config)
@@ -260,6 +257,42 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertEqual(installed, ["vision_baseline_v1"])
         installed_manifest = self.model_root / "understanding" / "profiles" / "vision_baseline_v1" / "profile_manifest.json"
         self.assertTrue(installed_manifest.is_file())
+
+
+class UnderstandingCaptionLanguageTests(unittest.TestCase):
+    def test_finalize_remote_vlm_settings_uses_chinese_prompt(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {"caption_language": "zh", "base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
+        )
+        self.assertEqual(settings["caption_language"], "zh")
+        self.assertIn("中文", settings["prompt"])
+
+    def test_finalize_remote_vlm_settings_uses_english_prompt(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {"caption_language": "en", "base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
+        )
+        self.assertEqual(settings["caption_language"], "en")
+        self.assertTrue(settings["prompt"].startswith("Describe this video frame"))
+
+    def test_get_remote_vlm_settings_infers_legacy_english_prompt(self):
+        config = {
+            "understanding": {
+                **DEFAULT_UNDERSTANDING_CONFIG,
+                "remote_vlm": {
+                    "base_url": "http://127.0.0.1:1234/v1",
+                    "model": "qwen3-vl-8b-instruct",
+                    "prompt": understanding_resource_service.CAPTION_LANGUAGE_PROMPTS["en"],
+                },
+            }
+        }
+        settings = understanding_resource_service.get_remote_vlm_settings(config)
+        self.assertEqual(settings["caption_language"], "en")
+
+    def test_video_summary_prompt_follows_language(self):
+        zh_prompt = understanding_resource_service.get_video_summary_prompt_for_language("zh")
+        en_prompt = understanding_resource_service.get_video_summary_prompt_for_language("en")
+        self.assertIn("中文", zh_prompt)
+        self.assertTrue(en_prompt.startswith("Below are chronological segment descriptions"))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ from src.core.understanding.types import (
 from src.services.understanding_paths import (
     build_component_id,
     build_component_install_relpath,
+    get_builtin_component_manifest_path,
+    get_builtin_components_dir,
     get_builtin_profiles_dir,
     get_component_dir,
     get_component_manifest_path,
@@ -43,9 +45,97 @@ DEFAULT_UNDERSTANDING_PROFILES = [
     }
 ]
 
+DEFAULT_REMOTE_VLM_CONFIG = {
+    "base_url": "http://127.0.0.1:1234/v1",
+    "model": "qwen3-vl-8b-instruct",
+    "caption_language": "zh",
+    "prompt": (
+        "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
+    ),
+    "timeout_sec": 120,
+    "max_tokens": 128,
+}
+
+CAPTION_LANGUAGE_ZH = "zh"
+CAPTION_LANGUAGE_EN = "en"
+SUPPORTED_CAPTION_LANGUAGES = {CAPTION_LANGUAGE_ZH, CAPTION_LANGUAGE_EN}
+CAPTION_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: (
+        "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
+    ),
+    CAPTION_LANGUAGE_EN: (
+        "Describe this video frame in one or two concise sentences. "
+        "Focus on visible people, objects, actions, and setting."
+    ),
+}
+VIDEO_SUMMARY_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: (
+        "以下是一个视频按时间顺序各段的画面描述。请用一段简洁的中文总结整个视频的主要内容、"
+        "情节或主题，不要逐段复述，不要输出分析过程。"
+    ),
+    CAPTION_LANGUAGE_EN: (
+        "Below are chronological segment descriptions of a video. "
+        "Write one concise paragraph summarizing the overall content, story, or theme. "
+        "Do not repeat each segment line by line."
+    ),
+}
+
+
+def normalize_caption_language(value, *, default: str = CAPTION_LANGUAGE_ZH) -> str:
+    text = str(value or "").strip().lower()
+    if text in SUPPORTED_CAPTION_LANGUAGES:
+        return text
+    fallback = str(default or CAPTION_LANGUAGE_ZH).strip().lower()
+    return fallback if fallback in SUPPORTED_CAPTION_LANGUAGES else CAPTION_LANGUAGE_ZH
+
+
+def get_caption_prompt_for_language(language: str) -> str:
+    return CAPTION_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def get_video_summary_prompt_for_language(language: str) -> str:
+    return VIDEO_SUMMARY_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> str:
+    explicit = str(raw_remote_vlm.get("caption_language", "") or "").strip()
+    if explicit:
+        return normalize_caption_language(explicit)
+    prompt = str(raw_remote_vlm.get("prompt", "") or "").strip()
+    if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] or prompt.startswith("Describe this video frame"):
+        return CAPTION_LANGUAGE_EN
+    if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_ZH] or any(token in prompt for token in ("中文", "视频帧")):
+        return CAPTION_LANGUAGE_ZH
+    return CAPTION_LANGUAGE_EN if prompt and "Describe" in prompt else CAPTION_LANGUAGE_ZH
+
+
+def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(raw_remote_vlm, dict):
+        raw_remote_vlm = {}
+    remote_vlm = dict(DEFAULT_REMOTE_VLM_CONFIG)
+    base_url = str(raw_remote_vlm.get("base_url", "") or remote_vlm["base_url"]).strip()
+    if base_url:
+        remote_vlm["base_url"] = base_url
+    model = str(raw_remote_vlm.get("model", "") or remote_vlm["model"]).strip()
+    if model:
+        remote_vlm["model"] = model
+    language = resolve_remote_vlm_caption_language(raw_remote_vlm)
+    remote_vlm["caption_language"] = language
+    remote_vlm["prompt"] = get_caption_prompt_for_language(language)
+    try:
+        remote_vlm["timeout_sec"] = max(5.0, float(raw_remote_vlm.get("timeout_sec", remote_vlm["timeout_sec"])))
+    except (TypeError, ValueError):
+        remote_vlm["timeout_sec"] = float(DEFAULT_REMOTE_VLM_CONFIG["timeout_sec"])
+    try:
+        remote_vlm["max_tokens"] = max(16, min(512, int(raw_remote_vlm.get("max_tokens", remote_vlm["max_tokens"]))))
+    except (TypeError, ValueError):
+        remote_vlm["max_tokens"] = int(DEFAULT_REMOTE_VLM_CONFIG["max_tokens"])
+    return remote_vlm
+
 DEFAULT_UNDERSTANDING_CONFIG = {
     "active_profile": "vision_baseline_v1",
     "profiles": list(DEFAULT_UNDERSTANDING_PROFILES),
+    "remote_vlm": dict(DEFAULT_REMOTE_VLM_CONFIG),
 }
 
 
@@ -115,9 +205,12 @@ def validate_component_manifest(
     _require_text(engine.get("registry_key"), "engine.registry_key")
 
     required_files = data.get("required_files")
-    if not isinstance(required_files, list) or not required_files:
-        raise UnderstandingManifestError("required_files must be a non-empty list")
+    delivery = str(data.get("delivery", "local") or "local").strip().lower()
+    if not isinstance(required_files, list):
+        raise UnderstandingManifestError("required_files must be a list")
     normalized_required = [_require_text(name, f"required_files[{index}]") for index, name in enumerate(required_files)]
+    if delivery != "remote" and not normalized_required:
+        raise UnderstandingManifestError("required_files must be a non-empty list")
 
     if component_dir:
         missing = [
@@ -222,9 +315,13 @@ def normalize_understanding_config(config: Mapping[str, Any] | None = None) -> d
     if not any(item["id"] == active_profile for item in normalized_profiles):
         active_profile = normalized_profiles[0]["id"]
 
+    raw_remote_vlm = raw_understanding.get("remote_vlm")
+    remote_vlm = finalize_remote_vlm_settings(raw_remote_vlm)
+
     understanding = {
         "active_profile": active_profile,
         "profiles": normalized_profiles,
+        "remote_vlm": remote_vlm,
     }
     cfg["understanding"] = understanding
     return cfg
@@ -311,6 +408,64 @@ def _iter_builtin_profile_manifest_paths() -> list[str]:
     return found
 
 
+def _iter_builtin_component_manifest_paths() -> list[str]:
+    components_root = get_builtin_components_dir()
+    if not os.path.isdir(components_root):
+        return []
+    found: list[str] = []
+    for current_root, _dirs, files in os.walk(components_root):
+        if UNDERSTANDING_MANIFEST_FILENAME in files:
+            found.append(os.path.join(current_root, UNDERSTANDING_MANIFEST_FILENAME))
+    return sorted(found)
+
+
+def get_remote_vlm_settings(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    normalized = normalize_understanding_config(config)
+    return dict(normalized["understanding"].get("remote_vlm") or DEFAULT_REMOTE_VLM_CONFIG)
+
+
+def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: float = 3.0) -> dict[str, Any]:
+    import urllib.error
+    import urllib.request
+
+    settings = get_remote_vlm_settings(config)
+    base_url = str(settings.get("base_url", "") or "").strip().rstrip("/")
+    model = str(settings.get("model", "") or "").strip()
+    if not base_url:
+        return {"reachable": False, "model_available": False, "error": "base_url is not configured"}
+    if not model:
+        return {"reachable": False, "model_available": False, "error": "model is not configured"}
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1" if not base_url.endswith("/v1/") else base_url.rstrip("/")
+
+    request = urllib.request.Request(
+        f"{base_url}/models",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=max(1.0, float(timeout_sec))) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        return {"reachable": False, "model_available": False, "error": str(getattr(exc, "reason", exc) or exc)}
+    except TimeoutError:
+        return {"reachable": False, "model_available": False, "error": f"timed out after {timeout_sec:.0f}s"}
+    except json.JSONDecodeError as exc:
+        return {"reachable": False, "model_available": False, "error": f"invalid JSON from /models: {exc}"}
+
+    model_ids = {
+        str(item.get("id", "") or "").strip()
+        for item in (payload.get("data") or [])
+        if isinstance(item, dict)
+    }
+    return {
+        "reachable": True,
+        "model_available": model in model_ids,
+        "available_models": sorted(model_ids),
+        "error": "" if model in model_ids else f"model {model!r} not listed by server",
+    }
+
+
 def load_profile_manifest(profile_id: str, model_dir: str | None = None) -> dict[str, Any]:
     profile_text = str(profile_id or "").strip()
     if not profile_text:
@@ -355,12 +510,52 @@ def ensure_understanding_profiles_installed(model_dir: str | None = None) -> lis
     return installed
 
 
+def ensure_understanding_components_installed(model_dir: str | None = None) -> list[str]:
+    import shutil
+
+    installed: list[str] = []
+    resolved_model_dir = _resolve_model_dir(model_dir)
+    components_root = get_understanding_components_root(resolved_model_dir)
+    os.makedirs(components_root, exist_ok=True)
+
+    for manifest_path in _iter_builtin_component_manifest_paths():
+        manifest = validate_component_manifest(
+            _read_json_file(manifest_path),
+            component_dir=os.path.dirname(manifest_path),
+        )
+        component_id = manifest["id"]
+        target_manifest = get_component_manifest_path(component_id, model_dir=resolved_model_dir)
+        if os.path.isfile(target_manifest):
+            continue
+        source_dir = os.path.dirname(manifest_path)
+        target_dir = get_component_dir(component_id, model_dir=resolved_model_dir)
+        os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+        if os.path.isdir(target_dir):
+            shutil.rmtree(target_dir)
+        shutil.copytree(source_dir, target_dir)
+        installed.append(component_id)
+    return installed
+
+
 def get_required_component_ids(profile_manifest: Mapping[str, Any]) -> list[str]:
     requires = _require_mapping(profile_manifest.get("requires"), "requires")
     components = requires.get("components")
     if not isinstance(components, list):
         raise UnderstandingManifestError("requires.components must be a list")
     return [_require_text(item, "requires.components") for item in components]
+
+
+def _component_delivery(component_id: str, model_dir: str | None = None) -> str:
+    manifest_path = get_component_manifest_path(component_id, model_dir=model_dir)
+    if not os.path.isfile(manifest_path):
+        manifest_path = get_builtin_component_manifest_path(component_id) or ""
+    if not manifest_path or not os.path.isfile(manifest_path):
+        return "local"
+    try:
+        manifest = validate_component_manifest(_read_json_file(manifest_path))
+    except Exception:
+        return "local"
+    return str(manifest.get("delivery", "local") or "local").strip().lower()
 
 
 def get_missing_components_for_profile(
@@ -376,7 +571,15 @@ def get_missing_components_for_profile(
         for item in scan_understanding_components(model_dir=model_dir)
         if item.get("installed")
     }
-    return [component_id for component_id in required_ids if component_id not in installed]
+    missing = [component_id for component_id in required_ids if component_id not in installed]
+
+    remote_probe = probe_remote_vlm(config, timeout_sec=3.0)
+    remote_ok = bool(remote_probe.get("reachable")) and bool(remote_probe.get("model_available"))
+    if not remote_ok:
+        for component_id in required_ids:
+            if _component_delivery(component_id, model_dir=model_dir) == "remote" and component_id not in missing:
+                missing.append(component_id)
+    return missing
 
 
 def get_understanding_resource_status(
@@ -386,13 +589,12 @@ def get_understanding_resource_status(
     normalized_config = normalize_understanding_config(config)
     active_profile_id = get_active_understanding_profile_id(normalized_config)
     resolved_model_dir = str(model_dir or get_configured_model_dir() or "").strip()
-    components = scan_understanding_components(model_dir=resolved_model_dir or None)
-    installed_components = [item["id"] for item in components if item.get("installed")]
 
     missing_components: list[str] = []
     profile_error = ""
     try:
         ensure_understanding_profiles_installed(model_dir=resolved_model_dir or None)
+        ensure_understanding_components_installed(model_dir=resolved_model_dir or None)
         missing_components = get_missing_components_for_profile(
             active_profile_id,
             config=normalized_config,
@@ -402,6 +604,9 @@ def get_understanding_resource_status(
         profile_error = str(exc)
         missing_components = []
 
+    components = scan_understanding_components(model_dir=resolved_model_dir or None)
+    installed_components = [item["id"] for item in components if item.get("installed")]
+    remote_vlm = probe_remote_vlm(normalized_config, timeout_sec=3.0)
     understanding_ready = not profile_error and not missing_components
     return {
         "understanding_ready": understanding_ready,
@@ -411,6 +616,7 @@ def get_understanding_resource_status(
         "missing_components": missing_components,
         "components": components,
         "profile_error": profile_error,
+        "remote_vlm": remote_vlm,
     }
 
 

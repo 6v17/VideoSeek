@@ -45,10 +45,12 @@ from ui.widgets.components import (
     LinkSearchPage,
     NavigationSidebar,
     SearchPage,
+    UnderstandingEvidencePage,
 )
 from ui.widgets.settings import SettingsPage
 from ui.dialogs import AboutDialog, AppMessageDialog, MobileBridgeDialog, NoticeDialog
 from ui.controllers.indexing_controller import IndexingController
+from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
@@ -60,6 +62,7 @@ from ui.widgets.styles import DARK_STYLE, LIGHT_STYLE
 from ui.windows.gui_settings import SettingsGuiMixin
 from ui.windows.gui_preview import PreviewGuiMixin
 from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
+from ui.windows.gui_understanding import UnderstandingGuiMixin
 from ui.windows.gui_vector_network import VectorNetworkGuiMixin
 from ui.windows.gui_runtime import RuntimeGuiMixin
 from ui.windows.gui_model_packages import ModelPackagesGuiMixin
@@ -79,6 +82,7 @@ class MainWindow(
     SettingsGuiMixin,
     PreviewGuiMixin,
     LibraryIndexingGuiMixin,
+    UnderstandingGuiMixin,
     VectorNetworkGuiMixin,
     RuntimeGuiMixin,
     AppUiStateMixin,
@@ -90,7 +94,7 @@ class MainWindow(
 ):
     """Sidebar / stacked widget order: local search → library → remote link → settings."""
 
-    _NAV_PAGE_ORDER = ("search", "library", "link", "settings")
+    _NAV_PAGE_ORDER = ("search", "library", "understanding", "link", "settings")
 
     def __init__(self):
         super().__init__()
@@ -140,6 +144,11 @@ class MainWindow(
         self.indexing_controller.runtime_status_changed.connect(self.push_inference_status)
         self.indexing_controller.error_occurred.connect(self._handle_indexing_error)
         self.indexing_controller.finished.connect(self._finish_indexing)
+        self.understanding_controller = UnderstandingController(self)
+        self.understanding_controller.status_changed.connect(self._update_understanding_progress)
+        self.understanding_controller.error_occurred.connect(self._handle_understanding_error)
+        self.understanding_controller.chunk_completed.connect(self._handle_understanding_chunk_completed)
+        self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
         self.network_search_controller = NetworkSearchController(self)
@@ -202,9 +211,11 @@ class MainWindow(
         self.search_page = SearchPage()
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
+        self.understanding_page = UnderstandingEvidencePage()
         self.settings_page = SettingsPage()
         self.pages.addWidget(self._build_scroll_page(self.search_page))
         self.pages.addWidget(self._build_scroll_page(self.library_page))
+        self.pages.addWidget(self._build_scroll_page(self.understanding_page))
         self.pages.addWidget(self._build_scroll_page(self.link_page))
         self.pages.addWidget(self.settings_page)
         content_layout.addWidget(self.pages)
@@ -230,6 +241,7 @@ class MainWindow(
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
+        self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)
         self.sidebar.btn_language.clicked.connect(self.toggle_language)
@@ -270,6 +282,20 @@ class MainWindow(
         self.library_page.btn_debug_gpu_oom.clicked.connect(self.start_debug_gpu_oom)
         self.library_page.btn_debug_system_oom.clicked.connect(self.start_debug_system_oom)
 
+        self.understanding_page.btn_generate_evidence.clicked.connect(self.start_generate_understanding_evidence)
+        self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
+        self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
+        self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
+        self.understanding_page.btn_stop.clicked.connect(self.stop_understanding_generation)
+        self.understanding_page.btn_save_config.clicked.connect(self.save_understanding_settings)
+        self.understanding_page.btn_import_understanding_model.clicked.connect(self.open_runtime_resource_dialog)
+        self.understanding_page.scope_combo.currentIndexChanged.connect(self._on_understanding_scope_changed)
+        self.understanding_page.video_combo.currentIndexChanged.connect(self._on_understanding_video_changed)
+        self.understanding_page.chunk_timeline.chunk_clicked.connect(self._on_understanding_chunk_clicked)
+        self.understanding_page.chunk_timeline.chunk_double_clicked.connect(self._on_understanding_chunk_double_clicked)
+        self._understanding_chunk_payloads = {}
+        self._understanding_index_chunks = []
+
         self.settings_page.btn_save.clicked.connect(self.save_settings)
         self.settings_page.btn_reset.clicked.connect(self.reset_settings)
         self.settings_page.btn_edit_sampling_rules.clicked.connect(self._open_sampling_rules_dialog)
@@ -288,7 +314,7 @@ class MainWindow(
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
 
         self.setAcceptDrops(True)
-        for page in (self.search_page, self.link_page, self.library_page, self.settings_page):
+        for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
             page.header.runtime_banner_action.clicked.connect(self.open_runtime_resource_dialog)
 
     def _build_scroll_page(self, page_widget):
@@ -316,6 +342,12 @@ class MainWindow(
         if page_name == "settings":
             self._refresh_agent_api_status()
             self.refresh_search_telemetry_panel()
+        if page_name == "understanding":
+            if hasattr(self, "load_understanding_settings"):
+                self.load_understanding_settings()
+            if hasattr(self, "_refresh_understanding_scope_options"):
+                self._refresh_understanding_scope_options()
+            self._refresh_understanding_ui()
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -346,6 +378,7 @@ class MainWindow(
         self.sidebar.btn_page_search.setText(t["nav_search"])
         self.sidebar.btn_page_link.setText(t["nav_link"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
+        self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
         self.sidebar.btn_notice.setText(
             t["notice_short_update"]
@@ -445,6 +478,37 @@ class MainWindow(
         self.library_page.btn_debug_system_oom.setVisible(getattr(self, "_debug_tools_enabled", False))
         self._apply_index_issue_button_state(bool(self._last_index_issues))
 
+        self.understanding_page.header.title.setText(t["understanding_page_title"])
+        self.understanding_page.header.subtitle.setText(t["understanding_page_desc"])
+        self.understanding_page.config_title.setText(t["understanding_config_title"])
+        self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
+        self.understanding_page.label_yolo.setText(t["understanding_yolo_label"])
+        self.understanding_page.btn_import_understanding_model.setToolTip(t["understanding_yolo_hint"])
+        self.understanding_page.label_remote_vlm_base_url.setText(t["setting_remote_vlm_base_url"])
+        self.understanding_page.input_remote_vlm_base_url.setToolTip(t["setting_remote_vlm_base_url_hint"])
+        self.understanding_page.label_remote_vlm_model.setText(t["setting_remote_vlm_model"])
+        self.understanding_page.input_remote_vlm_model.setToolTip(t["setting_remote_vlm_model_hint"])
+        self.understanding_page.label_caption_language.setText(t["understanding_caption_language_label"])
+        current_language = self.understanding_page.input_caption_language.currentData()
+        self._populate_understanding_caption_language_options(current_language or "zh")
+        self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
+        self.understanding_page.btn_import_understanding_model.setText(t["understanding_import_yolo_model"])
+        self.understanding_page.btn_save_config.setText(t["understanding_save_config"])
+        self.understanding_page.scope_label.setText(t["understanding_scope_label"])
+        self.understanding_page.video_label.setText(t["understanding_video_label"])
+        self.understanding_page.timeline_label.setText(t["understanding_timeline_label"])
+        self.understanding_page.timeline_hint.setText(t["understanding_timeline_hint"])
+        self.understanding_page.chunk_detail_title.setText(t["understanding_chunk_detail_title"])
+        self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
+        self.understanding_page.btn_generate_evidence.setText(t["understanding_generate_selected_video"])
+        self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
+        self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
+        self.understanding_page.btn_understanding_setup.setText(t["understanding_setup_action"])
+        self.understanding_page.btn_stop.setText(t["stop"])
+        self._refresh_understanding_ui()
+        if hasattr(self, "_refresh_understanding_settings_status"):
+            self._refresh_understanding_settings_status()
+
         self.settings_page.header.title.setText(t["settings_page_title"])
         self.settings_page.header.subtitle.setText(t["settings_page_desc"])
         self.settings_page.general_title.setText(t["settings_group_title"])
@@ -464,6 +528,11 @@ class MainWindow(
         self.link_page.lbl_build_status.setText(t["ready"])
         self.link_page.lbl_search_status.setText(t["ready"])
         self.library_page.lbl_status.setText(t["ready"])
+        if not (
+            getattr(self, "understanding_controller", None)
+            and self.understanding_controller.is_running()
+        ):
+            self.understanding_page.lbl_status.setText(t["ready"])
         self.settings_page.lbl_status.setText(t["settings_hint"])
         self._bind_sampling_preview_signals()
         self._update_sampling_preview()
@@ -1206,7 +1275,16 @@ class MainWindow(
                 )
                 event.ignore()
                 return
-        if self.indexing_controller.is_running() and not self._force_application_quit:
+        if (
+            (
+                self.indexing_controller.is_running()
+                or (
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                )
+            )
+            and not self._force_application_quit
+        ):
             if self._handle_indexing_window_close(event):
                 return
         if self._try_minimize_to_tray_on_close(event):

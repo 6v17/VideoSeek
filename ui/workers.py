@@ -265,6 +265,115 @@ class IndexUpdateWorker(QThread):
                 os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = previous_system_debug
 
 
+class UnderstandingVideoWorker(QThread):
+    progress_signal = Signal(int, str)
+    chunk_completed = Signal(int, int, object)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+
+    def __init__(self, video_id, model_dir=None):
+        super().__init__()
+        self.video_id = str(video_id or "").strip()
+        self.model_dir = model_dir
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.understanding_service import generate_evidence_for_video
+
+            config = load_config()
+            language = config.get("language", "zh")
+            texts = get_texts(language)
+
+            def _chunk_completed(index, total, payload):
+                progress = int(((int(index) + 1) / max(int(total), 1)) * 100)
+                message = texts.get(
+                    "understanding_chunk_progress",
+                    "Generating segment {current}/{total}",
+                ).format(current=int(index) + 1, total=int(total))
+                self.progress_signal.emit(progress, message)
+                self.chunk_completed.emit(int(index), int(total), payload)
+
+            result = generate_evidence_for_video(
+                self.video_id,
+                config=config,
+                model_dir=self.model_dir,
+                chunk_completed_callback=_chunk_completed,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+            )
+            stopped = bool(getattr(self, "_stop_requested", False))
+            self.finished_signal.emit(not stopped, stopped, result)
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(False, True, {"video_id": self.video_id, "stopped": True})
+                return
+            logger.exception("Understanding video worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+
+
+class UnderstandingWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+
+    def __init__(self, target_lib=None, model_dir=None):
+        super().__init__()
+        self.target_lib = target_lib
+        self.model_dir = model_dir
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.services.understanding_service import generate_evidence_batch
+
+            config = load_config()
+            language = config.get("language", "zh")
+            texts = get_texts(language)
+
+            def _progress_callback(progress, video_id, current, total):
+                if total <= 0:
+                    message = texts.get("understanding_generation_started", "Generating understanding evidence…")
+                elif not video_id:
+                    message = texts.get("understanding_generation_done", "Understanding evidence generation finished.")
+                else:
+                    message = texts.get(
+                        "understanding_progress",
+                        "Generating evidence ({current}/{total}): {video_id}",
+                    ).format(current=current, total=total, video_id=video_id)
+                self.progress_signal.emit(int(progress), message)
+
+            result = generate_evidence_batch(
+                target_lib=self.target_lib,
+                config=config,
+                model_dir=self.model_dir,
+                progress_callback=_progress_callback,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+            )
+            stopped = bool(result.get("stopped"))
+            success = not stopped
+            self.finished_signal.emit(success, stopped, result)
+        except Exception as exc:
+            logger.exception("Understanding evidence worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+
+
 def _iter_thumb_jobs(results):
     """Yield (table_row, hit_payload). Entries may be hits or (row, hit) pairs."""
     for default_row, entry in enumerate(results or []):

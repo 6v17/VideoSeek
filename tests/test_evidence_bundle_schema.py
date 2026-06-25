@@ -23,8 +23,8 @@ def sample_evidence_bundle_payload() -> dict:
         "provenance": {
             "understanding_profile_id": "vision_baseline_v1",
             "components": {
-                "object_detection": "vision/object_detection/yolov8n",
-                "image_caption": "vision/image_caption/vit-gpt2-quantized",
+                "object_detection": "vision/object_detection/yolo11n",
+                "image_caption": "vision/image_caption/qwen3-vl-remote",
             },
             "chunk_source": {
                 "search_profile_id": "clip_onnx_default",
@@ -46,7 +46,7 @@ def sample_evidence_bundle_payload() -> dict:
                 "evidence": {
                     "vision": {
                         "object_detection": {
-                            "source": "vision/object_detection/yolov8n",
+                            "source": "vision/object_detection/yolo11n",
                             "objects": [
                                 {
                                     "label": "person",
@@ -56,7 +56,7 @@ def sample_evidence_bundle_payload() -> dict:
                             ],
                         },
                         "image_caption": {
-                            "source": "vision/image_caption/vit-gpt2-quantized",
+                            "source": "vision/image_caption/qwen3-vl-remote",
                             "text": "a person sitting at a table",
                         },
                     },
@@ -97,6 +97,19 @@ class EvidenceBundleSchemaTests(unittest.TestCase):
         self.assertEqual(restored.video.video_id, bundle.video.video_id)
         self.assertEqual(restored.provenance.components, bundle.provenance.components)
         self.assertEqual(len(restored.chunks), len(bundle.chunks))
+
+    def test_optional_video_summary_round_trip(self):
+        payload = sample_evidence_bundle_payload()
+        payload["summary"] = {
+            "text": "A person works at a desk throughout the clip.",
+            "source": "remote_vlm",
+        }
+        bundle = validate_evidence_bundle(payload)
+        self.assertIsNotNone(bundle.summary)
+        self.assertEqual(bundle.summary.text, "A person works at a desk throughout the clip.")
+        restored = validate_evidence_bundle(evidence_bundle_to_dict(bundle))
+        self.assertIsNotNone(restored.summary)
+        self.assertEqual(restored.summary.text, bundle.summary.text)
 
     def test_rejects_unsupported_schema_version(self):
         payload = sample_evidence_bundle_payload()

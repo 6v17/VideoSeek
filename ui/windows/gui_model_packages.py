@@ -160,6 +160,10 @@ class ModelPackagesGuiMixin:
         if imported or updated:
             self.load_settings_values()
             self.check_runtime_resources(show_dialog=False)
+            if hasattr(self, "load_understanding_settings"):
+                self.load_understanding_settings()
+            elif hasattr(self, "_refresh_understanding_ui"):
+                self._refresh_understanding_ui()
             message = self.texts.get("parse_model_package_done", "Model packages parsed: +{imported}, updated {updated}.").format(
                 imported=imported,
                 updated=updated,

@@ -62,7 +62,11 @@ class TrayGuiMixin:
         self._sync_tray_stop_action()
 
     def _sync_tray_stop_action(self):
-        running = bool(getattr(self, "indexing_controller", None) and self.indexing_controller.is_running())
+        indexing_running = bool(getattr(self, "indexing_controller", None) and self.indexing_controller.is_running())
+        understanding_running = bool(
+            getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()
+        )
+        running = indexing_running or understanding_running
         self._tray_stop_index_action.setVisible(running)
         self._tray_stop_index_action.setEnabled(running)
 
@@ -84,6 +88,9 @@ class TrayGuiMixin:
     def _stop_indexing_from_tray(self):
         if getattr(self, "indexing_controller", None) and self.indexing_controller.request_stop():
             self.library_page.lbl_status.setText(self.texts.get("index_stop_requested", ""))
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.request_stop():
+            self.understanding_page.lbl_status.setText(self.texts.get("understanding_stop_requested", ""))
 
     def _quit_application_from_tray(self):
         self._force_application_quit = True
@@ -119,8 +126,12 @@ class TrayGuiMixin:
     def _handle_indexing_window_close(self, event):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             self._close_when_indexing_stops = True
-            self.indexing_controller.request_stop()
-            self.library_page.lbl_status.setText(self.texts.get("index_stop_requested", ""))
+            if getattr(self, "indexing_controller", None) and self.indexing_controller.is_running():
+                self.indexing_controller.request_stop()
+                self.library_page.lbl_status.setText(self.texts.get("index_stop_requested", ""))
+            elif getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+                self.understanding_controller.request_stop()
+                self.understanding_page.lbl_status.setText(self.texts.get("understanding_stop_requested", ""))
             event.ignore()
             return True
 
@@ -134,8 +145,12 @@ class TrayGuiMixin:
             return True
         if choice == "stop_exit":
             self._close_when_indexing_stops = True
-            self.indexing_controller.request_stop()
-            self.library_page.lbl_status.setText(self.texts.get("index_stop_requested", ""))
+            if getattr(self, "indexing_controller", None) and self.indexing_controller.is_running():
+                self.indexing_controller.request_stop()
+                self.library_page.lbl_status.setText(self.texts.get("index_stop_requested", ""))
+            elif getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+                self.understanding_controller.request_stop()
+                self.understanding_page.lbl_status.setText(self.texts.get("understanding_stop_requested", ""))
             event.ignore()
             return True
         event.ignore()
@@ -145,6 +160,8 @@ class TrayGuiMixin:
         if self._force_application_quit:
             return False
         if getattr(self, "indexing_controller", None) and self.indexing_controller.is_running():
+            return False
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
             return False
         if self._close_window_action() != "tray":
             return False
@@ -178,6 +195,8 @@ class TrayGuiMixin:
         if hasattr(self, "agent_api_controller"):
             self.agent_api_controller.shutdown()
         self.indexing_controller.shutdown()
+        if getattr(self, "understanding_controller", None):
+            self.understanding_controller.shutdown()
         self.app_meta_controller.shutdown()
         self.runtime_resource_controller.shutdown()
         self.preview_controller.shutdown()
