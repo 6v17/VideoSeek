@@ -6,7 +6,11 @@ Desktop semantic video search (PySide6 + ONNX + FAISS + FFmpeg).
 
 ## Download
 
-End users → **[Releases](https://www.lv17.top/)** (installer).
+Don't want to set up Python and dependencies? Grab the **pre-built installer** from **[lv17.top](https://www.lv17.top/)** — models, FFmpeg, etc. are bundled.
+
+## Community
+
+- **QQ group**: 1033551438 (install help, usage questions, feedback)
 
 ## From source
 
