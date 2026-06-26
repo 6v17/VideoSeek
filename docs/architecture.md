@@ -36,8 +36,6 @@
 | 理解资源就绪 | `from src.services.understanding_resource_service import get_understanding_resource_status` |
 | Agent HTTP | `src/web/agent_api.py` → `execute_agent_search`（直接调 `search_service`） |
 
-**已删除：** `src/core/core.py` 曾是 4 行 re-export（`run_search` → `search_service`），不要加回。
-
 ## 热路径
 
 复杂逻辑集中在少数模块，不必按目录层级逐层改。
