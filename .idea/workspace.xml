@@ -4,7 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="vlm动态并发吃帧，加入云api选择" />
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新readme">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.en.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -456,31 +460,7 @@
       <workItem from="1782217529558" duration="120000" />
       <workItem from="1782217662862" duration="7423000" />
       <workItem from="1782392206578" duration="11019000" />
-      <workItem from="1782474044093" duration="7359000" />
-    </task>
-    <task id="LOCAL-00073" summary="加视频溯源功能beta">
-      <option name="closed" value="true" />
-      <created>1778601151708</created>
-      <option name="number" value="00073" />
-      <option name="presentableId" value="LOCAL-00073" />
-      <option name="project" value="LOCAL" />
-      <updated>1778601151708</updated>
-    </task>
-    <task id="LOCAL-00074" summary="RANSAC 线性回归">
-      <option name="closed" value="true" />
-      <created>1778635318978</created>
-      <option name="number" value="00074" />
-      <option name="presentableId" value="LOCAL-00074" />
-      <option name="project" value="LOCAL" />
-      <updated>1778635318978</updated>
-    </task>
-    <task id="LOCAL-00075" summary="混剪回源功能完善，gui相关代码拆解">
-      <option name="closed" value="true" />
-      <created>1778692202985</created>
-      <option name="number" value="00075" />
-      <option name="presentableId" value="LOCAL-00075" />
-      <option name="project" value="LOCAL" />
-      <updated>1778692202986</updated>
+      <workItem from="1782474044093" duration="8054000" />
     </task>
     <task id="LOCAL-00076" summary="完善混剪回源配置，ui文件归类">
       <option name="closed" value="true" />
@@ -850,7 +830,31 @@
       <option name="project" value="LOCAL" />
       <updated>1782485544128</updated>
     </task>
-    <option name="localTasksCounter" value="122" />
+    <task id="LOCAL-00122" summary="更新readme">
+      <option name="closed" value="true" />
+      <created>1782485808067</created>
+      <option name="number" value="00122" />
+      <option name="presentableId" value="LOCAL-00122" />
+      <option name="project" value="LOCAL" />
+      <updated>1782485808067</updated>
+    </task>
+    <task id="LOCAL-00123" summary="更新readme">
+      <option name="closed" value="true" />
+      <created>1782485953779</created>
+      <option name="number" value="00123" />
+      <option name="presentableId" value="LOCAL-00123" />
+      <option name="project" value="LOCAL" />
+      <updated>1782485953779</updated>
+    </task>
+    <task id="LOCAL-00124" summary="更新readme">
+      <option name="closed" value="true" />
+      <created>1782486250398</created>
+      <option name="number" value="00124" />
+      <option name="presentableId" value="LOCAL-00124" />
+      <option name="project" value="LOCAL" />
+      <updated>1782486250398</updated>
+    </task>
+    <option name="localTasksCounter" value="125" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -880,7 +884,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="给agent调用api的说明书" />
     <MESSAGE value="加了搜索接口，供agent使用（beta）" />
     <MESSAGE value="引入chinese-clip模型，优化核心链路，增加预设标签" />
     <MESSAGE value="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配" />
@@ -905,7 +908,8 @@
     <MESSAGE value="移除caption适配，改为外置vlm理解视频" />
     <MESSAGE value="用线程后台检测服务，更新说明文档" />
     <MESSAGE value="vlm动态并发吃帧，加入云api选择" />
-    <option name="LAST_COMMIT_MESSAGE" value="vlm动态并发吃帧，加入云api选择" />
+    <MESSAGE value="更新readme" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新readme" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

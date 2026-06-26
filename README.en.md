@@ -10,7 +10,7 @@ Don't want to set up Python and dependencies? Grab the **pre-built installer** f
 
 ## Minimal workflow
 
-1. **Set up runtime assets** — Follow first-launch prompts, or download and **import** models and FFmpeg under **Settings** (see table below).
+1. **Set up runtime assets** — Follow first-launch prompts, or download and **import** models and FFmpeg under **Settings** .
 2. **Add a library** — Open **Local Library** in the sidebar and add a folder.
 3. **Sync the library** — Select the library and click **Sync**; wait for frame extraction and indexing to finish.
 4. **Search** — Open **Search** in the sidebar and query with text or images over synced videos.
