@@ -344,10 +344,15 @@ class MainWindow(
             self.refresh_search_telemetry_panel()
         if page_name == "understanding":
             if hasattr(self, "load_understanding_settings"):
-                self.load_understanding_settings()
+                self.load_understanding_settings(refresh_status=False)
             if hasattr(self, "_refresh_understanding_scope_options"):
                 self._refresh_understanding_scope_options()
-            self._refresh_understanding_ui()
+            if hasattr(self, "_refresh_understanding_page_fast"):
+                self._refresh_understanding_page_fast()
+            elif hasattr(self, "_refresh_understanding_ui"):
+                self._refresh_understanding_ui(probe_remote=False)
+            if hasattr(self, "_schedule_understanding_status_refresh"):
+                self._schedule_understanding_status_refresh()
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -505,9 +510,15 @@ class MainWindow(
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
         self.understanding_page.btn_understanding_setup.setText(t["understanding_setup_action"])
         self.understanding_page.btn_stop.setText(t["stop"])
-        self._refresh_understanding_ui()
-        if hasattr(self, "_refresh_understanding_settings_status"):
-            self._refresh_understanding_settings_status()
+        if self._is_current_page("understanding"):
+            if hasattr(self, "_refresh_understanding_page_fast"):
+                self._refresh_understanding_page_fast()
+            if hasattr(self, "_schedule_understanding_status_refresh"):
+                self._schedule_understanding_status_refresh()
+        else:
+            self._refresh_understanding_ui()
+            if hasattr(self, "_refresh_understanding_settings_status"):
+                self._refresh_understanding_settings_status()
 
         self.settings_page.header.title.setText(t["settings_page_title"])
         self.settings_page.header.subtitle.setText(t["settings_page_desc"])

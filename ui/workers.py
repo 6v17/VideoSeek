@@ -576,6 +576,32 @@ class LocalVectorDetailsWorker(QThread):
             self.finished.emit()
 
 
+class UnderstandingResourceStatusWorker(QThread):
+    result_ready = Signal(dict)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(self, parent=None, *, remote_probe_timeout_sec: float = 2.0):
+        super().__init__(parent)
+        self.remote_probe_timeout_sec = float(remote_probe_timeout_sec)
+
+    def run(self):
+        try:
+            from src.services.understanding_resource_service import get_understanding_resource_status
+
+            status = get_understanding_resource_status(
+                config=load_config(),
+                probe_remote=True,
+                remote_probe_timeout_sec=self.remote_probe_timeout_sec,
+            )
+            self.result_ready.emit(status)
+        except Exception as exc:
+            logger.warning("understanding_resource_status_worker_failed: %s", exc)
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
 class ModelPackageImportWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(dict)

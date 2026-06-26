@@ -563,6 +563,8 @@ def get_missing_components_for_profile(
     *,
     config: Mapping[str, Any] | None = None,
     model_dir: str | None = None,
+    remote_probe: Mapping[str, Any] | None = None,
+    check_remote: bool = True,
 ) -> list[str]:
     profile_manifest = load_profile_manifest(profile_id, model_dir=model_dir)
     required_ids = get_required_component_ids(profile_manifest)
@@ -573,22 +575,31 @@ def get_missing_components_for_profile(
     }
     missing = [component_id for component_id in required_ids if component_id not in installed]
 
-    remote_probe = probe_remote_vlm(config, timeout_sec=3.0)
-    remote_ok = bool(remote_probe.get("reachable")) and bool(remote_probe.get("model_available"))
-    if not remote_ok:
-        for component_id in required_ids:
-            if _component_delivery(component_id, model_dir=model_dir) == "remote" and component_id not in missing:
-                missing.append(component_id)
+    if check_remote:
+        probe = remote_probe if remote_probe is not None else probe_remote_vlm(config, timeout_sec=3.0)
+        remote_ok = bool(probe.get("reachable")) and bool(probe.get("model_available"))
+        if not remote_ok:
+            for component_id in required_ids:
+                if _component_delivery(component_id, model_dir=model_dir) == "remote" and component_id not in missing:
+                    missing.append(component_id)
     return missing
 
 
 def get_understanding_resource_status(
     config: Mapping[str, Any] | None = None,
     model_dir: str | None = None,
+    *,
+    probe_remote: bool = True,
+    remote_probe_timeout_sec: float = 3.0,
 ) -> dict[str, Any]:
     normalized_config = normalize_understanding_config(config)
     active_profile_id = get_active_understanding_profile_id(normalized_config)
     resolved_model_dir = str(model_dir or get_configured_model_dir() or "").strip()
+
+    if probe_remote:
+        remote_vlm = probe_remote_vlm(normalized_config, timeout_sec=remote_probe_timeout_sec)
+    else:
+        remote_vlm = {"reachable": False, "model_available": False, "error": "", "pending": True}
 
     missing_components: list[str] = []
     profile_error = ""
@@ -599,6 +610,8 @@ def get_understanding_resource_status(
             active_profile_id,
             config=normalized_config,
             model_dir=resolved_model_dir or None,
+            remote_probe=remote_vlm if probe_remote else None,
+            check_remote=probe_remote,
         )
     except Exception as exc:
         profile_error = str(exc)
@@ -606,8 +619,7 @@ def get_understanding_resource_status(
 
     components = scan_understanding_components(model_dir=resolved_model_dir or None)
     installed_components = [item["id"] for item in components if item.get("installed")]
-    remote_vlm = probe_remote_vlm(normalized_config, timeout_sec=3.0)
-    understanding_ready = not profile_error and not missing_components
+    understanding_ready = probe_remote and not profile_error and not missing_components
     return {
         "understanding_ready": understanding_ready,
         "active_understanding_profile": active_profile_id,

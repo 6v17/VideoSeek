@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QScrollArea, QFileDialog
 
 from src.app.config import load_config, save_config, DEFAULT_CONFIG
@@ -24,6 +24,7 @@ from src.services.indexing_service import load_video_chunks_by_id
 from src.utils import format_timecode_range, open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
 from ui.widgets.chunk_timeline import ChunkTimelineSegment
+from ui.workers import UnderstandingResourceStatusWorker
 
 
 class UnderstandingGuiMixin:
@@ -35,7 +36,7 @@ class UnderstandingGuiMixin:
             return None
         return page
 
-    def load_understanding_settings(self):
+    def load_understanding_settings(self, *, refresh_status: bool = True):
         page = self._understanding_config_widgets()
         if page is None:
             return
@@ -49,7 +50,8 @@ class UnderstandingGuiMixin:
         page.input_remote_vlm_base_url.setText(str(remote_vlm.get("base_url", "") or ""))
         page.input_remote_vlm_model.setText(str(remote_vlm.get("model", "") or ""))
         self._populate_understanding_caption_language_options(remote_vlm.get("caption_language", "zh"))
-        self._refresh_understanding_settings_status()
+        if refresh_status:
+            self._refresh_understanding_settings_status()
 
     def _populate_understanding_caption_language_options(self, active_language=None):
         page = self._understanding_config_widgets()
@@ -93,8 +95,8 @@ class UnderstandingGuiMixin:
             understanding["remote_vlm"] = remote_vlm
             config["understanding"] = understanding
             save_config(config)
-            self._refresh_understanding_settings_status()
-            self._refresh_understanding_ui()
+            self._refresh_understanding_page_fast()
+            self._schedule_understanding_status_refresh()
             message = self.texts.get("understanding_config_saved", "Understanding settings saved.")
             page.lbl_status.setText(message)
             self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
@@ -454,13 +456,89 @@ class UnderstandingGuiMixin:
         path = str(value or "").strip()
         return path or None
 
-    def _refresh_understanding_ui(self):
+    def _fetch_understanding_resource_status(self, *, probe_remote: bool = True) -> dict:
+        try:
+            return get_understanding_resource_status(
+                config=load_config(),
+                probe_remote=probe_remote,
+                remote_probe_timeout_sec=2.0,
+            )
+        except Exception:
+            return {"understanding_ready": False, "missing_components": []}
+
+    def _refresh_understanding_page_fast(self):
+        status = self._fetch_understanding_resource_status(probe_remote=False)
+        self._refresh_understanding_ui(status=status)
+        self._refresh_understanding_settings_status(status=status)
+
+    def _schedule_understanding_status_refresh(self):
+        if not self._is_current_page("understanding"):
+            return
+        timer = getattr(self, "_understanding_status_refresh_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._start_understanding_status_refresh)
+            self._understanding_status_refresh_timer = timer
+        timer.start(150)
+
+    def _start_understanding_status_refresh(self):
+        if not self._is_current_page("understanding"):
+            return
+
+        generation = int(getattr(self, "_understanding_status_generation", 0)) + 1
+        self._understanding_status_generation = generation
+
+        worker = UnderstandingResourceStatusWorker(self, remote_probe_timeout_sec=2.0)
+        self._understanding_status_worker = worker
+        worker.result_ready.connect(
+            lambda status, gen=generation: self._finish_understanding_status_refresh(status, gen)
+        )
+        worker.error_signal.connect(
+            lambda _message, gen=generation: self._fail_understanding_status_refresh(gen)
+        )
+        worker.finished.connect(lambda active_worker=worker: self._release_understanding_status_worker(active_worker))
+        worker.start()
+
+    def _finish_understanding_status_refresh(self, status, generation: int):
+        if generation != int(getattr(self, "_understanding_status_generation", 0)):
+            return
+        if not self._is_current_page("understanding"):
+            return
+        self._understanding_cached_status = dict(status or {})
+        self._refresh_understanding_ui(status=status)
+        self._refresh_understanding_settings_status(status=status)
+
+    def _fail_understanding_status_refresh(self, generation: int):
+        if generation != int(getattr(self, "_understanding_status_generation", 0)):
+            return
+        if not self._is_current_page("understanding"):
+            return
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        hint = getattr(page, "hint_understanding_status", None)
+        if hint is not None:
+            hint.setText(
+                self.texts.get(
+                    "understanding_settings_remote_vlm_not_ready",
+                    "Description service not ready: {error}",
+                ).format(error="status check failed")
+            )
+
+    def _release_understanding_status_worker(self, worker):
+        if getattr(self, "_understanding_status_worker", None) is worker:
+            self._understanding_status_worker = None
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+
+    def _refresh_understanding_ui(self, status=None, *, probe_remote: bool = True):
         if not hasattr(self, "understanding_page"):
             return
-        try:
-            status = get_understanding_resource_status(config=load_config())
-        except Exception:
-            status = {"understanding_ready": False, "missing_components": []}
+        if status is None:
+            status = self._fetch_understanding_resource_status(probe_remote=probe_remote)
 
         ready = bool(status.get("understanding_ready"))
         missing = ", ".join(status.get("missing_components") or [])
@@ -502,6 +580,14 @@ class UnderstandingGuiMixin:
                     "Import YOLO and configure the description service below.",
                 )
             )
+        remote_vlm = dict(status.get("remote_vlm") or {})
+        if remote_vlm.get("pending") and ready:
+            page.lbl_understanding_hint.setText(
+                self.texts.get(
+                    "understanding_settings_status_checking",
+                    "Checking description service…",
+                )
+            )
         if not ready:
             page.btn_generate_evidence.setToolTip(self.texts.get("understanding_not_ready", "Not ready"))
         else:
@@ -515,21 +601,27 @@ class UnderstandingGuiMixin:
         if isinstance(scroll, QScrollArea):
             scroll.ensureWidgetVisible(self.understanding_page.config_card, 48)
 
-    def _refresh_understanding_settings_status(self):
+    def _refresh_understanding_settings_status(self, status=None, *, probe_remote: bool = True):
         page = self._understanding_config_widgets()
         if page is None:
             return
         hint = getattr(page, "hint_understanding_status", None)
         if hint is None:
             return
-        try:
-            status = get_understanding_resource_status(config=load_config())
-        except Exception as exc:
-            hint.setText(str(exc))
-            return
+        if status is None:
+            try:
+                status = self._fetch_understanding_resource_status(probe_remote=probe_remote)
+            except Exception as exc:
+                hint.setText(str(exc))
+                return
         remote_vlm = dict(status.get("remote_vlm") or {})
         remote_line = ""
-        if remote_vlm.get("reachable") and remote_vlm.get("model_available"):
+        if remote_vlm.get("pending"):
+            remote_line = self.texts.get(
+                "understanding_settings_remote_vlm_checking",
+                "Connecting to description service…",
+            )
+        elif remote_vlm.get("reachable") and remote_vlm.get("model_available"):
             remote_line = self.texts.get(
                 "understanding_settings_remote_vlm_ready",
                 "Description service connected: {model}",

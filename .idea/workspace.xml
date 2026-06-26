@@ -4,25 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="增加yolo11n、vit-gpt2适配">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除caption适配，改为外置vlm理解视频">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/understanding/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/understanding/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/domain/evidence_bundle.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/domain/evidence_bundle.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/understanding_paths.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_paths.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_resource_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_evidence_bundle_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_evidence_bundle_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/dialogs/resource_table.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/resource_table.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_model_packages.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_model_packages.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_preview.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_preview.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_tray.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_tray.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -37,7 +25,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="267" />
+    <option name="cachedIndexableFilesCount" value="269" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -92,23 +80,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.037162722343835" />
-      <entry key="MS500" value="1.5176324619206887" />
-      <entry key="S2" value="1.8482138822286571" />
-      <entry key="S5" value="1.9362722474397183" />
-      <entry key="S10" value="1.9676216875734838" />
-      <entry key="S30" value="2.1785298896396594" />
-      <entry key="S60" value="4.410763414396518" />
-      <entry key="M2" value="11.977373931091673" />
-      <entry key="M5" value="31.154438748806736" />
-      <entry key="M10" value="52.02895142287394" />
-      <entry key="M15" value="71.60942315509652" />
-      <entry key="M30" value="139.5164568534333" />
-      <entry key="H1" value="275.3890294103204" />
-      <entry key="H2" value="460.139744755487" />
-      <entry key="H4" value="647.880556027618" />
-      <entry key="D1" value="1225.5531038066208" />
-      <entry key="W1" value="1562.4244082199568" />
+      <entry key="MS100" value="1.0000000002026932" />
+      <entry key="MS500" value="1.012696929209287" />
+      <entry key="S2" value="1.5361319697305964" />
+      <entry key="S5" value="2.8464374551653044" />
+      <entry key="S10" value="5.407651265028974" />
+      <entry key="S30" value="15.276155477693782" />
+      <entry key="S60" value="26.66128240280768" />
+      <entry key="M2" value="41.590104994581615" />
+      <entry key="M5" value="63.37814295835721" />
+      <entry key="M10" value="86.26406887839491" />
+      <entry key="M15" value="106.87480099073302" />
+      <entry key="M30" value="172.1689080275036" />
+      <entry key="H1" value="306.0863993860964" />
+      <entry key="H2" value="500.28651378576865" />
+      <entry key="H4" value="704.6781014078381" />
+      <entry key="D1" value="1311.092263277885" />
+      <entry key="W1" value="1658.9704561867586" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -130,23 +118,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="1.002082834671886" />
-      <entry key="MS500" value="1.5078625371540344" />
-      <entry key="S2" value="1.8453074553814204" />
-      <entry key="S5" value="1.9350603047758699" />
-      <entry key="S10" value="1.9670069283568612" />
-      <entry key="S30" value="2.178298499825491" />
-      <entry key="S60" value="4.410502027355074" />
-      <entry key="M2" value="11.976986348456245" />
-      <entry key="M5" value="31.15401265492903" />
-      <entry key="M10" value="52.02859029229975" />
-      <entry key="M15" value="71.60909059025026" />
-      <entry key="M30" value="139.51613046569878" />
-      <entry key="H1" value="275.38870166400176" />
-      <entry key="H2" value="460.1394673531297" />
-      <entry key="H4" value="647.8803591507593" />
-      <entry key="D1" value="1225.5530407593576" />
-      <entry key="W1" value="1562.4243967068371" />
+      <entry key="MS100" value="0.9659363291179387" />
+      <entry key="MS500" value="1.0056668088304306" />
+      <entry key="S2" value="1.53310943990116" />
+      <entry key="S5" value="2.844016501114546" />
+      <entry key="S10" value="5.405302934379803" />
+      <entry key="S30" value="15.273978050667885" />
+      <entry key="S60" value="26.659418957284245" />
+      <entry key="M2" value="41.588674713230034" />
+      <entry key="M5" value="63.37728123653" />
+      <entry key="M10" value="86.26348146865189" />
+      <entry key="M15" value="106.8743138240933" />
+      <entry key="M30" value="172.16851137240997" />
+      <entry key="H1" value="306.0860400620115" />
+      <entry key="H2" value="500.28621542211755" />
+      <entry key="H4" value="704.6778891382803" />
+      <entry key="D1" value="1311.0921962214447" />
+      <entry key="W1" value="1658.9704440201099" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -475,15 +463,8 @@
       <workItem from="1782124327366" duration="6656000" />
       <workItem from="1782217529558" duration="120000" />
       <workItem from="1782217662862" duration="7423000" />
-      <workItem from="1782392206578" duration="9726000" />
-    </task>
-    <task id="LOCAL-00070" summary="补充说明">
-      <option name="closed" value="true" />
-      <created>1778347403670</created>
-      <option name="number" value="00070" />
-      <option name="presentableId" value="LOCAL-00070" />
-      <option name="project" value="LOCAL" />
-      <updated>1778347403670</updated>
+      <workItem from="1782392206578" duration="11019000" />
+      <workItem from="1782474044093" duration="1229000" />
     </task>
     <task id="LOCAL-00071" summary="补充说明">
       <option name="closed" value="true" />
@@ -869,7 +850,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782219298277</updated>
     </task>
-    <option name="localTasksCounter" value="119" />
+    <task id="LOCAL-00119" summary="移除caption适配，改为外置vlm理解视频">
+      <option name="closed" value="true" />
+      <created>1782402153448</created>
+      <option name="number" value="00119" />
+      <option name="presentableId" value="LOCAL-00119" />
+      <option name="project" value="LOCAL" />
+      <updated>1782402153448</updated>
+    </task>
+    <option name="localTasksCounter" value="120" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -899,7 +888,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="迁移数据非阻塞" />
     <MESSAGE value="移除远古旧版本迁移代码" />
     <MESSAGE value="增加GPU解码抽帧（试验性）" />
     <MESSAGE value="给agent调用api的说明书" />
@@ -924,7 +912,8 @@
     <MESSAGE value="增加素材篮，优化状态显示" />
     <MESSAGE value="界面微调" />
     <MESSAGE value="增加yolo11n、vit-gpt2适配" />
-    <option name="LAST_COMMIT_MESSAGE" value="增加yolo11n、vit-gpt2适配" />
+    <MESSAGE value="移除caption适配，改为外置vlm理解视频" />
+    <option name="LAST_COMMIT_MESSAGE" value="移除caption适配，改为外置vlm理解视频" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
