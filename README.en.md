@@ -6,7 +6,7 @@ Desktop semantic video search (PySide6 + ONNX + FAISS + FFmpeg).
 
 ## Download
 
-Don't want to set up Python and dependencies? Grab the **pre-built installer** from **[lv17.top](https://www.lv17.top/)** — models, FFmpeg, etc. are bundled.
+Don't want to set up Python and dependencies? Grab the **pre-built installer** from **[lv17.top](https://www.lv17.top/)**. On first launch, follow the in-app prompts to download and import runtime assets (models, FFmpeg, etc.).
 
 ## Community
 
@@ -19,14 +19,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
-On first launch, import missing runtime assets:
+On first launch, missing runtime assets must be imported in the app (same for installer and source builds):
 
 | Missing | Fix |
 |---------|-----|
-| Models, FFmpeg | [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse** in the app |
+| Models, FFmpeg | Follow in-app prompts, or use [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse** |
 | VLC (Windows source only) | [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip) at project root |
 
-Installers bundle these. See **`docs/quickstart.md`** for troubleshooting and advanced layout.
+See **`docs/quickstart.md`** for troubleshooting and advanced layout.
 
 ## Docs
 
