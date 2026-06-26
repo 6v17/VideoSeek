@@ -5,9 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新readme">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.en.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.en.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -460,15 +458,7 @@
       <workItem from="1782217529558" duration="120000" />
       <workItem from="1782217662862" duration="7423000" />
       <workItem from="1782392206578" duration="11019000" />
-      <workItem from="1782474044093" duration="8054000" />
-    </task>
-    <task id="LOCAL-00076" summary="完善混剪回源配置，ui文件归类">
-      <option name="closed" value="true" />
-      <created>1778751152079</created>
-      <option name="number" value="00076" />
-      <option name="presentableId" value="LOCAL-00076" />
-      <option name="project" value="LOCAL" />
-      <updated>1778751152079</updated>
+      <workItem from="1782474044093" duration="8198000" />
     </task>
     <task id="LOCAL-00077" summary="混剪匹配默认参数标准化">
       <option name="closed" value="true" />
@@ -854,7 +844,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782486250398</updated>
     </task>
-    <option name="localTasksCounter" value="125" />
+    <task id="LOCAL-00125" summary="更新readme">
+      <option name="closed" value="true" />
+      <created>1782486390891</created>
+      <option name="number" value="00125" />
+      <option name="presentableId" value="LOCAL-00125" />
+      <option name="project" value="LOCAL" />
+      <updated>1782486390891</updated>
+    </task>
+    <option name="localTasksCounter" value="126" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
