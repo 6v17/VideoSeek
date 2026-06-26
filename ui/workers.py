@@ -308,7 +308,7 @@ class UnderstandingVideoWorker(QThread):
                 chunk_completed_callback=_chunk_completed,
                 should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
             )
-            stopped = bool(getattr(self, "_stop_requested", False))
+            stopped = bool(result.get("stopped")) or bool(getattr(self, "_stop_requested", False))
             self.finished_signal.emit(not stopped, stopped, result)
         except Exception as exc:
             from src.core.understanding.base import UnderstandingStoppedError
@@ -571,6 +571,29 @@ class LocalVectorDetailsWorker(QThread):
             self.result_ready.emit(list_local_vector_details(validate_contents=True))
         except Exception as exc:
             logger.warning("local_vector_details_worker_failed: %s", exc)
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class RemoteVlmConnectionTestWorker(QThread):
+    result_ready = Signal(dict)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(self, remote_vlm: dict, *, timeout_sec: float = 8.0, parent=None):
+        super().__init__(parent)
+        self.remote_vlm = dict(remote_vlm or {})
+        self.timeout_sec = float(timeout_sec)
+
+    def run(self):
+        try:
+            from src.services.understanding_resource_service import probe_remote_vlm_draft
+
+            result = probe_remote_vlm_draft(self.remote_vlm, timeout_sec=self.timeout_sec)
+            self.result_ready.emit(dict(result or {}))
+        except Exception as exc:
+            logger.warning("remote_vlm_connection_test_failed: %s", exc)
             self.error_signal.emit(str(exc))
         finally:
             self.finished.emit()

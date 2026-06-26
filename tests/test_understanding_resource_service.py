@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.app.config import DEFAULT_UNDERSTANDING_CONFIG
 from src.services import understanding_import_service, understanding_resource_service
@@ -293,6 +293,95 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         en_prompt = understanding_resource_service.get_video_summary_prompt_for_language("en")
         self.assertIn("中文", zh_prompt)
         self.assertTrue(en_prompt.startswith("Below are chronological segment descriptions"))
+
+    def test_finalize_remote_vlm_settings_preserves_api_key(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "provider_mode": "cloud",
+                "provider_preset": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o",
+                "api_key": " sk-secret ",
+            }
+        )
+        self.assertEqual(settings["api_key"], "sk-secret")
+
+    def test_build_remote_vlm_auth_headers(self):
+        self.assertEqual(
+            understanding_resource_service.build_remote_vlm_auth_headers({"api_key": "abc"}),
+            {"Authorization": "Bearer abc"},
+        )
+        self.assertEqual(understanding_resource_service.build_remote_vlm_auth_headers({}), {})
+        self.assertEqual(understanding_resource_service.build_remote_vlm_auth_headers({"api_key": "  "}), {})
+
+    def test_resolve_remote_vlm_provider_settings_infers_cloud_from_api_key(self):
+        mode, preset = understanding_resource_service.resolve_remote_vlm_provider_settings(
+            {
+                "base_url": "https://example.com/v1",
+                "api_key": "sk-test",
+                "model": "gpt-4o",
+            }
+        )
+        self.assertEqual(mode, understanding_resource_service.REMOTE_VLM_MODE_CLOUD)
+        self.assertEqual(preset, understanding_resource_service.REMOTE_VLM_PRESET_CUSTOM)
+
+    def test_resolve_remote_vlm_provider_settings_infers_lm_studio(self):
+        mode, preset = understanding_resource_service.resolve_remote_vlm_provider_settings(
+            {"base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
+        )
+        self.assertEqual(mode, understanding_resource_service.REMOTE_VLM_MODE_LOCAL)
+        self.assertEqual(preset, "lm_studio")
+
+    def test_finalize_remote_vlm_settings_clears_api_key_for_local_mode(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "provider_mode": "local",
+                "provider_preset": "lm_studio",
+                "api_key": "should-clear",
+            }
+        )
+        self.assertEqual(settings["provider_mode"], "local")
+        self.assertEqual(settings["api_key"], "")
+
+    def test_probe_remote_vlm_requires_cloud_api_key(self):
+        probe = understanding_resource_service.probe_remote_vlm(
+            {
+                "understanding": {
+                    "remote_vlm": {
+                        "provider_mode": "cloud",
+                        "provider_preset": "openai",
+                        "base_url": "https://api.openai.com/v1",
+                        "model": "gpt-4o",
+                        "api_key": "",
+                    }
+                }
+            }
+        )
+        self.assertEqual(probe.get("error_code"), "cloud_api_key_required")
+
+    def test_probe_remote_vlm_model_not_found_lists_samples(self):
+        response_body = json.dumps({"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4.1"}]}).encode("utf-8")
+        fake_response = MagicMock()
+        fake_response.read.return_value = response_body
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        config = {
+            "understanding": {
+                "remote_vlm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-4o",
+                    "api_key": "sk-test",
+                }
+            }
+        }
+        with patch("urllib.request.urlopen", return_value=fake_response):
+            probe = understanding_resource_service.probe_remote_vlm(config, timeout_sec=3.0)
+        self.assertTrue(probe.get("reachable"))
+        self.assertFalse(probe.get("model_available"))
+        self.assertEqual(probe.get("error_code"), "model_not_found")
+        self.assertIn("gpt-4o-mini", probe.get("available_models") or [])
 
 
 if __name__ == "__main__":

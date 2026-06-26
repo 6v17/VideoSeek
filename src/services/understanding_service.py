@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -17,6 +21,8 @@ from src.domain.evidence_bundle import (
 from src.services.understanding_paths import get_evidence_path, get_evidence_root, get_evidence_videos_dir
 from src.services.understanding_resource_service import (
     get_active_understanding_profile,
+    get_remote_vlm_concurrency,
+    get_remote_vlm_settings,
     get_understanding_resource_status,
     load_profile_manifest,
 )
@@ -31,6 +37,335 @@ class UnderstandingGenerationError(RuntimeError):
     """Raised when evidence generation cannot proceed."""
 
 
+_worker_pipelines: dict[int, UnderstandingPipeline] = {}
+_worker_pipelines_lock = threading.Lock()
+
+
+class CaptionConcurrencyController:
+    """Adaptive in-flight limit for caption/VLM requests (min 1 .. max from config)."""
+
+    _FAST_RATIO = 0.25
+    _SLOW_RATIO = 0.65
+    _SUCCESS_STREAK_TO_INCREASE = 2
+
+    def __init__(self, max_concurrency: int, *, timeout_sec: float = 120.0):
+        max_value = max(1, min(4, int(max_concurrency)))
+        self.max_concurrency = max_value
+        self.min_concurrency = 1
+        self.current_concurrency = min(2, max_value) if max_value > 1 else 1
+        self._timeout_sec = max(5.0, float(timeout_sec))
+        self._success_streak = 0
+        self._lock = threading.Lock()
+
+    @property
+    def fast_threshold_sec(self) -> float:
+        return max(8.0, self._timeout_sec * self._FAST_RATIO)
+
+    @property
+    def slow_threshold_sec(self) -> float:
+        return max(self.fast_threshold_sec + 1.0, self._timeout_sec * self._SLOW_RATIO)
+
+    def active_limit(self) -> int:
+        with self._lock:
+            return self.current_concurrency
+
+    def note_success(self, elapsed_sec: float) -> None:
+        with self._lock:
+            previous = self.current_concurrency
+            elapsed = max(0.0, float(elapsed_sec))
+            if elapsed >= self.slow_threshold_sec:
+                self._success_streak = 0
+                self._decrease_locked()
+            elif elapsed <= self.fast_threshold_sec:
+                self._success_streak += 1
+                if self._success_streak >= self._SUCCESS_STREAK_TO_INCREASE:
+                    self._increase_locked()
+                    self._success_streak = 0
+            else:
+                self._success_streak = 0
+            self._log_change(previous)
+
+    def note_failure(self) -> None:
+        with self._lock:
+            previous = self.current_concurrency
+            self._success_streak = 0
+            self._decrease_locked()
+            self._log_change(previous)
+
+    def note_empty_result(self) -> None:
+        with self._lock:
+            previous = self.current_concurrency
+            self._success_streak = 0
+            self._decrease_locked()
+            self._log_change(previous)
+
+    def _increase_locked(self) -> None:
+        self.current_concurrency = min(self.max_concurrency, self.current_concurrency + 1)
+
+    def _decrease_locked(self) -> None:
+        self.current_concurrency = max(self.min_concurrency, self.current_concurrency - 1)
+
+    def _log_change(self, previous: int) -> None:
+        if self.current_concurrency != previous:
+            logger.info(
+                "Caption concurrency adjusted: %s -> %s (max %s)",
+                previous,
+                self.current_concurrency,
+                self.max_concurrency,
+            )
+
+
+def _get_worker_pipeline(
+    *,
+    profile_manifest: Mapping[str, Any],
+    config: Mapping[str, Any],
+    model_dir: str | None,
+) -> UnderstandingPipeline:
+    thread_id = threading.get_ident()
+    with _worker_pipelines_lock:
+        pipeline = _worker_pipelines.get(thread_id)
+        if pipeline is None:
+            pipeline = UnderstandingPipeline(profile_manifest, model_dir=model_dir, config=config)
+            _worker_pipelines[thread_id] = pipeline
+        return pipeline
+
+
+def _close_worker_pipelines() -> None:
+    with _worker_pipelines_lock:
+        for pipeline in _worker_pipelines.values():
+            try:
+                pipeline.close()
+            except Exception as exc:
+                logger.warning("Failed to close understanding worker pipeline: %s", exc)
+        _worker_pipelines.clear()
+
+
+def _run_single_chunk(
+    *,
+    chunk_index: int,
+    chunk: Mapping[str, Any],
+    video_path: str,
+    profile_manifest: Mapping[str, Any],
+    config: Mapping[str, Any],
+    model_dir: str | None,
+    should_stop_callback=None,
+) -> dict[str, Any]:
+    if should_stop_callback and should_stop_callback():
+        raise UnderstandingStoppedError("Evidence generation stopped by user")
+    pipeline = _get_worker_pipeline(
+        profile_manifest=profile_manifest,
+        config=config,
+        model_dir=model_dir,
+    )
+    return pipeline.run_chunk(
+        video_path=video_path,
+        chunk=chunk,
+        chunk_index=chunk_index,
+        should_stop_callback=should_stop_callback,
+    )
+
+
+def _process_completed_chunk(
+    *,
+    video_id: str,
+    chunk_index: int,
+    result: Mapping[str, Any],
+    total: int,
+    completed: dict[int, dict[str, Any]],
+    state_lock: threading.Lock,
+    video_context: Mapping[str, Any],
+    profile_id: str,
+    checkpoint_pipeline: UnderstandingPipeline,
+    config: Mapping[str, Any],
+    generated_at: str | None,
+) -> str:
+    with state_lock:
+        completed[chunk_index] = dict(result)
+        return _checkpoint_evidence_bundle(
+            video_id,
+            video_context=video_context,
+            profile_id=profile_id,
+            pipeline=checkpoint_pipeline,
+            completed=completed,
+            chunk_total=total,
+            config=config,
+            generation_status="in_progress",
+            generated_at=generated_at,
+        )
+
+
+def _run_pending_chunks(
+    *,
+    video_id: str,
+    video_context: Mapping[str, Any],
+    chunks: list[Mapping[str, Any]],
+    profile_manifest: Mapping[str, Any],
+    profile_id: str,
+    checkpoint_pipeline: UnderstandingPipeline,
+    config: Mapping[str, Any],
+    model_dir: str | None,
+    completed: dict[int, dict[str, Any]],
+    total: int,
+    generated_at: str | None,
+    should_stop_callback=None,
+    chunk_completed_callback=None,
+) -> str:
+    pending_indices = [index for index in range(total) if index not in completed]
+    if not pending_indices:
+        return ""
+
+    max_concurrency = get_remote_vlm_concurrency(config)
+    remote_vlm = get_remote_vlm_settings(config)
+    video_path = str(video_context["video_path"])
+    output_path = ""
+    state_lock = threading.Lock()
+
+    def _emit_resumed_chunks() -> None:
+        if not chunk_completed_callback:
+            return
+        for chunk_index in sorted(completed.keys()):
+            chunk_completed_callback(chunk_index, total, completed[chunk_index])
+
+    def _handle_chunk_done(chunk_index: int, result: dict[str, Any]) -> None:
+        nonlocal output_path
+        checkpoint_path = _process_completed_chunk(
+            video_id=video_id,
+            chunk_index=chunk_index,
+            result=result,
+            total=total,
+            completed=completed,
+            state_lock=state_lock,
+            video_context=video_context,
+            profile_id=profile_id,
+            checkpoint_pipeline=checkpoint_pipeline,
+            config=config,
+            generated_at=generated_at,
+        )
+        if checkpoint_path:
+            output_path = checkpoint_path
+        if chunk_completed_callback:
+            chunk_completed_callback(chunk_index, total, result)
+
+    def _run_sequential() -> None:
+        _emit_resumed_chunks()
+        for chunk_index in pending_indices:
+            if should_stop_callback and should_stop_callback():
+                break
+            result = _run_single_chunk(
+                chunk_index=chunk_index,
+                chunk=chunks[chunk_index],
+                video_path=video_path,
+                profile_manifest=profile_manifest,
+                config=config,
+                model_dir=model_dir,
+                should_stop_callback=should_stop_callback,
+            )
+            _handle_chunk_done(chunk_index, dict(result))
+
+    if max_concurrency <= 1:
+        _run_sequential()
+        return output_path
+
+    controller = CaptionConcurrencyController(
+        max_concurrency,
+        timeout_sec=float(remote_vlm.get("timeout_sec", 120) or 120),
+    )
+    logger.info(
+        "Running understanding evidence for %s with adaptive caption concurrency (max=%s, start=%s, pending=%s)",
+        video_id,
+        max_concurrency,
+        controller.active_limit(),
+        len(pending_indices),
+    )
+    _emit_resumed_chunks()
+    stop_event = threading.Event()
+    pending_queue: deque[int] = deque(pending_indices)
+    retry_counts: dict[int, int] = {}
+    in_flight: dict[Future, tuple[int, float]] = {}
+
+    def _should_stop() -> bool:
+        return stop_event.is_set() or bool(should_stop_callback and should_stop_callback())
+
+    def _worker(chunk_index: int) -> tuple[int, dict[str, Any] | None, float, Exception | None]:
+        started = time.monotonic()
+        if _should_stop():
+            return chunk_index, None, 0.0, None
+        try:
+            result = _run_single_chunk(
+                chunk_index=chunk_index,
+                chunk=chunks[chunk_index],
+                video_path=video_path,
+                profile_manifest=profile_manifest,
+                config=config,
+                model_dir=model_dir,
+                should_stop_callback=_should_stop,
+            )
+            return chunk_index, dict(result), time.monotonic() - started, None
+        except UnderstandingStoppedError:
+            stop_event.set()
+            return chunk_index, None, time.monotonic() - started, None
+        except Exception as exc:
+            return chunk_index, None, time.monotonic() - started, exc
+
+    def _schedule_more(executor: ThreadPoolExecutor) -> None:
+        while pending_queue and len(in_flight) < controller.active_limit() and not _should_stop():
+            chunk_index = pending_queue.popleft()
+            future = executor.submit(_worker, chunk_index)
+            in_flight[future] = (chunk_index, time.monotonic())
+
+    executor = ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="understanding-chunk")
+    try:
+        _schedule_more(executor)
+        while in_flight:
+            if _should_stop():
+                stop_event.set()
+            done, _pending = wait(in_flight.keys(), timeout=0.2, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                chunk_index, _started = in_flight.pop(future)
+                try:
+                    result_index, result, elapsed, error = future.result()
+                except Exception as exc:
+                    result_index, result, elapsed, error = chunk_index, None, 0.0, exc
+
+                if error is not None:
+                    controller.note_failure()
+                    attempts = retry_counts.get(result_index, 0) + 1
+                    retry_counts[result_index] = attempts
+                    if attempts <= 2 and not _should_stop():
+                        pending_queue.appendleft(result_index)
+                        logger.warning(
+                            "Understanding chunk %s failed (attempt %s/2): %s",
+                            result_index,
+                            attempts,
+                            error,
+                        )
+                    else:
+                        logger.warning(
+                            "Understanding chunk %s failed after retries: %s",
+                            result_index,
+                            error,
+                        )
+                    continue
+
+                if result is None:
+                    continue
+
+                if chunk_payload_has_evidence(result):
+                    controller.note_success(elapsed)
+                else:
+                    controller.note_empty_result()
+                _handle_chunk_done(result_index, result)
+
+            _schedule_more(executor)
+    finally:
+        stop_event.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+        _close_worker_pipelines()
+
+    return output_path
+
 def _atomic_write_json(path: str, payload: Mapping[str, Any]) -> None:
     folder = os.path.dirname(path)
     if folder:
@@ -43,6 +378,169 @@ def _atomic_write_json(path: str, payload: Mapping[str, Any]) -> None:
 
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def chunk_payload_has_evidence(payload: Mapping[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    evidence = dict(payload.get("evidence") or {})
+    vision = dict(evidence.get("vision") or {})
+    caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
+    objects = list(dict(vision.get("object_detection") or {}).get("objects") or [])
+    return bool(caption or objects)
+
+
+def _index_chunk_payloads(chunks: list[Any] | None) -> dict[int, dict[str, Any]]:
+    indexed: dict[int, dict[str, Any]] = {}
+    for item in chunks or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            chunk_index = int(item.get("chunk_index", -1))
+        except (TypeError, ValueError):
+            continue
+        if chunk_index < 0:
+            continue
+        indexed[chunk_index] = dict(item)
+    return indexed
+
+
+def _chunk_meta_matches_payload(chunk_meta: Mapping[str, Any], payload: Mapping[str, Any], chunk_index: int) -> bool:
+    if int(payload.get("chunk_index", -1)) != int(chunk_index):
+        return False
+    try:
+        start = float(chunk_meta.get("start", 0.0))
+        end = float(chunk_meta.get("end", start))
+        return (
+            abs(float(payload.get("start_sec", -1)) - start) < 0.05
+            and abs(float(payload.get("end_sec", -1)) - end) < 0.05
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _load_resumable_chunk_payloads(
+    existing_bundle: Mapping[str, Any] | None,
+    chunks: list[Mapping[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    indexed = _index_chunk_payloads(list((existing_bundle or {}).get("chunks") or []))
+    resumable: dict[int, dict[str, Any]] = {}
+    for chunk_index, chunk_meta in enumerate(chunks):
+        payload = indexed.get(chunk_index)
+        if payload is None:
+            continue
+        if not _chunk_meta_matches_payload(chunk_meta, payload, chunk_index):
+            logger.warning(
+                "Skipping stale evidence chunk %s for video; index chunk timing changed",
+                chunk_index,
+            )
+            continue
+        if chunk_payload_has_evidence(payload):
+            resumable[chunk_index] = payload
+    return resumable
+
+
+def _ordered_chunk_payloads(completed: Mapping[int, Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(completed[index]) for index in sorted(completed.keys())]
+
+
+def _build_chunk_source_payload(config: Mapping[str, Any]) -> dict[str, str]:
+    search_profile = get_active_model_profile(config=config)
+    embedding_spec = get_active_embedding_spec(config=config)
+    runtime = dict(search_profile.get("runtime") or {})
+    search_variant = str(runtime.get("model_variant", "") or search_profile.get("model_variant", "") or "").strip()
+    if not search_variant:
+        search_variant = "vit-base-patch32"
+    return {
+        "search_profile_id": str(embedding_spec.get("model_id", "") or search_profile.get("id", "") or ""),
+        "search_provider": str(search_profile.get("provider", "") or embedding_spec.get("provider", "") or ""),
+        "search_variant": search_variant,
+    }
+
+
+def _assemble_evidence_payload(
+    *,
+    video_context: Mapping[str, Any],
+    profile_id: str,
+    pipeline: UnderstandingPipeline,
+    chunk_payloads: list[Mapping[str, Any]],
+    config: Mapping[str, Any],
+    generation_status: str,
+    chunk_total: int,
+    summary_payload: Mapping[str, Any] | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    provenance = {
+        "understanding_profile_id": profile_id,
+        "components": pipeline.component_map(),
+        "chunk_source": _build_chunk_source_payload(config),
+        "keyframe_strategy": pipeline.keyframe_strategy,
+        "generated_at": str(generated_at or _utc_timestamp()),
+        "updated_at": _utc_timestamp(),
+        "generation_status": str(generation_status or "completed"),
+        "chunk_total": int(chunk_total),
+        "chunks_completed": len(chunk_payloads),
+    }
+    payload: dict[str, Any] = {
+        "schema_version": EVIDENCE_BUNDLE_SCHEMA_VERSION,
+        "video": {
+            "video_id": str(video_context["video_id"]),
+            "video_path": str(video_context["video_path"]),
+            "video_rel_path": str(video_context.get("video_rel_path", "") or ""),
+            "library_path": str(video_context.get("library_path", "") or ""),
+            "duration_sec": video_context.get("duration_sec"),
+            "source_exists": bool(video_context.get("source_exists", True)),
+        },
+        "provenance": provenance,
+        "chunks": list(chunk_payloads),
+    }
+    if summary_payload:
+        payload["summary"] = dict(summary_payload)
+    validate_evidence_bundle(payload)
+    return payload
+
+
+def _serialize_evidence_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    bundle = validate_evidence_bundle(payload)
+    output = evidence_bundle_to_dict(bundle)
+    provenance = dict(output.get("provenance") or {})
+    raw_provenance = dict(payload.get("provenance") or {})
+    for key in ("generation_status", "chunk_total", "chunks_completed", "updated_at"):
+        if key in raw_provenance:
+            provenance[key] = raw_provenance[key]
+    output["provenance"] = provenance
+    return output
+
+
+def write_evidence_bundle(video_id: str, payload: Mapping[str, Any], *, config=None) -> str:
+    path = get_evidence_path(video_id, config=config)
+    _atomic_write_json(path, _serialize_evidence_payload(payload))
+    return path
+
+
+def _checkpoint_evidence_bundle(
+    video_id: str,
+    *,
+    video_context: Mapping[str, Any],
+    profile_id: str,
+    pipeline: UnderstandingPipeline,
+    completed: Mapping[int, Mapping[str, Any]],
+    chunk_total: int,
+    config: Mapping[str, Any],
+    generation_status: str,
+    generated_at: str | None = None,
+) -> str:
+    payload = _assemble_evidence_payload(
+        video_context=video_context,
+        profile_id=profile_id,
+        pipeline=pipeline,
+        chunk_payloads=_ordered_chunk_payloads(completed),
+        config=config,
+        generation_status=generation_status,
+        chunk_total=chunk_total,
+        generated_at=generated_at,
+    )
+    return write_evidence_bundle(video_id, payload, config=config)
 
 
 def resolve_video_context(video_id: str, config=None) -> dict[str, Any]:
@@ -230,47 +728,148 @@ def build_evidence_bundle_payload(
         except UnderstandingStoppedError:
             raise
 
-    search_profile = get_active_model_profile(config=cfg)
-    embedding_spec = get_active_embedding_spec(config=cfg)
-    runtime = dict(search_profile.get("runtime") or {})
-    search_variant = str(runtime.get("model_variant", "") or search_profile.get("model_variant", "") or "").strip()
-    if not search_variant:
-        search_variant = "vit-base-patch32"
-
-    payload = {
-        "schema_version": EVIDENCE_BUNDLE_SCHEMA_VERSION,
-        "video": {
-            "video_id": str(video_context["video_id"]),
-            "video_path": str(video_context["video_path"]),
-            "video_rel_path": str(video_context.get("video_rel_path", "") or ""),
-            "library_path": str(video_context.get("library_path", "") or ""),
-            "duration_sec": video_context.get("duration_sec"),
-            "source_exists": bool(video_context.get("source_exists", True)),
-        },
-        "provenance": {
-            "understanding_profile_id": profile_id,
-            "components": pipeline.component_map(),
-            "chunk_source": {
-                "search_profile_id": str(embedding_spec.get("model_id", "") or search_profile.get("id", "") or ""),
-                "search_provider": str(search_profile.get("provider", "") or embedding_spec.get("provider", "") or ""),
-                "search_variant": search_variant,
-            },
-            "keyframe_strategy": pipeline.keyframe_strategy,
-            "generated_at": _utc_timestamp(),
-        },
-        "chunks": chunk_payloads,
-    }
-    if summary_payload:
-        payload["summary"] = summary_payload
-    validate_evidence_bundle(payload)
+    payload = _assemble_evidence_payload(
+        video_context=video_context,
+        profile_id=profile_id,
+        pipeline=pipeline,
+        chunk_payloads=chunk_payloads,
+        config=cfg,
+        generation_status="completed",
+        chunk_total=len(chunk_payloads),
+        summary_payload=summary_payload,
+    )
     return payload
 
 
-def write_evidence_bundle(video_id: str, payload: Mapping[str, Any], *, config=None) -> str:
-    path = get_evidence_path(video_id, config=config)
-    bundle = validate_evidence_bundle(payload)
-    _atomic_write_json(path, evidence_bundle_to_dict(bundle))
-    return path
+def _run_video_evidence_generation(
+    *,
+    video_id: str,
+    video_context: Mapping[str, Any],
+    chunks: list[Mapping[str, Any]],
+    profile_manifest: Mapping[str, Any],
+    profile_id: str,
+    config: Mapping[str, Any],
+    model_dir: str | None = None,
+    should_stop_callback=None,
+    chunk_completed_callback=None,
+) -> dict[str, Any]:
+    total = len(chunks)
+    existing_bundle = load_evidence_bundle(video_id, config=config) or {}
+    generated_at = str(dict(existing_bundle.get("provenance") or {}).get("generated_at", "") or "").strip() or None
+    completed = _load_resumable_chunk_payloads(existing_bundle, chunks)
+    resumed_count = len(completed)
+
+    if resumed_count:
+        logger.info(
+            "Resuming understanding evidence for %s: %s/%s chunks already saved",
+            video_id,
+            resumed_count,
+            total,
+        )
+
+    pipeline = UnderstandingPipeline(profile_manifest, model_dir=model_dir, config=config)
+    output_path = ""
+    try:
+        output_path = _run_pending_chunks(
+            video_id=video_id,
+            video_context=video_context,
+            chunks=chunks,
+            profile_manifest=profile_manifest,
+            profile_id=profile_id,
+            checkpoint_pipeline=pipeline,
+            config=config,
+            model_dir=model_dir,
+            completed=completed,
+            total=total,
+            generated_at=generated_at,
+            should_stop_callback=should_stop_callback,
+            chunk_completed_callback=chunk_completed_callback,
+        )
+
+        saved_count = len(completed)
+        stopped = bool(should_stop_callback and should_stop_callback()) or saved_count < total
+        if stopped:
+            if saved_count > 0 and not output_path:
+                output_path = _checkpoint_evidence_bundle(
+                    video_id,
+                    video_context=video_context,
+                    profile_id=profile_id,
+                    pipeline=pipeline,
+                    completed=completed,
+                    chunk_total=total,
+                    config=config,
+                    generation_status="in_progress",
+                    generated_at=generated_at,
+                )
+            return {
+                "video_id": video_id,
+                "evidence_path": output_path,
+                "chunk_count": saved_count,
+                "chunk_total": total,
+                "understanding_profile_id": profile_id,
+                "stopped": True,
+                "resumed_from": resumed_count,
+            }
+
+        chunk_payloads = [completed[index] for index in range(total)]
+        summary_payload = None
+        if "image_caption" in pipeline.component_map():
+            try:
+                summary_payload = generate_video_summary_from_chunks(
+                    chunk_payloads,
+                    config=config,
+                    should_stop_callback=should_stop_callback,
+                )
+            except UnderstandingStoppedError:
+                output_path = write_evidence_bundle(
+                    video_id,
+                    _assemble_evidence_payload(
+                        video_context=video_context,
+                        profile_id=profile_id,
+                        pipeline=pipeline,
+                        chunk_payloads=chunk_payloads,
+                        config=config,
+                        generation_status="in_progress",
+                        chunk_total=total,
+                        generated_at=generated_at,
+                    ),
+                    config=config,
+                )
+                return {
+                    "video_id": video_id,
+                    "evidence_path": output_path,
+                    "chunk_count": total,
+                    "chunk_total": total,
+                    "understanding_profile_id": profile_id,
+                    "stopped": True,
+                    "resumed_from": resumed_count,
+                }
+
+        final_payload = _assemble_evidence_payload(
+            video_context=video_context,
+            profile_id=profile_id,
+            pipeline=pipeline,
+            chunk_payloads=chunk_payloads,
+            config=config,
+            generation_status="completed",
+            chunk_total=total,
+            summary_payload=summary_payload,
+            generated_at=generated_at,
+        )
+        output_path = write_evidence_bundle(video_id, final_payload, config=config)
+        return {
+            "video_id": video_id,
+            "evidence_path": output_path,
+            "chunk_count": total,
+            "chunk_total": total,
+            "understanding_profile_id": profile_id,
+            "stopped": False,
+            "resumed_from": resumed_count,
+            "caption_concurrency": get_remote_vlm_concurrency(config),
+        }
+    finally:
+        pipeline.close()
+        _close_worker_pipelines()
 
 
 def load_evidence_bundle(video_id: str, *, config=None) -> dict[str, Any] | None:
@@ -317,22 +916,17 @@ def generate_evidence_for_video(
     profile_id = str(profile.get("id", "") or "").strip()
     profile_manifest = dict(profile.get("manifest") or load_profile_manifest(profile_id, model_dir=model_dir))
 
-    payload = build_evidence_bundle_payload(
+    return _run_video_evidence_generation(
+        video_id=video_id,
         video_context=video_context,
         chunks=chunks,
         profile_manifest=profile_manifest,
         profile_id=profile_id,
         config=cfg,
+        model_dir=model_dir,
         should_stop_callback=should_stop_callback,
         chunk_completed_callback=chunk_completed_callback,
     )
-    output_path = write_evidence_bundle(video_id, payload, config=cfg)
-    return {
-        "video_id": video_id,
-        "evidence_path": output_path,
-        "chunk_count": len(payload.get("chunks") or []),
-        "understanding_profile_id": profile_id,
-    }
 
 
 def generate_evidence_batch(

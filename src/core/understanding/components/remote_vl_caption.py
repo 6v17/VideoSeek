@@ -85,7 +85,10 @@ class RemoteVlCaptionComponent(UnderstandingComponent):
         if self._should_stop_callback and self._should_stop_callback():
             raise UnderstandingStoppedError("Evidence generation stopped by user")
 
-        from src.services.understanding_resource_service import get_remote_vlm_settings
+        from src.services.understanding_resource_service import (
+            build_remote_vlm_auth_headers,
+            get_remote_vlm_settings,
+        )
 
         settings = get_remote_vlm_settings(load_config())
         base_url = _normalize_base_url(settings["base_url"])
@@ -124,7 +127,10 @@ class RemoteVlCaptionComponent(UnderstandingComponent):
         request = urllib.request.Request(
             f"{base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                **build_remote_vlm_auth_headers(settings),
+            },
             method="POST",
         )
         try:
@@ -168,7 +174,10 @@ def call_remote_vlm_text_completion(
     if should_stop_callback and should_stop_callback():
         raise UnderstandingStoppedError("Evidence generation stopped by user")
 
-    from src.services.understanding_resource_service import get_remote_vlm_settings
+    from src.services.understanding_resource_service import (
+        build_remote_vlm_auth_headers,
+        get_remote_vlm_settings,
+    )
 
     settings = get_remote_vlm_settings(load_config() if config is None else config)
     base_url = _normalize_base_url(settings["base_url"])
@@ -190,7 +199,10 @@ def call_remote_vlm_text_completion(
     request = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            **build_remote_vlm_auth_headers(settings),
+        },
         method="POST",
     )
     try:

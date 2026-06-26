@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtCore import Qt, Signal, QSize, QEvent
+from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
+from PySide6.QtWidgets import QScrollArea, QSizePolicy, QWidget
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,60 @@ class ChunkTimelineSegment:
     start_sec: float
     end_sec: float
     state: str = "pending"  # pending | ready | generating
+
+
+def effective_timeline_duration(
+    segments: list[ChunkTimelineSegment],
+    duration_sec: float = 0.0,
+) -> float:
+    if not segments:
+        return 0.0
+    spans = [
+        max(float(segment.end_sec) - float(segment.start_sec), 0.001)
+        for segment in segments
+    ]
+    chunk_end = max(float(segment.end_sec) for segment in segments)
+    passed = float(duration_sec or 0.0)
+    timeline_duration = chunk_end if passed <= 0 or passed > chunk_end * 1.01 else passed
+    return max(timeline_duration, chunk_end, sum(spans))
+
+
+def distribute_segment_widths(
+    segments: list[ChunkTimelineSegment],
+    usable_width: int,
+    *,
+    duration_sec: float = 0.0,
+    min_segment_width: int = 12,
+) -> list[int]:
+    count = len(segments)
+    if count <= 0:
+        return []
+
+    spans = [
+        max(float(segment.end_sec) - float(segment.start_sec), 0.001)
+        for segment in segments
+    ]
+    duration = max(effective_timeline_duration(segments, duration_sec), sum(spans))
+    min_each = max(int(min_segment_width), 1)
+    min_total = count * min_each
+    usable_width = max(int(usable_width), min_total)
+
+    remaining = usable_width - min_total
+    if remaining <= 0:
+        base, extra = divmod(usable_width, count)
+        return [base + (1 if index < extra else 0) for index in range(count)]
+
+    raw_fractions = [remaining * (span / duration) for span in spans]
+    extras = [int(value) for value in raw_fractions]
+    leftover = remaining - sum(extras)
+    if leftover > 0:
+        ranked = sorted(
+            ((raw_fractions[index] - extras[index], index) for index in range(count)),
+            reverse=True,
+        )
+        for offset in range(leftover):
+            extras[ranked[offset % count][1]] += 1
+    return [min_each + extras[index] for index in range(count)]
 
 
 class ChunkTimelineWidget(QWidget):
@@ -32,15 +86,18 @@ class ChunkTimelineWidget(QWidget):
     _SEGMENT_GAP = 3
     _OUTER_RADIUS = 6
     _INNER_RADIUS = 3
-    _MIN_SEGMENT_WIDTH = 4
+    _MIN_SEGMENT_WIDTH = 12
+    _PIXELS_PER_SECOND = 5.0
+    _VIEWPORT_MIN_WIDTH = 320
     _TRACK_VERTICAL_INSET = 2
     _TRACK_INNER_PADDING = 2
+    _TRACK_END_PADDING = 8
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(32)
-        self.setMinimumWidth(480)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(self._VIEWPORT_MIN_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         self._segments: list[ChunkTimelineSegment] = []
         self._segment_rects: list[tuple[int, int, int, int]] = []
@@ -50,20 +107,22 @@ class ChunkTimelineWidget(QWidget):
 
     def set_segments(self, segments: list[ChunkTimelineSegment], *, duration_sec: float = 0.0):
         self._segments = list(segments or [])
-        if duration_sec > 0:
-            self._duration_sec = float(duration_sec)
-        elif self._segments:
-            self._duration_sec = max(float(item.end_sec) for item in self._segments)
+        if self._segments:
+            chunk_end = max(float(item.end_sec) for item in self._segments)
+            passed = float(duration_sec or 0.0)
+            self._duration_sec = chunk_end if passed <= 0 or passed > chunk_end * 1.01 else passed
         else:
             self._duration_sec = 0.0
         if self._selected_index >= len(self._segments):
             self._selected_index = len(self._segments) - 1
         self._segment_rects = []
+        self._sync_layout_width()
         self.update()
 
     def set_selected_index(self, index: int):
         self._selected_index = int(index)
         self.update()
+        self._ensure_index_visible(self._selected_index)
 
     def selected_index(self) -> int:
         return self._selected_index
@@ -71,6 +130,7 @@ class ChunkTimelineWidget(QWidget):
     def set_generating_index(self, index: int):
         self._generating_index = int(index)
         self.update()
+        self._ensure_index_visible(self._generating_index)
 
     def set_segment_state(self, index: int, state: str):
         if index < 0 or index >= len(self._segments):
@@ -86,32 +146,101 @@ class ChunkTimelineWidget(QWidget):
     def segment_count(self) -> int:
         return len(self._segments)
 
+    def sizeHint(self) -> QSize:
+        return QSize(self._layout_width(), self.minimumHeight())
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        viewport = self.parentWidget()
+        if viewport is not None and not getattr(self, "_viewport_filter_installed", False):
+            viewport.installEventFilter(self)
+            self._viewport_filter_installed = True
+        self._sync_layout_width()
+
+    def eventFilter(self, watched, event):
+        if watched is self.parentWidget() and event.type() == QEvent.Type.Resize:
+            self._sync_layout_width()
+        return super().eventFilter(watched, event)
+
+    def wheelEvent(self, event: QWheelEvent):
+        scroll_area = self._scroll_area()
+        if scroll_area is not None:
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            if delta:
+                bar = scroll_area.horizontalScrollBar()
+                if bar is not None and bar.maximum() > 0:
+                    bar.setValue(bar.value() - delta)
+                    event.accept()
+                    return
+        super().wheelEvent(event)
+
+    def _scroll_area(self) -> QScrollArea | None:
+        viewport = self.parentWidget()
+        if viewport is None:
+            return None
+        parent = viewport.parentWidget()
+        return parent if isinstance(parent, QScrollArea) else None
+
+    def _viewport_width(self) -> int:
+        scroll_area = self._scroll_area()
+        if scroll_area is not None:
+            return max(int(scroll_area.viewport().width()), 0)
+        return max(int(self.width()), self._VIEWPORT_MIN_WIDTH)
+
+    def _effective_duration(self) -> float:
+        return effective_timeline_duration(self._segments, self._duration_sec)
+
+    def _compute_content_width(self) -> int:
+        count = len(self._segments)
+        horizontal_pad = self._TRACK_INNER_PADDING * 2 + 2
+        if count <= 0 or self._effective_duration() <= 0:
+            return self._VIEWPORT_MIN_WIDTH
+
+        duration = self._effective_duration()
+        gap_total = self._SEGMENT_GAP * max(count - 1, 0)
+        proportional = int(round(duration * self._PIXELS_PER_SECOND))
+        min_total = count * self._MIN_SEGMENT_WIDTH + gap_total
+        inner_width = max(proportional, min_total, 1)
+        return inner_width + horizontal_pad + self._TRACK_END_PADDING
+
+    def _distribute_segment_widths(self, usable_width: int) -> list[int]:
+        return distribute_segment_widths(
+            self._segments,
+            usable_width,
+            duration_sec=self._duration_sec,
+            min_segment_width=self._MIN_SEGMENT_WIDTH,
+        )
+
+    def _layout_width(self) -> int:
+        content = self._compute_content_width()
+        viewport = self._viewport_width()
+        if viewport > 0:
+            return max(content, viewport)
+        return max(content, self._VIEWPORT_MIN_WIDTH)
+
+    def _sync_layout_width(self):
+        target = self._layout_width()
+        if self.width() != target or self.minimumWidth() != target:
+            self.setFixedWidth(target)
+        self.updateGeometry()
+
     def _track_rect(self):
         inset = self._TRACK_VERTICAL_INSET
         return self.rect().adjusted(0, inset, 0, -inset)
 
     def _compute_segment_rects(self, track_rect):
         count = len(self._segments)
-        if count <= 0 or self._duration_sec <= 0:
+        if count <= 0 or self._effective_duration() <= 0:
             return []
 
         pad = self._TRACK_INNER_PADDING
         inner = track_rect.adjusted(pad, pad, -pad, -pad)
-        total_width = max(inner.width(), 1)
         gap_total = self._SEGMENT_GAP * max(count - 1, 0)
-        usable_width = max(total_width - gap_total, count * self._MIN_SEGMENT_WIDTH)
-
-        spans = [
-            max(float(segment.end_sec) - float(segment.start_sec), 0.001)
-            for segment in self._segments
-        ]
-        duration = max(self._duration_sec, sum(spans))
-
-        raw_widths = [usable_width * (span / duration) for span in spans]
-        widths = [max(self._MIN_SEGMENT_WIDTH, int(round(width))) for width in raw_widths]
-        width_delta = usable_width - sum(widths)
-        if widths:
-            widths[-1] = max(self._MIN_SEGMENT_WIDTH, widths[-1] + width_delta)
+        usable_width = max(inner.width() - gap_total, count * self._MIN_SEGMENT_WIDTH)
+        widths = self._distribute_segment_widths(usable_width)
 
         rects: list[tuple[int, int, int, int]] = []
         x = inner.left()
@@ -123,6 +252,20 @@ class ChunkTimelineWidget(QWidget):
             if index < count - 1:
                 x += self._SEGMENT_GAP
         return rects
+
+    def _ensure_index_visible(self, index: int):
+        if index < 0:
+            return
+        scroll_area = self._scroll_area()
+        if scroll_area is None:
+            return
+        if not self._segment_rects:
+            self._segment_rects = self._compute_segment_rects(self._track_rect())
+        if index >= len(self._segment_rects):
+            return
+        x, y, width, height = self._segment_rects[index]
+        margin = 16
+        scroll_area.ensureVisible(x - margin, y, width + margin * 2, height)
 
     def _segment_color(self, segment: ChunkTimelineSegment, index: int) -> QColor:
         if segment.state == "ready":
@@ -140,7 +283,7 @@ class ChunkTimelineWidget(QWidget):
         painter.setBrush(self._COLOR_TRACK)
         painter.drawRoundedRect(track_rect, self._OUTER_RADIUS, self._OUTER_RADIUS)
 
-        if not self._segments or self._duration_sec <= 0:
+        if not self._segments or self._effective_duration() <= 0:
             painter.setPen(QPen(QColor("#777777")))
             painter.drawText(track_rect, Qt.AlignmentFlag.AlignCenter, "—")
             painter.end()

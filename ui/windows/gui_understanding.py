@@ -11,7 +11,15 @@ from PySide6.QtWidgets import QApplication, QAbstractItemView, QScrollArea, QFil
 from src.app.config import load_config, save_config, DEFAULT_CONFIG
 from src.app.indexing_progress import format_progress_text
 from src.services.library_service import list_libraries
-from src.services.understanding_resource_service import get_understanding_resource_status
+from src.services.understanding_resource_service import (
+    REMOTE_VLM_MODE_CLOUD,
+    REMOTE_VLM_MODE_LOCAL,
+    REMOTE_VLM_PRESET_CUSTOM,
+    get_remote_vlm_preset_defaults,
+    get_understanding_resource_status,
+    list_remote_vlm_preset_ids,
+    normalize_remote_vlm_provider_mode,
+)
 from src.services.understanding_service import (
     clear_all_evidence,
     delete_evidence_for_videos,
@@ -24,7 +32,7 @@ from src.services.indexing_service import load_video_chunks_by_id
 from src.utils import format_timecode_range, open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
 from ui.widgets.chunk_timeline import ChunkTimelineSegment
-from ui.workers import UnderstandingResourceStatusWorker
+from ui.workers import RemoteVlmConnectionTestWorker, UnderstandingResourceStatusWorker
 
 
 class UnderstandingGuiMixin:
@@ -45,11 +53,22 @@ class UnderstandingGuiMixin:
         except Exception as exc:
             self.show_error_dialog(self.texts.get("understanding_config_load_failed", "Failed to load settings."), exc)
             return
-        understanding = dict(config.get("understanding") or {})
-        remote_vlm = dict(understanding.get("remote_vlm") or DEFAULT_CONFIG["understanding"]["remote_vlm"])
+        from src.services.understanding_resource_service import get_remote_vlm_settings
+
+        remote_vlm = dict(get_remote_vlm_settings(config))
+        self._populate_vlm_provider_mode_options(remote_vlm.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
+        self._populate_vlm_provider_preset_options(
+            remote_vlm.get("provider_mode", REMOTE_VLM_MODE_LOCAL),
+            remote_vlm.get("provider_preset", "lm_studio"),
+        )
         page.input_remote_vlm_base_url.setText(str(remote_vlm.get("base_url", "") or ""))
+        page.input_remote_vlm_api_key.setText(str(remote_vlm.get("api_key", "") or ""))
         page.input_remote_vlm_model.setText(str(remote_vlm.get("model", "") or ""))
+        self._sync_vlm_provider_ui()
         self._populate_understanding_caption_language_options(remote_vlm.get("caption_language", "zh"))
+        page.input_caption_concurrency.setValue(
+            max(1, min(4, int(remote_vlm.get("concurrency", 2) or 2)))
+        )
         if refresh_status:
             self._refresh_understanding_settings_status()
 
@@ -67,6 +86,246 @@ class UnderstandingGuiMixin:
         combo.setCurrentIndex(0 if index < 0 else index)
         combo.blockSignals(False)
 
+    def _vlm_provider_mode_label(self, mode: str) -> str:
+        if mode == REMOTE_VLM_MODE_CLOUD:
+            return self.texts.get("understanding_vlm_provider_mode_cloud", "Cloud API")
+        return self.texts.get("understanding_vlm_provider_mode_local", "Local")
+
+    def _vlm_provider_preset_label(self, preset_id: str) -> str:
+        key = f"understanding_vlm_provider_preset_{preset_id}"
+        defaults = {
+            "lm_studio": "LM Studio",
+            "ollama": "Ollama",
+            "openai": "OpenAI",
+            "dashscope": "DashScope (Qwen)",
+            REMOTE_VLM_PRESET_CUSTOM: "Custom",
+        }
+        return self.texts.get(key, defaults.get(preset_id, preset_id))
+
+    def _populate_vlm_provider_mode_options(self, active_mode=None):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        combo = page.input_vlm_provider_mode
+        active = normalize_remote_vlm_provider_mode(active_mode)
+        combo.blockSignals(True)
+        combo.clear()
+        for mode in (REMOTE_VLM_MODE_LOCAL, REMOTE_VLM_MODE_CLOUD):
+            combo.addItem(self._vlm_provider_mode_label(mode), mode)
+        index = combo.findData(active)
+        combo.setCurrentIndex(0 if index < 0 else index)
+        combo.blockSignals(False)
+
+    def _populate_vlm_provider_preset_options(self, mode, active_preset=None):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        combo = page.input_vlm_provider_preset
+        normalized_mode = normalize_remote_vlm_provider_mode(mode)
+        active = str(active_preset or "").strip().lower()
+        combo.blockSignals(True)
+        combo.clear()
+        preset_ids = list_remote_vlm_preset_ids(mode=normalized_mode)
+        for preset_id in preset_ids:
+            combo.addItem(self._vlm_provider_preset_label(preset_id), preset_id)
+        index = combo.findData(active if active in preset_ids else preset_ids[0])
+        combo.setCurrentIndex(0 if index < 0 else index)
+        combo.blockSignals(False)
+
+    def _sync_vlm_provider_ui(self):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
+        preset_id = str(page.input_vlm_provider_preset.currentData() or REMOTE_VLM_PRESET_CUSTOM)
+        is_cloud = mode == REMOTE_VLM_MODE_CLOUD
+        is_custom = preset_id == REMOTE_VLM_PRESET_CUSTOM
+        preset_defaults = get_remote_vlm_preset_defaults(preset_id) if not is_custom else {}
+
+        page.label_remote_vlm_api_key.setVisible(is_cloud)
+        page.input_remote_vlm_api_key.setVisible(is_cloud)
+        page.label_remote_vlm_base_url.setVisible(is_custom)
+        page.input_remote_vlm_base_url.setVisible(is_custom)
+        page.label_remote_vlm_model.setVisible(is_custom)
+        page.input_remote_vlm_model.setVisible(is_custom)
+
+        if is_custom:
+            page.hint_vlm_preset_summary.hide()
+            return
+
+        model = str(preset_defaults.get("model", "") or page.input_remote_vlm_model.text() or "").strip()
+        preset_label = self._vlm_provider_preset_label(preset_id)
+        if model:
+            page.input_remote_vlm_base_url.setText(str(preset_defaults.get("base_url", "") or ""))
+            page.input_remote_vlm_model.setText(model)
+            if is_cloud:
+                summary = self.texts.get(
+                    "understanding_vlm_preset_model_summary_cloud",
+                    "Preset {preset} uses model {model}. After you enter an API Key, requests go to this model (not auto-detected from the key).",
+                ).format(preset=preset_label, model=model)
+            else:
+                summary = self.texts.get(
+                    "understanding_vlm_preset_model_summary_local",
+                    "Preset {preset} uses model {model}. Load a compatible vision model in your local server.",
+                ).format(preset=preset_label, model=model)
+            page.hint_vlm_preset_summary.setText(summary)
+            page.hint_vlm_preset_summary.show()
+        else:
+            page.hint_vlm_preset_summary.hide()
+
+    def _resolve_vlm_fields_for_save(self, page):
+        provider_mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
+        provider_preset = str(page.input_vlm_provider_preset.currentData() or REMOTE_VLM_PRESET_CUSTOM)
+        if provider_preset != REMOTE_VLM_PRESET_CUSTOM:
+            defaults = get_remote_vlm_preset_defaults(provider_preset)
+            base_url = str(defaults.get("base_url", "") or page.input_remote_vlm_base_url.text() or "").strip()
+            model = str(defaults.get("model", "") or page.input_remote_vlm_model.text() or "").strip()
+        else:
+            base_url = page.input_remote_vlm_base_url.text().strip()
+            model = page.input_remote_vlm_model.text().strip()
+        api_key = page.input_remote_vlm_api_key.text().strip() if provider_mode == REMOTE_VLM_MODE_CLOUD else ""
+        return provider_mode, provider_preset, base_url, model, api_key
+
+    def _build_remote_vlm_draft_from_page(self, page):
+        provider_mode, provider_preset, base_url, model, api_key = self._resolve_vlm_fields_for_save(page)
+        return {
+            "provider_mode": provider_mode,
+            "provider_preset": provider_preset,
+            "base_url": base_url,
+            "model": model,
+            "api_key": api_key,
+        }
+
+    def _format_vlm_probe_status(self, probe: dict) -> str:
+        probe = dict(probe or {})
+        model = str(probe.get("configured_model", "") or "").strip()
+        error_code = str(probe.get("error_code", "") or "").strip()
+        if probe.get("reachable") and probe.get("model_available"):
+            return self.texts.get(
+                "understanding_test_vlm_success",
+                "Connection OK. Model {model} is available.",
+            ).format(model=model or "?")
+        if error_code == "cloud_api_key_required":
+            return self.texts.get(
+                "understanding_test_vlm_api_key_required",
+                "Enter an API Key before testing a cloud provider.",
+            )
+        if error_code == "auth_failed":
+            return self.texts.get(
+                "understanding_test_vlm_auth_failed",
+                "API Key invalid or unauthorized.",
+            )
+        if error_code == "model_not_found":
+            available = [str(item) for item in (probe.get("available_models") or []) if str(item).strip()]
+            sample = ", ".join(available[:8])
+            if len(available) > 8:
+                sample = f"{sample} (+{len(available) - 8})"
+            return self.texts.get(
+                "understanding_test_vlm_model_missing",
+                "Connected, but model {model} is not in your account list. Available: {samples}",
+            ).format(model=model or "?", samples=sample or self.texts.get("understanding_test_vlm_no_models", "none"))
+        if error_code == "timeout":
+            return self.texts.get(
+                "understanding_test_vlm_timeout",
+                "Connection timed out: {error}",
+            ).format(error=str(probe.get("error", "") or "timeout"))
+        return self.texts.get(
+            "understanding_test_vlm_failed",
+            "Connection failed: {error}",
+        ).format(error=str(probe.get("error", "") or "unknown error"))
+
+    def test_understanding_vlm_connection(self):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        if getattr(self, "_vlm_connection_test_worker", None) is not None:
+            return
+
+        draft = self._build_remote_vlm_draft_from_page(page)
+        hint = getattr(page, "hint_understanding_status", None)
+        if hint is not None:
+            hint.setText(self.texts.get("understanding_test_vlm_testing", "Testing description service…"))
+
+        worker = RemoteVlmConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
+        self._vlm_connection_test_worker = worker
+        page.btn_test_vlm_connection.setEnabled(False)
+
+        def _finish(active_worker=worker):
+            if getattr(self, "_vlm_connection_test_worker", None) is active_worker:
+                self._vlm_connection_test_worker = None
+            page.btn_test_vlm_connection.setEnabled(True)
+            try:
+                active_worker.deleteLater()
+            except Exception:
+                pass
+
+        worker.result_ready.connect(
+            lambda probe, active_page=page, active_hint=hint: self._finish_vlm_connection_test(probe, active_page, active_hint)
+        )
+        worker.error_signal.connect(
+            lambda message, active_page=page, active_hint=hint: self._fail_vlm_connection_test(message, active_page, active_hint)
+        )
+        worker.finished.connect(_finish)
+        worker.start()
+
+    def _finish_vlm_connection_test(self, probe, page, hint):
+        message = self._format_vlm_probe_status(probe)
+        if hint is not None:
+            hint.setText(message)
+        if dict(probe or {}).get("reachable") and dict(probe or {}).get("model_available"):
+            self.show_info_dialog(
+                self.texts.get("understanding_test_vlm_title", "Connection test"),
+                message,
+                kind="success",
+            )
+        elif dict(probe or {}).get("error_code") != "cloud_api_key_required":
+            self.show_error_dialog(message)
+
+    def _fail_vlm_connection_test(self, message, page, hint):
+        text = self.texts.get(
+            "understanding_test_vlm_failed",
+            "Connection failed: {error}",
+        ).format(error=str(message or "unknown error"))
+        if hint is not None:
+            hint.setText(text)
+        self.show_error_dialog(text)
+
+    def _apply_vlm_provider_preset(self, preset_id: str):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        preset_id = str(preset_id or "").strip().lower()
+        if preset_id == REMOTE_VLM_PRESET_CUSTOM:
+            self._sync_vlm_provider_ui()
+            return
+        defaults = get_remote_vlm_preset_defaults(preset_id)
+        if not defaults:
+            self._sync_vlm_provider_ui()
+            return
+        page.input_remote_vlm_base_url.setText(defaults.get("base_url", ""))
+        page.input_remote_vlm_model.setText(defaults.get("model", ""))
+        if normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData()) == REMOTE_VLM_MODE_LOCAL:
+            page.input_remote_vlm_api_key.setText("")
+        self._sync_vlm_provider_ui()
+
+    def _on_vlm_provider_mode_changed(self, _index=None):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
+        default_preset = "openai" if mode == REMOTE_VLM_MODE_CLOUD else "lm_studio"
+        self._populate_vlm_provider_preset_options(mode, default_preset)
+        self._apply_vlm_provider_preset(default_preset)
+
+    def _on_vlm_provider_preset_changed(self, _index=None):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        preset_id = str(page.input_vlm_provider_preset.currentData() or REMOTE_VLM_PRESET_CUSTOM)
+        self._apply_vlm_provider_preset(preset_id)
+
     def save_understanding_settings(self):
         if not self._ensure_startup_migration_idle("feature_understanding"):
             return
@@ -82,8 +341,12 @@ class UnderstandingGuiMixin:
                 understanding = {}
                 config["understanding"] = understanding
             remote_vlm = dict(understanding.get("remote_vlm") or DEFAULT_CONFIG["understanding"]["remote_vlm"])
-            remote_vlm["base_url"] = page.input_remote_vlm_base_url.text().strip()
-            remote_vlm["model"] = page.input_remote_vlm_model.text().strip()
+            provider_mode, provider_preset, base_url, model, api_key = self._resolve_vlm_fields_for_save(page)
+            remote_vlm["provider_mode"] = provider_mode
+            remote_vlm["provider_preset"] = provider_preset
+            remote_vlm["base_url"] = base_url
+            remote_vlm["model"] = model
+            remote_vlm["api_key"] = api_key
             from src.services.understanding_resource_service import (
                 get_caption_prompt_for_language,
                 normalize_caption_language,
@@ -92,6 +355,7 @@ class UnderstandingGuiMixin:
             language = normalize_caption_language(page.input_caption_language.currentData())
             remote_vlm["caption_language"] = language
             remote_vlm["prompt"] = get_caption_prompt_for_language(language)
+            remote_vlm["concurrency"] = int(page.input_caption_concurrency.value())
             understanding["remote_vlm"] = remote_vlm
             config["understanding"] = understanding
             save_config(config)
@@ -107,9 +371,14 @@ class UnderstandingGuiMixin:
         page = self._understanding_config_widgets()
         if page is None:
             return
+        page.input_vlm_provider_mode.setEnabled(enabled)
+        page.input_vlm_provider_preset.setEnabled(enabled)
         page.input_remote_vlm_base_url.setEnabled(enabled)
+        page.input_remote_vlm_api_key.setEnabled(enabled)
         page.input_remote_vlm_model.setEnabled(enabled)
         page.input_caption_language.setEnabled(enabled)
+        page.input_caption_concurrency.setEnabled(enabled)
+        page.btn_test_vlm_connection.setEnabled(enabled)
         page.btn_import_understanding_model.setEnabled(enabled)
         page.btn_save_config.setEnabled(enabled)
 
@@ -344,7 +613,6 @@ class UnderstandingGuiMixin:
             for item in (evidence.get("chunks") or [])
             if isinstance(item, dict)
         }
-        duration_sec = float((evidence.get("video") or {}).get("duration_sec") or 0.0)
         segments: list[ChunkTimelineSegment] = []
         for index, chunk in enumerate(index_chunks):
             payload = evidence_chunks.get(index)
@@ -358,8 +626,7 @@ class UnderstandingGuiMixin:
                     state=state,
                 )
             )
-            if duration_sec <= 0 and segments:
-                duration_sec = max(float(segments[-1].end_sec), duration_sec)
+        duration_sec = max((float(segment.end_sec) for segment in segments), default=0.0)
         page.chunk_timeline.set_segments(segments, duration_sec=duration_sec)
         self._refresh_understanding_video_summary(evidence)
         if segments:
@@ -439,11 +706,20 @@ class UnderstandingGuiMixin:
 
     def _prepare_understanding_timeline_for_generation(self):
         page = self.understanding_page
-        self._understanding_chunk_payloads = {}
+        self._load_understanding_video_timeline()
         total = page.chunk_timeline.segment_count()
+        first_pending = None
         for index in range(total):
-            page.chunk_timeline.set_segment_state(index, "pending")
-        page.chunk_timeline.set_generating_index(0 if total else -1)
+            payload = dict(self._understanding_chunk_payloads.get(index) or {})
+            if self._chunk_payload_has_evidence(payload):
+                page.chunk_timeline.set_segment_state(index, "ready")
+            else:
+                page.chunk_timeline.set_segment_state(index, "pending")
+                if first_pending is None:
+                    first_pending = index
+        page.chunk_timeline.set_generating_index(
+            first_pending if first_pending is not None else (0 if total else -1)
+        )
         self._set_understanding_readonly_text(
             page.video_summary_text,
             self.texts.get("understanding_video_summary_generating", "Generating video summary after all segments…"),
@@ -625,7 +901,9 @@ class UnderstandingGuiMixin:
             remote_line = self.texts.get(
                 "understanding_settings_remote_vlm_ready",
                 "Description service connected: {model}",
-            ).format(model=str(load_config().get("understanding", {}).get("remote_vlm", {}).get("model", "")))
+            ).format(model=str(remote_vlm.get("configured_model", "") or remote_vlm.get("model", "") or ""))
+        elif remote_vlm.get("reachable") and str(remote_vlm.get("error_code", "") or "") == "model_not_found":
+            remote_line = self._format_vlm_probe_status(remote_vlm)
         elif remote_vlm:
             remote_line = self.texts.get(
                 "understanding_settings_remote_vlm_not_ready",
@@ -712,6 +990,18 @@ class UnderstandingGuiMixin:
         page.lbl_status.setText(self.texts.get("understanding_generation_started", "Generating…"))
         page.understanding_notice.hide()
         self._prepare_understanding_timeline_for_generation()
+        resumed = sum(
+            1
+            for index in range(page.chunk_timeline.segment_count())
+            if self._chunk_payload_has_evidence(self._understanding_chunk_payloads.get(index))
+        )
+        if resumed > 0:
+            page.lbl_status.setText(
+                self.texts.get(
+                    "understanding_generation_resuming",
+                    "Resuming: {saved} segments already saved.",
+                ).format(saved=resumed)
+            )
 
         if self.understanding_controller.start_video(video_id):
             if hasattr(self, "_sync_tray_stop_action"):
@@ -746,8 +1036,12 @@ class UnderstandingGuiMixin:
 
         if result.get("video_id"):
             chunk_count = int(result.get("chunk_count", 0) or 0)
+            chunk_total = int(result.get("chunk_total", chunk_count) or chunk_count)
             if stopped:
-                status_text = self.texts.get("understanding_generation_stopped", "Stopped.")
+                status_text = self.texts.get(
+                    "understanding_generation_stopped_partial",
+                    "Stopped. Saved {saved}/{total} segments.",
+                ).format(saved=chunk_count, total=chunk_total)
             elif success:
                 status_text = self.texts.get(
                     "understanding_video_generation_done",
@@ -756,10 +1050,7 @@ class UnderstandingGuiMixin:
             else:
                 status_text = self.texts.get("understanding_generation_failed", "Failed.")
             page.lbl_status.setText(status_text)
-            if stopped:
-                page.chunk_timeline.set_generating_index(-1)
-            else:
-                self._load_understanding_video_timeline()
+            self._load_understanding_video_timeline()
         else:
             generated_count = int(result.get("generated_count", 0) or 0)
             error_count = len(result.get("errors") or [])

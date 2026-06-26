@@ -4,11 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除caption适配，改为外置vlm理解视频">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="用线程后台检测服务，更新说明文档">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/understanding/components/remote_vl_caption.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/understanding/components/remote_vl_caption.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/understanding_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_remote_vl.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_remote_vl.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/chunk_timeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/chunk_timeline.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
@@ -464,15 +471,7 @@
       <workItem from="1782217529558" duration="120000" />
       <workItem from="1782217662862" duration="7423000" />
       <workItem from="1782392206578" duration="11019000" />
-      <workItem from="1782474044093" duration="1229000" />
-    </task>
-    <task id="LOCAL-00071" summary="补充说明">
-      <option name="closed" value="true" />
-      <created>1778348051809</created>
-      <option name="number" value="00071" />
-      <option name="presentableId" value="LOCAL-00071" />
-      <option name="project" value="LOCAL" />
-      <updated>1778348051809</updated>
+      <workItem from="1782474044093" duration="6992000" />
     </task>
     <task id="LOCAL-00072" summary="加视频溯源功能beta">
       <option name="closed" value="true" />
@@ -858,7 +857,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782402153448</updated>
     </task>
-    <option name="localTasksCounter" value="120" />
+    <task id="LOCAL-00120" summary="用线程后台检测服务，更新说明文档">
+      <option name="closed" value="true" />
+      <created>1782475334523</created>
+      <option name="number" value="00120" />
+      <option name="presentableId" value="LOCAL-00120" />
+      <option name="project" value="LOCAL" />
+      <updated>1782475334524</updated>
+    </task>
+    <option name="localTasksCounter" value="121" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -888,7 +895,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="移除远古旧版本迁移代码" />
     <MESSAGE value="增加GPU解码抽帧（试验性）" />
     <MESSAGE value="给agent调用api的说明书" />
     <MESSAGE value="加了搜索接口，供agent使用（beta）" />
@@ -913,7 +919,8 @@
     <MESSAGE value="界面微调" />
     <MESSAGE value="增加yolo11n、vit-gpt2适配" />
     <MESSAGE value="移除caption适配，改为外置vlm理解视频" />
-    <option name="LAST_COMMIT_MESSAGE" value="移除caption适配，改为外置vlm理解视频" />
+    <MESSAGE value="用线程后台检测服务，更新说明文档" />
+    <option name="LAST_COMMIT_MESSAGE" value="用线程后台检测服务，更新说明文档" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -46,15 +46,49 @@ DEFAULT_UNDERSTANDING_PROFILES = [
 ]
 
 DEFAULT_REMOTE_VLM_CONFIG = {
+    "provider_mode": "local",
+    "provider_preset": "lm_studio",
     "base_url": "http://127.0.0.1:1234/v1",
     "model": "qwen3-vl-8b-instruct",
+    "api_key": "",
     "caption_language": "zh",
     "prompt": (
         "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
     ),
     "timeout_sec": 120,
     "max_tokens": 128,
+    "concurrency": 2,
 }
+
+REMOTE_VLM_MODE_LOCAL = "local"
+REMOTE_VLM_MODE_CLOUD = "cloud"
+REMOTE_VLM_PRESET_CUSTOM = "custom"
+
+REMOTE_VLM_PRESETS: dict[str, dict[str, str]] = {
+    "lm_studio": {
+        "mode": REMOTE_VLM_MODE_LOCAL,
+        "base_url": "http://127.0.0.1:1234/v1",
+        "model": "qwen3-vl-8b-instruct",
+    },
+    "ollama": {
+        "mode": REMOTE_VLM_MODE_LOCAL,
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "qwen3-vl-8b-instruct",
+    },
+    "openai": {
+        "mode": REMOTE_VLM_MODE_CLOUD,
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+    },
+    "dashscope": {
+        "mode": REMOTE_VLM_MODE_CLOUD,
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-vl-max",
+    },
+}
+
+LOCAL_VLM_PRESET_IDS = ("lm_studio", "ollama", REMOTE_VLM_PRESET_CUSTOM)
+CLOUD_VLM_PRESET_IDS = ("openai", "dashscope", REMOTE_VLM_PRESET_CUSTOM)
 
 CAPTION_LANGUAGE_ZH = "zh"
 CAPTION_LANGUAGE_EN = "en"
@@ -97,6 +131,89 @@ def get_video_summary_prompt_for_language(language: str) -> str:
     return VIDEO_SUMMARY_LANGUAGE_PROMPTS[normalize_caption_language(language)]
 
 
+def _normalize_vlm_base_url_for_compare(base_url: str) -> str:
+    text = str(base_url or "").strip().rstrip("/").lower()
+    if not text:
+        return ""
+    if text.endswith("/v1"):
+        return text
+    return f"{text}/v1"
+
+
+def normalize_remote_vlm_provider_mode(value, *, default: str = REMOTE_VLM_MODE_LOCAL) -> str:
+    text = str(value or "").strip().lower()
+    if text in {REMOTE_VLM_MODE_LOCAL, REMOTE_VLM_MODE_CLOUD}:
+        return text
+    fallback = str(default or REMOTE_VLM_MODE_LOCAL).strip().lower()
+    return fallback if fallback in {REMOTE_VLM_MODE_LOCAL, REMOTE_VLM_MODE_CLOUD} else REMOTE_VLM_MODE_LOCAL
+
+
+def normalize_remote_vlm_provider_preset(value, *, mode: str | None = None) -> str:
+    text = str(value or "").strip().lower()
+    if text == REMOTE_VLM_PRESET_CUSTOM:
+        return REMOTE_VLM_PRESET_CUSTOM
+    if text in REMOTE_VLM_PRESETS:
+        preset_mode = REMOTE_VLM_PRESETS[text]["mode"]
+        if mode and preset_mode != mode:
+            return REMOTE_VLM_PRESET_CUSTOM
+        return text
+    return REMOTE_VLM_PRESET_CUSTOM
+
+
+def resolve_remote_vlm_provider_settings(raw_remote_vlm: Mapping[str, Any]) -> tuple[str, str]:
+    raw = dict(raw_remote_vlm or {})
+    base_url = str(raw.get("base_url", "") or "").strip()
+    api_key = str(raw.get("api_key", "") or "").strip()
+    explicit_mode = str(raw.get("provider_mode", "") or "").strip().lower()
+    explicit_preset = str(raw.get("provider_preset", "") or "").strip().lower()
+    has_explicit_mode = "provider_mode" in raw and bool(explicit_mode)
+    has_explicit_preset = "provider_preset" in raw and bool(explicit_preset)
+
+    if has_explicit_preset and explicit_preset in REMOTE_VLM_PRESETS:
+        preset_mode = REMOTE_VLM_PRESETS[explicit_preset]["mode"]
+        mode = normalize_remote_vlm_provider_mode(explicit_mode, default=preset_mode) if has_explicit_mode else preset_mode
+        return mode, explicit_preset
+
+    if has_explicit_mode and has_explicit_preset and explicit_preset == REMOTE_VLM_PRESET_CUSTOM:
+        return normalize_remote_vlm_provider_mode(explicit_mode), REMOTE_VLM_PRESET_CUSTOM
+
+    normalized_url = _normalize_vlm_base_url_for_compare(base_url)
+    for preset_id, preset in REMOTE_VLM_PRESETS.items():
+        if normalized_url and normalized_url == _normalize_vlm_base_url_for_compare(preset["base_url"]):
+            return preset["mode"], preset_id
+
+    if api_key or (
+        normalized_url.startswith("https://")
+        and "127.0.0.1" not in normalized_url
+        and "localhost" not in normalized_url
+    ):
+        return REMOTE_VLM_MODE_CLOUD, REMOTE_VLM_PRESET_CUSTOM
+
+    if normalized_url:
+        return REMOTE_VLM_MODE_LOCAL, REMOTE_VLM_PRESET_CUSTOM
+
+    if has_explicit_mode or has_explicit_preset:
+        mode = normalize_remote_vlm_provider_mode(explicit_mode)
+        preset = normalize_remote_vlm_provider_preset(explicit_preset, mode=mode)
+        return mode, preset
+
+    return REMOTE_VLM_MODE_LOCAL, "lm_studio"
+
+
+def get_remote_vlm_preset_defaults(preset_id: str) -> dict[str, str]:
+    preset = REMOTE_VLM_PRESETS.get(str(preset_id or "").strip().lower())
+    if not preset:
+        return {}
+    return {"base_url": preset["base_url"], "model": preset["model"]}
+
+
+def list_remote_vlm_preset_ids(*, mode: str) -> tuple[str, ...]:
+    normalized_mode = normalize_remote_vlm_provider_mode(mode)
+    if normalized_mode == REMOTE_VLM_MODE_CLOUD:
+        return CLOUD_VLM_PRESET_IDS
+    return LOCAL_VLM_PRESET_IDS
+
+
 def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> str:
     explicit = str(raw_remote_vlm.get("caption_language", "") or "").strip()
     if explicit:
@@ -130,7 +247,24 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
         remote_vlm["max_tokens"] = max(16, min(512, int(raw_remote_vlm.get("max_tokens", remote_vlm["max_tokens"]))))
     except (TypeError, ValueError):
         remote_vlm["max_tokens"] = int(DEFAULT_REMOTE_VLM_CONFIG["max_tokens"])
+    try:
+        remote_vlm["concurrency"] = max(1, min(4, int(raw_remote_vlm.get("concurrency", remote_vlm.get("concurrency", 2)))))
+    except (TypeError, ValueError):
+        remote_vlm["concurrency"] = int(DEFAULT_REMOTE_VLM_CONFIG["concurrency"])
+    remote_vlm["api_key"] = str(raw_remote_vlm.get("api_key", remote_vlm.get("api_key", "")) or "").strip()
+    mode, preset = resolve_remote_vlm_provider_settings(raw_remote_vlm)
+    remote_vlm["provider_mode"] = mode
+    remote_vlm["provider_preset"] = preset
+    if mode == REMOTE_VLM_MODE_LOCAL:
+        remote_vlm["api_key"] = ""
     return remote_vlm
+
+
+def build_remote_vlm_auth_headers(settings: Mapping[str, Any]) -> dict[str, str]:
+    api_key = str(settings.get("api_key", "") or "").strip()
+    if not api_key:
+        return {}
+    return {"Authorization": f"Bearer {api_key}"}
 
 DEFAULT_UNDERSTANDING_CONFIG = {
     "active_profile": "vision_baseline_v1",
@@ -424,6 +558,14 @@ def get_remote_vlm_settings(config: Mapping[str, Any] | None = None) -> dict[str
     return dict(normalized["understanding"].get("remote_vlm") or DEFAULT_REMOTE_VLM_CONFIG)
 
 
+def get_remote_vlm_concurrency(config: Mapping[str, Any] | None = None) -> int:
+    settings = get_remote_vlm_settings(config)
+    try:
+        return max(1, min(4, int(settings.get("concurrency", DEFAULT_REMOTE_VLM_CONFIG["concurrency"]))))
+    except (TypeError, ValueError):
+        return int(DEFAULT_REMOTE_VLM_CONFIG["concurrency"])
+
+
 def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: float = 3.0) -> dict[str, Any]:
     import urllib.error
     import urllib.request
@@ -431,39 +573,143 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     settings = get_remote_vlm_settings(config)
     base_url = str(settings.get("base_url", "") or "").strip().rstrip("/")
     model = str(settings.get("model", "") or "").strip()
+    provider_mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
+    api_key = str(settings.get("api_key", "") or "").strip()
     if not base_url:
-        return {"reachable": False, "model_available": False, "error": "base_url is not configured"}
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "base_url_missing",
+            "error": "base_url is not configured",
+            "configured_model": model,
+            "available_models": [],
+        }
     if not model:
-        return {"reachable": False, "model_available": False, "error": "model is not configured"}
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "model_missing",
+            "error": "model is not configured",
+            "configured_model": "",
+            "available_models": [],
+        }
+    if provider_mode == REMOTE_VLM_MODE_CLOUD and not api_key:
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "cloud_api_key_required",
+            "error": "API Key is required for cloud providers",
+            "configured_model": model,
+            "available_models": [],
+        }
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1" if not base_url.endswith("/v1/") else base_url.rstrip("/")
 
     request = urllib.request.Request(
         f"{base_url}/models",
-        headers={"Accept": "application/json"},
+        headers={"Accept": "application/json", **build_remote_vlm_auth_headers(settings)},
         method="GET",
     )
     try:
         with urllib.request.urlopen(request, timeout=max(1.0, float(timeout_sec))) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        if exc.code in {401, 403}:
+            return {
+                "reachable": False,
+                "model_available": False,
+                "auth_ok": False,
+                "error_code": "auth_failed",
+                "error": f"HTTP {exc.code}: API Key invalid or unauthorized",
+                "configured_model": model,
+                "available_models": [],
+                "http_status": int(exc.code),
+                "http_detail": detail[:240],
+            }
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "http_error",
+            "error": f"HTTP {exc.code}: {detail[:240] or exc.reason}",
+            "configured_model": model,
+            "available_models": [],
+            "http_status": int(exc.code),
+            "http_detail": detail[:240],
+        }
     except urllib.error.URLError as exc:
-        return {"reachable": False, "model_available": False, "error": str(getattr(exc, "reason", exc) or exc)}
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "unreachable",
+            "error": str(getattr(exc, "reason", exc) or exc),
+            "configured_model": model,
+            "available_models": [],
+        }
     except TimeoutError:
-        return {"reachable": False, "model_available": False, "error": f"timed out after {timeout_sec:.0f}s"}
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "timeout",
+            "error": f"timed out after {timeout_sec:.0f}s",
+            "configured_model": model,
+            "available_models": [],
+        }
     except json.JSONDecodeError as exc:
-        return {"reachable": False, "model_available": False, "error": f"invalid JSON from /models: {exc}"}
+        return {
+            "reachable": False,
+            "model_available": False,
+            "auth_ok": False,
+            "error_code": "invalid_json",
+            "error": f"invalid JSON from /models: {exc}",
+            "configured_model": model,
+            "available_models": [],
+        }
 
     model_ids = {
         str(item.get("id", "") or "").strip()
         for item in (payload.get("data") or [])
         if isinstance(item, dict)
     }
+    available_models = sorted(model_ids)
+    model_available = model in model_ids
+    sample_models = ", ".join(available_models[:8])
+    if not model_available:
+        suffix = f" Available: {sample_models}" if sample_models else ""
+        if len(available_models) > 8:
+            suffix += f" (+{len(available_models) - 8} more)"
+        return {
+            "reachable": True,
+            "model_available": False,
+            "auth_ok": True,
+            "error_code": "model_not_found",
+            "error": f"model {model!r} not listed by server.{suffix}",
+            "configured_model": model,
+            "available_models": available_models,
+        }
     return {
         "reachable": True,
-        "model_available": model in model_ids,
-        "available_models": sorted(model_ids),
-        "error": "" if model in model_ids else f"model {model!r} not listed by server",
+        "model_available": True,
+        "auth_ok": True,
+        "error_code": "",
+        "error": "",
+        "configured_model": model,
+        "available_models": available_models,
     }
+
+
+def build_remote_vlm_probe_config(remote_vlm: Mapping[str, Any]) -> dict[str, Any]:
+    return {"understanding": {"remote_vlm": dict(remote_vlm or {})}}
+
+
+def probe_remote_vlm_draft(remote_vlm: Mapping[str, Any], *, timeout_sec: float = 8.0) -> dict[str, Any]:
+    return probe_remote_vlm(build_remote_vlm_probe_config(remote_vlm), timeout_sec=timeout_sec)
 
 
 def load_profile_manifest(profile_id: str, model_dir: str | None = None) -> dict[str, Any]:

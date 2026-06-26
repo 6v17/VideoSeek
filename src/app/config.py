@@ -63,14 +63,18 @@ DEFAULT_UNDERSTANDING_CONFIG = {
         }
     ],
     "remote_vlm": {
+        "provider_mode": "local",
+        "provider_preset": "lm_studio",
         "base_url": "http://127.0.0.1:1234/v1",
         "model": "qwen3-vl-8b-instruct",
+        "api_key": "",
         "caption_language": "zh",
         "prompt": (
             "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
         ),
         "timeout_sec": 120,
         "max_tokens": 128,
+        "concurrency": 2,
     },
 }
 

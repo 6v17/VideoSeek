@@ -10,7 +10,10 @@ import numpy as np
 from src.core.understanding.pipeline import UnderstandingPipeline
 from src.domain.evidence_bundle import validate_evidence_bundle
 from src.services.understanding_service import (
+    CaptionConcurrencyController,
     build_evidence_bundle_payload,
+    chunk_payload_has_evidence,
+    generate_evidence_for_video,
     resolve_video_context,
     write_evidence_bundle,
 )
@@ -306,6 +309,152 @@ class UnderstandingServiceTests(unittest.TestCase):
                 cleared = clear_all_evidence(config=config)
             self.assertEqual(cleared["deleted_count"], 1)
             self.assertFalse(os.path.isfile(second_path))
+
+    def test_generate_evidence_for_video_checkpoints_and_resumes(self):
+        video_context = {
+            "video_id": "abc123",
+            "video_path": "D:/Videos/AnimeS1/ep01.mp4",
+            "video_rel_path": "ep01.mp4",
+            "library_path": "D:/Videos/AnimeS1",
+            "duration_sec": 4.0,
+            "source_exists": True,
+        }
+        chunks = [{"start": 0.0, "end": 2.0}, {"start": 2.0, "end": 4.0}]
+        saved_chunk = {
+            "chunk_index": 0,
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "sample": {"timestamp_sec": 1.0, "strategy": "midpoint"},
+            "evidence": {
+                "vision": {
+                    "image_caption": {"source": "vision/image_caption/qwen3-vl-remote", "text": "saved segment"},
+                },
+                "audio": {},
+            },
+        }
+        generated_chunk = {
+            "chunk_index": 1,
+            "start_sec": 2.0,
+            "end_sec": 4.0,
+            "sample": {"timestamp_sec": 3.0, "strategy": "midpoint"},
+            "evidence": {
+                "vision": {
+                    "image_caption": {"source": "vision/image_caption/qwen3-vl-remote", "text": "new segment"},
+                },
+                "audio": {},
+            },
+        }
+        fake_pipeline = MagicMock()
+        fake_pipeline.run_chunk.return_value = generated_chunk
+        fake_pipeline.component_map.return_value = {
+            "object_detection": "vision/object_detection/yolo11n",
+            "image_caption": "vision/image_caption/qwen3-vl-remote",
+        }
+        fake_pipeline.keyframe_strategy = "midpoint"
+        fake_pipeline.close = MagicMock()
+
+        config = {
+            "data_root": "D:/VideoSeek/data",
+            "models": {
+                "active_profile": "clip_onnx_default",
+                "profiles": [
+                    {
+                        "id": "clip_onnx_default",
+                        "provider": "clip_onnx",
+                        "runtime": {"model_variant": "vit-base-patch32"},
+                    }
+                ],
+            },
+        }
+        existing_bundle = {
+            "schema_version": 1,
+            "video": video_context,
+            "provenance": {
+                "understanding_profile_id": "vision_baseline_v1",
+                "components": fake_pipeline.component_map.return_value,
+                "chunk_source": {
+                    "search_profile_id": "clip_onnx_default",
+                    "search_provider": "clip_onnx",
+                    "search_variant": "vit-base-patch32",
+                },
+                "keyframe_strategy": "midpoint",
+                "generated_at": "2026-06-26T10:00:00Z",
+            },
+            "chunks": [saved_chunk],
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            evidence_path = os.path.join(temp_dir, "data", "evidence", "videos", "abc123.json")
+            os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+            config["data_root"] = temp_dir
+            written_paths: list[str] = []
+
+            def _capture_write(path, payload):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                written_paths.append(str(path))
+
+            with (
+                patch(
+                    "src.services.understanding_service.get_understanding_resource_status",
+                    return_value={"understanding_ready": True, "missing_components": []},
+                ),
+                patch("src.services.understanding_service.resolve_video_context", return_value=video_context),
+                patch("src.services.indexing_service.load_video_chunks_by_id", return_value=chunks),
+                patch(
+                    "src.services.understanding_service.get_active_understanding_profile",
+                    return_value={"id": "vision_baseline_v1", "manifest": PROFILE_MANIFEST},
+                ),
+                patch("src.services.understanding_service.UnderstandingPipeline", return_value=fake_pipeline),
+                patch("src.services.understanding_service.load_evidence_bundle", return_value=existing_bundle),
+                patch("src.services.understanding_service.get_evidence_path", return_value=evidence_path),
+                patch(
+                    "src.services.understanding_service.generate_video_summary_from_chunks",
+                    return_value={"text": "summary", "source": "remote_vlm"},
+                ),
+                patch(
+                    "src.services.understanding_service.get_active_embedding_spec",
+                    return_value={"model_id": "clip_onnx_default", "provider": "clip_onnx"},
+                ),
+                patch(
+                    "src.services.understanding_service.get_active_model_profile",
+                    return_value={
+                        "id": "clip_onnx_default",
+                        "provider": "clip_onnx",
+                        "runtime": {"model_variant": "vit-base-patch32"},
+                    },
+                ),
+                patch("src.services.understanding_service._atomic_write_json", side_effect=_capture_write),
+            ):
+                result = generate_evidence_for_video("abc123", config=config)
+
+            self.assertFalse(result.get("stopped"))
+            self.assertEqual(result.get("chunk_count"), 2)
+            self.assertEqual(result.get("resumed_from"), 1)
+            fake_pipeline.run_chunk.assert_called_once()
+            self.assertTrue(written_paths)
+            loaded = json.loads(Path(written_paths[-1]).read_text(encoding="utf-8"))
+            self.assertEqual(loaded["provenance"]["generation_status"], "completed")
+            self.assertEqual(len(loaded["chunks"]), 2)
+            self.assertTrue(chunk_payload_has_evidence(loaded["chunks"][0]))
+
+
+class CaptionConcurrencyControllerTests(unittest.TestCase):
+    def test_increases_after_fast_success_streak(self):
+        controller = CaptionConcurrencyController(4, timeout_sec=120.0)
+        self.assertEqual(controller.active_limit(), 2)
+        controller.note_success(5.0)
+        self.assertEqual(controller.active_limit(), 2)
+        controller.note_success(5.0)
+        self.assertEqual(controller.active_limit(), 3)
+
+    def test_decreases_on_slow_or_failed_chunks(self):
+        controller = CaptionConcurrencyController(4, timeout_sec=100.0)
+        controller.note_success(80.0)
+        self.assertEqual(controller.active_limit(), 1)
+        controller.current_concurrency = 3
+        controller.note_failure()
+        self.assertEqual(controller.active_limit(), 2)
 
 
 if __name__ == "__main__":
