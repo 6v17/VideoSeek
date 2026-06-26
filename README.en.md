@@ -8,6 +8,15 @@ Desktop semantic video search (PySide6 + ONNX + FAISS + FFmpeg).
 
 Don't want to set up Python and dependencies? Grab the **pre-built installer** from **[lv17.top](https://www.lv17.top/)**. On first launch, follow the in-app prompts to download and import runtime assets (models, FFmpeg, etc.).
 
+## Minimal workflow
+
+1. **Set up runtime assets** — Follow first-launch prompts, or download and **import** models and FFmpeg under **Settings** (see table below).
+2. **Add a library** — Open **Local Library** in the sidebar and add a folder.
+3. **Sync the library** — Select the library and click **Sync**; wait for frame extraction and indexing to finish.
+4. **Search** — Open **Search** in the sidebar and query with text or images over synced videos.
+
+Understanding evidence and the Agent API are optional add-ons — **sync a library first** before using them.
+
 ## Community
 
 - **QQ group**: 1033551438 (install help, usage questions, feedback)
