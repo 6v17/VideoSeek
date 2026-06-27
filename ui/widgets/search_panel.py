@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.layout import COMPONENT_SIZES
+from ui.widgets.layout import COMPONENT_SIZES, compute_search_panel_width
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
 
@@ -29,12 +29,13 @@ class SearchScopeSelect(QComboBox):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    def set_display_text(self, text: str) -> None:
+    def set_display_text(self, text: str, *, tooltip: str = "") -> None:
         blocked = self.blockSignals(True)
         self.clear()
         if text:
             self.addItem(text)
             self.setCurrentIndex(0)
+        self.setToolTip(tooltip or text)
         self.blockSignals(blocked)
 
     def showPopup(self) -> None:
@@ -65,12 +66,31 @@ class SearchPanel(VSCard):
     TAB_COMPOSE = 2
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 12))
+        super().__init__(parent, margins=(card_margin,) * 4, spacing=8)
         layout = self.content_layout
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         combo_width = int(COMPONENT_SIZES.get("search_option_combo_width", 96))
+        scope_select_width = int(COMPONENT_SIZES.get("search_scope_select_width", 120))
+        mobile_qr_width = int(COMPONENT_SIZES.get("mobile_bridge_qr_width", 56))
+        field_label_width = int(COMPONENT_SIZES.get("search_field_label_width", 80))
+        field_gap = int(COMPONENT_SIZES.get("search_field_gap", 4))
+        group_gap = int(COMPONENT_SIZES.get("search_controls_group_gap", 12))
+        toggle_width = 52
+        group1_width = field_label_width + field_gap + scope_select_width
+        group2_width = field_label_width + field_gap + toggle_width + field_gap + mobile_qr_width
         combo_policy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        def _configure_field_label(label: QLabel) -> None:
+            label.setFixedWidth(field_label_width)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        def _configure_field_group(container: QWidget, *, width: int) -> None:
+            container.setFixedWidth(width)
+            container.setSizePolicy(
+                QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            )
 
         self.img_label = QLabel()
         self.img_label.setObjectName("ImageDropZone")
@@ -95,18 +115,53 @@ class SearchPanel(VSCard):
 
         self.search_precision_label = QLabel()
         self.search_precision_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.search_precision_label)
         self.search_precision_toggle = QPushButton()
         self.search_precision_toggle.setObjectName("SearchPrecisionToggle")
         self.search_precision_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_precision_toggle.setCheckable(True)
-        self.search_precision_toggle.setFixedWidth(52)
+        self.search_precision_toggle.setFixedWidth(toggle_width)
         self.search_precision_toggle.setSizePolicy(combo_policy)
         self.search_precision_cluster = QWidget()
         precision_row = QHBoxLayout(self.search_precision_cluster)
         precision_row.setContentsMargins(0, 0, 0, 0)
-        precision_row.setSpacing(8)
+        precision_row.setSpacing(field_gap)
         precision_row.addWidget(self.search_precision_label, 0)
         precision_row.addWidget(self.search_precision_toggle, 0)
+        self.search_precision_qr_spacer = QWidget()
+        self.search_precision_qr_spacer.setFixedWidth(mobile_qr_width)
+        precision_row.addWidget(self.search_precision_qr_spacer, 0)
+        _configure_field_group(self.search_precision_cluster, width=group2_width)
+
+        self.search_video_discovery_label = QLabel()
+        self.search_video_discovery_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.search_video_discovery_label)
+        self.search_video_discovery_toggle = QPushButton()
+        self.search_video_discovery_toggle.setObjectName("SearchVideoDiscoveryToggle")
+        self.search_video_discovery_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.search_video_discovery_toggle.setCheckable(True)
+        self.search_video_discovery_toggle.setChecked(True)
+        self.search_video_discovery_toggle.setFixedWidth(toggle_width)
+        self.search_video_discovery_toggle.setSizePolicy(combo_policy)
+        self.search_video_discovery_cluster = QWidget()
+        video_discovery_row = QHBoxLayout(self.search_video_discovery_cluster)
+        video_discovery_row.setContentsMargins(0, 0, 0, 0)
+        video_discovery_row.setSpacing(field_gap)
+        video_discovery_row.addWidget(self.search_video_discovery_label, 0)
+        video_discovery_row.addWidget(self.search_video_discovery_toggle, 0)
+        video_discovery_row.addStretch(1)
+        _configure_field_group(self.search_video_discovery_cluster, width=group1_width)
+
+        self.search_image_options_group = QWidget()
+        self.search_image_options_group.setObjectName("SearchImageOptionsRow")
+        image_options_layout = QHBoxLayout(self.search_image_options_group)
+        image_options_layout.setContentsMargins(0, 0, 0, 0)
+        image_options_layout.setSpacing(group_gap)
+        image_options_layout.addWidget(self.search_video_discovery_cluster, 0)
+        image_options_layout.addWidget(self.search_precision_cluster, 0)
+        self.search_image_options_group.setSizePolicy(
+            QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        )
 
         self.search_mode_label = QLabel()
         self.search_mode_label.setObjectName("InlineFieldLabel")
@@ -152,37 +207,58 @@ class SearchPanel(VSCard):
 
         self.search_scope_label = QLabel()
         self.search_scope_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.search_scope_label)
         self.search_scope_select = SearchScopeSelect()
-        self.search_scope_select.setMinimumWidth(combo_width + 40)
-        self.search_scope_select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.search_scope_select.setFixedWidth(scope_select_width)
+        self.search_scope_select.setSizePolicy(combo_policy)
         self.search_scope_cluster = QWidget()
         scope_row = QHBoxLayout(self.search_scope_cluster)
         scope_row.setContentsMargins(0, 0, 0, 0)
-        scope_row.setSpacing(8)
+        scope_row.setSpacing(field_gap)
         scope_row.addWidget(self.search_scope_label, 0)
-        scope_row.addWidget(self.search_scope_select, 1)
+        scope_row.addWidget(self.search_scope_select, 0)
+        scope_row.addStretch(1)
+        _configure_field_group(self.search_scope_cluster, width=group1_width)
 
         self.options_block = self.search_scope_cluster
         self.options_title = self.search_scope_label
+
+        self.mobile_toggle_label = QLabel()
+        self.mobile_toggle_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.mobile_toggle_label)
+        self.btn_mobile_toggle = QPushButton()
+        self.btn_mobile_toggle.setObjectName("MobileBridgeToggle")
+        self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_mobile_toggle.setCheckable(True)
+        self.btn_mobile_toggle.setFixedWidth(toggle_width)
+        self.btn_mobile_toggle.setSizePolicy(combo_policy)
+        self.btn_mobile_qr = QPushButton()
+        self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
+        self.btn_mobile_qr.setFixedWidth(mobile_qr_width)
+        self.btn_mobile_qr.setMinimumWidth(mobile_qr_width)
+        self.btn_mobile_qr.setMaximumWidth(mobile_qr_width)
+        self.btn_mobile_qr.setProperty("qrState", "hidden")
+        self.btn_mobile_qr.setEnabled(False)
+        self.btn_mobile_qr.setSizePolicy(combo_policy)
+        self.mobile_group = QWidget()
+        mobile_group_layout = QHBoxLayout(self.mobile_group)
+        mobile_group_layout.setContentsMargins(0, 0, 0, 0)
+        mobile_group_layout.setSpacing(field_gap)
+        mobile_group_layout.addWidget(self.mobile_toggle_label, 0)
+        mobile_group_layout.addWidget(self.btn_mobile_toggle, 0)
+        mobile_group_layout.addWidget(self.btn_mobile_qr, 0)
+        _configure_field_group(self.mobile_group, width=group2_width)
 
         self.mobile_row = QWidget()
         self.mobile_row.setObjectName("SearchMobileRow")
         mobile_row_layout = QHBoxLayout(self.mobile_row)
         mobile_row_layout.setContentsMargins(0, 0, 0, 0)
-        mobile_row_layout.setSpacing(8)
-        self.mobile_toggle_label = QLabel()
-        self.mobile_toggle_label.setObjectName("InlineFieldLabel")
-        self.btn_mobile_toggle = QPushButton()
-        self.btn_mobile_toggle.setObjectName("MobileBridgeToggle")
-        self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
-        self.btn_mobile_toggle.setCheckable(True)
-        self.btn_mobile_qr = QPushButton()
-        self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
-        mobile_row_layout.addWidget(self.mobile_toggle_label, 0)
-        mobile_row_layout.addWidget(self.btn_mobile_toggle, 0)
-        mobile_row_layout.addWidget(self.btn_mobile_qr, 0)
-        mobile_row_layout.addStretch(1)
-        mobile_row_layout.addWidget(self.search_precision_cluster, 0)
+        mobile_row_layout.setSpacing(group_gap)
+        mobile_row_layout.addWidget(self.search_scope_cluster, 0)
+        mobile_row_layout.addWidget(self.mobile_group, 0)
+        self.mobile_row.setSizePolicy(
+            QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        )
 
         self.btn_search = QPushButton()
         self.btn_search.setObjectName("SearchButton")
@@ -198,12 +274,13 @@ class SearchPanel(VSCard):
 
         layout.addWidget(self.lbl_active_model)
         layout.addWidget(self.search_query_tabs)
-        layout.addWidget(self.search_scope_cluster)
-        layout.addWidget(self.mobile_row)
+        layout.addWidget(self.mobile_row, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.search_image_options_group, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addLayout(action_row)
 
         self.setFixedHeight(int(COMPONENT_SIZES["search_compare_baseline_height"]) + 24)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedWidth(compute_search_panel_width())
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def text_query(self) -> str:
         return self.text_search.toPlainText().strip()

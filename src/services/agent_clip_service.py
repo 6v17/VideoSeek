@@ -104,13 +104,14 @@ def execute_agent_export_clip(
     if not _output_path_allowed(destination, config=cfg):
         raise ValueError("output_path must not be inside an indexed library root.")
 
-    if float(end_sec) <= float(start_sec):
-        raise ValueError("end_sec must be greater than start_sec.")
+    start = float(start_sec)
+    end = float(end_sec)
+    effective_end = end if end > start + 1e-3 else None
 
     clip_start, clip_duration = resolve_clip_window(
         source,
-        start_sec,
-        end_sec=end_sec,
+        start,
+        end_sec=effective_end,
         config=cfg,
         encode_mode=encode_mode,
     )

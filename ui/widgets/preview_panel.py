@@ -12,6 +12,7 @@ class PreviewPanel(VSCard):
         super().__init__(parent)
         layout = self.content_layout
         baseline = int(COMPONENT_SIZES["search_compare_baseline_height"])
+        compare_extra = 24
 
         preview_header = QHBoxLayout()
         preview_header.setContentsMargins(0, 0, 0, 0)
@@ -34,5 +35,5 @@ class PreviewPanel(VSCard):
 
         layout.addLayout(preview_header)
         layout.addWidget(self.preview_host, 1)
-        self.setFixedHeight(baseline)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(baseline + compare_extra)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

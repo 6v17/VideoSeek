@@ -3,6 +3,7 @@ import os
 from PySide6.QtCore import QUrl
 
 from src.app.config import load_config
+from src.app.logging_utils import get_logger
 from ui.threading_utils import shutdown_thread
 from src.utils import (
     _resolve_base_clip_window,
@@ -14,6 +15,8 @@ from src.utils import (
 )
 from ui.playback.vlc_player import VlcPreviewPlayer
 from ui.workers import PreviewWarmupWorker
+
+logger = get_logger("preview_controller")
 
 
 class PreviewController:
@@ -51,8 +54,8 @@ class PreviewController:
                 suggested_sec=float(start_sec),
                 playback_start_sec=float(clip_start),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Playback telemetry session start skipped: %s", exc)
 
         vlc_player = self._ensure_vlc_player()
 
@@ -93,8 +96,8 @@ class PreviewController:
                 from src.services.search_telemetry import cancel_playback_session
 
                 cancel_playback_session()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Playback telemetry cancel skipped: %s", exc)
         else:
             self._record_playback_telemetry(source="inline")
         if self.vlc_player is not None:
@@ -117,8 +120,8 @@ class PreviewController:
             from src.services.search_telemetry import finish_playback_session
 
             finish_playback_session(actual_sec=actual_sec, source=source)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Playback telemetry finish skipped: %s", exc)
 
     def get_current_preview_context(self):
         return dict(self.current_preview_context) if self.current_preview_context else None

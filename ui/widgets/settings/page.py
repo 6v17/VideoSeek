@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -86,6 +87,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
 
         self.search_telemetry_title = QLabel()
         self.search_telemetry_title.setObjectName("CardTitle")
+        self.btn_search_telemetry_collapse = QToolButton()
+        self.btn_search_telemetry_collapse.setObjectName("VideoScopeCollapseBtn")
+        self.btn_search_telemetry_collapse.setAutoRaise(True)
+        self.btn_search_telemetry_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_telemetry_header = QWidget()
         search_telemetry_header_layout = QHBoxLayout(self.search_telemetry_header)
         search_telemetry_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -105,9 +110,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.search_telemetry_file.setObjectName("StatusHint")
         self.search_telemetry_file.setWordWrap(True)
         self.search_telemetry_file.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.search_telemetry_body_widget = QWidget()
+        search_telemetry_body_layout = QVBoxLayout(self.search_telemetry_body_widget)
+        search_telemetry_body_layout.setContentsMargins(0, 0, 0, 0)
+        search_telemetry_body_layout.setSpacing(8)
+        search_telemetry_body_layout.addWidget(self.search_telemetry_body)
+        search_telemetry_body_layout.addWidget(self.search_telemetry_hint)
+        search_telemetry_body_layout.addWidget(self.search_telemetry_file)
+        search_telemetry_header_layout.addWidget(self.btn_search_telemetry_collapse, 0)
         search_telemetry_header_layout.addWidget(self.search_telemetry_title, 0)
         search_telemetry_header_layout.addStretch(1)
         search_telemetry_header_layout.addWidget(self.btn_refresh_search_telemetry, 0)
+        self.btn_search_telemetry_collapse.clicked.connect(self._toggle_search_telemetry_panel)
+        self._search_telemetry_expanded = False
+        self._set_search_telemetry_expanded(False)
 
         self.input_fps = NoWheelDoubleSpinBox()
         self.input_fps.setRange(0.01, 24.0)
@@ -156,6 +172,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_min_chunk_size = NoWheelSpinBox()
         self.input_min_chunk_size.setRange(1, 50)
         self.input_chunk_similarity_mode = NoWheelComboBox()
+        self.input_chunk_segmentation_strategy = NoWheelComboBox()
         self.input_prefer_gpu = NoWheelComboBox()
         self.input_experimental_hw_decode = NoWheelComboBox()
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
@@ -196,7 +213,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_browse_model_dir = QPushButton()
         self.btn_migrate_model_dir = QPushButton()
         self.section_search_title = QLabel()
+        self.section_fast_image_search_title = QLabel()
+        self.hint_fast_image_search_section = QLabel()
         self.section_precise_search_title = QLabel()
+        self.hint_precise_search_section = QLabel()
         self.section_preview_title = QLabel()
         self.section_index_title = QLabel()
         self.section_model_gpu_title = QLabel()
@@ -221,6 +241,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_max_chunk_duration = ClickableLabel()
         self.label_min_chunk_size = ClickableLabel()
         self.label_chunk_similarity_mode = ClickableLabel()
+        self.label_chunk_segmentation_strategy = ClickableLabel()
         self.label_prefer_gpu = ClickableLabel()
         self.label_experimental_hw_decode = ClickableLabel()
         self.label_gpu_probe_unknown_keep_gpu = ClickableLabel()
@@ -256,6 +277,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_max_chunk_duration = QLabel()
         self.hint_min_chunk_size = QLabel()
         self.hint_chunk_similarity_mode = QLabel()
+        self.hint_chunk_segmentation_strategy = QLabel()
         self.hint_prefer_gpu = QLabel()
         self.hint_experimental_hw_decode = QLabel()
         self.hint_gpu_probe_unknown_keep_gpu = QLabel()
@@ -319,6 +341,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_max_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(
+            self.input_chunk_segmentation_strategy,
+            width=COMPONENT_SIZES["settings_input_width"] + 36,
+        )
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_experimental_hw_decode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
@@ -402,6 +428,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_rules.hide()
 
         self.section_search_card, self.section_search_form = self._create_settings_section(self.section_search_title)
+        self.section_fast_image_search_card, self.section_fast_image_search_form = self._create_settings_section(
+            self.section_fast_image_search_title
+        )
         self.section_precise_search_card, self.section_precise_search_form = self._create_settings_section(
             self.section_precise_search_title
         )
@@ -433,61 +462,63 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_remote_max_frames,
             self.hint_remote_max_frames,
         )
+        self._add_section_note(self.section_fast_image_search_form, 0, self.hint_fast_image_search_section)
         self._add_setting_row(
-            self.section_precise_search_form,
-            0,
+            self.section_fast_image_search_form,
+            1,
             self.label_frame_neighbor_rerank_enabled,
             self.input_frame_neighbor_rerank_enabled,
             self.hint_frame_neighbor_rerank_enabled,
         )
         self.frame_neighbor_rerank_top_n_row = self._add_setting_row(
-            self.section_precise_search_form,
-            1,
+            self.section_fast_image_search_form,
+            2,
             self.label_frame_neighbor_rerank_top_n,
             self.input_frame_neighbor_rerank_top_n,
             self.hint_frame_neighbor_rerank_top_n,
         )
         self.frame_neighbor_rerank_window_row = self._add_setting_row(
-            self.section_precise_search_form,
-            2,
+            self.section_fast_image_search_form,
+            3,
             self.label_frame_neighbor_rerank_window,
             self.input_frame_neighbor_rerank_window,
             self.hint_frame_neighbor_rerank_window,
         )
+        self._add_section_note(self.section_precise_search_form, 0, self.hint_precise_search_section)
         self._add_setting_row(
             self.section_precise_search_form,
-            3,
+            1,
+            self.label_image_search_fetch_multiplier,
+            self.input_image_search_fetch_multiplier,
+            self.hint_image_search_fetch_multiplier,
+        )
+        self._add_setting_row(
+            self.section_precise_search_form,
+            2,
             self.label_image_pixel_rerank_top_n,
             self.input_image_pixel_rerank_top_n,
             self.hint_image_pixel_rerank_top_n,
         )
         self._add_setting_row(
             self.section_precise_search_form,
-            4,
+            3,
             self.label_image_pixel_rerank_probe_mode,
             self.input_image_pixel_rerank_probe_mode,
             self.hint_image_pixel_rerank_probe_mode,
         )
         self.image_pixel_rerank_time_window_row = self._add_setting_row(
             self.section_precise_search_form,
-            5,
+            4,
             self.label_image_pixel_rerank_time_window_sec,
             self.input_image_pixel_rerank_time_window_sec,
             self.hint_image_pixel_rerank_time_window_sec,
         )
         self.image_pixel_rerank_probe_step_row = self._add_setting_row(
             self.section_precise_search_form,
-            6,
+            5,
             self.label_image_pixel_rerank_probe_step_sec,
             self.input_image_pixel_rerank_probe_step_sec,
             self.hint_image_pixel_rerank_probe_step_sec,
-        )
-        self._add_setting_row(
-            self.section_precise_search_form,
-            7,
-            self.label_image_search_fetch_multiplier,
-            self.input_image_search_fetch_multiplier,
-            self.hint_image_search_fetch_multiplier,
         )
 
         self._add_setting_row(self.section_preview_form, 0, self.label_preview_seconds, self.input_preview_seconds, self.hint_preview_seconds)
@@ -506,6 +537,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(self.section_index_form, 2, self.label_max_chunk_duration, self.input_max_chunk_duration, self.hint_max_chunk_duration)
         self._add_setting_row(self.section_index_form, 3, self.label_min_chunk_size, self.input_min_chunk_size, self.hint_min_chunk_size)
         self._add_setting_row(self.section_index_form, 4, self.label_chunk_similarity_mode, self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode)
+        self._add_setting_row(
+            self.section_index_form,
+            5,
+            self.label_chunk_segmentation_strategy,
+            self.input_chunk_segmentation_strategy,
+            self.hint_chunk_segmentation_strategy,
+        )
         self._add_setting_row(
             self.section_general_form,
             0,
@@ -587,6 +625,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         search_preview_layout.setContentsMargins(0, 0, 0, 0)
         search_preview_layout.setSpacing(12)
         search_preview_layout.addWidget(self.section_search_card)
+        search_preview_layout.addWidget(self.section_fast_image_search_card)
         search_preview_layout.addWidget(self.section_precise_search_card)
         search_preview_layout.addWidget(self.section_preview_card)
         self.card_search_preview.content_layout.addWidget(search_preview_host)
@@ -611,9 +650,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
 
         self.card_search_telemetry = VSCard()
         self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_header)
-        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_body)
-        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_hint)
-        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_file)
+        self.card_search_telemetry.content_layout.addWidget(self.search_telemetry_body_widget)
 
         for card in (
             self.card_runtime_status,
@@ -769,8 +806,23 @@ class SettingsPage(QWidget, SettingsFormMixin):
     def configure_form_labels(self, texts):
         self._current_texts = texts
         self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索与采样", "Search & Sampling"))
+        self.section_fast_image_search_title.setText(
+            _fallback_text(texts, "settings_section_fast_image_search", "快速图搜", "Fast Image Search")
+        )
+        self.hint_fast_image_search_section.setText(
+            texts.get(
+                "settings_section_fast_image_search_note",
+                "Applies when Deep search is OFF on the search page.",
+            )
+        )
         self.section_precise_search_title.setText(
             _fallback_text(texts, "settings_section_precise_search", "图搜精搜", "Precise Image Search")
+        )
+        self.hint_precise_search_section.setText(
+            texts.get(
+                "settings_section_precise_search_note",
+                "Applies when Deep search is ON. Cropped queries skip pixel rerank.",
+            )
         )
         self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview & Thumbnails"))
         self.section_index_title.setText(_fallback_text(texts, "settings_section_indexing", "索引与分段", "Indexing & Chunking"))
@@ -824,6 +876,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_max_chunk_duration.setText(texts["setting_max_chunk_duration"])
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
         self.label_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode"])
+        self.label_chunk_segmentation_strategy.setText(texts["setting_chunk_segmentation_strategy"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
         self.label_experimental_hw_decode.setText(texts["setting_experimental_hw_decode"])
         self.label_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu"])
@@ -851,6 +904,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         restore_index = self.input_chunk_similarity_mode.findData(current_chunk_similarity_mode)
         self.input_chunk_similarity_mode.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_chunk_similarity_mode.blockSignals(False)
+        current_chunk_segmentation_strategy = self.input_chunk_segmentation_strategy.currentData()
+        self.input_chunk_segmentation_strategy.blockSignals(True)
+        self.input_chunk_segmentation_strategy.clear()
+        self.input_chunk_segmentation_strategy.addItem(
+            texts["setting_chunk_segmentation_strategy_legacy"],
+            "legacy",
+        )
+        self.input_chunk_segmentation_strategy.addItem(
+            texts["setting_chunk_segmentation_strategy_delta_ema"],
+            "delta_ema",
+        )
+        restore_index = self.input_chunk_segmentation_strategy.findData(current_chunk_segmentation_strategy)
+        self.input_chunk_segmentation_strategy.setCurrentIndex(0 if restore_index < 0 else restore_index)
+        self.input_chunk_segmentation_strategy.blockSignals(False)
         current_prefer_gpu = self.input_prefer_gpu.currentData()
         self.input_prefer_gpu.blockSignals(True)
         self.input_prefer_gpu.clear()
@@ -951,6 +1018,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_max_chunk_duration.setText(texts["setting_max_chunk_duration_hint"])
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
         self.hint_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode_hint"])
+        self.hint_chunk_segmentation_strategy.setText(texts["setting_chunk_segmentation_strategy_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
         self.hint_experimental_hw_decode.setText(texts["setting_experimental_hw_decode_hint"])
         self.hint_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu_hint"])
@@ -1003,6 +1071,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_max_chunk_duration,
             self.label_min_chunk_size,
             self.label_chunk_similarity_mode,
+            self.label_chunk_segmentation_strategy,
             self.label_prefer_gpu,
             self.label_experimental_hw_decode,
             self.label_gpu_probe_unknown_keep_gpu,
@@ -1039,4 +1108,14 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.search_telemetry_file.setText(f"{file_path}{suffix}")
         else:
             self.search_telemetry_file.setText("")
+
+    def _set_search_telemetry_expanded(self, expanded: bool) -> None:
+        self._search_telemetry_expanded = bool(expanded)
+        self.search_telemetry_body_widget.setVisible(self._search_telemetry_expanded)
+        self.btn_search_telemetry_collapse.setArrowType(
+            Qt.ArrowType.DownArrow if self._search_telemetry_expanded else Qt.ArrowType.RightArrow
+        )
+
+    def _toggle_search_telemetry_panel(self) -> None:
+        self._set_search_telemetry_expanded(not self._search_telemetry_expanded)
 

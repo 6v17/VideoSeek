@@ -158,7 +158,7 @@ def test_persistence_round_trip(tmp_path):
     assert reloaded["crop_locate"]["anchor_kept"] == 1
 
     payload = json.loads((tmp_path / "search_telemetry.json").read_text(encoding="utf-8"))
-    assert payload["version"] == 3
+    assert payload["version"] == 5
     assert payload["crop_locate"]["total"] == 1
 
 
@@ -173,3 +173,39 @@ def test_format_telemetry_summary_contains_key_sections():
     assert "截图定位 anchor 保留" in text
     assert "置信度分布" in text
     assert "播放偏差" in text
+
+
+def test_locate_bias_auto_tune_disabled_by_default():
+    assert telemetry.is_locate_bias_auto_tune_enabled() is False
+    assert telemetry.get_locate_clip_window_bias_sec(score=0.78) == 0.0
+
+
+def test_record_locate_clip_window_does_not_apply_segmented_bias_without_gating(monkeypatch):
+    monkeypatch.setattr(telemetry, "_LOCATE_CLIP_BIAS_SEGMENT_INTERVAL", 2)
+    monkeypatch.setattr(telemetry, "_LOCATE_CLIP_BIAS_SEGMENT_MIN_ERRORS", 2)
+    telemetry.record_locate_clip_window(
+        window_sec=20.0,
+        score=0.78,
+        margin=0.08,
+        anchor_sec=64.0,
+        result_sec=67.0,
+        is_crop=False,
+        confidence=0.8424,
+        video_pace="normal",
+    )
+    telemetry.record_locate_clip_window(
+        window_sec=20.0,
+        score=0.78,
+        margin=0.08,
+        anchor_sec=120.0,
+        result_sec=126.0,
+        is_crop=False,
+        confidence=0.8424,
+        video_pace="normal",
+    )
+
+    summary = telemetry.get_telemetry_summary()
+    locate = summary["locate_clip_window"]
+    assert locate["samples"] == 2
+    assert "0.7" not in locate.get("bias_by_score", {})
+    assert telemetry.get_locate_clip_window_bias_sec(score=0.78) == pytest.approx(0.0)

@@ -140,6 +140,16 @@ class SettingsGuiMixin:
         )
         search_mode = config.get("search_mode", DEFAULT_CONFIG["search_mode"])
         self.search_page.search_mode.setCurrentIndex(0 if search_mode == "frame" else 1)
+        video_discovery_enabled = bool(
+            config.get(
+                "search_video_discovery_enabled",
+                DEFAULT_CONFIG["search_video_discovery_enabled"],
+            )
+        )
+        toggle = self.search_page.search_video_discovery_toggle
+        toggle.blockSignals(True)
+        toggle.setChecked(video_discovery_enabled)
+        toggle.blockSignals(False)
         self.settings_page.input_similarity_threshold.setValue(
             config.get("similarity_threshold", DEFAULT_CONFIG["similarity_threshold"])
         )
@@ -152,6 +162,14 @@ class SettingsGuiMixin:
         chunk_similarity_mode = config.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"])
         self.settings_page.input_chunk_similarity_mode.setCurrentIndex(
             0 if chunk_similarity_mode == "chunk" else 1
+        )
+        chunk_segmentation_strategy = config.get(
+            "chunk_segmentation_strategy",
+            DEFAULT_CONFIG["chunk_segmentation_strategy"],
+        )
+        strategy_index = self.settings_page.input_chunk_segmentation_strategy.findData(chunk_segmentation_strategy)
+        self.settings_page.input_chunk_segmentation_strategy.setCurrentIndex(
+            0 if strategy_index < 0 else strategy_index
         )
         prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
         self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
@@ -186,6 +204,8 @@ class SettingsGuiMixin:
         self._refresh_agent_api_status()
         if hasattr(self, "_refresh_search_precision_controls"):
             self._refresh_search_precision_controls()
+        if hasattr(self, "load_understanding_settings"):
+            self.load_understanding_settings()
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -212,6 +232,7 @@ class SettingsGuiMixin:
             self.settings_page.input_max_chunk_duration,
             self.settings_page.input_min_chunk_size,
             self.settings_page.input_chunk_similarity_mode,
+            self.settings_page.input_chunk_segmentation_strategy,
             self.settings_page.input_prefer_gpu,
             self.settings_page.input_experimental_hw_decode,
             self.settings_page.input_gpu_probe_unknown_keep_gpu,
@@ -321,6 +342,9 @@ class SettingsGuiMixin:
             previous_chunk_similarity_mode = str(
                 config.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"])
             )
+            previous_chunk_segmentation_strategy = str(
+                config.get("chunk_segmentation_strategy", DEFAULT_CONFIG["chunk_segmentation_strategy"])
+            )
             previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
             previous_gpu_probe_unknown_keep_gpu = bool(
                 config.get("gpu_probe_unknown_keep_gpu", DEFAULT_CONFIG["gpu_probe_unknown_keep_gpu"])
@@ -362,6 +386,9 @@ class SettingsGuiMixin:
             new_max_chunk_duration = float(self.settings_page.input_max_chunk_duration.value())
             new_min_chunk_size = int(self.settings_page.input_min_chunk_size.value())
             new_chunk_similarity_mode = str(self.settings_page.input_chunk_similarity_mode.currentData())
+            new_chunk_segmentation_strategy = str(
+                self.settings_page.input_chunk_segmentation_strategy.currentData()
+            )
             config["fps"] = new_fps
             config["sampling_fps_mode"] = new_sampling_fps_mode
             # Preserve the user's rule set even while fixed mode is active so
@@ -402,6 +429,7 @@ class SettingsGuiMixin:
             config["max_chunk_duration"] = new_max_chunk_duration
             config["min_chunk_size"] = new_min_chunk_size
             config["chunk_similarity_mode"] = new_chunk_similarity_mode
+            config["chunk_segmentation_strategy"] = new_chunk_segmentation_strategy
             config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
             config["experimental_hw_decode"] = bool(
                 self.settings_page.input_experimental_hw_decode.currentData()
@@ -472,6 +500,7 @@ class SettingsGuiMixin:
                 or previous_max_chunk_duration != new_max_chunk_duration
                 or previous_min_chunk_size != new_min_chunk_size
                 or previous_chunk_similarity_mode != new_chunk_similarity_mode
+                or previous_chunk_segmentation_strategy != new_chunk_segmentation_strategy
             )
             if (
                 previous_prefer_gpu != config["prefer_gpu"]
@@ -491,6 +520,8 @@ class SettingsGuiMixin:
                     self.settings_page.input_ffmpeg_path.setText(synced_path)
             self.check_runtime_resources(show_dialog=False)
             self.push_inference_status()
+            if hasattr(self, "_refresh_understanding_ui"):
+                self._refresh_understanding_ui()
             self._update_sampling_preview()
             if profile_switched:
                 self.refresh_library_table()
@@ -623,6 +654,8 @@ class SettingsGuiMixin:
             synced_model_dir = sync_model_dir_to_config()
             synced_path = sync_ffmpeg_path_to_config()
             self.load_settings_values()
+            if hasattr(self, "load_understanding_settings"):
+                self.load_understanding_settings()
             if synced_model_dir:
                 self.settings_page.input_model_dir.setText(synced_model_dir)
             if synced_path:

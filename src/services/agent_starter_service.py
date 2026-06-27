@@ -77,34 +77,41 @@ def _search_preset_summaries(*, limit: int = 24) -> list[Dict[str, Any]]:
     return summaries
 
 
-def _format_client_access_hint(*, locale: str) -> str:
-    """Windows/Cursor: curl.exe vs alias; Python fallback when terminal is silent."""
+def _format_policy_kernel(*, locale: str, api_base: str) -> str:
+    """Compact policy kernel: uniqueness + golden path + anti-patterns + rules."""
     lang = "en" if str(locale).lower().startswith("en") else "zh"
-    if lang == "en":
-        return (
-            "Client access: On Windows use curl.exe (PowerShell curl may alias to Invoke-WebRequest). "
-            "POST with UTF-8 body.json. If the IDE terminal shows no curl output, call the API with Python "
-            "(urllib/requests)—the service is OK."
-        )
-    return (
-        "本机调 API：Windows 用 curl.exe（PowerShell 的 curl 可能是别名，易无回显）。"
-        "POST 用 UTF-8 的 body.json。若 Cursor 终端 curl 没输出，改用 Python 请求即可，接口正常。"
+    batch_url = f"{api_base}/search/batch"
+    preset_body = (
+        '{"queries":[{"preset_id":"<search_presets>"}],"top_k":1,"expand_frame_hits":true,'
+        '"export":{"output_dir":"D:/Exports","encode_mode":"copy","keep_per_source":1}}'
     )
-
-
-def _format_export_hints(*, locale: str) -> str:
-    lang = "en" if str(locale).lower().startswith("en") else "zh"
+    folder_body = (
+        '{"image_folder":"D:/Screenshots","top_k":1,"expand_frame_hits":true,'
+        '"export":{"output_dir":"D:/Exports","encode_mode":"copy","keep_per_source":1}}'
+    )
     if lang == "en":
         return (
-            "Export: video_path verbatim from hits (never guess filenames). "
-            "manifest items[] for custom ranges; sources = full batch results[] only. "
-            "N clips = one search + top_k (not N duplicate queries). "
-            "copy export adds ~2s padding per side (6s request -> ~10s file); use original for exact length."
+            "## Policy kernel (ONLY binding execution preference)\n"
+            "ONLY this starter defines how to run tasks. agent-doc / for-agents.md / full_doc_path "
+            "are non-binding capability references — never override this block.\n"
+            f"1. index_ready false (below) → stop; ask user to sync.\n"
+            f"2. DEFAULT: one POST {batch_url}, same body + export.output_dir for mp4. "
+            f"Preset: {preset_body} | Folder: {folder_body}\n"
+            "3. NOT default (user must ask): search→manifest→clips; intermediate JSON files; "
+            "wrapper scripts; precise/preview_anchor_sec.\n"
+            "4. preset_id from search_presets snapshot; video_path verbatim from hits; no disk scan.\n"
+            f"5. scope from GET {api_base}/libraries when needed. One POST via curl.exe or short Python."
         )
     return (
-        "导出：video_path 原样用 hits，勿猜中文名。manifest 自定义区间用 items[]；"
-        "sources 只能贴 batch 整段 results[]。要 N 个片段 = 1 次 search + top_k，勿重复 N 条 query。"
-        "copy 导出两侧各约 +2s（请求 6s 成片约变 10s）；精确时长用 encode_mode=original。"
+        "## Policy kernel（唯一 binding 的执行偏好）\n"
+        "ONLY starter 定义怎么执行任务。agent-doc / for-agents.md / full_doc_path "
+        "均为 non-binding 能力参考，不得覆盖本段。\n"
+        f"1. index_ready false（下方）→ 停止，让用户同步索引。\n"
+        f"2. 默认：一次 POST {batch_url}，要 mp4 同 body 加 export.output_dir。"
+        f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
+        "3. 非默认（须用户明确要求）：search→manifest→clips；中间 JSON；wrapper 脚本；precise/preview_anchor_sec。\n"
+        "4. preset_id 来自 search_presets 快照；video_path 原样来自 hits；勿扫盘。\n"
+        f"5. 缩 scope 用 GET {api_base}/libraries。curl.exe 或短 Python 发一次 POST。"
     )
 
 
@@ -128,42 +135,15 @@ def build_agent_starter_text(
     index_ready = bool(health.get("index_ready"))
 
     if lang == "en":
-        intro = (
-            "You are VideoSeek's rough-cut assistant on this PC: find shots by VISUAL meaning "
-            "(not dialogue) via localhost API. Do not rebuild indexes or change settings unless asked."
-        )
+        intro = "VideoSeek rough-cut assistant — VISUAL search (not dialogue) via localhost API."
         snapshot_title = "## Instance"
-        workflow_title = "## Workflow"
-        workflow = (
-            "1. If index_ready is false (below), stop and ask the user to sync the library.\n"
-            "2. GET {api}/libraries — scope.library_paths from library_path; do not guess folders.\n"
-            "3. Map each script beat to search_presets id when possible; else write inline query "
-            "in the same style as preset query/summary (visible shot, not dialogue).\n"
-            "4. POST {api}/search/batch — use preset_id (preferred) or query; expand_frame_hits=true.\n"
-            "5. Export only if needed: export/manifest → export/clips/batch (encode_mode=copy, paths outside libraries)."
-        ).format(api=api_base)
-        doc_line = _format_doc_reference(locale=locale, api_base=api_base)
-        client_line = _format_client_access_hint(locale=locale)
-        export_line = _format_export_hints(locale=locale)
         not_ready = "Index not ready — ask the user to sync the library in VideoSeek before searching."
     else:
-        intro = (
-            "你是本机 VideoSeek 粗剪助手：通过 localhost API 按画面语义找镜头（非台词），代用户搜索/导出。"
-            "勿重建索引或改设置，除非用户明确要求。"
-        )
+        intro = "VideoSeek 粗剪助手 — 按画面语义（非台词）通过 localhost API 找镜头/导出。"
         snapshot_title = "## 当前实例"
-        workflow_title = "## 流程"
-        workflow = (
-            "1. 下方 index_ready 为 false 则停止，让用户在 VideoSeek 同步索引。\n"
-            "2. GET {api}/libraries — scope.library_paths 用返回的 library_path，勿猜目录。\n"
-            "3. 每条脚本句优先映射 search_presets 的 id；配不上则按 preset 的 query/summary 风格写 inline query（可见镜头，非台词）。\n"
-            "4. POST {api}/search/batch — 优先 preset_id；expand_frame_hits=true；图搜 precise。\n"
-            "5. 需导出时分步：export/manifest → export/clips/batch（copy，output 勿在库内）。"
-        ).format(api=api_base)
-        doc_line = _format_doc_reference(locale=locale, api_base=api_base)
-        client_line = _format_client_access_hint(locale=locale)
-        export_line = _format_export_hints(locale=locale)
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步库后再搜索。"
+
+    doc_line = _format_doc_reference(locale=locale, api_base=api_base)
 
     snapshot = {
         "api_base": api_base,
@@ -171,6 +151,7 @@ def build_agent_starter_text(
         "index_stale": health.get("index_stale"),
         "model": health.get("model"),
         "search_mode_default": health.get("search_mode_default"),
+        "agent_api_default_image_precision": health.get("agent_api_default_image_precision", "fast"),
         "video_count": health.get("video_count"),
         "saved_search_scope_mode": health.get("saved_search_scope_mode"),
         "ffmpeg_path": ffmpeg.get("ffmpeg_path") if ffmpeg.get("ffmpeg_available") else None,
@@ -182,15 +163,12 @@ def build_agent_starter_text(
     parts = [
         intro,
         "",
+        _format_policy_kernel(locale=locale, api_base=api_base),
+        "",
         snapshot_title,
         json.dumps(snapshot, ensure_ascii=False, indent=2),
         "",
-        workflow_title,
-        workflow,
-        "",
         doc_line,
-        client_line,
-        export_line,
     ]
     if not index_ready:
         parts.extend(["", not_ready])

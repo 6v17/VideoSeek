@@ -108,6 +108,33 @@ class SearchPanelStateMixin:
             return "fast"
         return self._search_precision_mode_from_ui()
 
+    def _search_video_discovery_from_ui(self) -> bool:
+        toggle = self.search_page.search_video_discovery_toggle
+        return bool(toggle.isChecked())
+
+    def _resolve_video_discovery_enabled(self, *, is_text: bool, has_image: bool) -> bool:
+        if is_text or not has_image:
+            return False
+        if self._resolve_search_precision_mode(is_text=is_text, has_image=has_image) == "precise":
+            return False
+        if not self._search_scope_is_global():
+            return False
+        return self._search_video_discovery_from_ui()
+
+    def _update_search_video_discovery_toggle_ui(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        texts = getattr(self, "texts", {}) or {}
+        toggle = self.search_page.search_video_discovery_toggle
+        is_on = toggle.isChecked()
+        toggle.setProperty("videoDiscoveryState", "on" if is_on else "off")
+        toggle.setText(
+            texts.get("search_video_discovery_on" if is_on else "search_video_discovery_off", "ON" if is_on else "OFF")
+        )
+        toggle.style().unpolish(toggle)
+        toggle.style().polish(toggle)
+        toggle.update()
+
     def _refresh_search_panel_state(self) -> None:
         if not hasattr(self, "search_page"):
             return
@@ -135,14 +162,20 @@ class SearchPanelStateMixin:
         show_image_precision = active_tab == self.SEARCH_TAB_IMAGE
         page.search_precision_cluster.setVisible(show_image_precision)
 
-        is_on = page.search_precision_toggle.isChecked()
-        image_hint = texts.get(
-            "search_precision_hint_on" if is_on else "search_precision_hint_off",
-            texts.get("search_precision_hint", ""),
-        )
-        page.search_precision_label.setToolTip(image_hint)
-        page.search_precision_toggle.setToolTip(image_hint)
+        show_video_discovery = active_tab in (self.SEARCH_TAB_IMAGE, self.SEARCH_TAB_COMPOSE)
+        show_video_discovery = show_video_discovery and not page.search_precision_toggle.isChecked()
+        page.search_video_discovery_cluster.setVisible(show_video_discovery)
+        page.search_image_options_group.setVisible(show_image_precision or show_video_discovery)
+
+        precision_hint = texts.get("search_precision_hint", "")
+        page.search_precision_label.setToolTip(precision_hint)
+        page.search_precision_toggle.setToolTip("")
         self._update_search_precision_toggle_ui()
+
+        page.search_video_discovery_label.setText(texts.get("search_video_discovery_label", ""))
+        page.search_video_discovery_label.setToolTip(texts.get("search_video_discovery_hint", ""))
+        page.search_video_discovery_toggle.setToolTip("")
+        self._update_search_video_discovery_toggle_ui()
 
         chunk_hint = texts.get("search_mode_hint", "")
         page.search_mode_label.setToolTip(chunk_hint)
@@ -180,6 +213,10 @@ class SearchPanelStateMixin:
         self._refresh_search_panel_state()
 
     def _on_search_precision_toggled(self, _checked=False) -> None:
+        self._refresh_search_panel_state()
+
+    def _on_search_video_discovery_toggled(self, _checked=False) -> None:
+        self._save_search_video_discovery_enabled()
         self._refresh_search_panel_state()
 
     def _on_search_mode_changed(self) -> None:

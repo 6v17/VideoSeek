@@ -199,7 +199,7 @@ class AgentStarterApiTests(unittest.TestCase):
         self.assertIn("/api/v1/libraries", payload["starter_text"])
         self.assertIn("search_presets", payload["starter_text"])
         self.assertIn("/api/v1/agent-doc", payload["starter_text"])
-        self.assertLess(payload["meta"]["line_count"], 120)
+        self.assertLess(payload["meta"]["line_count"], 145)
 
 
 class AgentDocApiTests(unittest.TestCase):

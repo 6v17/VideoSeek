@@ -51,6 +51,12 @@ QMenu::separator {
     background: __NOTICE_BG__;
     border: 1px solid __NOTICE_LINE__;
 }
+#NoticeUpdateHint {
+    color: __ACCENT__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+}
 /* Runtime / indexing strip: info tone uses accent-soft so it reads as a highlight strip; ``bannerTone=warn`` when resources missing */
 #RuntimeBanner {
     background: __ACCENT_SOFT__;
@@ -177,6 +183,12 @@ QRadioButton::indicator:disabled {
 }
 #CardTitle {
     font-size: 16px;
+}
+#UnderstandingChunkTimeLabel {
+    color: __SUCCESS__;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 2px 0 4px 0;
 }
 QPushButton {
     border-radius: 10px;
@@ -322,10 +334,26 @@ QPushButton:disabled {
     opacity: 0.45;
 }
 #MobileBridgeQrButton {
+    min-width: 56px;
+    max-width: 56px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
     background: __ACCENT_SOFT__;
     border: 1px solid __ACCENT_HOVER__;
     color: __ACCENT__;
     font-weight: 700;
+    text-align: center;
+}
+#MobileBridgeQrButton[qrState="hidden"] {
+    background: transparent;
+    border: none;
+    color: transparent;
+    padding: 0;
+}
+#MobileBridgeQrButton[qrState="hidden"]:hover {
+    background: transparent;
+    border: none;
 }
 #MobileBridgeQrButton:hover {
     background: __BUTTON_SOFT_HOVER__;
@@ -611,6 +639,7 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
+    padding: 8px 6px;
 }
 #SearchModeSelect QAbstractItemView {
     background: __PANEL__;
@@ -713,7 +742,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     color: __MUTED__;
     font-size: 12px;
     font-weight: 600;
-    padding: 0 2px;
+    padding: 0 2px 0 0;
 }
 #SearchQueryTabs::pane {
     border: 1px solid __LINE__;
@@ -742,6 +771,48 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 }
 #SearchMobileRow {
     background: transparent;
+}
+#SearchOptionsBlock {
+    background: transparent;
+}
+#SearchImageOptionsRow {
+    background: transparent;
+}
+#SearchVideoDiscoveryToggle {
+    min-width: 52px;
+    max-width: 52px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0;
+    border-radius: 15px;
+    border: 1px solid __LINE_STRONG__;
+    background: __TRACK__;
+    color: __MUTED__;
+    font-weight: 700;
+    text-align: center;
+}
+#SearchVideoDiscoveryToggle[videoDiscoveryState="off"] {
+    background: __BUTTON_SOFT__;
+    border-color: __LINE_STRONG__;
+    color: __MUTED__;
+}
+#SearchVideoDiscoveryToggle[videoDiscoveryState="on"] {
+    background: __SUCCESS_SOFT__;
+    border-color: __SUCCESS__;
+    color: __SUCCESS__;
+}
+#SearchVideoDiscoveryToggle:hover {
+    border-color: currentColor;
+    background: __BUTTON_SOFT_HOVER__;
+}
+#SearchVideoDiscoveryToggle[videoDiscoveryState="on"]:hover {
+    background: __SUCCESS_SOFT__;
+}
+#SearchVideoDiscoveryToggle[videoDiscoveryState="off"]:hover {
+    background: __BUTTON_SOFT_HOVER__;
+}
+#SearchVideoDiscoveryToggle:disabled {
+    opacity: 0.45;
 }
 #ImageDropZone, #PreviewPlaceholder {
     background: __FIELD__;

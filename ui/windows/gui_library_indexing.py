@@ -42,6 +42,8 @@ class LibraryIndexingGuiMixin:
             self._refresh_global_index_ui()
             if hasattr(self, "_refresh_search_scope_ui"):
                 self._refresh_search_scope_ui()
+            if hasattr(self, "_refresh_understanding_scope_options"):
+                self._refresh_understanding_scope_options()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
@@ -266,6 +268,8 @@ class LibraryIndexingGuiMixin:
                 if hasattr(self, "_sync_tray_stop_action"):
                     self._sync_tray_stop_action()
             self._refresh_search_session_hint()
+            if hasattr(self, "_refresh_understanding_ui"):
+                self._refresh_understanding_ui()
         except Exception as exc:
             self.show_error_dialog(self.texts["index_start_failed"], exc)
 
@@ -321,6 +325,8 @@ class LibraryIndexingGuiMixin:
             status_text = self._with_global_index_notice(status_text)
         self.library_page.lbl_status.setText(status_text)
         self._refresh_search_session_hint()
+        if hasattr(self, "_refresh_understanding_ui"):
+            self._refresh_understanding_ui()
         self._show_index_issue_guidance(issues or [])
         if hasattr(self, "_sync_tray_stop_action"):
             self._sync_tray_stop_action()

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.chunk_timeline import ChunkTimelineWidget
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import LinkResultTable, ResultTable
@@ -262,10 +264,12 @@ class NavigationSidebar(QWidget):
 
         self.btn_page_search = self._build_nav_button("Search", checked=True)
         self.btn_page_library = self._build_nav_button("Libraries")
+        self.btn_page_understanding = self._build_nav_button("Evidence")
         self.btn_page_link = self._build_nav_button("Link Match")
         self.btn_page_settings = self._build_nav_button("Settings")
         layout.addWidget(self.btn_page_search)
         layout.addWidget(self.btn_page_library)
+        layout.addWidget(self.btn_page_understanding)
         layout.addWidget(self.btn_page_link)
         layout.addWidget(self.btn_page_settings)
         self.runtime_hint = QLabel("")
@@ -303,6 +307,7 @@ class NavigationSidebar(QWidget):
             "search": self.btn_page_search,
             "link": self.btn_page_link,
             "library": self.btn_page_library,
+            "understanding": self.btn_page_understanding,
             "settings": self.btn_page_settings,
         }
         for name, button in mapping.items():
@@ -344,6 +349,9 @@ class SearchPage(QWidget):
         self.search_precision_toggle = self.search_panel.search_precision_toggle
         self.search_precision_label = self.search_panel.search_precision_label
         self.search_precision_cluster = self.search_panel.search_precision_cluster
+        self.search_video_discovery_toggle = self.search_panel.search_video_discovery_toggle
+        self.search_video_discovery_label = self.search_panel.search_video_discovery_label
+        self.search_video_discovery_cluster = self.search_panel.search_video_discovery_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
@@ -356,6 +364,7 @@ class SearchPage(QWidget):
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row
+        self.search_image_options_group = self.search_panel.search_image_options_group
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
 
@@ -366,8 +375,8 @@ class SearchPage(QWidget):
         self.preview_host_layout = self.preview_panel.preview_host_layout
         self.preview_placeholder = self.preview_panel.preview_placeholder
 
-        compare_row.addWidget(self.search_panel, 5, Qt.AlignmentFlag.AlignTop)
-        compare_row.addWidget(self.preview_panel, 7, Qt.AlignmentFlag.AlignTop)
+        compare_row.addWidget(self.search_panel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        compare_row.addWidget(self.preview_panel, 1, Qt.AlignmentFlag.AlignTop)
         page_body.addLayout(compare_row, 3)
 
         self.results_card = VSCard()
@@ -386,6 +395,8 @@ class SearchPage(QWidget):
         self.btn_expand_preview.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
+        self.btn_shot_list = QPushButton()
+        self.btn_shot_list.setObjectName("GhostButton")
 
         self.results_actions = QWidget()
         self.results_actions.setObjectName("SearchResultsActions")
@@ -394,6 +405,7 @@ class SearchPage(QWidget):
         actions_layout.setSpacing(6)
         actions_layout.addWidget(self.btn_manage_presets)
         actions_layout.addWidget(self.btn_expand_preview)
+        actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
         results_toolbar.addWidget(self.lbl_status, 2)
@@ -522,6 +534,363 @@ class LibraryPage(QWidget):
         table_layout.addWidget(self.library_scroll, 1)
         page_body.addWidget(self.table_card, 1)
 
+
+def _understanding_field_label(text=""):
+    label = QLabel(text)
+    label.setObjectName("CardHint")
+    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    label.setFixedWidth(COMPONENT_SIZES.get("understanding_form_label_width", 96))
+    return label
+
+
+def _configure_understanding_line_edit(field: QLineEdit, *, width: int):
+    field.setMinimumWidth(width)
+    field.setMaximumWidth(width)
+    field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+
+class UnderstandingEvidencePage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.scaffold = PageScaffold()
+        root.addWidget(self.scaffold)
+        self.header = self.scaffold.header
+        page_body = self.scaffold.content_layout
+
+        self.understanding_notice, self.understanding_notice_text = make_runtime_banner()
+        self.btn_understanding_setup = QPushButton()
+        self.btn_understanding_setup.setObjectName("AccentGhostButton")
+        self.btn_understanding_setup.setMinimumHeight(30)
+        self.understanding_notice.layout().addWidget(self.btn_understanding_setup, 0)
+        self.understanding_notice.hide()
+        page_body.addWidget(self.understanding_notice)
+
+        self.config_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
+        config_layout = self.config_card.content_layout
+
+        self.config_header = QWidget()
+        config_header_layout = QHBoxLayout(self.config_header)
+        config_header_layout.setContentsMargins(0, 0, 0, 0)
+        config_header_layout.setSpacing(8)
+        self.btn_config_collapse = QToolButton()
+        self.btn_config_collapse.setObjectName("VideoScopeCollapseBtn")
+        self.btn_config_collapse.setAutoRaise(True)
+        self.btn_config_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.config_title = QLabel()
+        self.config_title.setObjectName("CardTitle")
+        config_header_layout.addWidget(self.btn_config_collapse, 0)
+        config_header_layout.addWidget(self.config_title, 0)
+        config_header_layout.addStretch(1)
+        config_layout.addWidget(self.config_header)
+
+        self.config_body = QWidget()
+        config_body_layout = QVBoxLayout(self.config_body)
+        config_body_layout.setContentsMargins(0, 0, 0, 0)
+        config_body_layout.setSpacing(10)
+
+        config_form_host = QWidget()
+        config_form = QGridLayout(config_form_host)
+        config_form.setContentsMargins(0, 0, 0, 0)
+        config_form.setHorizontalSpacing(12)
+        config_form.setVerticalSpacing(8)
+
+        self.label_yolo = _understanding_field_label()
+        self.btn_import_understanding_model = QPushButton()
+        self.btn_import_understanding_model.setObjectName("AccentGhostButton")
+        self.btn_import_understanding_model.setMinimumHeight(34)
+        self.hint_yolo = QLabel()
+        self.hint_yolo.setObjectName("CardHint")
+        self.hint_yolo.hide()
+
+        yolo_actions = QWidget()
+        yolo_actions_layout = QHBoxLayout(yolo_actions)
+        yolo_actions_layout.setContentsMargins(0, 0, 0, 0)
+        yolo_actions_layout.setSpacing(8)
+        yolo_actions_layout.addWidget(self.btn_import_understanding_model, 0)
+        yolo_actions_layout.addStretch(1)
+        config_form.addWidget(self.label_yolo, 0, 0)
+        config_form.addWidget(yolo_actions, 0, 1)
+
+        self.label_vlm_section = QLabel()
+        self.label_vlm_section.setObjectName("CardHint")
+        self.label_vlm_section.hide()
+
+        self.label_vlm_provider_mode = _understanding_field_label()
+        self.input_vlm_provider_mode = NoWheelComboBox()
+        self.input_vlm_provider_mode.setObjectName("SearchModeSelect")
+        self.input_vlm_provider_mode.setMinimumWidth(180)
+        self.input_vlm_provider_mode.setMaximumWidth(260)
+        config_form.addWidget(self.label_vlm_provider_mode, 1, 0)
+        config_form.addWidget(self.input_vlm_provider_mode, 1, 1)
+
+        self.label_vlm_provider_preset = _understanding_field_label()
+        self.input_vlm_provider_preset = NoWheelComboBox()
+        self.input_vlm_provider_preset.setObjectName("SearchModeSelect")
+        self.input_vlm_provider_preset.setMinimumWidth(220)
+        self.input_vlm_provider_preset.setMaximumWidth(320)
+        config_form.addWidget(self.label_vlm_provider_preset, 2, 0)
+        config_form.addWidget(self.input_vlm_provider_preset, 2, 1)
+
+        self.hint_vlm_preset_summary = QLabel()
+        self.hint_vlm_preset_summary.setObjectName("CardHint")
+        self.hint_vlm_preset_summary.setWordWrap(True)
+        self.hint_vlm_preset_summary.hide()
+        config_form.addWidget(self.hint_vlm_preset_summary, 3, 0, 1, 2)
+
+        self.label_remote_vlm_api_key = _understanding_field_label()
+        self.input_remote_vlm_api_key = QLineEdit()
+        self.input_remote_vlm_api_key.setObjectName("SearchInput")
+        self.input_remote_vlm_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        _configure_understanding_line_edit(
+            self.input_remote_vlm_api_key,
+            width=COMPONENT_SIZES.get("settings_path_input_width", 520),
+        )
+        self.hint_remote_vlm_api_key = QLabel()
+        self.hint_remote_vlm_api_key.setObjectName("CardHint")
+        self.hint_remote_vlm_api_key.hide()
+        config_form.addWidget(self.label_remote_vlm_api_key, 4, 0)
+        config_form.addWidget(self.input_remote_vlm_api_key, 4, 1)
+
+        self.label_remote_vlm_base_url = _understanding_field_label()
+        self.input_remote_vlm_base_url = QLineEdit()
+        self.input_remote_vlm_base_url.setObjectName("SearchInput")
+        _configure_understanding_line_edit(
+            self.input_remote_vlm_base_url,
+            width=COMPONENT_SIZES.get("settings_path_input_width", 520),
+        )
+        self.hint_remote_vlm_base_url = QLabel()
+        self.hint_remote_vlm_base_url.setObjectName("CardHint")
+        self.hint_remote_vlm_base_url.hide()
+        config_form.addWidget(self.label_remote_vlm_base_url, 5, 0)
+        config_form.addWidget(self.input_remote_vlm_base_url, 5, 1)
+
+        self.label_remote_vlm_model = _understanding_field_label()
+        self.input_remote_vlm_model = QLineEdit()
+        self.input_remote_vlm_model.setObjectName("SearchInput")
+        _configure_understanding_line_edit(
+            self.input_remote_vlm_model,
+            width=COMPONENT_SIZES.get("settings_input_width", 116) + 180,
+        )
+        self.hint_remote_vlm_model = QLabel()
+        self.hint_remote_vlm_model.setObjectName("CardHint")
+        self.hint_remote_vlm_model.hide()
+        config_form.addWidget(self.label_remote_vlm_model, 6, 0)
+        config_form.addWidget(self.input_remote_vlm_model, 6, 1)
+
+        self.label_caption_language = _understanding_field_label()
+        self.input_caption_language = NoWheelComboBox()
+        self.input_caption_language.setObjectName("SearchModeSelect")
+        self.input_caption_language.setMinimumWidth(160)
+        self.input_caption_language.setMaximumWidth(220)
+        config_form.addWidget(self.label_caption_language, 7, 0)
+        config_form.addWidget(self.input_caption_language, 7, 1)
+
+        self.label_caption_concurrency = _understanding_field_label()
+        self.input_caption_concurrency = QSpinBox()
+        self.input_caption_concurrency.setObjectName("SearchModeSelect")
+        self.input_caption_concurrency.setMinimum(1)
+        self.input_caption_concurrency.setMaximum(4)
+        self.input_caption_concurrency.setMinimumWidth(80)
+        self.input_caption_concurrency.setMaximumWidth(120)
+        config_form.addWidget(self.label_caption_concurrency, 8, 0)
+        config_form.addWidget(self.input_caption_concurrency, 8, 1)
+
+        config_form.setColumnStretch(1, 1)
+        config_body_layout.addWidget(config_form_host)
+
+        config_footer = QHBoxLayout()
+        config_footer.setSpacing(10)
+        self.hint_understanding_status = QLabel()
+        self.hint_understanding_status.setObjectName("StatusHint")
+        self.hint_understanding_status.setWordWrap(True)
+        self.btn_save_config = QPushButton()
+        self.btn_save_config.setObjectName("PrimaryButton")
+        self.btn_save_config.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        config_footer.addWidget(self.hint_understanding_status, 1)
+        self.btn_test_vlm_connection = QPushButton()
+        self.btn_test_vlm_connection.setObjectName("AccentGhostButton")
+        self.btn_test_vlm_connection.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        config_footer.addWidget(self.btn_test_vlm_connection, 0)
+        config_footer.addWidget(self.btn_save_config, 0)
+        config_body_layout.addLayout(config_footer)
+        config_layout.addWidget(self.config_body)
+
+        self.btn_config_collapse.clicked.connect(self._toggle_config_panel)
+        self._config_expanded = False
+        self._set_config_expanded(False)
+        page_body.addWidget(self.config_card)
+
+        self.workspace_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
+        workspace_layout = self.workspace_card.content_layout
+        self.workspace_title = QLabel()
+        self.workspace_title.setObjectName("CardTitle")
+        workspace_layout.addWidget(self.workspace_title)
+
+        picker_row = QHBoxLayout()
+        picker_row.setSpacing(10)
+        self.scope_label = _understanding_field_label()
+        self.scope_combo = QComboBox()
+        self.scope_combo.setObjectName("SearchModeSelect")
+        self.scope_combo.setMinimumWidth(180)
+        self.scope_combo.setMaximumWidth(280)
+        self.video_label = _understanding_field_label()
+        self.video_combo = QComboBox()
+        self.video_combo.setObjectName("SearchModeSelect")
+        self.video_combo.setMinimumWidth(240)
+        self.video_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        picker_row.addWidget(self.scope_label, 0)
+        picker_row.addWidget(self.scope_combo, 0)
+        picker_row.addSpacing(8)
+        picker_row.addWidget(self.video_label, 0)
+        picker_row.addWidget(self.video_combo, 1)
+        workspace_layout.addLayout(picker_row)
+
+        timeline_header = QHBoxLayout()
+        timeline_header.setSpacing(8)
+        self.timeline_label = QLabel()
+        self.timeline_label.setObjectName("CardHint")
+        self.timeline_hint = QLabel()
+        self.timeline_hint.setObjectName("StatusHint")
+        self.timeline_hint.setWordWrap(True)
+        timeline_header.addWidget(self.timeline_label, 0)
+        timeline_header.addWidget(self.timeline_hint, 1)
+        workspace_layout.addLayout(timeline_header)
+
+        self.chunk_timeline_scroll = QScrollArea()
+        self.chunk_timeline_scroll.setObjectName("ChunkTimelineScroll")
+        self.chunk_timeline_scroll.setWidgetResizable(False)
+        self.chunk_timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.chunk_timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.chunk_timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.chunk_timeline_scroll.setMinimumHeight(50)
+        self.chunk_timeline = ChunkTimelineWidget()
+        self.chunk_timeline_scroll.setWidget(self.chunk_timeline)
+        workspace_layout.addWidget(self.chunk_timeline_scroll)
+
+        detail_host = QWidget()
+        detail_grid = QGridLayout(detail_host)
+        detail_grid.setContentsMargins(0, 0, 0, 0)
+        detail_grid.setHorizontalSpacing(12)
+        detail_grid.setVerticalSpacing(8)
+        detail_grid.setColumnStretch(0, 1)
+        detail_grid.setColumnStretch(1, 1)
+
+        segment_time_host = QWidget()
+        segment_time_layout = QHBoxLayout(segment_time_host)
+        segment_time_layout.setContentsMargins(0, 0, 0, 0)
+        segment_time_layout.setSpacing(0)
+        self.chunk_time_label = QLabel()
+        self.chunk_time_label.setObjectName("UnderstandingChunkTimeLabel")
+        self.chunk_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        segment_time_layout.addStretch(1)
+        segment_time_layout.addWidget(self.chunk_time_label, 0)
+        segment_time_layout.addStretch(1)
+        detail_grid.addWidget(segment_time_host, 0, 0, 1, 2)
+
+        segment_header = QHBoxLayout()
+        segment_header.setContentsMargins(0, 0, 0, 0)
+        segment_header.setSpacing(10)
+        self.chunk_detail_title = QLabel()
+        self.chunk_detail_title.setObjectName("CardTitle")
+        segment_header.addWidget(self.chunk_detail_title, 0)
+        segment_header_host = QWidget()
+        segment_header_host.setLayout(segment_header)
+        detail_grid.addWidget(segment_header_host, 1, 0)
+
+        summary_header = QHBoxLayout()
+        summary_header.setContentsMargins(0, 0, 0, 0)
+        summary_header.setSpacing(8)
+        self.video_summary_title = QLabel()
+        self.video_summary_title.setObjectName("CardTitle")
+        summary_header.addWidget(self.video_summary_title, 0)
+        summary_header.addStretch(1)
+        summary_header_host = QWidget()
+        summary_header_host.setLayout(summary_header)
+        detail_grid.addWidget(summary_header_host, 1, 1)
+
+        self.chunk_caption_text = QPlainTextEdit()
+        self.chunk_caption_text.setObjectName("SearchInput")
+        self.chunk_caption_text.setReadOnly(True)
+        self.chunk_caption_text.setMinimumHeight(132)
+        self.chunk_caption_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.chunk_caption_text.setPlaceholderText("")
+        detail_grid.addWidget(self.chunk_caption_text, 2, 0)
+
+        self.video_summary_text = QPlainTextEdit()
+        self.video_summary_text.setObjectName("SearchInput")
+        self.video_summary_text.setReadOnly(True)
+        self.video_summary_text.setMinimumHeight(132)
+        self.video_summary_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        detail_grid.addWidget(self.video_summary_text, 2, 1)
+        detail_grid.setRowStretch(2, 1)
+
+        self.chunk_objects_label = QLabel()
+        self.chunk_objects_label.setObjectName("StatusHint")
+        self.chunk_objects_label.setWordWrap(True)
+        self.chunk_objects_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        detail_grid.addWidget(self.chunk_objects_label, 3, 0)
+
+        self.video_summary_meta_label = QLabel()
+        self.video_summary_meta_label.setObjectName("StatusHint")
+        self.video_summary_meta_label.setWordWrap(True)
+        self.video_summary_meta_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        detail_grid.addWidget(self.video_summary_meta_label, 3, 1)
+
+        workspace_layout.addWidget(detail_host, 1)
+
+        self.lbl_understanding_hint = QLabel()
+        self.lbl_understanding_hint.setObjectName("StatusHint")
+        self.lbl_understanding_hint.setWordWrap(True)
+        workspace_layout.addWidget(self.lbl_understanding_hint)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self.btn_generate_evidence = QPushButton()
+        self.btn_generate_evidence.setObjectName("PrimaryButton")
+        self.btn_generate_evidence.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_evidence_details = QPushButton()
+        self.btn_evidence_details.setObjectName("GhostButton")
+        self.btn_evidence_details.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_export_video_json = QPushButton()
+        self.btn_export_video_json.setObjectName("GhostButton")
+        self.btn_export_video_json.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_stop = QPushButton()
+        self.btn_stop.setObjectName("DangerGhostButton")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.setVisible(False)
+        self.btn_stop.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        actions.addWidget(self.btn_generate_evidence, 0)
+        actions.addWidget(self.btn_evidence_details, 0)
+        actions.addWidget(self.btn_export_video_json, 0)
+        actions.addStretch(1)
+        actions.addWidget(self.btn_stop, 0)
+        workspace_layout.addLayout(actions)
+
+        self.progress_status = VSProgressStatusRow()
+        self.progress_bar = self.progress_status.progress_bar
+        self.lbl_status = self.progress_status.status_label
+        self.progress_bar.setVisible(False)
+        workspace_layout.addWidget(self.progress_status)
+        workspace_layout.addStretch(0)
+        page_body.addWidget(self.workspace_card, 0)
+        page_body.addStretch(1)
+
+    def _set_config_expanded(self, expanded: bool) -> None:
+        self._config_expanded = bool(expanded)
+        self.config_body.setVisible(self._config_expanded)
+        self.btn_config_collapse.setArrowType(
+            Qt.ArrowType.DownArrow if self._config_expanded else Qt.ArrowType.RightArrow
+        )
+
+    def _toggle_config_panel(self) -> None:
+        self._set_config_expanded(not self._config_expanded)
+
+    def expand_config_panel(self) -> None:
+        self._set_config_expanded(True)
 
 
 class LinkSearchPage(QWidget):

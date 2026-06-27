@@ -6,6 +6,8 @@ import time
 import uuid
 from typing import Callable, Optional
 
+_MOBILE_UPLOAD_JS_CACHE: str | None = None
+
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -23,6 +25,12 @@ else:
 
 from src.app.logging_utils import get_logger
 from src.app.config import get_data_storage_paths
+from src.services.mobile_search_service import (
+    build_mobile_search_payload,
+    get_mobile_search_defaults,
+    normalize_mobile_search_kind,
+    parse_mobile_fusion,
+)
 from src.utils import ensure_folder_exists, get_app_data_dir, get_resource_path
 
 logger = get_logger("mobile_bridge")
@@ -142,10 +150,61 @@ def get_local_ip():
         sock.close()
 
 
+def read_mobile_upload_js() -> str:
+    global _MOBILE_UPLOAD_JS_CACHE
+    if _MOBILE_UPLOAD_JS_CACHE is not None:
+        return _MOBILE_UPLOAD_JS_CACHE
+    js_path = get_resource_path(os.path.join("static", "mobile_upload.js"))
+    try:
+        with open(js_path, "r", encoding="utf-8") as handle:
+            _MOBILE_UPLOAD_JS_CACHE = handle.read()
+    except OSError:
+        logger.warning("Mobile upload JS missing at %s", js_path)
+        _MOBILE_UPLOAD_JS_CACHE = ""
+    return _MOBILE_UPLOAD_JS_CACHE
+
+
+def cleanup_stale_mobile_uploads(
+    upload_dir: str,
+    *,
+    max_age_sec: int = 7 * 24 * 3600,
+    keep_recent: int = 20,
+) -> int:
+    """Delete old mobile query images; always keep the newest `keep_recent` files."""
+    if not upload_dir or not os.path.isdir(upload_dir):
+        return 0
+    entries: list[tuple[float, str]] = []
+    for name in os.listdir(upload_dir):
+        path = os.path.join(upload_dir, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            entries.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+    if not entries:
+        return 0
+
+    entries.sort(key=lambda item: item[0], reverse=True)
+    cutoff = time.time() - max(0, int(max_age_sec))
+    removed = 0
+    for index, (mtime, path) in enumerate(entries):
+        if index < max(0, int(keep_recent)):
+            continue
+        if mtime >= cutoff:
+            continue
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError as exc:
+            logger.warning("Failed to remove stale mobile upload %s: %s", path, exc)
+    return removed
+
+
 class MobileBridgeService:
     def __init__(
         self,
-        on_image_received: Callable[[str, str], None],
+        on_search_requested: Callable[[dict], None],
         host: str = "0.0.0.0",
         port: int = 8918,
     ):
@@ -157,7 +216,7 @@ class MobileBridgeService:
         self.upload_dir = str(get_data_storage_paths().get("mobile_upload_dir", "") or "")
         if not self.upload_dir:
             self.upload_dir = os.path.join(get_app_data_dir(), "mobile_uploads")
-        self._on_image_received = on_image_received
+        self._on_search_requested = on_search_requested
         self._thread: Optional[threading.Thread] = None
         self._server = None
         self._started = threading.Event()
@@ -166,11 +225,13 @@ class MobileBridgeService:
         self._template_path = get_resource_path(os.path.join("static", "index.html"))
 
         self.app = FastAPI(title="VideoSeek Mobile Bridge")
+        self.app.get("/static/mobile_upload.js")(self._mobile_upload_js)
         if os.path.isdir(self._static_dir):
             self.app.mount("/static", StaticFiles(directory=self._static_dir), name="static")
         else:
             logger.warning("Mobile bridge static directory missing: %s", self._static_dir)
         self.app.get("/", response_class=HTMLResponse)(self._index)
+        self.app.get("/config")(self._config)
         self.app.post("/preview")(self._preview)
         self.app.post("/search")(self._search)
         self.app.get("/health")(self._health)
@@ -179,6 +240,10 @@ class MobileBridgeService:
         with self._lock:
             if self.is_running():
                 return
+            ensure_folder_exists(self.upload_dir)
+            removed = cleanup_stale_mobile_uploads(self.upload_dir)
+            if removed:
+                logger.info("Removed %s stale mobile upload file(s).", removed)
             config = uvicorn.Config(
                 self.app,
                 host=self.host,
@@ -231,13 +296,25 @@ class MobileBridgeService:
         finally:
             self._started.clear()
 
-    async def _index(self, request: Request):
-        token = str(request.query_params.get("token", "") or "").strip()
-        if token != self.token:
+    def _validate_access_token(self, token: str) -> None:
+        if str(token or "").strip() != self.token:
             raise HTTPException(status_code=403, detail="Invalid access token.")
+
+    async def _index(self, request: Request):
+        self._validate_access_token(str(request.query_params.get("token", "") or ""))
 
         html = self._load_index_html()
         return html.replace("__UPLOAD_TOKEN__", self.token)
+
+    async def _config(self, request: Request):
+        self._validate_access_token(str(request.query_params.get("token", "") or ""))
+        return JSONResponse(get_mobile_search_defaults())
+
+    async def _mobile_upload_js(self):
+        payload = read_mobile_upload_js()
+        if not payload:
+            raise HTTPException(status_code=404, detail="Mobile upload script unavailable.")
+        return Response(content=payload, media_type="application/javascript")
 
     def _load_index_html(self):
         if os.path.isfile(self._template_path):
@@ -287,32 +364,80 @@ class MobileBridgeService:
         self,
         request: Request,
         token: str = Form(""),
-        file: UploadFile = File(...),
+        search_kind: str = Form("image"),
+        query: str = Form(""),
+        text_weight: str = Form(""),
+        file: UploadFile = File(None),
+        files: list[UploadFile] = File(None),
     ):
-        if str(token).strip() != self.token:
-            raise HTTPException(status_code=403, detail="Invalid upload token.")
-        target_path = await self._save_upload_file(file)
+        self._validate_access_token(token)
+        kind = normalize_mobile_search_kind(search_kind)
+        cleaned_query = str(query or "").strip()
+        saved_paths: list[str] = []
 
-        from src.core.image_io import normalize_image_upload
+        uploads: list[UploadFile] = []
+        if files:
+            uploads.extend(files)
+        if file is not None and str(getattr(file, "filename", "") or "").strip():
+            uploads.append(file)
 
-        try:
-            target_path = normalize_image_upload(target_path)
-        except ValueError as exc:
+        for upload in uploads:
+            if upload is None or not str(getattr(upload, "filename", "") or "").strip():
+                continue
+            target_path = await self._save_upload_file(upload)
+            from src.core.image_io import normalize_image_upload
+
             try:
-                os.remove(target_path)
-            except OSError:
-                pass
+                target_path = normalize_image_upload(target_path)
+            except ValueError as exc:
+                for path in saved_paths:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                try:
+                    os.remove(target_path)
+                except OSError:
+                    pass
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            saved_paths.append(target_path)
+
+        fusion = parse_mobile_fusion(
+            text_weight,
+            has_text=bool(cleaned_query),
+            has_image=bool(saved_paths),
+        )
+        try:
+            payload = build_mobile_search_payload(
+                search_kind=kind,
+                query=cleaned_query,
+                image_paths=saved_paths,
+                fusion=fusion,
+                source=request.client.host if request.client else "",
+            )
+        except ValueError as exc:
+            for path in saved_paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        client_host = request.client.host if request.client else ""
         try:
-            self._on_image_received(target_path, client_host)
+            self._on_search_requested(payload)
         except Exception as exc:
-            logger.exception("Failed to hand off uploaded image to UI.")
+            logger.exception("Failed to hand off mobile search request to UI.")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        logger.info("Accepted mobile upload: %s", target_path)
-        return JSONResponse({"ok": True, "message": "图片已发送到电脑端，正在触发搜索。"})
+        logger.info("Accepted mobile search request: kind=%s", kind)
+        labels = {"image": "图搜", "text": "文搜", "compose": "组合搜索"}
+        return JSONResponse(
+            {
+                "ok": True,
+                "message": f"已提交{labels.get(kind, '搜索')}请求，请在电脑端查看结果。",
+                "search_kind": kind,
+            }
+        )
 
     async def _health(self):
         return {"ok": True, "running": self.is_running()}

@@ -19,9 +19,13 @@ from src.services.search_service import (
     _resolve_frame_fetch_top_k,
     _resolve_locate_result_top_k,
     _resolve_stage1_global_fetch_k,
+    compute_locate_score_margin,
+    compute_locate_confidence,
     format_clip_score_percent,
     locate_crop_confidence_warning_key,
     resolve_clip_confidence_tier_key,
+    resolve_locate_clip_window_sec,
+    should_allow_pixel_refine,
     _apply_locate_crop_anchor_stability,
     _search_frame_results_in_time_window,
     _search_locate_anchor_window_hits,
@@ -139,6 +143,14 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=True, scoped=False))
         self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=False, scoped=True))
         self.assertFalse(_use_video_discovery_results(is_text=True, precise_image=False, scoped=False))
+        self.assertFalse(
+            _use_video_discovery_results(
+                is_text=False,
+                precise_image=False,
+                scoped=False,
+                video_discovery_enabled=False,
+            )
+        )
 
     def test_aggregate_hits_to_video_discovery_marks_video_kind(self):
         hits = [
@@ -406,12 +418,30 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
             20,
             {},
             locate_anchor_sec=64.0,
+            locate_anchor_score=0.9,
+            locate_score_margin=0.1,
         )
-
-        self.assertEqual(len(refined), 5)
         mock_pixel.assert_called_once()
         passed_hits = mock_pixel.call_args.args[1]
         self.assertEqual(len(passed_hits), 3)
+
+    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=False)
+    def test_refine_locate_skips_pixel_when_refine_gate_closed(self, _mock_crop, mock_pixel):
+        hits = [SearchHit(64.0, 64.0, 0.9, "D:/a.mp4")]
+
+        refined = _refine_precise_seed_hits(
+            object(),
+            hits,
+            3,
+            {},
+            locate_anchor_sec=64.0,
+            locate_anchor_score=0.65,
+            locate_score_margin=0.1,
+        )
+
+        self.assertEqual(len(refined), 1)
+        mock_pixel.assert_not_called()
 
     @mock.patch("src.services.search_service.apply_image_pixel_rerank")
     @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=True)
@@ -548,6 +578,57 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         stable = _apply_locate_crop_anchor_stability(hits, 64.0, "D:/a.mp4")
         self.assertAlmostEqual(float(stable[0].start_sec), 67.0)
         self.assertAlmostEqual(float(stable[0].score), 0.82)
+
+    def test_resolve_locate_clip_window_sec_continuous(self):
+        self.assertEqual(resolve_locate_clip_window_sec(is_crop=True), 5.0)
+        self.assertAlmostEqual(
+            resolve_locate_clip_window_sec(score=0.90, margin=0.12, is_crop=False),
+            10.0,
+        )
+        self.assertAlmostEqual(
+            resolve_locate_clip_window_sec(score=0.75, margin=0.08, is_crop=False),
+            19.47,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            resolve_locate_clip_window_sec(score=0.65, margin=0.08, is_crop=False),
+            25.16,
+            places=1,
+        )
+
+    def test_compute_locate_confidence(self):
+        self.assertAlmostEqual(compute_locate_confidence(0.90, 0.12), 1.008)
+        self.assertAlmostEqual(compute_locate_confidence(0.75, 0.08), 0.81)
+        self.assertIsNone(compute_locate_confidence(None, 0.08))
+
+    def test_resolve_locate_clip_window_sec_expands_on_unstable_margin(self):
+        self.assertEqual(
+            resolve_locate_clip_window_sec(score=0.90, margin=0.02, is_crop=False),
+            40.0,
+        )
+
+    @mock.patch("src.services.search_telemetry.get_locate_clip_window_bias_sec", return_value=5.0)
+    def test_resolve_locate_clip_window_sec_applies_telemetry_bias(self, _mock_bias):
+        self.assertAlmostEqual(
+            resolve_locate_clip_window_sec(score=0.75, margin=0.08, is_crop=False),
+            24.47,
+            places=1,
+        )
+
+    def test_compute_locate_score_margin(self):
+        hits = [
+            SearchHit(10.0, 10.0, 0.82, "D:/a.mp4"),
+            SearchHit(20.0, 20.0, 0.71, "D:/b.mp4"),
+        ]
+        self.assertAlmostEqual(compute_locate_score_margin(None, hits), 0.11)
+        self.assertAlmostEqual(compute_locate_score_margin(0.82, hits), 0.11)
+
+    def test_should_allow_pixel_refine(self):
+        self.assertFalse(should_allow_pixel_refine(is_crop=True, score=0.9, margin=0.1))
+        self.assertFalse(should_allow_pixel_refine(is_crop=False, score=0.65, margin=0.1))
+        self.assertFalse(should_allow_pixel_refine(is_crop=False, score=0.9, margin=0.02))
+        self.assertFalse(should_allow_pixel_refine(is_crop=False, score=None, margin=0.1))
+        self.assertTrue(should_allow_pixel_refine(is_crop=False, score=0.75, margin=0.08))
 
 
 if __name__ == "__main__":

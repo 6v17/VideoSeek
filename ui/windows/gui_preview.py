@@ -8,10 +8,13 @@ import time
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog
 
+from src.app.logging_utils import get_logger
 from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_explorer
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
 from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
+
+logger = get_logger("gui_preview")
 
 
 class PreviewGuiMixin:
@@ -26,15 +29,66 @@ class PreviewGuiMixin:
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
         self._update_expand_preview_button()
 
+    def open_segment_preview_dialog(
+        self,
+        video_path,
+        start_sec,
+        end_sec,
+        *,
+        suggested_sec=None,
+        on_status=None,
+    ) -> bool:
+        def set_status(message: str) -> None:
+            if callable(on_status):
+                on_status(message)
+            else:
+                self.search_page.lbl_status.setText(message)
+
+        if not self.check_runtime_resources():
+            set_status(self.texts["model_features_disabled"])
+            return False
+
+        video_path = str(video_path or "").strip()
+        if not video_path:
+            return False
+
+        now = time.monotonic()
+        if self._preview_dialog_opening or now < self._preview_dialog_cooldown_until:
+            set_status(self.texts.get("preview_dialog_busy", "Preview is still switching. Try again in a moment."))
+            return False
+
+        start_sec = float(start_sec)
+        end_sec = float(end_sec)
+        if end_sec <= start_sec:
+            end_sec = start_sec + 0.1
+        suggested = float(suggested_sec if suggested_sec is not None else (start_sec + end_sec) / 2.0)
+
+        self.preview_controller.stop_preview(skip_telemetry=True)
+        self._update_expand_preview_button()
+        self._preview_dialog_opening = True
+        self._preview_dialog_cooldown_until = now + 0.8
+
+        try:
+            if not hasattr(self, "_preview_dialog") or self._preview_dialog is None:
+                self._preview_dialog = PreviewDialog(
+                    self, video_path, start_sec, end_sec, self.texts, suggested_sec=suggested
+                )
+                self._preview_dialog.export_requested.connect(self._queue_preview_export)
+                self._preview_dialog.export_status_changed.connect(self._handle_preview_export_status)
+            else:
+                self._preview_dialog.load_preview(
+                    video_path, start_sec, end_sec, suggested_sec=suggested
+                )
+            self._preview_dialog.show()
+            self._preview_dialog.raise_()
+            self._preview_dialog.activateWindow()
+        finally:
+            QTimer.singleShot(800, self._release_preview_dialog_gate)
+        return True
+
     def open_current_preview_dialog(self, _event=None):
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
-            return
-        now = time.monotonic()
-        if self._preview_dialog_opening or now < self._preview_dialog_cooldown_until:
-            self.search_page.lbl_status.setText(
-                self.texts.get("preview_dialog_busy", "Preview is still switching. Try again in a moment.")
-            )
             return
 
         payload = self.preview_controller.get_current_preview_context()
@@ -47,27 +101,12 @@ class PreviewGuiMixin:
         start_sec = float(payload.get("start_sec", 0.0))
         end_sec = float(payload.get("end_sec", start_sec))
         suggested_sec = float(payload.get("suggested_sec", start_sec))
-        self.preview_controller.stop_preview(skip_telemetry=True)
-        self._update_expand_preview_button()
-        self._preview_dialog_opening = True
-        self._preview_dialog_cooldown_until = now + 0.8
-
-        try:
-            if not hasattr(self, "_preview_dialog") or self._preview_dialog is None:
-                self._preview_dialog = PreviewDialog(
-                    self, video_path, start_sec, end_sec, self.texts, suggested_sec=suggested_sec
-                )
-                self._preview_dialog.export_requested.connect(self._queue_preview_export)
-                self._preview_dialog.export_status_changed.connect(self._handle_preview_export_status)
-            else:
-                self._preview_dialog.load_preview(
-                    video_path, start_sec, end_sec, suggested_sec=suggested_sec
-                )
-            self._preview_dialog.show()
-            self._preview_dialog.raise_()
-            self._preview_dialog.activateWindow()
-        finally:
-            QTimer.singleShot(800, self._release_preview_dialog_gate)
+        self.open_segment_preview_dialog(
+            video_path,
+            start_sec,
+            end_sec,
+            suggested_sec=suggested_sec,
+        )
 
     def _release_preview_dialog_gate(self):
         self._preview_dialog_opening = False
@@ -185,8 +224,8 @@ class PreviewGuiMixin:
         if worker is not None:
             try:
                 worker.deleteLater()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Preview export worker deleteLater failed: %s", exc)
         self._start_next_preview_exports()
         if self._preview_export_active or self._preview_export_queue:
             self.search_page.lbl_status.setText(
@@ -216,8 +255,8 @@ class PreviewGuiMixin:
                 return False
             try:
                 worker.deleteLater()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Preview export worker deleteLater failed during cancel: %s", exc)
         self._preview_export_active.clear()
         self._update_preview_action_button_styles()
         return True

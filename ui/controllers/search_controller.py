@@ -2,9 +2,13 @@ import time
 
 from PySide6.QtCore import QObject
 
+from src.app.logging_utils import get_logger
 from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
 from ui.threading_utils import shutdown_thread
+from ui.views.table_visibility import visible_table_row_range
 from ui.workers import SearchWarmupWorker, SearchWorker, ThumbLoader
+
+logger = get_logger("search_controller")
 
 
 class SearchController(QObject):
@@ -19,13 +23,30 @@ class SearchController(QObject):
         self._gpu_warning_shown = False
         self._warmup_started = False
         self._is_shutdown = False
+        self._last_coarse_results = []
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
 
+    def _visible_result_rows(self, table):
+        return set(visible_table_row_range(table))
+
     def is_search_running(self) -> bool:
         worker = self.worker
         return worker is not None and worker.isRunning()
+
+    def _stop_active_search_worker(self):
+        worker = self.worker
+        if worker is None:
+            return
+        self._disconnect_search_worker(worker)
+        shutdown_thread(worker, allow_terminate=False)
+        if worker is self.worker:
+            self.worker = None
+
+    def _is_current_worker(self, worker=None):
+        target = worker if worker is not None else self.sender()
+        return target is self.worker
 
     def start_search(
         self,
@@ -40,7 +61,11 @@ class SearchController(QObject):
         search_precision_mode=None,
         pixel_query_data=None,
         preview_anchor_sec=None,
+        locate_anchor_score=None,
+        locate_score_margin=None,
+        video_discovery_enabled=None,
     ):
+        self._stop_active_search_worker()
         self.stop_thumbnail_loading()
         self.start_time = time.time()
         self._scope_library_paths = list(scope_library_paths or [])
@@ -60,6 +85,9 @@ class SearchController(QObject):
             search_precision_mode=search_precision_mode,
             pixel_query_data=pixel_query_data,
             preview_anchor_sec=preview_anchor_sec,
+            locate_anchor_score=locate_anchor_score,
+            locate_score_margin=locate_score_margin,
+            video_discovery_enabled=video_discovery_enabled,
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
@@ -96,6 +124,10 @@ class SearchController(QObject):
             min_score=query_part.get("default_min_score"),
             search_precision_mode=search_precision_mode,
             pixel_query_data=query_part.get("pixel_query_data"),
+            video_discovery_enabled=self.parent_window._resolve_video_discovery_enabled(
+                is_text=is_text,
+                has_image=has_image,
+            ),
         )
 
     def clear_results(self):
@@ -159,7 +191,7 @@ class SearchController(QObject):
         self._result_view().set_thumbnail(row, pixmap)
 
     def _on_search_progress(self, progress_key: str):
-        if self._is_shutdown:
+        if self._is_shutdown or not self._is_current_worker():
             return
         key = str(progress_key or "").strip()
         if not key:
@@ -169,8 +201,11 @@ class SearchController(QObject):
         self.parent_window.search_page.lbl_status.setText(label)
 
     def _display_results(self, results):
-        if self._is_shutdown:
+        if self._is_shutdown or not self._is_current_worker():
             return
+        is_locate_run = bool(getattr(self.worker, "preview_anchor_sec", None) is not None)
+        if not is_locate_run:
+            self._last_coarse_results = list(results or [])
         self.parent_window.push_inference_status()
         result_view = self._result_view()
         if not results:
@@ -190,8 +225,8 @@ class SearchController(QObject):
                 if is_likely_cropped_query_image(image_path):
                     clip_score_mode = True
                     low_confidence_threshold = _LOCATE_CROP_MIN_CLIP_SCORE
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Crop query clip-score UI hint skipped: %s", exc)
 
         result_view.populate_local(
             results,
@@ -200,6 +235,7 @@ class SearchController(QObject):
             self.parent_window.handle_export_clip,
             texts,
             on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
+            on_add_to_shot_list=getattr(self.parent_window, "add_hit_to_shot_list", None),
             clip_score_mode=clip_score_mode,
             low_confidence_score=low_confidence_threshold,
         )
@@ -215,9 +251,11 @@ class SearchController(QObject):
                 )
                 from src.services.search_telemetry import record_crop_confidence
 
-                hint = texts.get("search_crop_clip_only_hint", "")
-                if hint:
-                    status_text = f"{status_text} · {hint}"
+                precise_mode = str(getattr(self.worker, "search_precision_mode", "") or "").strip().lower() == "precise"
+                if precise_mode:
+                    hint = texts.get("search_crop_clip_only_hint", "")
+                    if hint:
+                        status_text = f"{status_text} · {hint}"
                 top_score = float(coerce_search_hit(results[0]).score)
                 top_label = format_clip_score_percent(top_score)
                 tier_label = resolve_clip_confidence_label(top_score, texts)
@@ -237,9 +275,9 @@ class SearchController(QObject):
                         f"{status_text} · "
                         f"{texts.get('search_clip_confidence_level', '置信度 {level}').format(level=tier_label)}"
                     )
-            except Exception:
-                pass
-        warning_key = getattr(self.worker, "locate_warning_key", None) if self.worker else None
+            except Exception as exc:
+                logger.debug("Crop confidence status formatting skipped: %s", exc)
+        warning_key = getattr(self.worker, "locate_warning_key", None)
         if warning_key:
             warn_template = texts.get(warning_key, "")
             if warn_template:
@@ -254,12 +292,12 @@ class SearchController(QObject):
                 status_text = f"{status_text} · {warn}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
-        self.thumb_thread = ThumbLoader(results)
+        self.thumb_thread = ThumbLoader(results, priority_rows=self._visible_result_rows(result_view.table))
         self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
 
     def _finish_search(self):
-        if self._is_shutdown:
+        if self._is_shutdown or not self._is_current_worker():
             return
         self.parent_window.search_page.btn_search.setEnabled(True)
 
@@ -270,7 +308,7 @@ class SearchController(QObject):
         self.parent_window.push_inference_status()
 
     def _handle_search_error(self, error_text):
-        if self._is_shutdown:
+        if self._is_shutdown or not self._is_current_worker():
             return
         self.parent_window.push_inference_status()
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["search_failed"])

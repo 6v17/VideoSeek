@@ -8,7 +8,7 @@ import numpy as np
 from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_text_embedding
 from src.app.config import DEFAULT_CONFIG, load_config
 from src.app.logging_utils import get_logger
-from src.domain.search_hit import SearchHit
+from src.domain.search_hit import SearchHit, coerce_search_hit
 from src.services.indexing_service import load_video_chunks_by_id
 from src.services.search_scope import (
     apply_search_scope,
@@ -56,189 +56,34 @@ from src.services.search_progress import (
     set_search_progress_callback,
 )
 
+from src.services.search_assets import (
+    _CHUNK_ASSET_INFO,
+    _FRAME_ASSET_INFO,
+    _check_asset_profile_compatibility,
+    _library_indexes_ready,
+    _load_per_video_frame_assets,
+    load_chunk_search_assets,
+    load_library_chunk_search_assets,
+    load_library_frame_search_assets,
+    load_search_assets,
+)
+from src.services.search_locate import (
+    _LOCATE_CROP_MIN_CLIP_SCORE,
+    _resolve_rerank_query,
+    apply_locate_crop_anchor_stability,
+    compute_locate_confidence,
+    compute_locate_score_margin,
+    format_clip_score_percent,
+    locate_crop_confidence_warning_key,
+    resolve_clip_confidence_label,
+    resolve_clip_confidence_tier_key,
+    resolve_locate_clip_window_sec,
+    should_allow_pixel_refine,
+)
+
+_apply_locate_crop_anchor_stability = apply_locate_crop_anchor_stability
+
 logger = get_logger("search_service")
-_FRAME_ASSET_CACHE = {"key": None, "value": (None, None, None)}
-_CHUNK_ASSET_CACHE = {"key": None, "value": (None, None, None)}
-_FRAME_ASSET_INFO = {"key": None, "embedding_spec": None, "index_dim": 0}
-_CHUNK_ASSET_INFO = {"key": None, "embedding_spec": None, "index_dim": 0}
-
-
-def _asset_cache_key(index_file, vector_file):
-    try:
-        return (
-            os.path.abspath(index_file),
-            os.path.getmtime(index_file),
-            os.path.abspath(vector_file),
-            os.path.getmtime(vector_file),
-        )
-    except OSError:
-        return None
-
-
-def _load_asset_metadata(vector_file, required_fields, asset_label):
-    try:
-        data = np.load(vector_file, allow_pickle=True).item()
-    except Exception as exc:
-        logger.error("Failed to load %s metadata: %s", asset_label, exc)
-        return None
-
-    if not isinstance(data, dict):
-        logger.error("Invalid %s metadata payload: expected dict", asset_label)
-        return None
-
-    missing_fields = [field for field in required_fields if data.get(field) is None]
-    if missing_fields:
-        logger.error("Invalid %s metadata payload: missing %s", asset_label, ", ".join(missing_fields))
-        return None
-
-    return data
-
-
-def _reset_asset_info(info_cache):
-    info_cache["key"] = None
-    info_cache["embedding_spec"] = None
-    info_cache["index_dim"] = 0
-
-
-def _check_asset_profile_compatibility(config, asset_info, asset_label):
-    spec = asset_info.get("embedding_spec")
-    if not isinstance(spec, dict):
-        return
-    profile = get_active_model_profile(config=config)
-    active_profile_id = str(profile.get("id", "") or "").strip()
-    active_provider = str(profile.get("provider", "") or "").strip()
-    spec_model_id = str(spec.get("model_id", "") or "").strip()
-    spec_provider = str(spec.get("provider", "") or "").strip()
-    spec_dimension = spec.get("dimension")
-    index_dim = int(asset_info.get("index_dim", 0) or 0)
-
-    if spec_model_id and active_profile_id and spec_model_id != active_profile_id:
-        raise RuntimeError(
-            f"Search {asset_label} index targets model profile '{spec_model_id}', "
-            f"but active profile is '{active_profile_id}'. "
-            "Please rebuild the index for the active model profile."
-        )
-    if spec_provider and active_provider and spec_provider != active_provider:
-        raise RuntimeError(
-            f"Search {asset_label} index provider mismatch (index={spec_provider}, active={active_provider}). "
-            "Please rebuild the index for the active model profile."
-        )
-    try:
-        spec_dimension = int(spec_dimension)
-    except (TypeError, ValueError):
-        spec_dimension = 0
-    if spec_dimension > 0 and index_dim > 0 and spec_dimension != index_dim:
-        raise RuntimeError(
-            f"Search {asset_label} index dimension mismatch in metadata (spec={spec_dimension}, index={index_dim}). "
-            "Please rebuild the index for the active model profile."
-        )
-
-
-def load_search_assets(config):
-    global_paths = get_global_model_asset_paths(config=config)
-    index_file = global_paths["cross_index_file"]
-    vector_file = global_paths["cross_vector_file"]
-
-    if not os.path.exists(index_file) or not os.path.exists(vector_file):
-        logger.warning("Global frame search index is missing. Please update the index first.")
-        return None, None, None
-
-    cache_key = _asset_cache_key(index_file, vector_file)
-    if cache_key is not None and _FRAME_ASSET_CACHE["key"] == cache_key:
-        return _FRAME_ASSET_CACHE["value"]
-
-    search_index = load_clip_index(index_file)
-    if search_index is None:
-        _FRAME_ASSET_CACHE["key"] = None
-        _FRAME_ASSET_CACHE["value"] = (None, None, None)
-        _reset_asset_info(_FRAME_ASSET_INFO)
-        return None, None, None
-
-    data = _load_asset_metadata(vector_file, required_fields=("timestamps", "paths"), asset_label="frame search")
-    if data is None:
-        _FRAME_ASSET_CACHE["key"] = None
-        _FRAME_ASSET_CACHE["value"] = (None, None, None)
-        _reset_asset_info(_FRAME_ASSET_INFO)
-        return None, None, None
-
-    value = (search_index, data.get("timestamps"), data.get("paths"))
-    _FRAME_ASSET_CACHE["key"] = cache_key
-    _FRAME_ASSET_CACHE["value"] = value
-    _FRAME_ASSET_INFO["key"] = cache_key
-    _FRAME_ASSET_INFO["embedding_spec"] = data.get("embedding_spec") if isinstance(data.get("embedding_spec"), dict) else None
-    _FRAME_ASSET_INFO["index_dim"] = int(getattr(search_index, "d", 0) or 0)
-    return value
-
-
-def load_chunk_search_assets(config):
-    global_paths = get_global_model_asset_paths(config=config)
-    index_file = global_paths["cross_chunk_index_file"]
-    vector_file = global_paths["cross_chunk_vector_file"]
-
-    if not os.path.exists(index_file) or not os.path.exists(vector_file):
-        logger.warning("Global chunk search index is missing. Please update the index first.")
-        return None, None, None
-
-    cache_key = _asset_cache_key(index_file, vector_file)
-    if cache_key is not None and _CHUNK_ASSET_CACHE["key"] == cache_key:
-        return _CHUNK_ASSET_CACHE["value"]
-
-    search_index = load_clip_index(index_file)
-    if search_index is None:
-        _CHUNK_ASSET_CACHE["key"] = None
-        _CHUNK_ASSET_CACHE["value"] = (None, None, None)
-        _reset_asset_info(_CHUNK_ASSET_INFO)
-        return None, None, None
-
-    data = _load_asset_metadata(vector_file, required_fields=("ranges", "paths"), asset_label="chunk search")
-    if data is None:
-        _CHUNK_ASSET_CACHE["key"] = None
-        _CHUNK_ASSET_CACHE["value"] = (None, None, None)
-        _reset_asset_info(_CHUNK_ASSET_INFO)
-        return None, None, None
-
-    value = (search_index, data.get("ranges"), data.get("paths"))
-    _CHUNK_ASSET_CACHE["key"] = cache_key
-    _CHUNK_ASSET_CACHE["value"] = value
-    _CHUNK_ASSET_INFO["key"] = cache_key
-    _CHUNK_ASSET_INFO["embedding_spec"] = data.get("embedding_spec") if isinstance(data.get("embedding_spec"), dict) else None
-    _CHUNK_ASSET_INFO["index_dim"] = int(getattr(search_index, "d", 0) or 0)
-    return value
-
-
-def _library_indexes_ready(config, library_paths) -> bool:
-    if get_search_index_schema_version(load_model_metadata(config=config)) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
-        return False
-    roots = [str(path or "").strip() for path in (library_paths or []) if str(path or "").strip()]
-    if not roots:
-        return False
-    return all(library_index_is_ready(path, config=config) for path in roots)
-
-
-def load_library_frame_search_assets(library_path, config):
-    if not library_index_is_ready(library_path, config=config):
-        return None, None, None
-    asset_paths = get_library_index_paths(library_path, config=config)
-    search_index = load_clip_index(asset_paths["frame_index_file"])
-    if search_index is None:
-        return None, None, None
-    data = _load_asset_metadata(asset_paths["frame_vector_file"], required_fields=("timestamps", "paths"), asset_label="library frame search")
-    if data is None:
-        return None, None, None
-    return search_index, data.get("timestamps"), data.get("paths")
-
-
-def load_library_chunk_search_assets(library_path, config):
-    asset_paths = get_library_index_paths(library_path, config=config)
-    if not os.path.exists(asset_paths["chunk_index_file"]) or not os.path.exists(asset_paths["chunk_vector_file"]):
-        return None, None, None
-    search_index = load_clip_index(asset_paths["chunk_index_file"])
-    if search_index is None:
-        return None, None, None
-    data = _load_asset_metadata(asset_paths["chunk_vector_file"], required_fields=("ranges", "paths"), asset_label="library chunk search")
-    if data is None:
-        return None, None, None
-    return search_index, data.get("ranges"), data.get("paths")
 
 
 def _merge_search_hits(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
@@ -270,37 +115,6 @@ def _resolve_scoped_video_targets(scope_video_paths, config):
     return targets
 
 
-def _load_per_video_frame_assets(video_id, abs_path, config, *, include_vectors: bool = True):
-    model_dirs = get_local_model_asset_dirs(config=config)
-    index_file = os.path.join(model_dirs["index_dir"], f"{video_id}_index.faiss")
-    if not os.path.isfile(index_file):
-        return None, None, None, None
-    search_index = load_clip_index(index_file)
-    if search_index is None:
-        return None, None, None, None
-    from src.services.indexing_service import load_video_vectors_by_id
-
-    vectors, timestamps = load_video_vectors_by_id(video_id, config)
-    if timestamps is None:
-        return None, None, None, None
-    ts = np.asarray(timestamps, dtype=np.float32).reshape(-1)
-    count = min(int(search_index.ntotal), len(ts))
-    if count <= 0:
-        return None, None, None, None
-    if count < len(ts):
-        ts = ts[:count]
-    vector_matrix = None
-    if include_vectors and vectors is not None:
-        try:
-            matrix = np.asarray(vectors, dtype=np.float32)
-            if matrix.ndim == 2 and matrix.shape[0] >= count:
-                vector_matrix = matrix[:count]
-        except Exception:
-            vector_matrix = None
-    video_paths = [abs_path] * count
-    return search_index, ts, video_paths, vector_matrix
-
-
 def _use_precise_image_pipeline(is_text: bool, config, search_precision_mode=None) -> bool:
     if is_text:
         return False
@@ -330,11 +144,19 @@ _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
 _PRECISE_NEIGHBOR_BLEND = 0.1
 _LOCATE_ANCHOR_WINDOW_SEC = 30.0
 _LOCATE_CROP_ANCHOR_WINDOW_SEC = 5.0
+_LOCATE_CLIP_WINDOW_TIGHT_SEC = 10.0
+_LOCATE_CLIP_WINDOW_MEDIUM_SEC = 20.0
+_LOCATE_CLIP_WINDOW_WIDE_SEC = 40.0
+_LOCATE_CLIP_WINDOW_HIGH_SCORE = 0.85
+_LOCATE_CLIP_WINDOW_HIGH_MARGIN = 0.10
+_LOCATE_CLIP_WINDOW_MEDIUM_SCORE = 0.70
+_LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN = 0.05
+_LOCATE_CLIP_CONFIDENCE_LOW = 0.42
+_LOCATE_CLIP_CONFIDENCE_HIGH = 0.99
 _LOCATE_PIXEL_MAX_SHIFT_SEC = 5.0
 _LOCATE_PIXEL_LOCALIZE_TOP_N = 3
 _LOCATE_RESULT_TOP_K = 3
 _LOCATE_CROP_RESULT_TOP_K = 1
-_LOCATE_CROP_MIN_CLIP_SCORE = 0.6
 _LOCATE_CROP_STABILITY_POOL_K = 12
 _LOCATE_CROP_ANCHOR_MIN_GAIN = 0.03
 _CLIP_CONFIDENCE_VERY_HIGH = 0.85
@@ -493,105 +315,6 @@ def _resolve_locate_result_top_k(top_k: int, *, crop_query: bool = False) -> int
     return max(1, min(requested, _LOCATE_RESULT_TOP_K))
 
 
-def _resolve_rerank_query(query_data, pixel_query_data):
-    return pixel_query_data if pixel_query_data is not None else query_data
-
-
-def format_clip_score_percent(score: float) -> str:
-    pct = max(0.0, float(score)) * 100.0
-    if pct >= 100.0:
-        return "100%"
-    if pct >= 10.0:
-        return f"{pct:.1f}%"
-    return f"{pct:.2f}%"
-
-
-def resolve_clip_confidence_tier_key(score: float) -> str:
-    value = max(0.0, float(score))
-    if value >= _CLIP_CONFIDENCE_VERY_HIGH:
-        return "clip_confidence_very_high"
-    if value >= _CLIP_CONFIDENCE_HIGH:
-        return "clip_confidence_high"
-    if value >= _CLIP_CONFIDENCE_MEDIUM:
-        return "clip_confidence_medium"
-    return "clip_confidence_low"
-
-
-def resolve_clip_confidence_label(score: float, texts) -> str:
-    key = resolve_clip_confidence_tier_key(score)
-    return str((texts or {}).get(key, "") or "").strip()
-
-
-def _apply_locate_crop_anchor_stability(
-    hits: List[SearchHit],
-    anchor_sec: float,
-    target_video_path: str,
-) -> List[SearchHit]:
-    """Keep preview anchor unless CLIP gain over nearest anchor frame is meaningful."""
-    anchor = max(0.0, float(anchor_sec))
-    path = str(target_video_path or "")
-    if not hits:
-        return [SearchHit(anchor, anchor, 0.0, path)]
-
-    best = hits[0]
-    anchor_hit = min(hits, key=lambda item: abs(float(item.start_sec) - anchor))
-    best_time = float(best.start_sec)
-    best_score = float(best.score)
-    anchor_score = float(anchor_hit.score)
-
-    if abs(best_time - anchor) <= 0.05:
-        result = [best]
-        anchor_kept = True
-    elif (best_score - anchor_score) < _LOCATE_CROP_ANCHOR_MIN_GAIN:
-        stable_score = anchor_score if anchor_score > 0 else best_score
-        stable_path = str(best.video_path or path or anchor_hit.video_path)
-        result = [SearchHit(anchor, anchor, stable_score, stable_path)]
-        anchor_kept = True
-    else:
-        result = [best]
-        anchor_kept = False
-
-    try:
-        from src.services.search_telemetry import record_crop_locate_anchor
-
-        record_crop_locate_anchor(
-            anchor_sec=anchor,
-            result_sec=float(result[0].start_sec),
-            anchor_kept=anchor_kept,
-            best_sec=best_time,
-            best_score=best_score,
-            anchor_score=anchor_score,
-            clip_score=float(result[0].score),
-            video_path=path,
-        )
-    except Exception:
-        pass
-
-    return result
-
-
-def locate_crop_confidence_warning_key(
-    hits: List[SearchHit],
-    query_data,
-    *,
-    preview_anchor_sec: float | None = None,
-    pixel_query_data=None,
-    min_score: float | None = None,
-) -> str | None:
-    """Return i18n key when screenshot locate confidence is low (still returns hits)."""
-    if preview_anchor_sec is None:
-        return None
-    rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
-    if not is_likely_cropped_query_image(rerank_query):
-        return None
-    threshold = float(min_score if min_score is not None else _LOCATE_CROP_MIN_CLIP_SCORE)
-    if not hits:
-        return "locate_crop_low_confidence_empty"
-    if float(hits[0].score) < threshold:
-        return "locate_crop_low_confidence"
-    return None
-
-
 def _locate_anchor_window_hits_from_index(
     query_vector,
     anchor_sec: float,
@@ -729,7 +452,7 @@ def _search_locate_crop_trusted_hits(
         window_sec=_LOCATE_CROP_ANCHOR_WINDOW_SEC,
         skip_neighbor_refine=True,
     )
-    return _apply_locate_crop_anchor_stability(pool, anchor_sec, target_video_path)
+    return apply_locate_crop_anchor_stability(pool, anchor_sec, target_video_path)
 
 
 def _apply_bounded_neighbor_refine(
@@ -805,6 +528,8 @@ def _refine_precise_seed_hits(
     seed_times: Sequence[float] | None = None,
     pixel_query_data=None,
     locate_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
 ) -> List[SearchHit]:
     """Localize frozen recall seeds: pixel (and optional bounded neighbor upstream) only."""
     if not hits:
@@ -824,6 +549,13 @@ def _refine_precise_seed_hits(
         return frozen[:limit]
 
     if locate_anchor_sec is not None:
+        if not should_allow_pixel_refine(
+            is_crop=False,
+            score=locate_anchor_score,
+            margin=locate_score_margin,
+        ):
+            return frozen[: max(1, int(top_k))]
+
         anchor = max(0.0, float(locate_anchor_sec))
         locate_limit = max(1, min(_LOCATE_PIXEL_LOCALIZE_TOP_N, len(frozen)))
         head = frozen[:locate_limit]
@@ -879,6 +611,8 @@ def _run_frame_search_per_videos(
     precise_image=False,
     pixel_query_data=None,
     preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
 ) -> List[SearchHit]:
     targets = _resolve_scoped_video_targets(scope_video_paths, config)
     if not targets:
@@ -929,6 +663,12 @@ def _run_frame_search_per_videos(
                         per_video_vectors=vector_matrix,
                     )
                 else:
+                    clip_window_sec = resolve_locate_clip_window_sec(
+                        score=locate_anchor_score,
+                        margin=locate_score_margin,
+                        is_crop=False,
+                        config=config,
+                    )
                     matched_results = _search_locate_anchor_window_hits(
                         query_vector,
                         abs_path,
@@ -939,7 +679,28 @@ def _run_frame_search_per_videos(
                         per_video_timestamps=timestamps,
                         per_video_paths=video_paths,
                         per_video_vectors=vector_matrix,
+                        window_sec=clip_window_sec,
                     )
+                    if matched_results:
+                        try:
+                            from src.services.locate_telemetry_utils import classify_video_pace
+                            from src.services.search_telemetry import record_locate_clip_window
+
+                            record_locate_clip_window(
+                                window_sec=clip_window_sec,
+                                score=locate_anchor_score,
+                                margin=locate_score_margin,
+                                anchor_sec=anchor_sec,
+                                result_sec=float(matched_results[0].start_sec),
+                                is_crop=False,
+                                confidence=compute_locate_confidence(
+                                    locate_anchor_score,
+                                    locate_score_margin,
+                                ),
+                                video_pace=classify_video_pace(timestamps, anchor_sec),
+                            )
+                        except Exception as exc:
+                            logger.debug("Locate telemetry record skipped: %s", exc)
             elif precise_image:
                 clip_seeds: List[float] = []
                 matched_results = []
@@ -1006,7 +767,11 @@ def _run_frame_search_per_videos(
                 )
         if anchor_sec is not None:
             locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
-            if not crop_query:
+            if not crop_query and should_allow_pixel_refine(
+                is_crop=False,
+                score=locate_anchor_score,
+                margin=locate_score_margin,
+            ):
                 emit_search_progress("locate_progress_pixel")
             merged_hits.extend(
                 _refine_precise_seed_hits(
@@ -1016,6 +781,8 @@ def _run_frame_search_per_videos(
                     config,
                     pixel_query_data=pixel_query_data,
                     locate_anchor_sec=anchor_sec,
+                    locate_anchor_score=locate_anchor_score,
+                    locate_score_margin=locate_score_margin,
                 )
             )
         else:
@@ -1155,8 +922,24 @@ def _cap_hits_per_video(hits: List[SearchHit], cap: int) -> List[SearchHit]:
     return sorted(capped, key=lambda item: float(item.score), reverse=True)
 
 
-def _use_video_discovery_results(is_text: bool, precise_image: bool, scoped: bool) -> bool:
+def _use_video_discovery_results(
+    is_text: bool,
+    precise_image: bool,
+    scoped: bool,
+    *,
+    video_discovery_enabled: bool = True,
+) -> bool:
+    if not video_discovery_enabled:
+        return False
     return (not is_text) and (not precise_image) and (not scoped)
+
+
+def _resolve_video_discovery_enabled(config, explicit: bool | None) -> bool:
+    if explicit is not None:
+        return bool(explicit)
+    from src.storage.config_store import get_search_video_discovery_enabled
+
+    return get_search_video_discovery_enabled(config)
 
 
 def _aggregate_hits_to_video_discovery(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
@@ -1459,8 +1242,8 @@ def _resolve_candidate_vector(
                 vector = np.asarray(vector_matrix[key], dtype=np.float32).reshape(-1)
                 cache[key] = vector
                 return vector
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Vector matrix lookup failed for key %s: %s", key, exc)
     return _reconstruct_index_vector(search_index, key, cache)
 
 
@@ -2005,8 +1788,11 @@ def run_search(
     search_precision_mode=None,
     pixel_query_data=None,
     preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
     profile: bool | None = None,
     progress_callback=None,
+    video_discovery_enabled: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
@@ -2038,6 +1824,9 @@ def run_search(
             search_precision_mode=search_precision_mode,
             pixel_query_data=pixel_query_data,
             preview_anchor_sec=preview_anchor_sec,
+            locate_anchor_score=locate_anchor_score,
+            locate_score_margin=locate_score_margin,
+            video_discovery_enabled=video_discovery_enabled,
         )
     finally:
         clear_search_progress_callback()
@@ -2059,6 +1848,9 @@ def _run_search_impl(
     search_precision_mode=None,
     pixel_query_data,
     preview_anchor_sec,
+    locate_anchor_score=None,
+    locate_score_margin=None,
+    video_discovery_enabled=None,
 ) -> List[SearchHit]:
     with search_profile_session(
         enabled=profile_enabled,
@@ -2077,12 +1869,21 @@ def _run_search_impl(
                 search_precision_mode=search_precision_mode,
                 pixel_query_data=pixel_query_data,
                 preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
+                video_discovery_enabled=video_discovery_enabled,
             )
             record_search_profile_result_count(len(results))
             return results
         if top_k is None:
             top_k = get_search_top_k(config)
         scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+        use_video_discovery = _use_video_discovery_results(
+            is_text,
+            precise_image,
+            scoped,
+            video_discovery_enabled=_resolve_video_discovery_enabled(config, video_discovery_enabled),
+        )
         with profile_phase("query_vector"):
             query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
 
@@ -2097,6 +1898,8 @@ def _run_search_impl(
                 precise_image=precise_image,
                 pixel_query_data=pixel_query_data,
                 preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
             )
             record_search_profile_result_count(len(results))
             return results
@@ -2164,7 +1967,7 @@ def _run_search_impl(
 
         if precise_image:
             fetch_k = _resolve_stage1_global_fetch_k(top_k, config)
-        elif _use_video_discovery_results(is_text, precise_image, scoped):
+        elif use_video_discovery:
             fetch_k = resolve_fetch_top_k(top_k, True)
         else:
             fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text, config, precise_image=precise_image)
@@ -2245,7 +2048,7 @@ def _run_search_impl(
         results = _apply_video_discovery_presentation(
             results,
             top_k,
-            enabled=_use_video_discovery_results(is_text, precise_image, scoped),
+            enabled=use_video_discovery,
         )
         record_search_profile_result_count(len(results))
         return results
@@ -2261,7 +2064,10 @@ def run_chunk_search(
     search_precision_mode=None,
     pixel_query_data=None,
     preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
     profile: bool | None = None,
+    video_discovery_enabled: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
@@ -2280,6 +2086,12 @@ def run_chunk_search(
     ):
         if not is_text:
             scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+            use_video_discovery = _use_video_discovery_results(
+                is_text,
+                precise_image,
+                scoped,
+                video_discovery_enabled=_resolve_video_discovery_enabled(config, video_discovery_enabled),
+            )
             if top_k is None:
                 top_k = get_search_top_k(config)
             if precise_image and scoped and scope_video_paths:
@@ -2294,6 +2106,9 @@ def run_chunk_search(
                     pixel_query_data=pixel_query_data,
                     search_mode="frame",
                     preview_anchor_sec=preview_anchor_sec,
+                    locate_anchor_score=locate_anchor_score,
+                    locate_score_margin=locate_score_margin,
+                    video_discovery_enabled=video_discovery_enabled,
                 )
             else:
                 results = _run_chunk_search_via_frames(
@@ -2311,7 +2126,7 @@ def run_chunk_search(
             results = _apply_video_discovery_presentation(
                 results,
                 top_k,
-                enabled=_use_video_discovery_results(is_text, precise_image, scoped),
+                enabled=use_video_discovery,
             )
             record_search_profile_result_count(len(results))
             return results

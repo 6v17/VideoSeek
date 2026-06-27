@@ -4,7 +4,7 @@ from src.web.mobile_bridge import MobileBridgeService
 
 
 class MobileBridgeController(QObject):
-    upload_received = Signal(str, str)
+    search_requested = Signal(dict)
     status_changed = Signal(str)
 
     def __init__(self, parent_window):
@@ -14,7 +14,7 @@ class MobileBridgeController(QObject):
 
     def start(self):
         if self._service is None:
-            self._service = MobileBridgeService(on_image_received=self._handle_upload_received)
+            self._service = MobileBridgeService(on_search_requested=self._handle_search_requested)
         if self.is_running():
             return self.get_access_url()
         self._service.start()
@@ -43,5 +43,5 @@ class MobileBridgeController(QObject):
     def get_access_url(self):
         return self._service.get_access_url() if self._service is not None else ""
 
-    def _handle_upload_received(self, path, source):
-        self.upload_received.emit(str(path), str(source or ""))
+    def _handle_search_requested(self, payload):
+        self.search_requested.emit(dict(payload or {}))

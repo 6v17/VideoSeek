@@ -1,5 +1,3 @@
-import webbrowser
-
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -64,12 +62,6 @@ class AboutDialog(QDialog):
         else:
             body.setPlainText(about.get("body", texts["about_body"]))
 
-        download_button = QPushButton(texts["download_latest"])
-        download_button.setObjectName("PrimaryButton")
-        download_button.setFixedHeight(40)
-        download_button.setVisible(bool(version_info.get("download_url")) and version_info.get("has_update"))
-        download_button.clicked.connect(lambda: webbrowser.open(version_info["download_url"]))
-
         close_button = QPushButton(texts["close"])
         close_button.setObjectName("PrimaryButton")
         close_button.setFixedHeight(40)
@@ -83,8 +75,6 @@ class AboutDialog(QDialog):
         inner.addWidget(body)
         button_row = QHBoxLayout()
         button_row.addStretch()
-        if download_button.isVisible():
-            button_row.addWidget(download_button)
         button_row.addWidget(close_button)
 
         inner.addLayout(button_row)

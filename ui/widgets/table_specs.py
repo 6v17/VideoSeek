@@ -67,7 +67,7 @@ LOCAL_SEARCH_TABLE_SPEC = TableSpec(
         TableColumnSpec("range", width=108),
         TableColumnSpec("mode", width=74),
         TableColumnSpec("score", width=74),
-        TableColumnSpec("actions", width=300),
+        TableColumnSpec("actions", width=360),
     ),
 )
 

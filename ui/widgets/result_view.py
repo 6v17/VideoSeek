@@ -91,6 +91,7 @@ class ResultView(QWidget):
         on_export,
         texts,
         on_deep_locate=None,
+        on_add_to_shot_list=None,
         *,
         clip_score_mode: bool = False,
         low_confidence_score: float | None = None,
@@ -103,6 +104,7 @@ class ResultView(QWidget):
             on_export,
             texts,
             on_deep_locate,
+            on_add_to_shot_list,
             clip_score_mode=clip_score_mode,
             low_confidence_score=low_confidence_score,
         )

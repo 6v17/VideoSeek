@@ -3,175 +3,346 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VideoSeek Mobile Upload</title>
+    <title>VideoSeek Mobile Search</title>
     <style>
         :root {
             --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --bg: linear-gradient(145deg, #dbeafe 0%, #eff6ff 48%, #f8fafc 100%);
-            --card: rgba(255, 255, 255, 0.9);
+            --primary-soft: rgba(37, 99, 235, 0.12);
+            --danger: #dc2626;
+            --danger-soft: #fee2e2;
+            --bg: #eef2ff;
+            --card: #ffffff;
             --text: #0f172a;
-            --muted: #475569;
-            --border: rgba(148, 163, 184, 0.28);
+            --muted: #64748b;
+            --line: #dbeafe;
+            --field: #f8fafc;
         }
 
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         body {
             margin: 0;
             min-height: 100vh;
             font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-            background: var(--bg);
+            background: linear-gradient(180deg, #eff6ff 0%, var(--bg) 100%);
             color: var(--text);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px 16px;
+            padding: 18px 14px 28px;
         }
 
-        .shell {
-            width: min(100%, 420px);
-        }
+        .shell { width: min(100%, 460px); margin: 0 auto; }
 
         .badge {
-            margin-bottom: 12px;
             display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
+            margin-bottom: 10px;
+            padding: 7px 12px;
             border-radius: 999px;
-            background: rgba(37, 99, 235, 0.1);
+            background: var(--primary-soft);
             color: var(--primary);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 700;
-            letter-spacing: 0.02em;
         }
 
         .card {
             background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 28px;
-            box-shadow: 0 30px 80px rgba(15, 23, 42, 0.12);
-            padding: 28px 22px 20px;
-            backdrop-filter: blur(16px);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+            padding: 18px 16px 16px;
         }
 
-        h1 {
-            margin: 0;
-            font-size: 28px;
-            line-height: 1.12;
-        }
+        h1 { margin: 0; font-size: 22px; line-height: 1.2; }
 
-        .subtitle {
-            margin: 10px 0 0;
+        .subtitle, .desktop-hint {
+            margin: 8px 0 0;
             color: var(--muted);
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .mode-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 16px;
+            padding: 4px;
+            border-radius: 14px;
+            background: var(--field);
+            border: 1px solid var(--line);
+        }
+
+        .mode-tab {
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            border-radius: 10px;
+            padding: 10px 8px;
             font-size: 14px;
-            line-height: 1.5;
+            font-weight: 700;
         }
 
-        .upload-area {
-            margin-top: 24px;
-            border: 2px dashed #bfdbfe;
-            border-radius: 24px;
-            background: white;
-            padding: 28px 14px;
+        .mode-tab.active {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+        }
+
+        .mode-panel { display: none; margin-top: 14px; }
+        .mode-panel.active { display: block; }
+
+        .search-input {
+            width: 100%;
+            min-height: 88px;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-size: 15px;
+            resize: vertical;
+            font-family: inherit;
+            background: var(--field);
+        }
+
+        .image-drop {
+            min-height: 220px;
+            border: 1px dashed #93c5fd;
+            border-radius: 14px;
+            background: var(--field);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             text-align: center;
-            transition: border-color 0.2s ease, transform 0.2s ease;
+            padding: 18px 12px;
         }
 
-        .upload-area:active {
-            transform: scale(0.985);
-            border-color: var(--primary);
+        .image-drop.has-image {
+            padding: 10px;
         }
 
-        .upload-area strong {
+        .drop-placeholder strong {
             display: block;
             margin-top: 8px;
-            font-size: 16px;
+            font-size: 15px;
         }
 
-        .upload-area span {
+        .drop-placeholder span {
             display: block;
             margin-top: 6px;
-            color: #64748b;
-            font-size: 13px;
+            color: var(--muted);
+            font-size: 12px;
+            white-space: pre-line;
         }
 
-        #preview {
+        #image-preview {
             max-width: 100%;
             max-height: 260px;
-            display: none;
-            border-radius: 16px;
-            margin: 0 auto;
-        }
-
-        #file-input {
+            border-radius: 12px;
             display: none;
         }
 
-        .actions {
+        .image-strip-wrap {
+            margin-top: 10px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .image-strip {
+            display: flex;
+            gap: 8px;
+            min-height: 92px;
+        }
+
+        .image-chip {
+            position: relative;
+            flex: 0 0 auto;
+            width: 82px;
+            height: 82px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: var(--field);
+            overflow: hidden;
+        }
+
+        .image-chip.selected {
+            border: 2px solid var(--primary);
+            background: var(--primary-soft);
+        }
+
+        .image-chip img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .image-chip .chip-check {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+        }
+
+        .image-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .btn-ghost, .btn-danger-ghost, .btn-primary, .btn-secondary {
+            border-radius: 12px;
+            padding: 11px 14px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .btn-ghost {
+            border: 1px solid var(--primary);
+            background: transparent;
+            color: var(--primary);
+        }
+
+        .btn-danger-ghost {
+            border: 1px solid #fecaca;
+            background: transparent;
+            color: var(--danger);
+        }
+
+        .btn-danger-ghost:disabled {
+            opacity: 0.45;
+        }
+
+        .fusion-block {
+            margin-top: 12px;
+            padding-top: 4px;
+        }
+
+        .fusion-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #334155;
+            margin-bottom: 4px;
+        }
+
+        .fusion-hint {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 10px;
+            line-height: 1.45;
+        }
+
+        .fusion-row {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .fusion-side {
+            font-size: 12px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        #fusion-slider {
+            width: 100%;
+            accent-color: var(--primary);
+        }
+
+        .fusion-value {
+            margin-top: 8px;
+            text-align: right;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .footer-actions {
             display: flex;
             gap: 10px;
-            margin-top: 18px;
-        }
-
-        button {
-            border: none;
-            border-radius: 16px;
-            padding: 15px 16px;
-            font-size: 15px;
-            font-weight: 700;
+            margin-top: 16px;
         }
 
         .btn-primary {
             flex: 1;
+            border: none;
             background: var(--primary);
-            color: white;
-            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.24);
-        }
-
-        .btn-primary:active {
-            background: var(--primary-hover);
+            color: #fff;
         }
 
         .btn-secondary {
-            background: transparent;
-            color: #64748b;
-            border: 1px solid rgba(148, 163, 184, 0.38);
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: var(--muted);
         }
 
         .status {
-            margin-top: 14px;
-            min-height: 22px;
-            color: #475569;
-            font-size: 13px;
+            margin-top: 12px;
+            min-height: 18px;
+            color: var(--muted);
+            font-size: 12px;
             line-height: 1.5;
         }
+
+        #file-input, #compose-file-input { display: none; }
     </style>
 </head>
 <body>
 <div class="shell">
-    <div class="badge">VideoSeek LAN Upload</div>
+    <div class="badge">VideoSeek 局域网搜索</div>
     <div class="card">
-        <h1>手机上传图片，电脑端直接出结果</h1>
-        <p class="subtitle">拍照或选择图片后发送到当前电脑。搜索结果会继续显示在电脑端 VideoSeek 里。</p>
+        <h1 id="page-title">手机端搜索</h1>
+        <p class="subtitle" id="page-subtitle">图搜 / 文搜 / 组合搜，布局与电脑端一致；范围与帧·片段模式跟随电脑。</p>
+        <p class="desktop-hint" id="desktop-hint">正在读取电脑端设置…</p>
 
-        <div class="upload-area" onclick="document.getElementById('file-input').click()">
-            <div id="placeholder">
-                <div style="font-size: 40px;">&#128247;</div>
-                <strong>选择一张图片</strong>
-                <span>支持 JPG / PNG / HEIC（iPhone 由电脑生成预览）</span>
-            </div>
-            <img id="preview" alt="preview">
+        <div class="mode-tabs">
+            <button type="button" class="mode-tab active" data-mode-tab="image">图搜</button>
+            <button type="button" class="mode-tab" data-mode-tab="text">文搜</button>
+            <button type="button" class="mode-tab" data-mode-tab="compose">组合</button>
         </div>
 
-        <input id="file-input" type="file" accept="image/*" onchange="previewImage()">
+        <div id="panel-image" class="mode-panel active">
+            <div class="image-drop" id="image-drop" onclick="openImagePicker()">
+                <div class="drop-placeholder" id="image-drop-placeholder">
+                    <div style="font-size: 38px;">&#128247;</div>
+                    <strong id="image-drop-title">选择图片</strong>
+                    <span id="image-drop-hint">拖入图片到这里&#10;或点击选择图片</span>
+                </div>
+                <img id="image-preview" alt="preview">
+            </div>
+            <input id="file-input" type="file" accept="image/*" onchange="handleImageFileInput()">
+        </div>
 
-        <div class="actions">
-            <button class="btn-primary" id="submit-btn" onclick="submitImage()">发送并搜索</button>
-            <button class="btn-secondary" onclick="clearFile()">重置</button>
+        <div id="panel-text" class="mode-panel">
+            <textarea id="text-query-input" class="search-input" placeholder="用文本描述你想找的画面…"></textarea>
+        </div>
+
+        <div id="panel-compose" class="mode-panel">
+            <textarea id="compose-query-input" class="search-input" placeholder="用文本补充搜索意图，可与辅助图搭配使用"></textarea>
+
+            <div class="image-strip-wrap" id="compose-strip-wrap" style="display:none;">
+                <div class="image-strip" id="compose-image-strip"></div>
+            </div>
+
+            <div class="image-actions">
+                <button type="button" class="btn-ghost" id="btn-add-images" onclick="openComposePicker()">添加图片</button>
+                <button type="button" class="btn-danger-ghost" id="btn-remove-selected" disabled onclick="removeSelectedComposeImages()">删除选中</button>
+            </div>
+            <input id="compose-file-input" type="file" accept="image/*" multiple onchange="handleComposeFileInput()">
+
+            <div class="fusion-block" id="fusion-block" style="display:none;">
+                <div class="fusion-title" id="fusion-title">文图权重</div>
+                <div class="fusion-hint" id="fusion-hint">同时有描述和辅助图时才会用到。</div>
+                <div class="fusion-row">
+                    <div class="fusion-side" id="fusion-text-label">偏文本</div>
+                    <input id="fusion-slider" type="range" min="0" max="100" step="5" value="50">
+                    <div class="fusion-side" id="fusion-image-label">偏图片</div>
+                </div>
+                <div class="fusion-value" id="fusion-value">文本 50% · 图片 50%</div>
+            </div>
+        </div>
+
+        <div class="footer-actions">
+            <button class="btn-primary" id="submit-btn" type="button" onclick="submitSearch()">发送并搜索</button>
+            <button class="btn-secondary" type="button" onclick="clearForm()">重置</button>
         </div>
         <div class="status" id="status"></div>
     </div>

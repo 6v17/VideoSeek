@@ -16,8 +16,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.app.logging_utils import get_logger
 from src.utils import format_timecode_seconds, get_video_duration_seconds
 from ui.playback.vlc_player import VlcPreviewPlayer
+
+logger = get_logger("preview_dialog")
 
 
 class ExportCancelledError(Exception):
@@ -73,11 +76,12 @@ class ExportClipWorker(QThread):
         try:
             process.terminate()
             process.wait(timeout=2)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Export process terminate failed, trying kill: %s", exc)
             try:
                 process.kill()
-            except Exception:
-                pass
+            except Exception as kill_exc:
+                logger.debug("Export process kill failed: %s", kill_exc)
 
     def _remove_partial_output(self):
         if not self.save_path:
@@ -279,8 +283,8 @@ class PreviewDialog(QDialog):
                 suggested_sec=self.suggested_sec,
                 playback_start_sec=float(self.start_sec),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Preview dialog playback telemetry start skipped: %s", exc)
         self._start_playback()
 
     def shutdown_player(self, fast=False):
@@ -331,8 +335,8 @@ class PreviewDialog(QDialog):
             from src.services.search_telemetry import finish_playback_session
 
             finish_playback_session(actual_sec=self._current_time_seconds(), source="dialog")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Preview dialog playback telemetry finish skipped: %s", exc)
         self._dispose_player()
         if self.isFullScreen():
             self.showNormal()
@@ -402,8 +406,8 @@ class PreviewDialog(QDialog):
             from src.services.search_telemetry import mark_playback_user_adjusted
 
             mark_playback_user_adjusted()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Preview dialog playback user-adjust telemetry skipped: %s", exc)
         player = self._ensure_player()
         player.unlock_full_playback()
         self._apply_detail_label()
@@ -427,8 +431,8 @@ class PreviewDialog(QDialog):
             from src.services.search_telemetry import mark_playback_user_adjusted
 
             mark_playback_user_adjusted()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Preview dialog slider telemetry skipped: %s", exc)
         player = self._ensure_player()
         length = self._effective_total_ms(player)
         if length > 0:
@@ -464,7 +468,8 @@ class PreviewDialog(QDialog):
     def _resolve_known_total_ms(self, video_path):
         try:
             duration_sec = get_video_duration_seconds(video_path)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Could not read video duration for %s: %s", video_path, exc)
             return 0
         if duration_sec is None:
             return 0
@@ -677,8 +682,8 @@ class PreviewDialog(QDialog):
             return
         try:
             worker.deleteLater()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Preview dialog export worker deleteLater failed: %s", exc)
 
     def _resolve_export_status(self, result, save_path):
         if isinstance(result, ExportCancelledError):

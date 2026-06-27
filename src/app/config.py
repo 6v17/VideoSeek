@@ -52,6 +52,32 @@ def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
         "remote_vector_file": os.path.join(storage_dir, "remote", "remote_vectors.npy"),
     }
 
+DEFAULT_UNDERSTANDING_CONFIG = {
+    "active_profile": "vision_baseline_v1",
+    "profiles": [
+        {
+            "id": "vision_baseline_v1",
+            "display_name": "视觉基础版",
+            "profile_dir": "vision_baseline_v1",
+            "enabled": True,
+        }
+    ],
+    "remote_vlm": {
+        "provider_mode": "local",
+        "provider_preset": "lm_studio",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "model": "qwen3-vl-8b-instruct",
+        "api_keys": {},
+        "caption_language": "zh",
+        "prompt": (
+            "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
+        ),
+        "timeout_sec": 120,
+        "max_tokens": 128,
+        "concurrency": 2,
+    },
+}
+
 DEFAULT_CONFIG = {
     "fps": 1,
     "sampling_fps_mode": "dynamic",
@@ -82,8 +108,15 @@ DEFAULT_CONFIG = {
     "max_chunk_duration": 5.0,
     "min_chunk_size": 2,
     "chunk_similarity_mode": "chunk",
+    "chunk_segmentation_strategy": "legacy",
+    "chunk_delta_ema_alpha": 0.35,
+    "chunk_delta_high_threshold": 0.15,
+    "chunk_delta_low_threshold": 0.08,
+    "chunk_delta_rise_frames": 2,
+    "chunk_delta_stable_frames": 2,
     "search_mode": "frame",
     "search_precision_mode": "fast",
+    "search_video_discovery_enabled": True,
     "search_scope_mode": "all",
     "search_scope_library_paths": [],
     "search_scope_video_paths": [],
@@ -102,11 +135,13 @@ DEFAULT_CONFIG = {
     "agent_api_search_timeout_precise_sec": 180,
     "agent_api_batch_timeout_sec": 1200,
     "agent_api_default_image_precision": "fast",
-    "search_profiling_enabled": False,
     "search_telemetry_enabled": True,
+    "locate_clip_bias_auto_tune_enabled": False,
     "show_debug_test_buttons": False,
     "theme": "dark",
     "language": "zh",
+    "update_notice_dismissed_version": "",
+    "understanding": DEFAULT_UNDERSTANDING_CONFIG,
 }
 
 CONFIG_BOUNDS = {
@@ -134,6 +169,11 @@ CONFIG_BOUNDS = {
     "similarity_threshold": (0.1, 1.0),
     "max_chunk_duration": (1.0, 60.0),
     "min_chunk_size": (1, 50),
+    "chunk_delta_ema_alpha": (0.05, 0.95),
+    "chunk_delta_high_threshold": (0.01, 0.8),
+    "chunk_delta_low_threshold": (0.01, 0.8),
+    "chunk_delta_rise_frames": (1, 12),
+    "chunk_delta_stable_frames": (1, 12),
 }
 
 CONFIG_INT_KEYS = {
@@ -150,10 +190,13 @@ CONFIG_INT_KEYS = {
     "remote_max_frames",
     "embedding_batch_size",
     "min_chunk_size",
+    "chunk_delta_rise_frames",
+    "chunk_delta_stable_frames",
 }
 
 CONFIG_ENUMS = {
     "chunk_similarity_mode": {"chunk", "frame"},
+    "chunk_segmentation_strategy": {"legacy", "delta_ema"},
     "search_mode": {"frame", "chunk"},
     "search_precision_mode": {"fast", "precise"},
     "image_pixel_rerank_probe_mode": {"index", "fixed"},
@@ -347,6 +390,57 @@ def _coerce_bool(raw_value, default_value):
     return bool(raw_value)
 
 
+def _sanitize_understanding_settings(config):
+    sanitized = dict(config)
+    raw_understanding = sanitized.get("understanding")
+    if not isinstance(raw_understanding, dict):
+        raw_understanding = {}
+
+    profiles = raw_understanding.get("profiles")
+    if not isinstance(profiles, list) or not profiles:
+        profiles = [dict(item) for item in DEFAULT_UNDERSTANDING_CONFIG["profiles"]]
+
+    normalized_profiles = []
+    seen_ids = set()
+    for item in profiles:
+        if not isinstance(item, dict):
+            continue
+        profile_id = str(item.get("id", "") or "").strip()
+        if not profile_id or profile_id in seen_ids:
+            continue
+        profile_dir = str(item.get("profile_dir", "") or profile_id).strip() or profile_id
+        normalized_profiles.append(
+            {
+                "id": profile_id,
+                "display_name": str(item.get("display_name", "") or profile_id).strip() or profile_id,
+                "profile_dir": profile_dir,
+                "enabled": _coerce_bool(item.get("enabled", True), True),
+            }
+        )
+        seen_ids.add(profile_id)
+
+    if not normalized_profiles:
+        normalized_profiles = [dict(item) for item in DEFAULT_UNDERSTANDING_CONFIG["profiles"]]
+
+    active_profile = str(raw_understanding.get("active_profile", "") or "").strip()
+    if not active_profile or not any(item["id"] == active_profile for item in normalized_profiles):
+        active_profile = normalized_profiles[0]["id"]
+
+    raw_remote_vlm = raw_understanding.get("remote_vlm")
+    if not isinstance(raw_remote_vlm, dict):
+        raw_remote_vlm = {}
+    from src.services.understanding_resource_service import finalize_remote_vlm_settings
+
+    remote_vlm = finalize_remote_vlm_settings(raw_remote_vlm)
+
+    sanitized["understanding"] = {
+        "active_profile": active_profile,
+        "profiles": normalized_profiles,
+        "remote_vlm": remote_vlm,
+    }
+    return sanitized
+
+
 def _sanitize_general_settings(config):
     sanitized = dict(config)
 
@@ -393,6 +487,13 @@ def _sanitize_general_settings(config):
     sanitized["show_debug_test_buttons"] = _coerce_bool(
         sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
         DEFAULT_CONFIG["show_debug_test_buttons"],
+    )
+    sanitized["search_video_discovery_enabled"] = _coerce_bool(
+        sanitized.get(
+            "search_video_discovery_enabled",
+            DEFAULT_CONFIG["search_video_discovery_enabled"],
+        ),
+        DEFAULT_CONFIG["search_video_discovery_enabled"],
     )
     raw_scope_paths = sanitized.get("search_scope_library_paths", DEFAULT_CONFIG["search_scope_library_paths"])
     if not isinstance(raw_scope_paths, list):
@@ -482,6 +583,7 @@ def load_config():
             is_legacy_config=os.path.normpath(config_path) == os.path.normpath(LEGACY_CONFIG_FILE),
         )
         config = _sanitize_sampling_settings(config)
+        config = _sanitize_understanding_settings(config)
         config = _sanitize_general_settings(config)
         config = _migrate_legacy_storage_if_needed(config)
         # Migrate legacy cap from old builds; 300 causes long videos to look capped at ~299s.
@@ -507,7 +609,7 @@ def save_config(config):
     raw_config = dict(config)
     has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
     has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
-    config = _sanitize_sampling_settings(_apply_default_values(raw_config))
+    config = _sanitize_understanding_settings(_sanitize_sampling_settings(_apply_default_values(raw_config)))
     if has_explicit_data_root:
         config = _normalize_data_root(config, os.path.dirname(CONFIG_FILE))
         config = _apply_data_root_storage_paths(config)

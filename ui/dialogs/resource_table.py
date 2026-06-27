@@ -167,6 +167,9 @@ class ResourceTableDialog(QDialog):
         button_row.addWidget(self.btn_copy_row)
         for action in self.extra_actions:
             button = QPushButton(action.get("label", "Action"))
+            object_name = str(action.get("object_name", "") or "").strip()
+            if object_name:
+                button.setObjectName(object_name)
             button.clicked.connect(lambda _, handler=action.get("handler"): handler(self) if callable(handler) else None)
             button_row.addWidget(button)
         button_row.addStretch()

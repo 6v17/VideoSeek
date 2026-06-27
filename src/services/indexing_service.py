@@ -7,19 +7,16 @@ import numpy as np
 from src.app.indexing_progress import IndexingProgressReporter, build_progress_token
 from src.app.logging_utils import get_logger
 from src.core.faiss_index import IncrementalClipIndex, atomic_save_numpy, create_clip_index, load_clip_index
-from src.core.semantic_chunking import build_semantic_chunks, chunk_config_payload, unpack_chunks
+from src.core.semantic_chunking import build_semantic_chunks, unpack_chunks
 from src.core.clip_embedding import generate_vectors_and_index_for_video
 from src.core.extract_frames import FrameExtractionError
 from src.core.timestamp_health import assess_index_timestamp_health
 from src.storage.asset_store import load_vector_payload, save_vector_payload
 from src.storage.config_store import (
+    build_chunk_config,
     get_active_embedding_spec,
-    get_chunk_similarity_mode,
     get_global_model_asset_paths,
     get_local_model_asset_dirs,
-    get_max_chunk_duration,
-    get_min_chunk_size,
-    get_similarity_threshold,
 )
 from src.services.search_index_schema import (
     TARGET_SEARCH_INDEX_SCHEMA_VERSION,
@@ -304,26 +301,14 @@ def load_video_chunks_by_id(video_id, config):
 
 
 def _ensure_chunk_payload(data, vectors, timestamps, vector_file, config):
-    current_chunk_config = chunk_config_payload(
-        similarity_threshold=get_similarity_threshold(config),
-        max_chunk_duration=get_max_chunk_duration(config),
-        min_chunk_size=get_min_chunk_size(config),
-        similarity_mode=get_chunk_similarity_mode(config),
-    )
+    current_chunk_config = build_chunk_config(config)
     saved_chunk_config = data.get("chunk_config")
     chunks = unpack_chunks(data.get("chunks"))
     if chunks and saved_chunk_config == current_chunk_config:
         return chunks
 
     logger.info("Rebuilding chunk payload from existing frame vectors: %s", os.path.basename(vector_file))
-    chunks = build_semantic_chunks(
-        vectors,
-        timestamps,
-        similarity_threshold=current_chunk_config["similarity_threshold"],
-        max_chunk_duration=current_chunk_config["max_chunk_duration"],
-        min_chunk_size=current_chunk_config["min_chunk_size"],
-        similarity_mode=current_chunk_config["similarity_mode"],
-    )
+    chunks = build_semantic_chunks(vectors, timestamps, **current_chunk_config)
     save_vector_payload(
         vectors,
         timestamps,
@@ -711,8 +696,13 @@ def process_single_video(
                 detail=_exception_detail(exc),
             )
             search_assets_changed = bool(saved.get("vid"))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist skipped indexing issue for %s: %s",
+                abs_path,
+                exc,
+                exc_info=True,
+            )
         return None, None, metadata_updated, search_assets_changed
 
 

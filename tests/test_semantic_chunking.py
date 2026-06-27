@@ -171,6 +171,64 @@ class SemanticChunkingTests(unittest.TestCase):
         self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 3.0))
         self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (6.5, 6.5))
 
+    def test_delta_ema_strategy_splits_on_sustained_change(self):
+        embeddings = np.asarray(
+            [
+                [1.0, 0.0],
+                [0.98, 0.02],
+                [0.0, 1.0],
+                [0.02, 0.98],
+            ],
+            dtype=np.float32,
+        )
+        timestamps = [0.0, 1.0, 2.0, 3.0]
+
+        chunks = build_semantic_chunks(
+            embeddings,
+            timestamps,
+            max_chunk_duration=10.0,
+            min_chunk_size=2,
+            segmentation_strategy="delta_ema",
+            delta_ema_alpha=0.5,
+            delta_high_threshold=0.15,
+            delta_rise_frames=2,
+        )
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
+        self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (2.0, 3.0))
+
+    def test_delta_ema_streaming_matches_single_pass(self):
+        embeddings = np.asarray(
+            [
+                [1.0, 0.0],
+                [0.98, 0.02],
+                [0.0, 1.0],
+                [0.02, 0.98],
+            ],
+            dtype=np.float32,
+        )
+        timestamps = [0.0, 1.0, 2.0, 3.0]
+        kwargs = {
+            "max_chunk_duration": 10.0,
+            "min_chunk_size": 2,
+            "segmentation_strategy": "delta_ema",
+            "delta_ema_alpha": 0.5,
+            "delta_high_threshold": 0.15,
+            "delta_rise_frames": 2,
+        }
+
+        single = build_semantic_chunks(embeddings, timestamps, **kwargs)
+        streaming = build_semantic_chunks_streaming(
+            [embeddings[:2], embeddings[2:]],
+            timestamps,
+            **kwargs,
+        )
+
+        self.assertEqual(len(single), len(streaming))
+        for left, right in zip(single, streaming):
+            self.assertEqual((left["start"], left["end"]), (right["start"], right["end"]))
+
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class IndexingChunkUpgradeTests(unittest.TestCase):

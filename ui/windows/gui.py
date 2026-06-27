@@ -45,10 +45,12 @@ from ui.widgets.components import (
     LinkSearchPage,
     NavigationSidebar,
     SearchPage,
+    UnderstandingEvidencePage,
 )
 from ui.widgets.settings import SettingsPage
 from ui.dialogs import AboutDialog, AppMessageDialog, MobileBridgeDialog, NoticeDialog
 from ui.controllers.indexing_controller import IndexingController
+from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
@@ -60,6 +62,7 @@ from ui.widgets.styles import DARK_STYLE, LIGHT_STYLE
 from ui.windows.gui_settings import SettingsGuiMixin
 from ui.windows.gui_preview import PreviewGuiMixin
 from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
+from ui.windows.gui_understanding import UnderstandingGuiMixin
 from ui.windows.gui_vector_network import VectorNetworkGuiMixin
 from ui.windows.gui_runtime import RuntimeGuiMixin
 from ui.windows.gui_model_packages import ModelPackagesGuiMixin
@@ -69,6 +72,7 @@ from ui.windows.gui_startup_migration import StartupMigrationGuiMixin
 from ui.windows.gui_search_scope import SearchScopeGuiMixin
 from ui.windows.gui_search_presets import SearchPresetsGuiMixin
 from ui.windows.gui_search_panel_state import SearchPanelStateMixin
+from ui.windows.gui_shot_list import ShotListGuiMixin
 
 
 class MainWindow(
@@ -78,6 +82,7 @@ class MainWindow(
     SettingsGuiMixin,
     PreviewGuiMixin,
     LibraryIndexingGuiMixin,
+    UnderstandingGuiMixin,
     VectorNetworkGuiMixin,
     RuntimeGuiMixin,
     AppUiStateMixin,
@@ -85,10 +90,11 @@ class MainWindow(
     SearchScopeGuiMixin,
     SearchPresetsGuiMixin,
     SearchPanelStateMixin,
+    ShotListGuiMixin,
 ):
     """Sidebar / stacked widget order: local search → library → remote link → settings."""
 
-    _NAV_PAGE_ORDER = ("search", "library", "link", "settings")
+    _NAV_PAGE_ORDER = ("search", "library", "understanding", "link", "settings")
 
     def __init__(self):
         super().__init__()
@@ -101,6 +107,7 @@ class MainWindow(
         self.notice_payload = None
         self.about_payload = None
         self._startup_complete = False
+        self._update_notice_auto_show_pending = False
         self._defer_runtime_warmup = False
         self._preview_dialog_cooldown_until = 0.0
         self._preview_dialog_opening = False
@@ -137,12 +144,18 @@ class MainWindow(
         self.indexing_controller.runtime_status_changed.connect(self.push_inference_status)
         self.indexing_controller.error_occurred.connect(self._handle_indexing_error)
         self.indexing_controller.finished.connect(self._finish_indexing)
+        self.understanding_controller = UnderstandingController(self)
+        self.understanding_controller.status_changed.connect(self._update_understanding_progress)
+        self.understanding_controller.error_occurred.connect(self._handle_understanding_error)
+        self.understanding_controller.chunk_completed.connect(self._handle_understanding_chunk_completed)
+        self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
         self.network_search_controller = NetworkSearchController(self)
         self._init_search_presets_ui()
+        self._init_shot_list_ui()
         self.mobile_bridge_controller = MobileBridgeController(self)
-        self.mobile_bridge_controller.upload_received.connect(self._handle_mobile_upload_received)
+        self.mobile_bridge_controller.search_requested.connect(self._handle_mobile_search_requested)
         self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
         self.agent_api_controller = AgentApiController(self)
         self.runtime_resource_controller = RuntimeResourceController(self)
@@ -198,9 +211,11 @@ class MainWindow(
         self.search_page = SearchPage()
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
+        self.understanding_page = UnderstandingEvidencePage()
         self.settings_page = SettingsPage()
         self.pages.addWidget(self._build_scroll_page(self.search_page))
         self.pages.addWidget(self._build_scroll_page(self.library_page))
+        self.pages.addWidget(self._build_scroll_page(self.understanding_page))
         self.pages.addWidget(self._build_scroll_page(self.link_page))
         self.pages.addWidget(self.settings_page)
         content_layout.addWidget(self.pages)
@@ -226,6 +241,7 @@ class MainWindow(
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
         self.sidebar.btn_page_library.clicked.connect(lambda: self.switch_page("library"))
+        self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)
         self.sidebar.btn_language.clicked.connect(self.toggle_language)
@@ -242,6 +258,7 @@ class MainWindow(
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
         self.search_page.search_precision_toggle.toggled.connect(self._on_search_precision_toggled)
+        self.search_page.search_video_discovery_toggle.toggled.connect(self._on_search_video_discovery_toggled)
         self.search_page.text_search.textChanged.connect(self._refresh_search_panel_state)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
@@ -265,6 +282,23 @@ class MainWindow(
         self.library_page.btn_debug_gpu_oom.clicked.connect(self.start_debug_gpu_oom)
         self.library_page.btn_debug_system_oom.clicked.connect(self.start_debug_system_oom)
 
+        self.understanding_page.btn_generate_evidence.clicked.connect(self.start_generate_understanding_evidence)
+        self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
+        self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
+        self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
+        self.understanding_page.btn_stop.clicked.connect(self.stop_understanding_generation)
+        self.understanding_page.btn_save_config.clicked.connect(self.save_understanding_settings)
+        self.understanding_page.btn_test_vlm_connection.clicked.connect(self.test_understanding_vlm_connection)
+        self.understanding_page.btn_import_understanding_model.clicked.connect(self.open_runtime_resource_dialog)
+        self.understanding_page.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
+        self.understanding_page.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
+        self.understanding_page.scope_combo.currentIndexChanged.connect(self._on_understanding_scope_changed)
+        self.understanding_page.video_combo.currentIndexChanged.connect(self._on_understanding_video_changed)
+        self.understanding_page.chunk_timeline.chunk_clicked.connect(self._on_understanding_chunk_clicked)
+        self.understanding_page.chunk_timeline.chunk_double_clicked.connect(self._on_understanding_chunk_double_clicked)
+        self._understanding_chunk_payloads = {}
+        self._understanding_index_chunks = []
+
         self.settings_page.btn_save.clicked.connect(self.save_settings)
         self.settings_page.btn_reset.clicked.connect(self.reset_settings)
         self.settings_page.btn_edit_sampling_rules.clicked.connect(self._open_sampling_rules_dialog)
@@ -283,7 +317,7 @@ class MainWindow(
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
 
         self.setAcceptDrops(True)
-        for page in (self.search_page, self.link_page, self.library_page, self.settings_page):
+        for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
             page.header.runtime_banner_action.clicked.connect(self.open_runtime_resource_dialog)
 
     def _build_scroll_page(self, page_widget):
@@ -311,10 +345,20 @@ class MainWindow(
         if page_name == "settings":
             self._refresh_agent_api_status()
             self.refresh_search_telemetry_panel()
+        if page_name == "understanding":
+            if hasattr(self, "load_understanding_settings"):
+                self.load_understanding_settings(refresh_status=False)
+            if hasattr(self, "_refresh_understanding_scope_options"):
+                self._refresh_understanding_scope_options()
+            if hasattr(self, "_refresh_understanding_page_fast"):
+                self._refresh_understanding_page_fast()
+            elif hasattr(self, "_refresh_understanding_ui"):
+                self._refresh_understanding_ui(probe_remote=False)
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
         self.apply_texts()
+        self._maybe_auto_show_update_notice()
 
     def _update_notice_payload(self, notice_payload):
         self.notice_payload = notice_payload
@@ -340,14 +384,22 @@ class MainWindow(
         self.sidebar.btn_page_search.setText(t["nav_search"])
         self.sidebar.btn_page_link.setText(t["nav_link"])
         self.sidebar.btn_page_library.setText(t["nav_library"])
+        self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
-        self.sidebar.btn_notice.setText(t["notice_short"])
+        self.sidebar.btn_notice.setText(
+            t["notice_short_update"]
+            if self.version_info and self.version_info.get("has_update")
+            else t["notice_short"]
+        )
         if self.version_info and self.version_info.get("has_update"):
-            self.sidebar.btn_about.setText(t["about_short_update"])
-            self.sidebar.btn_about.setObjectName("UpdateButton")
+            self.sidebar.btn_notice.setObjectName("UpdateButton")
         else:
-            self.sidebar.btn_about.setText(t["about_short"])
-            self.sidebar.btn_about.setObjectName("SidebarFooterButton")
+            self.sidebar.btn_notice.setObjectName("SidebarFooterButton")
+        self.sidebar.btn_notice.style().unpolish(self.sidebar.btn_notice)
+        self.sidebar.btn_notice.style().polish(self.sidebar.btn_notice)
+        self.sidebar.btn_notice.update()
+        self.sidebar.btn_about.setText(t["about_short"])
+        self.sidebar.btn_about.setObjectName("SidebarFooterButton")
         self.sidebar.btn_about.style().unpolish(self.sidebar.btn_about)
         self.sidebar.btn_about.style().polish(self.sidebar.btn_about)
         self.sidebar.btn_about.update()
@@ -367,22 +419,19 @@ class MainWindow(
         self.search_page.search_mode.setCurrentIndex(1 if current_mode == "chunk" else 0)
         self.search_page.search_mode.blockSignals(False)
         self.search_page.search_precision_label.setText(t["search_precision_label"])
+        self.search_page.search_video_discovery_label.setText(t.get("search_video_discovery_label", ""))
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
         self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
+        self._update_shot_list_button()
         self._update_expand_preview_button()
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
         self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))
-        self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(self.mobile_bridge_controller.is_running(), texts=t))
-        self.search_page.btn_mobile_toggle.setToolTip(
-            t["mobile_bridge_stop"] if self.mobile_bridge_controller.is_running() else t["mobile_bridge_start"]
-        )
-        self.search_page.btn_mobile_toggle.setChecked(self.mobile_bridge_controller.is_running())
         self.search_page.btn_mobile_qr.setText(t["mobile_bridge_qr"])
-        self.search_page.btn_mobile_qr.setEnabled(self.mobile_bridge_controller.is_running())
+        self._update_mobile_bridge_controls()
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
@@ -435,6 +484,56 @@ class MainWindow(
         self.library_page.btn_debug_system_oom.setVisible(getattr(self, "_debug_tools_enabled", False))
         self._apply_index_issue_button_state(bool(self._last_index_issues))
 
+        self.understanding_page.header.title.setText(t["understanding_page_title"])
+        self.understanding_page.header.subtitle.setText(t["understanding_page_desc"])
+        self.understanding_page.config_title.setText(t["understanding_config_title"])
+        self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
+        self.understanding_page.label_yolo.setText(t["understanding_yolo_label"])
+        self.understanding_page.btn_import_understanding_model.setToolTip(t["understanding_yolo_hint"])
+        self.understanding_page.label_vlm_provider_mode.setText(t["understanding_vlm_provider_mode_label"])
+        self.understanding_page.input_vlm_provider_mode.setToolTip(t["understanding_vlm_provider_mode_hint"])
+        current_vlm_mode = self.understanding_page.input_vlm_provider_mode.currentData()
+        self._populate_vlm_provider_mode_options(current_vlm_mode or "local")
+        self.understanding_page.label_vlm_provider_preset.setText(t["understanding_vlm_provider_preset_label"])
+        self.understanding_page.input_vlm_provider_preset.setToolTip(t["understanding_vlm_provider_preset_hint"])
+        current_vlm_preset = self.understanding_page.input_vlm_provider_preset.currentData()
+        self._populate_vlm_provider_preset_options(current_vlm_mode or "local", current_vlm_preset or "lm_studio")
+        self._sync_vlm_provider_ui()
+        self.understanding_page.label_remote_vlm_base_url.setText(t["setting_remote_vlm_base_url"])
+        self.understanding_page.input_remote_vlm_base_url.setToolTip(t["setting_remote_vlm_base_url_hint"])
+        self.understanding_page.label_remote_vlm_api_key.setText(t["setting_remote_vlm_api_key"])
+        self.understanding_page.input_remote_vlm_api_key.setToolTip(t["setting_remote_vlm_api_key_hint"])
+        self.understanding_page.label_remote_vlm_model.setText(t["setting_remote_vlm_model"])
+        self.understanding_page.input_remote_vlm_model.setToolTip(t["setting_remote_vlm_model_hint"])
+        self.understanding_page.label_caption_language.setText(t["understanding_caption_language_label"])
+        current_language = self.understanding_page.input_caption_language.currentData()
+        self._populate_understanding_caption_language_options(current_language or "zh")
+        self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
+        self.understanding_page.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
+        self.understanding_page.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
+        self.understanding_page.btn_import_understanding_model.setText(t["understanding_import_yolo_model"])
+        self.understanding_page.btn_save_config.setText(t["understanding_save_config"])
+        self.understanding_page.btn_test_vlm_connection.setText(t["understanding_test_vlm_connection"])
+        self.understanding_page.btn_test_vlm_connection.setToolTip(t["understanding_test_vlm_connection_hint"])
+        self.understanding_page.scope_label.setText(t["understanding_scope_label"])
+        self.understanding_page.video_label.setText(t["understanding_video_label"])
+        self.understanding_page.timeline_label.setText(t["understanding_timeline_label"])
+        self.understanding_page.timeline_hint.setText(t["understanding_timeline_hint"])
+        self.understanding_page.chunk_detail_title.setText(t["understanding_chunk_detail_title"])
+        self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
+        self.understanding_page.btn_generate_evidence.setText(t["understanding_generate_selected_video"])
+        self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
+        self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
+        self.understanding_page.btn_understanding_setup.setText(t["understanding_setup_action"])
+        self.understanding_page.btn_stop.setText(t["stop"])
+        if self._is_current_page("understanding"):
+            if hasattr(self, "_refresh_understanding_page_fast"):
+                self._refresh_understanding_page_fast()
+        else:
+            self._refresh_understanding_ui()
+            if hasattr(self, "_refresh_understanding_settings_status"):
+                self._refresh_understanding_settings_status()
+
         self.settings_page.header.title.setText(t["settings_page_title"])
         self.settings_page.header.subtitle.setText(t["settings_page_desc"])
         self.settings_page.general_title.setText(t["settings_group_title"])
@@ -454,6 +553,11 @@ class MainWindow(
         self.link_page.lbl_build_status.setText(t["ready"])
         self.link_page.lbl_search_status.setText(t["ready"])
         self.library_page.lbl_status.setText(t["ready"])
+        if not (
+            getattr(self, "understanding_controller", None)
+            and self.understanding_controller.is_running()
+        ):
+            self.understanding_page.lbl_status.setText(t["ready"])
         self.settings_page.lbl_status.setText(t["settings_hint"])
         self._bind_sampling_preview_signals()
         self._update_sampling_preview()
@@ -479,7 +583,58 @@ class MainWindow(
         self._apply_agent_api_settings()
 
     def show_notice(self):
-        NoticeDialog(self, self.is_dark_mode, self.language, notice=self.notice_payload).exec()
+        had_update = bool(self.version_info and self.version_info.get("has_update"))
+        NoticeDialog(
+            self,
+            self.is_dark_mode,
+            self.language,
+            notice=self.notice_payload,
+            version_info=self.version_info,
+        ).exec()
+        if had_update:
+            self._mark_update_notice_seen()
+
+    def _should_auto_show_update_notice(self) -> bool:
+        if not getattr(self, "_startup_complete", False):
+            return False
+        info = self.version_info or {}
+        if not info.get("has_update"):
+            return False
+        latest = str(info.get("latest_version") or "").strip()
+        if not latest:
+            return False
+        try:
+            config = load_config()
+        except Exception:
+            return False
+        dismissed = str(config.get("update_notice_dismissed_version") or "").strip()
+        return dismissed != latest
+
+    def _mark_update_notice_seen(self) -> None:
+        info = self.version_info or {}
+        latest = str(info.get("latest_version") or "").strip()
+        if not latest:
+            return
+        try:
+            config = load_config()
+            config["update_notice_dismissed_version"] = latest
+            save_config(config)
+        except Exception:
+            return
+
+    def _maybe_auto_show_update_notice(self) -> None:
+        if not self._should_auto_show_update_notice():
+            return
+        if getattr(self, "_update_notice_auto_show_pending", False):
+            return
+        self._update_notice_auto_show_pending = True
+        QTimer.singleShot(300, self._auto_show_update_notice)
+
+    def _auto_show_update_notice(self) -> None:
+        self._update_notice_auto_show_pending = False
+        if not self._should_auto_show_update_notice():
+            return
+        self.show_notice()
 
     def show_about(self):
         AboutDialog(
@@ -507,98 +662,151 @@ class MainWindow(
             if not text_query:
                 self.search_page.lbl_status.setText(self.texts.get("search_empty_text", self.texts["empty_query"]))
                 return
-            query_info = prepare_text_query(text_query)
-            if query_info["too_short"]:
-                self.search_page.lbl_status.setText(self.texts["query_too_short"])
-                return
-            if query_info["changed"]:
-                self.search_page.search_panel.set_text_query(query_info["normalized"])
-            if query_info["generic"]:
-                self.show_info_dialog(
-                    self.texts["query_generic_title"],
-                    self.texts["query_generic_hint"],
-                    kind="info",
-                )
-            query = query_info["normalized"]
-            is_text = True
-            has_image = False
-        else:
-            query = self.current_img_path
-            if not query:
-                self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
-                return
-            is_text = False
-            has_image = True
-        if not query:
-            self.search_page.lbl_status.setText(self.texts["empty_query"])
-            return
-        if not self._validate_search_scope():
-            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            self._run_text_search(text_query)
             return
 
-        self.switch_page("search")
+        if not self.current_img_path:
+            self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
+            return
+        self._run_image_search(self.current_img_path)
+
+    def _run_text_search(self, raw_query, *, sync_ui=True):
+        query_info = prepare_text_query(str(raw_query or ""))
+        if query_info["too_short"]:
+            self.search_page.lbl_status.setText(self.texts["query_too_short"])
+            return False
+        if query_info["generic"] and sync_ui:
+            self.show_info_dialog(
+                self.texts["query_generic_title"],
+                self.texts["query_generic_hint"],
+                kind="info",
+            )
+        query = str(query_info["normalized"] or "").strip()
+        if not query:
+            self.search_page.lbl_status.setText(self.texts.get("search_empty_text", self.texts["empty_query"]))
+            return False
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+
+        if sync_ui:
+            self.switch_page("search")
+            self._set_search_query_tab(self.SEARCH_TAB_TEXT)
+            self.search_page.search_panel.set_text_query(query)
+
         from src.services.search_scope import resolve_default_active_search_scope
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
-        # Manual search uses text when both are present; image-only path when text is empty.
         search_precision_mode = self._resolve_search_precision_mode(
-            is_text=is_text,
-            has_image=has_image,
+            is_text=True,
+            has_image=False,
         )
         self.search_controller.start_search(
             query,
-            is_text,
+            True,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             search_precision_mode=search_precision_mode,
         )
+        return True
 
-    def _start_compose_search(self):
+    def _run_image_search(self, image_path, *, sync_ui=True):
+        """Execute the PC image-tab search path for a concrete image file."""
+        path = str(image_path or "").strip()
+        if not path:
+            self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
+            return False
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+
+        if sync_ui:
+            self.switch_page("search")
+            self._set_image_query(path, clear_text=False)
+        elif not self.current_img_path:
+            self.current_img_path = path
+        if not self.current_img_path:
+            return False
+
+        from src.services.search_scope import resolve_default_active_search_scope
+
+        scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
+        search_precision_mode = self._resolve_search_precision_mode(
+            is_text=False,
+            has_image=True,
+        )
+        self.search_controller.start_search(
+            path,
+            False,
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            search_precision_mode=search_precision_mode,
+            video_discovery_enabled=self._resolve_video_discovery_enabled(
+                is_text=False,
+                has_image=True,
+            ),
+        )
+        return True
+
+    def _run_compose_search_with_inputs(
+        self,
+        raw_query,
+        image_paths,
+        fusion=None,
+        *,
+        sync_ui=True,
+    ):
         from src.services.search_preset_service import build_compose_search_plan
         from src.services.search_scope import resolve_active_search_mode, resolve_default_active_search_scope
 
-        compose_form = self.search_page.search_panel.compose_form
-        if not compose_form.has_content():
+        query = str(raw_query or "").strip()
+        paths = [str(path or "").strip() for path in (image_paths or []) if str(path or "").strip()]
+        if not query and not paths:
             self.search_page.lbl_status.setText(
                 self.texts.get("search_compose_empty", self.texts["empty_query"])
             )
-            return
-        try:
-            query = compose_form.normalized_query()
-        except ValueError:
-            self.search_page.lbl_status.setText(self.texts["query_too_short"])
-            return
-        image_paths = compose_form.image_paths()
-        if not query and not image_paths:
-            self.search_page.lbl_status.setText(
-                self.texts.get("search_compose_empty", self.texts["empty_query"])
-            )
-            return
+            return False
         if query:
-            query_info = prepare_text_query(query)
-            if query_info["generic"]:
+            try:
+                query_info = prepare_text_query(query)
+            except Exception:
+                query_info = {"normalized": query, "too_short": False, "generic": False, "changed": False}
+            if query_info.get("too_short"):
+                self.search_page.lbl_status.setText(self.texts["query_too_short"])
+                return False
+            if query_info.get("generic") and sync_ui:
                 self.show_info_dialog(
                     self.texts["query_generic_title"],
                     self.texts["query_generic_hint"],
                     kind="info",
                 )
-            query = str(query_info["normalized"] or query).strip()
-            if query_info["changed"]:
-                compose_form.input_description.setPlainText(query)
+            query = str(query_info.get("normalized") or query).strip()
         if not self._validate_search_scope():
             self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
-            return
+            return False
 
-        self.switch_page("search")
+        effective_fusion = fusion
+        if sync_ui:
+            self.switch_page("search")
+            compose_form = self.search_page.search_panel.compose_form
+            self._set_search_query_tab(self.SEARCH_TAB_COMPOSE)
+            compose_form.clear()
+            if query:
+                compose_form.input_description.setPlainText(query)
+            for image_path in paths:
+                compose_form.add_image(image_path)
+            if effective_fusion is None:
+                effective_fusion = compose_form.current_fusion()
+            self._refresh_search_panel_state()
         try:
             plan = build_compose_search_plan(
                 query=query,
-                source_image_paths=image_paths,
-                fusion=compose_form.current_fusion(),
+                source_image_paths=paths,
+                fusion=effective_fusion,
             )
         except Exception as exc:
             self.show_error_dialog(self.texts["search_failed"], exc)
-            return
+            return False
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
         search_precision_mode = self._resolve_search_precision_mode(
@@ -616,6 +824,65 @@ class MainWindow(
             min_score=plan.get("min_score"),
             search_precision_mode=search_precision_mode,
             pixel_query_data=plan.get("pixel_query_data"),
+            video_discovery_enabled=self._resolve_video_discovery_enabled(
+                is_text=bool(plan["is_text"]),
+                has_image=bool(plan["has_image"]),
+            ),
+        )
+        return True
+
+    def _ensure_mobile_search_ready(self) -> bool:
+        if not self._ensure_startup_migration_idle("feature_search"):
+            return False
+        if not self.check_runtime_resources():
+            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return False
+        return True
+
+    def _handle_mobile_search_requested(self, payload):
+        if not self._ensure_mobile_search_ready():
+            return
+        data = dict(payload or {})
+        kind = str(data.get("search_kind") or "image").strip().lower()
+        self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
+        if kind == "text":
+            self._run_text_search(str(data.get("query") or ""), sync_ui=True)
+            return
+        if kind == "compose":
+            image_paths = [str(path or "").strip() for path in (data.get("image_paths") or []) if str(path or "").strip()]
+            if not image_paths:
+                single = str(data.get("image_path") or "").strip()
+                if single:
+                    image_paths = [single]
+            self._run_compose_search_with_inputs(
+                str(data.get("query") or ""),
+                image_paths,
+                data.get("fusion"),
+                sync_ui=True,
+            )
+            return
+        image_paths = [str(path or "").strip() for path in (data.get("image_paths") or []) if str(path or "").strip()]
+        image_path = image_paths[0] if image_paths else str(data.get("image_path") or "").strip()
+        self._run_image_search(image_path, sync_ui=True)
+
+    def _start_compose_search(self):
+        compose_form = self.search_page.search_panel.compose_form
+        if not compose_form.has_content():
+            self.search_page.lbl_status.setText(
+                self.texts.get("search_compose_empty", self.texts["empty_query"])
+            )
+            return
+        try:
+            query = compose_form.normalized_query()
+        except ValueError:
+            self.search_page.lbl_status.setText(self.texts["query_too_short"])
+            return
+        self.switch_page("search")
+        self._run_compose_search_with_inputs(
+            query,
+            compose_form.image_paths(),
+            compose_form.current_fusion(),
+            sync_ui=False,
         )
 
     def save_compose_as_preset(self):
@@ -678,7 +945,12 @@ class MainWindow(
         self.refresh_search_presets_ui()
         self.search_page.lbl_status.setText(self.texts.get("search_presets_save_done", ""))
 
-    def start_in_video_deep_search(self, video_path: str, preview_sec: float | None = None):
+    def start_in_video_deep_search(
+        self,
+        video_path: str,
+        preview_sec: float | None = None,
+        anchor_score: float | None = None,
+    ):
         """Re-run image search inside one video with deep (moment) pipeline."""
         if not self._ensure_startup_migration_idle("feature_search"):
             return
@@ -696,6 +968,11 @@ class MainWindow(
             self.search_page.lbl_status.setText(self.texts.get("search_busy", self.texts["searching"]))
             return
 
+        from src.services.search_service import compute_locate_score_margin
+
+        coarse_results = list(getattr(self.search_controller, "_last_coarse_results", []) or [])
+        score_margin = compute_locate_score_margin(anchor_score, coarse_results)
+
         self.switch_page("search")
         self.search_page.lbl_status.setText(self.texts.get("search_in_video_running", self.texts["searching"]))
         self.search_controller.start_search(
@@ -705,6 +982,8 @@ class MainWindow(
             scope_library_paths=None,
             search_precision_mode="precise",
             preview_anchor_sec=preview_sec,
+            locate_anchor_score=anchor_score,
+            locate_score_margin=score_margin,
         )
 
     def toggle_mobile_bridge(self):
@@ -715,7 +994,7 @@ class MainWindow(
             return
 
         if url:
-            self.search_page.lbl_status.setText(self.texts["mobile_bridge_running"].format(url=url))
+            self.search_page.lbl_status.setText(self.texts["mobile_bridge_running"])
             self.show_mobile_bridge_qr()
         else:
             self.search_page.lbl_status.setText(self.texts["mobile_bridge_stopped"])
@@ -733,17 +1012,6 @@ class MainWindow(
             qr_pixmap=build_qr_pixmap(url),
         ).exec()
 
-    def _handle_mobile_upload_received(self, path, _source):
-        self.switch_page("search")
-        if self._search_active_tab() == self.SEARCH_TAB_COMPOSE:
-            self.search_page.search_panel.compose_form.add_image(path)
-            self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
-            self._refresh_search_panel_state()
-            return
-        self._set_image_query(path, clear_text=True)
-        self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
-        self.start_search()
-
     def _handle_mobile_bridge_status_changed(self, _state):
         self._update_mobile_bridge_controls()
 
@@ -756,15 +1024,16 @@ class MainWindow(
         self.search_page.btn_mobile_toggle.style().unpolish(self.search_page.btn_mobile_toggle)
         self.search_page.btn_mobile_toggle.style().polish(self.search_page.btn_mobile_toggle)
         self.search_page.btn_mobile_toggle.update()
-        self.search_page.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
-        self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
-        self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
-        self.search_page.btn_mobile_qr.update()
         self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(is_running))
         self.search_page.btn_mobile_toggle.setToolTip(
             self.texts["mobile_bridge_stop"] if is_running else self.texts["mobile_bridge_start"]
         )
+        self.search_page.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
+        self.search_page.btn_mobile_qr.setProperty("qrState", "visible" if is_running else "hidden")
         self.search_page.btn_mobile_qr.setEnabled(is_running)
+        self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
+        self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
+        self.search_page.btn_mobile_qr.update()
 
     def _mobile_bridge_toggle_text(self, is_running, texts=None):
         t = texts or self.texts
@@ -775,6 +1044,16 @@ class MainWindow(
             config = load_config()
             search_mode = str(self.search_page.search_mode.currentData() or DEFAULT_CONFIG["search_mode"])
             config["search_mode"] = search_mode
+            save_config(config)
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _save_search_video_discovery_enabled(self):
+        try:
+            config = load_config()
+            config["search_video_discovery_enabled"] = bool(
+                self.search_page.search_video_discovery_toggle.isChecked()
+            )
             save_config(config)
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
@@ -1021,7 +1300,16 @@ class MainWindow(
                 )
                 event.ignore()
                 return
-        if self.indexing_controller.is_running() and not self._force_application_quit:
+        if (
+            (
+                self.indexing_controller.is_running()
+                or (
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                )
+            )
+            and not self._force_application_quit
+        ):
             if self._handle_indexing_window_close(event):
                 return
         if self._try_minimize_to_tray_on_close(event):
