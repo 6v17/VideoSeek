@@ -3,7 +3,24 @@ import sys
 
 from PySide6.QtCore import Qt, QTimer
 
+from src.app.logging_utils import get_logger
 from src.utils import get_resource_path
+
+logger = get_logger("vlc_player")
+
+
+def _log_vlc_warning(action: str, exc: BaseException | None = None) -> None:
+    if exc is not None:
+        logger.warning("VLC %s failed: %s", action, exc, exc_info=True)
+    else:
+        logger.warning("VLC %s failed", action)
+
+
+def _log_vlc_debug(action: str, exc: BaseException | None = None) -> None:
+    if exc is not None:
+        logger.debug("VLC %s: %s", action, exc, exc_info=True)
+    else:
+        logger.debug("VLC %s skipped", action)
 
 
 def _prepare_vlc_runtime():
@@ -18,8 +35,8 @@ def _prepare_vlc_runtime():
     if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
         try:
             os.add_dll_directory(vlc_dir)
-        except OSError:
-            pass
+        except OSError as exc:
+            _log_vlc_debug("add_dll_directory", exc)
     os.environ["PYTHON_VLC_LIB_PATH"] = os.path.join(vlc_dir, "libvlc.dll")
 
     try:
@@ -43,7 +60,8 @@ def create_vlc_preview_instance():
         return None
     try:
         return vlc_module.Instance(_vlc_embed_instance_args())
-    except Exception:
+    except Exception as exc:
+        _log_vlc_warning("create preview instance", exc)
         return None
 
 
@@ -60,19 +78,20 @@ def warmup_vlc_runtime():
         instance = vlc_module.Instance(args)
         player = instance.media_player_new()
         return player is not None
-    except Exception:
+    except Exception as exc:
+        _log_vlc_warning("warmup runtime", exc)
         return False
     finally:
         if player is not None:
             try:
                 player.release()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("release warmup player", exc)
         if instance is not None:
             try:
                 instance.release()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("release warmup instance", exc)
 
 
 class VlcPreviewPlayer:
@@ -95,7 +114,8 @@ class VlcPreviewPlayer:
             self._instance = shared_instance
             try:
                 self._player = self._instance.media_player_new()
-            except Exception:
+            except Exception as exc:
+                _log_vlc_warning("create media player", exc)
                 self._player = None
         else:
             self._initialize()
@@ -119,16 +139,18 @@ class VlcPreviewPlayer:
             media = self._instance.media_new(os.fspath(video_path), f":start-time={start_sec:.3f}")
             self._player.set_media(media)
             self._bind_output_window()
-        except Exception:
+        except Exception as exc:
+            _log_vlc_warning("prepare media playback", exc)
             return False
         self._stop_at_ms = -1 if stop_sec is None else int(stop_sec * 1000)
         self._locked_stop_at_ms = self._stop_at_ms
         self._user_unlocked = False
         try:
             result = self._player.play()
-        except Exception:
+        except Exception as exc:
             self._stop_at_ms = -1
             self._locked_stop_at_ms = -1
+            _log_vlc_warning("start playback", exc)
             return False
         if result == -1:
             self._stop_at_ms = -1
@@ -148,12 +170,12 @@ class VlcPreviewPlayer:
         if self._player is not None:
             try:
                 self._player.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("stop player", exc)
             try:
                 self._player.set_media(None)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("clear player media", exc)
 
     def shutdown(self, fast=False):
         """Stop playback and release libvlc resources.
@@ -174,32 +196,32 @@ class VlcPreviewPlayer:
             self._detach_output_window()
             try:
                 self._player.pause()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("pause before shutdown", exc)
             try:
                 self._player.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("stop before shutdown", exc)
             try:
                 self._player.set_media(None)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("clear media before shutdown", exc)
             try:
                 self._player.audio_set_mute(True)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("mute before shutdown", exc)
             # Always release the native media player; omitting release() (historically when fast=True)
             # can leave audio/video playing after the Qt host is hidden or destroyed.
             try:
                 self._player.release()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("release player", exc)
             self._player = None
         if self._owns_instance and self._instance is not None:
             try:
                 self._instance.release()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_vlc_debug("release instance", exc)
         self._instance = None
 
     def _initialize(self):
@@ -212,7 +234,8 @@ class VlcPreviewPlayer:
         try:
             self._instance = vlc_module.Instance(args)
             self._player = self._instance.media_player_new()
-        except Exception:
+        except Exception as exc:
+            _log_vlc_warning("initialize player", exc)
             self._instance = None
             self._player = None
 
@@ -236,8 +259,8 @@ class VlcPreviewPlayer:
             return
         try:
             self._player.pause()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("pause", exc)
 
     def resume(self):
         if self._player is None or self._released:
@@ -273,8 +296,8 @@ class VlcPreviewPlayer:
         self._pending_seek_ms = max(0, int(ms))
         try:
             self._player.set_time(self._pending_seek_ms)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("set playback time", exc)
 
     def has_locked_window(self):
         return not self._released and self._locked_stop_at_ms > 0 and not self._user_unlocked
@@ -284,7 +307,8 @@ class VlcPreviewPlayer:
             return
         try:
             window_id = int(self.host_widget.winId())
-        except Exception:
+        except Exception as exc:
+            _log_vlc_debug("read host window id", exc)
             return
         if sys.platform == "win32":
             self._player.set_hwnd(window_id)
@@ -303,8 +327,8 @@ class VlcPreviewPlayer:
                 self._player.set_nsobject(0)
             else:
                 self._player.set_xwindow(0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("detach output window", exc)
 
     def _handle_timeout(self):
         if self._player is None or self._released or self._stop_at_ms <= 0:
@@ -324,12 +348,12 @@ class VlcPreviewPlayer:
             return
         try:
             self._player.pause()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("pause before replay", exc)
         try:
             self._player.set_media(None)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("clear media before replay", exc)
 
     def _pause_at_stop_time(self):
         stop_at_ms = self._stop_at_ms
@@ -340,12 +364,12 @@ class VlcPreviewPlayer:
         try:
             if stop_at_ms > 0:
                 self._player.set_time(stop_at_ms)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("seek to stop time", exc)
         try:
             self._player.pause()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_vlc_debug("pause at stop time", exc)
 
     def _should_restart_media(self):
         if not self._current_video_path:
@@ -365,7 +389,8 @@ class VlcPreviewPlayer:
             self._player.set_media(media)
             self._bind_output_window()
             result = self._player.play()
-        except Exception:
+        except Exception as exc:
+            _log_vlc_warning("prepare media playback", exc)
             return False
         if result == -1:
             return False

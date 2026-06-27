@@ -696,8 +696,13 @@ def process_single_video(
                 detail=_exception_detail(exc),
             )
             search_assets_changed = bool(saved.get("vid"))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist skipped indexing issue for %s: %s",
+                abs_path,
+                exc,
+                exc_info=True,
+            )
         return None, None, metadata_updated, search_assets_changed
 
 

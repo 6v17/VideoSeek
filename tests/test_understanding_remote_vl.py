@@ -76,9 +76,11 @@ class RemoteVlCaptionTests(unittest.TestCase):
         config = {
             "understanding": {
                 "remote_vlm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "openai",
                     "base_url": "https://api.openai.com/v1",
                     "model": "gpt-4o",
-                    "api_key": "sk-test-key",
+                    "api_keys": {"openai": "sk-test-key"},
                     "prompt": "Describe the image.",
                     "timeout_sec": 30,
                     "max_tokens": 64,

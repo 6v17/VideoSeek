@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QScrollArea, QFileDialog
 
 from src.app.config import load_config, save_config, DEFAULT_CONFIG
@@ -15,10 +15,13 @@ from src.services.understanding_resource_service import (
     REMOTE_VLM_MODE_CLOUD,
     REMOTE_VLM_MODE_LOCAL,
     REMOTE_VLM_PRESET_CUSTOM,
+    get_remote_vlm_api_key_for_preset,
     get_remote_vlm_preset_defaults,
     get_understanding_resource_status,
     list_remote_vlm_preset_ids,
+    normalize_remote_vlm_api_keys,
     normalize_remote_vlm_provider_mode,
+    set_remote_vlm_api_key_for_preset,
 )
 from src.services.understanding_service import (
     clear_all_evidence,
@@ -32,7 +35,7 @@ from src.services.indexing_service import load_video_chunks_by_id
 from src.utils import format_timecode_range, open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
 from ui.widgets.chunk_timeline import ChunkTimelineSegment
-from ui.workers import RemoteVlmConnectionTestWorker, UnderstandingResourceStatusWorker
+from ui.workers import RemoteVlmConnectionTestWorker
 
 
 class UnderstandingGuiMixin:
@@ -56,15 +59,23 @@ class UnderstandingGuiMixin:
         from src.services.understanding_resource_service import get_remote_vlm_settings
 
         remote_vlm = dict(get_remote_vlm_settings(config))
+        self._remote_vlm_api_keys = normalize_remote_vlm_api_keys(remote_vlm.get("api_keys"))
         self._populate_vlm_provider_mode_options(remote_vlm.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
         self._populate_vlm_provider_preset_options(
             remote_vlm.get("provider_mode", REMOTE_VLM_MODE_LOCAL),
             remote_vlm.get("provider_preset", "lm_studio"),
         )
         page.input_remote_vlm_base_url.setText(str(remote_vlm.get("base_url", "") or ""))
-        page.input_remote_vlm_api_key.setText(str(remote_vlm.get("api_key", "") or ""))
+        page.input_remote_vlm_api_key.setText(
+            get_remote_vlm_api_key_for_preset(
+                remote_vlm,
+                remote_vlm.get("provider_preset", "lm_studio"),
+                mode=remote_vlm.get("provider_mode", REMOTE_VLM_MODE_LOCAL),
+            )
+        )
         page.input_remote_vlm_model.setText(str(remote_vlm.get("model", "") or ""))
         self._sync_vlm_provider_ui()
+        self._remember_vlm_ui_selection(page)
         self._populate_understanding_caption_language_options(remote_vlm.get("caption_language", "zh"))
         page.input_caption_concurrency.setValue(
             max(1, min(4, int(remote_vlm.get("concurrency", 2) or 2)))
@@ -173,6 +184,47 @@ class UnderstandingGuiMixin:
         else:
             page.hint_vlm_preset_summary.hide()
 
+    def _remember_vlm_ui_selection(self, page):
+        if page is None:
+            return
+        self._vlm_ui_mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
+        self._vlm_ui_preset = str(page.input_vlm_provider_preset.currentData() or REMOTE_VLM_PRESET_CUSTOM)
+
+    def _commit_vlm_api_key_draft(self, page):
+        if page is None:
+            return
+        if not hasattr(self, "_remote_vlm_api_keys") or not isinstance(getattr(self, "_remote_vlm_api_keys", None), dict):
+            self._remote_vlm_api_keys = {}
+        preset_id = getattr(self, "_vlm_ui_preset", None)
+        mode = getattr(self, "_vlm_ui_mode", None)
+        if not preset_id or not mode:
+            self._remember_vlm_ui_selection(page)
+            preset_id = self._vlm_ui_preset
+            mode = self._vlm_ui_mode
+        self._remote_vlm_api_keys = set_remote_vlm_api_key_for_preset(
+            self._remote_vlm_api_keys,
+            preset_id,
+            page.input_remote_vlm_api_key.text(),
+            mode=mode,
+        )
+
+    def _stash_vlm_api_key_for_active_preset(self, page):
+        self._commit_vlm_api_key_draft(page)
+
+    def _load_vlm_api_key_for_preset(self, page, preset_id: str, mode: str):
+        if page is None:
+            return
+        if not hasattr(self, "_remote_vlm_api_keys") or not isinstance(getattr(self, "_remote_vlm_api_keys", None), dict):
+            self._remote_vlm_api_keys = {}
+        draft = {
+            "api_keys": self._remote_vlm_api_keys,
+            "provider_preset": preset_id,
+            "provider_mode": mode,
+        }
+        page.input_remote_vlm_api_key.setText(
+            get_remote_vlm_api_key_for_preset(draft, preset_id, mode=mode)
+        )
+
     def _resolve_vlm_fields_for_save(self, page):
         provider_mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
         provider_preset = str(page.input_vlm_provider_preset.currentData() or REMOTE_VLM_PRESET_CUSTOM)
@@ -183,17 +235,17 @@ class UnderstandingGuiMixin:
         else:
             base_url = page.input_remote_vlm_base_url.text().strip()
             model = page.input_remote_vlm_model.text().strip()
-        api_key = page.input_remote_vlm_api_key.text().strip() if provider_mode == REMOTE_VLM_MODE_CLOUD else ""
-        return provider_mode, provider_preset, base_url, model, api_key
+        return provider_mode, provider_preset, base_url, model
 
     def _build_remote_vlm_draft_from_page(self, page):
-        provider_mode, provider_preset, base_url, model, api_key = self._resolve_vlm_fields_for_save(page)
+        self._stash_vlm_api_key_for_active_preset(page)
+        provider_mode, provider_preset, base_url, model = self._resolve_vlm_fields_for_save(page)
         return {
             "provider_mode": provider_mode,
             "provider_preset": provider_preset,
             "base_url": base_url,
             "model": model,
-            "api_key": api_key,
+            "api_keys": dict(self._remote_vlm_api_keys),
         }
 
     def _format_vlm_probe_status(self, probe: dict) -> str:
@@ -271,9 +323,11 @@ class UnderstandingGuiMixin:
         worker.start()
 
     def _finish_vlm_connection_test(self, probe, page, hint):
+        self._cached_vlm_connection_probe = dict(probe or {})
         message = self._format_vlm_probe_status(probe)
         if hint is not None:
             hint.setText(message)
+        self._refresh_understanding_settings_status()
         if dict(probe or {}).get("reachable") and dict(probe or {}).get("model_available"):
             self.show_info_dialog(
                 self.texts.get("understanding_test_vlm_title", "Connection test"),
@@ -288,43 +342,62 @@ class UnderstandingGuiMixin:
             "understanding_test_vlm_failed",
             "Connection failed: {error}",
         ).format(error=str(message or "unknown error"))
+        self._cached_vlm_connection_probe = {
+            "reachable": False,
+            "model_available": False,
+            "error": str(message or "unknown error"),
+        }
         if hint is not None:
             hint.setText(text)
+        self._refresh_understanding_settings_status()
         self.show_error_dialog(text)
+
+    def _clear_cached_vlm_connection_probe(self):
+        self._cached_vlm_connection_probe = None
 
     def _apply_vlm_provider_preset(self, preset_id: str):
         page = self._understanding_config_widgets()
         if page is None:
             return
         preset_id = str(preset_id or "").strip().lower()
+        mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
         if preset_id == REMOTE_VLM_PRESET_CUSTOM:
             self._sync_vlm_provider_ui()
+            self._load_vlm_api_key_for_preset(page, preset_id, mode)
             return
         defaults = get_remote_vlm_preset_defaults(preset_id)
         if not defaults:
             self._sync_vlm_provider_ui()
+            self._load_vlm_api_key_for_preset(page, preset_id, mode)
             return
         page.input_remote_vlm_base_url.setText(defaults.get("base_url", ""))
         page.input_remote_vlm_model.setText(defaults.get("model", ""))
-        if normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData()) == REMOTE_VLM_MODE_LOCAL:
-            page.input_remote_vlm_api_key.setText("")
         self._sync_vlm_provider_ui()
+        if mode == REMOTE_VLM_MODE_CLOUD:
+            self._load_vlm_api_key_for_preset(page, preset_id, mode)
+        else:
+            page.input_remote_vlm_api_key.setText("")
 
     def _on_vlm_provider_mode_changed(self, _index=None):
         page = self._understanding_config_widgets()
         if page is None:
             return
+        self._commit_vlm_api_key_draft(page)
+        self._clear_cached_vlm_connection_probe()
         mode = normalize_remote_vlm_provider_mode(page.input_vlm_provider_mode.currentData())
         default_preset = "openai" if mode == REMOTE_VLM_MODE_CLOUD else "lm_studio"
         self._populate_vlm_provider_preset_options(mode, default_preset)
         self._apply_vlm_provider_preset(default_preset)
+        self._remember_vlm_ui_selection(page)
 
     def _on_vlm_provider_preset_changed(self, _index=None):
         page = self._understanding_config_widgets()
         if page is None:
             return
+        self._commit_vlm_api_key_draft(page)
         preset_id = str(page.input_vlm_provider_preset.currentData() or REMOTE_VLM_PRESET_CUSTOM)
         self._apply_vlm_provider_preset(preset_id)
+        self._remember_vlm_ui_selection(page)
 
     def save_understanding_settings(self):
         if not self._ensure_startup_migration_idle("feature_understanding"):
@@ -341,12 +414,13 @@ class UnderstandingGuiMixin:
                 understanding = {}
                 config["understanding"] = understanding
             remote_vlm = dict(understanding.get("remote_vlm") or DEFAULT_CONFIG["understanding"]["remote_vlm"])
-            provider_mode, provider_preset, base_url, model, api_key = self._resolve_vlm_fields_for_save(page)
+            self._stash_vlm_api_key_for_active_preset(page)
+            provider_mode, provider_preset, base_url, model = self._resolve_vlm_fields_for_save(page)
             remote_vlm["provider_mode"] = provider_mode
             remote_vlm["provider_preset"] = provider_preset
             remote_vlm["base_url"] = base_url
             remote_vlm["model"] = model
-            remote_vlm["api_key"] = api_key
+            remote_vlm["api_keys"] = dict(self._remote_vlm_api_keys)
             from src.services.understanding_resource_service import (
                 get_caption_prompt_for_language,
                 normalize_caption_language,
@@ -359,8 +433,8 @@ class UnderstandingGuiMixin:
             understanding["remote_vlm"] = remote_vlm
             config["understanding"] = understanding
             save_config(config)
+            self._clear_cached_vlm_connection_probe()
             self._refresh_understanding_page_fast()
-            self._schedule_understanding_status_refresh()
             message = self.texts.get("understanding_config_saved", "Understanding settings saved.")
             page.lbl_status.setText(message)
             self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
@@ -732,7 +806,7 @@ class UnderstandingGuiMixin:
         path = str(value or "").strip()
         return path or None
 
-    def _fetch_understanding_resource_status(self, *, probe_remote: bool = True) -> dict:
+    def _fetch_understanding_resource_status(self, *, probe_remote: bool = False) -> dict:
         try:
             return get_understanding_resource_status(
                 config=load_config(),
@@ -747,70 +821,7 @@ class UnderstandingGuiMixin:
         self._refresh_understanding_ui(status=status)
         self._refresh_understanding_settings_status(status=status)
 
-    def _schedule_understanding_status_refresh(self):
-        if not self._is_current_page("understanding"):
-            return
-        timer = getattr(self, "_understanding_status_refresh_timer", None)
-        if timer is None:
-            timer = QTimer(self)
-            timer.setSingleShot(True)
-            timer.timeout.connect(self._start_understanding_status_refresh)
-            self._understanding_status_refresh_timer = timer
-        timer.start(150)
-
-    def _start_understanding_status_refresh(self):
-        if not self._is_current_page("understanding"):
-            return
-
-        generation = int(getattr(self, "_understanding_status_generation", 0)) + 1
-        self._understanding_status_generation = generation
-
-        worker = UnderstandingResourceStatusWorker(self, remote_probe_timeout_sec=2.0)
-        self._understanding_status_worker = worker
-        worker.result_ready.connect(
-            lambda status, gen=generation: self._finish_understanding_status_refresh(status, gen)
-        )
-        worker.error_signal.connect(
-            lambda _message, gen=generation: self._fail_understanding_status_refresh(gen)
-        )
-        worker.finished.connect(lambda active_worker=worker: self._release_understanding_status_worker(active_worker))
-        worker.start()
-
-    def _finish_understanding_status_refresh(self, status, generation: int):
-        if generation != int(getattr(self, "_understanding_status_generation", 0)):
-            return
-        if not self._is_current_page("understanding"):
-            return
-        self._understanding_cached_status = dict(status or {})
-        self._refresh_understanding_ui(status=status)
-        self._refresh_understanding_settings_status(status=status)
-
-    def _fail_understanding_status_refresh(self, generation: int):
-        if generation != int(getattr(self, "_understanding_status_generation", 0)):
-            return
-        if not self._is_current_page("understanding"):
-            return
-        page = self._understanding_config_widgets()
-        if page is None:
-            return
-        hint = getattr(page, "hint_understanding_status", None)
-        if hint is not None:
-            hint.setText(
-                self.texts.get(
-                    "understanding_settings_remote_vlm_not_ready",
-                    "Description service not ready: {error}",
-                ).format(error="status check failed")
-            )
-
-    def _release_understanding_status_worker(self, worker):
-        if getattr(self, "_understanding_status_worker", None) is worker:
-            self._understanding_status_worker = None
-        try:
-            worker.deleteLater()
-        except Exception:
-            pass
-
-    def _refresh_understanding_ui(self, status=None, *, probe_remote: bool = True):
+    def _refresh_understanding_ui(self, status=None, *, probe_remote: bool = False):
         if not hasattr(self, "understanding_page"):
             return
         if status is None:
@@ -846,7 +857,7 @@ class UnderstandingGuiMixin:
             page.lbl_understanding_hint.setText(
                 self.texts.get(
                     "understanding_library_ready_hint",
-                    "YOLO and the description service are ready.",
+                    "Local models are ready. Configure the description service and use Test connection before generating.",
                 )
             )
         else:
@@ -854,14 +865,6 @@ class UnderstandingGuiMixin:
                 self.texts.get(
                     "understanding_library_not_ready_hint",
                     "Import YOLO and configure the description service below.",
-                )
-            )
-        remote_vlm = dict(status.get("remote_vlm") or {})
-        if remote_vlm.get("pending") and ready:
-            page.lbl_understanding_hint.setText(
-                self.texts.get(
-                    "understanding_settings_status_checking",
-                    "Checking description service…",
                 )
             )
         if not ready:
@@ -877,7 +880,41 @@ class UnderstandingGuiMixin:
         if isinstance(scroll, QScrollArea):
             scroll.ensureWidgetVisible(self.understanding_page.config_card, 48)
 
-    def _refresh_understanding_settings_status(self, status=None, *, probe_remote: bool = True):
+    def _remote_vlm_status_line(self, status=None) -> str:
+        cached_probe = getattr(self, "_cached_vlm_connection_probe", None)
+        if isinstance(cached_probe, dict) and cached_probe:
+            if cached_probe.get("reachable") and cached_probe.get("model_available"):
+                return self.texts.get(
+                    "understanding_settings_remote_vlm_ready",
+                    "Description service connected: {model}",
+                ).format(
+                    model=str(
+                        cached_probe.get("configured_model", "") or cached_probe.get("model", "") or ""
+                    )
+                )
+            return self._format_vlm_probe_status(cached_probe)
+
+        remote_vlm = dict((status or {}).get("remote_vlm") or {})
+        if remote_vlm.get("skipped"):
+            return self.texts.get(
+                "understanding_settings_remote_vlm_test_hint",
+                "Description service: click Test connection to verify.",
+            )
+        if remote_vlm.get("reachable") and remote_vlm.get("model_available"):
+            return self.texts.get(
+                "understanding_settings_remote_vlm_ready",
+                "Description service connected: {model}",
+            ).format(model=str(remote_vlm.get("configured_model", "") or remote_vlm.get("model", "") or ""))
+        if remote_vlm.get("reachable") and str(remote_vlm.get("error_code", "") or "") == "model_not_found":
+            return self._format_vlm_probe_status(remote_vlm)
+        if remote_vlm and not remote_vlm.get("skipped"):
+            return self.texts.get(
+                "understanding_settings_remote_vlm_not_ready",
+                "Description service not ready: {error}",
+            ).format(error=str(remote_vlm.get("error", "") or "unreachable"))
+        return ""
+
+    def _refresh_understanding_settings_status(self, status=None, *, probe_remote: bool = False):
         page = self._understanding_config_widgets()
         if page is None:
             return
@@ -890,29 +927,12 @@ class UnderstandingGuiMixin:
             except Exception as exc:
                 hint.setText(str(exc))
                 return
-        remote_vlm = dict(status.get("remote_vlm") or {})
-        remote_line = ""
-        if remote_vlm.get("pending"):
-            remote_line = self.texts.get(
-                "understanding_settings_remote_vlm_checking",
-                "Connecting to description service…",
-            )
-        elif remote_vlm.get("reachable") and remote_vlm.get("model_available"):
-            remote_line = self.texts.get(
-                "understanding_settings_remote_vlm_ready",
-                "Description service connected: {model}",
-            ).format(model=str(remote_vlm.get("configured_model", "") or remote_vlm.get("model", "") or ""))
-        elif remote_vlm.get("reachable") and str(remote_vlm.get("error_code", "") or "") == "model_not_found":
-            remote_line = self._format_vlm_probe_status(remote_vlm)
-        elif remote_vlm:
-            remote_line = self.texts.get(
-                "understanding_settings_remote_vlm_not_ready",
-                "Description service not ready: {error}",
-            ).format(error=str(remote_vlm.get("error", "") or "unreachable"))
+        remote_line = self._remote_vlm_status_line(status)
 
         if status.get("understanding_ready"):
-            base = self.texts.get("understanding_settings_ready", "YOLO and the description service are ready.")
-            hint.setText(f"{base}\n{remote_line}".strip() if remote_line else base)
+            yolo_line = self._understanding_yolo_status_line(status)
+            lines = [line for line in (yolo_line, remote_line) if line]
+            hint.setText("\n".join(lines))
             return
         missing = ", ".join(status.get("missing_components") or [])
         profile_error = str(status.get("profile_error", "") or "").strip()

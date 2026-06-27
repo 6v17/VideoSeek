@@ -4,8 +4,25 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新readme">
-      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_remote_vl.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_remote_vl.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/preview_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/playback/preview_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/playback/preview_dialog.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/playback/vlc_player.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/playback/vlc_player.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_preview.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_preview.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,7 +36,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="269" />
+    <option name="cachedIndexableFilesCount" value="270" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -74,23 +91,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0000000002026932" />
-      <entry key="MS500" value="1.012696929209287" />
-      <entry key="S2" value="1.5361319697305964" />
-      <entry key="S5" value="2.8464374551653044" />
-      <entry key="S10" value="5.407651265028974" />
-      <entry key="S30" value="15.276155477693782" />
-      <entry key="S60" value="26.66128240280768" />
-      <entry key="M2" value="41.590104994581615" />
-      <entry key="M5" value="63.37814295835721" />
-      <entry key="M10" value="86.26406887839491" />
-      <entry key="M15" value="106.87480099073302" />
-      <entry key="M30" value="172.1689080275036" />
-      <entry key="H1" value="306.0863993860964" />
-      <entry key="H2" value="500.28651378576865" />
-      <entry key="H4" value="704.6781014078381" />
-      <entry key="D1" value="1311.092263277885" />
-      <entry key="W1" value="1658.9704561867586" />
+      <entry key="MS100" value="1.0000702522843707" />
+      <entry key="MS500" value="1.2290557221508944" />
+      <entry key="S2" value="2.813613957596945" />
+      <entry key="S5" value="4.47851325774999" />
+      <entry key="S10" value="5.5086533763498675" />
+      <entry key="S30" value="6.479389737205577" />
+      <entry key="S60" value="7.873173970443962" />
+      <entry key="M2" value="14.693826798587573" />
+      <entry key="M5" value="40.18432819668068" />
+      <entry key="M10" value="75.83383001785234" />
+      <entry key="M15" value="105.08140535141659" />
+      <entry key="M30" value="181.75366264643606" />
+      <entry key="H1" value="324.79896339006973" />
+      <entry key="H2" value="552.8908047864081" />
+      <entry key="H4" value="816.2855209180524" />
+      <entry key="D1" value="1533.7528278246905" />
+      <entry key="W1" value="1923.703802897241" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -112,23 +129,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9659363291179387" />
-      <entry key="MS500" value="1.0056668088304306" />
-      <entry key="S2" value="1.53310943990116" />
-      <entry key="S5" value="2.844016501114546" />
-      <entry key="S10" value="5.405302934379803" />
-      <entry key="S30" value="15.273978050667885" />
-      <entry key="S60" value="26.659418957284245" />
-      <entry key="M2" value="41.588674713230034" />
-      <entry key="M5" value="63.37728123653" />
-      <entry key="M10" value="86.26348146865189" />
-      <entry key="M15" value="106.8743138240933" />
-      <entry key="M30" value="172.16851137240997" />
-      <entry key="H1" value="306.0860400620115" />
-      <entry key="H2" value="500.28621542211755" />
-      <entry key="H4" value="704.6778891382803" />
-      <entry key="D1" value="1311.0921962214447" />
-      <entry key="W1" value="1658.9704440201099" />
+      <entry key="MS100" value="0.9660036922356535" />
+      <entry key="MS500" value="1.2200620983843213" />
+      <entry key="S2" value="2.8079693201836995" />
+      <entry key="S5" value="4.474966425564382" />
+      <entry key="S10" value="5.506495842618782" />
+      <entry key="S30" value="6.478551286496392" />
+      <entry key="S60" value="7.8726650142619015" />
+      <entry key="M2" value="14.693355350003" />
+      <entry key="M5" value="40.18381716889592" />
+      <entry key="M10" value="75.83334631027809" />
+      <entry key="M15" value="105.08095595089904" />
+      <entry key="M30" value="181.75326633984986" />
+      <entry key="H1" value="324.7985988364601" />
+      <entry key="H2" value="552.8904861086055" />
+      <entry key="H4" value="816.2852815275174" />
+      <entry key="D1" value="1533.7527507550863" />
+      <entry key="W1" value="1923.7037889943758" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -458,23 +475,8 @@
       <workItem from="1782217529558" duration="120000" />
       <workItem from="1782217662862" duration="7423000" />
       <workItem from="1782392206578" duration="11019000" />
-      <workItem from="1782474044093" duration="8198000" />
-    </task>
-    <task id="LOCAL-00077" summary="混剪匹配默认参数标准化">
-      <option name="closed" value="true" />
-      <created>1778768552434</created>
-      <option name="number" value="00077" />
-      <option name="presentableId" value="LOCAL-00077" />
-      <option name="project" value="LOCAL" />
-      <updated>1778768552434</updated>
-    </task>
-    <task id="LOCAL-00078" summary="抽帧、向量生成稳定性提高，部分逻辑bug修复">
-      <option name="closed" value="true" />
-      <created>1778940471886</created>
-      <option name="number" value="00078" />
-      <option name="presentableId" value="LOCAL-00078" />
-      <option name="project" value="LOCAL" />
-      <updated>1778940471887</updated>
+      <workItem from="1782474044093" duration="8271000" />
+      <workItem from="1782529924939" duration="5854000" />
     </task>
     <task id="LOCAL-00079" summary="局域网HEIC格式图片上传Bug修复">
       <option name="closed" value="true" />
@@ -852,7 +854,23 @@
       <option name="project" value="LOCAL" />
       <updated>1782486390891</updated>
     </task>
-    <option name="localTasksCounter" value="126" />
+    <task id="LOCAL-00126" summary="更新readme">
+      <option name="closed" value="true" />
+      <created>1782486539754</created>
+      <option name="number" value="00126" />
+      <option name="presentableId" value="LOCAL-00126" />
+      <option name="project" value="LOCAL" />
+      <updated>1782486539754</updated>
+    </task>
+    <task id="LOCAL-00127" summary="更新">
+      <option name="closed" value="true" />
+      <created>1782486563104</created>
+      <option name="number" value="00127" />
+      <option name="presentableId" value="LOCAL-00127" />
+      <option name="project" value="LOCAL" />
+      <updated>1782486563104</updated>
+    </task>
+    <option name="localTasksCounter" value="128" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -882,7 +900,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="加了搜索接口，供agent使用（beta）" />
     <MESSAGE value="引入chinese-clip模型，优化核心链路，增加预设标签" />
     <MESSAGE value="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配" />
     <MESSAGE value="更新说明" />
@@ -907,7 +924,8 @@
     <MESSAGE value="用线程后台检测服务，更新说明文档" />
     <MESSAGE value="vlm动态并发吃帧，加入云api选择" />
     <MESSAGE value="更新readme" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新readme" />
+    <MESSAGE value="更新" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

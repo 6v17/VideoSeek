@@ -247,6 +247,34 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertEqual(status["missing_components"], [])
         self.assertEqual(len(status["installed_components"]), 2)
 
+    def test_understanding_ready_true_without_remote_probe_when_local_installed(self):
+        self._install_component(YOLO_MANIFEST, "yolo11n.onnx")
+        self._install_component(CAPTION_MANIFEST)
+        config = {"understanding": DEFAULT_UNDERSTANDING_CONFIG}
+
+        with (
+            patch(
+                "src.services.understanding_resource_service.get_configured_model_dir",
+                return_value=str(self.model_root),
+            ),
+            patch(
+                "src.services.understanding_resource_service.get_builtin_profiles_dir",
+                return_value=str(self.builtin_profiles.parent),
+            ),
+            patch(
+                "src.services.understanding_resource_service.probe_remote_vlm",
+                side_effect=AssertionError("probe_remote_vlm should not run when probe_remote=False"),
+            ),
+        ):
+            status = understanding_resource_service.get_understanding_resource_status(
+                config=config,
+                probe_remote=False,
+            )
+
+        self.assertTrue(status["understanding_ready"])
+        self.assertEqual(status["missing_components"], [])
+        self.assertTrue(status["remote_vlm"].get("skipped"))
+
     def test_ensure_understanding_profiles_installed_copies_builtin_profile(self):
         with patch(
             "src.services.understanding_resource_service.get_builtin_profiles_dir",
@@ -301,24 +329,62 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                 "provider_preset": "openai",
                 "base_url": "https://api.openai.com/v1",
                 "model": "gpt-4o",
-                "api_key": " sk-secret ",
+                "api_keys": {"openai": " sk-secret "},
             }
         )
-        self.assertEqual(settings["api_key"], "sk-secret")
+        self.assertEqual(settings["api_keys"]["openai"], "sk-secret")
+
+    def test_finalize_remote_vlm_settings_keeps_api_keys_per_preset(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "provider_mode": "cloud",
+                "provider_preset": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o",
+                "api_keys": {
+                    "dashscope": "qwen-key",
+                    "openai": "openai-key",
+                },
+            }
+        )
+        self.assertEqual(settings["api_keys"]["dashscope"], "qwen-key")
+        self.assertEqual(settings["api_keys"]["openai"], "openai-key")
+
+    def test_get_remote_vlm_api_key_for_preset_reads_stored_map(self):
+        key = understanding_resource_service.get_remote_vlm_api_key_for_preset(
+            {
+                "provider_mode": "cloud",
+                "provider_preset": "openai",
+                "api_keys": {"openai": "openai-key", "dashscope": "qwen-key"},
+            },
+            "dashscope",
+            mode="cloud",
+        )
+        self.assertEqual(key, "qwen-key")
 
     def test_build_remote_vlm_auth_headers(self):
+        cloud_settings = {
+            "provider_mode": "cloud",
+            "provider_preset": "openai",
+            "api_keys": {"openai": "abc"},
+        }
         self.assertEqual(
-            understanding_resource_service.build_remote_vlm_auth_headers({"api_key": "abc"}),
+            understanding_resource_service.build_remote_vlm_auth_headers(cloud_settings),
             {"Authorization": "Bearer abc"},
         )
         self.assertEqual(understanding_resource_service.build_remote_vlm_auth_headers({}), {})
-        self.assertEqual(understanding_resource_service.build_remote_vlm_auth_headers({"api_key": "  "}), {})
+        self.assertEqual(
+            understanding_resource_service.build_remote_vlm_auth_headers(
+                {"provider_mode": "cloud", "provider_preset": "openai", "api_keys": {"openai": "  "}}
+            ),
+            {},
+        )
 
     def test_resolve_remote_vlm_provider_settings_infers_cloud_from_api_key(self):
         mode, preset = understanding_resource_service.resolve_remote_vlm_provider_settings(
             {
                 "base_url": "https://example.com/v1",
-                "api_key": "sk-test",
+                "api_keys": {"openai": "sk-test"},
                 "model": "gpt-4o",
             }
         )
@@ -332,16 +398,17 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         self.assertEqual(mode, understanding_resource_service.REMOTE_VLM_MODE_LOCAL)
         self.assertEqual(preset, "lm_studio")
 
-    def test_finalize_remote_vlm_settings_clears_api_key_for_local_mode(self):
+    def test_finalize_remote_vlm_settings_keeps_api_keys_for_local_mode(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
             {
                 "provider_mode": "local",
                 "provider_preset": "lm_studio",
-                "api_key": "should-clear",
+                "api_keys": {"dashscope": "qwen-key", "openai": "openai-key"},
             }
         )
         self.assertEqual(settings["provider_mode"], "local")
-        self.assertEqual(settings["api_key"], "")
+        self.assertEqual(settings["api_keys"]["dashscope"], "qwen-key")
+        self.assertEqual(settings["api_keys"]["openai"], "openai-key")
 
     def test_probe_remote_vlm_requires_cloud_api_key(self):
         probe = understanding_resource_service.probe_remote_vlm(
@@ -352,7 +419,7 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                         "provider_preset": "openai",
                         "base_url": "https://api.openai.com/v1",
                         "model": "gpt-4o",
-                        "api_key": "",
+                        "api_keys": {},
                     }
                 }
             }
@@ -372,7 +439,7 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                     "provider_preset": "openai",
                     "base_url": "https://api.openai.com/v1",
                     "model": "gpt-4o",
-                    "api_key": "sk-test",
+                    "api_keys": {"openai": "sk-test"},
                 }
             }
         }

@@ -386,9 +386,10 @@ def _iter_thumb_jobs(results):
 class ThumbLoader(QThread):
     thumb_ready = Signal(int, object)
 
-    def __init__(self, results):
+    def __init__(self, results, priority_rows=None):
         super().__init__()
         self.results = results
+        self.priority_rows = set(priority_rows or [])
         self._running = True
 
     def stop(self):
@@ -396,11 +397,18 @@ class ThumbLoader(QThread):
 
     def run(self):
         from src.utils import get_single_thumbnail
+        from ui.thumb_cache import get_thumb_cache
+
         config = load_config()
         thumb_width = config.get("thumb_width", 130)
         thumb_height = config.get("thumb_height", 75)
+        cache = get_thumb_cache()
 
-        for table_row, raw in _iter_thumb_jobs(self.results):
+        jobs = list(_iter_thumb_jobs(self.results))
+        if self.priority_rows:
+            jobs.sort(key=lambda item: (0 if item[0] in self.priority_rows else 1, item[0]))
+
+        for table_row, raw in jobs:
             if not self._running or self.isInterruptionRequested():
                 break
 
@@ -413,6 +421,12 @@ class ThumbLoader(QThread):
             thumb_time = float(hit.start_sec)
             if float(hit.end_sec) > float(hit.start_sec):
                 thumb_time = (float(hit.start_sec) + float(hit.end_sec)) / 2.0
+
+            cache_key = cache.make_key(video_path, thumb_time, thumb_width, thumb_height)
+            cached = cache.get(cache_key)
+            if cached is not None:
+                self.thumb_ready.emit(table_row, cached)
+                continue
 
             frame = get_single_thumbnail(video_path, thumb_time)
             if not self._running or self.isInterruptionRequested():
@@ -430,6 +444,7 @@ class ThumbLoader(QThread):
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             )
+            cache.put(cache_key, pixmap)
             self.thumb_ready.emit(table_row, pixmap)
 
 
@@ -594,32 +609,6 @@ class RemoteVlmConnectionTestWorker(QThread):
             self.result_ready.emit(dict(result or {}))
         except Exception as exc:
             logger.warning("remote_vlm_connection_test_failed: %s", exc)
-            self.error_signal.emit(str(exc))
-        finally:
-            self.finished.emit()
-
-
-class UnderstandingResourceStatusWorker(QThread):
-    result_ready = Signal(dict)
-    error_signal = Signal(str)
-    finished = Signal()
-
-    def __init__(self, parent=None, *, remote_probe_timeout_sec: float = 2.0):
-        super().__init__(parent)
-        self.remote_probe_timeout_sec = float(remote_probe_timeout_sec)
-
-    def run(self):
-        try:
-            from src.services.understanding_resource_service import get_understanding_resource_status
-
-            status = get_understanding_resource_status(
-                config=load_config(),
-                probe_remote=True,
-                remote_probe_timeout_sec=self.remote_probe_timeout_sec,
-            )
-            self.result_ready.emit(status)
-        except Exception as exc:
-            logger.warning("understanding_resource_status_worker_failed: %s", exc)
             self.error_signal.emit(str(exc))
         finally:
             self.finished.emit()

@@ -50,7 +50,7 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "provider_preset": "lm_studio",
     "base_url": "http://127.0.0.1:1234/v1",
     "model": "qwen3-vl-8b-instruct",
-    "api_key": "",
+    "api_keys": {},
     "caption_language": "zh",
     "prompt": (
         "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
@@ -89,6 +89,7 @@ REMOTE_VLM_PRESETS: dict[str, dict[str, str]] = {
 
 LOCAL_VLM_PRESET_IDS = ("lm_studio", "ollama", REMOTE_VLM_PRESET_CUSTOM)
 CLOUD_VLM_PRESET_IDS = ("openai", "dashscope", REMOTE_VLM_PRESET_CUSTOM)
+REMOTE_VLM_API_KEY_PRESET_IDS = frozenset(CLOUD_VLM_PRESET_IDS)
 
 CAPTION_LANGUAGE_ZH = "zh"
 CAPTION_LANGUAGE_EN = "en"
@@ -163,7 +164,7 @@ def normalize_remote_vlm_provider_preset(value, *, mode: str | None = None) -> s
 def resolve_remote_vlm_provider_settings(raw_remote_vlm: Mapping[str, Any]) -> tuple[str, str]:
     raw = dict(raw_remote_vlm or {})
     base_url = str(raw.get("base_url", "") or "").strip()
-    api_key = str(raw.get("api_key", "") or "").strip()
+    has_cloud_api_key = bool(normalize_remote_vlm_api_keys(raw.get("api_keys")))
     explicit_mode = str(raw.get("provider_mode", "") or "").strip().lower()
     explicit_preset = str(raw.get("provider_preset", "") or "").strip().lower()
     has_explicit_mode = "provider_mode" in raw and bool(explicit_mode)
@@ -182,7 +183,7 @@ def resolve_remote_vlm_provider_settings(raw_remote_vlm: Mapping[str, Any]) -> t
         if normalized_url and normalized_url == _normalize_vlm_base_url_for_compare(preset["base_url"]):
             return preset["mode"], preset_id
 
-    if api_key or (
+    if has_cloud_api_key or (
         normalized_url.startswith("https://")
         and "127.0.0.1" not in normalized_url
         and "localhost" not in normalized_url
@@ -212,6 +213,70 @@ def list_remote_vlm_preset_ids(*, mode: str) -> tuple[str, ...]:
     if normalized_mode == REMOTE_VLM_MODE_CLOUD:
         return CLOUD_VLM_PRESET_IDS
     return LOCAL_VLM_PRESET_IDS
+
+
+def normalize_remote_vlm_api_keys(raw: Mapping[str, Any] | None) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in raw.items():
+        preset = normalize_remote_vlm_provider_preset(str(key or ""))
+        if preset not in REMOTE_VLM_API_KEY_PRESET_IDS:
+            continue
+        text = str(value or "").strip()
+        if text:
+            cleaned[preset] = text
+    return cleaned
+
+
+def remote_vlm_preset_supports_api_key(preset_id: str, *, mode: str | None = None) -> bool:
+    preset = normalize_remote_vlm_provider_preset(preset_id, mode=mode)
+    if preset not in REMOTE_VLM_API_KEY_PRESET_IDS:
+        return False
+    if preset == REMOTE_VLM_PRESET_CUSTOM:
+        return normalize_remote_vlm_provider_mode(mode) == REMOTE_VLM_MODE_CLOUD
+    return REMOTE_VLM_PRESETS.get(preset, {}).get("mode") == REMOTE_VLM_MODE_CLOUD
+
+
+def get_remote_vlm_api_key_for_preset(
+    raw_remote_vlm: Mapping[str, Any],
+    preset_id: str,
+    *,
+    mode: str | None = None,
+) -> str:
+    preset = normalize_remote_vlm_provider_preset(preset_id, mode=mode)
+    if not remote_vlm_preset_supports_api_key(preset, mode=mode):
+        return ""
+    api_keys = normalize_remote_vlm_api_keys(raw_remote_vlm.get("api_keys"))
+    return api_keys.get(preset, "")
+
+
+def set_remote_vlm_api_key_for_preset(
+    api_keys: Mapping[str, Any] | None,
+    preset_id: str,
+    api_key: str,
+    *,
+    mode: str | None = None,
+) -> dict[str, str]:
+    merged = normalize_remote_vlm_api_keys(api_keys)
+    preset = normalize_remote_vlm_provider_preset(preset_id, mode=mode)
+    if not remote_vlm_preset_supports_api_key(preset, mode=mode):
+        return merged
+    text = str(api_key or "").strip()
+    if text:
+        merged[preset] = text
+    else:
+        merged.pop(preset, None)
+    return merged
+
+
+def get_active_remote_vlm_api_key(settings: Mapping[str, Any]) -> str:
+    mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
+    preset = normalize_remote_vlm_provider_preset(
+        settings.get("provider_preset"),
+        mode=mode,
+    )
+    return get_remote_vlm_api_key_for_preset(settings, preset, mode=mode)
 
 
 def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> str:
@@ -251,17 +316,16 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
         remote_vlm["concurrency"] = max(1, min(4, int(raw_remote_vlm.get("concurrency", remote_vlm.get("concurrency", 2)))))
     except (TypeError, ValueError):
         remote_vlm["concurrency"] = int(DEFAULT_REMOTE_VLM_CONFIG["concurrency"])
-    remote_vlm["api_key"] = str(raw_remote_vlm.get("api_key", remote_vlm.get("api_key", "")) or "").strip()
     mode, preset = resolve_remote_vlm_provider_settings(raw_remote_vlm)
     remote_vlm["provider_mode"] = mode
     remote_vlm["provider_preset"] = preset
-    if mode == REMOTE_VLM_MODE_LOCAL:
-        remote_vlm["api_key"] = ""
+
+    remote_vlm["api_keys"] = normalize_remote_vlm_api_keys(raw_remote_vlm.get("api_keys"))
     return remote_vlm
 
 
 def build_remote_vlm_auth_headers(settings: Mapping[str, Any]) -> dict[str, str]:
-    api_key = str(settings.get("api_key", "") or "").strip()
+    api_key = get_active_remote_vlm_api_key(settings)
     if not api_key:
         return {}
     return {"Authorization": f"Bearer {api_key}"}
@@ -574,7 +638,7 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     base_url = str(settings.get("base_url", "") or "").strip().rstrip("/")
     model = str(settings.get("model", "") or "").strip()
     provider_mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
-    api_key = str(settings.get("api_key", "") or "").strip()
+    api_key = get_active_remote_vlm_api_key(settings)
     if not base_url:
         return {
             "reachable": False,
@@ -845,7 +909,7 @@ def get_understanding_resource_status(
     if probe_remote:
         remote_vlm = probe_remote_vlm(normalized_config, timeout_sec=remote_probe_timeout_sec)
     else:
-        remote_vlm = {"reachable": False, "model_available": False, "error": "", "pending": True}
+        remote_vlm = {"skipped": True}
 
     missing_components: list[str] = []
     profile_error = ""
@@ -865,7 +929,7 @@ def get_understanding_resource_status(
 
     components = scan_understanding_components(model_dir=resolved_model_dir or None)
     installed_components = [item["id"] for item in components if item.get("installed")]
-    understanding_ready = probe_remote and not profile_error and not missing_components
+    understanding_ready = not profile_error and not missing_components
     return {
         "understanding_ready": understanding_ready,
         "active_understanding_profile": active_profile_id,

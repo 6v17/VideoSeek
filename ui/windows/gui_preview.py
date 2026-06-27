@@ -8,10 +8,13 @@ import time
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog
 
+from src.app.logging_utils import get_logger
 from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_explorer
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
 from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
+
+logger = get_logger("gui_preview")
 
 
 class PreviewGuiMixin:
@@ -221,8 +224,8 @@ class PreviewGuiMixin:
         if worker is not None:
             try:
                 worker.deleteLater()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Preview export worker deleteLater failed: %s", exc)
         self._start_next_preview_exports()
         if self._preview_export_active or self._preview_export_queue:
             self.search_page.lbl_status.setText(
@@ -252,8 +255,8 @@ class PreviewGuiMixin:
                 return False
             try:
                 worker.deleteLater()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Preview export worker deleteLater failed during cancel: %s", exc)
         self._preview_export_active.clear()
         self._update_preview_action_button_styles()
         return True

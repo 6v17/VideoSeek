@@ -184,6 +184,12 @@ QRadioButton::indicator:disabled {
 #CardTitle {
     font-size: 16px;
 }
+#UnderstandingChunkTimeLabel {
+    color: __SUCCESS__;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 2px 0 4px 0;
+}
 QPushButton {
     border-radius: 10px;
     border: 1px solid __LINE__;

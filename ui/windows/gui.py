@@ -354,8 +354,6 @@ class MainWindow(
                 self._refresh_understanding_page_fast()
             elif hasattr(self, "_refresh_understanding_ui"):
                 self._refresh_understanding_ui(probe_remote=False)
-            if hasattr(self, "_schedule_understanding_status_refresh"):
-                self._schedule_understanding_status_refresh()
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -531,8 +529,6 @@ class MainWindow(
         if self._is_current_page("understanding"):
             if hasattr(self, "_refresh_understanding_page_fast"):
                 self._refresh_understanding_page_fast()
-            if hasattr(self, "_schedule_understanding_status_refresh"):
-                self._schedule_understanding_status_refresh()
         else:
             self._refresh_understanding_ui()
             if hasattr(self, "_refresh_understanding_settings_status"):

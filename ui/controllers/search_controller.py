@@ -2,9 +2,13 @@ import time
 
 from PySide6.QtCore import QObject
 
+from src.app.logging_utils import get_logger
 from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
 from ui.threading_utils import shutdown_thread
+from ui.views.table_visibility import visible_table_row_range
 from ui.workers import SearchWarmupWorker, SearchWorker, ThumbLoader
+
+logger = get_logger("search_controller")
 
 
 class SearchController(QObject):
@@ -23,6 +27,9 @@ class SearchController(QObject):
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
+
+    def _visible_result_rows(self, table):
+        return set(visible_table_row_range(table))
 
     def is_search_running(self) -> bool:
         worker = self.worker
@@ -218,8 +225,8 @@ class SearchController(QObject):
                 if is_likely_cropped_query_image(image_path):
                     clip_score_mode = True
                     low_confidence_threshold = _LOCATE_CROP_MIN_CLIP_SCORE
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Crop query clip-score UI hint skipped: %s", exc)
 
         result_view.populate_local(
             results,
@@ -268,9 +275,9 @@ class SearchController(QObject):
                         f"{status_text} · "
                         f"{texts.get('search_clip_confidence_level', '置信度 {level}').format(level=tier_label)}"
                     )
-            except Exception:
-                pass
-        warning_key = getattr(self.worker, "locate_warning_key", None) if self.worker else None
+            except Exception as exc:
+                logger.debug("Crop confidence status formatting skipped: %s", exc)
+        warning_key = getattr(self.worker, "locate_warning_key", None)
         if warning_key:
             warn_template = texts.get(warning_key, "")
             if warn_template:
@@ -285,7 +292,7 @@ class SearchController(QObject):
                 status_text = f"{status_text} · {warn}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
-        self.thumb_thread = ThumbLoader(results)
+        self.thumb_thread = ThumbLoader(results, priority_rows=self._visible_result_rows(result_view.table))
         self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
 
