@@ -881,7 +881,7 @@ def _run_indexing_nvdec_frame_reader(
     """Background thread: PyNvVideoCodec NVDEC decode yields GPU RGB frames."""
     from src.core.nvdec_cuda_decoder import stream_frames_nvdec_cuda_with_fallback
 
-    fps = float(stream_kwargs.get("fps") or 1.0)
+    fps = float(stream_kwargs.get("fps_override") or stream_kwargs.get("fps") or 1.0)
     should_stop = stream_kwargs.get("should_stop")
     try:
         for frame, timestamp in stream_frames_nvdec_cuda_with_fallback(
@@ -1191,7 +1191,7 @@ def generate_vectors_and_index_for_video(
     stream_kwargs = {
         "should_stop": _should_stop,
         "process_holder": process_holder,
-        "fps": _resolve_index_stream_fps(video_path, config=runtime_config),
+        "fps_override": _resolve_index_stream_fps(video_path, config=runtime_config),
     }
     use_zero_copy = _indexing_use_cuda_zero_copy(config=runtime_config)
     from src.core.gpu_vector_ops import full_gpu_indexing_enabled
@@ -1288,7 +1288,7 @@ def generate_vectors_and_index_for_video(
                 timestamps = _encode_batched_from_gpu_frame_stream(
                     stream_frames_nvdec_cuda_with_fallback(
                         video_path,
-                        stream_kwargs["fps"],
+                        stream_kwargs["fps_override"],
                         should_stop=_should_stop,
                     ),
                     engine_instance,

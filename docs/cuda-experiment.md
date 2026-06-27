@@ -14,10 +14,19 @@ conda install "faiss=*=*cuda130*"   # Windows：pip 无 faiss-gpu
 
 ## 运行前
 
+本分支**默认即为 CUDA 全链路**（无需再手动设 `VIDEOSEEK_INFERENCE_EP`）。若需回退 DirectML / CPU 路径：
+
 ```powershell
-$env:VIDEOSEEK_INFERENCE_EP='cuda'
-$env:VIDEOSEEK_CUDA_ZERO_COPY='1'    # 默认 cuda 模式下 auto=开
-$env:VIDEOSEEK_FULL_GPU_INDEX='1'   # ORT 输出/GPU 向量/FAISS-GPU，auto=开
+$env:VIDEOSEEK_INFERENCE_EP='dml'      # 强制 DirectML（Release 风格）
+$env:VIDEOSEEK_CUDA_ZERO_COPY='0'      # 关闭 NVDEC 零拷贝
+$env:VIDEOSEEK_FULL_GPU_INDEX='0'      # 关闭 ORT 输出/GPU 向量/FAISS-GPU
+```
+
+可选环境变量（一般不用改，默认 auto=开）：
+
+```powershell
+$env:VIDEOSEEK_CUDA_ZERO_COPY='1'
+$env:VIDEOSEEK_FULL_GPU_INDEX='1'
 $env:CUDA_PATH='C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2'  # 可选，消 CuPy 警告
 ```
 

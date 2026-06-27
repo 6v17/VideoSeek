@@ -6,23 +6,12 @@
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_resource_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_understanding_remote_vl.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_remote_vl.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/controllers/preview_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/preview_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/playback/preview_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/playback/preview_dialog.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/playback/vlc_player.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/playback/vlc_player.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_preview.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_preview.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/cuda-experiment.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/cuda-experiment.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/inference_providers.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/inference_providers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/understanding/ort_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/understanding/ort_runtime.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_inference_providers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_inference_providers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -49,7 +38,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="feat/cuda-experiment" />
+        <entry key="$PROJECT_DIR$" value="master" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -91,23 +80,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0000702522843707" />
-      <entry key="MS500" value="1.2290557221508944" />
-      <entry key="S2" value="2.813613957596945" />
-      <entry key="S5" value="4.47851325774999" />
-      <entry key="S10" value="5.5086533763498675" />
-      <entry key="S30" value="6.479389737205577" />
-      <entry key="S60" value="7.873173970443962" />
-      <entry key="M2" value="14.693826798587573" />
-      <entry key="M5" value="40.18432819668068" />
-      <entry key="M10" value="75.83383001785234" />
-      <entry key="M15" value="105.08140535141659" />
-      <entry key="M30" value="181.75366264643606" />
-      <entry key="H1" value="324.79896339006973" />
-      <entry key="H2" value="552.8908047864081" />
-      <entry key="H4" value="816.2855209180524" />
-      <entry key="D1" value="1533.7528278246905" />
-      <entry key="W1" value="1923.703802897241" />
+      <entry key="MS100" value="1.1476248627041759" />
+      <entry key="MS500" value="1.7489209607143281" />
+      <entry key="S2" value="3.066084190512692" />
+      <entry key="S5" value="5.954129000071963" />
+      <entry key="S10" value="9.853016143220803" />
+      <entry key="S30" value="16.94405924663961" />
+      <entry key="S60" value="20.771168973786466" />
+      <entry key="M2" value="26.722692483056747" />
+      <entry key="M5" value="51.79476815954621" />
+      <entry key="M10" value="93.13145247423338" />
+      <entry key="M15" value="127.72982210631537" />
+      <entry key="M30" value="213.26757655782728" />
+      <entry key="H1" value="362.59001229809286" />
+      <entry key="H2" value="597.1637828523601" />
+      <entry key="H4" value="869.120311366359" />
+      <entry key="D1" value="1602.5939333914987" />
+      <entry key="W1" value="1998.4259457233813" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -129,23 +118,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9660036922356535" />
-      <entry key="MS500" value="1.2200620983843213" />
-      <entry key="S2" value="2.8079693201836995" />
-      <entry key="S5" value="4.474966425564382" />
-      <entry key="S10" value="5.506495842618782" />
-      <entry key="S30" value="6.478551286496392" />
-      <entry key="S60" value="7.8726650142619015" />
-      <entry key="M2" value="14.693355350003" />
-      <entry key="M5" value="40.18381716889592" />
-      <entry key="M10" value="75.83334631027809" />
-      <entry key="M15" value="105.08095595089904" />
-      <entry key="M30" value="181.75326633984986" />
-      <entry key="H1" value="324.7985988364601" />
-      <entry key="H2" value="552.8904861086055" />
-      <entry key="H4" value="816.2852815275174" />
-      <entry key="D1" value="1533.7527507550863" />
-      <entry key="W1" value="1923.7037889943758" />
+      <entry key="MS100" value="1.1075475680418627" />
+      <entry key="MS500" value="1.7359111353937269" />
+      <entry key="S2" value="3.060560461265657" />
+      <entry key="S5" value="5.949934627156213" />
+      <entry key="S10" value="9.84955493903391" />
+      <entry key="S30" value="16.94207246505002" />
+      <entry key="S60" value="20.769950614279004" />
+      <entry key="M2" value="26.721905717046408" />
+      <entry key="M5" value="51.79414453250461" />
+      <entry key="M10" value="93.13088067438652" />
+      <entry key="M15" value="127.72929329795281" />
+      <entry key="M30" value="213.267123863292" />
+      <entry key="H1" value="362.58961409358795" />
+      <entry key="H2" value="597.1634442752973" />
+      <entry key="H4" value="869.1200597096392" />
+      <entry key="D1" value="1602.593853511143" />
+      <entry key="W1" value="1998.4259313770176" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -159,32 +148,32 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/resources&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;ml.llm.LLMThirdPartyAiProvidersConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "DefaultHtmlFileTemplate": "HTML File",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.core.executor": "Debug",
+    "Python.main.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "feat/cuda-experiment",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "D:/PycharmProjects/VideoSeek/resources",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\resources" />

@@ -1,10 +1,15 @@
-"""ORT execution provider selection (DirectML default; CUDA via env on experiment branch)."""
+"""ORT execution provider selection (CUDA-first on experiment branch; DML via explicit opt-in)."""
 from __future__ import annotations
 
 import os
 import site
 
+from src.app.logging_utils import get_logger
+
+logger = get_logger("inference_providers")
+
 _INFERENCE_EP_ENV = "VIDEOSEEK_INFERENCE_EP"
+_DEFAULT_INFERENCE_EP = "cuda"
 _NVIDIA_DLL_SUBDIRS = (
     "cublas",
     "cudnn",
@@ -15,14 +20,69 @@ _NVIDIA_DLL_SUBDIRS = (
     "cuda_nvrtc",
 )
 _CUDA_DLL_PATHS_PREPARED = False
+_AVAILABLE_ORT_PROVIDERS: list[str] | None = None
+_CUDA_DEFAULTS_LOGGED = False
 
 
 def get_inference_ep_mode() -> str:
-    return os.environ.get(_INFERENCE_EP_ENV, "dml").strip().lower()
+    return os.environ.get(_INFERENCE_EP_ENV, _DEFAULT_INFERENCE_EP).strip().lower()
+
+
+def _get_available_ort_providers() -> list[str]:
+    global _AVAILABLE_ORT_PROVIDERS
+    if _AVAILABLE_ORT_PROVIDERS is None:
+        import onnxruntime as ort
+
+        _AVAILABLE_ORT_PROVIDERS = list(ort.get_available_providers())
+    return list(_AVAILABLE_ORT_PROVIDERS)
 
 
 def is_cuda_inference_mode() -> bool:
-    return get_inference_ep_mode() == "cuda"
+    mode = get_inference_ep_mode()
+    if mode in {"dml", "directml", "cpu"}:
+        return False
+    available = _get_available_ort_providers()
+    if "CUDAExecutionProvider" not in available:
+        if mode == "cuda":
+            logger.warning(
+                "CUDA inference mode is configured but CUDAExecutionProvider is unavailable; "
+                "GPU decode/indexing will fall back to DirectML or CPU where possible."
+            )
+        return False
+    return True
+
+
+def apply_cuda_experiment_defaults() -> None:
+    """Prepare CUDA-first runtime defaults before ORT sessions or GPU decode initialize."""
+    global _CUDA_DEFAULTS_LOGGED
+    ensure_cuda_runtime_dll_paths()
+    if not os.environ.get(_INFERENCE_EP_ENV, "").strip():
+        os.environ[_INFERENCE_EP_ENV] = _DEFAULT_INFERENCE_EP
+    if _CUDA_DEFAULTS_LOGGED:
+        return
+    _CUDA_DEFAULTS_LOGGED = True
+    if not is_cuda_inference_mode():
+        logger.info(
+            "Inference defaults: mode=%s (CUDAExecutionProvider unavailable in this build)",
+            get_inference_ep_mode(),
+        )
+        return
+    zero_copy = False
+    full_gpu = False
+    try:
+        from src.core.extract_frames import cuda_zero_copy_indexing_enabled
+        from src.core.gpu_vector_ops import full_gpu_indexing_enabled
+
+        zero_copy = cuda_zero_copy_indexing_enabled()
+        full_gpu = full_gpu_indexing_enabled()
+    except Exception as exc:
+        logger.info("CUDA pipeline capability probe skipped during startup: %s", exc)
+    logger.info(
+        "Inference defaults: mode=cuda zero_copy=%s full_gpu_index=%s providers=%s",
+        zero_copy,
+        full_gpu,
+        _get_available_ort_providers(),
+    )
 
 
 def _candidate_site_roots() -> list[str]:
@@ -86,7 +146,13 @@ def resolve_ort_providers(*, prefer_gpu: bool) -> list[str]:
     if is_cuda_inference_mode():
         ensure_cuda_runtime_dll_paths()
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    return ["DmlExecutionProvider", "CPUExecutionProvider"]
+    available = _get_available_ort_providers()
+    if "DmlExecutionProvider" in available:
+        return ["DmlExecutionProvider", "CPUExecutionProvider"]
+    if "CUDAExecutionProvider" in available:
+        ensure_cuda_runtime_dll_paths()
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    return ["CPUExecutionProvider"]
 
 
 def is_gpu_provider_active(providers: list[str]) -> bool:

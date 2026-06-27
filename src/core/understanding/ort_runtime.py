@@ -7,6 +7,7 @@ import numpy as np
 import onnxruntime as ort
 
 from src.app.logging_utils import get_logger
+from src.core.inference_providers import is_gpu_provider_active, resolve_ort_providers
 from src.core.onnx_session import build_session_options
 
 logger = get_logger("understanding.ort")
@@ -22,7 +23,7 @@ def resolve_provider_list(prefer_gpu: bool, provider_hints: Sequence[str] | None
             if "CPUExecutionProvider" not in providers:
                 providers.append("CPUExecutionProvider")
             return providers
-        return ["DmlExecutionProvider", "CPUExecutionProvider"]
+        return resolve_ort_providers(prefer_gpu=True)
     return ["CPUExecutionProvider"]
 
 
@@ -52,7 +53,7 @@ def run_with_cpu_fallback(
     run_fn: Callable[[ort.InferenceSession], np.ndarray | list[np.ndarray] | dict],
 ):
     session = create_inference_session(model_path, prefer_gpu=prefer_gpu, provider_hints=provider_hints)
-    using_gpu = "DmlExecutionProvider" in session.get_providers()
+    using_gpu = is_gpu_provider_active(list(session.get_providers()))
     try:
         with INFERENCE_LOCK:
             return run_fn(session), using_gpu

@@ -2,9 +2,11 @@
 import sys
 from src.app.logging_utils import get_logger, setup_logging
 from src.core.clip_embedding import gpu_probe_cli_main
+from src.core.inference_providers import apply_cuda_experiment_defaults
 
 if __name__ == "__main__":
     setup_logging()
+    apply_cuda_experiment_defaults()
     logger = get_logger("main")
 
     if "--gpu-probe" in sys.argv:

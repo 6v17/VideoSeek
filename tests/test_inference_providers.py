@@ -7,8 +7,28 @@ from src.core.inference_providers import (
 )
 
 
-def test_default_mode_uses_directml(monkeypatch):
+def test_default_mode_uses_cuda(monkeypatch):
     monkeypatch.delenv("VIDEOSEEK_INFERENCE_EP", raising=False)
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    assert get_inference_ep_mode() == "cuda"
+    assert is_cuda_inference_mode()
+    assert preferred_gpu_provider_name() == "CUDAExecutionProvider"
+    assert resolve_ort_providers(prefer_gpu=True) == [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
+    assert resolve_ort_providers(prefer_gpu=False) == ["CPUExecutionProvider"]
+
+
+def test_explicit_directml_mode(monkeypatch):
+    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "dml")
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["DmlExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
     assert get_inference_ep_mode() == "dml"
     assert not is_cuda_inference_mode()
     assert preferred_gpu_provider_name() == "DmlExecutionProvider"
@@ -16,7 +36,20 @@ def test_default_mode_uses_directml(monkeypatch):
         "DmlExecutionProvider",
         "CPUExecutionProvider",
     ]
-    assert resolve_ort_providers(prefer_gpu=False) == ["CPUExecutionProvider"]
+
+
+def test_auto_cuda_when_directml_missing(monkeypatch):
+    monkeypatch.delenv("VIDEOSEEK_INFERENCE_EP", raising=False)
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    assert is_cuda_inference_mode()
+    assert preferred_gpu_provider_name() == "CUDAExecutionProvider"
+    assert resolve_ort_providers(prefer_gpu=True) == [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
 
 
 def test_cuda_mode_uses_cuda_ep(monkeypatch):
