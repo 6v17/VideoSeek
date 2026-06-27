@@ -185,11 +185,11 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertEqual(_precise_pixel_localize_top_n(config, single_video_hits), 12)
         self.assertEqual(_precise_pixel_localize_top_n(config, multi_video_hits), 3)
 
-    @mock.patch("src.services.search_service._top_video_paths_from_hits", return_value=["D:/runner-up.mp4"])
-    @mock.patch("src.services.search_service._apply_frame_neighbor_rerank", side_effect=lambda results, *_args, **_kwargs: results)
-    @mock.patch("src.services.search_service._search_frame_results_with_ids")
-    @mock.patch("src.services.search_service._load_per_video_frame_assets")
-    @mock.patch("src.services.search_service._resolve_scoped_video_targets")
+    @mock.patch("src.services.search_video_discovery._top_video_paths_from_hits", return_value=["D:/runner-up.mp4"])
+    @mock.patch("src.services.search_neighbor_rerank._apply_frame_neighbor_rerank", side_effect=lambda results, *_args, **_kwargs: results)
+    @mock.patch("src.services.search_video_discovery._search_frame_results_with_ids")
+    @mock.patch("src.services.search_video_discovery._load_per_video_frame_assets")
+    @mock.patch("src.services.search_video_discovery._resolve_scoped_video_targets")
     def test_locate_frames_preserves_stage1_hits_outside_candidates(
         self,
         mock_resolve_targets,
@@ -230,11 +230,11 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         refined = next(hit for hit in located if hit.video_path == "D:/runner-up.mp4")
         self.assertAlmostEqual(float(refined.start_sec), 21.0)
 
-    @mock.patch("src.services.search_service._top_video_paths_from_hits", return_value=["D:/a.mp4"])
-    @mock.patch("src.services.search_service._apply_frame_neighbor_rerank", side_effect=lambda results, *_args, **_kwargs: results)
-    @mock.patch("src.services.search_service._search_frame_results_with_ids")
-    @mock.patch("src.services.search_service._load_per_video_frame_assets")
-    @mock.patch("src.services.search_service._resolve_scoped_video_targets")
+    @mock.patch("src.services.search_video_discovery._top_video_paths_from_hits", return_value=["D:/a.mp4"])
+    @mock.patch("src.services.search_neighbor_rerank._apply_frame_neighbor_rerank", side_effect=lambda results, *_args, **_kwargs: results)
+    @mock.patch("src.services.search_video_discovery._search_frame_results_with_ids")
+    @mock.patch("src.services.search_video_discovery._load_per_video_frame_assets")
+    @mock.patch("src.services.search_video_discovery._resolve_scoped_video_targets")
     def test_locate_frames_keeps_stage1_seed_when_stage2_prefers_other_times(
         self,
         mock_resolve_targets,
@@ -346,9 +346,10 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertAlmostEqual(float(hits[0].start_sec), 59.0)
         self.assertIn(25, ids)
 
-    @mock.patch("src.services.search_service.load_search_assets")
-    @mock.patch("src.services.search_service._search_frame_results_in_time_window")
-    def test_search_locate_anchor_window_prefers_per_video_index(self, mock_window, mock_load_assets):
+    @mock.patch("src.services.search_locate_pipeline._apply_bounded_neighbor_refine", side_effect=lambda hits, *_args, **_kwargs: hits)
+    @mock.patch("src.services.search_assets.load_search_assets")
+    @mock.patch("src.services.search_locate_pipeline._search_frame_results_in_time_window")
+    def test_search_locate_anchor_window_prefers_per_video_index(self, mock_window, mock_load_assets, _mock_neighbor):
         import numpy as np
 
         mock_window.return_value = ([SearchHit(64.0, 64.0, 0.91, "D:/a.mp4")], [0])
@@ -369,9 +370,9 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         mock_window.assert_called_once()
         mock_load_assets.assert_not_called()
 
-    @mock.patch("src.services.search_service._apply_bounded_neighbor_refine", side_effect=lambda hits, *_args, **_kwargs: hits)
-    @mock.patch("src.services.search_service._search_frame_results_with_ids")
-    @mock.patch("src.services.search_service.load_search_assets")
+    @mock.patch("src.services.search_neighbor_rerank._apply_bounded_neighbor_refine", side_effect=lambda hits, *_args, **_kwargs: hits)
+    @mock.patch("src.services.search_locate_pipeline._search_frame_results_with_ids")
+    @mock.patch("src.services.search_assets.load_search_assets")
     def test_search_locate_anchor_window_uses_global_hits(self, mock_load_assets, mock_search_with_ids, _mock_neighbor):
         import numpy as np
 
@@ -403,7 +404,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertAlmostEqual(float(hits[0].start_sec), 64.0)
         mock_search_with_ids.assert_called_once()
 
-    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_locate_pipeline.apply_image_pixel_rerank")
     @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=False)
     def test_refine_locate_pixels_only_top_three(self, _mock_crop, mock_pixel):
         hits = [
@@ -425,7 +426,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         passed_hits = mock_pixel.call_args.args[1]
         self.assertEqual(len(passed_hits), 3)
 
-    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_locate_pipeline.apply_image_pixel_rerank")
     @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=False)
     def test_refine_locate_skips_pixel_when_refine_gate_closed(self, _mock_crop, mock_pixel):
         hits = [SearchHit(64.0, 64.0, 0.9, "D:/a.mp4")]
@@ -443,7 +444,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertEqual(len(refined), 1)
         mock_pixel.assert_not_called()
 
-    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_locate_pipeline.apply_image_pixel_rerank")
     @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=True)
     def test_refine_locate_skips_pixel_for_cropped_query(self, _mock_crop, mock_pixel):
         hits = [SearchHit(64.0, 64.0, 0.99, "D:/a.mp4")]
@@ -465,8 +466,8 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertEqual(_resolve_locate_result_top_k(20, crop_query=True), 1)
         self.assertEqual(_resolve_locate_result_top_k(1), 1)
 
-    @mock.patch("src.services.search_service._search_frame_results_in_time_window")
-    @mock.patch("src.services.search_service.load_search_assets", return_value=(None, None, None))
+    @mock.patch("src.services.search_locate_pipeline._search_frame_results_in_time_window")
+    @mock.patch("src.services.search_assets.load_search_assets", return_value=(None, None, None))
     def test_search_locate_crop_trusted_uses_narrow_window(self, _mock_load, mock_window):
         import numpy as np
 
@@ -488,7 +489,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertAlmostEqual(float(mock_window.call_args.kwargs["window_sec"]), 5.0)
         self.assertEqual(int(mock_window.call_args.kwargs["top_k"]), 12)
 
-    @mock.patch("src.services.search_service.apply_image_pixel_rerank")
+    @mock.patch("src.services.search_locate_pipeline.apply_image_pixel_rerank")
     def test_refine_precise_skips_pixel_for_cropped_query(self, mock_pixel):
         import numpy as np
 

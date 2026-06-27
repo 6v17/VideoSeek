@@ -1,17 +1,7 @@
 import unittest
 import os
-import sys
 from unittest.mock import patch
 
-# test_controllers stubs PySide6 and ui.workers; remove stubs so the real Qt worker module loads.
-for _name in (
-    "ui.workers",
-    "PySide6",
-    "PySide6.QtCore",
-    "PySide6.QtWidgets",
-    "PySide6.QtGui",
-):
-    sys.modules.pop(_name, None)
 from ui.workers import IndexUpdateWorker
 
 

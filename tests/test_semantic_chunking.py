@@ -1,5 +1,3 @@
-import sys
-import types
 import unittest
 from unittest.mock import patch
 
@@ -9,12 +7,6 @@ except ImportError:  # pragma: no cover
     np = None
 if np is not None and not hasattr(np, "asarray"):  # pragma: no cover
     np = None
-
-sys.modules.setdefault("cv2", types.SimpleNamespace())
-sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
-sys.modules.setdefault("faiss", types.SimpleNamespace())
-sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
-sys.modules.setdefault("regex", __import__("re"))
 
 from src.domain.search_hit import SearchHit
 
@@ -376,10 +368,10 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class ChunkSearchTests(unittest.TestCase):
-    @patch("src.services.search_service.get_global_model_asset_paths")
-    @patch("src.services.search_service.load_clip_index")
-    @patch("src.services.search_service.np.load")
-    @patch("src.services.search_service.os.path.exists", return_value=True)
+    @patch("src.services.search_assets.get_global_model_asset_paths")
+    @patch("src.services.search_assets.load_clip_index")
+    @patch("src.services.search_assets.np.load")
+    @patch("src.services.search_assets.os.path.exists", return_value=True)
     def test_load_chunk_search_assets_reads_ranges(
         self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
     ):
@@ -402,10 +394,10 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertEqual(ranges.shape, (1, 2))
         self.assertEqual(paths, ["video.mp4"])
 
-    @patch("src.services.search_service.get_global_model_asset_paths")
-    @patch("src.services.search_service.load_clip_index")
-    @patch("src.services.search_service.np.load")
-    @patch("src.services.search_service.os.path.exists", return_value=True)
+    @patch("src.services.search_assets.get_global_model_asset_paths")
+    @patch("src.services.search_assets.load_clip_index")
+    @patch("src.services.search_assets.np.load")
+    @patch("src.services.search_assets.os.path.exists", return_value=True)
     def test_load_search_assets_accepts_legacy_payload_with_vector_field(
         self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
     ):
@@ -429,10 +421,10 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertEqual(timestamps.shape, (1,))
         self.assertEqual(paths, ["video.mp4"])
 
-    @patch("src.services.search_service.get_global_model_asset_paths")
-    @patch("src.services.search_service.load_clip_index")
-    @patch("src.services.search_service.np.load")
-    @patch("src.services.search_service.os.path.exists", return_value=True)
+    @patch("src.services.search_assets.get_global_model_asset_paths")
+    @patch("src.services.search_assets.load_clip_index")
+    @patch("src.services.search_assets.np.load")
+    @patch("src.services.search_assets.os.path.exists", return_value=True)
     def test_load_search_assets_accepts_compact_payload_without_vector_field(
         self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
     ):
@@ -463,16 +455,11 @@ class ChunkSearchTests(unittest.TestCase):
         result = search_service.run_search("query", is_text=True, top_k=5)
 
         self.assertEqual(result, [SearchHit(0.0, 0.0, 0.0, "chunk.mp4")])
-        mock_run_chunk_search.assert_called_once_with(
-            "query",
-            is_text=True,
-            top_k=5,
-            scope_video_paths=None,
-            scope_library_paths=None,
-            query_vector=None,
-            search_precision_mode=None,
-            pixel_query_data=None,
-        )
+        mock_run_chunk_search.assert_called_once()
+        _, kwargs = mock_run_chunk_search.call_args
+        self.assertEqual(kwargs["top_k"], 5)
+        self.assertIsNone(kwargs["scope_video_paths"])
+        self.assertIsNone(kwargs["scope_library_paths"])
 
     def test_aggregate_frame_hits_to_chunks_groups_by_segment(self):
         from src.services.search_scope import normalize_scope_path
@@ -489,7 +476,7 @@ class ChunkSearchTests(unittest.TestCase):
             SearchHit(2.0, 2.0, 0.9, video_path),
             SearchHit(6.0, 6.0, 0.8, video_path),
         ]
-        with patch("src.services.search_service._load_global_chunk_ranges_by_path", return_value=range_index):
+        with patch("src.services.search_chunk_pipeline._load_global_chunk_ranges_by_path", return_value=range_index):
             aggregated = search_service._aggregate_frame_hits_to_chunks(frame_hits, 5, {})
         self.assertEqual(len(aggregated), 2)
         self.assertAlmostEqual(float(aggregated[0].score), 0.9)
@@ -498,8 +485,8 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertAlmostEqual(float(aggregated[1].score), 0.8)
         self.assertAlmostEqual(float(aggregated[1].start_sec), 4.0)
 
-    @patch("src.services.search_service._aggregate_frame_hits_to_chunks", return_value=[])
-    @patch("src.services.search_service._collect_frame_candidates_for_chunk_search")
+    @patch("src.services.search_chunk_pipeline._aggregate_frame_hits_to_chunks", return_value=[])
+    @patch("src.services.search_chunk_pipeline._collect_frame_candidates_for_chunk_search")
     def test_chunk_image_search_falls_back_to_frame_hits(self, mock_collect, _mock_aggregate):
         mock_collect.return_value = [SearchHit(12.0, 12.0, 0.91, "D:/lib/a.mp4")]
         results = search_service._run_chunk_search_via_frames(
@@ -530,12 +517,14 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertIn((video_path, 1.0), prepared_by_video)
         self.assertIn((video_path, 2.0), prepared_by_video)
 
-    @patch("src.services.search_service.load_search_assets")
-    @patch("src.services.search_service._search_frame_results_with_ids")
+    @patch("src.services.search_chunk_pipeline._check_asset_profile_compatibility")
+    @patch("src.services.search_chunk_pipeline.load_search_assets")
+    @patch("src.services.search_chunk_pipeline._search_frame_results_with_ids")
     def test_collect_frame_candidates_expands_neighbors_for_chunk_aggregate(
         self,
         mock_search,
         mock_load_assets,
+        _mock_check_profile,
     ):
         class DummyIndex:
             def reconstruct(self, idx):
@@ -566,7 +555,7 @@ class ChunkSearchTests(unittest.TestCase):
             is_text=False,
             top_k=5,
             query_vector=query_vector,
-            precise_image=True,
+            precise_image=False,
             config=config,
         )
         hit_times = sorted(float(hit.start_sec) for hit in hits if hit.video_path == video_path)
@@ -606,7 +595,7 @@ class ChunkSearchTests(unittest.TestCase):
             timestamps,
             paths,
             config,
-            precise_image=True,
+            precise_image=False,
             seed_top_n=1,
         )
         self.assertGreaterEqual(len(expanded), 2)

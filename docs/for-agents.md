@@ -30,6 +30,7 @@
 | POST | `/search` | 单次搜索 |
 | POST | `/search/batch` | 批量搜索（可内嵌导出） |
 | GET | `/search/telemetry` | 截图搜诊断（可选） |
+| GET | `/videos/evidence` | 理解笔录（可选；读盘优先，可触发生成） |
 | POST | `/export/manifest` | 生成剪辑清单 JSON |
 | POST | `/export/clip` | 导出单个片段 |
 | POST | `/export/clips/batch` | 批量导出片段 |
@@ -38,7 +39,7 @@
 
 ## 1. 能力与边界
 
-- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段。
+- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段；**可选**读取/生成理解笔录（YOLO + 描述服务 caption）。
 - **不支持：** 精确台词/剧情检索；自动成片；修改索引或用户设置（除非用户在对话中明确要求）。
 
 ---
@@ -55,9 +56,9 @@
 |------|------|------|
 | 400 | `invalid_request` | 请求体/参数不合法（含 Pydantic 校验失败） |
 | 404 | `invalid_request` / `doc_not_found` | 库/视频/源文件不存在；或 `agent-doc` 缺 md |
-| 409 | `index_not_ready` | 索引未就绪或 per-library 索引升级中 |
-| 422 | `query_failed` / `export_failed` | 搜索/导出执行失败 |
-| 503 | `engine_busy` | 超时、并发满、FFmpeg 不可用、导出队列忙 |
+| 409 | `index_not_ready` / `understanding_not_ready` | 索引未就绪；或理解资源未就绪且 `ensure=true` |
+| 422 | `query_failed` / `export_failed` / `no_chunks` / `video_not_found` | 搜索/导出/理解执行失败 |
+| 503 | `engine_busy` / `understanding_timeout` | 超时、并发满、FFmpeg 不可用、导出队列忙；理解生成超时 |
 
 ### 2.2 路径规则（必读）
 
@@ -130,6 +131,9 @@
 | `library_indexes_upgrade_needed` | true 时需重启并完成迁移 |
 | `agent_api_default_image_precision` | 图搜默认 `fast` 或 `precise` |
 | `search_telemetry_enabled` | 遥测开关 |
+| `understanding_ready` | 理解资源是否就绪（YOLO + 描述服务）；false 时勿 `ensure=true` |
+| `active_understanding_profile` | 当前理解方案 id |
+| `understanding_missing_components` | 未就绪时的缺失组件 id 列表 |
 
 ---
 
@@ -428,6 +432,45 @@
 
 ---
 
+### 4.12 `GET /videos/evidence`
+
+**可选模块。** 读取（或按需生成）单视频理解笔录：chunk 级 YOLO 检测 + 描述服务 caption，可选整片 `summary`。不影响搜索/索引。
+
+**Query：**
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `video_id` 或 `video_path` | 二选一 | 与 search / libraries 路径规范一致 |
+| `start_sec` / `end_sec` | 否 | 与笔录 chunk **时间重叠**过滤；仅影响响应，不改落盘 |
+| `ensure` | 否，默认 `false` | `true`：无笔录时触发生成并落盘；`false`：仅读盘 |
+
+**成功响应要点：**
+
+| 字段 | 说明 |
+|------|------|
+| `evidence_available` | 是否有可用笔录 |
+| `video_id`, `video` | 视频标识与路径 |
+| `chunks[]` | 过滤后的 chunk 证据（`evidence.vision.object_detection` / `image_caption`） |
+| `summary` | 整片总结对象 `{ "text": string, "source": string }`（若有；`text` 为描述正文） |
+| `provenance` | 生成来源与 profile |
+| `meta.generated_by` | API 本次触发生成时为 `"agent_api"` |
+| `meta.understanding_timeout_sec` | 本次请求超时预算 |
+
+无笔录且 `ensure=false` → **HTTP 200**，`evidence_available: false`，`chunks: []`（非错误）。
+
+**推荐编排：**
+
+```text
+GET /health → understanding_ready?
+POST /search → hits
+GET /videos/evidence?video_path=…&start_sec=…&end_sec=…&ensure=false
+  → 无笔录则询问用户是否 ensure=true
+GET /videos/evidence?…&ensure=true
+  → 读 caption / summary 供 LLM 解释
+```
+
+---
+
 ## 5. 能力组合（字段级）
 
 ### 搜索
@@ -437,6 +480,7 @@
 | `POST /search` | 单次 query；返回 `hits[]` |
 | `POST /search/batch` | 多 query 或 `image_folder`；返回 `results[]` |
 | `POST /search/batch` + `export` | 同上，并在 `export.output_dir` 写入 mp4；响应含 `export` 块 |
+| `GET /videos/evidence` | 搜索命中后读取/生成 chunk 级理解笔录（可选） |
 
 ### 导出（可独立调用）
 

@@ -1,236 +1,57 @@
+import importlib.util
 import sys
 import types
 import unittest
 import re as std_re
 from unittest.mock import MagicMock, patch
 
-sys.modules.setdefault("cv2", types.SimpleNamespace())
-sys.modules.setdefault("numpy", types.SimpleNamespace())
-sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
-sys.modules.setdefault("faiss", types.SimpleNamespace())
-sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
-sys.modules.setdefault("regex", std_re)
 
-if "PySide6" not in sys.modules:
-    qtcore = types.ModuleType("PySide6.QtCore")
-    qtwidgets = types.ModuleType("PySide6.QtWidgets")
+def _stub_if_missing(module_name, factory):
+    if importlib.util.find_spec(module_name) is not None:
+        return
+    sys.modules.setdefault(module_name, factory())
 
-    class _QObject:
-        def __init__(self, *args, **kwargs):
-            pass
 
-    class _Signal:
-        def __init__(self, *args, **kwargs):
-            self._subscribers = []
+_stub_if_missing("cv2", lambda: types.SimpleNamespace())
+_stub_if_missing("onnxruntime", lambda: types.SimpleNamespace())
+_stub_if_missing("faiss", lambda: types.SimpleNamespace())
+_stub_if_missing("ftfy", lambda: types.SimpleNamespace(fix_text=lambda text: text))
+_stub_if_missing("regex", lambda: std_re)
 
-        def connect(self, callback):
-            self._subscribers.append(callback)
+_USE_PYSIDE_STUB = importlib.util.find_spec("PySide6") is None
 
-        def emit(self, *args, **kwargs):
-            for callback in list(self._subscribers):
-                callback(*args, **kwargs)
 
-    class _Qt:
-        AlignCenter = 0
-        WA_NativeWindow = 100
-        Horizontal = 1
-        Key_Space = 32
+class _Signal:
+    def __init__(self, *args, **kwargs):
+        self._subscribers = []
 
-    class _QLabel:
-        def __init__(self, *_args, **_kwargs):
-            self._text = ""
+    def connect(self, callback):
+        self._subscribers.append(callback)
 
-        def setAlignment(self, *_args, **_kwargs):
-            pass
+    def emit(self, *args, **kwargs):
+        for callback in list(self._subscribers):
+            callback(*args, **kwargs)
 
-        def setPixmap(self, *_args, **_kwargs):
-            pass
 
-        def setText(self, value):
-            self._text = value
+def _install_lightweight_ui_stubs():
+    if "ui.dialogs" not in sys.modules:
+        dialogs_module = types.ModuleType("ui.dialogs")
+        dialogs_module.ModelDownloadDialog = type("ModelDownloadDialog", (), {})
+        sys.modules["ui.dialogs"] = dialogs_module
 
-        def text(self):
-            return self._text
+    if "ui.views.table_views" not in sys.modules:
+        table_views_module = types.ModuleType("ui.views.table_views")
 
-        def setWordWrap(self, *_args, **_kwargs):
-            pass
-
-        def setObjectName(self, *_args, **_kwargs):
-            pass
-
-        def setMinimumHeight(self, *_args, **_kwargs):
-            pass
-
-        def setTextInteractionFlags(self, *_args, **_kwargs):
-            pass
-
-    class _QUrl:
-        def __init__(self, value=""):
-            self.value = value
-
-        @classmethod
-        def fromLocalFile(cls, path):
-            return cls(path)
-
-    class _QTimer:
-        def __init__(self, *_args, **_kwargs):
-            self.timeout = _Signal()
-
-        def setInterval(self, *_args, **_kwargs):
+        def _populate_result_table(*_args, **_kwargs):
             return None
 
-        def start(self):
-            return None
+        table_views_module.populate_result_table = _populate_result_table
+        sys.modules["ui.views.table_views"] = table_views_module
 
-        def stop(self):
-            return None
+    workers_module = sys.modules.get("ui.workers")
+    if workers_module is not None and getattr(workers_module, "__file__", None):
+        return
 
-        @staticmethod
-        def singleShot(*_args, **_kwargs):
-            return None
-
-    class _QThread:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def start(self):
-            return None
-
-        def isRunning(self):
-            return False
-
-    class _WidgetBase:
-        def __init__(self, *_args, **_kwargs):
-            self._enabled = True
-
-        def setEnabled(self, value):
-            self._enabled = bool(value)
-
-        def isEnabled(self):
-            return self._enabled
-
-        def setMinimumHeight(self, *_args, **_kwargs):
-            pass
-
-        def setStyleSheet(self, *_args, **_kwargs):
-            pass
-
-        def setObjectName(self, *_args, **_kwargs):
-            pass
-
-    class _QPushButton(_WidgetBase):
-        def __init__(self, *_args, **_kwargs):
-            super().__init__()
-            self.clicked = _Signal()
-            self._text = ""
-
-        def setText(self, value):
-            self._text = value
-
-        def text(self):
-            return self._text
-
-    class _QSlider(_WidgetBase):
-        def __init__(self, *_args, **_kwargs):
-            super().__init__()
-            self.sliderPressed = _Signal()
-            self.sliderReleased = _Signal()
-            self._value = 0
-
-        def setRange(self, *_args, **_kwargs):
-            pass
-
-        def setValue(self, value):
-            self._value = value
-
-        def value(self):
-            return self._value
-
-        def blockSignals(self, *_args, **_kwargs):
-            pass
-
-    class _QBoxLayout:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def addWidget(self, *_args, **_kwargs):
-            pass
-
-        def addLayout(self, *_args, **_kwargs):
-            pass
-
-        def setContentsMargins(self, *_args, **_kwargs):
-            pass
-
-        def setSpacing(self, *_args, **_kwargs):
-            pass
-
-    class _QDialog(_WidgetBase):
-        def __init__(self, *_args, **_kwargs):
-            super().__init__()
-            self._fullscreen = False
-
-        def setWindowTitle(self, *_args, **_kwargs):
-            pass
-
-        def resize(self, *_args, **_kwargs):
-            pass
-
-        def showNormal(self):
-            self._fullscreen = False
-
-        def showFullScreen(self):
-            self._fullscreen = True
-
-        def isFullScreen(self):
-            return self._fullscreen
-
-        def hide(self):
-            pass
-
-    qtcore.QThread = _QThread
-    qtcore.QObject = _QObject
-    qtcore.Signal = _Signal
-    qtcore.Qt = _Qt
-    qtcore.QUrl = _QUrl
-    qtcore.QTimer = _QTimer
-    qtwidgets.QLabel = _QLabel
-    qtwidgets.QDialog = _QDialog
-    qtwidgets.QFileDialog = type(
-        "QFileDialog",
-        (),
-        {
-            "getSaveFileName": staticmethod(lambda *_args, **_kwargs: ("", "")),
-            "getOpenFileName": staticmethod(lambda *_args, **_kwargs: ("", "")),
-            "getExistingDirectory": staticmethod(lambda *_args, **_kwargs: ""),
-        },
-    )
-    qtwidgets.QHBoxLayout = _QBoxLayout
-    qtwidgets.QVBoxLayout = _QBoxLayout
-    qtwidgets.QPushButton = _QPushButton
-    qtwidgets.QSlider = _QSlider
-    qtwidgets.QWidget = _WidgetBase
-
-    pyside6 = types.ModuleType("PySide6")
-    sys.modules["PySide6"] = pyside6
-    sys.modules["PySide6.QtCore"] = qtcore
-    sys.modules["PySide6.QtWidgets"] = qtwidgets
-
-if "ui.dialogs" not in sys.modules:
-    dialogs_module = types.ModuleType("ui.dialogs")
-    dialogs_module.ModelDownloadDialog = type("ModelDownloadDialog", (), {})
-    sys.modules["ui.dialogs"] = dialogs_module
-
-if "ui.views.table_views" not in sys.modules:
-    table_views_module = types.ModuleType("ui.views.table_views")
-
-    def _populate_result_table(*_args, **_kwargs):
-        return None
-
-    table_views_module.populate_result_table = _populate_result_table
-    sys.modules["ui.views.table_views"] = table_views_module
-
-if "ui.workers" not in sys.modules:
     workers_module = types.ModuleType("ui.workers")
 
     class _BaseWorker:
@@ -269,13 +90,308 @@ if "ui.workers" not in sys.modules:
     workers_module.IndexUpdateWorker = _BaseWorker
     sys.modules["ui.workers"] = workers_module
 
-from ui.controllers.indexing_controller import IndexingController
-from ui.controllers.mobile_bridge_controller import MobileBridgeController
-from ui.controllers.runtime_resource_controller import RuntimeResourceController
-from ui.controllers.preview_controller import PreviewController
-from ui.playback.preview_dialog import PreviewDialog
-from ui.controllers.search_controller import SearchController
-from ui.playback.vlc_player import VlcPreviewPlayer
+
+def _install_pyside_stub():
+    for module_name in list(sys.modules):
+        if module_name == "PySide6" or module_name.startswith("PySide6."):
+            del sys.modules[module_name]
+
+    if "PySide6" in sys.modules:
+        return
+
+    qtcore = types.ModuleType("PySide6.QtCore")
+    qtgui = types.ModuleType("PySide6.QtGui")
+    qtwidgets = types.ModuleType("PySide6.QtWidgets")
+
+    class _QObject:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _SignalLocal:
+        def __init__(self, *args, **kwargs):
+            self._subscribers = []
+
+        def connect(self, callback):
+            self._subscribers.append(callback)
+
+        def emit(self, *args, **kwargs):
+            for callback in list(self._subscribers):
+                callback(*args, **kwargs)
+
+    class _Qt:
+        AlignCenter = 0x84
+        AlignHCenter = 4
+        AlignVCenter = 0x80
+        AlignBottom = 64
+        WA_NativeWindow = 100
+        Horizontal = 1
+        Key_Space = 32
+
+        class TextElideMode:
+            ElideRight = 2
+
+    class _StubMixin:
+        def __getattr__(self, name):
+            if name.startswith(("set", "add", "insert", "remove", "clear", "block")):
+                return lambda *_args, **_kwargs: None
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    class _QLabel(_StubMixin):
+        def __init__(self, *_args, **_kwargs):
+            self._text = ""
+
+        def setAlignment(self, *_args, **_kwargs):
+            pass
+
+        def setPixmap(self, *_args, **_kwargs):
+            pass
+
+        def setText(self, value):
+            self._text = value
+
+        def text(self):
+            return self._text
+
+        def setWordWrap(self, *_args, **_kwargs):
+            pass
+
+        def setObjectName(self, *_args, **_kwargs):
+            pass
+
+        def setMinimumHeight(self, *_args, **_kwargs):
+            pass
+
+        def setTextInteractionFlags(self, *_args, **_kwargs):
+            pass
+
+        def setVisible(self, *_args, **_kwargs):
+            pass
+
+    class _QUrl:
+        def __init__(self, value=""):
+            self.value = value
+
+        @classmethod
+        def fromLocalFile(cls, path):
+            return cls(path)
+
+    class _QTimer:
+        def __init__(self, *_args, **_kwargs):
+            self.timeout = _SignalLocal()
+
+        def setInterval(self, *_args, **_kwargs):
+            return None
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        @staticmethod
+        def singleShot(*_args, **_kwargs):
+            return None
+
+    class _QThread:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            return None
+
+        def isRunning(self):
+            return False
+
+    class _WidgetBase(_StubMixin):
+        def __init__(self, *_args, **_kwargs):
+            self._enabled = True
+
+        def setEnabled(self, value):
+            self._enabled = bool(value)
+
+        def isEnabled(self):
+            return self._enabled
+
+        def setMinimumHeight(self, *_args, **_kwargs):
+            pass
+
+        def setStyleSheet(self, *_args, **_kwargs):
+            pass
+
+        def setObjectName(self, *_args, **_kwargs):
+            pass
+
+        def setSizePolicy(self, *_args, **_kwargs):
+            pass
+
+        def setVisible(self, *_args, **_kwargs):
+            pass
+
+    class _QPushButton(_WidgetBase):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self.clicked = _SignalLocal()
+            self._text = ""
+
+        def setText(self, value):
+            self._text = value
+
+        def text(self):
+            return self._text
+
+    class _QSlider(_WidgetBase):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self.sliderPressed = _SignalLocal()
+            self.sliderReleased = _SignalLocal()
+            self._value = 0
+
+        def setRange(self, *_args, **_kwargs):
+            pass
+
+        def setValue(self, value):
+            self._value = value
+
+        def value(self):
+            return self._value
+
+        def blockSignals(self, *_args, **_kwargs):
+            pass
+
+    class _QBoxLayout(_StubMixin):
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def addWidget(self, *_args, **_kwargs):
+            pass
+
+        def addLayout(self, *_args, **_kwargs):
+            pass
+
+        def setContentsMargins(self, *_args, **_kwargs):
+            pass
+
+        def setSpacing(self, *_args, **_kwargs):
+            pass
+
+    class _QDialog(_WidgetBase):
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self._fullscreen = False
+
+        def setWindowTitle(self, *_args, **_kwargs):
+            pass
+
+        def resize(self, *_args, **_kwargs):
+            pass
+
+        def showNormal(self):
+            self._fullscreen = False
+
+        def showFullScreen(self):
+            self._fullscreen = True
+
+        def isFullScreen(self):
+            return self._fullscreen
+
+        def hide(self):
+            pass
+
+    class _QSizePolicy:
+        class Policy:
+            Fixed = 0
+            Maximum = 4
+            Preferred = 5
+            Expanding = 7
+
+    qtcore.QThread = _QThread
+    qtcore.QObject = _QObject
+    qtcore.Signal = _SignalLocal
+    qtcore.Qt = _Qt
+    qtcore.QUrl = _QUrl
+    qtcore.QTimer = _QTimer
+    qtwidgets.QLabel = _QLabel
+    qtwidgets.QDialog = _QDialog
+    qtwidgets.QFileDialog = type(
+        "QFileDialog",
+        (),
+        {
+            "getSaveFileName": staticmethod(lambda *_args, **_kwargs: ("", "")),
+            "getOpenFileName": staticmethod(lambda *_args, **_kwargs: ("", "")),
+            "getExistingDirectory": staticmethod(lambda *_args, **_kwargs: ""),
+        },
+    )
+    qtwidgets.QHBoxLayout = _QBoxLayout
+    qtwidgets.QVBoxLayout = _QBoxLayout
+    qtwidgets.QPushButton = _QPushButton
+    qtwidgets.QSlider = _QSlider
+    qtwidgets.QWidget = _WidgetBase
+    qtwidgets.QTableWidget = _WidgetBase
+    qtwidgets.QAbstractItemView = type("QAbstractItemView", (), {"SelectRows": 1})
+    qtwidgets.QSizePolicy = _QSizePolicy
+
+    class _QApplication:
+        @staticmethod
+        def instance():
+            return None
+
+        @staticmethod
+        def clipboard():
+            return MagicMock()
+
+    qtwidgets.QApplication = _QApplication
+    qtgui.QFontMetrics = _QLabel
+
+    pyside6 = types.ModuleType("PySide6")
+    pyside6.__path__ = []
+    sys.modules["PySide6"] = pyside6
+    sys.modules["PySide6.QtCore"] = qtcore
+    sys.modules["PySide6.QtGui"] = qtgui
+    sys.modules["PySide6.QtWidgets"] = qtwidgets
+
+
+IndexingController = None
+MobileBridgeController = None
+PreviewController = None
+PreviewDialog = None
+RuntimeResourceController = None
+SearchController = None
+VlcPreviewPlayer = None
+
+
+def setUpModule():
+    global IndexingController, MobileBridgeController, PreviewController
+    global PreviewDialog, RuntimeResourceController, SearchController, VlcPreviewPlayer
+
+    for module_name in (
+        "ui.controllers.indexing_controller",
+        "ui.controllers.mobile_bridge_controller",
+        "ui.controllers.runtime_resource_controller",
+        "ui.controllers.preview_controller",
+        "ui.playback.preview_dialog",
+        "ui.controllers.search_controller",
+        "ui.playback.vlc_player",
+    ):
+        sys.modules.pop(module_name, None)
+
+    _install_lightweight_ui_stubs()
+    _install_pyside_stub()
+
+    from ui.controllers.indexing_controller import IndexingController as _IndexingController
+    from ui.controllers.mobile_bridge_controller import MobileBridgeController as _MobileBridgeController
+    from ui.controllers.runtime_resource_controller import RuntimeResourceController as _RuntimeResourceController
+    from ui.controllers.preview_controller import PreviewController as _PreviewController
+    from ui.playback.preview_dialog import PreviewDialog as _PreviewDialog
+    from ui.controllers.search_controller import SearchController as _SearchController
+    from ui.playback.vlc_player import VlcPreviewPlayer as _VlcPreviewPlayer
+
+    IndexingController = _IndexingController
+    MobileBridgeController = _MobileBridgeController
+    RuntimeResourceController = _RuntimeResourceController
+    PreviewController = _PreviewController
+    PreviewDialog = _PreviewDialog
+    SearchController = _SearchController
+    VlcPreviewPlayer = _VlcPreviewPlayer
 
 
 def _make_parent_window():
@@ -400,6 +516,7 @@ class IndexingControllerTests(unittest.TestCase):
             force_cleanup_missing_files=False,
             cleanup_missing_entries=None,
             rebuild_global_assets=False,
+            index_from_vectors_only=False,
         )
         worker.start.assert_called_once()
 
@@ -473,7 +590,22 @@ class SearchControllerTests(unittest.TestCase):
 
         parent.search_page.btn_search.setEnabled.assert_called_with(False)
         parent.search_page.lbl_status.setText.assert_called_with("Searching...")
-        mock_worker_cls.assert_called_once_with("cat", True)
+        mock_worker_cls.assert_called_once_with(
+            query="cat",
+            is_text=True,
+            scope_library_paths=[],
+            scope_video_paths=None,
+            query_vector=None,
+            search_mode=None,
+            top_k=None,
+            min_score=None,
+            search_precision_mode=None,
+            pixel_query_data=None,
+            preview_anchor_sec=None,
+            locate_anchor_score=None,
+            locate_score_margin=None,
+            video_discovery_enabled=None,
+        )
         worker.start.assert_called_once()
 
     @patch("ui.controllers.search_controller.shutdown_thread")
@@ -484,7 +616,6 @@ class SearchControllerTests(unittest.TestCase):
         first_worker = MagicMock()
         second_worker = MagicMock()
         mock_worker_cls.side_effect = [first_worker, second_worker]
-        controller.worker = first_worker
 
         controller.start_search("cat", True)
         controller.start_search("dog", True)
@@ -506,6 +637,8 @@ class SearchControllerTests(unittest.TestCase):
     def test_display_results_handles_empty_result(self):
         parent = _make_parent_window()
         controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller._is_current_worker = MagicMock(return_value=True)
 
         controller._display_results([])
 
@@ -550,10 +683,9 @@ class PreviewControllerTests(unittest.TestCase):
         mock_worker_cls.assert_called_once_with()
         worker.start.assert_called_once()
 
+    @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
-    @patch("ui.controllers.preview_controller.get_video_duration_seconds", return_value=120.0)
-    @patch("ui.controllers.preview_controller.load_config", return_value={"preview_seconds": 6})
-    def test_play_prefers_vlc_for_direct_preview(self, _mock_config, _mock_duration, mock_vlc_cls):
+    def test_play_prefers_vlc_for_direct_preview(self, mock_vlc_cls, _mock_window):
         parent = _make_parent_window()
         vlc_player = MagicMock()
         vlc_player.play.return_value = True
@@ -568,14 +700,12 @@ class PreviewControllerTests(unittest.TestCase):
 
     @patch("ui.controllers.preview_controller.create_preview_clip")
     @patch("ui.controllers.preview_controller.build_preview_cache_path", return_value="D:/cache/preview.mp4")
+    @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
-    @patch("ui.controllers.preview_controller.get_video_duration_seconds", return_value=120.0)
-    @patch("ui.controllers.preview_controller.load_config", return_value={"preview_seconds": 6})
     def test_play_falls_back_to_generated_clip_when_vlc_playback_fails(
         self,
-        _mock_config,
-        _mock_duration,
         mock_vlc_cls,
+        _mock_window,
         _mock_cache_path,
         mock_create_preview,
     ):
@@ -601,6 +731,8 @@ class PreviewControllerTests(unittest.TestCase):
         parent = _make_parent_window()
         controller = PreviewController(parent)
         controller.vlc_player = MagicMock()
+        controller.vlc_player.get_time.return_value = -1
+        controller.vlc_player.is_available.return_value = False
         controller.current_preview_context = {
             "video_path": "D:/videos/clip.mp4",
             "start_sec": 1.0,

@@ -158,7 +158,7 @@ class SigLIP2OnnxEngine(OnnxVisionBatchMixin):
 
 
 def build_siglip_profile_manifest(variant="base-patch16-224"):
-    """Return a draft model_manifest payload for SigLIP package parsing."""
+    """Return a model_manifest payload for SigLIP package parsing."""
     variant_text = str(variant or "").strip() or "base-patch16-224"
     return {
         "id": f"siglip2_{variant_text.replace('-', '_')}",

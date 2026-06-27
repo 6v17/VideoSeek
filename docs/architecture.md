@@ -10,7 +10,10 @@
 
 | 模块 | 职责 |
 |------|------|
-| `search_service.py` | frame/chunk 搜索、scope、rerank、预设 |
+| `search_service.py` | frame/chunk 搜索编排（`run_search` / `run_chunk_search`） |
+| `search_*` 子模块 | 邻居重排、定位管线、chunk 聚合、资产加载、query 向量等（由 `search_service` 组合） |
+| `search_telemetry*` | 截图搜索遥测：持久化 store、定位/播放/置信度记录、UI 格式化（由 `search_telemetry` 门面 re-export） |
+| `search_preset*` | 混合搜索预设：JSON 存储、记录规范化、query 向量缓存、CRUD、搜索 plan（由 `search_preset_service` 门面 re-export） |
 | `indexing_service.py` | 索引构建与复用、全局/分库合并 |
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
 | `understanding_service.py` | 理解笔录生成、读盘/写盘、`EvidenceBundle` 编排 |

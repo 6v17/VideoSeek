@@ -6,12 +6,28 @@ from unittest.mock import patch
 
 import numpy as np
 
-sys.modules.setdefault("cv2", __import__("types").SimpleNamespace())
-sys.modules.setdefault("onnxruntime", __import__("types").SimpleNamespace())
-_faiss = __import__("types").SimpleNamespace()
-_faiss.normalize_L2 = lambda vector: None
-sys.modules.setdefault("faiss", _faiss)
+import importlib.util
+import types
 
+try:
+    import cv2 as _real_cv2
+    sys.modules["cv2"] = _real_cv2
+except ImportError:
+    sys.modules.setdefault("cv2", types.SimpleNamespace())
+try:
+    import onnxruntime as _real_ort
+    sys.modules["onnxruntime"] = _real_ort
+except ImportError:
+    sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
+try:
+    import faiss as _real_faiss
+    sys.modules["faiss"] = _real_faiss
+except ImportError:
+    _faiss = types.SimpleNamespace()
+    _faiss.normalize_L2 = lambda vector: None
+    sys.modules["faiss"] = _faiss
+
+from src.services import search_preset_query as preset_query_module
 from src.services import search_preset_service as preset_service
 
 
@@ -37,8 +53,8 @@ class SearchPresetServiceTests(unittest.TestCase):
             },
         }
         self.embedding_patcher = patch.object(
-            preset_service,
-            "_encode_preset_query_vector",
+            preset_query_module,
+            "encode_preset_query_vector",
             return_value=np.array([[0.1, 0.2, 0.3]], dtype=np.float32),
         )
         self.embedding_patcher.start()
@@ -47,10 +63,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.embedding_patcher.stop()
         self._tmp.cleanup()
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_text_only_preset_crud_and_cache(
         self,
         mock_data_root,
@@ -99,10 +115,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.assertEqual(len(remaining), len(preset_service.BUILTIN_SEARCH_PRESETS))
         self.assertNotIn(created["id"], {item["id"] for item in remaining})
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_image_preset_copies_reference_and_builds_cache(
         self,
         mock_data_root,
@@ -135,10 +151,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         vector = preset_service.resolve_preset_query_vector(created, config=self.config)
         self.assertEqual(vector.shape, (1, 3))
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_mixed_preset_with_multiple_images(
         self,
         mock_data_root,
@@ -187,9 +203,9 @@ class SearchPresetServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(updated["ref_files"]), 1)
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_legacy_text_and_image_presets_normalize_to_mixed(
         self,
         mock_data_root,
@@ -226,10 +242,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         image_preset = next(item for item in presets if item["name"] == "Old Image")
         self.assertEqual(image_preset["ref_files"], ["refs/legacy.png"])
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_shared_presets_with_profile_scoped_query_cache(
         self,
         mock_data_root,
@@ -263,10 +279,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(clip_cache))
         self.assertTrue(os.path.isfile(siglip_cache))
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_update_fusion_without_recopying_reference_images(
         self,
         mock_data_root,
@@ -311,10 +327,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             preset_service.create_preset(name="Empty", query="", source_image_paths=[], config=self.config)
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_build_preset_search_plan_uses_live_search_mode(
         self,
         mock_data_root,
@@ -343,10 +359,10 @@ class SearchPresetServiceTests(unittest.TestCase):
         plan = preset_service.build_preset_search_plan(created["id"], config=self.config)
         self.assertEqual(plan["search_mode"], "chunk")
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_embedding_spec")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_query.get_active_embedding_spec")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_build_preset_search_plan_mixed_uses_ref_for_pixel_query(
         self,
         mock_data_root,
@@ -380,9 +396,9 @@ class SearchPresetServiceTests(unittest.TestCase):
         self.assertEqual(plan["query_data"], "blue night")
         self.assertTrue(os.path.isfile(plan["pixel_query_data"]))
 
-    @patch("src.services.search_preset_service.load_config")
-    @patch("src.services.search_preset_service.get_active_model_profile")
-    @patch("src.services.search_preset_service.get_configured_data_root")
+    @patch("src.services.search_preset_storage.load_config")
+    @patch("src.services.search_preset_storage.get_active_model_profile")
+    @patch("src.services.search_preset_storage.get_configured_data_root")
     def test_builtin_presets_seeded_once(
         self,
         mock_data_root,

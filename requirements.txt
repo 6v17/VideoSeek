@@ -1,28 +1,32 @@
 # VideoSeek — Python dependencies
 # Install: pip install -r requirements.txt
+# Conda:  conda env create -f environment.yml
 #
 # ONNX Runtime: Windows uses the DirectML build (GPU via DirectML); other platforms use the standard CPU wheel.
-onnxruntime-directml; sys_platform == "win32"
-onnxruntime; sys_platform != "win32"
+onnxruntime-directml==1.23.0; sys_platform == "win32"
+onnxruntime==1.23.0; sys_platform != "win32"
 
-opencv-python
-scenedetect>=0.6.4
-PySide6
-faiss-cpu
-numpy
-pillow
-pillow-heif
+opencv-python==4.13.0.92
+scenedetect>=0.6.4,<0.8
+PySide6==6.10.2
+faiss-cpu==1.13.2
+numpy==2.2.6
+pillow==12.1.1
+pillow-heif==1.3.0
 # SigLIP ONNX profiles load tokenizer.json via Hugging Face tokenizers (default clip_onnx does not need this)
-tokenizers
+tokenizers==0.22.2
 ftfy
 regex
 yt-dlp
 python-vlc
 
 # Mobile bridge (local HTTP server / phone upload) — see src/web/mobile_bridge.py
-fastapi
-uvicorn
+fastapi==0.136.0
+uvicorn==0.44.0
 python-multipart
 
 # QR code for mobile bridge dialog — optional; UI works without it but QR image may be missing
 qrcode[pil]
+
+# Dev / CI
+pytest>=9.0

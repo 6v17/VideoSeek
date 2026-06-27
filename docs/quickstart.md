@@ -48,7 +48,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 ## 附录 B：测试
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+python -m pytest tests/ -q
 ```
 
 UI 相关测试需已安装 PySide6（`pip install -r requirements.txt` 即可）。

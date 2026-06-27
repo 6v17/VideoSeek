@@ -7,12 +7,23 @@ import types
 import unittest
 from unittest.mock import patch
 
-sys.modules.pop("numpy", None)
 import numpy as np
 
-sys.modules.setdefault("cv2", types.SimpleNamespace())
-sys.modules.setdefault("faiss", types.SimpleNamespace())
-sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
+try:
+    import cv2 as _real_cv2
+    sys.modules["cv2"] = _real_cv2
+except ImportError:
+    sys.modules["cv2"] = types.SimpleNamespace()
+try:
+    import faiss as _real_faiss
+    sys.modules["faiss"] = _real_faiss
+except ImportError:
+    sys.modules["faiss"] = types.SimpleNamespace()
+try:
+    import ftfy as _real_ftfy
+    sys.modules["ftfy"] = _real_ftfy
+except ImportError:
+    sys.modules["ftfy"] = types.SimpleNamespace(fix_text=lambda text: text)
 sys.modules.setdefault("regex", std_re)
 
 
@@ -402,7 +413,7 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
         self.assertEqual(status["backend"], "CPU")
 
     @patch(
-        "src.core.clip_embedding.chunk_config_payload",
+        "src.core.clip_embedding.build_chunk_config",
         return_value={
             "similarity_threshold": 0.85,
             "max_chunk_duration": 5.0,

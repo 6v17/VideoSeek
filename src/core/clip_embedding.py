@@ -1136,7 +1136,7 @@ def _register_default_inference_engines():
     register_inference_engine("clip_onnx", lambda: CLIPOnnxEngine())
 
     def _siglip_factory():
-        from src.core.siglip_provider_draft import SigLIP2OnnxEngine
+        from src.core.siglip_provider import SigLIP2OnnxEngine
 
         runtime_config = load_config()
         return SigLIP2OnnxEngine(get_active_model_resource_dir(config=runtime_config))

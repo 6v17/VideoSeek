@@ -24,8 +24,13 @@ else:
     cv2_module.CAP_PROP_POS_MSEC = getattr(cv2_module, "CAP_PROP_POS_MSEC", 0)
     cv2_module.CAP_PROP_FPS = getattr(cv2_module, "CAP_PROP_FPS", 5)
 
-faiss_module = sys.modules.setdefault("faiss", types.SimpleNamespace())
-faiss_module.normalize_L2 = getattr(faiss_module, "normalize_L2", lambda *_args, **_kwargs: None)
+try:
+    import faiss as _real_faiss
+    sys.modules["faiss"] = _real_faiss
+except ImportError:
+    faiss_module = types.SimpleNamespace()
+    faiss_module.normalize_L2 = getattr(faiss_module, "normalize_L2", lambda *_args, **_kwargs: None)
+    sys.modules["faiss"] = faiss_module
 
 from src.domain.remote_search_hit import RemoteSearchHit
 from src.domain.search_hit import SearchHit
@@ -1275,7 +1280,7 @@ class SearchServiceTests(unittest.TestCase):
         mock_per_video_search.assert_called_once()
         self.assertTrue(mock_per_video_search.call_args.kwargs.get("precise_image"))
 
-    @patch("src.services.search_service.get_active_model_profile")
+    @patch("src.services.search_assets.get_active_model_profile")
     def test_check_asset_profile_compatibility_rejects_mismatched_model_id(self, mock_get_profile):
         mock_get_profile.return_value = {"id": "siglip2_default", "provider": "siglip2_onnx"}
         asset_info = {
@@ -1294,7 +1299,7 @@ class SearchServiceTests(unittest.TestCase):
 
         self.assertIn("active profile", str(ctx.exception).lower())
 
-    @patch("src.services.search_service.get_active_model_profile")
+    @patch("src.services.search_assets.get_active_model_profile")
     def test_check_asset_profile_compatibility_ignores_missing_embedding_spec(self, mock_get_profile):
         mock_get_profile.return_value = {"id": "clip_onnx_default", "provider": "clip_onnx"}
         asset_info = {"embedding_spec": None, "index_dim": 512}
@@ -1334,7 +1339,7 @@ class SearchServiceTests(unittest.TestCase):
     def test_neighbor_rerank_disabled_for_fast_image_search(self):
         self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
 
-    @patch("src.services.search_service.apply_image_pixel_rerank")
+    @patch("src.services.search_locate_pipeline.apply_image_pixel_rerank")
     def test_finalize_frame_hits_prefers_pixel_query_data(self, mock_pixel):
         mock_pixel.return_value = []
         hits = [SearchHit(1.0, 1.0, 0.9, "a.mp4")]

@@ -34,6 +34,12 @@ from src.services.agent_clip_service import (
     execute_agent_batch_export_clips,
     execute_agent_export_clip,
 )
+from src.services.agent_evidence_service import (
+    AgentEvidenceError,
+    build_agent_understanding_health_fields,
+    get_agent_video_evidence,
+    resolve_understanding_timeout_sec,
+)
 from src.utils import normalize_export_encode_mode
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
 from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
@@ -387,6 +393,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
+        **build_agent_understanding_health_fields(config=config, probe_remote=False),
     }
 
 
@@ -1411,6 +1418,7 @@ class AgentApiService:
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
+        self.app.get("/api/v1/videos/evidence")(self._video_evidence)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
         self.app.post("/api/v1/export/clip")(self._export_clip)
         self.app.post("/api/v1/export/clips/batch")(self._export_clips_batch)
@@ -1580,6 +1588,56 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent search telemetry failed.")
             raise_api_error(500, "query_failed", str(exc))
+
+    async def _video_evidence(
+        self,
+        video_id: Optional[str] = None,
+        video_path: Optional[str] = None,
+        start_sec: Optional[float] = None,
+        end_sec: Optional[float] = None,
+        ensure: bool = False,
+    ):
+        config = load_config()
+        timeout_sec = resolve_understanding_timeout_sec(chunk_count=0, config=config)
+        try:
+            from src.services.indexing_service import load_video_chunks_by_id
+            from src.services.agent_evidence_service import resolve_agent_video_id
+
+            resolved_video_id = await asyncio.to_thread(
+                resolve_agent_video_id,
+                video_id=video_id,
+                video_path=video_path,
+                config=config,
+            )
+            chunks = await asyncio.to_thread(load_video_chunks_by_id, resolved_video_id, config)
+            timeout_sec = resolve_understanding_timeout_sec(chunk_count=len(chunks or []), config=config)
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(
+                    get_agent_video_evidence,
+                    video_id=video_id,
+                    video_path=video_path,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    ensure=ensure,
+                    config=config,
+                ),
+                timeout=timeout_sec,
+            )
+        except AgentEvidenceError as exc:
+            raise_api_error(exc.status_code, exc.code, exc.message)
+        except asyncio.TimeoutError:
+            raise_api_error(
+                503,
+                "understanding_timeout",
+                f"Understanding evidence timed out after {int(timeout_sec)} seconds.",
+            )
+        except Exception as exc:
+            logger.exception("Agent video evidence failed.")
+            raise_api_error(500, "query_failed", str(exc))
+        payload.setdefault("meta", {})
+        if isinstance(payload.get("meta"), dict):
+            payload["meta"]["understanding_timeout_sec"] = int(timeout_sec)
+        return payload
 
     async def _search(self, body: AgentSearchRequest):
         started = time.perf_counter()

@@ -4,11 +4,31 @@ import types
 import unittest
 from unittest.mock import patch
 
-sys.modules.setdefault("cv2", types.SimpleNamespace())
-sys.modules.setdefault("numpy", types.SimpleNamespace())
-sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
-sys.modules.setdefault("faiss", types.SimpleNamespace())
-sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
+try:
+    import cv2 as _real_cv2
+    sys.modules["cv2"] = _real_cv2
+except ImportError:
+    sys.modules.setdefault("cv2", types.SimpleNamespace())
+try:
+    import numpy as _real_numpy
+    sys.modules["numpy"] = _real_numpy
+except ImportError:
+    sys.modules.setdefault("numpy", types.SimpleNamespace())
+try:
+    import onnxruntime as _real_ort
+    sys.modules["onnxruntime"] = _real_ort
+except ImportError:
+    sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
+try:
+    import faiss as _real_faiss
+    sys.modules["faiss"] = _real_faiss
+except ImportError:
+    sys.modules.setdefault("faiss", types.SimpleNamespace())
+try:
+    import ftfy as _real_ftfy
+    sys.modules["ftfy"] = _real_ftfy
+except ImportError:
+    sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
 sys.modules.setdefault("regex", __import__("re"))
 
 from src.core import clip_embedding

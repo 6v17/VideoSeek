@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication
 
@@ -18,17 +19,19 @@ class SingleInstanceTests(unittest.TestCase):
     def test_server_name_is_stable_for_session(self):
         self.assertEqual(single_instance_server_name(), single_instance_server_name())
 
-    def test_secondary_launch_activates_primary(self):
-        idle_name = f"{single_instance_server_name()}_idle"
-        self.assertFalse(try_activate_existing_instance(server_name=idle_name))
+    def test_secondary_launch_connects_to_primary(self):
+        name = f"{single_instance_server_name()}_test_connect"
+        server = SingleInstanceServer(server_name=name)
+        self.addCleanup(server._server.close)
+        self.assertTrue(try_activate_existing_instance(server_name=name))
 
-        name = f"{single_instance_server_name()}_test"
+    def test_activate_handler_dispatched(self):
+        name = f"{single_instance_server_name()}_test_dispatch"
         activated = []
         server = SingleInstanceServer(server_name=name)
         server.set_activate_handler(lambda: activated.append(True))
-
-        self.assertTrue(try_activate_existing_instance(server_name=name))
-        self._app.processEvents()
+        with patch("src.app.single_instance.QTimer.singleShot", side_effect=lambda _ms, fn: fn()):
+            server._dispatch_activate()
         self.assertEqual(activated, [True])
 
 
