@@ -2,46 +2,91 @@
 
 [中文说明](./README.md) | **English**
 
-Desktop semantic video search (PySide6 + ONNX + FAISS + FFmpeg).
+**Search your local video library by text or screenshot, preview hits, export clips.**  
+Indexing and retrieval run on your machine (ONNX + FAISS + FFmpeg); your media files are not uploaded.
+
+> Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.
+
+## Features
+
+### Core (available after you **sync a library**)
+
+| Feature | Description |
+|---------|-------------|
+| **Local libraries** | Add folders, sync to extract frames and build embeddings |
+| **Text search** | Describe a scene; get time ranges in indexed videos |
+| **Image / screenshot search** | Find similar shots from a reference or cropped frame |
+| **Scope & presets** | All libraries, selected libraries/videos; saved search presets |
+| **frame / chunk modes** | Per-frame hits or semantic chunk aggregation |
+| **Preview & export** | Timeline preview; export mp4 segments |
+
+### Optional
+
+| Feature | Description |
+|---------|-------------|
+| **Understanding evidence** | Per-chunk detection + captions + video summary (YOLO + caption service) |
+| **Localhost Agent API** | HTTP on `127.0.0.1`: search, libraries, export, evidence (see `docs/for-agents.md`) |
+| **Remote libraries** | Import linked libraries and search them like local ones |
+
+## Who is it for?
+
+- Large local or NAS media folders — find **semantically similar shots**, not filenames
+- **Rough-cut prep** before editing in a NLE
+- **Local models** plus optional HTTP access for Cursor / other agents
+
+## Screenshots
+
+No screenshots in the repo yet. See **[lv17.top](https://www.lv17.top/)** for the installer page. PRs welcome under `docs/assets/`.
+
+<!-- Example:
+![Search UI](docs/assets/search.png)
+-->
 
 ## Download
 
-Don't want to set up Python and dependencies? Grab the **pre-built installer** from **[lv17.top](https://www.lv17.top/)**. On first launch, follow the in-app prompts to download and import runtime assets (models, FFmpeg, etc.).
+Prefer not to manage Python? Get the **installer** from **[lv17.top](https://www.lv17.top/)**. On first launch, import **runtime assets** (models, FFmpeg) as prompted.
 
 ## Minimal workflow
 
-1. **Set up runtime assets** — Follow first-launch prompts, or download and **import** models and FFmpeg under **Settings** .
-2. **Add a library** — Open **Local Library** in the sidebar and add a folder.
-3. **Sync the library** — Select the library and click **Sync**; wait for frame extraction and indexing to finish.
-4. **Search** — Open **Search** in the sidebar and query with text or images over synced videos.
+1. **Runtime assets** — First-launch prompts, or **Settings** → import models and FFmpeg.
+2. **Add a library** — Sidebar **Local Library** → add a folder.
+3. **Sync** — Select the library → **Sync**; wait for indexing.
+4. **Search** — Sidebar **Search** → text or image query.
 
-Understanding evidence and the Agent API are optional add-ons — **sync a library first** before using them.
+Understanding evidence and the Agent API are optional — **sync a library first**.
 
 ## Community
 
-- **QQ group**: 1033551438 (install help, usage questions, feedback)
+- **QQ group**: 1033551438
+- **GitHub Issues** — especially for source builds and the Agent API
 
 ## From source
+
+**Windows 10/11 recommended.** Linux / macOS: adjust ONNX runtime (see `docs/quickstart.md`).
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-On first launch, missing runtime assets must be imported in the app (same for installer and source builds):
+Or Conda: `conda env create -f environment.yml` → `conda activate VideoSeek`.
+
+Missing runtime assets (import in-app for both installer and source):
 
 | Missing | Fix |
 |---------|-----|
-| Models, FFmpeg | Follow in-app prompts, or use [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse** |
+| Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse** |
 | VLC (Windows source only) | [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip) at project root |
 
-See **`docs/quickstart.md`** for troubleshooting and advanced layout.
+See **`docs/quickstart.md`** for troubleshooting and tests.
 
 ## Docs
 
-- `docs/quickstart.md` — setup details (Chinese)
-- `docs/architecture.md` — architecture
-- `docs/for-agents.md` — localhost Agent API
+| Doc | Topic |
+|-----|--------|
+| `docs/quickstart.md` | Setup, troubleshooting, tests |
+| `docs/for-agents.md` | Localhost Agent API |
+| `docs/architecture.md` | Architecture (developers) |
 
 ## License
 

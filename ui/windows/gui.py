@@ -740,6 +740,7 @@ class MainWindow(
             False,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
+            search_mode="frame",
             search_precision_mode=search_precision_mode,
             video_discovery_enabled=self._resolve_video_discovery_enabled(
                 is_text=False,
@@ -980,6 +981,7 @@ class MainWindow(
             False,
             scope_video_paths=[target],
             scope_library_paths=None,
+            search_mode="frame",
             search_precision_mode="precise",
             preview_anchor_sec=preview_sec,
             locate_anchor_score=anchor_score,

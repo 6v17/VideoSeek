@@ -394,9 +394,14 @@ def run_search(
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
-    mode = str(search_mode or get_search_mode(config)).strip().lower()
-    if mode not in {"frame", "chunk"}:
-        mode = get_search_mode(config)
+    # Image queries default to frame search (matches search UI hint); callers can
+    # pass search_mode="chunk" explicitly when segment aggregation is intended.
+    if not is_text and search_mode is None:
+        mode = "frame"
+    else:
+        mode = str(search_mode or get_search_mode(config)).strip().lower()
+        if mode not in {"frame", "chunk"}:
+            mode = get_search_mode(config)
     profile_enabled = profile if profile is not None else is_profiling_enabled(config)
     profile_meta = build_profile_meta_from_config(
         config,

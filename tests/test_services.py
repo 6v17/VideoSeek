@@ -1253,6 +1253,24 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(result, expected)
         mock_per_video_search.assert_called_once()
 
+    @patch("src.services.search_service.run_chunk_search")
+    @patch("src.services.search_service._run_search_impl")
+    @patch("src.services.search_service.load_config")
+    def test_run_search_image_defaults_to_frame_when_mode_unset(
+        self,
+        mock_load_config,
+        mock_run_impl,
+        mock_run_chunk,
+    ):
+        mock_load_config.return_value = {"search_mode": "chunk"}
+        mock_run_impl.return_value = []
+
+        search_service.run_search("img.jpg", is_text=False, search_mode=None)
+
+        mock_run_chunk.assert_not_called()
+        mock_run_impl.assert_called_once()
+        self.assertEqual(mock_run_impl.call_args.kwargs["mode"], "frame")
+
     @patch("src.services.search_service.build_query_vector", return_value=np.array([[1.0, 0.0]], dtype=np.float32))
     @patch("src.services.search_service._run_frame_search_per_videos")
     @patch("src.services.search_service.load_config")
