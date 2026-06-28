@@ -36,11 +36,9 @@ Indexing and retrieval run on your machine (ONNX + FAISS + FFmpeg); your media f
 
 ## Screenshots
 
-No screenshots in the repo yet. See **[lv17.top](https://www.lv17.top/)** for the installer page. PRs welcome under `docs/assets/`.
-
-<!-- Example:
-![Search UI](docs/assets/search.png)
--->
+![搜索界面](docs/assets/图搜视频.png)
+![搜索界面](docs/assets/文搜视频.png)
+![搜索界面](docs/assets/视频理解.png)
 
 ## Download
 

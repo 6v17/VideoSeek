@@ -5,11 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="大文件重构">
-      <change afterPath="$PROJECT_DIR$/docs/assets/图搜视频.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/assets/文搜视频.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/assets/视频理解.png" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.en.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.en.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -78,23 +74,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0000573439177987" />
-      <entry key="MS500" value="1.1418075906177922" />
-      <entry key="S2" value="1.642103699505772" />
-      <entry key="S5" value="2.0633462902057587" />
-      <entry key="S10" value="2.3982129647997326" />
-      <entry key="S30" value="2.9788306014877066" />
-      <entry key="S60" value="4.491414601395876" />
-      <entry key="M2" value="9.699540571596177" />
-      <entry key="M5" value="31.977509529326934" />
-      <entry key="M10" value="67.91637519689597" />
-      <entry key="M15" value="98.42834649425699" />
-      <entry key="M30" value="177.510509766869" />
-      <entry key="H1" value="322.33231822477364" />
-      <entry key="H2" value="552.7080175938449" />
-      <entry key="H4" value="819.5430954899037" />
-      <entry key="D1" value="1543.7012641857941" />
-      <entry key="W1" value="1936.1571634556333" />
+      <entry key="MS100" value="1.002923604468557" />
+      <entry key="MS500" value="1.4079066685232915" />
+      <entry key="S2" value="3.063862191021532" />
+      <entry key="S5" value="6.087940273715755" />
+      <entry key="S10" value="9.25874686148783" />
+      <entry key="S30" value="13.159118577661369" />
+      <entry key="S60" value="14.781866109306366" />
+      <entry key="M2" value="17.73769143123483" />
+      <entry key="M5" value="34.34303697269848" />
+      <entry key="M10" value="67.7250268690746" />
+      <entry key="M15" value="98.14926847453057" />
+      <entry key="M30" value="178.22068052612906" />
+      <entry key="H1" value="324.1620640690203" />
+      <entry key="H2" value="556.4327034068374" />
+      <entry key="H4" value="826.3945973031913" />
+      <entry key="D1" value="1556.8167946889444" />
+      <entry key="W1" value="1951.6399633725273" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -116,23 +112,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9330864953039776" />
-      <entry key="MS500" value="1.1260879600756302" />
-      <entry key="S2" value="1.6361097761598584" />
-      <entry key="S5" value="2.0594235653503046" />
-      <entry key="S10" value="2.3954649694299546" />
-      <entry key="S30" value="2.977570521196575" />
-      <entry key="S60" value="4.49054700769251" />
-      <entry key="M2" value="9.698767414819855" />
-      <entry key="M5" value="31.97680112315493" />
-      <entry key="M10" value="67.9157585464432" />
-      <entry key="M15" value="98.42779479810322" />
-      <entry key="M30" value="177.51005307140633" />
-      <entry key="H1" value="322.33192075150924" />
-      <entry key="H2" value="552.707681045186" />
-      <entry key="H4" value="819.5428461390716" />
-      <entry key="D1" value="1543.7011851217762" />
-      <entry key="W1" value="1936.1571492496166" />
+      <entry key="MS100" value="0.9488621292346597" />
+      <entry key="MS500" value="1.3933319261019281" />
+      <entry key="S2" value="3.056212962618862" />
+      <entry key="S5" value="6.0819637540549385" />
+      <entry key="S10" value="9.254217970439882" />
+      <entry key="S30" value="13.156969399754853" />
+      <entry key="S60" value="14.78062665244315" />
+      <entry key="M2" value="17.73686973808255" />
+      <entry key="M5" value="34.34236768104904" />
+      <entry key="M10" value="67.7244265438309" />
+      <entry key="M15" value="98.1487209799982" />
+      <entry key="M30" value="178.22021966246712" />
+      <entry key="H1" value="324.1616623158232" />
+      <entry key="H2" value="556.4323634551706" />
+      <entry key="H4" value="826.3943452968174" />
+      <entry key="D1" value="1556.8167148661219" />
+      <entry key="W1" value="1951.6399490407994" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -465,15 +461,7 @@
       <workItem from="1782474044093" duration="8271000" />
       <workItem from="1782529924939" duration="5854000" />
       <workItem from="1782553183333" duration="2918000" />
-      <workItem from="1782611494949" duration="1961000" />
-    </task>
-    <task id="LOCAL-00084" summary="增加GPU解码抽帧（试验性）">
-      <option name="closed" value="true" />
-      <created>1779683638226</created>
-      <option name="number" value="00084" />
-      <option name="presentableId" value="LOCAL-00084" />
-      <option name="project" value="LOCAL" />
-      <updated>1779683638227</updated>
+      <workItem from="1782611494949" duration="2227000" />
     </task>
     <task id="LOCAL-00085" summary="加了搜索接口，供agent使用（beta）">
       <option name="closed" value="true" />
@@ -859,7 +847,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782613256838</updated>
     </task>
-    <option name="localTasksCounter" value="133" />
+    <task id="LOCAL-00133" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613704578</created>
+      <option name="number" value="00133" />
+      <option name="presentableId" value="LOCAL-00133" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613704578</updated>
+    </task>
+    <option name="localTasksCounter" value="134" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
