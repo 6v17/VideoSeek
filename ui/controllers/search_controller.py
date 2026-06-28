@@ -6,7 +6,7 @@ from src.app.logging_utils import get_logger
 from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
 from ui.threading_utils import shutdown_thread
 from ui.views.table_visibility import visible_table_row_range
-from ui.workers import SearchWarmupWorker, SearchWorker, ThumbLoader
+from ui.workers import SearchConfig, SearchWarmupWorker, SearchWorker, ThumbLoader
 
 logger = get_logger("search_controller")
 
@@ -74,20 +74,22 @@ class SearchController(QObject):
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["searching"])
 
         self.worker = SearchWorker(
-            query=query,
-            is_text=is_text,
-            scope_library_paths=self._scope_library_paths,
-            scope_video_paths=scope_video_paths,
-            query_vector=query_vector,
-            search_mode=search_mode,
-            top_k=top_k,
-            min_score=min_score,
-            search_precision_mode=search_precision_mode,
-            pixel_query_data=pixel_query_data,
-            preview_anchor_sec=preview_anchor_sec,
-            locate_anchor_score=locate_anchor_score,
-            locate_score_margin=locate_score_margin,
-            video_discovery_enabled=video_discovery_enabled,
+            SearchConfig(
+                query=query,
+                is_text=is_text,
+                scope_library_paths=self._scope_library_paths,
+                scope_video_paths=list(scope_video_paths or []),
+                query_vector=query_vector,
+                search_mode=search_mode,
+                top_k=top_k,
+                min_score=min_score,
+                search_precision_mode=search_precision_mode,
+                pixel_query_data=pixel_query_data,
+                preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
+                video_discovery_enabled=video_discovery_enabled,
+            )
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)

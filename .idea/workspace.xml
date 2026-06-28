@@ -5,7 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="大文件重构">
-      <change beforePath="$PROJECT_DIR$/README.en.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_workers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,7 +24,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="300" />
+    <option name="cachedIndexableFilesCount" value="303" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -74,23 +79,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.002923604468557" />
-      <entry key="MS500" value="1.4079066685232915" />
-      <entry key="S2" value="3.063862191021532" />
-      <entry key="S5" value="6.087940273715755" />
-      <entry key="S10" value="9.25874686148783" />
-      <entry key="S30" value="13.159118577661369" />
-      <entry key="S60" value="14.781866109306366" />
-      <entry key="M2" value="17.73769143123483" />
-      <entry key="M5" value="34.34303697269848" />
-      <entry key="M10" value="67.7250268690746" />
-      <entry key="M15" value="98.14926847453057" />
-      <entry key="M30" value="178.22068052612906" />
-      <entry key="H1" value="324.1620640690203" />
-      <entry key="H2" value="556.4327034068374" />
-      <entry key="H4" value="826.3945973031913" />
-      <entry key="D1" value="1556.8167946889444" />
-      <entry key="W1" value="1951.6399633725273" />
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0000001446558744" />
+      <entry key="S2" value="1.0632164146236402" />
+      <entry key="S5" value="2.3385152281930726" />
+      <entry key="S10" value="5.456682696380336" />
+      <entry key="S30" value="11.72295715247143" />
+      <entry key="S60" value="14.733898368835701" />
+      <entry key="M2" value="18.47959164762499" />
+      <entry key="M5" value="35.37378866839172" />
+      <entry key="M10" value="68.77600880948573" />
+      <entry key="M15" value="99.2343580934456" />
+      <entry key="M30" value="179.39184394620113" />
+      <entry key="H1" value="325.409293260322" />
+      <entry key="H2" value="557.7870765521454" />
+      <entry key="H4" value="827.9153057605333" />
+      <entry key="D1" value="1558.6663561422229" />
+      <entry key="W1" value="1953.613024133167" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -112,23 +117,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9488621292346597" />
-      <entry key="MS500" value="1.3933319261019281" />
-      <entry key="S2" value="3.056212962618862" />
-      <entry key="S5" value="6.0819637540549385" />
-      <entry key="S10" value="9.254217970439882" />
-      <entry key="S30" value="13.156969399754853" />
-      <entry key="S60" value="14.78062665244315" />
-      <entry key="M2" value="17.73686973808255" />
-      <entry key="M5" value="34.34236768104904" />
-      <entry key="M10" value="67.7244265438309" />
-      <entry key="M15" value="98.1487209799982" />
-      <entry key="M30" value="178.22021966246712" />
-      <entry key="H1" value="324.1616623158232" />
-      <entry key="H2" value="556.4323634551706" />
-      <entry key="H4" value="826.3943452968174" />
-      <entry key="D1" value="1556.8167148661219" />
-      <entry key="W1" value="1951.6399490407994" />
+      <entry key="MS100" value="0.9138314502294005" />
+      <entry key="MS500" value="0.9821397305967184" />
+      <entry key="S2" value="1.058053797771323" />
+      <entry key="S5" value="2.3329308544551934" />
+      <entry key="S10" value="5.450765965153524" />
+      <entry key="S30" value="11.71926044499816" />
+      <entry key="S60" value="14.731653758735767" />
+      <entry key="M2" value="18.478205691231214" />
+      <entry key="M5" value="35.372880714906806" />
+      <entry key="M10" value="68.77528668193915" />
+      <entry key="M15" value="99.23372856765613" />
+      <entry key="M30" value="179.39134149379646" />
+      <entry key="H1" value="325.4088705324081" />
+      <entry key="H2" value="557.7867260306068" />
+      <entry key="H4" value="827.9150484155322" />
+      <entry key="D1" value="1558.6662754126176" />
+      <entry key="W1" value="1953.6130096709853" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -142,32 +147,32 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "DefaultHtmlFileTemplate": "HTML File",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.core.executor": "Debug",
-    "Python.main.executor": "Run",
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "master",
-    "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "D:/PycharmProjects/VideoSeek/docs/assets",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/docs/assets&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;ml.llm.LLMThirdPartyAiProvidersConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\docs\assets" />
@@ -238,8 +243,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.24374.152" />
-        <option value="bundled-python-sdk-c59985aa861c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.24374.152" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.25134.203" />
+        <option value="bundled-python-sdk-245168a56dbd-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.25134.203" />
       </set>
     </attachedChunks>
   </component>
@@ -461,15 +466,10 @@
       <workItem from="1782474044093" duration="8271000" />
       <workItem from="1782529924939" duration="5854000" />
       <workItem from="1782553183333" duration="2918000" />
-      <workItem from="1782611494949" duration="2227000" />
-    </task>
-    <task id="LOCAL-00085" summary="加了搜索接口，供agent使用（beta）">
-      <option name="closed" value="true" />
-      <created>1779705980280</created>
-      <option name="number" value="00085" />
-      <option name="presentableId" value="LOCAL-00085" />
-      <option name="project" value="LOCAL" />
-      <updated>1779705980280</updated>
+      <workItem from="1782611494949" duration="2839000" />
+      <workItem from="1782614526199" duration="2065000" />
+      <workItem from="1782621309148" duration="691000" />
+      <workItem from="1782646805727" duration="3432000" />
     </task>
     <task id="LOCAL-00086" summary="给agent调用api的说明书">
       <option name="closed" value="true" />
@@ -855,7 +855,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782613704578</updated>
     </task>
-    <option name="localTasksCounter" value="134" />
+    <task id="LOCAL-00134" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613891519</created>
+      <option name="number" value="00134" />
+      <option name="presentableId" value="LOCAL-00134" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613891519</updated>
+    </task>
+    <option name="localTasksCounter" value="135" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
