@@ -5,8 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="大文件重构">
-      <change beforePath="$PROJECT_DIR$/_old_search_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/_pre_refactor_search_service.py" beforeDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/assets/图搜视频.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/assets/文搜视频.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/assets/视频理解.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -75,23 +78,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0000000000064224" />
-      <entry key="MS500" value="1.0062913062771448" />
-      <entry key="S2" value="1.7439393639144667" />
-      <entry key="S5" value="3.9630830925287395" />
-      <entry key="S10" value="6.049336193449622" />
-      <entry key="S30" value="8.419753763354985" />
-      <entry key="S60" value="10.230983360201005" />
-      <entry key="M2" value="17.13225270145038" />
-      <entry key="M5" value="42.602368576824254" />
-      <entry key="M10" value="78.29272413455223" />
-      <entry key="M15" value="107.58383783859189" />
-      <entry key="M30" value="184.3255808155332" />
-      <entry key="H1" value="327.4177148665212" />
-      <entry key="H2" value="555.5668756978417" />
-      <entry key="H4" value="819.0465850883542" />
-      <entry key="D1" value="1536.6780628294784" />
-      <entry key="W1" value="1926.690409203912" />
+      <entry key="MS100" value="1.0000573439177987" />
+      <entry key="MS500" value="1.1418075906177922" />
+      <entry key="S2" value="1.642103699505772" />
+      <entry key="S5" value="2.0633462902057587" />
+      <entry key="S10" value="2.3982129647997326" />
+      <entry key="S30" value="2.9788306014877066" />
+      <entry key="S60" value="4.491414601395876" />
+      <entry key="M2" value="9.699540571596177" />
+      <entry key="M5" value="31.977509529326934" />
+      <entry key="M10" value="67.91637519689597" />
+      <entry key="M15" value="98.42834649425699" />
+      <entry key="M30" value="177.510509766869" />
+      <entry key="H1" value="322.33231822477364" />
+      <entry key="H2" value="552.7080175938449" />
+      <entry key="H4" value="819.5430954899037" />
+      <entry key="D1" value="1543.7012641857941" />
+      <entry key="W1" value="1936.1571634556333" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -113,23 +116,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9460576467314245" />
-      <entry key="MS500" value="0.9951266532477134" />
-      <entry key="S2" value="1.7361516108169726" />
-      <entry key="S5" value="3.955084203006324" />
-      <entry key="S10" value="6.043422301993713" />
-      <entry key="S30" value="8.417136572293602" />
-      <entry key="S60" value="10.229507321336708" />
-      <entry key="M2" value="17.13128165795817" />
-      <entry key="M5" value="42.60165461779572" />
-      <entry key="M10" value="78.29213815579641" />
-      <entry key="M15" value="107.58331995992837" />
-      <entry key="M30" value="184.32515007699195" />
-      <entry key="H1" value="327.41733304254933" />
-      <entry key="H2" value="555.5665483537249" />
-      <entry key="H4" value="819.0463413404135" />
-      <entry key="D1" value="1536.6779850255841" />
-      <entry key="W1" value="1926.690395195705" />
+      <entry key="MS100" value="0.9330864953039776" />
+      <entry key="MS500" value="1.1260879600756302" />
+      <entry key="S2" value="1.6361097761598584" />
+      <entry key="S5" value="2.0594235653503046" />
+      <entry key="S10" value="2.3954649694299546" />
+      <entry key="S30" value="2.977570521196575" />
+      <entry key="S60" value="4.49054700769251" />
+      <entry key="M2" value="9.698767414819855" />
+      <entry key="M5" value="31.97680112315493" />
+      <entry key="M10" value="67.9157585464432" />
+      <entry key="M15" value="98.42779479810322" />
+      <entry key="M30" value="177.51005307140633" />
+      <entry key="H1" value="322.33192075150924" />
+      <entry key="H2" value="552.707681045186" />
+      <entry key="H4" value="819.5428461390716" />
+      <entry key="D1" value="1543.7011851217762" />
+      <entry key="W1" value="1936.1571492496166" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -143,39 +146,39 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/resources&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;ml.llm.LLMThirdPartyAiProvidersConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "DefaultHtmlFileTemplate": "HTML File",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.core.executor": "Debug",
+    "Python.main.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "master",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "D:/PycharmProjects/VideoSeek/docs/assets",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\PycharmProjects\VideoSeek\docs\assets" />
       <recent name="D:\PycharmProjects\VideoSeek\resources" />
       <recent name="D:\PycharmProjects\VideoSeek\face_model" />
       <recent name="D:\PycharmProjects\VideoSeek" />
       <recent name="D:\PycharmProjects\VideoSeek\vlc_lib" />
-      <recent name="D:\PycharmProjects\VideoSeek\static" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\models\chinese-clip\vit-base-patch16" />
@@ -462,15 +465,7 @@
       <workItem from="1782474044093" duration="8271000" />
       <workItem from="1782529924939" duration="5854000" />
       <workItem from="1782553183333" duration="2918000" />
-      <workItem from="1782611494949" duration="1598000" />
-    </task>
-    <task id="LOCAL-00083" summary="移除远古旧版本迁移代码">
-      <option name="closed" value="true" />
-      <created>1779536050161</created>
-      <option name="number" value="00083" />
-      <option name="presentableId" value="LOCAL-00083" />
-      <option name="project" value="LOCAL" />
-      <updated>1779536050161</updated>
+      <workItem from="1782611494949" duration="1961000" />
     </task>
     <task id="LOCAL-00084" summary="增加GPU解码抽帧（试验性）">
       <option name="closed" value="true" />
@@ -856,7 +851,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782613070583</updated>
     </task>
-    <option name="localTasksCounter" value="132" />
+    <task id="LOCAL-00132" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613256838</created>
+      <option name="number" value="00132" />
+      <option name="presentableId" value="LOCAL-00132" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613256838</updated>
+    </task>
+    <option name="localTasksCounter" value="133" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

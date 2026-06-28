@@ -36,11 +36,9 @@
 
 ## 界面预览
 
-仓库内暂未放截图。可先访问 **[lv17.top](https://www.lv17.top/)** 看安装包介绍；若你补图，建议放到 `docs/assets/` 并在本段引用。
-
-<!-- 示例：
-![搜索界面](docs/assets/search.png)
--->
+![搜索界面](docs/assets/图搜视频.png)
+![搜索界面](docs/assets/文搜视频.png)
+![搜索界面](docs/assets/视频理解.png)
 
 ## 下载
 
