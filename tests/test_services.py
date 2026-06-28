@@ -1230,12 +1230,17 @@ class SearchServiceTests(unittest.TestCase):
         mock_build_query_vector.assert_called_once()
         mock_search_results_with_ids.assert_not_called()
 
+    @patch(
+        "src.services.search_service._coalesce_query_vector",
+        return_value=np.array([[1.0, 0.0]], dtype=np.float32),
+    )
     @patch("src.services.search_service._run_frame_search_per_videos")
     @patch("src.services.search_service.load_config")
     def test_run_search_uses_per_video_route_when_video_scope_set(
         self,
         mock_load_config,
         mock_per_video_search,
+        _mock_coalesce_query_vector,
     ):
         from src.domain.search_hit import SearchHit
 

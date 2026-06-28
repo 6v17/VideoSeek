@@ -1,0 +1,26 @@
+{
+  "kind": "understanding_component",
+  "manifest_version": 1,
+  "id": "vision/image_caption/qwen3-vl-remote",
+  "modality": "vision",
+  "task": "image_caption",
+  "model_id": "qwen3-vl-remote",
+  "display_name": "External VLM Caption (OpenAI-compatible)",
+  "package_version": "1.0.0",
+  "description": "Calls a local OpenAI-compatible vision API (e.g. LM Studio + Qwen3-VL). Configure base URL and model in Settings.",
+  "delivery": "remote",
+  "install_relpath": "components/vision/image_caption/qwen3-vl-remote",
+  "input_kind": "chunk_keyframe",
+  "output_kind": "caption",
+  "engine": {
+    "registry_key": "vision.image_caption.qwen3_vl_remote"
+  },
+  "required_files": [
+    "understanding_manifest.json"
+  ],
+  "params": {
+    "temperature": 0.2,
+    "max_tokens": 128,
+    "jpeg_quality": 85
+  }
+}

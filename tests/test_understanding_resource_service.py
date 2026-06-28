@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 import tempfile
 import unittest
 import zipfile
@@ -41,6 +40,36 @@ CAPTION_MANIFEST = {
     "output_kind": "caption",
     "engine": {"registry_key": "vision.image_caption.qwen3_vl_remote"},
     "required_files": ["understanding_manifest.json"],
+}
+
+VISION_BASELINE_PROFILE_MANIFEST = {
+    "kind": "understanding_profile",
+    "manifest_version": 1,
+    "id": "vision_baseline_v1",
+    "display_name": "视觉基础版",
+    "package_version": "1.0.0",
+    "install_relpath": "profiles/vision_baseline_v1",
+    "requires": {
+        "components": [
+            "vision/object_detection/yolo11n",
+            "vision/image_caption/qwen3-vl-remote",
+        ]
+    },
+    "pipeline": [
+        {
+            "step": "object_detection",
+            "component": "vision/object_detection/yolo11n",
+            "enabled": True,
+        },
+        {
+            "step": "image_caption",
+            "component": "vision/image_caption/qwen3-vl-remote",
+            "enabled": True,
+        },
+    ],
+    "defaults": {
+        "keyframe_strategy": "midpoint",
+    },
 }
 
 
@@ -155,9 +184,9 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.model_root.mkdir(parents=True)
         self.builtin_profiles = self.root / "resources" / "understanding_profiles" / "vision_baseline_v1"
         self.builtin_profiles.mkdir(parents=True)
-        shutil.copyfile(
-            Path("resources/understanding_profiles/vision_baseline_v1/profile_manifest.json"),
-            self.builtin_profiles / "profile_manifest.json",
+        (self.builtin_profiles / "profile_manifest.json").write_text(
+            json.dumps(VISION_BASELINE_PROFILE_MANIFEST, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
     def tearDown(self):
