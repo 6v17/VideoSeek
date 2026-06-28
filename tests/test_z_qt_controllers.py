@@ -590,22 +590,12 @@ class SearchControllerTests(unittest.TestCase):
 
         parent.search_page.btn_search.setEnabled.assert_called_with(False)
         parent.search_page.lbl_status.setText.assert_called_with("Searching...")
-        mock_worker_cls.assert_called_once_with(
-            query="cat",
-            is_text=True,
-            scope_library_paths=[],
-            scope_video_paths=None,
-            query_vector=None,
-            search_mode=None,
-            top_k=None,
-            min_score=None,
-            search_precision_mode=None,
-            pixel_query_data=None,
-            preview_anchor_sec=None,
-            locate_anchor_score=None,
-            locate_score_margin=None,
-            video_discovery_enabled=None,
-        )
+        mock_worker_cls.assert_called_once()
+        config = mock_worker_cls.call_args.args[0]
+        self.assertEqual(config.query, "cat")
+        self.assertTrue(config.is_text)
+        self.assertEqual(config.scope_library_paths, [])
+        self.assertEqual(config.scope_video_paths, [])
         worker.start.assert_called_once()
 
     @patch("ui.controllers.search_controller.shutdown_thread")

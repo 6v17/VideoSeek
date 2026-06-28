@@ -20,7 +20,8 @@ class SidebarIconsTests(unittest.TestCase):
             icon = factory()
             pixmap = icon.pixmap(20, 20)
             self.assertFalse(pixmap.isNull())
-            self.assertGreater(pixmap.toImage().byteCount(), 0)
+            self.assertGreater(pixmap.width(), 0)
+            self.assertGreater(pixmap.height(), 0)
 
 
 if __name__ == "__main__":

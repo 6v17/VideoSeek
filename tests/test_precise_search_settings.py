@@ -372,7 +372,7 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
 
     @mock.patch("src.services.search_neighbor_rerank._apply_bounded_neighbor_refine", side_effect=lambda hits, *_args, **_kwargs: hits)
     @mock.patch("src.services.search_locate_pipeline._search_frame_results_with_ids")
-    @mock.patch("src.services.search_assets.load_search_assets")
+    @mock.patch("src.services.search_locate_pipeline.load_search_assets")
     def test_search_locate_anchor_window_uses_global_hits(self, mock_load_assets, mock_search_with_ids, _mock_neighbor):
         import numpy as np
 

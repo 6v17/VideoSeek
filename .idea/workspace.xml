@@ -6,7 +6,10 @@
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新友情链接及LICENSE">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/LICENSE" beforeDir="false" afterPath="$PROJECT_DIR$/LICENSE" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_precise_search_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_precise_search_settings.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_sidebar_icons.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_sidebar_icons.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_workers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_z_qt_controllers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_z_qt_controllers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -75,23 +78,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0080030908570166" />
-      <entry key="MS500" value="1.6257242358553747" />
-      <entry key="S2" value="3.566532132251741" />
-      <entry key="S5" value="5.744185481783219" />
-      <entry key="S10" value="7.396265537756955" />
-      <entry key="S30" value="10.68042845196473" />
-      <entry key="S60" value="13.688004664509005" />
-      <entry key="M2" value="18.350668300385763" />
-      <entry key="M5" value="37.62497853983477" />
-      <entry key="M10" value="69.03684337280295" />
-      <entry key="M15" value="96.00942474881792" />
-      <entry key="M30" value="172.04475204480508" />
-      <entry key="H1" value="325.467803291284" />
-      <entry key="H2" value="596.3848204340222" />
-      <entry key="H4" value="948.8239198820014" />
-      <entry key="D1" value="1870.2612651272036" />
-      <entry key="W1" value="2339.4483392248057" />
+      <entry key="MS100" value="1.000000000614691" />
+      <entry key="MS500" value="1.018291917116294" />
+      <entry key="S2" value="2.214738585181245" />
+      <entry key="S5" value="5.058981913311746" />
+      <entry key="S10" value="7.313242289491176" />
+      <entry key="S30" value="9.788454397496846" />
+      <entry key="S60" value="12.768733355708358" />
+      <entry key="M2" value="21.31551454690839" />
+      <entry key="M5" value="46.14661037673977" />
+      <entry key="M10" value="81.50997330233638" />
+      <entry key="M15" value="111.494048095811" />
+      <entry key="M30" value="191.8005054874294" />
+      <entry key="H1" value="347.4912943057073" />
+      <entry key="H2" value="621.1826716491328" />
+      <entry key="H4" value="979.2538979986375" />
+      <entry key="D1" value="1915.1940053794447" />
+      <entry key="W1" value="2390.1865684279524" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -113,23 +116,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9735125729036123" />
-      <entry key="MS500" value="1.6128471926679833" />
-      <entry key="S2" value="3.559045621154052" />
-      <entry key="S5" value="5.739340948017792" />
-      <entry key="S10" value="7.3931604317034125" />
-      <entry key="S30" value="10.678946725782689" />
-      <entry key="S60" value="13.687058744673891" />
-      <entry key="M2" value="18.35003409728422" />
-      <entry key="M5" value="37.62446081940637" />
-      <entry key="M10" value="69.0363718633451" />
-      <entry key="M15" value="96.00898847472487" />
-      <entry key="M30" value="172.0443551761073" />
-      <entry key="H1" value="325.4674186867878" />
-      <entry key="H2" value="596.3844631470103" />
-      <entry key="H4" value="948.8236335981036" />
-      <entry key="D1" value="1870.2611698421651" />
-      <entry key="W1" value="2339.448322137923" />
+      <entry key="MS100" value="0.959264119914917" />
+      <entry key="MS500" value="1.0098611668749171" />
+      <entry key="S2" value="2.2102660666754916" />
+      <entry key="S5" value="5.054976964274854" />
+      <entry key="S10" value="7.310367027480131" />
+      <entry key="S30" value="9.787179246943493" />
+      <entry key="S60" value="12.76791510618539" />
+      <entry key="M2" value="21.314846232864543" />
+      <entry key="M5" value="46.146026905978005" />
+      <entry key="M10" value="81.50944782105594" />
+      <entry key="M15" value="111.49356380290044" />
+      <entry key="M30" value="191.80007694525875" />
+      <entry key="H1" value="347.49089235909184" />
+      <entry key="H2" value="621.1823043646979" />
+      <entry key="H4" value="979.2536051017763" />
+      <entry key="D1" value="1915.1939082714855" />
+      <entry key="W1" value="2390.1865510385323" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -465,15 +468,7 @@
       <workItem from="1782611494949" duration="2839000" />
       <workItem from="1782614526199" duration="2065000" />
       <workItem from="1782621309148" duration="691000" />
-      <workItem from="1782646805727" duration="11378000" />
-    </task>
-    <task id="LOCAL-00088" summary="加了搜索接口，供agent使用（beta）">
-      <option name="closed" value="true" />
-      <created>1779712564610</created>
-      <option name="number" value="00088" />
-      <option name="presentableId" value="LOCAL-00088" />
-      <option name="project" value="LOCAL" />
-      <updated>1779712564611</updated>
+      <workItem from="1782646805727" duration="12043000" />
     </task>
     <task id="LOCAL-00089" summary="引入chinese-clip模型，优化核心链路，增加预设标签">
       <option name="closed" value="true" />
@@ -859,7 +854,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782660462635</updated>
     </task>
-    <option name="localTasksCounter" value="137" />
+    <task id="LOCAL-00137" summary="更新友情链接及LICENSE">
+      <option name="closed" value="true" />
+      <created>1782660954613</created>
+      <option name="number" value="00137" />
+      <option name="presentableId" value="LOCAL-00137" />
+      <option name="project" value="LOCAL" />
+      <updated>1782660954614</updated>
+    </task>
+    <option name="localTasksCounter" value="138" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

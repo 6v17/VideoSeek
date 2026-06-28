@@ -101,7 +101,7 @@ class WorkersTests(unittest.TestCase):
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM"))
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"))
 
-    @patch("src.services.version_service.get_version_status", return_value={"ok": True})
+    @patch("ui.workers.get_version_status", return_value={"ok": True})
     def test_version_check_worker_emits_result(self, _mock_get_version_status):
         emitted = []
         worker = VersionCheckWorker("zh")
@@ -111,7 +111,7 @@ class WorkersTests(unittest.TestCase):
 
         self.assertEqual(emitted, [{"ok": True}])
 
-    @patch("src.services.version_service.get_version_status", side_effect=RuntimeError("network down"))
+    @patch("ui.workers.get_version_status", side_effect=RuntimeError("network down"))
     def test_version_check_worker_swallows_fetch_errors(self, _mock_get_version_status):
         emitted = []
         worker = VersionCheckWorker("zh")
