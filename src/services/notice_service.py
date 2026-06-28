@@ -1,9 +1,9 @@
 import json
-import urllib.error
-import urllib.request
 
 from src.app.app_meta import get_app_meta
 from src.app.i18n import get_texts
+from src.services.remote_fetch_cache import DEFAULT_REMOTE_USER_AGENT, fetch_cached_text
+from src.services.remote_html_assets import inline_remote_html_images
 
 
 def get_local_notice_payload(language):
@@ -26,18 +26,15 @@ def get_notice_payload(language):
 def fetch_remote_notice():
     app_meta = get_app_meta()
     notice_url = app_meta.get("notice_url", "").strip()
-    timeout = app_meta.get("remote_timeout", 4)
     if not notice_url:
         return None
 
-    request = urllib.request.Request(
-        notice_url,
-        headers={"User-Agent": "VideoSeek/notice-fetch"},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+        raw_text = fetch_cached_text(notice_url, kind="json", user_agent=DEFAULT_REMOTE_USER_AGENT)
+        if not raw_text:
+            return None
+        data = json.loads(raw_text)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None
 
     if not isinstance(data, dict):
@@ -60,6 +57,14 @@ def _normalize_notice(data, texts):
 
     if content_format not in {"plain", "html"}:
         content_format = "plain"
+
+    if content_format == "html":
+        app_meta = get_app_meta()
+        try:
+            timeout = float(app_meta.get("remote_timeout", 4))
+        except (TypeError, ValueError):
+            timeout = 4.0
+        body = inline_remote_html_images(body, timeout=max(timeout, 6.0))
 
     meta_parts = [part for part in [version_text, date_text] if part]
     if meta_parts:

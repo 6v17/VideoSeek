@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.i18n import get_texts
+from ui.dialogs.html_links import open_html_link
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
@@ -53,7 +54,8 @@ class NoticeDialog(QDialog):
         content = QTextBrowser()
         content.setObjectName("DialogBodyBrowser")
         content.setReadOnly(True)
-        content.setOpenExternalLinks(True)
+        content.setOpenExternalLinks(False)
+        content.anchorClicked.connect(open_html_link)
         if notice.get("format") == "html":
             content.setHtml(notice.get("body", texts["notice_body"]))
         else:

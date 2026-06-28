@@ -1,10 +1,9 @@
 import json
-import urllib.error
-import urllib.request
 
 from src.app.app_meta import get_app_meta
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
+from src.services.remote_fetch_cache import DEFAULT_REMOTE_USER_AGENT, fetch_cached_text
 
 
 def get_local_version_status(language):
@@ -42,18 +41,15 @@ def get_version_status(language):
 def fetch_remote_version():
     app_meta = get_app_meta()
     version_url = app_meta.get("version_url", "").strip()
-    timeout = app_meta.get("remote_timeout", 4)
     if not version_url:
         return None
 
-    request = urllib.request.Request(
-        version_url,
-        headers={"User-Agent": "VideoSeek/version-check"},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+        raw_text = fetch_cached_text(version_url, kind="json", user_agent=DEFAULT_REMOTE_USER_AGENT)
+        if not raw_text:
+            return None
+        data = json.loads(raw_text)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None
 
     if not isinstance(data, dict):

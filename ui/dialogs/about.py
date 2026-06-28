@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
+from ui.dialogs.html_links import open_html_link
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
@@ -56,7 +57,8 @@ class AboutDialog(QDialog):
         body = QTextBrowser()
         body.setObjectName("DialogBodyBrowser")
         body.setReadOnly(True)
-        body.setOpenExternalLinks(True)
+        body.setOpenExternalLinks(False)
+        body.anchorClicked.connect(open_html_link)
         if about.get("format") == "html":
             body.setHtml(about.get("body", texts["about_body"]))
         else:

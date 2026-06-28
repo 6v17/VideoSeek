@@ -27,6 +27,7 @@ from src.app.config import (
 )
 from src.app.i18n import get_texts
 from src.services.about_service import get_local_about_payload
+from src.services.donate_service import get_donate_payload
 from src.services.library_service import (
     list_partial_libraries,
 )
@@ -48,7 +49,14 @@ from ui.widgets.components import (
     UnderstandingEvidencePage,
 )
 from ui.widgets.settings import SettingsPage
-from ui.dialogs import AboutDialog, AppMessageDialog, MobileBridgeDialog, NoticeDialog
+from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog
+from ui.dialogs.html_links import open_html_link
+from ui.widgets.sidebar_icons import (
+    bilibili_toolbar_icon,
+    github_toolbar_icon,
+    qq_toolbar_icon,
+    sidebar_toolbar_icon_size,
+)
 from ui.controllers.indexing_controller import IndexingController
 from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
@@ -244,6 +252,10 @@ class MainWindow(
         self.sidebar.btn_page_understanding.clicked.connect(lambda: self.switch_page("understanding"))
         self.sidebar.btn_page_settings.clicked.connect(lambda: self.switch_page("settings"))
         self.sidebar.btn_theme.clicked.connect(self.toggle_theme)
+        self.sidebar.btn_donate.clicked.connect(self.show_donate)
+        self.sidebar.btn_github.clicked.connect(self.open_github)
+        self.sidebar.btn_bilibili.clicked.connect(self.open_bilibili)
+        self.sidebar.btn_qq.clicked.connect(self.open_qq)
         self.sidebar.btn_language.clicked.connect(self.toggle_language)
         self.sidebar.btn_about.clicked.connect(self.show_about)
         self.sidebar.btn_notice.clicked.connect(self.show_notice)
@@ -404,7 +416,7 @@ class MainWindow(
         self.sidebar.btn_about.style().polish(self.sidebar.btn_about)
         self.sidebar.btn_about.update()
         self.sidebar.btn_language.setText(t["language_toggle"])
-        self.sidebar.btn_theme.setText(t["theme_light"] if self.is_dark_mode else t["theme_dark"])
+        self._refresh_sidebar_icon_buttons(t)
         self.sidebar.runtime_hint.hide()
         self.sidebar.runtime_hint.setToolTip("")
 
@@ -644,6 +656,55 @@ class MainWindow(
             version_info=self.version_info,
             about=self.about_payload,
         ).exec()
+
+    def show_donate(self):
+        DonateDialog(
+            self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+            donate=get_donate_payload(),
+        ).exec()
+
+    def open_github(self):
+        self._open_social_link("github_url")
+
+    def open_bilibili(self):
+        self._open_social_link("bilibili_url")
+
+    def open_qq(self):
+        self._open_social_link("qq_url")
+
+    def _open_social_link(self, key: str):
+        url = str(get_donate_payload().get(key, "") or "").strip()
+        if url:
+            open_html_link(url)
+
+    def _refresh_sidebar_icon_buttons(self, texts=None):
+        t = texts or self.texts
+        social = get_donate_payload()
+        icon_size = sidebar_toolbar_icon_size()
+        self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
+        self.sidebar.btn_theme.setToolTip(
+            t["theme_switch_to_light"] if self.is_dark_mode else t["theme_switch_to_dark"]
+        )
+        self.sidebar.btn_donate.setText("❤")
+        self.sidebar.btn_donate.setToolTip(t["donate_tooltip"])
+        self.sidebar.btn_github.setIcon(github_toolbar_icon(is_dark=self.is_dark_mode))
+        self.sidebar.btn_github.setIconSize(icon_size)
+        self.sidebar.btn_github.setToolTip(t["sidebar_github_tooltip"])
+        self.sidebar.btn_github.setVisible(bool(social.get("github_url")))
+
+        has_bilibili = bool(social.get("bilibili_url"))
+        self.sidebar.btn_bilibili.setIcon(bilibili_toolbar_icon())
+        self.sidebar.btn_bilibili.setIconSize(icon_size)
+        self.sidebar.btn_bilibili.setToolTip(t["sidebar_bilibili_tooltip"])
+        self.sidebar.btn_bilibili.setVisible(has_bilibili)
+
+        has_qq = bool(social.get("qq_url"))
+        self.sidebar.btn_qq.setIcon(qq_toolbar_icon())
+        self.sidebar.btn_qq.setIconSize(icon_size)
+        self.sidebar.btn_qq.setToolTip(t["sidebar_qq_tooltip"])
+        self.sidebar.btn_qq.setVisible(has_qq)
 
     def start_search(self):
         if not self._ensure_startup_migration_idle("feature_search"):
@@ -1100,7 +1161,8 @@ class MainWindow(
             app.setProperty("videoseek_is_dark", self.is_dark_mode)
             app.setStyleSheet(style)
         self.update()
-        self.sidebar.btn_theme.setText(self.texts["theme_light"] if self.is_dark_mode else self.texts["theme_dark"])
+        self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
+        self._refresh_sidebar_icon_buttons()
 
     def toggle_theme(self):
         self.is_dark_mode = not self.is_dark_mode

@@ -628,6 +628,44 @@ QPushButton:disabled {
     background: transparent;
     font-weight: 600;
 }
+#SidebarIconButton {
+    border-radius: 10px;
+    border: 1px solid __LINE_STRONG__;
+    background: __TRACK__;
+    color: __HEADLINE__;
+    font-weight: 700;
+    padding: 0px;
+}
+#SidebarIconButton:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE_STRONG__;
+}
+#SidebarIconButton:pressed {
+    background: __BUTTON_SOFT__;
+    border-color: __LINE_STRONG__;
+}
+#SidebarDonateButton {
+    border-radius: 10px;
+    border: 1px solid __LINE_STRONG__;
+    background: __TRACK__;
+    color: #e81123;
+    font-weight: 700;
+    padding: 0px;
+}
+#SidebarDonateButton:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: #e81123;
+    color: #ff4d4f;
+}
+#SidebarDonateButton:pressed {
+    background: __BUTTON_SOFT__;
+    border-color: #e81123;
+    color: #c50f1f;
+}
+#DonateImageLabel {
+    min-height: 380px;
+    padding: 8px 0;
+}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: __FIELD__;
     border: 1px solid __LINE__;

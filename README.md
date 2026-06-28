@@ -88,4 +88,6 @@ python main.py
 
 ## 许可证
 
-MIT
+Copyright (c) 2026 [6v17](https://github.com/6v17)
+
+采用 [AGPL-3.0](LICENSE)（GNU Affero General Public License v3.0）。

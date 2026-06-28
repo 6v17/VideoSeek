@@ -18,6 +18,11 @@ WINDOW_SIZES = {
         "minimum": QSize(560, 420),
         "screen_margin": 96,
     },
+    "donate_dialog": {
+        "preferred": QSize(520, 720),
+        "minimum": QSize(460, 640),
+        "screen_margin": 96,
+    },
     "message_dialog": {
         "minimum_width": 440,
         "screen_margin": 96,

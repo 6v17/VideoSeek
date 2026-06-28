@@ -88,4 +88,6 @@ See **`docs/quickstart.md`** for troubleshooting and tests.
 
 ## License
 
-MIT
+Copyright (c) 2026 [6v17](https://github.com/6v17)
+
+Licensed under [AGPL-3.0](LICENSE) (GNU Affero General Public License v3.0).

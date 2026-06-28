@@ -64,6 +64,22 @@ class NoticeServiceTests(unittest.TestCase):
 
         self.assertEqual(result["format"], "plain")
 
+    @patch("src.services.remote_html_assets._fetch_image_data_uri", return_value="data:image/png;base64,abc")
+    def test_normalize_notice_inlines_remote_html_images(self, _mock_fetch):
+        texts = {"notice_heading": "Heading", "notice_subtitle": "Subtitle", "notice_body": "Body"}
+
+        result = notice_service._normalize_notice(
+            {
+                "body": "<p>tip</p><img src='https://example.com/wechat-reward.png' width='200' />",
+                "format": "html",
+            },
+            texts,
+        )
+
+        self.assertIn("data:image/png;base64,abc", result["body"])
+        self.assertIn('href="https://example.com/wechat-reward.png"', result["body"])
+        self.assertNotIn("src='https://example.com/wechat-reward.png'", result["body"])
+
 
 class AboutServiceTests(unittest.TestCase):
     def test_normalize_about_supports_html_and_list_body(self):
