@@ -2393,6 +2393,155 @@ class ModelPackageServiceTests(unittest.TestCase):
             self.assertTrue(mock_save_config.called)
             self.assertEqual(config["models"]["profiles"][0]["runtime"]["model_variant"], "vit-base-patch32")
 
+    def test_import_switches_active_profile_when_placeholder_clip_is_not_ready(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            manifest_dir = Path(model_root) / "chinese-clip" / "vit-base-patch16"
+            manifest_dir.mkdir(parents=True)
+            required_files = [
+                "chinese_clip_image.onnx",
+                "chinese_clip_text.onnx",
+                "vocab.txt",
+                "preprocessor_config.json",
+                "config.json",
+            ]
+            for file_name in required_files:
+                (manifest_dir / file_name).write_bytes(b"x")
+            (manifest_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "chinese_clip_vit_base_patch16",
+                        "provider": "chinese_clip_onnx",
+                        "variant": "vit-base-patch16",
+                        "display_name": "Chinese CLIP",
+                        "required_files": required_files,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            config = {
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "display_name": "OpenAI CLIP",
+                            "enabled": True,
+                            "runtime": {
+                                "prefer_gpu": True,
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch32",
+                            },
+                            "files": {
+                                "visual_model": "clip_visual.onnx",
+                                "text_model": "clip_text.onnx",
+                                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+                            },
+                        }
+                    ],
+                }
+            }
+
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config") as mock_save_config,
+                patch("src.services.model_package_service.get_config_schema_version", return_value=2),
+            ):
+                result = model_package_service.import_model_packages(model_root)
+
+            self.assertEqual(result["imported"], 1)
+            self.assertEqual(result["updated"], 0)
+            self.assertTrue(result["active_profile_switched"])
+            self.assertEqual(result["active_profile"], "chinese_clip_vit_base_patch16")
+            self.assertEqual(config["models"]["active_profile"], "chinese_clip_vit_base_patch16")
+            self.assertTrue(mock_save_config.called)
+
+    def test_import_model_package_zip_ignores_unrelated_placeholder_manifests(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            placeholder_dir = Path(model_root) / "openai-clip" / "vit-base-patch32"
+            placeholder_dir.mkdir(parents=True)
+            (placeholder_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "clip_onnx_default",
+                        "provider": "clip_onnx",
+                        "variant": "vit-base-patch32",
+                        "required_files": ["clip_visual.onnx", "clip_text.onnx"],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            required_files = [
+                "chinese_clip_image.onnx",
+                "chinese_clip_text.onnx",
+                "vocab.txt",
+                "preprocessor_config.json",
+                "config.json",
+            ]
+            zip_root = Path(model_root) / "packages"
+            zip_root.mkdir()
+            package_dir = zip_root / "chinese-clip" / "vit-base-patch16"
+            package_dir.mkdir(parents=True)
+            for file_name in required_files:
+                (package_dir / file_name).write_bytes(b"x")
+            (package_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "chinese_clip_vit_base_patch16",
+                        "provider": "chinese_clip_onnx",
+                        "variant": "vit-base-patch16",
+                        "display_name": "Chinese CLIP",
+                        "required_files": required_files,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            zip_path = zip_root / "chinese_clip.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                for file_path in package_dir.rglob("*"):
+                    if file_path.is_file():
+                        archive.write(file_path, file_path.relative_to(package_dir.parent).as_posix())
+
+            config = {
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "display_name": "OpenAI CLIP",
+                            "enabled": True,
+                            "runtime": {
+                                "prefer_gpu": True,
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch32",
+                            },
+                            "files": {
+                                "visual_model": "clip_visual.onnx",
+                                "text_model": "clip_text.onnx",
+                                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+                            },
+                        }
+                    ],
+                }
+            }
+
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config"),
+                patch("src.services.model_package_service.get_config_schema_version", return_value=2),
+            ):
+                result = model_package_service.import_model_package_zip(model_root, str(zip_path))
+
+            self.assertEqual(result["imported"], 1)
+            self.assertEqual(result["errors"], [])
+
 
 class ModelResourceDirTests(unittest.TestCase):
     def test_resolve_model_resource_dir_prefers_legacy_chinese_clip_onnx_folder(self):

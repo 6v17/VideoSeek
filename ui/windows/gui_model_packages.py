@@ -61,18 +61,7 @@ class ModelPackagesGuiMixin:
             return
         self._ffmpeg_imported_with_package = bool(ffmpeg_updated)
         if not model_files and not scan_only:
-            self.check_runtime_resources(show_dialog=False)
-            dialog = self._active_model_import_dialog()
-            if dialog is not None:
-                status = self.runtime_resource_controller.get_status_snapshot()
-                if status.get("resources_ready"):
-                    dialog.set_manage_state()
-                else:
-                    dialog.set_missing_state(
-                        status.get("display_files", []),
-                        "",
-                        download_enabled=bool(status.get("download_enabled", False)),
-                    )
+            self.refresh_runtime_resource_ui(sync_dialog=True)
             self.push_inference_status()
             if ffmpeg_updated:
                 self.show_info_dialog(
@@ -158,8 +147,10 @@ class ModelPackagesGuiMixin:
         checksum_verified_count = int(result.get("checksum_verified_count", 0))
         dialog = self._active_model_import_dialog()
         if imported or updated:
+            reset_engine()
             self.load_settings_values()
-            self.check_runtime_resources(show_dialog=False)
+            self.refresh_runtime_resource_ui(sync_dialog=True)
+            self.push_inference_status()
             if hasattr(self, "load_understanding_settings"):
                 if hasattr(self, "_invalidate_understanding_status_cache"):
                     self._invalidate_understanding_status_cache()
@@ -176,7 +167,7 @@ class ModelPackagesGuiMixin:
                 message = f"{message}\n\nChecksums verified: {checksum_verified_count}"
             if self._ffmpeg_imported_with_package:
                 message = f"{message}\n\n{self.texts.get('ffmpeg_import_done', 'FFmpeg imported successfully.')}"
-            if dialog is not None:
+            if dialog is not None and not self.ui_state.resources_ready:
                 dialog.set_import_success_state(
                     self.texts.get("parse_model_package_done", "Model packages parsed: +{imported}, updated {updated}.").format(
                         imported=imported,
@@ -184,10 +175,12 @@ class ModelPackagesGuiMixin:
                     )
                 )
             if errors:
-                message = f"{message}\n\n" + "\n".join(errors[:3])
-                self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
-            else:
-                self.show_info_dialog(self.texts["success_title"], message, kind="success")
+                skipped_note = self.texts.get(
+                    "parse_model_package_skipped",
+                    "Some other model packages were skipped:",
+                )
+                message = f"{message}\n\n{skipped_note}\n" + "\n".join(errors[:3])
+            self.show_info_dialog(self.texts["success_title"], message, kind="success")
             self._ffmpeg_imported_with_package = False
             return
         if errors:
@@ -266,7 +259,7 @@ class ModelPackagesGuiMixin:
             result = remove_model_profile(selected_profile_id)
             reset_engine()
             self.load_settings_values()
-            self.check_runtime_resources(show_dialog=False)
+            self.refresh_runtime_resource_ui(sync_dialog=False)
             self.push_inference_status()
             self.refresh_library_table()
             active_profile = str(result.get("active_profile", "") or "").strip()

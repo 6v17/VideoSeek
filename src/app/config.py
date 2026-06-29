@@ -123,7 +123,7 @@ DEFAULT_CONFIG = {
     "chunk_delta_stable_frames": 2,
     "search_mode": "frame",
     "search_precision_mode": "fast",
-    "search_video_discovery_enabled": True,
+    "search_video_discovery_enabled": False,
     "search_scope_mode": "all",
     "search_scope_library_paths": [],
     "search_scope_video_paths": [],

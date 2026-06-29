@@ -140,7 +140,7 @@ class SearchPanel(VSCard):
         self.search_video_discovery_toggle.setObjectName("SearchVideoDiscoveryToggle")
         self.search_video_discovery_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_video_discovery_toggle.setCheckable(True)
-        self.search_video_discovery_toggle.setChecked(True)
+        self.search_video_discovery_toggle.setChecked(False)
         self.search_video_discovery_toggle.setFixedWidth(toggle_width)
         self.search_video_discovery_toggle.setSizePolicy(combo_policy)
         self.search_video_discovery_cluster = QWidget()

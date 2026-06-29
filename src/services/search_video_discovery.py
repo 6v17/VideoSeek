@@ -36,7 +36,7 @@ def _use_video_discovery_results(
     precise_image: bool,
     scoped: bool,
     *,
-    video_discovery_enabled: bool = True,
+    video_discovery_enabled: bool = False,
 ) -> bool:
     if not video_discovery_enabled:
         return False
