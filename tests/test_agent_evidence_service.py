@@ -138,6 +138,22 @@ class AgentEvidenceServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "understanding_not_ready")
         self.assertEqual(ctx.exception.status_code, 409)
 
+    @patch("src.services.agent_evidence_service.evidence_bundle_exists")
+    def test_list_agent_evidence_status(self, mock_exists):
+        from src.services.agent_evidence_service import list_agent_evidence_status
+
+        mock_exists.side_effect = lambda video_id, **kwargs: video_id == "a"
+        payload = list_agent_evidence_status(["a", "b"], config={})
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["items"][0]["has_evidence"], True)
+        self.assertEqual(payload["items"][1]["has_evidence"], False)
+
+    def test_list_agent_evidence_status_requires_ids(self):
+        from src.services.agent_evidence_service import list_agent_evidence_status
+
+        with self.assertRaises(ValueError):
+            list_agent_evidence_status([])
+
 
 if __name__ == "__main__":
     unittest.main()

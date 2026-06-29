@@ -28,10 +28,11 @@ from types import SimpleNamespace
 
 from src.services.agent_clip_service import execute_agent_batch_export_clips, execute_agent_export_clip, resolve_clip_window
 from src.utils import EXPORT_ENCODE_MODE_COPY, EXPORT_ENCODE_MODE_ORIGINAL, resolve_export_clip_window
-from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
+from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos, list_agent_videos
 
 
 class AgentLibraryServiceTests(unittest.TestCase):
+    @patch("src.services.agent_library_service.get_index_sync_status", return_value={"index_sync_in_progress": True, "index_sync_target_library_path": "D:/Anime"})
     @patch("src.storage.config_store.get_search_scope_mode", return_value="all")
     @patch("src.services.agent_library_service.get_search_index_schema_version", return_value=2)
     @patch("src.services.agent_library_service.list_library_search_index_summaries", return_value=[])
@@ -56,6 +57,8 @@ class AgentLibraryServiceTests(unittest.TestCase):
         self.assertEqual(lib["display_name"], "Anime")
         self.assertEqual(lib["video_count_total"], 2)
         self.assertEqual(lib["video_count_indexed_ready"], 1)
+        self.assertTrue(lib["sync_in_progress"])
+        self.assertTrue(payload["meta"]["index_sync_in_progress"])
 
     @patch("src.services.library_service.list_libraries")
     def test_list_agent_library_videos_ready_only(self, mock_list_libraries):
@@ -80,6 +83,64 @@ class AgentLibraryServiceTests(unittest.TestCase):
     def test_list_agent_library_videos_unknown_library(self, _mock_libraries):
         with self.assertRaises(KeyError):
             list_agent_library_videos("D:/missing")
+
+    @patch("src.services.library_service.list_libraries")
+    def test_list_agent_videos_all_libraries(self, mock_list_libraries):
+        with tempfile.TemporaryDirectory() as lib_a, tempfile.TemporaryDirectory() as lib_b:
+            ready_a = os.path.join(lib_a, "a.mp4")
+            ready_b = os.path.join(lib_b, "b.mp4")
+            with open(ready_a, "wb") as handle:
+                handle.write(b"0")
+            with open(ready_b, "wb") as handle:
+                handle.write(b"0")
+            mock_list_libraries.return_value = {
+                lib_a: {"files": {"a.mp4": {"vid": "v1", "asset_state": "ready"}}},
+                lib_b: {"files": {"b.mp4": {"vid": "v2", "asset_state": "ready"}}},
+            }
+            payload = list_agent_videos(ready_only=True, limit=10, offset=0)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(len(payload["videos"]), 2)
+            self.assertEqual(payload["meta"]["libraries_scanned"], 2)
+            self.assertNotIn("library_path", payload)
+            paths = {row["video_path"] for row in payload["videos"]}
+            self.assertEqual(paths, {ready_a, ready_b})
+            for row in payload["videos"]:
+                self.assertIn("library_path", row)
+                self.assertIn("library_display_name", row)
+                self.assertIn("has_evidence", row)
+
+    @patch("src.services.agent_library_service._indexed_evidence_video_ids", return_value={"v1"})
+    @patch("src.services.library_service.list_libraries")
+    def test_list_agent_videos_filter_q_and_has_evidence(self, mock_list_libraries, _mock_evidence_ids):
+        with tempfile.TemporaryDirectory() as lib_dir:
+            ready_a = os.path.join(lib_dir, "ep01.mp4")
+            ready_b = os.path.join(lib_dir, "ep03.mp4")
+            with open(ready_a, "wb") as handle:
+                handle.write(b"0")
+            with open(ready_b, "wb") as handle:
+                handle.write(b"0")
+            mock_list_libraries.return_value = {
+                lib_dir: {
+                    "files": {
+                        "ep01.mp4": {"vid": "v1", "asset_state": "ready"},
+                        "ep03.mp4": {"vid": "v3", "asset_state": "ready"},
+                    }
+                }
+            }
+            payload = list_agent_videos(lib_dir, q="ep03", has_evidence=False, ready_only=True)
+            self.assertEqual(len(payload["videos"]), 1)
+            self.assertEqual(payload["videos"][0]["video_id"], "v3")
+            self.assertFalse(payload["videos"][0]["has_evidence"])
+
+            payload = list_agent_videos(video_id="v1", ready_only=True)
+            self.assertEqual(len(payload["videos"]), 1)
+            self.assertEqual(payload["videos"][0]["video_path"], ready_a)
+            self.assertTrue(payload["videos"][0]["has_evidence"])
+
+    @patch("src.services.library_service.list_libraries", return_value={})
+    def test_list_agent_videos_unknown_video_id(self, _mock_libraries):
+        with self.assertRaises(KeyError):
+            list_agent_videos(video_id="missing")
 
 
 class AgentClipServiceTests(unittest.TestCase):

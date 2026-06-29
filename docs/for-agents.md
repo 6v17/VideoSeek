@@ -24,12 +24,14 @@
 | GET | `/agent-starter` | 粘贴块 + 实时快照 |
 | GET | `/agent-doc` | 完整本文 |
 | GET | `/libraries` | 库列表 → `scope.library_paths` |
-| GET | `/libraries/videos` | 库内视频 → `scope.video_paths` |
+| GET | `/videos` | 已同步视频列表（全库；可选 `library_path` 筛选）→ `video_path` / `scope.video_paths` |
+| GET | `/libraries/videos` | 同 `/videos`，兼容旧路径 |
 | GET | `/search/presets` | 预设列表 |
 | GET | `/search/presets/{preset_id}` | 单个预设 |
 | POST | `/search` | 单次搜索 |
 | POST | `/search/batch` | 批量搜索（可内嵌导出） |
 | GET | `/search/telemetry` | 截图搜诊断（可选） |
+| GET | `/videos/evidence/status` | 批量查询是否已有理解笔录（轻量） |
 | GET | `/videos/evidence` | 理解笔录（可选；读盘优先，可触发生成） |
 | POST | `/export/manifest` | 生成剪辑清单 JSON |
 | POST | `/export/clip` | 导出单个片段 |
@@ -62,7 +64,7 @@
 
 ### 2.2 路径规则（必读）
 
-- **`video_path`**：必须**原样**来自 `hits[]`、`/libraries/videos`，或导出响应；禁止按显示名/语义/终端乱码猜中文文件名。
+- **`video_path`**：必须**原样**来自 `hits[]`、`GET /videos`（或 `/libraries/videos`）、或导出响应；禁止按显示名/语义/终端乱码猜中文文件名。
 - **`library_path`**：必须来自 `/libraries` 的 `library_path`。
 - **写出路径**（`output_path`、`export.output_dir`、`write_path`）：**不得**落在已索引库根目录内（防覆盖源媒体）。
 - Python 写 JSON：`ensure_ascii=False`；POST body 用 UTF-8。
@@ -83,7 +85,7 @@
 |------|------|
 | **省略 `scope`** | 使用 VideoSeek 桌面当前保存的搜索范围 |
 | `library_paths` | 只搜这些库（路径来自 `/libraries`） |
-| `video_paths` | 只搜这些绝对路径（来自 `/libraries/videos` 或 hits） |
+| `video_paths` | 只搜这些绝对路径（来自 `GET /videos`、`/libraries/videos` 或 hits） |
 | `use_saved_scope: true` | 显式使用桌面保存的范围（无 paths 时） |
 | 同时给 paths | **显式 paths 优先**于 `use_saved_scope` |
 
@@ -118,6 +120,8 @@
 | 字段 | 说明 |
 |------|------|
 | `index_ready` | 当前 mode 下全局索引是否可用 |
+| `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
+| `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
 | `index_stale` / `global_index_state` | 索引新鲜度 |
 | `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `video_evidence`, `video_evidence_ready` 等 |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
@@ -176,26 +180,46 @@
 | `index_state` | 库索引状态 |
 | `video_count_total` / `video_count_indexed_ready` / `video_count_missing_source` | 计数 |
 | `per_library_index_ready` | 该库 per-library 索引是否就绪 |
+| `sync_in_progress` | 该库是否正在同步（见 `/health` `index_sync_in_progress`） |
 | `offline` | 库目录是否存在 |
 
 ---
 
-### 4.5 `GET /libraries/videos`
+### 4.5 `GET /videos` · `GET /libraries/videos`
 
-**Query（必填/可选）：**
+列出**已同步且可检索**的视频（默认 `ready_only=true`：`asset_state=ready` 且源文件存在）。
+
+**Query：**
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
-| `library_path` | **必填** | 来自 `/libraries` |
-| `ready_only` | `true` | 只返回 `asset_state=ready` 且源文件存在 |
+| `library_path` | 省略=全库 | 来自 `/libraries`；指定则只列该库 |
+| `video_id` | — | 精确查单条；未找到 → 404 |
+| `q` | — | 按 `video_rel_path` / 文件名 / `video_id` / 库名子串匹配（不区分大小写） |
+| `has_evidence` | — | `true` 只列已有笔录；`false` 只列尚无笔录 |
+| `ready_only` | `true` | 只返回已同步就绪且源文件存在的视频 |
 | `limit` | 500 | 最大 2000 |
 | `offset` | 0 | 分页 |
 
-**响应 `videos[]` 每项：** `video_path`（绝对路径）, `video_rel_path`, `video_id`, `asset_state`, `source_exists`
+**响应 `videos[]` 每项：** `video_path`（绝对路径）, `video_rel_path`, `video_id`, `library_path`, `library_display_name`, `asset_state`, `source_exists`, **`has_evidence`**
 
-**meta：** `returned`, `total_listed`, `total_ready`, `offset`, `limit`, `ready_only`
+指定 `library_path` 时，响应根级还会回显 `library_path` / `library_display_name`。
 
-库不存在 → 404。
+**meta：** `returned`, `total_listed`, `total_ready`, `offset`, `limit`, `ready_only`, `libraries_scanned`, **`filters`**
+
+库不存在（传了错误 `library_path`）→ 404。`video_id` 不存在 → 404。
+
+**推荐链路：** `/libraries` → `/videos?q=…` 或 `/videos?library_path=…` → 取 `video_path` → `/search`（`scope.video_paths`）→ `/videos/evidence`
+
+**示例：**
+
+```http
+GET /api/v1/videos
+GET /api/v1/videos?library_path=D:/222库路径
+GET /api/v1/videos?video_id=abc123
+GET /api/v1/videos?q=ep03&has_evidence=false
+GET /api/v1/libraries/videos?library_path=D:/222库路径
+```
 
 ---
 
@@ -435,6 +459,22 @@
 
 ---
 
+### 4.11.5 `GET /videos/evidence/status`
+
+批量查询是否已有落盘的理解笔录（不读 chunk 正文，不触发生成）。
+
+**Query：**
+
+| 参数 | 说明 |
+|------|------|
+| `video_ids` | 必填；可重复 query（`video_ids=a&video_ids=b`）或逗号分隔 |
+
+最多 **64** 个 id。
+
+**响应 `items[]`：** `{ "video_id", "has_evidence" }`
+
+---
+
 ### 4.12 `GET /videos/evidence`
 
 **可选模块。** 读取（或按需生成）单视频理解笔录：chunk 级 YOLO 检测 + 描述服务 caption，可选整片 `summary`。不影响搜索/索引。
@@ -496,6 +536,16 @@ POST /export/clip 或 batch+export（用户要 mp4 时）
 ```
 
 binding 执行偏好以 **`GET /agent-starter`** 内 Policy kernel + 能力路由 为准。
+
+### 5.0.1 搜索无命中时（禁止扫盘）
+
+| 步骤 | 允许 | 禁止 |
+|------|------|------|
+| 1 | 换 query / 加大 `top_k` / 试 `chunk` 模式 / 缩小 `scope.library_paths` | `ls`、`find`、猜桌面文件名 |
+| 2 | `GET /libraries/videos?library_path=…` 或 **`GET /videos?library_path=…`** 列出已索引视频的 **`video_path`**，再 `scope.video_paths` 只搜该条并重试 | 用显示名或终端路径拼 `video_path` |
+| 3 | 仍无 hit → 告诉用户「库内无匹配」；若用户只要整片笔录且路径来自 `/libraries/videos`，可 `GET /videos/evidence` | 扫盘「碰运气」找第二段 |
+
+**第二库某段搜不到** 不等于可以扫桌面；要么 API 列出该库视频后重试，要么承认 CLIP 没匹配上。
 
 ### 搜索
 

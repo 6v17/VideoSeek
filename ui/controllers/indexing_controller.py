@@ -45,6 +45,9 @@ class IndexingController(QObject):
         }
         if debug_failure:
             worker_kwargs["debug_failure"] = debug_failure
+        from src.services.indexing_runtime_status import set_index_sync_running
+
+        set_index_sync_running(target_lib)
         self.worker = IndexUpdateWorker(**worker_kwargs)
         self.worker.progress_signal.connect(self.status_changed.emit)
         self.worker.runtime_status_signal.connect(self.runtime_status_changed.emit)
@@ -63,6 +66,9 @@ class IndexingController(QObject):
         return False
 
     def _finish(self, success, stopped, has_search_assets, issues):
+        from src.services.indexing_runtime_status import clear_index_sync_running
+
+        clear_index_sync_running()
         target = self.current_target
         rebuild_global_assets = self.current_rebuild_global_assets
         self.current_target = None

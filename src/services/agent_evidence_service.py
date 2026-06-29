@@ -267,3 +267,42 @@ def build_agent_understanding_health_fields(*, config=None, probe_remote: bool =
         "understanding_missing_components": list(status.get("missing_components") or []),
         "understanding_optional_missing_components": list(status.get("optional_missing_components") or []),
     }
+
+
+_MAX_EVIDENCE_STATUS_IDS = 64
+
+
+def evidence_bundle_exists(video_id: str, *, config=None) -> bool:
+    from src.services.understanding_paths import get_evidence_path
+
+    video_id_text = str(video_id or "").strip()
+    if not video_id_text:
+        return False
+    path = get_evidence_path(video_id_text, config=config)
+    return os.path.isfile(path)
+
+
+def list_agent_evidence_status(
+    video_ids: list[str],
+    *,
+    config=None,
+) -> dict[str, Any]:
+    ids = [str(item).strip() for item in video_ids if str(item).strip()]
+    if not ids:
+        raise ValueError("video_ids is required")
+    if len(ids) > _MAX_EVIDENCE_STATUS_IDS:
+        raise ValueError(f"At most {_MAX_EVIDENCE_STATUS_IDS} video_ids per request")
+    cfg = config or load_config()
+    items = [
+        {
+            "video_id": video_id,
+            "has_evidence": evidence_bundle_exists(video_id, config=cfg),
+        }
+        for video_id in ids
+    ]
+    return {
+        "api_version": API_VERSION,
+        "ok": True,
+        "items": items,
+        "meta": {"count": len(items)},
+    }

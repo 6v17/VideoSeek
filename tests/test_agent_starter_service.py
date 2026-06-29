@@ -108,6 +108,7 @@ class AgentStarterServiceTests(unittest.TestCase):
         self.assertIn("understanding_ready", text)
         self.assertIn("能力路由", text)
         self.assertIn("不是第三种搜索", text)
+        self.assertIn("禁止 ls", text)
         self.assertIn('"capabilities"', text)
         self.assertNotIn("capabilities:\n- enabled", text)
 

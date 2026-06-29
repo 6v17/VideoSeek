@@ -38,11 +38,12 @@ from src.services.agent_evidence_service import (
     AgentEvidenceError,
     build_agent_understanding_health_fields,
     get_agent_video_evidence,
+    list_agent_evidence_status,
     resolve_understanding_timeout_sec,
 )
 from src.utils import normalize_export_encode_mode
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
-from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
+from src.services.agent_library_service import list_agent_libraries, list_agent_videos
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
@@ -360,6 +361,9 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     from src.services.search_telemetry import is_telemetry_enabled
 
     understanding_fields = build_agent_understanding_health_fields(config=config, probe_remote=False)
+    from src.services.indexing_runtime_status import get_index_sync_status
+
+    sync_status = get_index_sync_status()
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -367,6 +371,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "index_ready": bool(snapshot["index_ready"]),
         "index_stale": bool(snapshot["index_stale"]),
         "global_index_state": snapshot["global_index_state"],
+        **sync_status,
         "index_id": _build_index_id(spec, snapshot),
         "search_mode_default": get_search_mode(config),
         "search_mode_checked": mode,
@@ -1419,11 +1424,13 @@ class AgentApiService:
         self.app.get("/api/v1/agent-doc")(self._agent_doc)
         self.app.get("/api/v1/libraries")(self._libraries)
         self.app.get("/api/v1/libraries/videos")(self._library_videos)
+        self.app.get("/api/v1/videos")(self._videos)
         self.app.get("/api/v1/search/presets")(self._search_presets)
         self.app.get("/api/v1/search/presets/{preset_id}")(self._search_preset_detail)
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
+        self.app.get("/api/v1/videos/evidence/status")(self._video_evidence_status)
         self.app.get("/api/v1/videos/evidence")(self._video_evidence)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
         self.app.post("/api/v1/export/clip")(self._export_clip)
@@ -1555,15 +1562,41 @@ class AgentApiService:
 
     async def _library_videos(
         self,
-        library_path: str,
+        library_path: Optional[str] = None,
+        video_id: Optional[str] = None,
+        q: Optional[str] = None,
+        has_evidence: Optional[bool] = None,
+        ready_only: bool = True,
+        limit: int = 500,
+        offset: int = 0,
+    ):
+        return await self._videos(
+            library_path=library_path,
+            video_id=video_id,
+            q=q,
+            has_evidence=has_evidence,
+            ready_only=ready_only,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def _videos(
+        self,
+        library_path: Optional[str] = None,
+        video_id: Optional[str] = None,
+        q: Optional[str] = None,
+        has_evidence: Optional[bool] = None,
         ready_only: bool = True,
         limit: int = 500,
         offset: int = 0,
     ):
         try:
             payload = await asyncio.to_thread(
-                list_agent_library_videos,
+                list_agent_videos,
                 library_path,
+                video_id=video_id,
+                q=q,
+                has_evidence=has_evidence,
                 ready_only=ready_only,
                 limit=limit,
                 offset=offset,
@@ -1573,7 +1606,7 @@ class AgentApiService:
         except ValueError as exc:
             raise_api_error(400, "invalid_request", str(exc))
         except Exception as exc:
-            logger.exception("Agent library videos failed.")
+            logger.exception("Agent synced videos list failed.")
             raise_api_error(500, "query_failed", str(exc))
         return JSONResponse(payload)
 
@@ -1594,6 +1627,19 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent search telemetry failed.")
             raise_api_error(500, "query_failed", str(exc))
+
+    async def _video_evidence_status(self, video_ids: Optional[List[str]] = None):
+        ids = [str(item).strip() for item in (video_ids or []) if str(item).strip()]
+        if len(ids) == 1 and "," in ids[0]:
+            ids = [part.strip() for part in ids[0].split(",") if part.strip()]
+        try:
+            payload = await asyncio.to_thread(list_agent_evidence_status, ids)
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent evidence status failed.")
+            raise_api_error(500, "query_failed", str(exc))
+        return JSONResponse(payload)
 
     async def _video_evidence(
         self,

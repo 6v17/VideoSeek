@@ -89,7 +89,11 @@ def _format_capability_routing(*, locale: str, api_base: str) -> str:
             "→ if user wants detail/generation, ensure=true → read chunks[].evidence.vision.image_caption + summary.\n"
             "- Do NOT use /videos/evidence instead of /search to locate footage. Evidence is not a third search mode.\n"
             "- NOT for: speech/dialogue/ASR, plot-by-plot library search, auto commentary/narration video generation.\n"
-            "- YOLO object_detection in evidence is optional; captions are the main text."
+            "- YOLO object_detection in evidence is optional; captions are the main text.\n"
+            "- Search returned no hits? Retry (broader query, higher top_k, chunk mode, scope one library via "
+            f"GET {api_base}/videos or GET {api_base}/libraries/videos → scope.video_paths). Still empty → tell the user; "
+            "NEVER ls/find/guess paths. video_path only from hits, GET /videos, /libraries/videos, or export responses.\n"
+            f"- Typical discovery chain: GET {api_base}/libraries → GET {api_base}/videos?q=… → search with scope.video_paths."
         )
     return (
         "## 能力路由（search vs 理解笔录）\n"
@@ -100,7 +104,11 @@ def _format_capability_routing(*, locale: str, api_base: str) -> str:
         "→ 用户需要详情/生成时再 ensure=true → 读 chunks[].evidence.vision.image_caption 与 summary。\n"
         "- 不要用 /videos/evidence 代替 /search 找片；笔录不是第三种搜索。\n"
         "- 不适用：台词/对白/ASR、按剧情全库检索、自动生成解说成片。\n"
-        "- 笔录里 YOLO 物体检测为可选；主文本是 caption 描述。"
+        "- 笔录里 YOLO 物体检测为可选；主文本是 caption 描述。\n"
+        "- 搜索无命中？可重试（换 query、加大 top_k、chunk 模式、用 GET /videos 或 GET /libraries/videos 列出该库视频后 "
+        f"scope.video_paths 只搜一条再试）。仍无 hit → 如实告知用户；禁止 ls/扫盘/猜文件名。"
+        "video_path 只能来自 hits、GET /videos、/libraries/videos 或导出响应。\n"
+        f"- 典型发现链路：GET {api_base}/libraries → GET {api_base}/videos?q=… → 用 scope.video_paths 搜索。"
     )
 
 
@@ -126,7 +134,8 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             f"Preset: {preset_body} | Folder: {folder_body}\n"
             "3. NOT default (user must ask): search→manifest→clips; intermediate JSON files; "
             "wrapper scripts; precise/preview_anchor_sec.\n"
-            "4. preset_id from search_presets snapshot; video_path verbatim from hits; no disk scan.\n"
+            "4. preset_id from search_presets snapshot; video_path ONLY from hits, GET /videos, GET /libraries/videos, or export — "
+            "never ls/guess desktop paths.\n"
             f"5. scope from GET {api_base}/libraries when needed. One POST via curl.exe or short Python.\n"
             f"6. Evidence only AFTER locate: user asks 理解笔录/发生了什么/解释这段 → search first if no video_path; "
             f"then GET {api_base}/videos/evidence (ensure=false; ensure=true after user agrees). Not speech ASR.\n"
@@ -140,7 +149,7 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         f"2. 默认：一次 POST {batch_url}，要 mp4 同 body 加 export.output_dir。"
         f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
         "3. 非默认（须用户明确要求）：search→manifest→clips；中间 JSON；wrapper 脚本；precise/preview_anchor_sec。\n"
-        "4. preset_id 来自 search_presets 快照；video_path 原样来自 hits；勿扫盘。\n"
+        "4. preset_id 来自 search_presets 快照；video_path 只能来自 hits、GET /videos、GET /libraries/videos 或导出响应 — 禁止 ls/扫盘/猜路径。\n"
         f"5. 缩 scope 用 GET {api_base}/libraries。curl.exe 或短 Python 发一次 POST。\n"
         f"6. 笔录仅在定位之后：用户要理解笔录/发生了什么/解释这段 → 无 video_path 时先 search；"
         f"再 GET {api_base}/videos/evidence（先 ensure=false，用户同意后再 ensure=true）。非 ASR 台词。\n"
@@ -187,6 +196,8 @@ def build_agent_starter_text(
     snapshot = {
         "api_base": api_base,
         "index_ready": index_ready,
+        "index_sync_in_progress": bool(health.get("index_sync_in_progress")),
+        "index_sync_target_library_path": health.get("index_sync_target_library_path"),
         "index_stale": health.get("index_stale"),
         "model": health.get("model"),
         "search_mode_default": health.get("search_mode_default"),
@@ -219,6 +230,11 @@ def build_agent_starter_text(
     ]
     if not index_ready:
         parts.extend(["", not_ready])
+    elif bool(health.get("index_sync_in_progress")):
+        if lang == "en":
+            parts.extend(["", "Library sync is in progress — search results may be incomplete until it finishes."])
+        else:
+            parts.extend(["", "库正在同步 — 搜索结果可能暂时不完整，请稍后再搜。"])
     return "\n".join(parts)
 
 
