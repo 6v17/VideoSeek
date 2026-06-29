@@ -4,10 +4,25 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新test">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="ui微调">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/resources/understanding_profiles/vision_baseline_v1/profile_manifest.json" beforeDir="false" afterPath="$PROJECT_DIR$/resources/understanding_profiles/vision_baseline_v1/profile_manifest.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/understanding/pipeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/understanding/pipeline.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/agent_evidence_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_evidence_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_starter_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_starter_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_pipeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_pipeline.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_resource_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_model_packages.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_model_packages.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -76,23 +91,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.6029040733390907" />
-      <entry key="MS500" value="1.950623555405538" />
-      <entry key="S2" value="2.669421111188398" />
-      <entry key="S5" value="3.283535819786687" />
-      <entry key="S10" value="3.59998904784705" />
-      <entry key="S30" value="3.8607184702782287" />
-      <entry key="S60" value="4.2001756628294125" />
-      <entry key="M2" value="6.360160720694589" />
-      <entry key="M5" value="17.745645889587024" />
-      <entry key="M10" value="41.82451605020104" />
-      <entry key="M15" value="68.1595952953438" />
-      <entry key="M30" value="148.97501865710862" />
-      <entry key="H1" value="307.9488279785813" />
-      <entry key="H2" value="592.4499506052119" />
-      <entry key="H4" value="979.1016431901269" />
-      <entry key="D1" value="1995.796079657626" />
-      <entry key="W1" value="2503.962394926606" />
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0002411134915639" />
+      <entry key="S2" value="1.1246107122299223" />
+      <entry key="S5" value="1.4349997379815502" />
+      <entry key="S10" value="1.715308741388477" />
+      <entry key="S30" value="4.844710380027846" />
+      <entry key="S60" value="11.37764009958039" />
+      <entry key="M2" value="21.728702817429475" />
+      <entry key="M5" value="45.70220070038161" />
+      <entry key="M10" value="70.57784943180103" />
+      <entry key="M15" value="85.06431353378991" />
+      <entry key="M30" value="119.75921941904102" />
+      <entry key="H1" value="219.30335829917158" />
+      <entry key="H2" value="467.2231300258586" />
+      <entry key="H4" value="873.1472566783631" />
+      <entry key="D1" value="2035.9873903415125" />
+      <entry key="W1" value="2615.947476606641" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -114,23 +129,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="1.189321542522091" />
-      <entry key="MS500" value="1.8490592806166843" />
-      <entry key="S2" value="2.6419676754053074" />
-      <entry key="S5" value="3.2720996882341438" />
-      <entry key="S10" value="3.5941618294619087" />
-      <entry key="S30" value="3.8587465800678804" />
-      <entry key="S60" value="4.199163992034238" />
-      <entry key="M2" value="6.359571864853119" />
-      <entry key="M5" value="17.74525150573507" />
-      <entry key="M10" value="41.82416053222142" />
-      <entry key="M15" value="68.15924382613828" />
-      <entry key="M30" value="148.97466341182675" />
-      <entry key="H1" value="307.9484652133473" />
-      <entry key="H2" value="592.4495989109896" />
-      <entry key="H4" value="979.1013502133882" />
-      <entry key="D1" value="1995.7959785739295" />
-      <entry key="W1" value="2503.962376730035" />
+      <entry key="MS100" value="0.9526379980439373" />
+      <entry key="MS500" value="0.9905819882166151" />
+      <entry key="S2" value="1.121928786029346" />
+      <entry key="S5" value="1.4336681285455652" />
+      <entry key="S10" value="1.7145255593438073" />
+      <entry key="S30" value="4.843991118066856" />
+      <entry key="S60" value="11.376792660741945" />
+      <entry key="M2" value="21.727885774225996" />
+      <entry key="M5" value="45.701495230697844" />
+      <entry key="M10" value="70.57729314079477" />
+      <entry key="M15" value="85.06386282500148" />
+      <entry key="M30" value="119.75890417259998" />
+      <entry key="H1" value="219.30308111495745" />
+      <entry key="H2" value="467.22284307323645" />
+      <entry key="H4" value="873.1469907196251" />
+      <entry key="D1" value="2035.9872865138148" />
+      <entry key="W1" value="2615.9474574985184" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -467,15 +482,7 @@
       <workItem from="1782614526199" duration="2065000" />
       <workItem from="1782621309148" duration="691000" />
       <workItem from="1782646805727" duration="14496000" />
-      <workItem from="1782696773783" duration="1071000" />
-    </task>
-    <task id="LOCAL-00093" summary="搜索界面重构">
-      <option name="closed" value="true" />
-      <created>1780246088632</created>
-      <option name="number" value="00093" />
-      <option name="presentableId" value="LOCAL-00093" />
-      <option name="project" value="LOCAL" />
-      <updated>1780246088632</updated>
+      <workItem from="1782696773783" duration="3623000" />
     </task>
     <task id="LOCAL-00094" summary="搜索优化">
       <option name="closed" value="true" />
@@ -861,7 +868,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782663176561</updated>
     </task>
-    <option name="localTasksCounter" value="142" />
+    <task id="LOCAL-00142" summary="ui微调">
+      <option name="closed" value="true" />
+      <created>1782697882297</created>
+      <option name="number" value="00142" />
+      <option name="presentableId" value="LOCAL-00142" />
+      <option name="project" value="LOCAL" />
+      <updated>1782697882298</updated>
+    </task>
+    <option name="localTasksCounter" value="143" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -891,7 +906,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="搜索优化" />
     <MESSAGE value="块级搜索bug修复，增加默认预设" />
     <MESSAGE value="导出优化，新增批量快速导出接口，供agent使用" />
     <MESSAGE value="完善api调用说明" />
@@ -916,7 +930,8 @@
     <MESSAGE value="更新友情链接及LICENSE" />
     <MESSAGE value="更新说明" />
     <MESSAGE value="更新test" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新test" />
+    <MESSAGE value="ui微调" />
+    <option name="LAST_COMMIT_MESSAGE" value="ui微调" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

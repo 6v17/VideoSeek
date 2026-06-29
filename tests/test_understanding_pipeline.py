@@ -14,9 +14,11 @@ PROFILE_MANIFEST = {
     "install_relpath": "profiles/vision_baseline_v1",
     "requires": {
         "components": [
-            "vision/object_detection/yolo11n",
             "vision/image_caption/qwen3-vl-remote",
-        ]
+        ],
+        "optional_components": [
+            "vision/object_detection/yolo11n",
+        ],
     },
     "pipeline": [
         {
@@ -55,3 +57,28 @@ class UnderstandingPipelineStopTests(unittest.TestCase):
                     chunks=chunks,
                     should_stop_callback=should_stop,
                 )
+
+    def test_run_chunk_skips_uninstalled_optional_components(self):
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        pipeline = UnderstandingPipeline(PROFILE_MANIFEST)
+        chunks = [{"start": 0.0, "end": 4.0}]
+
+        def _installed(component_id, _model_dir=None):
+            return component_id == "vision/image_caption/qwen3-vl-remote"
+
+        caption_component = MagicMock(infer=MagicMock(return_value={"text": "a desk scene"}))
+
+        with (
+            patch("src.core.understanding.pipeline.get_single_thumbnail", return_value=frame),
+            patch("src.core.understanding.pipeline.is_component_installed", side_effect=_installed),
+            patch.object(pipeline, "_get_component", return_value=caption_component) as get_component,
+        ):
+            results = pipeline.run_video_chunks(
+                video_path="D:/Videos/demo.mp4",
+                chunks=chunks,
+            )
+
+        self.assertEqual(len(results), 1)
+        self.assertNotIn("object_detection", results[0]["evidence"]["vision"])
+        self.assertEqual(results[0]["evidence"]["vision"]["image_caption"]["text"], "a desk scene")
+        get_component.assert_called_once()

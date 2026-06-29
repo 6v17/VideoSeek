@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QScrollArea, QFileDialog
 
 from src.app.config import load_config, save_config, DEFAULT_CONFIG
@@ -434,7 +435,8 @@ class UnderstandingGuiMixin:
             config["understanding"] = understanding
             save_config(config)
             self._clear_cached_vlm_connection_probe()
-            self._refresh_understanding_page_fast()
+            self._invalidate_understanding_status_cache()
+            self._refresh_understanding_page_fast(install_bootstrap=True)
             message = self.texts.get("understanding_config_saved", "Understanding settings saved.")
             page.lbl_status.setText(message)
             self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
@@ -806,18 +808,51 @@ class UnderstandingGuiMixin:
         path = str(value or "").strip()
         return path or None
 
-    def _fetch_understanding_resource_status(self, *, probe_remote: bool = False) -> dict:
+    def _invalidate_understanding_status_cache(self) -> None:
+        self._understanding_status_cache = None
+
+    def _fetch_understanding_resource_status(
+        self,
+        *,
+        probe_remote: bool = False,
+        install_bootstrap: bool = False,
+        use_cache: bool = True,
+    ) -> dict:
+        cache_key = (bool(probe_remote), bool(install_bootstrap))
+        cache = getattr(self, "_understanding_status_cache", None)
+        now = time.monotonic()
+        if (
+            use_cache
+            and isinstance(cache, dict)
+            and cache.get("key") == cache_key
+            and now - float(cache.get("at", 0.0) or 0.0) < 3.0
+        ):
+            return dict(cache.get("status") or {})
+
         try:
-            return get_understanding_resource_status(
+            status = get_understanding_resource_status(
                 config=load_config(),
                 probe_remote=probe_remote,
                 remote_probe_timeout_sec=2.0,
+                install_bootstrap=install_bootstrap,
             )
         except Exception:
-            return {"understanding_ready": False, "missing_components": []}
+            status = {"understanding_ready": False, "missing_components": []}
+        self._understanding_status_cache = {"key": cache_key, "at": now, "status": dict(status)}
+        return status
 
-    def _refresh_understanding_page_fast(self):
-        status = self._fetch_understanding_resource_status(probe_remote=False)
+    def _deferred_understanding_page_refresh(self) -> None:
+        if not self._is_current_page("understanding"):
+            return
+        if hasattr(self, "_refresh_understanding_scope_options"):
+            self._refresh_understanding_scope_options()
+        self._refresh_understanding_page_fast(install_bootstrap=True)
+
+    def _refresh_understanding_page_fast(self, *, install_bootstrap: bool = False):
+        status = self._fetch_understanding_resource_status(
+            probe_remote=False,
+            install_bootstrap=install_bootstrap,
+        )
         self._refresh_understanding_ui(status=status)
         self._refresh_understanding_settings_status(status=status)
 
@@ -825,7 +860,11 @@ class UnderstandingGuiMixin:
         if not hasattr(self, "understanding_page"):
             return
         if status is None:
-            status = self._fetch_understanding_resource_status(probe_remote=probe_remote)
+            status = self._fetch_understanding_resource_status(
+                probe_remote=probe_remote,
+                install_bootstrap=probe_remote,
+                use_cache=not probe_remote,
+            )
 
         ready = bool(status.get("understanding_ready"))
         missing = ", ".join(status.get("missing_components") or [])
@@ -922,11 +961,11 @@ class UnderstandingGuiMixin:
         if hint is None:
             return
         if status is None:
-            try:
-                status = self._fetch_understanding_resource_status(probe_remote=probe_remote)
-            except Exception as exc:
-                hint.setText(str(exc))
-                return
+            status = self._fetch_understanding_resource_status(
+                probe_remote=probe_remote,
+                install_bootstrap=probe_remote,
+                use_cache=not probe_remote,
+            )
         remote_line = self._remote_vlm_status_line(status)
 
         if status.get("understanding_ready"):

@@ -360,12 +360,7 @@ class MainWindow(
         if page_name == "understanding":
             if hasattr(self, "load_understanding_settings"):
                 self.load_understanding_settings(refresh_status=False)
-            if hasattr(self, "_refresh_understanding_scope_options"):
-                self._refresh_understanding_scope_options()
-            if hasattr(self, "_refresh_understanding_page_fast"):
-                self._refresh_understanding_page_fast()
-            elif hasattr(self, "_refresh_understanding_ui"):
-                self._refresh_understanding_ui(probe_remote=False)
+            QTimer.singleShot(0, self._deferred_understanding_page_refresh)
 
     def _update_version_info(self, version_info):
         self.version_info = version_info

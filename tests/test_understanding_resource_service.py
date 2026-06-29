@@ -51,9 +51,11 @@ VISION_BASELINE_PROFILE_MANIFEST = {
     "install_relpath": "profiles/vision_baseline_v1",
     "requires": {
         "components": [
-            "vision/object_detection/yolo11n",
             "vision/image_caption/qwen3-vl-remote",
-        ]
+        ],
+        "optional_components": [
+            "vision/object_detection/yolo11n",
+        ],
     },
     "pipeline": [
         {
@@ -251,6 +253,30 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertEqual(status["active_understanding_profile"], "vision_baseline_v1")
         self.assertGreaterEqual(len(status["missing_components"]), 1)
 
+    def test_understanding_ready_true_without_yolo_when_caption_ready(self):
+        self._install_component(CAPTION_MANIFEST)
+        config = {"understanding": DEFAULT_UNDERSTANDING_CONFIG}
+
+        with (
+            patch(
+                "src.services.understanding_resource_service.get_configured_model_dir",
+                return_value=str(self.model_root),
+            ),
+            patch(
+                "src.services.understanding_resource_service.get_builtin_profiles_dir",
+                return_value=str(self.builtin_profiles.parent),
+            ),
+            patch(
+                "src.services.understanding_resource_service.probe_remote_vlm",
+                return_value={"reachable": True, "model_available": True, "error": ""},
+            ),
+        ):
+            status = understanding_resource_service.get_understanding_resource_status(config=config)
+
+        self.assertTrue(status["understanding_ready"])
+        self.assertEqual(status["missing_components"], [])
+        self.assertIn("vision/object_detection/yolo11n", status["optional_missing_components"])
+
     def test_understanding_ready_true_when_profile_components_installed(self):
         self._install_component(YOLO_MANIFEST, "yolo11n.onnx")
         self._install_component(CAPTION_MANIFEST)
@@ -276,8 +302,7 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertEqual(status["missing_components"], [])
         self.assertEqual(len(status["installed_components"]), 2)
 
-    def test_understanding_ready_true_without_remote_probe_when_local_installed(self):
-        self._install_component(YOLO_MANIFEST, "yolo11n.onnx")
+    def test_understanding_ready_true_without_remote_probe_when_caption_installed(self):
         self._install_component(CAPTION_MANIFEST)
         config = {"understanding": DEFAULT_UNDERSTANDING_CONFIG}
 
@@ -303,6 +328,23 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertTrue(status["understanding_ready"])
         self.assertEqual(status["missing_components"], [])
         self.assertTrue(status["remote_vlm"].get("skipped"))
+
+    def test_understanding_resource_status_can_skip_install_bootstrap(self):
+        with patch(
+            "src.services.understanding_resource_service.ensure_understanding_profiles_installed",
+            side_effect=AssertionError("bootstrap profiles should be skipped"),
+        ):
+            with patch(
+                "src.services.understanding_resource_service.ensure_understanding_components_installed",
+                side_effect=AssertionError("bootstrap components should be skipped"),
+            ):
+                status = understanding_resource_service.get_understanding_resource_status(
+                    config={"understanding": DEFAULT_UNDERSTANDING_CONFIG},
+                    model_dir=str(self.model_root),
+                    probe_remote=False,
+                    install_bootstrap=False,
+                )
+        self.assertIn("understanding_ready", status)
 
     def test_ensure_understanding_profiles_installed_copies_builtin_profile(self):
         with patch(

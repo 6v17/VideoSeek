@@ -265,4 +265,5 @@ def build_agent_understanding_health_fields(*, config=None, probe_remote: bool =
         "understanding_ready": bool(status.get("understanding_ready")),
         "active_understanding_profile": str(status.get("active_understanding_profile") or ""),
         "understanding_missing_components": list(status.get("missing_components") or []),
+        "understanding_optional_missing_components": list(status.get("optional_missing_components") or []),
     }

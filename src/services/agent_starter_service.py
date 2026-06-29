@@ -100,7 +100,10 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             "3. NOT default (user must ask): search→manifest→clips; intermediate JSON files; "
             "wrapper scripts; precise/preview_anchor_sec.\n"
             "4. preset_id from search_presets snapshot; video_path verbatim from hits; no disk scan.\n"
-            f"5. scope from GET {api_base}/libraries when needed. One POST via curl.exe or short Python."
+            f"5. scope from GET {api_base}/libraries when needed. One POST via curl.exe or short Python.\n"
+            f"6. Understanding evidence (user asks what happens / 理解笔录 — NOT speech ASR): "
+            f"GET {api_base}/health → understanding_ready; then GET {api_base}/videos/evidence "
+            "(ensure=false first; ensure=true only after user agrees). Read chunks[].evidence + summary — not POST /search."
         )
     return (
         "## Policy kernel（唯一 binding 的执行偏好）\n"
@@ -111,7 +114,10 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
         "3. 非默认（须用户明确要求）：search→manifest→clips；中间 JSON；wrapper 脚本；precise/preview_anchor_sec。\n"
         "4. preset_id 来自 search_presets 快照；video_path 原样来自 hits；勿扫盘。\n"
-        f"5. 缩 scope 用 GET {api_base}/libraries。curl.exe 或短 Python 发一次 POST。"
+        f"5. 缩 scope 用 GET {api_base}/libraries。curl.exe 或短 Python 发一次 POST。\n"
+        f"6. 理解笔录（用户要描述/发生了什么/理解笔录 — 非 ASR 台词）：GET {api_base}/health 看 understanding_ready；"
+        f"再 GET {api_base}/videos/evidence（先 ensure=false，无则询问后 ensure=true）。"
+        "读 chunks[].evidence 与 summary；不是 POST /search。"
     )
 
 
@@ -135,11 +141,17 @@ def build_agent_starter_text(
     index_ready = bool(health.get("index_ready"))
 
     if lang == "en":
-        intro = "VideoSeek rough-cut assistant — VISUAL search (not dialogue) via localhost API."
+        intro = (
+            "VideoSeek rough-cut assistant — localhost API: CLIP visual search + export; "
+            "optional understanding evidence (description-service captions required; YOLO optional; not speech ASR)."
+        )
         snapshot_title = "## Instance"
         not_ready = "Index not ready — ask the user to sync the library in VideoSeek before searching."
     else:
-        intro = "VideoSeek 粗剪助手 — 按画面语义（非台词）通过 localhost API 找镜头/导出。"
+        intro = (
+            "VideoSeek 粗剪助手 — localhost API：CLIP 画面搜索找镜头/导出；"
+            "可选理解笔录（描述服务 caption 为主，YOLO 检测可选，非台词 ASR）。"
+        )
         snapshot_title = "## 当前实例"
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步库后再搜索。"
 
@@ -156,6 +168,9 @@ def build_agent_starter_text(
         "saved_search_scope_mode": health.get("saved_search_scope_mode"),
         "ffmpeg_path": ffmpeg.get("ffmpeg_path") if ffmpeg.get("ffmpeg_available") else None,
         "capabilities": caps if isinstance(caps, dict) else {},
+        "understanding_ready": bool(health.get("understanding_ready")),
+        "active_understanding_profile": health.get("active_understanding_profile"),
+        "understanding_missing_components": list(health.get("understanding_missing_components") or []),
         "search_presets": preset_summaries,
         "full_doc_path": doc_abs,
     }

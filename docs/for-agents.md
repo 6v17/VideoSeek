@@ -39,7 +39,7 @@
 
 ## 1. 能力与边界
 
-- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段；**可选**读取/生成理解笔录（YOLO + 描述服务 caption）。
+- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段；**可选**读取/生成理解笔录（描述服务 caption 为主，YOLO 检测为可选附加）。
 - **不支持：** 精确台词/剧情检索；自动成片；修改索引或用户设置（除非用户在对话中明确要求）。
 
 ---
@@ -119,7 +119,7 @@
 |------|------|
 | `index_ready` | 当前 mode 下全局索引是否可用 |
 | `index_stale` / `global_index_state` | 索引新鲜度 |
-| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate` 等 |
+| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `video_evidence`, `video_evidence_ready` 等 |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
 | `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
@@ -131,9 +131,12 @@
 | `library_indexes_upgrade_needed` | true 时需重启并完成迁移 |
 | `agent_api_default_image_precision` | 图搜默认 `fast` 或 `precise` |
 | `search_telemetry_enabled` | 遥测开关 |
-| `understanding_ready` | 理解资源是否就绪（YOLO + 描述服务）；false 时勿 `ensure=true` |
+| `understanding_ready` | 描述服务是否就绪（VLM caption）；false 时勿 `ensure=true`。YOLO 为可选附加 |
 | `active_understanding_profile` | 当前理解方案 id |
-| `understanding_missing_components` | 未就绪时的缺失组件 id 列表 |
+| `understanding_missing_components` | 未就绪时的缺失**必需**组件 id 列表 |
+| `understanding_optional_missing_components` | 可选组件缺失（如 YOLO）；不影响 `understanding_ready` |
+| `capabilities.video_evidence` | 理解笔录 API 是否可用（`GET /videos/evidence` 端点存在，恒为 true） |
+| `capabilities.video_evidence_ready` | 与 `understanding_ready` 相同；可生成/触发生成时为 true |
 
 ---
 

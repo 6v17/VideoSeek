@@ -601,6 +601,22 @@ def _understanding_field_label(text=""):
     return label
 
 
+def _understanding_value_hint(text=""):
+    label = QLabel(text)
+    label.setObjectName("CardHint")
+    label.setWordWrap(True)
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+    return label
+
+
+def _understanding_picker_label(text=""):
+    label = QLabel(text)
+    label.setObjectName("CardHint")
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    return label
+
+
 def _configure_understanding_line_edit(field: QLineEdit, *, width: int):
     field.setMinimumWidth(width)
     field.setMaximumWidth(width)
@@ -693,11 +709,9 @@ class UnderstandingEvidencePage(QWidget):
         config_form.addWidget(self.label_vlm_provider_preset, 2, 0)
         config_form.addWidget(self.input_vlm_provider_preset, 2, 1)
 
-        self.hint_vlm_preset_summary = QLabel()
-        self.hint_vlm_preset_summary.setObjectName("CardHint")
-        self.hint_vlm_preset_summary.setWordWrap(True)
+        self.hint_vlm_preset_summary = _understanding_value_hint()
         self.hint_vlm_preset_summary.hide()
-        config_form.addWidget(self.hint_vlm_preset_summary, 3, 0, 1, 2)
+        config_form.addWidget(self.hint_vlm_preset_summary, 3, 1)
 
         self.label_remote_vlm_api_key = _understanding_field_label()
         self.input_remote_vlm_api_key = QLineEdit()
@@ -790,21 +804,25 @@ class UnderstandingEvidencePage(QWidget):
 
         picker_row = QHBoxLayout()
         picker_row.setSpacing(10)
-        self.scope_label = _understanding_field_label()
+        picker_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.scope_label = _understanding_picker_label()
         self.scope_combo = QComboBox()
         self.scope_combo.setObjectName("SearchModeSelect")
         self.scope_combo.setMinimumWidth(180)
         self.scope_combo.setMaximumWidth(280)
-        self.video_label = _understanding_field_label()
+        self.scope_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.video_label = _understanding_picker_label()
         self.video_combo = QComboBox()
         self.video_combo.setObjectName("SearchModeSelect")
         self.video_combo.setMinimumWidth(240)
-        self.video_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.video_combo.setMaximumWidth(520)
+        self.video_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         picker_row.addWidget(self.scope_label, 0)
         picker_row.addWidget(self.scope_combo, 0)
         picker_row.addSpacing(8)
         picker_row.addWidget(self.video_label, 0)
-        picker_row.addWidget(self.video_combo, 1)
+        picker_row.addWidget(self.video_combo, 0)
+        picker_row.addStretch(1)
         workspace_layout.addLayout(picker_row)
 
         timeline_header = QHBoxLayout()

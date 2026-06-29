@@ -341,6 +341,8 @@ class AgentApiHealthTests(unittest.TestCase):
         self.assertTrue(payload["capabilities"]["chunk_search"])
         self.assertTrue(payload["capabilities"]["search_presets"])
         self.assertTrue(payload["capabilities"]["local_ffmpeg_clip"])
+        self.assertTrue(payload["capabilities"]["video_evidence"])
+        self.assertIn("video_evidence_ready", payload["capabilities"])
         self.assertEqual(payload["ffmpeg"]["ffmpeg_path"], "D:/VideoSeek/bin/ffmpeg.exe")
         self.assertEqual(payload["search_index_schema_version"], 2)
         self.assertEqual(payload["library_indexes_ready"], 2)
@@ -395,6 +397,7 @@ class AgentApiHealthTests(unittest.TestCase):
         mock_ffmpeg.return_value = {"ffmpeg_available": True, "ffmpeg_path": "", "ffmpeg_source": "managed"}
         payload = build_health_payload()
         self.assertFalse(payload["understanding_ready"])
+        self.assertFalse(payload["capabilities"]["video_evidence_ready"])
         self.assertEqual(payload["active_understanding_profile"], "vision_baseline_v1")
 
 

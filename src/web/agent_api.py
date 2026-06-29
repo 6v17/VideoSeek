@@ -303,7 +303,7 @@ def _build_index_id(spec: Dict[str, Any], snapshot: Dict[str, Any]) -> str:
     return f"{embedding_space}_{dimension}_{metric}_{state}"
 
 
-def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
+def _build_capabilities(snapshot: Dict[str, Any], *, understanding_ready: bool = False) -> Dict[str, bool]:
     ffmpeg_info = _build_ffmpeg_info()
     return {
         "text_search": True,
@@ -319,6 +319,8 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "search_precision": True,
         "search_telemetry": True,
         "crop_locate": True,
+        "video_evidence": True,
+        "video_evidence_ready": bool(understanding_ready),
     }
 
 
@@ -357,6 +359,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     timeouts = _agent_timeout_settings(config)
     from src.services.search_telemetry import is_telemetry_enabled
 
+    understanding_fields = build_agent_understanding_health_fields(config=config, probe_remote=False)
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -372,7 +375,10 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "embedding_space": spec.get("embedding_space"),
         "dimension": int(spec.get("dimension") or 0),
         "metric": spec.get("metric"),
-        "capabilities": _build_capabilities(snapshot),
+        "capabilities": _build_capabilities(
+            snapshot,
+            understanding_ready=bool(understanding_fields.get("understanding_ready")),
+        ),
         "ffmpeg": _build_ffmpeg_info(),
         "video_count": _count_library_videos(),
         "vector_count": snapshot["vector_count"],
@@ -393,7 +399,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
-        **build_agent_understanding_health_fields(config=config, probe_remote=False),
+        **understanding_fields,
     }
 
 

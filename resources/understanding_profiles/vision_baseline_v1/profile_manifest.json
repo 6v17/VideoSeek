@@ -7,8 +7,10 @@
   "install_relpath": "profiles/vision_baseline_v1",
   "requires": {
     "components": [
-      "vision/object_detection/yolo11n",
       "vision/image_caption/qwen3-vl-remote"
+    ],
+    "optional_components": [
+      "vision/object_detection/yolo11n"
     ]
   },
   "pipeline": [

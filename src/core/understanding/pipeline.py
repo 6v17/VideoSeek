@@ -11,7 +11,7 @@ from src.app.logging_utils import get_logger
 from src.core.understanding.base import UnderstandingStoppedError
 from src.core.understanding.registry import build_understanding_component
 from src.services.understanding_paths import get_component_manifest_path
-from src.services.understanding_resource_service import validate_component_manifest
+from src.services.understanding_resource_service import is_component_installed, validate_component_manifest
 from src.utils import get_single_thumbnail
 
 logger = get_logger("understanding.pipeline")
@@ -125,6 +125,13 @@ class UnderstandingPipeline:
                     raise UnderstandingStoppedError("Evidence generation stopped by user")
                 step_name = str(step["step"])
                 component_id = str(step["component"])
+                if not is_component_installed(component_id, self.model_dir):
+                    logger.info(
+                        "Skipping unavailable understanding component %s (%s)",
+                        component_id,
+                        step_name,
+                    )
+                    continue
                 vision_key = TASK_TO_VISION_KEY.get(step_name, step_name)
                 try:
                     component = self._get_component(component_id, step.get("params"))

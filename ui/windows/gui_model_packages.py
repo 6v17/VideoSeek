@@ -161,8 +161,12 @@ class ModelPackagesGuiMixin:
             self.load_settings_values()
             self.check_runtime_resources(show_dialog=False)
             if hasattr(self, "load_understanding_settings"):
+                if hasattr(self, "_invalidate_understanding_status_cache"):
+                    self._invalidate_understanding_status_cache()
                 self.load_understanding_settings()
             elif hasattr(self, "_refresh_understanding_ui"):
+                if hasattr(self, "_invalidate_understanding_status_cache"):
+                    self._invalidate_understanding_status_cache()
                 self._refresh_understanding_ui()
             message = self.texts.get("parse_model_package_done", "Model packages parsed: +{imported}, updated {updated}.").format(
                 imported=imported,

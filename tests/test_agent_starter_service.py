@@ -35,7 +35,12 @@ class AgentStarterServiceTests(unittest.TestCase):
                 "export_clip": True,
                 "library_discovery": True,
                 "batch_search": True,
+                "video_evidence": True,
+                "video_evidence_ready": False,
             },
+            "understanding_ready": False,
+            "active_understanding_profile": "vision_baseline_v1",
+            "understanding_missing_components": ["vision/object_detection/yolo11n"],
             "ffmpeg": {
                 "ffmpeg_available": True,
                 "ffmpeg_path": "C:/ffmpeg/ffmpeg.exe",
@@ -79,7 +84,7 @@ class AgentStarterServiceTests(unittest.TestCase):
                 self._sample_health(),
                 locale="zh",
             )
-        self.assertLess(len(text.splitlines()), 145)
+        self.assertLess(len(text.splitlines()), 155)
         self.assertIn("GET http://127.0.0.1:8765/api/v1/libraries", text)
         self.assertIn("search_presets", text)
         self.assertIn("builtin_smile", text)
@@ -99,6 +104,8 @@ class AgentStarterServiceTests(unittest.TestCase):
         self.assertIn("Release\\\\VideoSeek\\\\docs\\\\for-agents.md", text)
         self.assertIn("/agent-doc?format=text", text)
         self.assertIn('"full_doc_path"', text)
+        self.assertIn("videos/evidence", text)
+        self.assertIn("understanding_ready", text)
         self.assertIn('"capabilities"', text)
         self.assertNotIn("capabilities:\n- enabled", text)
 
@@ -190,7 +197,7 @@ class AgentStarterServiceTests(unittest.TestCase):
             self.assertIn("/agent-doc?format=text", payload["starter_text"])
             self.assertIn("do not scan the disk", payload["starter_text"])
             self.assertEqual(payload["meta"]["search_preset_count"], 0)
-            self.assertLessEqual(payload["meta"]["line_count"], 145)
+            self.assertLessEqual(payload["meta"]["line_count"], 155)
 
 
 class ForAgentsDocTests(unittest.TestCase):
