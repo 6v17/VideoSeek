@@ -84,7 +84,7 @@ class AgentStarterServiceTests(unittest.TestCase):
                 self._sample_health(),
                 locale="zh",
             )
-        self.assertLess(len(text.splitlines()), 155)
+        self.assertLess(len(text.splitlines()), 175)
         self.assertIn("GET http://127.0.0.1:8765/api/v1/libraries", text)
         self.assertIn("search_presets", text)
         self.assertIn("builtin_smile", text)
@@ -106,6 +106,8 @@ class AgentStarterServiceTests(unittest.TestCase):
         self.assertIn('"full_doc_path"', text)
         self.assertIn("videos/evidence", text)
         self.assertIn("understanding_ready", text)
+        self.assertIn("能力路由", text)
+        self.assertIn("不是第三种搜索", text)
         self.assertIn('"capabilities"', text)
         self.assertNotIn("capabilities:\n- enabled", text)
 
@@ -197,7 +199,7 @@ class AgentStarterServiceTests(unittest.TestCase):
             self.assertIn("/agent-doc?format=text", payload["starter_text"])
             self.assertIn("do not scan the disk", payload["starter_text"])
             self.assertEqual(payload["meta"]["search_preset_count"], 0)
-            self.assertLessEqual(payload["meta"]["line_count"], 155)
+            self.assertLessEqual(payload["meta"]["line_count"], 175)
 
 
 class ForAgentsDocTests(unittest.TestCase):

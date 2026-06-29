@@ -476,6 +476,27 @@ GET /videos/evidence?…&ensure=true
 
 ## 5. 能力组合（字段级）
 
+### 5.0 何时用 search / 何时用理解笔录
+
+| 用户意图 | 用什么 | 说明 |
+|----------|--------|------|
+| 在库里**找**镜头（未知在哪条视频） | `POST /search` 或 `/search/batch` | CLIP 画面语义匹配；返回 `hits[]` |
+| **解释**某条视频或某段在发生什么 | `GET /videos/evidence` | 需 `understanding_ready`；通常 **在 search 给出 `video_path` + 时间窗之后** |
+| 找片 + 说明 + 导出 | search → evidence → export | 笔录不是第三种搜索，是 search 之后的可读说明层 |
+| 台词 / 对白 / 剧情因果 / 自动解说成片 | **都不适用** | 笔录是 VLM 画面描述，非 ASR |
+
+**典型 Agent 链路：**
+
+```text
+POST /search → hits
+GET /videos/evidence?video_path=…&start_sec=…&end_sec=…&ensure=false
+  → 读 caption 解释或筛选 hits
+  → 用户同意且无笔录时再 ensure=true
+POST /export/clip 或 batch+export（用户要 mp4 时）
+```
+
+binding 执行偏好以 **`GET /agent-starter`** 内 Policy kernel + 能力路由 为准。
+
 ### 搜索
 
 | 端点 | 能力 |

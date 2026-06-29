@@ -77,6 +77,33 @@ def _search_preset_summaries(*, limit: int = 24) -> list[Dict[str, Any]]:
     return summaries
 
 
+def _format_capability_routing(*, locale: str, api_base: str) -> str:
+    evidence_url = f"{api_base}/videos/evidence"
+    if str(locale).lower().startswith("en"):
+        return (
+            "## Capability routing (search vs evidence)\n"
+            "- FIND unknown clips across the library → POST /search or /search/batch ONLY (CLIP visual match).\n"
+            f"- EXPLAIN what happens in a known video or hit window → GET {evidence_url} "
+            "(needs understanding_ready; usually AFTER search gives video_path + start/end).\n"
+            "- Typical chain: POST /search → hits → GET /videos/evidence?video_path=…&start_sec=…&end_sec=…&ensure=false "
+            "→ if user wants detail/generation, ensure=true → read chunks[].evidence.vision.image_caption + summary.\n"
+            "- Do NOT use /videos/evidence instead of /search to locate footage. Evidence is not a third search mode.\n"
+            "- NOT for: speech/dialogue/ASR, plot-by-plot library search, auto commentary/narration video generation.\n"
+            "- YOLO object_detection in evidence is optional; captions are the main text."
+        )
+    return (
+        "## 能力路由（search vs 理解笔录）\n"
+        "- 在库里**找**未知镜头 → 只用 POST /search 或 /search/batch（CLIP 画面语义匹配）。\n"
+        f"- **解释**某条视频或某段 hit 里发生了什么 → GET {evidence_url} "
+        "（需 understanding_ready；通常在有 video_path + 时间段之后）。\n"
+        "- 典型链路：POST /search → hits → GET /videos/evidence?video_path=…&start_sec=…&end_sec=…&ensure=false "
+        "→ 用户需要详情/生成时再 ensure=true → 读 chunks[].evidence.vision.image_caption 与 summary。\n"
+        "- 不要用 /videos/evidence 代替 /search 找片；笔录不是第三种搜索。\n"
+        "- 不适用：台词/对白/ASR、按剧情全库检索、自动生成解说成片。\n"
+        "- 笔录里 YOLO 物体检测为可选；主文本是 caption 描述。"
+    )
+
+
 def _format_policy_kernel(*, locale: str, api_base: str) -> str:
     """Compact policy kernel: uniqueness + golden path + anti-patterns + rules."""
     lang = "en" if str(locale).lower().startswith("en") else "zh"
@@ -101,9 +128,9 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             "wrapper scripts; precise/preview_anchor_sec.\n"
             "4. preset_id from search_presets snapshot; video_path verbatim from hits; no disk scan.\n"
             f"5. scope from GET {api_base}/libraries when needed. One POST via curl.exe or short Python.\n"
-            f"6. Understanding evidence (user asks what happens / 理解笔录 — NOT speech ASR): "
-            f"GET {api_base}/health → understanding_ready; then GET {api_base}/videos/evidence "
-            "(ensure=false first; ensure=true only after user agrees). Read chunks[].evidence + summary — not POST /search."
+            f"6. Evidence only AFTER locate: user asks 理解笔录/发生了什么/解释这段 → search first if no video_path; "
+            f"then GET {api_base}/videos/evidence (ensure=false; ensure=true after user agrees). Not speech ASR.\n"
+            "7. See Capability routing below — do not treat evidence as clip search."
         )
     return (
         "## Policy kernel（唯一 binding 的执行偏好）\n"
@@ -115,9 +142,9 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         "3. 非默认（须用户明确要求）：search→manifest→clips；中间 JSON；wrapper 脚本；precise/preview_anchor_sec。\n"
         "4. preset_id 来自 search_presets 快照；video_path 原样来自 hits；勿扫盘。\n"
         f"5. 缩 scope 用 GET {api_base}/libraries。curl.exe 或短 Python 发一次 POST。\n"
-        f"6. 理解笔录（用户要描述/发生了什么/理解笔录 — 非 ASR 台词）：GET {api_base}/health 看 understanding_ready；"
-        f"再 GET {api_base}/videos/evidence（先 ensure=false，无则询问后 ensure=true）。"
-        "读 chunks[].evidence 与 summary；不是 POST /search。"
+        f"6. 笔录仅在定位之后：用户要理解笔录/发生了什么/解释这段 → 无 video_path 时先 search；"
+        f"再 GET {api_base}/videos/evidence（先 ensure=false，用户同意后再 ensure=true）。非 ASR 台词。\n"
+        "7. 见下方「能力路由」— 勿把笔录当找片搜索。"
     )
 
 
@@ -171,6 +198,9 @@ def build_agent_starter_text(
         "understanding_ready": bool(health.get("understanding_ready")),
         "active_understanding_profile": health.get("active_understanding_profile"),
         "understanding_missing_components": list(health.get("understanding_missing_components") or []),
+        "understanding_optional_missing_components": list(
+            health.get("understanding_optional_missing_components") or []
+        ),
         "search_presets": preset_summaries,
         "full_doc_path": doc_abs,
     }
@@ -179,6 +209,8 @@ def build_agent_starter_text(
         intro,
         "",
         _format_policy_kernel(locale=locale, api_base=api_base),
+        "",
+        _format_capability_routing(locale=locale, api_base=api_base),
         "",
         snapshot_title,
         json.dumps(snapshot, ensure_ascii=False, indent=2),
