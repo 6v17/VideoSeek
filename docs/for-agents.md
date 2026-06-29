@@ -6,8 +6,8 @@
 
 **怎么用：**
 
-1. 粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（行为规则 + 实例快照 + `search_presets`）。
-2. 查字段 / 默认值 / 响应形状 → **`GET /api/v1/agent-doc?format=json`** 读 `content`，或 `?format=text` 纯 Markdown。
+1. 粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（精简 binding + 实例快照；预设最多 8 条 id/name）。
+2. 查字段 / playbook / 重试策略 → **`GET /api/v1/agent-doc?format=json`** 或 `?format=text`（§5）。
 3. 路径字段必须来自 API 响应（见 §2.2）；勿扫盘、勿猜路径、勿猜文件名。
 
 | 前提 | 动作 |
@@ -152,12 +152,15 @@
 
 | 字段 | 说明 |
 |------|------|
-| `starter_text` | **粘贴给外部 AI 的主文本** |
+| `starter_text` | **粘贴给外部 AI 的主文本**；内含「读完请先告诉用户」— Agent 第一条回复须向用户说明能做什么 |
 | `full_doc_path` | 本机 `docs/for-agents.md` 绝对路径（可读文件） |
 | `full_doc_rel` | `docs/for-agents.md` |
-| `meta.search_preset_count` | 快照里预设条数 |
+| `meta.search_preset_count` | 实例预设总数 |
+| `meta.search_preset_snapshot_count` | 快照内 preset 条数（≤8） |
 
-`starter_text` 内嵌 JSON 快照含：`api_base`, `index_ready`, `capabilities`, `search_presets[]`（id/name/query/summary）等。
+`starter_text` 结构：**读完请先告诉用户** → **Policy kernel** → **三条铁律** → 紧凑 JSON 快照（`search_presets[]` 仅 id/name；全量 `GET /search/presets`）。
+
+开头 **「读完请先告诉用户」** 要求 Agent 第一条回复向用户介绍能做什么；playbook 与字段细节见 **agent-doc §5**。
 
 ---
 
@@ -471,7 +474,9 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 最多 **64** 个 id。
 
-**响应 `items[]`：** `{ "video_id", "has_evidence" }`
+**响应 `items[]`：** `{ "video_id", "has_evidence", "generation_status", "chunks_completed", "chunk_total" }`
+
+`has_evidence=true` 含 `in_progress` 已有 chunk；`generation_status=completed` 表示整片完成。
 
 ---
 
@@ -485,88 +490,79 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 |------|------|------|
 | `video_id` 或 `video_path` | 二选一 | 与 search / libraries 路径规范一致 |
 | `start_sec` / `end_sec` | 否 | 与笔录 chunk **时间重叠**过滤；仅影响响应，不改落盘 |
-| `ensure` | 否，默认 `false` | `true`：无笔录时触发生成并落盘；`false`：仅读盘 |
+| `ensure` | 否，默认 `false` | `true`：无笔录或 **`in_progress` 未完成**时触发生成/续跑；`false`：仅读盘 |
 
 **成功响应要点：**
 
 | 字段 | 说明 |
 |------|------|
-| `evidence_available` | 是否有可用笔录 |
+| `evidence_available` | 是否有可用笔录（含 `in_progress` 已完成的 chunk） |
 | `video_id`, `video` | 视频标识与路径 |
 | `chunks[]` | 过滤后的 chunk 证据（`evidence.vision.object_detection` / `image_caption`） |
 | `summary` | 整片总结对象 `{ "text": string, "source": string }`（若有；`text` 为描述正文） |
 | `provenance` | 生成来源与 profile |
+| `meta.generation_status` | `missing` / `in_progress` / `completed` |
+| `meta.chunks_completed` / `meta.chunk_total` | 生成进度 |
 | `meta.generated_by` | API 本次触发生成时为 `"agent_api"` |
-| `meta.understanding_timeout_sec` | 本次请求超时预算 |
+| `meta.understanding_timeout_sec` | 本次请求超时预算（按**剩余** chunk 估算） |
 
 无笔录且 `ensure=false` → **HTTP 200**，`evidence_available: false`，`chunks: []`（非错误）。
+
+**超时（503 `understanding_timeout`）：** 生成可能已部分落盘；用 `ensure=false` 看 `meta.chunks_completed/chunk_total`，再 **`ensure=true` 续跑**（与 GUI 理解页相同 checkpoint 机制）。
 
 **推荐编排：**
 
 ```text
 GET /health → understanding_ready?
 POST /search → hits
-GET /videos/evidence?video_path=…&start_sec=…&end_sec=…&ensure=false
+GET /videos/evidence/status → 是否已有/是否 in_progress
+GET /videos/evidence?…&ensure=false
   → 无笔录则询问用户是否 ensure=true
 GET /videos/evidence?…&ensure=true
-  → 读 caption / summary 供 LLM 解释
+  → 完成或续跑；503 时看进度后重试 ensure=true
 ```
 
 ---
 
-## 5. 能力组合（字段级）
+## 5. Agent playbook（non-binding）
 
-### 5.0 何时用 search / 何时用理解笔录
+**不覆盖** starter 内 Policy kernel。用户意图匹配时选用；字段细节见 §4。
+
+### 5.1 search vs 理解笔录
 
 | 用户意图 | 用什么 | 说明 |
 |----------|--------|------|
-| 在库里**找**镜头（未知在哪条视频） | `POST /search` 或 `/search/batch` | CLIP 画面语义匹配；返回 `hits[]` |
-| **解释**某条视频或某段在发生什么 | `GET /videos/evidence` | 需 `understanding_ready`；通常 **在 search 给出 `video_path` + 时间窗之后** |
-| 找片 + 说明 + 导出 | search → evidence → export | 笔录不是第三种搜索，是 search 之后的可读说明层 |
-| 台词 / 对白 / 剧情因果 / 自动解说成片 | **都不适用** | 笔录是 VLM 画面描述，非 ASR |
+| 在库里**找**镜头 | `POST /search` 或 `/search/batch` | CLIP 画面匹配 → `hits[]` |
+| **解释**某段在发生什么 | `GET /videos/evidence` | 需 `understanding_ready`；通常在 search 给出 `video_path` + 时间窗**之后** |
+| 找片 + 说明 + 导出 | search → evidence → export | 笔录不是第三种搜索 |
+| 台词 / 剧情 / 自动解说 | **不适用** | 非 ASR |
 
-**典型 Agent 链路：**
+### 5.2 可选场景
 
-```text
-POST /search → hits
-GET /videos/evidence?video_path=…&start_sec=…&end_sec=…&ensure=false
-  → 读 caption 解释或筛选 hits
-  → 用户同意且无笔录时再 ensure=true
-POST /export/clip 或 batch+export（用户要 mp4 时）
-```
+| 场景 | 优先用法 |
+|------|----------|
+| 参考图 / 截图文件夹 | `query_type: image_path` 或 batch 的 `image_folder` |
+| 精确瞬间 | `mode: frame` + `expand_frame_hits: true` |
+| 较长氛围 / 动作段 | `mode: chunk`（无命中时**先问用户**再切换） |
+| 解释 hit | `GET /videos/evidence/status` → `ensure=false` → 用户同意 → `ensure=true`（`in_progress` 可续跑） |
+| 要 mp4 | batch + `export`（`encode_mode: copy`，默认） |
+| 要剪辑清单 JSON | `POST /export/manifest`（用户明确要求） |
+| 要重编码 | `encode_mode: original`（用户明确要求） |
+| 多个 beat | `POST /search/batch`（≤64）；`keep_per_source`、`dedupe`、`silent` |
+| 多库 | `GET /libraries` → `scope.library_paths`；看 `sync_in_progress` |
+| 图搜异常 | `GET /search/telemetry` |
 
-binding 执行偏好以 **`GET /agent-starter`** 内 Policy kernel + 能力路由 为准。
-
-### 5.0.1 搜索无命中时（禁止扫盘）
+### 5.3 搜索无命中（禁止扫盘）
 
 | 步骤 | 允许 | 禁止 |
 |------|------|------|
-| 1 | 换 query / 加大 `top_k` / 试 `chunk` 模式 / 缩小 `scope.library_paths` | `ls`、`find`、猜桌面文件名 |
-| 2 | `GET /libraries/videos?library_path=…` 或 **`GET /videos?library_path=…`** 列出已索引视频的 **`video_path`**，再 `scope.video_paths` 只搜该条并重试 | 用显示名或终端路径拼 `video_path` |
-| 3 | 仍无 hit → 告诉用户「库内无匹配」；若用户只要整片笔录且路径来自 `/libraries/videos`，可 `GET /videos/evidence` | 扫盘「碰运气」找第二段 |
+| 1 | 换 query / 加大 `top_k` / 试 `chunk` / 缩 `scope` | `ls`、`find`、猜文件名 |
+| 2 | `GET /videos?q=…` 或 `?library_path=…` → `scope.video_paths` 重试 | 拼 `video_path` |
+| 3 | 仍无 hit → 告知用户；路径来自 `/videos` 时可整片 `GET /videos/evidence` | 扫盘碰运气 |
 
-**第二库某段搜不到** 不等于可以扫桌面；要么 API 列出该库视频后重试，要么承认 CLIP 没匹配上。
+**典型链路：** `GET /health` → `GET /libraries` → search/batch → 可选 `/videos/evidence` → export 或 manifest。
 
-### 搜索
-
-| 端点 | 能力 |
-|------|------|
-| `POST /search` | 单次 query；返回 `hits[]` |
-| `POST /search/batch` | 多 query 或 `image_folder`；返回 `results[]` |
-| `POST /search/batch` + `export` | 同上，并在 `export.output_dir` 写入 mp4；响应含 `export` 块 |
-| `GET /videos/evidence` | 搜索命中后读取/生成 chunk 级理解笔录（可选） |
-
-### 导出（可独立调用）
-
-| 端点 | 输入 | 输出 |
-|------|------|------|
-| `POST /export/manifest` | `items[]` 或 `sources` | manifest JSON；可选 `write_path` |
-| `POST /export/clip` | 单条 `video_path` + 区间 + `output_path` | 单个 mp4 |
-| `POST /export/clips/batch` | `items[]`（每项含 `output_path`） | 多个 mp4 |
-
-内嵌 `export` 文件名：`{client_request_id或query}_rank{NN}.mp4`（冲突加后缀）。`clips/batch` 的 `items[]` 支持自定义 `output_path`。
-
-是否组合上述端点，见 **`GET /agent-starter`**。
+binding 以 **`GET /agent-starter`** 内 Policy kernel 为准。
 
 ---
 

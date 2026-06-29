@@ -12,7 +12,13 @@ from src.services.agent_evidence_service import (
 SAMPLE_BUNDLE = {
     "schema_version": 1,
     "video": {"video_id": "vid123", "video_path": "D:/Videos/demo.mp4"},
-    "provenance": {"understanding_profile_id": "vision_baseline_v1", "components": {}},
+    "provenance": {
+        "understanding_profile_id": "vision_baseline_v1",
+        "components": {},
+        "generation_status": "completed",
+        "chunk_total": 2,
+        "chunks_completed": 2,
+    },
     "chunks": [
         {
             "chunk_index": 0,
@@ -114,9 +120,71 @@ class AgentEvidenceServiceTests(unittest.TestCase):
         self.assertEqual(len(payload["chunks"]), 2)
         self.assertEqual(payload["meta"]["generated_by"], "agent_api")
         self.assertEqual(payload["meta"]["chunk_count"], 2)
+        self.assertEqual(payload["meta"]["generation_status"], "completed")
         mock_generate.assert_called_once()
         self.assertEqual(mock_generate.call_args.args[0], "vid123")
         mock_load.assert_called()
+
+    @patch("src.services.agent_evidence_service.load_evidence_bundle")
+    @patch("src.services.agent_evidence_service.generate_evidence_for_video")
+    @patch(
+        "src.services.agent_evidence_service.get_understanding_resource_status",
+        return_value={"understanding_ready": True, "missing_components": []},
+    )
+    @patch("src.services.agent_evidence_service.resolve_video_context")
+    @patch("src.services.agent_evidence_service.resolve_agent_video_id", return_value="vid123")
+    def test_get_agent_video_evidence_resumes_in_progress_when_ensure_true(
+        self,
+        _mock_resolve_id,
+        mock_context,
+        _mock_status,
+        mock_generate,
+        mock_load,
+    ):
+        partial_bundle = {
+            **SAMPLE_BUNDLE,
+            "provenance": {
+                **SAMPLE_BUNDLE["provenance"],
+                "generation_status": "in_progress",
+                "chunk_total": 2,
+                "chunks_completed": 1,
+            },
+            "chunks": SAMPLE_BUNDLE["chunks"][:1],
+        }
+        completed_bundle = SAMPLE_BUNDLE
+        mock_context.return_value = {"video_path": "D:/Videos/demo.mp4"}
+        mock_load.side_effect = [partial_bundle, completed_bundle]
+        payload = get_agent_video_evidence(video_id="vid123", ensure=True, config={})
+        self.assertTrue(payload["evidence_available"])
+        self.assertEqual(payload["meta"]["generation_status"], "completed")
+        mock_generate.assert_called_once()
+
+    @patch("src.services.agent_evidence_service.load_evidence_bundle")
+    @patch("src.services.agent_evidence_service.resolve_video_context")
+    @patch("src.services.agent_evidence_service.resolve_agent_video_id", return_value="vid123")
+    def test_get_agent_video_evidence_returns_partial_without_ensure(
+        self,
+        _mock_resolve_id,
+        mock_context,
+        mock_load,
+    ):
+        partial_bundle = {
+            **SAMPLE_BUNDLE,
+            "provenance": {
+                **SAMPLE_BUNDLE["provenance"],
+                "generation_status": "in_progress",
+                "chunk_total": 4,
+                "chunks_completed": 1,
+            },
+            "chunks": SAMPLE_BUNDLE["chunks"][:1],
+        }
+        mock_context.return_value = {"video_path": "D:/Videos/demo.mp4"}
+        mock_load.return_value = partial_bundle
+        payload = get_agent_video_evidence(video_id="vid123", ensure=False, config={})
+        self.assertTrue(payload["evidence_available"])
+        self.assertEqual(payload["meta"]["generation_status"], "in_progress")
+        self.assertEqual(payload["meta"]["chunks_completed"], 1)
+        self.assertEqual(payload["meta"]["chunk_total"], 4)
 
     @patch(
         "src.services.agent_evidence_service.get_understanding_resource_status",
@@ -138,15 +206,31 @@ class AgentEvidenceServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "understanding_not_ready")
         self.assertEqual(ctx.exception.status_code, 409)
 
-    @patch("src.services.agent_evidence_service.evidence_bundle_exists")
-    def test_list_agent_evidence_status(self, mock_exists):
+    @patch("src.services.agent_evidence_service.load_evidence_bundle")
+    def test_list_agent_evidence_status(self, mock_load):
         from src.services.agent_evidence_service import list_agent_evidence_status
 
-        mock_exists.side_effect = lambda video_id, **kwargs: video_id == "a"
-        payload = list_agent_evidence_status(["a", "b"], config={})
+        def side_effect(video_id, **kwargs):
+            if video_id == "a":
+                return {
+                    "provenance": {"generation_status": "completed", "chunk_total": 2, "chunks_completed": 2},
+                    "chunks": [{}, {}],
+                }
+            if video_id == "b":
+                return {
+                    "provenance": {"generation_status": "in_progress", "chunk_total": 4, "chunks_completed": 1},
+                    "chunks": [{}],
+                }
+            return None
+
+        mock_load.side_effect = side_effect
+        payload = list_agent_evidence_status(["a", "b", "c"], config={})
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["items"][0]["has_evidence"], True)
-        self.assertEqual(payload["items"][1]["has_evidence"], False)
+        self.assertTrue(payload["items"][0]["has_evidence"])
+        self.assertEqual(payload["items"][0]["generation_status"], "completed")
+        self.assertTrue(payload["items"][1]["has_evidence"])
+        self.assertEqual(payload["items"][1]["generation_status"], "in_progress")
+        self.assertFalse(payload["items"][2]["has_evidence"])
 
     def test_list_agent_evidence_status_requires_ids(self):
         from src.services.agent_evidence_service import list_agent_evidence_status

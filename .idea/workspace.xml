@@ -4,13 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="api视频理解功能说明更新">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="api完善">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/agent_library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_library_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/agent_starter_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_agent_api_v11.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_api_v11.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_agent_starter_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_agent_starter_service.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -80,23 +77,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.059954026188854" />
-      <entry key="MS500" value="1.6004840349827907" />
-      <entry key="S2" value="2.726462284963164" />
-      <entry key="S5" value="4.259939527846835" />
-      <entry key="S10" value="5.338278205551936" />
-      <entry key="S30" value="6.392551206968915" />
-      <entry key="S60" value="7.331580391831389" />
-      <entry key="M2" value="10.120871336735878" />
-      <entry key="M5" value="16.298362495775947" />
-      <entry key="M10" value="26.049406860394008" />
-      <entry key="M15" value="39.039091874437524" />
-      <entry key="M30" value="82.89311117142113" />
-      <entry key="H1" value="179.76609262774204" />
-      <entry key="H2" value="411.2747467747326" />
-      <entry key="H4" value="822.262261881468" />
-      <entry key="D1" value="2079.0027931350846" />
-      <entry key="W1" value="2711.113154247861" />
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0" />
+      <entry key="S2" value="1.0000004596724206" />
+      <entry key="S5" value="1.0084894617028313" />
+      <entry key="S10" value="1.2254504812093183" />
+      <entry key="S30" value="3.009408458600458" />
+      <entry key="S60" value="4.49283197120393" />
+      <entry key="M2" value="5.967938886456027" />
+      <entry key="M5" value="10.828459921357265" />
+      <entry key="M10" value="20.481046835566993" />
+      <entry key="M15" value="32.24004105158194" />
+      <entry key="M30" value="73.48603583793515" />
+      <entry key="H1" value="167.6861975650657" />
+      <entry key="H2" value="395.2812680009801" />
+      <entry key="H4" value="805.9395688023601" />
+      <entry key="D1" value="2078.3565984801553" />
+      <entry key="W1" value="2719.9391806471044" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -118,23 +115,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="1.023050812783006" />
-      <entry key="MS500" value="1.5878952802656745" />
-      <entry key="S2" value="2.7210560188208994" />
-      <entry key="S5" value="4.256526481048192" />
-      <entry key="S10" value="5.336126391965304" />
-      <entry key="S30" value="6.391688202266991" />
-      <entry key="S60" value="7.331084792061908" />
-      <entry key="M2" value="10.120528878798684" />
-      <entry key="M5" value="16.29814014233128" />
-      <entry key="M10" value="26.049226179204112" />
-      <entry key="M15" value="39.03890804908251" />
-      <entry key="M30" value="82.89290957780165" />
-      <entry key="H1" value="179.76587236051682" />
-      <entry key="H2" value="411.2744965920639" />
-      <entry key="H4" value="822.262012465752" />
-      <entry key="D1" value="2079.0026873212955" />
-      <entry key="W1" value="2711.113134476598" />
+      <entry key="MS100" value="0.9659363289248456" />
+      <entry key="MS500" value="0.9930924954370359" />
+      <entry key="S2" value="0.9982690913879793" />
+      <entry key="S5" value="1.007789946078963" />
+      <entry key="S10" value="1.225015811888264" />
+      <entry key="S30" value="3.009030247661398" />
+      <entry key="S60" value="4.492545795888491" />
+      <entry key="M2" value="5.9677471347173245" />
+      <entry key="M5" value="10.828316785124585" />
+      <entry key="M10" value="20.480907746839772" />
+      <entry key="M15" value="32.239891927819286" />
+      <entry key="M30" value="73.48585921736174" />
+      <entry key="H1" value="167.6859932486442" />
+      <entry key="H2" value="395.28102807685525" />
+      <entry key="H4" value="805.9393245937101" />
+      <entry key="D1" value="2078.356492745667" />
+      <entry key="W1" value="2719.9391608183464" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -471,15 +468,7 @@
       <workItem from="1782614526199" duration="2065000" />
       <workItem from="1782621309148" duration="691000" />
       <workItem from="1782646805727" duration="14496000" />
-      <workItem from="1782696773783" duration="6871000" />
-    </task>
-    <task id="LOCAL-00096" summary="搜索优化">
-      <option name="closed" value="true" />
-      <created>1780315095461</created>
-      <option name="number" value="00096" />
-      <option name="presentableId" value="LOCAL-00096" />
-      <option name="project" value="LOCAL" />
-      <updated>1780315095461</updated>
+      <workItem from="1782696773783" duration="7651000" />
     </task>
     <task id="LOCAL-00097" summary="块级搜索bug修复，增加默认预设">
       <option name="closed" value="true" />
@@ -865,7 +854,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782705415294</updated>
     </task>
-    <option name="localTasksCounter" value="145" />
+    <task id="LOCAL-00145" summary="api完善">
+      <option name="closed" value="true" />
+      <created>1782707628828</created>
+      <option name="number" value="00145" />
+      <option name="presentableId" value="LOCAL-00145" />
+      <option name="project" value="LOCAL" />
+      <updated>1782707628828</updated>
+    </task>
+    <option name="localTasksCounter" value="146" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -895,7 +892,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="完善api调用说明" />
     <MESSAGE value="减少写配置因为权限问题导致失败" />
     <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
     <MESSAGE value="移除无用说明" />
@@ -920,7 +916,8 @@
     <MESSAGE value="ui微调" />
     <MESSAGE value="视频理解yolo检测改为非必须" />
     <MESSAGE value="api视频理解功能说明更新" />
-    <option name="LAST_COMMIT_MESSAGE" value="api视频理解功能说明更新" />
+    <MESSAGE value="api完善" />
+    <option name="LAST_COMMIT_MESSAGE" value="api完善" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

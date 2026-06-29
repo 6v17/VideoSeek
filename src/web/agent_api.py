@@ -40,6 +40,7 @@ from src.services.agent_evidence_service import (
     get_agent_video_evidence,
     list_agent_evidence_status,
     resolve_understanding_timeout_sec,
+    resolve_understanding_pending_chunk_count,
 )
 from src.utils import normalize_export_encode_mode
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
@@ -1650,9 +1651,8 @@ class AgentApiService:
         ensure: bool = False,
     ):
         config = load_config()
-        timeout_sec = resolve_understanding_timeout_sec(chunk_count=0, config=config)
+        timeout_sec = resolve_understanding_timeout_sec(chunk_count=1, config=config)
         try:
-            from src.services.indexing_service import load_video_chunks_by_id
             from src.services.agent_evidence_service import resolve_agent_video_id
 
             resolved_video_id = await asyncio.to_thread(
@@ -1661,8 +1661,15 @@ class AgentApiService:
                 video_path=video_path,
                 config=config,
             )
-            chunks = await asyncio.to_thread(load_video_chunks_by_id, resolved_video_id, config)
-            timeout_sec = resolve_understanding_timeout_sec(chunk_count=len(chunks or []), config=config)
+            pending_chunks = await asyncio.to_thread(
+                resolve_understanding_pending_chunk_count,
+                video_id=resolved_video_id,
+                config=config,
+            )
+            timeout_sec = resolve_understanding_timeout_sec(
+                chunk_count=pending_chunks,
+                config=config,
+            )
             payload = await asyncio.wait_for(
                 asyncio.to_thread(
                     get_agent_video_evidence,
@@ -1678,11 +1685,23 @@ class AgentApiService:
         except AgentEvidenceError as exc:
             raise_api_error(exc.status_code, exc.code, exc.message)
         except asyncio.TimeoutError:
-            raise_api_error(
-                503,
-                "understanding_timeout",
-                f"Understanding evidence timed out after {int(timeout_sec)} seconds.",
+            partial = await asyncio.to_thread(
+                get_agent_video_evidence,
+                video_id=video_id,
+                video_path=video_path,
+                start_sec=start_sec,
+                end_sec=end_sec,
+                ensure=False,
+                config=config,
             )
+            progress = (partial.get("meta") or {}) if isinstance(partial.get("meta"), dict) else {}
+            completed = int(progress.get("chunks_completed") or 0)
+            total = int(progress.get("chunk_total") or 0)
+            detail = (
+                f"Understanding evidence timed out after {int(timeout_sec)} seconds."
+                + (f" Partial progress: {completed}/{total} chunks on disk — retry ensure=true to resume." if completed else " Retry ensure=true to resume if generation was in progress.")
+            )
+            raise_api_error(503, "understanding_timeout", detail)
         except Exception as exc:
             logger.exception("Agent video evidence failed.")
             raise_api_error(500, "query_failed", str(exc))
