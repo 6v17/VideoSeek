@@ -234,12 +234,18 @@ def _apply_sidebar_icon_font(button: QToolButton, *, point_size: int = 14) -> No
     button.setFont(font)
 
 
+def _apply_sidebar_footer_icon_size(button: QToolButton) -> None:
+    height = COMPONENT_SIZES["sidebar_action_height"]
+    button.setFixedHeight(height)
+    button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
 def _make_sidebar_icon_button() -> QToolButton:
     button = QToolButton()
     button.setObjectName("SidebarIconButton")
     button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
     button.setIconSize(QSize(20, 20))
-    button.setFixedSize(COMPONENT_SIZES["sidebar_action_height"], COMPONENT_SIZES["sidebar_action_height"])
+    _apply_sidebar_footer_icon_size(button)
     return button
 
 
@@ -312,26 +318,28 @@ class NavigationSidebar(QWidget):
         self.btn_theme.setObjectName("SidebarIconButton")
         self.btn_theme.setText("☀")
         self.btn_theme.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        self.btn_theme.setFixedSize(COMPONENT_SIZES["sidebar_action_height"], COMPONENT_SIZES["sidebar_action_height"])
+        _apply_sidebar_footer_icon_size(self.btn_theme)
         _apply_sidebar_icon_font(self.btn_theme)
 
         self.btn_donate = QToolButton()
         self.btn_donate.setObjectName("SidebarDonateButton")
         self.btn_donate.setText("❤")
         self.btn_donate.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        self.btn_donate.setFixedSize(COMPONENT_SIZES["sidebar_action_height"], COMPONENT_SIZES["sidebar_action_height"])
+        _apply_sidebar_footer_icon_size(self.btn_donate)
         _apply_sidebar_icon_font(self.btn_donate)
 
         self.btn_github = _make_sidebar_icon_button()
         self.btn_bilibili = _make_sidebar_icon_button()
         self.btn_qq = _make_sidebar_icon_button()
 
-        footer_icon_layout.addWidget(self.btn_theme)
-        footer_icon_layout.addWidget(self.btn_donate)
-        footer_icon_layout.addWidget(self.btn_github)
-        footer_icon_layout.addWidget(self.btn_bilibili)
-        footer_icon_layout.addWidget(self.btn_qq)
-        footer_icon_layout.addStretch()
+        for button in (
+            self.btn_theme,
+            self.btn_donate,
+            self.btn_github,
+            self.btn_bilibili,
+            self.btn_qq,
+        ):
+            footer_icon_layout.addWidget(button, 1)
 
         for button in [self.btn_notice, self.btn_about, self.btn_language]:
             button.setCursor(Qt.PointingHandCursor)

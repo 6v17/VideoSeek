@@ -4,7 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明" />
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新test">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -17,7 +21,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="303" />
+    <option name="cachedIndexableFilesCount" value="316" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -72,23 +76,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0" />
-      <entry key="MS500" value="1.0" />
-      <entry key="S2" value="1.0000000000000813" />
-      <entry key="S5" value="1.0000102785622522" />
-      <entry key="S10" value="1.0081543276079614" />
-      <entry key="S30" value="2.1236681273097626" />
-      <entry key="S60" value="5.8709310249763" />
-      <entry key="M2" value="12.732723584545335" />
-      <entry key="M5" value="28.994244059903068" />
-      <entry key="M10" value="59.001940759764686" />
-      <entry key="M15" value="88.8219978840067" />
-      <entry key="M30" value="171.70220371461528" />
-      <entry key="H1" value="329.78618663218555" />
-      <entry key="H2" value="607.6268802688508" />
-      <entry key="H4" value="975.0348925730049" />
-      <entry key="D1" value="1935.9168815558894" />
-      <entry key="W1" value="2420.9935258870705" />
+      <entry key="MS100" value="1.6029040733390907" />
+      <entry key="MS500" value="1.950623555405538" />
+      <entry key="S2" value="2.669421111188398" />
+      <entry key="S5" value="3.283535819786687" />
+      <entry key="S10" value="3.59998904784705" />
+      <entry key="S30" value="3.8607184702782287" />
+      <entry key="S60" value="4.2001756628294125" />
+      <entry key="M2" value="6.360160720694589" />
+      <entry key="M5" value="17.745645889587024" />
+      <entry key="M10" value="41.82451605020104" />
+      <entry key="M15" value="68.1595952953438" />
+      <entry key="M30" value="148.97501865710862" />
+      <entry key="H1" value="307.9488279785813" />
+      <entry key="H2" value="592.4499506052119" />
+      <entry key="H4" value="979.1016431901269" />
+      <entry key="D1" value="1995.796079657626" />
+      <entry key="W1" value="2503.962394926606" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -110,23 +114,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9659363289248456" />
-      <entry key="MS500" value="0.9930924954370359" />
-      <entry key="S2" value="0.9982686325974737" />
-      <entry key="S5" value="0.9993173650772209" />
-      <entry key="S10" value="1.0078051545147952" />
-      <entry key="S30" value="2.1234258560167794" />
-      <entry key="S60" value="5.87058917646637" />
-      <entry key="M2" value="12.732343041286772" />
-      <entry key="M5" value="28.99388779806215" />
-      <entry key="M10" value="59.00156900879123" />
-      <entry key="M15" value="88.82161930012064" />
-      <entry key="M30" value="171.70182574588594" />
-      <entry key="H1" value="329.78580932819386" />
-      <entry key="H2" value="607.6265235292356" />
-      <entry key="H4" value="975.0346023259029" />
-      <entry key="D1" value="1935.9167836581198" />
-      <entry key="W1" value="2420.9935083118885" />
+      <entry key="MS100" value="1.189321542522091" />
+      <entry key="MS500" value="1.8490592806166843" />
+      <entry key="S2" value="2.6419676754053074" />
+      <entry key="S5" value="3.2720996882341438" />
+      <entry key="S10" value="3.5941618294619087" />
+      <entry key="S30" value="3.8587465800678804" />
+      <entry key="S60" value="4.199163992034238" />
+      <entry key="M2" value="6.359571864853119" />
+      <entry key="M5" value="17.74525150573507" />
+      <entry key="M10" value="41.82416053222142" />
+      <entry key="M15" value="68.15924382613828" />
+      <entry key="M30" value="148.97466341182675" />
+      <entry key="H1" value="307.9484652133473" />
+      <entry key="H2" value="592.4495989109896" />
+      <entry key="H4" value="979.1013502133882" />
+      <entry key="D1" value="1995.7959785739295" />
+      <entry key="W1" value="2503.962376730035" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -462,23 +466,8 @@
       <workItem from="1782611494949" duration="2839000" />
       <workItem from="1782614526199" duration="2065000" />
       <workItem from="1782621309148" duration="691000" />
-      <workItem from="1782646805727" duration="12685000" />
-    </task>
-    <task id="LOCAL-00091" summary="更新说明">
-      <option name="closed" value="true" />
-      <created>1780191449495</created>
-      <option name="number" value="00091" />
-      <option name="presentableId" value="LOCAL-00091" />
-      <option name="project" value="LOCAL" />
-      <updated>1780191449496</updated>
-    </task>
-    <task id="LOCAL-00092" summary="精搜优化">
-      <option name="closed" value="true" />
-      <created>1780197220513</created>
-      <option name="number" value="00092" />
-      <option name="presentableId" value="LOCAL-00092" />
-      <option name="project" value="LOCAL" />
-      <updated>1780197220513</updated>
+      <workItem from="1782646805727" duration="14496000" />
+      <workItem from="1782696773783" duration="1071000" />
     </task>
     <task id="LOCAL-00093" summary="搜索界面重构">
       <option name="closed" value="true" />
@@ -856,7 +845,23 @@
       <option name="project" value="LOCAL" />
       <updated>1782662168174</updated>
     </task>
-    <option name="localTasksCounter" value="140" />
+    <task id="LOCAL-00140" summary="更新test">
+      <option name="closed" value="true" />
+      <created>1782662430975</created>
+      <option name="number" value="00140" />
+      <option name="presentableId" value="LOCAL-00140" />
+      <option name="project" value="LOCAL" />
+      <updated>1782662430975</updated>
+    </task>
+    <task id="LOCAL-00141" summary="更新test">
+      <option name="closed" value="true" />
+      <created>1782663176561</created>
+      <option name="number" value="00141" />
+      <option name="presentableId" value="LOCAL-00141" />
+      <option name="project" value="LOCAL" />
+      <updated>1782663176561</updated>
+    </task>
+    <option name="localTasksCounter" value="142" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -909,9 +914,9 @@
     <MESSAGE value="与master分支同步" />
     <MESSAGE value="大文件重构" />
     <MESSAGE value="更新友情链接及LICENSE" />
-    <MESSAGE value="更新test" />
     <MESSAGE value="更新说明" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新说明" />
+    <MESSAGE value="更新test" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新test" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
