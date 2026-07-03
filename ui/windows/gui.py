@@ -62,7 +62,7 @@ from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
-from ui.controllers.network_search_controller import NetworkSearchController
+from ui.controllers.video_download_controller import VideoDownloadController
 from ui.controllers.preview_controller import PreviewController
 from ui.controllers.runtime_resource_controller import RuntimeResourceController
 from ui.controllers.search_controller import SearchController
@@ -71,7 +71,7 @@ from ui.windows.gui_settings import SettingsGuiMixin
 from ui.windows.gui_preview import PreviewGuiMixin
 from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
 from ui.windows.gui_understanding import UnderstandingGuiMixin
-from ui.windows.gui_vector_network import VectorNetworkGuiMixin
+from ui.windows.gui_video_download import VideoDownloadGuiMixin
 from ui.windows.gui_runtime import RuntimeGuiMixin
 from ui.windows.gui_model_packages import ModelPackagesGuiMixin
 from ui.windows.gui_ui_state import AppUiStateMixin
@@ -91,7 +91,7 @@ class MainWindow(
     PreviewGuiMixin,
     LibraryIndexingGuiMixin,
     UnderstandingGuiMixin,
-    VectorNetworkGuiMixin,
+    VideoDownloadGuiMixin,
     RuntimeGuiMixin,
     AppUiStateMixin,
     ModelPackagesGuiMixin,
@@ -110,8 +110,6 @@ class MainWindow(
         self.startup_cancelled = False
         self._close_when_indexing_stops = False
         self.current_img_path = None
-        self.network_query_img_path = None
-        self.version_info = None
         self.notice_payload = None
         self.about_payload = None
         self._startup_complete = False
@@ -159,7 +157,9 @@ class MainWindow(
         self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
-        self.network_search_controller = NetworkSearchController(self)
+        self.video_download_controller = VideoDownloadController(self)
+        self.video_download_controller.refresh_default_dir_label()
+        self.video_download_controller.load_settings_from_config()
         self._init_search_presets_ui()
         self._init_shot_list_ui()
         self.mobile_bridge_controller = MobileBridgeController(self)
@@ -275,14 +275,15 @@ class MainWindow(
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self._init_search_scope_state()
-        self.link_page.query_image_label.mousePressEvent = lambda e: self.upload_network_query_image()
-        self.link_page.btn_build.clicked.connect(self.start_network_build)
-        self.link_page.btn_import.clicked.connect(self.import_network_library)
-        self.link_page.btn_export.clicked.connect(self.export_network_library)
-        self.link_page.btn_run.clicked.connect(self.start_network_search)
-        self.link_page.btn_clear.clicked.connect(self.clear_link_search_content)
-        self.link_page.btn_link_details.clicked.connect(self.show_network_link_details)
-        self.link_page.btn_open_cache.clicked.connect(self.open_network_download_cache_folder)
+        self.link_page.btn_probe.clicked.connect(self.start_video_download_probe)
+        self.link_page.btn_download.clicked.connect(self.start_video_download)
+        self.link_page.btn_clear.clicked.connect(self.clear_video_download_content)
+        self.link_page.btn_change_dir.clicked.connect(self.choose_download_default_dir)
+        self.link_page.btn_open_dir.clicked.connect(self.open_download_default_dir)
+        self.link_page.btn_browse_cookie.clicked.connect(self.browse_download_cookie_file)
+        self.link_page.btn_clear_cookie.clicked.connect(self.clear_download_cookie_file)
+        self.link_page.btn_cookie_help.clicked.connect(self.show_download_cookie_help)
+        self.link_page.btn_clear_legacy.clicked.connect(self.clear_legacy_network_data)
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
@@ -361,6 +362,9 @@ class MainWindow(
             if hasattr(self, "load_understanding_settings"):
                 self.load_understanding_settings(refresh_status=False)
             QTimer.singleShot(0, self._deferred_understanding_page_refresh)
+        if page_name == "link":
+            if hasattr(self, "video_download_controller"):
+                self.video_download_controller.refresh_default_dir_label()
 
     def _update_version_info(self, version_info):
         self.version_info = version_info
@@ -448,32 +452,20 @@ class MainWindow(
 
         self.link_page.header.title.setText(t["link_page_title"])
         self.link_page.header.subtitle.setText(t["link_page_desc"])
-        self.link_page.notice_body.setText(t["network_notice_body"])
-        self.link_page.build_title.setText(t.get("network_build_section_title", t["controls_label"]))
-        self.link_page.build_hint.setText(t.get("network_build_section_hint", t["controls_hint"]))
-        self.link_page.search_title.setText(t.get("network_search_section_title", t["link_controls_label"]))
-        self.link_page.search_hint.setText(t.get("network_search_section_hint", t["link_controls_hint"]))
-        self.link_page.mode_label.show()
-        self.link_page.mode_combo.show()
-        self.link_page.mode_label.setText(t["network_build_mode"])
-        self.link_page.mode_combo.blockSignals(True)
-        self.link_page.mode_combo.clear()
-        self.link_page.mode_combo.addItem(t["link_mode_download"], "download")
-        self.link_page.mode_combo.addItem(t["link_mode_stream"], "stream")
-        self.link_page.mode_combo.blockSignals(False)
-        self.link_page.build_links_input.setPlaceholderText(t["network_link_editor_placeholder"])
-        self.link_page.input_link.setPlaceholderText(t["link_input_placeholder"])
-        self.link_page.query_image_label.setText(t["network_image_preview_hint"])
-        self.link_page.btn_build.setText(t["network_build"])
-        self.link_page.btn_import.setText(t["network_import"])
-        self.link_page.btn_export.setText(t["network_export"])
-        self.link_page.btn_link_details.setText(t["network_links_detail"])
-        self.link_page.btn_open_cache.setText(t["network_open_cache"])
-        self.link_page.btn_run.setText(t["link_run"])
+        self.link_page.links_input.setPlaceholderText(t["download_links_placeholder"])
+        self.link_page.btn_change_dir.setText(t["download_change_dir"])
+        cfg = load_config()
+        self.link_page.set_download_texts(t)
+        self.link_page.set_cookie_file_path(str(cfg.get("download_cookie_file", "") or ""))
+        self.video_download_controller.refresh_cookie_admin_hint()
+        self.link_page.list_title.setText(t["download_list_title"])
+        self.link_page.set_list_headers(t["download_list_headers"])
+        self.link_page.btn_probe.setText(t["download_btn_probe"])
+        self.link_page.btn_download.setText(t["download_btn_start_all"])
         self.link_page.btn_clear.setText(t["clear"])
-        self.link_page.results_title.setText(t["link_results_panel"])
-        self.link_page.result_table.apply_header_labels(t)
-        self.link_page.result_view.set_empty_message(t["no_results"])
+        self.link_page.btn_open_dir.setText(t["download_btn_open_dir"])
+        self.link_page.btn_clear_legacy.setText(t["download_btn_clear_legacy"])
+        self.video_download_controller.refresh_default_dir_label()
 
         self.library_page.header.title.setText(t["library_page_title"])
         self.library_page.header.subtitle.setText(t["library_page_desc"])
@@ -557,8 +549,6 @@ class MainWindow(
             self.search_page.img_label.setText(t["image_drop_hint"])
 
         self.search_page.lbl_status.setText(t["ready"])
-        self.link_page.lbl_build_status.setText(t["ready"])
-        self.link_page.lbl_search_status.setText(t["ready"])
         self.library_page.lbl_status.setText(t["ready"])
         if not (
             getattr(self, "understanding_controller", None)
@@ -1128,19 +1118,6 @@ class MainWindow(
         self._refresh_search_panel_state()
         self.search_page.lbl_status.setText(self.texts["ready"])
 
-    def clear_link_search_content(self):
-        if hasattr(self, "network_search_controller"):
-            self.network_search_controller.clear()
-            return
-        self.link_page.input_link.clear()
-        self.network_query_img_path = None
-        self.link_page.query_image_label.clear()
-        self.link_page.query_image_label.setText(self.texts["network_image_preview_hint"])
-        self.link_page.progress_bar.setValue(0)
-        self.link_page.result_table.setRowCount(0)
-        self.link_page.lbl_build_status.setText(self.texts["ready"])
-        self.link_page.lbl_search_status.setText(self.texts["ready"])
-
     def open_result_in_explorer(self, path):
         open_in_explorer(path)
 
@@ -1336,7 +1313,16 @@ class MainWindow(
         if urls:
             dropped_path = urls[0].toLocalFile()
             if self.pages.currentIndex() == self._nav_page_index("link"):
-                self.upload_network_file_path(dropped_path)
+                if dropped_path.lower().endswith(".txt"):
+                    try:
+                        with open(dropped_path, "r", encoding="utf-8", errors="ignore") as handle:
+                            content = handle.read().strip()
+                        if content:
+                            existing = self.link_page.links_input.toPlainText().strip()
+                            merged = f"{existing}\n{content}".strip() if existing else content
+                            self.link_page.links_input.setPlainText(merged)
+                    except OSError:
+                        pass
                 return
             self.upload_file_path(dropped_path)
 

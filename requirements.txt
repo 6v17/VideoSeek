@@ -18,6 +18,7 @@ tokenizers==0.22.2
 ftfy
 regex
 yt-dlp
+rookiepy
 python-vlc
 
 # Mobile bridge (local HTTP server / phone upload) — see src/web/mobile_bridge.py

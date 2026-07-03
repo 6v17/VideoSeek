@@ -1,78 +1,43 @@
 import numpy as np
 
-DEFAULT_SIMILARITY_MODE = "chunk"
-SUPPORTED_SIMILARITY_MODES = {"chunk", "frame"}
-DEFAULT_SEGMENTATION_STRATEGY = "legacy"
-SUPPORTED_SEGMENTATION_STRATEGIES = {"legacy", "delta_ema"}
+ACTIVE_CHUNK_CONFIG_KEYS = (
+    "similarity_threshold",
+    "min_chunk_size",
+    "min_chunk_duration",
+)
 
 
 def build_semantic_chunks(
     embeddings,
     timestamps,
     similarity_threshold=0.85,
-    max_chunk_duration=5.0,
     min_chunk_size=2,
-    similarity_mode=DEFAULT_SIMILARITY_MODE,
-    segmentation_strategy=DEFAULT_SEGMENTATION_STRATEGY,
-    delta_ema_alpha=0.35,
-    delta_high_threshold=0.15,
-    delta_low_threshold=0.08,
-    delta_rise_frames=2,
-    delta_stable_frames=2,
+    min_chunk_duration=0.0,
 ):
     builder = SemanticChunkStreamBuilder(
         similarity_threshold=similarity_threshold,
-        max_chunk_duration=max_chunk_duration,
         min_chunk_size=min_chunk_size,
-        similarity_mode=similarity_mode,
-        segmentation_strategy=segmentation_strategy,
-        delta_ema_alpha=delta_ema_alpha,
-        delta_high_threshold=delta_high_threshold,
-        delta_low_threshold=delta_low_threshold,
-        delta_rise_frames=delta_rise_frames,
-        delta_stable_frames=delta_stable_frames,
+        min_chunk_duration=min_chunk_duration,
     )
     builder.extend(embeddings, timestamps)
     return builder.finish()
 
 
 class SemanticChunkStreamBuilder:
-    """Incremental chunk builder for long videos (legacy similarity or delta+EMA experiment)."""
+    """Incremental dual-check chunk builder for long videos."""
 
     def __init__(
         self,
         similarity_threshold=0.85,
-        max_chunk_duration=5.0,
         min_chunk_size=2,
-        similarity_mode=DEFAULT_SIMILARITY_MODE,
-        segmentation_strategy=DEFAULT_SEGMENTATION_STRATEGY,
-        delta_ema_alpha=0.35,
-        delta_high_threshold=0.15,
-        delta_low_threshold=0.08,
-        delta_rise_frames=2,
-        delta_stable_frames=2,
+        min_chunk_duration=0.0,
     ):
-        if similarity_mode not in SUPPORTED_SIMILARITY_MODES:
-            raise ValueError(f"Unsupported similarity_mode: {similarity_mode}")
-        strategy = str(segmentation_strategy or DEFAULT_SEGMENTATION_STRATEGY).strip().lower()
-        if strategy not in SUPPORTED_SEGMENTATION_STRATEGIES:
-            raise ValueError(f"Unsupported segmentation_strategy: {segmentation_strategy}")
-        self.threshold = float(similarity_threshold)
-        self.max_duration = float(max_chunk_duration)
+        self.cut_threshold = float(similarity_threshold)
         self.min_size = max(1, int(min_chunk_size))
-        self.similarity_mode = similarity_mode
-        self.segmentation_strategy = strategy
-        self.delta_ema_alpha = float(delta_ema_alpha)
-        self.delta_high_threshold = float(delta_high_threshold)
-        self.delta_low_threshold = float(delta_low_threshold)
-        self.delta_rise_frames = max(1, int(delta_rise_frames))
-        self.delta_stable_frames = max(1, int(delta_stable_frames))
+        self.min_chunk_duration = max(0.0, float(min_chunk_duration))
         self.chunks = []
         self._current_vectors = []
         self._current_times = []
-        self._prev_vector = None
-        self._delta_ema = None
-        self._high_run = 0
 
     def extend(self, embeddings, timestamps):
         vectors = np.asarray(embeddings, dtype=np.float32)
@@ -90,33 +55,25 @@ class SemanticChunkStreamBuilder:
 
     def finish(self):
         if self._current_vectors:
-            self.chunks.append(_finalize_chunk(self._current_vectors, self._current_times))
+            self.chunks.append(_make_chunk_record(self._current_vectors, self._current_times))
             self._current_vectors = []
             self._current_times = []
-        return list(self.chunks)
+        records = merge_short_chunks(self.chunks, self.min_chunk_duration)
+        return _finalize_chunk_records(records)
 
     def _append_frame(self, vector, timestamp):
-        if self.segmentation_strategy == "delta_ema":
-            self._append_frame_delta_ema(vector, timestamp)
-            return
-        self._append_frame_legacy(vector, timestamp)
-
-    def _append_frame_legacy(self, vector, timestamp):
         if not self._current_vectors:
             self._current_vectors = [vector]
             self._current_times = [timestamp]
             return
 
-        similarity = _similarity_to_reference(
-            vector,
-            self._current_vectors,
-            similarity_mode=self.similarity_mode,
-        )
-        duration = timestamp - self._current_times[0]
-        should_split = similarity < self.threshold or duration > self.max_duration
+        if _frame_stays_in_chunk(vector, self._current_vectors, self.cut_threshold):
+            self._current_vectors.append(vector)
+            self._current_times.append(timestamp)
+            return
 
-        if should_split and len(self._current_vectors) >= self.min_size:
-            self.chunks.append(_finalize_chunk(self._current_vectors, self._current_times))
+        if len(self._current_vectors) >= self.min_size:
+            self.chunks.append(_make_chunk_record(self._current_vectors, self._current_times))
             self._current_vectors = [vector]
             self._current_times = [timestamp]
             return
@@ -124,55 +81,17 @@ class SemanticChunkStreamBuilder:
         self._current_vectors.append(vector)
         self._current_times.append(timestamp)
 
-    def _append_frame_delta_ema(self, vector, timestamp):
-        if not self._current_vectors:
-            self._current_vectors = [vector]
-            self._current_times = [timestamp]
-            self._prev_vector = vector
-            return
 
-        delta = cosine_distance(vector, self._prev_vector)
-        self._prev_vector = vector
-        self._delta_ema = _update_ema(self._delta_ema, delta, self.delta_ema_alpha)
+def _frame_stays_in_chunk(vector, current_vectors, threshold):
+    cut_threshold = float(threshold)
+    if cosine_similarity(vector, current_vectors[-1]) >= cut_threshold:
+        return True
+    return _similarity_to_chunk_mean(vector, current_vectors) >= cut_threshold
 
-        duration = timestamp - self._current_times[0]
-        if duration > self.max_duration and len(self._current_vectors) >= self.min_size:
-            self._start_new_chunk([vector], [timestamp])
-            self._reset_delta_state()
-            return
 
-        if self._delta_ema >= self.delta_high_threshold:
-            self._high_run += 1
-        else:
-            self._high_run = 0
-
-        self._current_vectors.append(vector)
-        self._current_times.append(timestamp)
-
-        if self._high_run < self.delta_rise_frames:
-            return
-
-        cut = len(self._current_vectors) - self.delta_rise_frames
-        if cut < self.min_size:
-            return
-
-        head_vectors = self._current_vectors[:cut]
-        head_times = self._current_times[:cut]
-        tail_vectors = self._current_vectors[cut:]
-        tail_times = self._current_times[cut:]
-        self.chunks.append(_finalize_chunk(head_vectors, head_times))
-        self._current_vectors = tail_vectors
-        self._current_times = tail_times
-        self._high_run = 0
-
-    def _start_new_chunk(self, vectors, timestamps):
-        if self._current_vectors:
-            self.chunks.append(_finalize_chunk(self._current_vectors, self._current_times))
-        self._current_vectors = list(vectors)
-        self._current_times = list(timestamps)
-
-    def _reset_delta_state(self):
-        self._high_run = 0
+def _similarity_to_chunk_mean(vector, current_vectors):
+    reference = np.mean(np.asarray(current_vectors, dtype=np.float32), axis=0)
+    return cosine_similarity(vector, reference)
 
 
 def build_semantic_chunks_streaming(vector_batches, timestamps, **kwargs):
@@ -200,39 +119,64 @@ def build_semantic_chunks_streaming(vector_batches, timestamps, **kwargs):
 
 def chunk_config_payload(
     similarity_threshold=0.85,
-    max_chunk_duration=5.0,
     min_chunk_size=2,
-    similarity_mode=DEFAULT_SIMILARITY_MODE,
-    segmentation_strategy=DEFAULT_SEGMENTATION_STRATEGY,
-    delta_ema_alpha=0.35,
-    delta_high_threshold=0.15,
-    delta_low_threshold=0.08,
-    delta_rise_frames=2,
-    delta_stable_frames=2,
+    min_chunk_duration=0.0,
 ):
-    strategy = str(segmentation_strategy or DEFAULT_SEGMENTATION_STRATEGY).strip().lower()
-    if strategy not in SUPPORTED_SEGMENTATION_STRATEGIES:
-        strategy = DEFAULT_SEGMENTATION_STRATEGY
     return {
         "similarity_threshold": float(similarity_threshold),
-        "max_chunk_duration": float(max_chunk_duration),
         "min_chunk_size": int(min_chunk_size),
-        "similarity_mode": str(similarity_mode),
-        "segmentation_strategy": strategy,
-        "delta_ema_alpha": float(delta_ema_alpha),
-        "delta_high_threshold": float(delta_high_threshold),
-        "delta_low_threshold": float(delta_low_threshold),
-        "delta_rise_frames": int(delta_rise_frames),
-        "delta_stable_frames": int(delta_stable_frames),
+        "min_chunk_duration": float(min_chunk_duration),
     }
 
 
-def _similarity_to_reference(vector, current_vectors, similarity_mode):
-    if similarity_mode == "frame":
-        reference = current_vectors[-1]
-    else:
-        reference = np.mean(np.asarray(current_vectors, dtype=np.float32), axis=0)
-    return cosine_similarity(vector, reference)
+def normalize_chunk_config_snapshot(config):
+    """Reduce stored chunk_config blobs to the active segmentation fields."""
+    payload = config if isinstance(config, dict) else {}
+    return chunk_config_payload(
+        similarity_threshold=payload.get("similarity_threshold", 0.85),
+        min_chunk_size=payload.get("min_chunk_size", 2),
+        min_chunk_duration=payload.get("min_chunk_duration", 0.0),
+    )
+
+
+def merge_short_chunks(chunks, min_duration):
+    if not chunks or min_duration <= 0:
+        return list(chunks)
+
+    merged = []
+    for chunk in chunks:
+        duration = float(chunk["end"]) - float(chunk["start"])
+        if duration < min_duration and merged:
+            previous = merged[-1]
+            previous["vectors"].extend(chunk["vectors"])
+            previous["times"].extend(chunk["times"])
+            previous["end"] = float(chunk["end"])
+        else:
+            merged.append(_copy_chunk_record(chunk))
+    return merged
+
+
+def _make_chunk_record(vectors, timestamps):
+    times = [float(value) for value in timestamps]
+    return {
+        "start": times[0],
+        "end": times[-1],
+        "vectors": list(vectors),
+        "times": times,
+    }
+
+
+def _copy_chunk_record(chunk):
+    return {
+        "start": float(chunk["start"]),
+        "end": float(chunk["end"]),
+        "vectors": list(chunk["vectors"]),
+        "times": list(chunk["times"]),
+    }
+
+
+def _finalize_chunk_records(records):
+    return [_finalize_chunk(record["vectors"], record["times"]) for record in records]
 
 
 def _finalize_chunk(vectors, timestamps):
@@ -249,18 +193,6 @@ def cosine_similarity(left, right):
     left_vector = _normalize_vector(np.asarray(left, dtype=np.float32))
     right_vector = _normalize_vector(np.asarray(right, dtype=np.float32))
     return float(np.dot(left_vector, right_vector))
-
-
-def cosine_distance(left, right):
-    return 1.0 - cosine_similarity(left, right)
-
-
-def _update_ema(previous, value, alpha):
-    current = float(value)
-    if previous is None:
-        return current
-    weight = float(alpha)
-    return weight * current + (1.0 - weight) * float(previous)
 
 
 def pack_chunks(chunks):

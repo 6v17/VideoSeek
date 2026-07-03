@@ -34,6 +34,9 @@ COMPONENT_SIZES = {
     "nav_button_height": 42,
     "sidebar_action_height": 36,
     "image_drop_min_height": 300,
+    "search_query_tab_chrome_height": 41,
+    "search_query_tab_page_margins_v": 12,
+    "search_image_options_row_height": 28,
     "preview_host_min_height": 340,
     "search_compare_baseline_height": 548,
     "search_panel_width_extra": 28,
@@ -53,6 +56,15 @@ COMPONENT_SIZES = {
     "search_panel_card_margin": 12,
     "settings_path_input_width": 520,
 }
+
+
+def compute_search_query_tabs_height(config=None) -> int:
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    body = int(sizes["image_drop_min_height"]) + int(sizes.get("search_query_tab_page_margins_v", 12))
+    chrome = int(sizes.get("search_query_tab_chrome_height", 41))
+    return body + chrome
 
 
 def compute_search_panel_width(config=None) -> int:

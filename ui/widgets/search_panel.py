@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.layout import COMPONENT_SIZES, compute_search_panel_width
+from ui.widgets.layout import COMPONENT_SIZES, compute_search_panel_width, compute_search_query_tabs_height
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
 
@@ -102,7 +102,8 @@ class SearchPanel(VSCard):
 
         self.text_search = QTextEdit()
         self.text_search.setObjectName("SearchInput")
-        self.text_search.setMinimumHeight(128)
+        self.text_search.setMinimumHeight(72)
+        self.text_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.text_search.setAcceptRichText(False)
 
         self.lbl_active_model = QLabel()
@@ -159,6 +160,8 @@ class SearchPanel(VSCard):
         image_options_layout.setSpacing(group_gap)
         image_options_layout.addWidget(self.search_video_discovery_cluster, 0)
         image_options_layout.addWidget(self.search_precision_cluster, 0)
+        options_row_height = int(COMPONENT_SIZES.get("search_image_options_row_height", 28))
+        self.search_image_options_group.setFixedHeight(options_row_height)
         self.search_image_options_group.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         )
@@ -177,22 +180,30 @@ class SearchPanel(VSCard):
         granularity_row.addWidget(self.search_mode, 0)
         granularity_row.addStretch(1)
 
+        tab_page_height = int(COMPONENT_SIZES["image_drop_min_height"]) + int(
+            COMPONENT_SIZES.get("search_query_tab_page_margins_v", 12)
+        )
+
         self.image_tab = QWidget()
+        self.image_tab.setFixedHeight(tab_page_height)
         image_tab_layout = QVBoxLayout(self.image_tab)
         image_tab_layout.setContentsMargins(4, 8, 4, 4)
         image_tab_layout.setSpacing(10)
-        image_tab_layout.addWidget(self.img_label)
+        image_tab_layout.addWidget(self.img_label, 0, Qt.AlignmentFlag.AlignTop)
+        image_tab_layout.addStretch(1)
 
         self.text_tab = QWidget()
+        self.text_tab.setFixedHeight(tab_page_height)
         text_tab_layout = QVBoxLayout(self.text_tab)
         text_tab_layout.setContentsMargins(4, 8, 4, 4)
         text_tab_layout.setSpacing(8)
-        text_tab_layout.addWidget(self.text_search)
-        text_tab_layout.addWidget(self.lbl_text_model_hint)
-        text_tab_layout.addWidget(self.text_granularity_cluster)
+        text_tab_layout.addWidget(self.text_search, 1)
+        text_tab_layout.addWidget(self.lbl_text_model_hint, 0, Qt.AlignmentFlag.AlignTop)
+        text_tab_layout.addWidget(self.text_granularity_cluster, 0, Qt.AlignmentFlag.AlignTop)
 
         self.compose_form = SearchComposeFormWidget(fill_text=True)
         self.compose_tab = QWidget()
+        self.compose_tab.setFixedHeight(tab_page_height)
         compose_tab_layout = QVBoxLayout(self.compose_tab)
         compose_tab_layout.setContentsMargins(4, 8, 4, 4)
         compose_tab_layout.setSpacing(0)
@@ -200,6 +211,7 @@ class SearchPanel(VSCard):
 
         self.search_query_tabs = QTabWidget()
         self.search_query_tabs.setObjectName("SearchQueryTabs")
+        self.search_query_tabs.setFixedHeight(compute_search_query_tabs_height())
         self.search_query_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.search_query_tabs.addTab(self.image_tab, "")
         self.search_query_tabs.addTab(self.text_tab, "")

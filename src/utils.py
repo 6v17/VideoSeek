@@ -1155,6 +1155,17 @@ def libx264_param():
     return "libx264"
 
 
+def is_windows_admin() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def open_in_explorer(video_path):
     path = os.fspath(video_path)
     if not os.path.exists(path):

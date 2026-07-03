@@ -367,7 +367,6 @@ class ConfigMigrationTests(unittest.TestCase):
                         "remote_max_frames": 5,
                         "embedding_batch_size": 999,
                         "similarity_threshold": 9,
-                        "max_chunk_duration": 0,
                         "min_chunk_size": 999,
                     }
                 )
@@ -382,10 +381,11 @@ class ConfigMigrationTests(unittest.TestCase):
             self.assertEqual(loaded["remote_max_frames"], 200)
             self.assertEqual(loaded["embedding_batch_size"], 64)
             self.assertEqual(loaded["similarity_threshold"], 1.0)
-            self.assertEqual(loaded["max_chunk_duration"], 1.0)
             self.assertEqual(loaded["min_chunk_size"], 50)
+            self.assertNotIn("max_chunk_duration", loaded)
+            self.assertNotIn("chunk_similarity_mode", loaded)
 
-    def test_save_config_normalizes_invalid_enums(self):
+    def test_save_config_strips_obsolete_chunk_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             user_config_file = root / "config.json"
@@ -394,6 +394,8 @@ class ConfigMigrationTests(unittest.TestCase):
                 config_module.save_config(
                     {
                         "chunk_similarity_mode": "bad",
+                        "chunk_split_confirm_frames": 5,
+                        "max_chunk_duration": 5.0,
                         "search_mode": "oops",
                         "theme": "blue",
                         "language": "jp",
@@ -401,7 +403,9 @@ class ConfigMigrationTests(unittest.TestCase):
                 )
                 loaded = config_module.load_config()
 
-            self.assertEqual(loaded["chunk_similarity_mode"], config_module.DEFAULT_CONFIG["chunk_similarity_mode"])
+            self.assertNotIn("chunk_similarity_mode", loaded)
+            self.assertNotIn("chunk_split_confirm_frames", loaded)
+            self.assertNotIn("max_chunk_duration", loaded)
             self.assertEqual(loaded["search_mode"], config_module.DEFAULT_CONFIG["search_mode"])
             self.assertEqual(loaded["theme"], config_module.DEFAULT_CONFIG["theme"])
             self.assertEqual(loaded["language"], config_module.DEFAULT_CONFIG["language"])

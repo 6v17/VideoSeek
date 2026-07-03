@@ -18,8 +18,7 @@ from src.services.understanding_import_service import classify_package_zip, impo
 from src.services.understanding_resource_service import SEARCH_MODEL_MANIFEST_FILENAME, UNDERSTANDING_MANIFEST_FILENAME
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
-from src.services.remote_library_service import build_remote_library_from_links
-from src.services.remote_search_service import run_remote_search
+from src.services.video_download_service import download_video, probe_video_links
 from src.services.search_service import warmup_search_runtime
 from src.services.version_service import get_version_status
 from ui.playback.vlc_player import warmup_vlc_runtime
@@ -512,47 +511,89 @@ class ResourceDownloadWorker(QThread):
             self.error_signal.emit(str(exc))
 
 
-class RemoteSearchWorker(QThread):
+class VideoDownloadProbeWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
     finished = Signal()
 
-    def __init__(self, query_data, is_text):
+    def __init__(self, links):
         super().__init__()
-        self.query_data = query_data
-        self.is_text = is_text
+        self.links = list(links or [])
 
     def run(self):
         try:
-            results = run_remote_search(self.query_data, is_text=self.is_text)
-            self.result_ready.emit(results or [])
+            results = probe_video_links(self.links)
+            self.result_ready.emit(results)
         except Exception as exc:
             self.error_signal.emit(str(exc))
         finally:
             self.finished.emit()
 
 
-class RemoteLibraryBuildWorker(QThread):
-    progress_signal = Signal(int, str)
-    finished_signal = Signal(dict)
+class VideoDownloadBatchWorker(QThread):
+    task_started = Signal(int, str, str)
+    task_progress = Signal(int, int, str)
+    task_finished = Signal(int, dict)
+    batch_finished = Signal(dict)
     error_signal = Signal(str)
+    finished = Signal()
 
-    def __init__(self, links, mode):
+    def __init__(self, jobs, *, output_dir):
         super().__init__()
-        self.links = links
-        self.mode = mode
+        self.jobs = list(jobs or [])
+        self.output_dir = str(output_dir or "")
 
     def run(self):
+        import time
+
+        from src.app.config import load_config
+        from src.services.video_download_service import download_video
+
+        started = time.time()
+        success_count = 0
+        failed_count = 0
         try:
-            result = build_remote_library_from_links(
-                self.links,
-                mode=self.mode,
-                incremental=True,
-                progress_callback=lambda value, text: self.progress_signal.emit(value, text),
-            )
-            self.finished_signal.emit(result)
+            base_config = load_config()
+            for index, job in enumerate(self.jobs):
+                url = str(job.get("url", "") or "")
+                title = str(job.get("title", "") or url)
+                quality = str(job.get("quality", "best") or "best")
+                self.task_started.emit(index, title, url)
+
+                def _progress(percent, text, idx=index):
+                    self.task_progress.emit(idx, int(percent), str(text))
+
+                config = dict(base_config)
+                config["download_quality"] = quality
+                result = download_video(
+                    url,
+                    output_dir=self.output_dir,
+                    progress_callback=_progress,
+                    config=config,
+                )
+                payload = {
+                    "ok": result.ok,
+                    "url": result.url,
+                    "title": result.title,
+                    "file_path": result.file_path,
+                    "reason_code": result.reason_code,
+                    "strategy_used": result.strategy_used,
+                }
+                if result.ok:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                self.task_finished.emit(index, payload)
+            summary = {
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "duration_sec": round(time.time() - started, 3),
+            }
+            self.batch_finished.emit(summary)
         except Exception as exc:
             self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
 
 
 class LocalVectorDetailsWorker(QThread):

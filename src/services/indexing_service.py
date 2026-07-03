@@ -7,7 +7,7 @@ import numpy as np
 from src.app.indexing_progress import IndexingProgressReporter, build_progress_token
 from src.app.logging_utils import get_logger
 from src.core.faiss_index import IncrementalClipIndex, atomic_save_numpy, create_clip_index, load_clip_index
-from src.core.semantic_chunking import build_semantic_chunks, unpack_chunks
+from src.core.semantic_chunking import build_semantic_chunks, normalize_chunk_config_snapshot, unpack_chunks
 from src.core.clip_embedding import generate_vectors_and_index_for_video
 from src.core.extract_frames import FrameExtractionError
 from src.core.timestamp_health import assess_index_timestamp_health
@@ -304,7 +304,10 @@ def _ensure_chunk_payload(data, vectors, timestamps, vector_file, config):
     current_chunk_config = build_chunk_config(config)
     saved_chunk_config = data.get("chunk_config")
     chunks = unpack_chunks(data.get("chunks"))
-    if chunks and saved_chunk_config == current_chunk_config:
+    if (
+        chunks
+        and normalize_chunk_config_snapshot(saved_chunk_config) == current_chunk_config
+    ):
         return chunks
 
     logger.info("Rebuilding chunk payload from existing frame vectors: %s", os.path.basename(vector_file))

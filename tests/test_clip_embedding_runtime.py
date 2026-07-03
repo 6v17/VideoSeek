@@ -416,9 +416,8 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
         "src.core.clip_embedding.build_chunk_config",
         return_value={
             "similarity_threshold": 0.85,
-            "max_chunk_duration": 5.0,
             "min_chunk_size": 2,
-            "similarity_mode": "chunk",
+            "min_chunk_duration": 0.0,
         },
     )
     @patch("src.core.clip_embedding.get_active_embedding_spec", return_value={})

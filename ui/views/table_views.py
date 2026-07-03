@@ -17,14 +17,13 @@ from PySide6.QtWidgets import (
 from src.services.library_service import resolve_library_card_status
 from src.storage.asset_store import load_model_metadata
 from src.app.config import load_config
-from src.domain.remote_search_hit import coerce_remote_search_hit
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_service import (
     format_clip_score_percent,
     resolve_clip_confidence_label,
     resolve_clip_confidence_tier_key,
 )
-from ui.widgets.table_specs import LocalSearchCol, NetworkLinkCol
+from ui.widgets.table_specs import LocalSearchCol
 from ui.widgets.thumb_cell import make_thumb_label
 from ui.widgets.styles import repolish_widget
 
@@ -253,44 +252,6 @@ def populate_link_result_table(table, results, source_link, on_preview, on_locat
     table.setUpdatesEnabled(True)
 
 
-def populate_network_result_table(table, results, texts):
-    table.setRowCount(0)
-    if hasattr(table, "apply_header_labels"):
-        table.apply_header_labels(texts)
-    else:
-        table.setHorizontalHeaderLabels(texts["network_result_headers"])
-    table.setUpdatesEnabled(False)
-
-    for row, raw in enumerate(results):
-        hit = coerce_remote_search_hit(raw)
-        table.insertRow(row)
-
-        order_item = QTableWidgetItem(str(row + 1))
-        order_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, NetworkLinkCol.ORDER, order_item)
-
-        title_item = QTableWidgetItem(hit.title)
-        title_item.setToolTip(hit.title)
-        table.setItem(row, NetworkLinkCol.TITLE, title_item)
-
-        time_item = QTableWidgetItem(_format_time_value(hit.time_sec))
-        time_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, NetworkLinkCol.TIME, time_item)
-
-        score_item = QTableWidgetItem(f"{int(hit.score * 100)}%")
-        score_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, NetworkLinkCol.SCORE, score_item)
-
-        source_link = hit.source_link
-        source_item = QTableWidgetItem(source_link)
-        source_item.setToolTip(source_link)
-        table.setItem(row, NetworkLinkCol.SOURCE, source_item)
-
-        table.setCellWidget(row, NetworkLinkCol.ACTIONS, _build_network_result_actions(source_link, texts))
-
-    table.setUpdatesEnabled(True)
-
-
 def _build_library_row_card(
     index, path, data, is_indexing, on_sync, on_remove, on_open, texts, meta=None, config=None
 ):
@@ -502,22 +463,6 @@ def _build_link_result_actions(video_path, match_sec, source_link, on_preview, o
     layout.addWidget(preview_button)
     layout.addWidget(locate_button)
     layout.addWidget(source_button)
-    return container
-
-
-def _build_network_result_actions(source_link, texts):
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(10, 0, 10, 0)
-    layout.setSpacing(8)
-    layout.setAlignment(Qt.AlignCenter)
-
-    open_button = QPushButton(texts["open_link"])
-    open_button.setProperty("class", "TableBtn")
-    open_button.setFixedSize(90, 30)
-    open_button.setCursor(Qt.PointingHandCursor)
-    open_button.clicked.connect(lambda _, link=source_link: webbrowser.open(link))
-    layout.addWidget(open_button)
     return container
 
 

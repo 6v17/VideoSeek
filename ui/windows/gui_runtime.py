@@ -332,7 +332,6 @@ class RuntimeGuiMixin:
         model_ready = bool(status.get("model_ready", self.ui_state.model_ready))
         resources_ready = bool(status.get("resources_ready", self.ui_state.resources_ready))
         self.search_page.btn_search.setEnabled(model_ready)
-        self.network_search_controller.refresh_status()
         self.library_page.btn_sync_db.setEnabled(resources_ready)
         if resources_ready:
             if getattr(self, "_startup_complete", False):
@@ -343,16 +342,14 @@ class RuntimeGuiMixin:
         if not resources_ready:
             status_text = disabled_text
             self.search_page.lbl_status.setText(status_text)
-            self.link_page.lbl_build_status.setText(status_text)
-            self.link_page.lbl_search_status.setText(status_text)
+            self.link_page.lbl_status.setText(status_text)
             self.library_page.lbl_status.setText(status_text)
         elif disabled_text:
             ready_text = self.texts.get("ready", "")
             for label in (
                 getattr(self.search_page, "lbl_status", None),
                 getattr(self.library_page, "lbl_status", None),
-                getattr(self.link_page, "lbl_build_status", None),
-                getattr(self.link_page, "lbl_search_status", None),
+                getattr(self.link_page, "lbl_status", None),
             ):
                 if label is not None and label.text().strip() == disabled_text.strip():
                     label.setText(ready_text)

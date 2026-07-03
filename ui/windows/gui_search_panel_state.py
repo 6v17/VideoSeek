@@ -165,7 +165,6 @@ class SearchPanelStateMixin:
         show_video_discovery = active_tab in (self.SEARCH_TAB_IMAGE, self.SEARCH_TAB_COMPOSE)
         show_video_discovery = show_video_discovery and not page.search_precision_toggle.isChecked()
         page.search_video_discovery_cluster.setVisible(show_video_discovery)
-        page.search_image_options_group.setVisible(show_image_precision or show_video_discovery)
 
         precision_hint = texts.get("search_precision_hint", "")
         page.search_precision_label.setToolTip(precision_hint)

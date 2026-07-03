@@ -102,8 +102,8 @@ class StartupMigrationGuiMixin:
             self.search_page.btn_search,
             self.library_page.btn_sync_db,
             self.library_page.btn_rebuild_index_vectors,
-            self.link_page.btn_run,
-            self.link_page.btn_build,
+            self.link_page.btn_probe,
+            self.link_page.btn_download,
             self.settings_page.btn_save,
         ]
         for widget in widgets:

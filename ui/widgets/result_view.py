@@ -6,10 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
 
-from ui.views.table_views import (
-    populate_network_result_table,
-    populate_result_table,
-)
+from ui.views.table_views import populate_result_table
 from ui.widgets.result_table import ResultTable
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
 from ui.widgets.thumb_cell import make_thumb_label
@@ -108,10 +105,6 @@ class ResultView(QWidget):
             clip_score_mode=clip_score_mode,
             low_confidence_score=low_confidence_score,
         )
-        self._sync_empty_overlay()
-
-    def populate_network(self, results, texts) -> None:
-        populate_network_result_table(self.table, results, texts)
         self._sync_empty_overlay()
 
     def set_thumbnail(self, row: int, pixmap, column: int | None = None) -> None:

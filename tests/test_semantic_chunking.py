@@ -47,6 +47,8 @@ if np is not None:
     from src.core.semantic_chunking import (
         build_semantic_chunks,
         build_semantic_chunks_streaming,
+        merge_short_chunks,
+        normalize_chunk_config_snapshot,
         unpack_chunks,
     )
     from src.services import indexing_service
@@ -60,7 +62,7 @@ else:  # pragma: no cover
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class SemanticChunkingTests(unittest.TestCase):
-    def test_build_semantic_chunks_splits_on_low_chunk_similarity(self):
+    def test_dual_check_splits_on_sharp_cut(self):
         embeddings = np.asarray(
             [
                 [1.0, 0.0],
@@ -76,37 +78,34 @@ class SemanticChunkingTests(unittest.TestCase):
             embeddings,
             timestamps,
             similarity_threshold=0.85,
-            max_chunk_duration=10.0,
             min_chunk_size=2,
-            similarity_mode="chunk",
         )
 
         self.assertEqual(len(chunks), 2)
         self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
         self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (2.0, 3.0))
 
-    def test_build_semantic_chunks_supports_frame_similarity_mode(self):
+    def test_dual_check_keeps_chunk_when_mean_similarity_recovers(self):
         embeddings = np.asarray(
             [
                 [1.0, 0.0],
-                [0.9, 0.1],
-                [0.8, 0.2],
+                [0.98, 0.02],
+                [0.90, 0.10],
+                [0.97, 0.03],
             ],
             dtype=np.float32,
         )
-        timestamps = [0.0, 1.0, 2.0]
+        timestamps = [0.0, 1.0, 2.0, 3.0]
 
         chunks = build_semantic_chunks(
             embeddings,
             timestamps,
-            similarity_threshold=0.7,
-            max_chunk_duration=10.0,
-            min_chunk_size=1,
-            similarity_mode="frame",
+            similarity_threshold=0.85,
+            min_chunk_size=2,
         )
 
         self.assertEqual(len(chunks), 1)
-        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 2.0))
+        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 3.0))
 
     def test_streaming_chunks_match_single_pass(self):
         embeddings = np.asarray(
@@ -122,9 +121,8 @@ class SemanticChunkingTests(unittest.TestCase):
         timestamps = [0.0, 1.0, 2.0, 3.0, 4.0]
         kwargs = {
             "similarity_threshold": 0.85,
-            "max_chunk_duration": 10.0,
             "min_chunk_size": 2,
-            "similarity_mode": "chunk",
+            "min_chunk_duration": 0.0,
         }
 
         single = build_semantic_chunks(embeddings, timestamps, **kwargs)
@@ -139,87 +137,55 @@ class SemanticChunkingTests(unittest.TestCase):
             self.assertEqual((left["start"], left["end"]), (right["start"], right["end"]))
             np.testing.assert_allclose(left["embedding"], right["embedding"], rtol=1e-5, atol=1e-5)
 
-    def test_build_semantic_chunks_respects_max_duration(self):
-        embeddings = np.asarray(
-            [
-                [1.0, 0.0],
-                [1.0, 0.0],
-                [1.0, 0.0],
-            ],
-            dtype=np.float32,
+    def test_identical_frames_stay_in_one_chunk(self):
+        embeddings = np.asarray([[1.0, 0.0]] * 12, dtype=np.float32)
+        timestamps = [float(index) for index in range(12)]
+
+        chunks = build_semantic_chunks(embeddings, timestamps, similarity_threshold=0.85)
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 11.0))
+
+    def test_merge_short_chunks_combines_short_tail(self):
+        records = [
+            {
+                "start": 0.0,
+                "end": 1.0,
+                "vectors": [np.asarray([1.0, 0.0], dtype=np.float32)],
+                "times": [0.0],
+            },
+            {
+                "start": 1.0,
+                "end": 1.5,
+                "vectors": [np.asarray([0.98, 0.02], dtype=np.float32)],
+                "times": [1.5],
+            },
+        ]
+
+        merged = merge_short_chunks(records, min_duration=2.0)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual((merged[0]["start"], merged[0]["end"]), (0.0, 1.5))
+        self.assertEqual(len(merged[0]["vectors"]), 2)
+
+    def test_normalize_chunk_config_snapshot_ignores_retired_keys(self):
+        normalized = normalize_chunk_config_snapshot(
+            {
+                "similarity_threshold": 0.85,
+                "min_chunk_size": 2,
+                "min_chunk_duration": 0.0,
+                "max_chunk_duration": 5.0,
+                "chunk_merge_adjacent_threshold": 0.9,
+            }
         )
-        timestamps = [0.0, 3.0, 6.5]
-
-        chunks = build_semantic_chunks(
-            embeddings,
-            timestamps,
-            similarity_threshold=0.1,
-            max_chunk_duration=5.0,
-            min_chunk_size=1,
-            similarity_mode="chunk",
+        self.assertEqual(
+            normalized,
+            {
+                "similarity_threshold": 0.85,
+                "min_chunk_size": 2,
+                "min_chunk_duration": 0.0,
+            },
         )
-
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 3.0))
-        self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (6.5, 6.5))
-
-    def test_delta_ema_strategy_splits_on_sustained_change(self):
-        embeddings = np.asarray(
-            [
-                [1.0, 0.0],
-                [0.98, 0.02],
-                [0.0, 1.0],
-                [0.02, 0.98],
-            ],
-            dtype=np.float32,
-        )
-        timestamps = [0.0, 1.0, 2.0, 3.0]
-
-        chunks = build_semantic_chunks(
-            embeddings,
-            timestamps,
-            max_chunk_duration=10.0,
-            min_chunk_size=2,
-            segmentation_strategy="delta_ema",
-            delta_ema_alpha=0.5,
-            delta_high_threshold=0.15,
-            delta_rise_frames=2,
-        )
-
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
-        self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (2.0, 3.0))
-
-    def test_delta_ema_streaming_matches_single_pass(self):
-        embeddings = np.asarray(
-            [
-                [1.0, 0.0],
-                [0.98, 0.02],
-                [0.0, 1.0],
-                [0.02, 0.98],
-            ],
-            dtype=np.float32,
-        )
-        timestamps = [0.0, 1.0, 2.0, 3.0]
-        kwargs = {
-            "max_chunk_duration": 10.0,
-            "min_chunk_size": 2,
-            "segmentation_strategy": "delta_ema",
-            "delta_ema_alpha": 0.5,
-            "delta_high_threshold": 0.15,
-            "delta_rise_frames": 2,
-        }
-
-        single = build_semantic_chunks(embeddings, timestamps, **kwargs)
-        streaming = build_semantic_chunks_streaming(
-            [embeddings[:2], embeddings[2:]],
-            timestamps,
-            **kwargs,
-        )
-
-        self.assertEqual(len(single), len(streaming))
-        for left, right in zip(single, streaming):
-            self.assertEqual((left["start"], left["end"]), (right["start"], right["end"]))
 
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
@@ -242,9 +208,7 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         }
         config = _schema_v2_config(
             similarity_threshold=0.85,
-            max_chunk_duration=5.0,
             min_chunk_size=2,
-            chunk_similarity_mode="chunk",
         )
 
         chunks = indexing_service.load_video_chunks_by_id("video-1", config)
@@ -275,16 +239,14 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
             },
             "chunk_config": {
                 "similarity_threshold": 0.9,
-                "max_chunk_duration": 5.0,
                 "min_chunk_size": 2,
                 "similarity_mode": "chunk",
+                "max_chunk_duration": 5.0,
             },
         }
         config = _schema_v2_config(
             similarity_threshold=0.85,
-            max_chunk_duration=5.0,
             min_chunk_size=2,
-            chunk_similarity_mode="chunk",
         )
 
         indexing_service.load_video_chunks_by_id("video-1", config)

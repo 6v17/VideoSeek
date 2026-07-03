@@ -673,6 +673,18 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     padding: 8px 10px;
     color: __TEXT__;
 }
+QTextEdit#SearchInput {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: __TEXT__;
+    selection-background-color: __ACCENT_SOFT__;
+    selection-color: __HEADLINE__;
+}
+QTextEdit#SearchInput:focus {
+    border: 1px solid __ACCENT__;
+}
 #SearchModeSelect {
     background: __FIELD__;
     color: __HEADLINE__;
@@ -813,6 +825,9 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #SearchOptionsBlock {
     background: transparent;
 }
+#DownloadOptionsRow, #DownloadFieldGroup {
+    background: transparent;
+}
 #SearchImageOptionsRow {
     background: transparent;
 }
@@ -916,6 +931,112 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 }
 #ResultTable::item:selected:active {
     background: __ACCENT_SOFT__;
+}
+#DownloadListTable {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 14px;
+    gridline-color: transparent;
+    outline: none;
+}
+#DownloadListTable::item {
+    border: none;
+    border-bottom: 1px solid __LINE__;
+    padding: 10px 8px;
+    color: __TEXT__;
+}
+#DownloadListTable::item:hover {
+    background: __ACCENT_SOFT__;
+}
+#DownloadListTable::item:selected {
+    background: __TRACK__;
+    color: __HEADLINE__;
+}
+#DownloadListTable::item:selected:active {
+    background: __ACCENT_SOFT__;
+}
+#DownloadListTable QHeaderView::section {
+    background: __PANEL__;
+    border: none;
+    border-bottom: 2px solid __LINE_STRONG__;
+    border-right: 1px solid __LINE__;
+    padding: 10px 8px;
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+#DownloadCellHost {
+    background: transparent;
+}
+#DownloadRowCombo {
+    background: __PANEL__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 0 8px;
+    min-height: 28px;
+    max-height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+}
+#DownloadRowCombo:hover:enabled {
+    border-color: __LINE_STRONG__;
+    background: __BUTTON_SOFT_HOVER__;
+}
+#DownloadRowCombo:focus {
+    border-color: __ACCENT__;
+}
+#DownloadRowCombo:disabled {
+    color: __MUTED__;
+    background: __FIELD__;
+}
+#DownloadRowCombo QAbstractItemView {
+    background: __PANEL__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    selection-background-color: __ACCENT_SOFT__;
+    selection-color: __HEADLINE__;
+    outline: 0;
+}
+#DownloadRowButton {
+    background: __BUTTON_SOFT__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    color: __HEADLINE__;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0;
+}
+#DownloadRowButton:hover:enabled {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    color: __HEADLINE__;
+}
+#DownloadRowButton:pressed:enabled {
+    background: __TRACK__;
+}
+#DownloadRowButton:disabled {
+    color: __MUTED__;
+    background: __FIELD__;
+    border-color: __LINE__;
+}
+#DownloadRowProgress {
+    background: __TRACK__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    min-height: 22px;
+    max-height: 22px;
+    text-align: center;
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px;
+}
+#DownloadRowProgress::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 __ACCENT__, stop:1 __ACCENT_HOVER__);
+    border-radius: 6px;
+    margin: 1px;
 }
 #ThumbPreview[gapFrameRow="true"] {
     background: __WARN_SOFT__;
