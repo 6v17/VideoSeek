@@ -3,7 +3,7 @@
 [中文说明](./README.md) | **English**
 
 **Search your local video library by text or screenshot, preview hits, export clips.**  
-Indexing and retrieval run on your machine (ONNX + FAISS + FFmpeg); your media files are not uploaded.
+Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media files are not uploaded.
 
 > Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.
 

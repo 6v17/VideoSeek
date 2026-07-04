@@ -4,9 +4,8 @@ import time
 
 import numpy as np
 
-from src.app.indexing_progress import IndexingProgressReporter, build_progress_token
+from src.app.indexing_progress import IndexingProgressReporter
 from src.app.logging_utils import get_logger
-from src.core.faiss_index import IncrementalClipIndex, atomic_save_numpy, create_clip_index, load_clip_index
 from src.core.semantic_chunking import build_semantic_chunks, normalize_chunk_config_snapshot, unpack_chunks
 from src.core.clip_embedding import generate_vectors_and_index_for_video
 from src.core.extract_frames import FrameExtractionError
@@ -15,16 +14,7 @@ from src.storage.asset_store import load_vector_payload, save_vector_payload
 from src.storage.config_store import (
     build_chunk_config,
     get_active_embedding_spec,
-    get_global_model_asset_paths,
     get_local_model_asset_dirs,
-)
-from src.services.search_index_schema import (
-    TARGET_SEARCH_INDEX_SCHEMA_VERSION,
-    clear_library_search_index,
-    get_library_index_paths,
-    get_search_index_schema_version,
-    library_has_ready_videos,
-    mark_search_index_schema_upgraded,
 )
 from src.utils import (
     canonicalize_library_path,
@@ -36,7 +26,39 @@ from src.utils import (
 )
 
 VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
+INFORMATIONAL_INDEX_ISSUE_REASONS = frozenset({"path_reconciled"})
 logger = get_logger("indexing_service")
+
+
+def _sync_video_vectors_to_lance(video_id, config, library_path, abs_path, *, vectors=None, timestamps=None, chunks=None):
+    try:
+        from src.storage.lance_store import (
+            should_use_lance_storage,
+            upsert_profile_video_vectors,
+            upsert_profile_video_vectors_from_arrays,
+        )
+
+        if not should_use_lance_storage(config):
+            return
+        if vectors is not None and timestamps is not None:
+            upsert_profile_video_vectors_from_arrays(
+                video_id,
+                vectors,
+                timestamps,
+                config=config,
+                library_path=library_path or "",
+                video_path=abs_path,
+                chunks=chunks,
+            )
+            return
+        upsert_profile_video_vectors(
+            video_id,
+            config=config,
+            library_path=library_path or "",
+            video_path=abs_path,
+        )
+    except Exception as exc:
+        logger.warning("Failed to sync Lance vectors for %s: %s", video_id, exc)
 
 
 class IndexUpdateInterrupted(InterruptedError):
@@ -165,18 +187,13 @@ def _emit_issue(issue_callback, library_path, video_rel_path, abs_path, action, 
     )
 
 
-def _ensure_video_index_file(video_id, vectors, config, *, force=False):
-    model_dirs = get_local_model_asset_dirs(config=config)
-    index_file = os.path.join(model_dirs["index_dir"], f"{video_id}_index.faiss")
-    if os.path.exists(index_file) and not force:
-        return False
-    try:
-        create_clip_index(vectors, index_file)
-        logger.info("Rebuilt per-video index for %s (force=%s)", video_id, bool(force))
-        return True
-    except Exception as exc:
-        logger.warning("Failed to rebuild per-video index for %s: %s", video_id, exc)
-        return False
+def is_index_problem_issue(issue):
+    reason = str((issue or {}).get("reason", "") or "").strip().lower()
+    return reason not in INFORMATIONAL_INDEX_ISSUE_REASONS
+
+
+def filter_index_problem_issues(issues):
+    return [item for item in (issues or []) if is_index_problem_issue(item)]
 
 
 def _per_video_asset_paths(vector_dir, index_dir, video_id):
@@ -202,19 +219,26 @@ def _rename_per_video_assets(vector_dir, index_dir, old_vid, new_vid):
 def _load_vectors_from_disk(video_id, config):
     model_dirs = get_local_model_asset_dirs(config=config)
     vector_file = os.path.join(model_dirs["vector_dir"], f"{video_id}_vectors.npy")
-    if not os.path.isfile(vector_file):
-        return None, None, vector_file
-    try:
-        data = load_vector_payload(vector_file)
-    except Exception as exc:
-        logger.warning("Unreadable cached vectors for %s: %s", video_id, exc)
-        return None, None, vector_file
-    if isinstance(data, dict):
-        vectors = data.get("vector")
-        timestamps = data.get("timestamps")
-        if vectors is not None and timestamps is not None:
-            _ensure_chunk_payload(data, vectors, timestamps, vector_file, config)
-        return vectors, timestamps, vector_file
+    if os.path.isfile(vector_file):
+        try:
+            data = load_vector_payload(vector_file)
+        except Exception as exc:
+            logger.warning("Unreadable cached vectors for %s: %s", video_id, exc)
+            return None, None, vector_file
+        if isinstance(data, dict):
+            vectors = data.get("vector")
+            timestamps = data.get("timestamps")
+            if vectors is not None and timestamps is not None:
+                _ensure_chunk_payload(data, vectors, timestamps, vector_file, config)
+            return vectors, timestamps, vector_file
+
+    from src.storage.lance_search_index import load_lance_video_frame_arrays
+    from src.storage.lance_store import should_use_lance_storage
+
+    if should_use_lance_storage(config):
+        vectors, timestamps = load_lance_video_frame_arrays(model_dirs["base_dir"], video_id)
+        if _has_usable_vectors(vectors, timestamps):
+            return vectors, timestamps, vector_file
     return None, None, vector_file
 
 
@@ -273,31 +297,29 @@ def _resolve_reusable_cached_vectors(abs_path, saved, config):
 
 
 def load_video_vectors_by_id(video_id, config):
-    model_dirs = get_local_model_asset_dirs(config=config)
-    vector_file = os.path.join(model_dirs["vector_dir"], f"{video_id}_vectors.npy")
-    data = load_vector_payload(vector_file)
-    if isinstance(data, dict):
-        vectors = data.get("vector")
-        timestamps = data.get("timestamps")
-        if vectors is not None and timestamps is not None:
-            _ensure_chunk_payload(data, vectors, timestamps, vector_file, config)
-        return vectors, timestamps
-    return None, None
+    vectors, timestamps, _vector_file = _load_vectors_from_disk(video_id, config)
+    return vectors, timestamps
 
 
 def load_video_chunks_by_id(video_id, config):
     model_dirs = get_local_model_asset_dirs(config=config)
     vector_file = os.path.join(model_dirs["vector_dir"], f"{video_id}_vectors.npy")
-    data = load_vector_payload(vector_file)
-    if not isinstance(data, dict):
-        return []
+    if os.path.isfile(vector_file):
+        data = load_vector_payload(vector_file)
+        if isinstance(data, dict):
+            vectors = data.get("vector")
+            timestamps = data.get("timestamps")
+            if vectors is not None and timestamps is not None:
+                return _ensure_chunk_payload(data, vectors, timestamps, vector_file, config)
 
-    vectors = data.get("vector")
-    timestamps = data.get("timestamps")
-    if vectors is None or timestamps is None:
-        return []
+    from src.storage.lance_search_index import load_lance_video_chunks
+    from src.storage.lance_store import should_use_lance_storage
 
-    return _ensure_chunk_payload(data, vectors, timestamps, vector_file, config)
+    if should_use_lance_storage(config):
+        chunks = load_lance_video_chunks(model_dirs["base_dir"], video_id)
+        if chunks:
+            return chunks
+    return []
 
 
 def _ensure_chunk_payload(data, vectors, timestamps, vector_file, config):
@@ -312,6 +334,18 @@ def _ensure_chunk_payload(data, vectors, timestamps, vector_file, config):
 
     logger.info("Rebuilding chunk payload from existing frame vectors: %s", os.path.basename(vector_file))
     chunks = build_semantic_chunks(vectors, timestamps, **current_chunk_config)
+    from src.storage.lance_store import should_use_lance_storage, upsert_profile_video_vectors_from_arrays
+
+    if should_use_lance_storage(config):
+        video_id = os.path.basename(vector_file).replace("_vectors.npy", "")
+        upsert_profile_video_vectors_from_arrays(
+            video_id,
+            vectors,
+            timestamps,
+            config=config,
+            chunks=chunks,
+        )
+        return chunks
     save_vector_payload(
         vectors,
         timestamps,
@@ -480,6 +514,117 @@ def discover_video_files(root_path):
     return valid_files
 
 
+def _file_record_source_ready(root_path, rel_path):
+    abs_path = os.path.join(root_path, rel_path)
+    return os.path.exists(abs_path) and _is_valid_video_source(abs_path)
+
+
+def _video_identity_for_path(abs_path):
+    try:
+        current_vid = get_video_hash(abs_path)
+    except OSError:
+        return None, None
+    try:
+        legacy_vid = get_legacy_video_hash(abs_path)
+    except OSError:
+        legacy_vid = ""
+    return current_vid, legacy_vid
+
+
+def reconcile_library_file_paths(root_path, lib_files):
+    """Align meta paths after in-library rename/move when video content (video_id) is unchanged."""
+    if not root_path or not os.path.exists(root_path):
+        return 0
+
+    missing_entries = []
+    satisfied_paths = set()
+    for rel_path, info in list(lib_files.items()):
+        if _file_record_source_ready(root_path, rel_path):
+            satisfied_paths.add(rel_path)
+            continue
+        missing_entries.append((rel_path, dict(info)))
+
+    if not missing_entries:
+        return 0
+
+    orphan_candidates = []
+    for abs_path in discover_video_files(root_path):
+        rel_path = os.path.relpath(abs_path, root_path)
+        if rel_path in satisfied_paths:
+            continue
+        if not _is_valid_video_source(abs_path):
+            continue
+        orphan_candidates.append((rel_path, abs_path))
+
+    if not orphan_candidates:
+        return 0
+
+    identity_by_rel = {}
+    for rel_path, abs_path in orphan_candidates:
+        current_vid, legacy_vid = _video_identity_for_path(abs_path)
+        if not current_vid:
+            continue
+        identity_by_rel[rel_path] = {
+            "current_vid": current_vid,
+            "legacy_vid": legacy_vid,
+            "abs_path": abs_path,
+        }
+
+    used_candidates = set()
+    reconciled = 0
+    for old_rel, info in missing_entries:
+        saved_vid = str(info.get("vid", "") or "").strip()
+        if not saved_vid:
+            continue
+
+        matched_rel = None
+        matched_abs = ""
+        for rel_path, identity in identity_by_rel.items():
+            if rel_path in used_candidates:
+                continue
+            current_vid = identity.get("current_vid")
+            legacy_vid = identity.get("legacy_vid")
+            if saved_vid not in {current_vid, legacy_vid}:
+                continue
+            matched_rel = rel_path
+            matched_abs = identity.get("abs_path", "")
+            break
+
+        if not matched_rel:
+            continue
+
+        existing = lib_files.get(matched_rel)
+        if existing:
+            existing_vid = str(existing.get("vid", "") or "").strip()
+            if existing_vid and existing_vid != saved_vid:
+                continue
+            if existing_vid == saved_vid and old_rel != matched_rel:
+                del lib_files[old_rel]
+                reconciled += 1
+                used_candidates.add(matched_rel)
+                continue
+
+        transferred = dict(info)
+        if matched_abs:
+            try:
+                transferred["mod_time"] = os.path.getmtime(matched_abs)
+            except OSError:
+                pass
+        lib_files[matched_rel] = transferred
+        if old_rel != matched_rel and old_rel in lib_files:
+            del lib_files[old_rel]
+        reconciled += 1
+        used_candidates.add(matched_rel)
+        logger.info(
+            "Reconciled relocated library file %s -> %s (video_id=%s)",
+            old_rel,
+            matched_rel,
+            saved_vid,
+        )
+
+    return reconciled
+
+
 def _is_excluded_video_path(abs_path):
     normalized_parts = [part.lower() for part in os.path.normpath(abs_path).split(os.sep)]
     return "__macosx" in normalized_parts
@@ -575,7 +720,6 @@ def process_single_video(
             timestamps = cached["timestamps"]
             disk_vid = cached["disk_vid"]
             t_reuse = time.perf_counter()
-            _ensure_video_index_file(video_id, vectors, config)
             metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
             if progress_reporter is not None:
                 progress_reporter.emit("reuse", force=True)
@@ -596,6 +740,14 @@ def process_single_video(
                     reuse_s,
                     len(timestamps),
                 )
+            _sync_video_vectors_to_lance(
+                video_id,
+                config,
+                library_path,
+                abs_path,
+                vectors=vectors,
+                timestamps=timestamps,
+            )
             return vectors, timestamps, metadata_updated, False
 
         video_id = get_video_hash(abs_path)
@@ -611,7 +763,7 @@ def process_single_video(
         os.makedirs(model_dirs["vector_dir"], exist_ok=True)
         os.makedirs(model_dirs["index_dir"], exist_ok=True)
         t_gen = time.perf_counter()
-        vectors, timestamps, _ = generate_vectors_and_index_for_video(
+        vectors, timestamps, _, chunks = generate_vectors_and_index_for_video(
             abs_path,
             video_id,
             model_dirs["index_dir"],
@@ -669,6 +821,15 @@ def process_single_video(
                 reason="timestamp_drift",
                 detail=health.get("detail", ""),
             )
+        _sync_video_vectors_to_lance(
+            video_id,
+            config,
+            library_path,
+            abs_path,
+            vectors=vectors,
+            timestamps=timestamps,
+            chunks=chunks,
+        )
         return vectors, timestamps, metadata_updated, True
     except InterruptedError:
         raise
@@ -758,6 +919,9 @@ def scan_target_libraries(
             continue
 
         lib_files = lib_data.get("files", {})
+        reconciled_count = reconcile_library_file_paths(root_path, lib_files)
+        if reconciled_count and persist_meta_callback:
+            persist_meta_callback()
         valid_files = discover_video_files(root_path)
         file_total = len(valid_files)
 
@@ -791,452 +955,4 @@ def scan_target_libraries(
         lib_data["files"] = lib_files
 
     return failed_videos, search_assets_changed
-
-
-def _count_meta_video_entries(meta, target_lib=None):
-    target_key = canonicalize_library_path(target_lib) if target_lib else None
-    total = 0
-    for root_path, lib_data in (meta.get("libraries") or {}).items():
-        if target_key and canonicalize_library_path(root_path) != target_key:
-            continue
-        if not os.path.exists(root_path):
-            continue
-        total += len(lib_data.get("files") or {})
-    return max(total, 1)
-
-
-def rebuild_indexes_from_cached_vectors(
-    meta,
-    config,
-    *,
-    target_lib=None,
-    rebuild_per_video=True,
-    rebuild_global=True,
-    force_per_video=False,
-    include_all_libraries=True,
-    progress_callback=None,
-    should_stop_callback=None,
-):
-    """Rebuild FAISS indexes from on-disk vectors without FFmpeg or embedding."""
-    from src.app.indexing_progress import build_progress_token
-
-    stats = {
-        "per_video_rebuilt": 0,
-        "per_video_skipped": 0,
-        "per_video_failed": 0,
-        "per_video_no_vectors": 0,
-        "videos_with_vectors": 0,
-        "global_built": False,
-    }
-    target_key = canonicalize_library_path(target_lib) if target_lib else None
-    file_total = _count_meta_video_entries(meta, target_lib=target_lib)
-    file_index = 0
-
-    if progress_callback:
-        progress_callback(2, build_progress_token(stage="rebuild_index", file_index=0, file_total=file_total))
-
-    for root_path, lib_data in (meta.get("libraries") or {}).items():
-        if target_key and canonicalize_library_path(root_path) != target_key:
-            continue
-        if not os.path.exists(root_path):
-            continue
-
-        lib_files = lib_data.get("files", {})
-        for rel_path, info in list(lib_files.items()):
-            if should_stop_callback and should_stop_callback():
-                raise InterruptedError("Index rebuild from vectors stopped")
-            file_index += 1
-            abs_path = os.path.join(root_path, rel_path)
-            if not os.path.isfile(abs_path):
-                stats["per_video_no_vectors"] += 1
-                continue
-
-            saved = dict(info)
-            cached = _resolve_reusable_cached_vectors(abs_path, saved, config)
-            if cached is None:
-                saved_vid = str(saved.get("vid", "") or "").strip()
-                if saved_vid:
-                    vectors, timestamps, _ = _load_vectors_from_disk(saved_vid, config)
-                    if _has_usable_vectors(vectors, timestamps):
-                        cached = {
-                            "canonical_vid": saved_vid,
-                            "disk_vid": saved_vid,
-                            "vectors": vectors,
-                            "timestamps": timestamps,
-                        }
-            if cached is None:
-                stats["per_video_no_vectors"] += 1
-                if progress_callback:
-                    progress_callback(
-                        min(89, int(90 * file_index / file_total)),
-                        build_progress_token(
-                            stage="rebuild_index",
-                            video_name=os.path.basename(abs_path),
-                            file_index=file_index,
-                            file_total=file_total,
-                        ),
-                    )
-                continue
-
-            stats["videos_with_vectors"] += 1
-            video_id = cached["canonical_vid"]
-            vectors = cached["vectors"]
-            if str(info.get("vid", "") or "").strip() != video_id:
-                info["vid"] = video_id
-            if str(info.get("asset_state", "") or "").strip().lower() != "ready":
-                info["asset_state"] = "ready"
-
-            if rebuild_per_video:
-                if _ensure_video_index_file(video_id, vectors, config, force=force_per_video):
-                    stats["per_video_rebuilt"] += 1
-                else:
-                    index_file = os.path.join(
-                        get_local_model_asset_dirs(config=config)["index_dir"],
-                        f"{video_id}_index.faiss",
-                    )
-                    if os.path.isfile(index_file):
-                        stats["per_video_skipped"] += 1
-                    else:
-                        stats["per_video_failed"] += 1
-
-            if progress_callback:
-                progress_callback(
-                    min(89, int(90 * file_index / file_total)),
-                    build_progress_token(
-                        stage="rebuild_index",
-                        video_name=os.path.basename(abs_path),
-                        file_index=file_index,
-                        file_total=file_total,
-                    ),
-                )
-
-    if rebuild_global:
-        if progress_callback:
-            progress_callback(92, build_progress_token(stage="global"))
-        result = build_global_index(
-            meta,
-            config,
-            target_lib=target_lib,
-            include_all_libraries=include_all_libraries,
-            progress_callback=progress_callback,
-            should_stop_callback=should_stop_callback,
-        )
-        stats["global_built"] = result is not None
-
-    if get_search_index_schema_version(meta) >= TARGET_SEARCH_INDEX_SCHEMA_VERSION:
-        library_stats = build_library_search_indexes(
-            meta,
-            config,
-            target_lib=target_lib,
-            progress_callback=progress_callback,
-            should_stop_callback=should_stop_callback,
-        )
-        stats.update(library_stats)
-
-    if progress_callback:
-        progress_callback(100, build_progress_token(stage="rebuild_index", file_index=file_total, file_total=file_total))
-
-    logger.info(
-        "Rebuild indexes from cached vectors finished: videos_with_vectors=%s per_video_rebuilt=%s "
-        "per_video_skipped=%s per_video_failed=%s per_video_no_vectors=%s global_built=%s",
-        stats["videos_with_vectors"],
-        stats["per_video_rebuilt"],
-        stats["per_video_skipped"],
-        stats["per_video_failed"],
-        stats["per_video_no_vectors"],
-        stats["global_built"],
-    )
-    return stats
-
-
-def clear_global_index(config):
-    global_paths = get_global_model_asset_paths(config=config)
-    for path in [
-        global_paths["cross_index_file"],
-        global_paths["cross_vector_file"],
-        global_paths["cross_chunk_index_file"],
-        global_paths["cross_chunk_vector_file"],
-    ]:
-        if os.path.exists(path):
-            os.remove(path)
-
-
-def merge_and_save_all_vectors(all_vectors, all_timestamps, all_paths, config):
-    global_paths = get_global_model_asset_paths(config=config)
-    ensure_folder_exists(global_paths["cross_index_file"])
-    ensure_folder_exists(global_paths["cross_vector_file"])
-
-    create_clip_index(all_vectors, global_paths["cross_index_file"])
-    payload = {
-        "format_version": 2,
-        "timestamps": np.asarray(all_timestamps, dtype="float32"),
-        "paths": all_paths,
-        "embedding_spec": get_active_embedding_spec(config=config),
-    }
-    atomic_save_numpy(global_paths["cross_vector_file"], payload)
-
-
-def merge_and_save_all_chunks(all_chunk_vectors, all_chunk_ranges, all_chunk_paths, config):
-    global_paths = get_global_model_asset_paths(config=config)
-    ensure_folder_exists(global_paths["cross_chunk_index_file"])
-    ensure_folder_exists(global_paths["cross_chunk_vector_file"])
-
-    create_clip_index(all_chunk_vectors, global_paths["cross_chunk_index_file"])
-    payload = {
-        "format_version": 2,
-        "ranges": np.asarray(all_chunk_ranges, dtype="float32"),
-        "paths": all_chunk_paths,
-        "embedding_spec": get_active_embedding_spec(config=config),
-    }
-    atomic_save_numpy(global_paths["cross_chunk_vector_file"], payload)
-
-
-def _save_global_frame_metadata(all_timestamps, all_paths, config):
-    global_paths = get_global_model_asset_paths(config=config)
-    ensure_folder_exists(global_paths["cross_vector_file"])
-    payload = {
-        "format_version": 2,
-        "timestamps": np.asarray(all_timestamps, dtype="float32"),
-        "paths": all_paths,
-        "embedding_spec": get_active_embedding_spec(config=config),
-    }
-    atomic_save_numpy(global_paths["cross_vector_file"], payload)
-
-
-def _save_global_chunk_metadata(all_chunk_ranges, all_chunk_paths, config):
-    global_paths = get_global_model_asset_paths(config=config)
-    ensure_folder_exists(global_paths["cross_chunk_vector_file"])
-    payload = {
-        "format_version": 2,
-        "ranges": np.asarray(all_chunk_ranges, dtype="float32"),
-        "paths": all_chunk_paths,
-        "embedding_spec": get_active_embedding_spec(config=config),
-    }
-    atomic_save_numpy(global_paths["cross_chunk_vector_file"], payload)
-
-
-def build_global_index(
-    meta,
-    config,
-    target_lib=None,
-    include_all_libraries=True,
-    progress_callback=None,
-    should_stop_callback=None,
-):
-    """Merge per-video on-disk vectors into cross-library search assets without vstacking the whole library."""
-    wall_start = time.perf_counter()
-    if progress_callback:
-        progress_callback(
-            95,
-            build_progress_token(stage="global"),
-        )
-
-    global_paths = get_global_model_asset_paths(config=config)
-    ensure_folder_exists(global_paths["cross_index_file"])
-    ensure_folder_exists(global_paths["cross_vector_file"])
-
-    frame_builder = IncrementalClipIndex()
-    all_timestamps = []
-    all_paths = []
-    videos_merged = 0
-
-    t_frame = time.perf_counter()
-    for vectors, timestamps, abs_path in iter_ready_library_frame_sources(
-        meta,
-        config,
-        target_lib=target_lib,
-        include_all_libraries=include_all_libraries,
-    ):
-        if should_stop_callback and should_stop_callback():
-            raise InterruptedError("Index update stopped during global index build")
-        frame_builder.add(vectors)
-        ts_list = np.asarray(timestamps, dtype="float32").reshape(-1).tolist()
-        all_paths.extend([abs_path] * len(ts_list))
-        all_timestamps.extend(ts_list)
-        videos_merged += 1
-        del vectors
-        gc.collect()
-
-    if frame_builder.total <= 0:
-        clear_global_index(config)
-        logger.warning("No searchable frame vectors found while building global index")
-        return None
-
-    logger.info(
-        "Building global frame index with %s frame vectors from %s videos",
-        frame_builder.total,
-        videos_merged,
-    )
-    frame_builder.save(global_paths["cross_index_file"])
-    _save_global_frame_metadata(all_timestamps, all_paths, config)
-    frame_stage_s = time.perf_counter() - t_frame
-    logger.info("Global index: frame incremental merge+save %.2fs", frame_stage_s)
-
-    chunk_builder = IncrementalClipIndex()
-    all_chunk_ranges = []
-    all_chunk_paths = []
-    chunk_stage_s = 0.0
-    t_chunk = time.perf_counter()
-    for embedding, chunk_range, abs_path in iter_ready_library_chunk_sources(
-        meta,
-        config,
-        target_lib=target_lib,
-        include_all_libraries=include_all_libraries,
-    ):
-        if should_stop_callback and should_stop_callback():
-            raise InterruptedError("Index update stopped during global chunk index build")
-        chunk_builder.add(embedding.reshape(1, -1))
-        all_chunk_ranges.append(chunk_range)
-        all_chunk_paths.append(abs_path)
-
-    if chunk_builder.total > 0:
-        ensure_folder_exists(global_paths["cross_chunk_index_file"])
-        ensure_folder_exists(global_paths["cross_chunk_vector_file"])
-        logger.info("Building global chunk index with %s chunks", chunk_builder.total)
-        chunk_builder.save(global_paths["cross_chunk_index_file"])
-        _save_global_chunk_metadata(all_chunk_ranges, all_chunk_paths, config)
-        chunk_stage_s = time.perf_counter() - t_chunk
-        logger.info("Global index: chunk incremental merge+save %.2fs", chunk_stage_s)
-    else:
-        for path in (global_paths["cross_chunk_index_file"], global_paths["cross_chunk_vector_file"]):
-            if path and os.path.exists(path):
-                os.remove(path)
-
-    gc.collect()
-    t_load = time.perf_counter()
-    index = load_clip_index(global_paths["cross_index_file"])
-    load_s = time.perf_counter() - t_load
-    timestamp_array = np.asarray(all_timestamps, dtype="float32")
-    parts_s = frame_stage_s + chunk_stage_s + load_s
-    logger.info(
-        "Global index: load_cross_index %.2fs | parts_sum=%.2fs wall_total=%.2fs",
-        load_s,
-        parts_s,
-        time.perf_counter() - wall_start,
-    )
-    return timestamp_array, np.array(all_paths), index
-
-
-def _clear_library_search_index(library_path: str, config) -> None:
-    clear_library_search_index(library_path, config=config)
-
-
-def _save_library_frame_assets(library_path: str, timestamps, paths, config, frame_builder: IncrementalClipIndex) -> None:
-    asset_paths = get_library_index_paths(library_path, config=config)
-    ensure_folder_exists(asset_paths["frame_index_file"])
-    frame_builder.save(asset_paths["frame_index_file"])
-    payload = {
-        "format_version": 2,
-        "timestamps": np.asarray(timestamps, dtype="float32"),
-        "paths": paths,
-        "embedding_spec": get_active_embedding_spec(config=config),
-        "library_path": canonicalize_library_path(library_path),
-    }
-    atomic_save_numpy(asset_paths["frame_vector_file"], payload)
-
-
-def _save_library_chunk_assets(library_path: str, chunk_ranges, chunk_paths, config, chunk_builder: IncrementalClipIndex) -> None:
-    asset_paths = get_library_index_paths(library_path, config=config)
-    ensure_folder_exists(asset_paths["chunk_index_file"])
-    chunk_builder.save(asset_paths["chunk_index_file"])
-    payload = {
-        "format_version": 2,
-        "ranges": np.asarray(chunk_ranges, dtype="float32"),
-        "paths": chunk_paths,
-        "embedding_spec": get_active_embedding_spec(config=config),
-        "library_path": canonicalize_library_path(library_path),
-    }
-    atomic_save_numpy(asset_paths["chunk_vector_file"], payload)
-
-
-def build_library_search_indexes(
-    meta,
-    config,
-    target_lib=None,
-    progress_callback=None,
-    should_stop_callback=None,
-) -> dict:
-    """Build v2 per-library FAISS assets from cached per-video vectors."""
-    stats = {"libraries_built": 0, "libraries_cleared": 0, "libraries_skipped": 0}
-    libraries = list(_library_roots_for_global_merge(meta, target_lib, include_all_libraries=True))
-    total = len(libraries)
-
-    for index, (root_path, _lib_data) in enumerate(libraries, start=1):
-        if should_stop_callback and should_stop_callback():
-            raise InterruptedError("Search index upgrade stopped during library index build")
-        if progress_callback and total:
-            progress_callback(
-                min(88, int(85 * index / total)),
-                build_progress_token(stage="upgrade_index", file_index=index, file_total=total),
-            )
-        if not os.path.exists(root_path):
-            stats["libraries_skipped"] += 1
-            continue
-
-        frame_builder = IncrementalClipIndex()
-        all_timestamps = []
-        all_paths = []
-        for vectors, timestamps, abs_path in iter_ready_library_frame_sources(
-            meta,
-            config,
-            target_lib=root_path,
-            include_all_libraries=False,
-        ):
-            if should_stop_callback and should_stop_callback():
-                raise InterruptedError("Search index upgrade stopped during library index build")
-            frame_builder.add(vectors)
-            ts_list = np.asarray(timestamps, dtype="float32").reshape(-1).tolist()
-            all_paths.extend([abs_path] * len(ts_list))
-            all_timestamps.extend(ts_list)
-
-        if frame_builder.total <= 0:
-            _clear_library_search_index(root_path, config)
-            stats["libraries_cleared"] += 1
-            continue
-
-        _save_library_frame_assets(root_path, all_timestamps, all_paths, config, frame_builder)
-
-        chunk_builder = IncrementalClipIndex()
-        all_chunk_ranges = []
-        all_chunk_paths = []
-        for embedding, chunk_range, abs_path in iter_ready_library_chunk_sources(
-            meta,
-            config,
-            target_lib=root_path,
-            include_all_libraries=False,
-        ):
-            if should_stop_callback and should_stop_callback():
-                raise InterruptedError("Search index upgrade stopped during library index build")
-            chunk_builder.add(embedding.reshape(1, -1))
-            all_chunk_ranges.append(chunk_range)
-            all_chunk_paths.append(abs_path)
-
-        if chunk_builder.total > 0:
-            _save_library_chunk_assets(root_path, all_chunk_ranges, all_chunk_paths, config, chunk_builder)
-        else:
-            asset_paths = get_library_index_paths(root_path, config=config)
-            for key in ("chunk_index_file", "chunk_vector_file"):
-                path = asset_paths.get(key)
-                if path and os.path.exists(path):
-                    os.remove(path)
-
-        stats["libraries_built"] += 1
-        logger.info(
-            "Built library search index for %s (%s frame vectors, %s chunks)",
-            root_path,
-            frame_builder.total,
-            chunk_builder.total,
-        )
-
-    mark_search_index_schema_upgraded(meta, target_lib=target_lib)
-    if progress_callback:
-        progress_callback(90, build_progress_token(stage="upgrade_index", file_index=total, file_total=total))
-    logger.info(
-        "Library search index build finished: built=%s cleared=%s skipped=%s schema=%s",
-        stats["libraries_built"],
-        stats["libraries_cleared"],
-        stats["libraries_skipped"],
-        TARGET_SEARCH_INDEX_SCHEMA_VERSION,
-    )
-    return stats
 

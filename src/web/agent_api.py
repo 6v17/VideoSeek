@@ -276,9 +276,7 @@ def _index_snapshot(mode: str, config=None) -> Dict[str, Any]:
     if video_paths:
         unique_paths = {str(path) for path in video_paths if path}
     index_ready = search_index is not None and vector_count > 0
-    from src.services.library_service import get_global_index_state
-
-    global_state = str(get_global_index_state() or "").strip().lower()
+    global_state = "fresh"
     frame_vector_count = _index_vector_count(frame_index)
     chunk_vector_count = _index_vector_count(chunk_index)
     library_snapshot = _library_index_snapshot(cfg)

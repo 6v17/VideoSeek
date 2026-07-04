@@ -80,11 +80,6 @@ class StartupMigrationGateTests(unittest.TestCase):
                 ),
                 patch.object(
                     migration_runner_module,
-                    "get_remote_model_asset_paths",
-                    return_value={"remote_dir": os.path.join(model_assets, "remote")},
-                ),
-                patch.object(
-                    migration_runner_module,
                     "_migration_state_file",
                     return_value=state_file,
                 ),
@@ -112,34 +107,25 @@ class StartupMigrationGateTests(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(backup_dir, "meta.json")))
 
 
-    def test_needs_background_true_when_search_index_schema_pending(self):
+    def test_needs_background_true_when_lance_migration_pending(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = os.path.join(tmp, "profile")
             data_dir = os.path.join(data_root, "data")
             model_assets = os.path.join(
                 data_dir, "model_assets", "openai-clip", "vit-base-patch32"
             )
+            vector_dir = os.path.join(model_assets, "vector")
             for path in (
-                os.path.join(model_assets, "vector"),
+                vector_dir,
                 os.path.join(model_assets, "index"),
                 os.path.join(model_assets, "global"),
-                os.path.join(model_assets, "remote"),
             ):
                 os.makedirs(path, exist_ok=True)
+            with open(os.path.join(vector_dir, "abc_vectors.npy"), "wb") as handle:
+                handle.write(b"placeholder")
             meta_file = os.path.join(model_assets, "meta.json")
             with open(meta_file, "w", encoding="utf-8") as handle:
-                json.dump(
-                    {
-                        "libraries": {
-                            "D:\\videos": {
-                                "files": {"clip.mp4": {"asset_state": "ready", "vid": "abc"}},
-                            }
-                        },
-                        "schema_version": 2,
-                        "search_index_schema_version": 1,
-                    },
-                    handle,
-                )
+                json.dump({"libraries": {}, "schema_version": 2}, handle)
             state_file = os.path.join(data_dir, "migration_state.json")
             with open(state_file, "w", encoding="utf-8") as handle:
                 json.dump({"completed": True, "schema_version": 2}, handle)

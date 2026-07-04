@@ -137,9 +137,6 @@ class SettingsGuiMixin:
         )
         export_video_silent = bool(config.get("export_video_silent", DEFAULT_CONFIG["export_video_silent"]))
         self.settings_page.input_export_video_silent.setCurrentIndex(1 if export_video_silent else 0)
-        self.settings_page.input_remote_max_frames.setValue(
-            int(config.get("remote_max_frames", DEFAULT_CONFIG["remote_max_frames"]))
-        )
         self.settings_page.input_embedding_batch_size.setValue(
             int(config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"]))
         )
@@ -226,7 +223,6 @@ class SettingsGuiMixin:
             self.settings_page.input_thumb_width,
             self.settings_page.input_thumb_height,
             self.settings_page.input_export_video_silent,
-            self.settings_page.input_remote_max_frames,
             self.settings_page.input_embedding_batch_size,
             self.settings_page.input_chunk_policy,
             self.settings_page.input_similarity_threshold,
@@ -451,7 +447,6 @@ class SettingsGuiMixin:
             config["thumb_width"] = self.settings_page.input_thumb_width.value()
             config["thumb_height"] = self.settings_page.input_thumb_height.value()
             config["export_video_silent"] = bool(self.settings_page.input_export_video_silent.currentData())
-            config["remote_max_frames"] = int(self.settings_page.input_remote_max_frames.value())
             config["embedding_batch_size"] = new_embedding_batch_size
             config["similarity_threshold"] = new_similarity_threshold
             config["min_chunk_size"] = new_min_chunk_size

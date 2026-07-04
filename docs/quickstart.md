@@ -31,7 +31,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 
 **构建完成但新增向量为 0** — 链接被预检拦截、重复，或源视频解析失败；看 UI 构建摘要。
 
-**从旧版升级（≥ 1.0.82）** — 首次启动自动迁移索引 ID（免重算）；仍提示未完成则再启动一次。详见 `docs/migration_forced_upgrade_checklist.md` §4.1。
+**从旧版升级（≥ 1.0.82）** — 首次启动自动迁移：配置 schema v2、视频 ID（免重算）、legacy npy → **Lance** 向量库。多模型 profile 各自独立迁移。仍提示未完成则再启动一次。详见 `docs/migration_forced_upgrade_checklist.md` §4–§5。
 
 ---
 

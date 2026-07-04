@@ -48,8 +48,6 @@ def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
         "cross_vector_file": os.path.join(storage_dir, "global", "cross_video_vectors.npy"),
         "cross_chunk_index_file": os.path.join(storage_dir, "global", "cross_chunk_index.faiss"),
         "cross_chunk_vector_file": os.path.join(storage_dir, "global", "cross_chunk_vectors.npy"),
-        "remote_index_file": os.path.join(storage_dir, "remote", "remote_index.faiss"),
-        "remote_vector_file": os.path.join(storage_dir, "remote", "remote_vectors.npy"),
     }
 
 DEFAULT_UNDERSTANDING_CONFIG = {
@@ -133,7 +131,6 @@ DEFAULT_CONFIG = {
     "download_target_library": "",
     "download_auto_index": False,
     "download_quality": "best",
-    "remote_max_frames": 2000,
     "auto_cleanup_missing_files": False,
     "export_video_silent": False,
     "export_encode_mode": "original",
@@ -175,7 +172,6 @@ CONFIG_BOUNDS = {
     "export_encode_crf": (0, 51),
     "thumb_width": (80, 480),
     "thumb_height": (45, 320),
-    "remote_max_frames": (200, 20000),
     "embedding_batch_size": (1, 64),
     "similarity_threshold": (0.1, 1.0),
     "min_chunk_size": (1, 50),
@@ -195,7 +191,6 @@ CONFIG_INT_KEYS = {
     "export_encode_crf",
     "thumb_width",
     "thumb_height",
-    "remote_max_frames",
     "embedding_batch_size",
     "min_chunk_size",
 }
@@ -224,8 +219,6 @@ PATH_KEYS = {
     "cross_vector_file",
     "cross_chunk_index_file",
     "cross_chunk_vector_file",
-    "remote_index_file",
-    "remote_vector_file",
 }
 
 DERIVED_DATA_PATH_KEYS = {
@@ -495,6 +488,8 @@ def _sanitize_general_settings(config):
 
     # Removed setting: strip from older config.json on load/save.
     sanitized.pop("ffmpeg_hwaccel", None)
+    sanitized.pop("remote_max_frames", None)
+    sanitized.pop("vector_search_backend", None)
 
     sanitized["prefer_gpu"] = _coerce_bool(
         sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]),
@@ -627,12 +622,6 @@ def load_config():
         config, chunk_migrated = _sanitize_chunk_settings(config)
         config = _sanitize_general_settings(config)
         config = _migrate_legacy_storage_if_needed(config)
-        # Migrate legacy cap from old builds; 300 causes long videos to look capped at ~299s.
-        try:
-            if int(config.get("remote_max_frames", 0)) == 300:
-                config["remote_max_frames"] = DEFAULT_CONFIG["remote_max_frames"]
-        except Exception:
-            config["remote_max_frames"] = DEFAULT_CONFIG["remote_max_frames"]
         if should_persist_new_defaults or chunk_migrated or os.path.normpath(config_path) != os.path.normpath(CONFIG_FILE):
             save_config(config)
         return config
@@ -707,6 +696,12 @@ def should_report_startup_migration_summary(result):
     if not isinstance(result, dict):
         return False
     if bool(result.get("search_index_upgraded")):
+        return True
+    if int(result.get("lance_videos_imported", 0) or 0) > 0:
+        return True
+    if int(result.get("lance_legacy_removed", 0) or 0) > 0:
+        return True
+    if int(result.get("lance_videos_failed", 0) or 0) > 0:
         return True
     if int(result.get("migrated_video_ids", 0) or 0) > 0:
         return True

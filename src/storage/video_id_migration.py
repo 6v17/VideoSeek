@@ -7,7 +7,6 @@ import os
 
 from src.app.config import get_configured_data_root, get_data_storage_paths, load_config
 from src.app.logging_utils import get_logger
-from src.services.library_service import mark_global_index_fresh
 from src.storage.asset_store import load_metadata, load_vector_payload, save_metadata
 from src.utils import get_legacy_video_hash, get_video_hash
 
@@ -312,19 +311,6 @@ def _root_has_legacy_video_ids(entries, vector_dir):
     return False
 
 
-def _heal_mistaken_stale_global_index(meta, base_dir):
-    """Video-id rename does not invalidate cross-library faiss; clear erroneous stale flags."""
-    if str(meta.get("global_index_state", "") or "").strip().lower() != "stale":
-        return False
-    global_dir = os.path.join(base_dir, "global")
-    cross_index = os.path.join(global_dir, "cross_video_index.faiss")
-    cross_vector = os.path.join(global_dir, "cross_video_vectors.npy")
-    if not (os.path.isfile(cross_index) and os.path.isfile(cross_vector)):
-        return False
-    mark_global_index_fresh(meta=meta)
-    return True
-
-
 def _collect_valid_video_ids(meta):
     valid = set()
     for lib_data in (meta.get("libraries") or {}).values():
@@ -371,9 +357,6 @@ def migrate_model_storage_root(storage_root, *, progress_callback=None, progress
     entries = _iter_meta_file_entries(meta)
 
     if not _root_has_legacy_video_ids(entries, vector_dir):
-        healed = _heal_mistaken_stale_global_index(meta, storage_root["base_dir"])
-        if healed:
-            save_metadata(meta, meta_file)
         return {
             "label": label,
             "migrated": 0,
@@ -381,7 +364,6 @@ def migrate_model_storage_root(storage_root, *, progress_callback=None, progress
             "failed": 0,
             "orphans_removed": 0,
             "skipped_root": True,
-            "healed_global_state": healed,
         }
 
     total = len(entries)
@@ -458,11 +440,7 @@ def migrate_model_storage_root(storage_root, *, progress_callback=None, progress
             file_entry["vid"] = new_vid
         migrated += 1
 
-    # Do not mark global_index_state stale: cross-library faiss/npy store file paths and
-    # embeddings, which are unchanged after renaming per-video asset files.
     meta_dirty = migrated > 0
-    if _heal_mistaken_stale_global_index(meta, storage_root["base_dir"]):
-        meta_dirty = True
     if meta_dirty:
         save_metadata(meta, meta_file)
 
@@ -501,19 +479,9 @@ def migrate_legacy_video_ids(config=None, progress_callback=None):
             _mark_video_id_pending_check_passed(runtime_config)
             logger.info("Marked legacy video-id fast check as passed after startup verification")
         logger.info("Video id migration skipped: already at format version %s", VIDEO_ID_FORMAT_VERSION)
-        healed_roots = 0
-        for storage_root in iter_model_asset_storage_roots(runtime_config):
-            meta_file = storage_root["meta_file"]
-            if not os.path.isfile(meta_file):
-                continue
-            meta = load_metadata(meta_file)
-            if _heal_mistaken_stale_global_index(meta, storage_root["base_dir"]):
-                save_metadata(meta, meta_file)
-                healed_roots += 1
         return {
-            "migrated": healed_roots > 0,
+            "migrated": False,
             "video_id_format": VIDEO_ID_FORMAT_VERSION,
-            "healed_global_state_roots": healed_roots,
             "pending_legacy": False,
         }
 

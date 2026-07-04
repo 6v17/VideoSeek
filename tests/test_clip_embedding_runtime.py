@@ -461,7 +461,7 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
         mock_create.return_value = object()
         clip_embedding.reset_engine()
         try:
-            vectors, ts, _index = clip_embedding.generate_vectors_and_index_for_video(
+            vectors, ts, _index, _chunks = clip_embedding.generate_vectors_and_index_for_video(
                 "D:/v.mp4", "vid1", "D:/idx", "D:/vec"
             )
         finally:

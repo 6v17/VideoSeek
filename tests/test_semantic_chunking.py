@@ -190,11 +190,12 @@ class SemanticChunkingTests(unittest.TestCase):
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class IndexingChunkUpgradeTests(unittest.TestCase):
+    @patch("src.services.indexing_service.os.path.isfile", return_value=True)
+    @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays")
     @patch("src.services.indexing_service.get_local_model_asset_dirs")
-    @patch("src.services.indexing_service.save_vector_payload")
     @patch("src.services.indexing_service.load_vector_payload")
     def test_load_video_chunks_by_id_builds_chunks_from_existing_vectors(
-        self, mock_load_payload, mock_save_payload, mock_model_dirs
+        self, mock_load_payload, mock_model_dirs, mock_upsert_lance, _mock_isfile
     ):
         mock_model_dirs.return_value = {
             "base_dir": "base",
@@ -215,13 +216,14 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
-        mock_save_payload.assert_called_once()
+        mock_upsert_lance.assert_called_once()
 
+    @patch("src.services.indexing_service.os.path.isfile", return_value=True)
+    @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays")
     @patch("src.services.indexing_service.get_local_model_asset_dirs")
-    @patch("src.services.indexing_service.save_vector_payload")
     @patch("src.services.indexing_service.load_vector_payload")
     def test_load_video_chunks_by_id_rebuilds_when_chunk_config_changes(
-        self, mock_load_payload, mock_save_payload, mock_model_dirs
+        self, mock_load_payload, mock_model_dirs, mock_upsert_lance, _mock_isfile
     ):
         mock_model_dirs.return_value = {
             "base_dir": "base",
@@ -251,9 +253,8 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
 
         indexing_service.load_video_chunks_by_id("video-1", config)
 
-        mock_save_payload.assert_called_once()
-        saved_chunk_config = mock_save_payload.call_args.kwargs["chunk_config"]
-        self.assertEqual(saved_chunk_config["similarity_threshold"], 0.85)
+        mock_upsert_lance.assert_called_once()
+        self.assertEqual(mock_upsert_lance.call_args.kwargs["chunks"][0]["start"], 0.0)
 
     def test_unpack_chunks_reconstructs_chunk_list(self):
         payload = {
@@ -267,88 +268,25 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         self.assertEqual(len(chunks), 2)
         self.assertEqual((chunks[0]["start"], chunks[1]["end"]), (0.0, 3.0))
 
-    @patch("src.services.indexing_service.get_global_model_asset_paths")
-    @patch("src.services.indexing_service.atomic_save_numpy")
-    @patch("src.services.indexing_service.create_clip_index")
-    @patch("src.services.indexing_service.ensure_folder_exists")
-    def test_merge_and_save_all_chunks_persists_ranges(
-        self, _mock_ensure_folder, mock_create_index, mock_atomic_save, mock_global_paths
-    ):
-        mock_global_paths.return_value = {
-            "global_dir": "source/global",
-            "cross_index_file": "source/global/cross_video_index.faiss",
-            "cross_vector_file": "source/global/cross_video_vectors.npy",
-            "cross_chunk_index_file": "source/global/cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "source/global/cross_chunk_vectors.npy",
-        }
-        config = _schema_v2_config()
-        vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
-        ranges = [(0.0, 1.0), (2.0, 3.0)]
-        paths = ["a.mp4", "b.mp4"]
-
-        indexing_service.merge_and_save_all_chunks(vectors, ranges, paths, config)
-
-        mock_create_index.assert_called_once()
-        saved_payload = mock_atomic_save.call_args[0][1]
-        self.assertEqual(saved_payload["ranges"].shape, (2, 2))
-        self.assertEqual(saved_payload["paths"], paths)
-        self.assertEqual(saved_payload["format_version"], 2)
-        self.assertNotIn("vector", saved_payload)
-
-    @patch("src.services.indexing_service.get_global_model_asset_paths")
-    @patch("src.services.indexing_service.atomic_save_numpy")
-    @patch("src.services.indexing_service.create_clip_index")
-    @patch("src.services.indexing_service.ensure_folder_exists")
-    def test_merge_and_save_all_vectors_omits_duplicate_vector_payload(
-        self,
-        _mock_ensure_folder,
-        mock_create_index,
-        mock_atomic_save,
-        mock_global_paths,
-    ):
-        mock_global_paths.return_value = {
-            "global_dir": "source/global",
-            "cross_index_file": "source/global/cross_video_index.faiss",
-            "cross_vector_file": "source/global/cross_video_vectors.npy",
-            "cross_chunk_index_file": "source/global/cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "source/global/cross_chunk_vectors.npy",
-        }
-        config = _schema_v2_config()
-        vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
-        timestamps = np.asarray([0.0, 2.0], dtype=np.float32)
-        paths = ["a.mp4", "b.mp4"]
-
-        indexing_service.merge_and_save_all_vectors(vectors, timestamps, paths, config)
-
-        mock_create_index.assert_called_once()
-        saved_payload = mock_atomic_save.call_args[0][1]
-        self.assertEqual(saved_payload["timestamps"].shape, (2,))
-        self.assertEqual(saved_payload["paths"], paths)
-        self.assertEqual(saved_payload["format_version"], 2)
-        self.assertNotIn("vector", saved_payload)
-
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class ChunkSearchTests(unittest.TestCase):
-    @patch("src.services.search_assets.get_global_model_asset_paths")
-    @patch("src.services.search_assets.load_clip_index")
-    @patch("src.services.search_assets.np.load")
-    @patch("src.services.search_assets.os.path.exists", return_value=True)
+    @patch("src.services.search_assets.load_lance_chunk_search_assets")
+    @patch("src.services.search_assets.lance_search_is_ready", return_value=True)
+    @patch(
+        "src.services.search_assets.get_local_model_asset_dirs",
+        return_value={"base_dir": "source/profile"},
+    )
     def test_load_chunk_search_assets_reads_ranges(
-        self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
+        self, _mock_dirs, _mock_ready, mock_load_lance
     ):
-        mock_global_paths.return_value = {
-            "global_dir": "g",
-            "cross_index_file": "cross_video_index.faiss",
-            "cross_vector_file": "cross_video_vectors.npy",
-            "cross_chunk_index_file": "cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "cross_chunk_vectors.npy",
-        }
-        mock_load_index.return_value = object()
-        mock_np_load.return_value.item.return_value = {
-            "ranges": np.asarray([[0.0, 1.0]], dtype=np.float32),
-            "paths": ["video.mp4"],
-        }
+        mock_load_lance.return_value = (
+            object(),
+            np.asarray([[0.0, 1.0]], dtype=np.float32),
+            ["video.mp4"],
+        )
+
+        from src.services import search_service
 
         index, ranges, paths = search_service.load_chunk_search_assets(_schema_v2_config())
 
@@ -356,53 +294,22 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertEqual(ranges.shape, (1, 2))
         self.assertEqual(paths, ["video.mp4"])
 
-    @patch("src.services.search_assets.get_global_model_asset_paths")
-    @patch("src.services.search_assets.load_clip_index")
-    @patch("src.services.search_assets.np.load")
-    @patch("src.services.search_assets.os.path.exists", return_value=True)
-    def test_load_search_assets_accepts_legacy_payload_with_vector_field(
-        self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
+    @patch("src.services.search_assets.load_lance_frame_search_assets")
+    @patch("src.services.search_assets.lance_search_is_ready", return_value=True)
+    @patch(
+        "src.services.search_assets.get_local_model_asset_dirs",
+        return_value={"base_dir": "source/profile"},
+    )
+    def test_load_search_assets_reads_timestamps(
+        self, _mock_dirs, _mock_ready, mock_load_lance
     ):
-        mock_global_paths.return_value = {
-            "global_dir": "g",
-            "cross_index_file": "cross_video_index.faiss",
-            "cross_vector_file": "cross_video_vectors.npy",
-            "cross_chunk_index_file": "cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "cross_chunk_vectors.npy",
-        }
-        mock_load_index.return_value = object()
-        mock_np_load.return_value.item.return_value = {
-            "vector": np.asarray([[1.0, 0.0]], dtype=np.float32),
-            "timestamps": np.asarray([0.0], dtype=np.float32),
-            "paths": ["video.mp4"],
-        }
+        mock_load_lance.return_value = (
+            object(),
+            np.asarray([0.0], dtype=np.float32),
+            ["video.mp4"],
+        )
 
-        index, timestamps, paths = search_service.load_search_assets(_schema_v2_config())
-
-        self.assertIsNotNone(index)
-        self.assertEqual(timestamps.shape, (1,))
-        self.assertEqual(paths, ["video.mp4"])
-
-    @patch("src.services.search_assets.get_global_model_asset_paths")
-    @patch("src.services.search_assets.load_clip_index")
-    @patch("src.services.search_assets.np.load")
-    @patch("src.services.search_assets.os.path.exists", return_value=True)
-    def test_load_search_assets_accepts_compact_payload_without_vector_field(
-        self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
-    ):
-        mock_global_paths.return_value = {
-            "global_dir": "g",
-            "cross_index_file": "cross_video_index.faiss",
-            "cross_vector_file": "cross_video_vectors.npy",
-            "cross_chunk_index_file": "cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "cross_chunk_vectors.npy",
-        }
-        mock_load_index.return_value = object()
-        mock_np_load.return_value.item.return_value = {
-            "format_version": 2,
-            "timestamps": np.asarray([0.0], dtype=np.float32),
-            "paths": ["video.mp4"],
-        }
+        from src.services import search_service
 
         index, timestamps, paths = search_service.load_search_assets(_schema_v2_config())
 

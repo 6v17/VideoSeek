@@ -252,7 +252,6 @@ class GuiSettingsPathTests(unittest.TestCase):
                 btn_stop_index=MagicMock(),
                 btn_add_lib=MagicMock(),
                 btn_cleanup_missing=MagicMock(),
-                btn_rebuild_index_vectors=MagicMock(),
                 progress_bar=MagicMock(),
             ),
             ui_state=types.SimpleNamespace(set_indexing_running=MagicMock()),

@@ -5,17 +5,8 @@ from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.services.indexing_service import (
     IndexUpdateInterrupted,
-    build_global_index,
-    build_library_search_indexes,
     cleanup_missing_library_files,
-    clear_global_index,
-    rebuild_indexes_from_cached_vectors,
     scan_target_libraries,
-)
-from src.services.library_service import mark_global_index_fresh, mark_global_index_stale
-from src.services.search_index_schema import (
-    TARGET_SEARCH_INDEX_SCHEMA_VERSION,
-    get_search_index_schema_version,
 )
 from src.storage.asset_store import load_model_metadata, save_model_metadata
 from src.storage.config_store import get_local_model_asset_dirs
@@ -67,6 +58,14 @@ def _mark_missing_source_entries(meta, target_lib=None):
     return changed
 
 
+def _has_ready_search_assets(meta):
+    for library in (meta or {}).get("libraries", {}).values():
+        for info in library.get("files", {}).values():
+            if str(info.get("asset_state", "")).strip().lower() == "ready":
+                return True
+    return False
+
+
 def update_videos_flow(
     target_lib=None,
     progress_callback=None,
@@ -78,6 +77,7 @@ def update_videos_flow(
     rebuild_global_assets=True,
 ):
     # Retained intentionally: imported dynamically inside IndexUpdateWorker.run().
+    del rebuild_global_assets
     flow_start = time.perf_counter()
     logger.info("Starting index update%s", f" for {target_lib}" if target_lib else "")
     garbage_collect_indices()
@@ -87,7 +87,6 @@ def update_videos_flow(
     save_model_metadata(meta, config=config)
 
     should_cleanup_missing_files = force_cleanup_missing_files or config.get("auto_cleanup_missing_files", False)
-    search_assets_changed = False
 
     t_cleanup = time.perf_counter()
     if should_cleanup_missing_files:
@@ -103,7 +102,6 @@ def update_videos_flow(
             removed_any = True
             delete_physical_video_data(video_id, config)
         if removed_any:
-            search_assets_changed = True
             save_model_metadata(meta, config=config)
     else:
         if progress_callback:
@@ -133,24 +131,20 @@ def update_videos_flow(
             time.perf_counter() - flow_start,
         )
         if getattr(exc, "search_assets_changed", False):
-            mark_global_index_stale(meta=meta)
             save_model_metadata(meta, config=config)
         raise
     scan_s = time.perf_counter() - t_scan
-    failed_videos, scan_search_assets_changed = scan_result
-    search_assets_changed = search_assets_changed or scan_search_assets_changed
+    failed_videos, _scan_search_assets_changed = scan_result
 
     if should_stop_callback and should_stop_callback():
-        if search_assets_changed:
-            mark_global_index_stale(meta=meta)
-            save_model_metadata(meta, config=config)
+        save_model_metadata(meta, config=config)
         logger.info(
-            "Index update stopped before global rebuild: cleanup=%.2fs scan_libraries=%.2fs total=%.2fs",
+            "Index update stopped after library scan: cleanup=%.2fs scan_libraries=%.2fs total=%.2fs",
             cleanup_s,
             scan_s,
             time.perf_counter() - flow_start,
         )
-        raise InterruptedError("Index update stopped before rebuilding global index")
+        raise InterruptedError("Index update stopped before finalizing library state")
 
     if failed_videos:
         logger.warning(
@@ -162,145 +156,17 @@ def update_videos_flow(
     if _mark_missing_source_entries(meta, target_lib=target_lib):
         save_model_metadata(meta, config=config)
 
-    save_model_metadata(meta, config=config)
-    if not any(len(lib.get("files", {})) > 0 for lib in meta["libraries"].values()):
-        _finalize_library_index_state(meta, target_lib=target_lib)
-        if rebuild_global_assets:
-            mark_global_index_fresh(meta=meta)
-        elif search_assets_changed:
-            mark_global_index_stale(meta=meta)
-        save_model_metadata(meta, config=config)
-        if rebuild_global_assets:
-            clear_global_index(config)
-            logger.info("No libraries remain after cleanup; cleared global indexes")
-        logger.info(
-            "Index update finished (no libraries): cleanup=%.2fs scan_libraries=%.2fs global_build=n/a total=%.2fs",
-            cleanup_s,
-            scan_s,
-            time.perf_counter() - flow_start,
-        )
-        return None, None, None, None
-
-    if not rebuild_global_assets:
-        _finalize_library_index_state(meta, target_lib=target_lib)
-        if search_assets_changed:
-            mark_global_index_stale(meta=meta)
-        if (
-            target_lib
-            and get_search_index_schema_version(meta) >= TARGET_SEARCH_INDEX_SCHEMA_VERSION
-        ):
-            build_library_search_indexes(
-                meta,
-                config,
-                target_lib=target_lib,
-                progress_callback=progress_callback,
-                should_stop_callback=should_stop_callback,
-            )
-        save_model_metadata(meta, config=config)
-        logger.info(
-            "Skipped global index rebuild (rebuild_global_assets=False).",
-        )
-        logger.info(
-            "Index update finished (skip global): cleanup=%.2fs scan_libraries=%.2fs global_build=n/a total=%.2fs",
-            cleanup_s,
-            scan_s,
-            time.perf_counter() - flow_start,
-        )
-        return None, None, None, None
-
-    t_global = time.perf_counter()
-    result = build_global_index(
-        meta,
-        config,
-        target_lib=target_lib,
-        include_all_libraries=include_existing_assets,
-        progress_callback=progress_callback,
-        should_stop_callback=should_stop_callback,
-    )
-    global_s = time.perf_counter() - t_global
-    if result is None:
-        _finalize_library_index_state(meta, target_lib=target_lib)
-        if rebuild_global_assets:
-            mark_global_index_fresh(meta=meta)
-        elif search_assets_changed:
-            mark_global_index_stale(meta=meta)
-        save_model_metadata(meta, config=config)
-        logger.warning("No valid videos found during indexing")
-        logger.info(
-            "Index update finished (no vectors): cleanup=%.2fs scan_libraries=%.2fs global_build=%.2fs total=%.2fs",
-            cleanup_s,
-            scan_s,
-            global_s,
-            time.perf_counter() - flow_start,
-        )
-        return None, None, None, None
     _finalize_library_index_state(meta, target_lib=target_lib)
-    mark_global_index_fresh(meta=meta)
-    if get_search_index_schema_version(meta) >= TARGET_SEARCH_INDEX_SCHEMA_VERSION:
-        build_library_search_indexes(
-            meta,
-            config,
-            target_lib=target_lib,
-            progress_callback=progress_callback,
-            should_stop_callback=should_stop_callback,
-        )
     save_model_metadata(meta, config=config)
+    has_search_assets = _has_ready_search_assets(meta)
     logger.info(
-        "Index update complete: cleanup=%.2fs scan_libraries=%.2fs global_build=%.2fs total=%.2fs",
+        "Index update complete: cleanup=%.2fs scan_libraries=%.2fs has_search_assets=%s total=%.2fs",
         cleanup_s,
         scan_s,
-        global_s,
+        has_search_assets,
         time.perf_counter() - flow_start,
     )
-    return result
-
-def rebuild_indexes_from_vectors_flow(
-    target_lib=None,
-    progress_callback=None,
-    should_stop_callback=None,
-    *,
-    rebuild_per_video=True,
-    rebuild_global=True,
-    force_per_video=False,
-    include_all_libraries=True,
-):
-    """Rebuild per-video and/or global FAISS assets from existing vector files only."""
-    flow_start = time.perf_counter()
-    logger.info(
-        "Starting index rebuild from cached vectors%s",
-        f" for {target_lib}" if target_lib else "",
-    )
-    config = load_config()
-    meta = load_model_metadata(config=config)
-    _set_library_index_state(meta, "partial", target_lib=target_lib)
-    save_model_metadata(meta, config=config)
-
-    stats = rebuild_indexes_from_cached_vectors(
-        meta,
-        config,
-        target_lib=target_lib,
-        rebuild_per_video=rebuild_per_video,
-        rebuild_global=rebuild_global,
-        force_per_video=force_per_video,
-        include_all_libraries=include_all_libraries,
-        progress_callback=progress_callback,
-        should_stop_callback=should_stop_callback,
-    )
-
-    _finalize_library_index_state(meta, target_lib=target_lib)
-    if rebuild_global:
-        if stats.get("global_built"):
-            mark_global_index_fresh(meta=meta)
-        else:
-            mark_global_index_stale(meta=meta)
-    save_model_metadata(meta, config=config)
-
-    logger.info(
-        "Index rebuild from vectors finished in %.2fs: %s",
-        time.perf_counter() - flow_start,
-        stats,
-    )
-    return stats
+    return (True, None, None, None) if has_search_assets else (None, None, None, None)
 
 
 def upgrade_search_index_flow(
@@ -310,50 +176,15 @@ def upgrade_search_index_flow(
     *,
     rebuild_global=True,
 ):
-    """Upgrade to v2 per-library search indexes from cached vectors (no re-embedding)."""
-    flow_start = time.perf_counter()
-    logger.info(
-        "Starting search index schema upgrade%s",
-        f" for {target_lib}" if target_lib else "",
-    )
-    config = load_config()
-    meta = load_model_metadata(config=config)
-    _set_library_index_state(meta, "partial", target_lib=target_lib)
-    save_model_metadata(meta, config=config)
-
-    stats = build_library_search_indexes(
-        meta,
-        config,
-        target_lib=target_lib,
-        progress_callback=progress_callback,
-        should_stop_callback=should_stop_callback,
-    )
-    global_built = False
-    if rebuild_global:
-        if progress_callback:
-            progress_callback(92, "global")
-        result = build_global_index(
-            meta,
-            config,
-            target_lib=target_lib,
-            include_all_libraries=True,
-            progress_callback=progress_callback,
-            should_stop_callback=should_stop_callback,
-        )
-        global_built = result is not None
-
-    _finalize_library_index_state(meta, target_lib=target_lib)
-    if rebuild_global and global_built:
-        mark_global_index_fresh(meta=meta)
-    save_model_metadata(meta, config=config)
-
-    logger.info(
-        "Search index schema upgrade finished in %.2fs: %s global_built=%s",
-        time.perf_counter() - flow_start,
-        stats,
-        global_built,
-    )
-    return {"global_built": global_built, **stats}
+    """Legacy FAISS per-library indexes are no longer built; Lance stores search vectors."""
+    del target_lib, progress_callback, should_stop_callback, rebuild_global
+    logger.info("Search index schema upgrade skipped: Lance vector storage is active.")
+    return {
+        "global_built": False,
+        "libraries_built": 0,
+        "libraries_cleared": 0,
+        "libraries_skipped": 0,
+    }
 
 
 def delete_physical_video_data(video_id, config):
@@ -373,6 +204,13 @@ def delete_physical_video_data(video_id, config):
             logger.info("Removed index file for %s", video_id)
     except Exception as exc:
         logger.error("Failed to remove files for %s: %s", video_id, exc)
+
+    try:
+        from src.storage.lance_store import delete_profile_video_vectors
+
+        delete_profile_video_vectors(video_id, config=config)
+    except Exception as exc:
+        logger.warning("Failed to remove Lance vectors for %s: %s", video_id, exc)
 
 
 def garbage_collect_indices():

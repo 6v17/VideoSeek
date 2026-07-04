@@ -171,23 +171,11 @@ def get_global_model_asset_paths(config=None):
     }
 
 
-def get_remote_model_asset_paths(config=None):
-    model_dirs = get_local_model_asset_dirs(config=config)
-    remote_dir = os.path.join(model_dirs["base_dir"], "remote")
-    return {
-        "remote_dir": remote_dir,
-        "remote_index_file": os.path.join(remote_dir, "remote_index.faiss"),
-        "remote_vector_file": os.path.join(remote_dir, "remote_vectors.npy"),
-    }
-
-
 def get_model_profile_storage_paths(config=None):
     model_dirs = get_local_model_asset_dirs(config=config)
     global_paths = get_global_model_asset_paths(config=config)
-    remote_paths = get_remote_model_asset_paths(config=config)
     merged = dict(model_dirs)
     merged.update(global_paths)
-    merged.update(remote_paths)
     return merged
 
 
@@ -307,14 +295,6 @@ def get_frame_neighbor_rerank_window(config=None) -> int:
         return int(cfg.get("frame_neighbor_rerank_window", DEFAULT_CONFIG["frame_neighbor_rerank_window"]))
     except (TypeError, ValueError):
         return int(DEFAULT_CONFIG["frame_neighbor_rerank_window"])
-
-
-def get_remote_max_frames(config=None) -> int:
-    cfg = _app_cfg(config)
-    try:
-        return int(cfg.get("remote_max_frames", DEFAULT_CONFIG["remote_max_frames"]))
-    except (TypeError, ValueError):
-        return int(DEFAULT_CONFIG["remote_max_frames"])
 
 
 def get_config_fps(config=None) -> float:

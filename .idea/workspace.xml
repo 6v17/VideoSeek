@@ -4,47 +4,40 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="修复新用户导入模型显示BUG">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="移除网络库，新增视频下载功能，优化chunk切分">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.en.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/for-agents.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/for-agents.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/quickstart.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/quickstart.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/build_remote_index.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/copy_overrides.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/copy_overrides.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/semantic_chunking.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/domain/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/domain/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/domain/remote_search_hit.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/remote_index_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/remote_library_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/remote_search_service.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_assets.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_assets.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_index_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_index_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/asset_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/asset_store.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/video_id_migration.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_clip_embedding_runtime.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_network_presenters.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_gui_settings_paths.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_gui_settings_paths.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_semantic_chunking.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/controllers/network_search_controller.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/presenters/network_build_presenter.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/presenters/network_precheck_presenter.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_startup_migration_gate.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_startup_migration_gate.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/layout.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/result_table.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/result_table.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/result_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/result_view.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/widgets/settings/page.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/settings/page.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/table_specs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/table_specs.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_runtime.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_startup_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_startup_migration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_tray.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_tray.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_vector_network.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -511,15 +504,8 @@
       <workItem from="1782880230315" duration="1857000" />
       <workItem from="1782882102686" duration="4756000" />
       <workItem from="1782991338802" duration="10079000" />
-      <workItem from="1783074854106" duration="4188000" />
-    </task>
-    <task id="LOCAL-00099" summary="完善api调用说明">
-      <option name="closed" value="true" />
-      <created>1780375314874</created>
-      <option name="number" value="00099" />
-      <option name="presentableId" value="LOCAL-00099" />
-      <option name="project" value="LOCAL" />
-      <updated>1780375314875</updated>
+      <workItem from="1783074854106" duration="5031000" />
+      <workItem from="1783160676471" duration="10742000" />
     </task>
     <task id="LOCAL-00100" summary="减少写配置因为权限问题导致失败">
       <option name="closed" value="true" />
@@ -905,7 +891,15 @@
       <option name="project" value="LOCAL" />
       <updated>1782732057140</updated>
     </task>
-    <option name="localTasksCounter" value="148" />
+    <task id="LOCAL-00148" summary="移除网络库，新增视频下载功能，优化chunk切分">
+      <option name="closed" value="true" />
+      <created>1783079379562</created>
+      <option name="number" value="00148" />
+      <option name="presentableId" value="LOCAL-00148" />
+      <option name="project" value="LOCAL" />
+      <updated>1783079379563</updated>
+    </task>
+    <option name="localTasksCounter" value="149" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -935,7 +929,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
     <MESSAGE value="移除无用说明" />
     <MESSAGE value="修复搜索范围选择功能" />
     <MESSAGE value="更新说明文件" />
@@ -960,7 +953,8 @@
     <MESSAGE value="api视频理解功能说明更新" />
     <MESSAGE value="api完善" />
     <MESSAGE value="修复新用户导入模型显示BUG" />
-    <option name="LAST_COMMIT_MESSAGE" value="修复新用户导入模型显示BUG" />
+    <MESSAGE value="移除网络库，新增视频下载功能，优化chunk切分" />
+    <option name="LAST_COMMIT_MESSAGE" value="移除网络库，新增视频下载功能，优化chunk切分" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

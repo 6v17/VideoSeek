@@ -364,7 +364,6 @@ class ConfigMigrationTests(unittest.TestCase):
                         "preview_height": -1,
                         "thumb_width": 1,
                         "thumb_height": 999,
-                        "remote_max_frames": 5,
                         "embedding_batch_size": 999,
                         "similarity_threshold": 9,
                         "min_chunk_size": 999,
@@ -378,7 +377,6 @@ class ConfigMigrationTests(unittest.TestCase):
             self.assertEqual(loaded["preview_height"], 90)
             self.assertEqual(loaded["thumb_width"], 80)
             self.assertEqual(loaded["thumb_height"], 320)
-            self.assertEqual(loaded["remote_max_frames"], 200)
             self.assertEqual(loaded["embedding_batch_size"], 64)
             self.assertEqual(loaded["similarity_threshold"], 1.0)
             self.assertEqual(loaded["min_chunk_size"], 50)

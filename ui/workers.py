@@ -204,23 +204,6 @@ class IndexUpdateWorker(QThread):
             elif self.debug_failure == "system_oom":
                 os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = "1"
                 os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
-            if self.index_from_vectors_only:
-                from src.workflows.update_video import rebuild_indexes_from_vectors_flow
-
-                logger.info(
-                    "Index rebuild-from-vectors worker starting: target_lib=%s",
-                    self.target_lib,
-                )
-                stats = rebuild_indexes_from_vectors_flow(
-                    target_lib=self.target_lib,
-                    progress_callback=lambda progress, text: self.progress_signal.emit(progress, text),
-                    should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
-                    rebuild_global=self.rebuild_global_assets,
-                )
-                has_search_assets = bool(stats.get("global_built")) or int(stats.get("per_video_rebuilt", 0) or 0) > 0
-                self.finished_signal.emit(True, False, has_search_assets, issues)
-                return
-
             from src.core.clip_embedding import get_engine_runtime_status, prepare_inference_runtime
             from src.workflows.update_video import update_videos_flow
 

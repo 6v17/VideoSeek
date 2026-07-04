@@ -1,6 +1,6 @@
 # VideoSeek 架构
 
-桌面语义视频检索（PySide6 + ONNX + FAISS + FFmpeg）。主流程：
+桌面语义视频检索（PySide6 + ONNX + Lance + FFmpeg）。主流程：
 
 ```text
 建索引 → 语义检索 → 定位 / 预览 → 导出片段 →（可选）理解笔录 →（可选）本机 Agent API
@@ -14,7 +14,7 @@
 | `search_*` 子模块 | 邻居重排、定位管线、chunk 聚合、资产加载、query 向量等（由 `search_service` 组合） |
 | `search_telemetry*` | 截图搜索遥测：持久化 store、定位/播放/置信度记录、UI 格式化（由 `search_telemetry` 门面 re-export） |
 | `search_preset*` | 混合搜索预设：JSON 存储、记录规范化、query 向量缓存、CRUD、搜索 plan（由 `search_preset_service` 门面 re-export） |
-| `indexing_service.py` | 索引构建与复用、全局/分库合并 |
+| `indexing_service.py` | 索引构建与复用、库内路径对齐、写 Lance |
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
 | `understanding_service.py` | 理解笔录生成、读盘/写盘、`EvidenceBundle` 编排 |
 | `understanding_resource_service.py` | YOLO / profile 扫描、描述服务探测、`understanding_ready` |
@@ -53,7 +53,7 @@ flowchart TB
   SS["search_service.run_search()"]
   CE["clip_embedding.get_engine()"]
   RR["image_search_rerank / search_scope"]
-  DISK[("FAISS + npy on disk")]
+  DISK[("Lance + legacy npy")]
 
   GUI --> SC --> SW --> SS
   SS --> CE
@@ -79,7 +79,7 @@ flowchart TB
   IC --> IW["IndexUpdateWorker"]
   IW --> WF["workflows/update_video"]
   WF --> IS["indexing_service"]
-  IS --> CE["clip_embedding + extract_frames + faiss_index"]
+  IS --> CE["clip_embedding + extract_frames + lance_store"]
 ```
 
 **理解笔录（可选，桌面手动触发）：**
@@ -105,8 +105,8 @@ flowchart TB
 
 | 模块 | 作用 | 说明 |
 |------|------|------|
-| `search_service.py` | FAISS 加载、scope、neighbor/pixel rerank、chunk/frame 分支 | **搜索主逻辑** |
-| `indexing_service.py` | 抽帧、embedding、chunk、写索引 | **索引主逻辑** |
+| `search_service.py` | Lance 资产加载、scope、neighbor/pixel rerank、chunk/frame 分支 | **搜索主逻辑** |
+| `indexing_service.py` | 抽帧、embedding、chunk、写 Lance | **索引主逻辑** |
 | `clip_embedding.py` | ONNX session、批量编码、引擎单例 | **推理核心** |
 | `search_request_service.py` | 精度模式、内联图校验、预设/query 解析 | GUI + Agent 共用 |
 | `search_scope.py` | 当前范围、过滤、`resolve_effective_search_scope` | GUI + Agent 共用 |
@@ -119,7 +119,7 @@ flowchart TB
 | `src/domain/evidence_bundle.py` | `EvidenceBundle` schema | 理解笔录边界类型 |
 | `inference_registry.py` | 3 个 provider 工厂（约 25 行） | 小插件表 |
 
-Frame/chunk、分库索引、scope over-fetch、rerank、预设与 Agent 批处理在 **services**；**core** 负责推理与索引 I/O。
+Frame/chunk、scope over-fetch、rerank、预设与 Agent 批处理在 **services**；**core** 负责推理与向量 I/O 原语；**storage/lance_*** 负责 Lance 持久化与检索资产加载。
 
 ## 系统总览
 
@@ -152,11 +152,11 @@ sequenceDiagram
   participant W as SearchWorker
   participant SS as search_service
   participant CE as clip_embedding
-  participant IX as FAISS + npy
+  participant IX as Lance（内存 flat 检索）
   UI->>W: query + scope + precision
   W->>SS: run_search(...)
   SS->>CE: 查询向量（除非 preset 已带向量）
-  SS->>IX: 加载全局 / 分库索引
+  SS->>IX: 从 Lance 表加载 frame/chunk 向量
   SS->>SS: top-K、scope 过滤、rerank
   SS-->>W: List[SearchHit]
   W-->>UI: result_ready → 表格 + 缩略图
@@ -166,8 +166,8 @@ sequenceDiagram
 
 1. **Chunk 模式** → `run_chunk_search`
 2. **限定视频列表** → 按视频 frame 搜
-3. **限定库 + v2 分库索引就绪** → 逐库查询后合并
-4. **其它** → 全局索引，必要时 over-fetch + `apply_search_scope`，再 rerank
+3. **限定库** → 按 `library_path` 过滤 Lance 行后检索
+4. **全库** → 加载当前 profile 的 Lance frame/chunk 表，必要时 over-fetch + `apply_search_scope`，再 rerank
 
 逐步细节见 `docs/ai/pipelines.md` Pipeline 4。
 

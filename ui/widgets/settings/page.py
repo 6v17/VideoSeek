@@ -157,8 +157,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_thumb_width.setRange(80, 480)
         self.input_thumb_height = NoWheelSpinBox()
         self.input_thumb_height.setRange(45, 320)
-        self.input_remote_max_frames = NoWheelSpinBox()
-        self.input_remote_max_frames.setRange(200, 20000)
         self.input_embedding_batch_size = NoWheelSpinBox()
         self.input_embedding_batch_size.setRange(1, 64)
         self.input_chunk_policy = NoWheelComboBox()
@@ -234,7 +232,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_thumb_width = ClickableLabel()
         self.label_thumb_height = ClickableLabel()
         self.label_export_video_silent = ClickableLabel()
-        self.label_remote_max_frames = ClickableLabel()
         self.label_embedding_batch_size = ClickableLabel()
         self.label_chunk_policy = ClickableLabel()
         self.label_similarity_threshold = ClickableLabel()
@@ -269,7 +266,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_thumb_width = QLabel()
         self.hint_thumb_height = QLabel()
         self.hint_export_video_silent = QLabel()
-        self.hint_remote_max_frames = QLabel()
         self.hint_embedding_batch_size = QLabel()
         self.hint_indexing_note = QLabel()
         self.hint_chunk_policy = QLabel()
@@ -342,7 +338,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_remote_max_frames, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_embedding_batch_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(
             self.input_chunk_policy,
@@ -472,13 +467,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_top_k,
             self.input_top_k,
             self.hint_top_k,
-        )
-        self._add_setting_row(
-            self.section_search_form,
-            1,
-            self.label_remote_max_frames,
-            self.input_remote_max_frames,
-            self.hint_remote_max_frames,
         )
         self._add_section_note(self.section_fast_image_search_form, 0, self.hint_fast_image_search_section)
         self._add_setting_row(
@@ -986,7 +974,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_thumb_width.setText(texts["setting_thumb_width"])
         self.label_thumb_height.setText(texts["setting_thumb_height"])
         self.label_export_video_silent.setText(texts["setting_export_video_silent"])
-        self.label_remote_max_frames.setText(texts["setting_remote_max_frames"])
         self.label_embedding_batch_size.setText(texts["setting_embedding_batch_size"])
         self.label_chunk_policy.setText(texts["setting_chunk_policy"])
         self.label_similarity_threshold.setText(texts["setting_similarity_threshold"])
@@ -1115,7 +1102,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_thumb_width.setText(texts["setting_thumb_width_hint"])
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
         self.hint_export_video_silent.setText(texts["setting_export_video_silent_hint"])
-        self.hint_remote_max_frames.setText(texts["setting_remote_max_frames_hint"])
         self.hint_embedding_batch_size.setText(texts["setting_embedding_batch_size_hint"])
         self.hint_indexing_note.setText(texts["setting_indexing_note"])
         self.hint_chunk_policy.setText(texts["setting_chunk_policy_hint"])
@@ -1169,7 +1155,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_thumb_width,
             self.label_thumb_height,
             self.label_export_video_silent,
-            self.label_remote_max_frames,
             self.label_embedding_batch_size,
             self.label_chunk_policy,
             self.label_similarity_threshold,

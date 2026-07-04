@@ -89,7 +89,7 @@
 | `use_saved_scope: true` | 显式使用桌面保存的范围（无 paths 时） |
 | 同时给 paths | **显式 paths 优先**于 `use_saved_scope` |
 
-响应 `meta` 会回显：`scope_applied`、`scope_library_paths`、`scope_video_paths`、`scope_uses_per_library_indexes`、`saved_search_scope_mode`。
+响应 `meta` 会回显：`scope_applied`、`scope_library_paths`、`scope_video_paths`、`scope_uses_per_library_indexes`（true 表示本次按库过滤 Lance 加载，**非** legacy FAISS 分库直查）、`saved_search_scope_mode`。
 
 ---
 
@@ -119,10 +119,10 @@
 
 | 字段 | 说明 |
 |------|------|
-| `index_ready` | 当前 mode 下全局索引是否可用 |
+| `index_ready` | 当前 mode 下 Lance 向量库是否可用（`lance_search_is_ready`） |
 | `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
 | `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
-| `index_stale` / `global_index_state` | 索引新鲜度 |
+| `index_stale` / `global_index_state` | 兼容字段；本地搜索实际以 Lance 是否就绪、桌面是否在同步为准 |
 | `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `video_evidence`, `video_evidence_ready` 等 |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
@@ -132,7 +132,7 @@
 | `max_batch_queries` | 64 |
 | `max_batch_export_clips` | 64 |
 | `batch_timeout_sec` | batch 基础超时 |
-| `library_indexes_upgrade_needed` | true 时需重启并完成迁移 |
+| `library_indexes_upgrade_needed` | 兼容字段；Lance 主线恒为 **false**（`needs_search_index_upgrade` 已 no-op） |
 | `agent_api_default_image_precision` | 图搜默认 `fast` 或 `precise` |
 | `search_telemetry_enabled` | 遥测开关 |
 | `understanding_ready` | 描述服务是否就绪（VLM caption）；false 时勿 `ensure=true`。YOLO 为可选附加 |
@@ -182,7 +182,7 @@
 | `display_name` | 展示名 |
 | `index_state` | 库索引状态 |
 | `video_count_total` / `video_count_indexed_ready` / `video_count_missing_source` | 计数 |
-| `per_library_index_ready` | 该库 per-library 索引是否就绪 |
+| `per_library_index_ready` | 该库是否有 `asset_state=ready` 视频且已在 Lance 中可搜（legacy 字段名；非 FAISS 分库文件） |
 | `sync_in_progress` | 该库是否正在同步（见 `/health` `index_sync_in_progress`） |
 | `offline` | 库目录是否存在 |
 

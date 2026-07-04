@@ -287,7 +287,6 @@ class MainWindow(
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
-        self.library_page.btn_rebuild_index_vectors.clicked.connect(self.rebuild_index_from_vectors)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_index_issues.clicked.connect(self.show_last_index_issue_details)
         self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
@@ -472,7 +471,6 @@ class MainWindow(
         self.library_page.table_title.setText(t["library_table_title"])
         self.library_page.btn_add_lib.setText(t["add_folder"])
         self.library_page.btn_sync_db.setText(t["update_index"])
-        self.library_page.btn_rebuild_index_vectors.setText(t["rebuild_index_vectors"])
         self.library_page.btn_stop_index.setText(t["stop"])
         self.library_page.btn_index_issues.setText(t["index_issues_button"])
         self.library_page.btn_cleanup_missing.setText(t["cleanup_missing_vectors"])
@@ -1266,14 +1264,34 @@ class MainWindow(
             lines.extend(video_lines)
 
         if summary.get("search_index_upgraded"):
-            lines.append(self.texts["migration_summary_search_index_section"])
-            lines.append(
-                self.texts["migration_summary_search_index_built"].format(
-                    count=int(summary.get("search_index_libraries_built", 0) or 0),
+            if int(summary.get("lance_videos_imported", 0) or 0) > 0 or int(
+                summary.get("lance_legacy_removed", 0) or 0
+            ) > 0:
+                lines.append(self.texts["migration_summary_lance_section"])
+                imported = int(summary.get("lance_videos_imported", 0) or 0)
+                if imported > 0:
+                    lines.append(
+                        self.texts["migration_summary_lance_imported"].format(count=imported)
+                    )
+                removed = int(summary.get("lance_legacy_removed", 0) or 0)
+                if removed > 0:
+                    lines.append(
+                        self.texts["migration_summary_lance_legacy_removed"].format(count=removed)
+                    )
+                failed = int(summary.get("lance_videos_failed", 0) or 0)
+                if failed > 0:
+                    lines.append(
+                        self.texts["migration_summary_lance_import_failed"].format(count=failed)
+                    )
+            else:
+                lines.append(self.texts["migration_summary_search_index_section"])
+                lines.append(
+                    self.texts["migration_summary_search_index_built"].format(
+                        count=int(summary.get("search_index_libraries_built", 0) or 0),
+                    )
                 )
-            )
-            if summary.get("search_index_global_built"):
-                lines.append(self.texts["migration_summary_search_index_global"])
+                if summary.get("search_index_global_built"):
+                    lines.append(self.texts["migration_summary_search_index_global"])
 
         backup_dir = str(summary.get("backup_dir", "") or "").strip()
         if backup_dir:
