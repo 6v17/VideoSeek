@@ -27,12 +27,18 @@ def get_version_status(language):
 
     latest_version = str(remote_data.get("version") or current_version)
     download_url = str(remote_data.get("download_url") or "")
-    has_update = _compare_versions(latest_version, current_version) > 0
-    status_key = "version_update_available" if has_update else "version_up_to_date"
+    compare = _compare_versions(latest_version, current_version)
+    has_update = compare > 0
+    if has_update:
+        status_text = texts["version_update_available"].format(version=latest_version)
+    elif compare == 0:
+        status_text = texts["version_up_to_date"].format(version=current_version)
+    else:
+        status_text = texts["version_label"].format(version=current_version)
     return {
         "current_version": current_version,
         "latest_version": latest_version,
-        "status_text": texts[status_key].format(version=latest_version),
+        "status_text": status_text,
         "download_url": download_url,
         "has_update": has_update,
     }

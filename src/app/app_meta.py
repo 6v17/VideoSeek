@@ -1,5 +1,5 @@
 APP_META = {
-    "version": "1.0.85",
+    "version": "1.0.86",
     "notice_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/notice.json",
     "about_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/about.json",
     "version_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/version.json",

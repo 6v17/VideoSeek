@@ -13,6 +13,8 @@ def get_local_notice_payload(language):
         "subtitle": texts["notice_subtitle"],
         "body": texts["notice_body"],
         "format": "plain",
+        "notice_version": "",
+        "notice_date": "",
     }
 
 
@@ -66,13 +68,11 @@ def _normalize_notice(data, texts):
             timeout = 4.0
         body = inline_remote_html_images(body, timeout=max(timeout, 6.0))
 
-    meta_parts = [part for part in [version_text, date_text] if part]
-    if meta_parts:
-        subtitle = f"{subtitle}\n{' | '.join(meta_parts)}"
-
     return {
         "title": title,
         "subtitle": subtitle,
         "body": body,
         "format": content_format,
+        "notice_version": version_text,
+        "notice_date": date_text,
     }

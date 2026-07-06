@@ -107,6 +107,55 @@ class StartupMigrationGateTests(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(backup_dir, "meta.json")))
 
 
+    def test_run_startup_migration_fresh_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {
+                "schema_version": 1,
+                "data_root": tmp,
+                "model_dir": os.path.join(tmp, "models"),
+                "prefer_gpu": True,
+            }
+            empty_video = {
+                "migrated": False,
+                "video_id_format": 2,
+                "pending_legacy": False,
+                "migrated_video_ids": 0,
+                "failed_video_ids": 0,
+            }
+            empty_search = {
+                "upgraded": False,
+                "libraries_built": 0,
+                "libraries_cleared": 0,
+                "libraries_skipped": 0,
+                "global_built": False,
+                "lance_profiles_migrated": 0,
+                "lance_videos_imported": 0,
+                "lance_videos_failed": 0,
+                "lance_legacy_removed": 0,
+            }
+
+            def _load_config():
+                return dict(config)
+
+            def _save_config(updated):
+                config.update(updated)
+
+            with (
+                patch.object(migration_runner_module, "load_config", _load_config),
+                patch.object(migration_runner_module, "save_config", _save_config),
+                patch.object(migration_runner_module, "ensure_default_clip_manifest"),
+                patch.object(
+                    migration_runner_module,
+                    "_apply_post_schema_maintenance",
+                    return_value=(empty_video, empty_search),
+                ),
+            ):
+                result = migration_runner_module.run_startup_migration()
+
+            self.assertTrue(result.get("migrated"))
+            self.assertEqual(result.get("migrated_remote_asset_files"), 0)
+            self.assertEqual(result.get("migrated_remote_payloads"), 0)
+
     def test_needs_background_true_when_lance_migration_pending(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_root = os.path.join(tmp, "profile")

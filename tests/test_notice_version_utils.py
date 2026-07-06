@@ -55,7 +55,9 @@ class NoticeServiceTests(unittest.TestCase):
         self.assertEqual(result["title"], "Update")
         self.assertEqual(result["format"], "html")
         self.assertIn("1. one", result["body"])
-        self.assertIn("1.0.2 | 2026-04-01", result["subtitle"])
+        self.assertEqual(result["notice_version"], "1.0.2")
+        self.assertEqual(result["notice_date"], "2026-04-01")
+        self.assertNotIn("1.0.2", result["subtitle"])
 
     def test_normalize_notice_falls_back_to_plain_for_unknown_format(self):
         texts = {"notice_heading": "Heading", "notice_subtitle": "Subtitle", "notice_body": "Body"}
@@ -130,6 +132,18 @@ class VersionServiceTests(unittest.TestCase):
 
         self.assertTrue(result["has_update"])
         self.assertEqual(result["download_url"], "https://example.com/releases")
+
+    @patch("src.services.version_service.fetch_remote_version")
+    @patch("src.services.version_service.get_app_version")
+    def test_get_version_status_when_local_is_ahead_of_remote(self, mock_get_app_version, mock_fetch_remote_version):
+        mock_get_app_version.return_value = "1.0.86"
+        mock_fetch_remote_version.return_value = {"version": "1.0.85"}
+
+        result = version_service.get_version_status("zh")
+
+        self.assertFalse(result["has_update"])
+        self.assertEqual(result["status_text"], "版本 1.0.86")
+        self.assertNotIn("1.0.85", result["status_text"])
 
 
 class UtilsConfigSyncTests(unittest.TestCase):
