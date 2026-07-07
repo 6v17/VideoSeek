@@ -17,8 +17,8 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 
 | 资源 | 做法 |
 |------|------|
-| **模型 + FFmpeg** | 下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入） |
-| **VLC（Windows 源码）** | 下载 [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip)，解压到与 `main.py` 同级的 `vlc_lib/` |
+| **模型 + FFmpeg** | **方式一**：下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入）。**方式二**：从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载所需文件（如 `openai-clip.zip`、`siglip2.zip`、`chinese-clip.zip`、`vision-object-detection-yolo11n.zip`、`ffmpeg.exe`），同样在应用内 **导入并解析** |
+| **VLC（Windows 源码）** | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到与 `main.py` 同级的 `vlc_lib/` |
 | **安装包用户** | 一般已全部内置 |
 
 缺 VLC 时搜索/建库仍可用，预览可能不能播。
@@ -57,4 +57,4 @@ UI 相关测试需已安装 PySide6（`pip install -r requirements.txt` 即可�
 
 - **FFmpeg 路径**：也可放到 `%LOCALAPPDATA%\VideoSeek\bin\` 或系统 `PATH`。
 - **硬件解码（Windows 实验）**：设置 → 模型/GPU → D3D11VA；见 `docs/ai/pipelines.md` Pipeline 1。
-- **`app_meta.py` URL**：主要用于公告/版本/关于与「前往下载」；不会自动 HTTP 拉 ONNX，除非 `model_manifest_url` 指向可解析的 JSON 清单。
+- **`app_meta.py` URL**：主要用于公告/版本/关于与「前往下载」；`model_manifest_url` 当前指向 123 云盘。应用内一键下载依赖该 manifest；若不可用，请改从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 手动下载后导入。

@@ -4,26 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="改用LanceDB向量数据库，移除废弃功能及无用设置">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="修复无数据迁移弹窗报错">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/copy_overrides.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/copy_overrides.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/notice_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/notice_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/version_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/version_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_notice_version_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_notice_version_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_startup_migration_gate.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_startup_migration_gate.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/dialogs/about.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/about.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/dialogs/html_links.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/html_links.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/dialogs/notice.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/notice.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
-  <component name="ChangesViewManager">
+  <component name="ChangesViewManager" show_ignored="true">
     <option name="groupingKeys">
       <option value="directory" />
       <option value="repository" />
@@ -249,8 +238,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.25134.203" />
-        <option value="bundled-python-sdk-245168a56dbd-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.25134.203" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.26222.68" />
+        <option value="bundled-python-sdk-50341a9f1f9c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.26222.68" />
       </set>
     </attachedChunks>
   </component>
@@ -486,14 +475,9 @@
       <workItem from="1783160676471" duration="19012000" />
       <workItem from="1783222075603" duration="4186000" />
       <workItem from="1783335915559" duration="677000" />
-    </task>
-    <task id="LOCAL-00101" summary="给本机接口说明加上了安装目录解析，避免agent找不到说明文档">
-      <option name="closed" value="true" />
-      <created>1780816433967</created>
-      <option name="number" value="00101" />
-      <option name="presentableId" value="LOCAL-00101" />
-      <option name="project" value="LOCAL" />
-      <updated>1780816433967</updated>
+      <workItem from="1783346276698" duration="576000" />
+      <workItem from="1783346886797" duration="34000" />
+      <workItem from="1783398947232" duration="751000" />
     </task>
     <task id="LOCAL-00102" summary="移除无用说明">
       <option name="closed" value="true" />
@@ -879,7 +863,15 @@
       <option name="project" value="LOCAL" />
       <updated>1783171834576</updated>
     </task>
-    <option name="localTasksCounter" value="150" />
+    <task id="LOCAL-00150" summary="修复无数据迁移弹窗报错">
+      <option name="closed" value="true" />
+      <created>1783346355009</created>
+      <option name="number" value="00150" />
+      <option name="presentableId" value="LOCAL-00150" />
+      <option name="project" value="LOCAL" />
+      <updated>1783346355010</updated>
+    </task>
+    <option name="localTasksCounter" value="151" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -909,7 +901,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="修复搜索范围选择功能" />
     <MESSAGE value="更新说明文件" />
     <MESSAGE value="搜索功能优化，局域网搜索功能对齐pc端" />
     <MESSAGE value="优化了agent使用本软件的说明" />
@@ -934,7 +925,8 @@
     <MESSAGE value="修复新用户导入模型显示BUG" />
     <MESSAGE value="移除网络库，新增视频下载功能，优化chunk切分" />
     <MESSAGE value="改用LanceDB向量数据库，移除废弃功能及无用设置" />
-    <option name="LAST_COMMIT_MESSAGE" value="改用LanceDB向量数据库，移除废弃功能及无用设置" />
+    <MESSAGE value="修复无数据迁移弹窗报错" />
+    <option name="LAST_COMMIT_MESSAGE" value="修复无数据迁移弹窗报错" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

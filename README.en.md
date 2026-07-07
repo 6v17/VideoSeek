@@ -73,8 +73,8 @@ Missing runtime assets (import in-app for both installer and source):
 
 | Missing | Fix |
 |---------|-----|
-| Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse** |
-| VLC (Windows source only) | [vlc_lib.zip](https://github.com/6v17/VideoSeek/releases/download/vlc_lib/vlc_lib.zip) at project root |
+| Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse**; or download model zips and `ffmpeg.exe` from [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models), then import |
+| VLC (Windows source only) | Download `vlc_lib.zip` from [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) and extract at project root |
 
 See **`docs/quickstart.md`** for troubleshooting and tests.
 
