@@ -4,8 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="修复无数据迁移弹窗报错">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -477,23 +478,7 @@
       <workItem from="1783335915559" duration="677000" />
       <workItem from="1783346276698" duration="576000" />
       <workItem from="1783346886797" duration="34000" />
-      <workItem from="1783398947232" duration="751000" />
-    </task>
-    <task id="LOCAL-00102" summary="移除无用说明">
-      <option name="closed" value="true" />
-      <created>1780820034526</created>
-      <option name="number" value="00102" />
-      <option name="presentableId" value="LOCAL-00102" />
-      <option name="project" value="LOCAL" />
-      <updated>1780820034526</updated>
-    </task>
-    <task id="LOCAL-00103" summary="修复搜索范围选择功能">
-      <option name="closed" value="true" />
-      <created>1780838448828</created>
-      <option name="number" value="00103" />
-      <option name="presentableId" value="LOCAL-00103" />
-      <option name="project" value="LOCAL" />
-      <updated>1780838448828</updated>
+      <workItem from="1783398947232" duration="1321000" />
     </task>
     <task id="LOCAL-00104" summary="更新说明文件">
       <option name="closed" value="true" />
@@ -871,7 +856,23 @@
       <option name="project" value="LOCAL" />
       <updated>1783346355010</updated>
     </task>
-    <option name="localTasksCounter" value="151" />
+    <task id="LOCAL-00151" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1783400719603</created>
+      <option name="number" value="00151" />
+      <option name="presentableId" value="LOCAL-00151" />
+      <option name="project" value="LOCAL" />
+      <updated>1783400719617</updated>
+    </task>
+    <task id="LOCAL-00152" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1783400775331</created>
+      <option name="number" value="00152" />
+      <option name="presentableId" value="LOCAL-00152" />
+      <option name="project" value="LOCAL" />
+      <updated>1783400775331</updated>
+    </task>
+    <option name="localTasksCounter" value="153" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -916,7 +917,6 @@
     <MESSAGE value="与master分支同步" />
     <MESSAGE value="大文件重构" />
     <MESSAGE value="更新友情链接及LICENSE" />
-    <MESSAGE value="更新说明" />
     <MESSAGE value="更新test" />
     <MESSAGE value="ui微调" />
     <MESSAGE value="视频理解yolo检测改为非必须" />
@@ -926,7 +926,8 @@
     <MESSAGE value="移除网络库，新增视频下载功能，优化chunk切分" />
     <MESSAGE value="改用LanceDB向量数据库，移除废弃功能及无用设置" />
     <MESSAGE value="修复无数据迁移弹窗报错" />
-    <option name="LAST_COMMIT_MESSAGE" value="修复无数据迁移弹窗报错" />
+    <MESSAGE value="更新说明" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新说明" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
