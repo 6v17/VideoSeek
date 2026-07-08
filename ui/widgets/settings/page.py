@@ -157,22 +157,19 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_thumb_width.setRange(80, 480)
         self.input_thumb_height = NoWheelSpinBox()
         self.input_thumb_height.setRange(45, 320)
-        self.input_remote_max_frames = NoWheelSpinBox()
-        self.input_remote_max_frames.setRange(200, 20000)
         self.input_embedding_batch_size = NoWheelSpinBox()
         self.input_embedding_batch_size.setRange(1, 64)
+        self.input_chunk_policy = NoWheelComboBox()
         self.input_similarity_threshold = NoWheelDoubleSpinBox()
         self.input_similarity_threshold.setRange(0.1, 1.0)
         self.input_similarity_threshold.setSingleStep(0.01)
         self.input_similarity_threshold.setDecimals(2)
-        self.input_max_chunk_duration = NoWheelDoubleSpinBox()
-        self.input_max_chunk_duration.setRange(1.0, 60.0)
-        self.input_max_chunk_duration.setSingleStep(0.5)
-        self.input_max_chunk_duration.setDecimals(1)
         self.input_min_chunk_size = NoWheelSpinBox()
         self.input_min_chunk_size.setRange(1, 50)
-        self.input_chunk_similarity_mode = NoWheelComboBox()
-        self.input_chunk_segmentation_strategy = NoWheelComboBox()
+        self.input_min_chunk_duration = NoWheelDoubleSpinBox()
+        self.input_min_chunk_duration.setRange(0.0, 30.0)
+        self.input_min_chunk_duration.setSingleStep(0.5)
+        self.input_min_chunk_duration.setDecimals(1)
         self.input_prefer_gpu = NoWheelComboBox()
         self.input_experimental_hw_decode = NoWheelComboBox()
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
@@ -218,7 +215,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.section_precise_search_title = QLabel()
         self.hint_precise_search_section = QLabel()
         self.section_preview_title = QLabel()
-        self.section_index_title = QLabel()
+        self.section_indexing_title = QLabel()
         self.section_model_gpu_title = QLabel()
         self.section_paths_title = QLabel()
         self.label_fps = ClickableLabel()
@@ -235,13 +232,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_thumb_width = ClickableLabel()
         self.label_thumb_height = ClickableLabel()
         self.label_export_video_silent = ClickableLabel()
-        self.label_remote_max_frames = ClickableLabel()
         self.label_embedding_batch_size = ClickableLabel()
+        self.label_chunk_policy = ClickableLabel()
         self.label_similarity_threshold = ClickableLabel()
-        self.label_max_chunk_duration = ClickableLabel()
         self.label_min_chunk_size = ClickableLabel()
-        self.label_chunk_similarity_mode = ClickableLabel()
-        self.label_chunk_segmentation_strategy = ClickableLabel()
+        self.label_min_chunk_duration = ClickableLabel()
         self.label_prefer_gpu = ClickableLabel()
         self.label_experimental_hw_decode = ClickableLabel()
         self.label_gpu_probe_unknown_keep_gpu = ClickableLabel()
@@ -271,13 +266,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_thumb_width = QLabel()
         self.hint_thumb_height = QLabel()
         self.hint_export_video_silent = QLabel()
-        self.hint_remote_max_frames = QLabel()
         self.hint_embedding_batch_size = QLabel()
+        self.hint_indexing_note = QLabel()
+        self.hint_chunk_policy = QLabel()
+        self.btn_toggle_chunk_advanced = QPushButton()
+        self.btn_toggle_chunk_advanced.setObjectName("LinkUtilityButton")
+        self.btn_toggle_chunk_advanced.setFlat(True)
+        self.btn_toggle_chunk_advanced.setCursor(Qt.PointingHandCursor)
+        self.input_chunk_policy_bundle = QWidget()
+        self.chunk_advanced_body = QFrame()
+        self.chunk_advanced_body.setObjectName("SubPanelCard")
+        self._chunk_advanced_expanded = False
         self.hint_similarity_threshold = QLabel()
-        self.hint_max_chunk_duration = QLabel()
         self.hint_min_chunk_size = QLabel()
-        self.hint_chunk_similarity_mode = QLabel()
-        self.hint_chunk_segmentation_strategy = QLabel()
+        self.hint_min_chunk_duration = QLabel()
         self.hint_prefer_gpu = QLabel()
         self.hint_experimental_hw_decode = QLabel()
         self.hint_gpu_probe_unknown_keep_gpu = QLabel()
@@ -294,6 +296,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.sampling_rule_rows = []
         self._setting_detail_bindings = []
         self._active_setting_label = None
+        self._chunk_policy_syncing = False
         self.detail_popup = SettingDetailPopup(is_dark=True)
         QApplication.instance().installEventFilter(self.detail_popup)
 
@@ -335,16 +338,14 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_preview_seconds, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_remote_max_frames, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_embedding_batch_size, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_similarity_threshold, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_max_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
-        self._configure_setting_input(self.input_chunk_similarity_mode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(
-            self.input_chunk_segmentation_strategy,
+            self.input_chunk_policy,
             width=COMPONENT_SIZES["settings_input_width"] + 36,
         )
+        self._configure_setting_input(self.input_similarity_threshold, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_min_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_experimental_hw_decode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
@@ -427,6 +428,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         sampling_bundle_layout.addWidget(self.sampling_rules_summary, 1)
         self.input_sampling_fps_rules.hide()
 
+        self.input_chunk_policy_bundle.setObjectName("ChunkPolicyBundle")
+        chunk_policy_bundle_layout = QHBoxLayout(self.input_chunk_policy_bundle)
+        chunk_policy_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        chunk_policy_bundle_layout.setSpacing(10)
+        chunk_policy_bundle_layout.addWidget(self.input_chunk_policy, 1)
+        chunk_policy_bundle_layout.addWidget(self.btn_toggle_chunk_advanced, 0, Qt.AlignRight | Qt.AlignVCenter)
+
         self.section_search_card, self.section_search_form = self._create_settings_section(self.section_search_title)
         self.section_fast_image_search_card, self.section_fast_image_search_form = self._create_settings_section(
             self.section_fast_image_search_title
@@ -435,7 +443,14 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.section_precise_search_title
         )
         self.section_preview_card, self.section_preview_form = self._create_settings_section(self.section_preview_title)
-        self.section_index_card, self.section_index_form = self._create_settings_section(self.section_index_title)
+        self.section_indexing_card, self.section_indexing_form = self._create_settings_section(self.section_indexing_title)
+        self.chunk_advanced_form = QGridLayout(self.chunk_advanced_body)
+        self.chunk_advanced_form.setContentsMargins(12, 8, 12, 10)
+        self.chunk_advanced_form.setHorizontalSpacing(16)
+        self.chunk_advanced_form.setVerticalSpacing(0)
+        self.chunk_advanced_form.setColumnMinimumWidth(0, 260)
+        self.chunk_advanced_form.setColumnStretch(0, 0)
+        self.chunk_advanced_form.setColumnStretch(1, 1)
         self.section_model_gpu_card, self.section_model_gpu_form = self._create_settings_section(self.section_model_gpu_title)
         self.section_paths_card, self.section_paths_form = self._create_settings_section(self.section_paths_title)
         self.section_general_form_host = QWidget()
@@ -449,18 +464,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(
             self.section_search_form,
             0,
-            self.label_fps,
-            self.input_sampling_bundle,
-            self.hint_fps,
-            show_help=False,
-        )
-        self._add_setting_row(self.section_search_form, 1, self.label_top_k, self.input_top_k, self.hint_top_k)
-        self._add_setting_row(
-            self.section_search_form,
-            2,
-            self.label_remote_max_frames,
-            self.input_remote_max_frames,
-            self.hint_remote_max_frames,
+            self.label_top_k,
+            self.input_top_k,
+            self.hint_top_k,
         )
         self._add_section_note(self.section_fast_image_search_form, 0, self.hint_fast_image_search_section)
         self._add_setting_row(
@@ -532,17 +538,54 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.hint_export_video_silent,
         )
 
-        self._add_setting_row(self.section_index_form, 0, self.label_embedding_batch_size, self.input_embedding_batch_size, self.hint_embedding_batch_size)
-        self._add_setting_row(self.section_index_form, 1, self.label_similarity_threshold, self.input_similarity_threshold, self.hint_similarity_threshold)
-        self._add_setting_row(self.section_index_form, 2, self.label_max_chunk_duration, self.input_max_chunk_duration, self.hint_max_chunk_duration)
-        self._add_setting_row(self.section_index_form, 3, self.label_min_chunk_size, self.input_min_chunk_size, self.hint_min_chunk_size)
-        self._add_setting_row(self.section_index_form, 4, self.label_chunk_similarity_mode, self.input_chunk_similarity_mode, self.hint_chunk_similarity_mode)
         self._add_setting_row(
-            self.section_index_form,
-            5,
-            self.label_chunk_segmentation_strategy,
-            self.input_chunk_segmentation_strategy,
-            self.hint_chunk_segmentation_strategy,
+            self.section_indexing_form,
+            0,
+            self.label_fps,
+            self.input_sampling_bundle,
+            self.hint_fps,
+            show_help=False,
+        )
+        self._add_setting_row(
+            self.section_indexing_form,
+            1,
+            self.label_embedding_batch_size,
+            self.input_embedding_batch_size,
+            self.hint_embedding_batch_size,
+        )
+        self._add_section_note(self.section_indexing_form, 2, self.hint_indexing_note)
+        self._configure_setting_input(
+            self.input_chunk_policy,
+            width=COMPONENT_SIZES["settings_input_width"] + 36,
+        )
+        self._add_setting_row(
+            self.section_indexing_form,
+            3,
+            self.label_chunk_policy,
+            self.input_chunk_policy_bundle,
+            self.hint_chunk_policy,
+        )
+        self.section_indexing_form.addWidget(self.chunk_advanced_body, 4, 0, 1, 2)
+        self._add_setting_row(
+            self.chunk_advanced_form,
+            0,
+            self.label_similarity_threshold,
+            self.input_similarity_threshold,
+            self.hint_similarity_threshold,
+        )
+        self._add_setting_row(
+            self.chunk_advanced_form,
+            1,
+            self.label_min_chunk_size,
+            self.input_min_chunk_size,
+            self.hint_min_chunk_size,
+        )
+        self._add_setting_row(
+            self.chunk_advanced_form,
+            2,
+            self.label_min_chunk_duration,
+            self.input_min_chunk_duration,
+            self.hint_min_chunk_duration,
         )
         self._add_setting_row(
             self.section_general_form,
@@ -630,12 +673,19 @@ class SettingsPage(QWidget, SettingsFormMixin):
         search_preview_layout.addWidget(self.section_preview_card)
         self.card_search_preview.content_layout.addWidget(search_preview_host)
 
+        self.card_indexing = VSCard()
+        indexing_host = QWidget()
+        indexing_layout = QVBoxLayout(indexing_host)
+        indexing_layout.setContentsMargins(0, 0, 0, 0)
+        indexing_layout.setSpacing(12)
+        indexing_layout.addWidget(self.section_indexing_card)
+        self.card_indexing.content_layout.addWidget(indexing_host)
+
         self.card_model_gpu = VSCard()
         model_gpu_host = QWidget()
         model_gpu_layout = QVBoxLayout(model_gpu_host)
         model_gpu_layout.setContentsMargins(0, 0, 0, 0)
         model_gpu_layout.setSpacing(12)
-        model_gpu_layout.addWidget(self.section_index_card)
         model_gpu_layout.addWidget(self.section_model_gpu_card)
         self.card_model_gpu.content_layout.addWidget(model_gpu_host)
 
@@ -657,6 +707,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.card_search_telemetry,
             self.card_general,
             self.card_search_preview,
+            self.card_indexing,
             self.card_model_gpu,
             self.card_paths,
         ):
@@ -705,6 +756,8 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._update_sampling_mode_visibility()
         self._update_frame_neighbor_rerank_visibility()
         self._update_image_pixel_probe_mode_visibility()
+        self.btn_toggle_chunk_advanced.clicked.connect(self._toggle_chunk_advanced_panel)
+        self.set_chunk_advanced_expanded(False)
 
     def _handle_sampling_mode_changed(self, *_args):
         self._update_sampling_mode_visibility()
@@ -803,9 +856,58 @@ class SettingsPage(QWidget, SettingsFormMixin):
                 parts.append(item)
         self.sampling_rules_summary.setText(" | ".join(parts[:3]) + (" ..." if len(parts) > 3 else ""))
 
+    def is_chunk_policy_syncing(self) -> bool:
+        return bool(self._chunk_policy_syncing)
+
+    def set_chunk_advanced_expanded(self, expanded: bool) -> None:
+        self._chunk_advanced_expanded = bool(expanded)
+        self._refresh_chunk_advanced_visibility()
+
+    def sync_chunk_advanced_visibility(self) -> None:
+        if self.get_chunk_policy_id() == "custom":
+            self.set_chunk_advanced_expanded(True)
+        else:
+            self._refresh_chunk_advanced_visibility()
+
+    def _toggle_chunk_advanced_panel(self) -> None:
+        self.set_chunk_advanced_expanded(not self._chunk_advanced_expanded)
+
+    def _refresh_chunk_advanced_visibility(self) -> None:
+        visible = self._chunk_advanced_expanded
+        self.chunk_advanced_body.setVisible(visible)
+        texts = getattr(self, "_current_texts", {}) or {}
+        if visible:
+            self.btn_toggle_chunk_advanced.setText(
+                texts.get("setting_chunk_advanced_collapse", "收起")
+            )
+        else:
+            self.btn_toggle_chunk_advanced.setText(
+                texts.get("setting_chunk_advanced_expand", "微调")
+            )
+
+    def get_chunk_policy_id(self) -> str:
+        return str(self.input_chunk_policy.currentData() or "balanced")
+
+    def set_chunk_policy_id(self, policy_id: str) -> None:
+        normalized = str(policy_id or "balanced")
+        index = self.input_chunk_policy.findData(normalized)
+        self.input_chunk_policy.setCurrentIndex(0 if index < 0 else index)
+
+    def apply_chunk_policy_values(self, values: dict) -> None:
+        self._chunk_policy_syncing = True
+        try:
+            if "similarity_threshold" in values:
+                self.input_similarity_threshold.setValue(float(values["similarity_threshold"]))
+            if "min_chunk_size" in values:
+                self.input_min_chunk_size.setValue(int(values["min_chunk_size"]))
+            if "min_chunk_duration" in values:
+                self.input_min_chunk_duration.setValue(float(values["min_chunk_duration"]))
+        finally:
+            self._chunk_policy_syncing = False
+
     def configure_form_labels(self, texts):
         self._current_texts = texts
-        self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索与采样", "Search & Sampling"))
+        self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索", "Search"))
         self.section_fast_image_search_title.setText(
             _fallback_text(texts, "settings_section_fast_image_search", "快速图搜", "Fast Image Search")
         )
@@ -825,7 +927,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
             )
         )
         self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview & Thumbnails"))
-        self.section_index_title.setText(_fallback_text(texts, "settings_section_indexing", "索引与分段", "Indexing & Chunking"))
+        self.section_indexing_title.setText(
+            _fallback_text(texts, "settings_section_indexing", "视频索引", "Video Indexing")
+        )
         self.section_model_gpu_title.setText(
             _fallback_text(texts, "settings_section_model_gpu", "模型与 GPU", "Model & GPU")
         )
@@ -870,13 +974,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_thumb_width.setText(texts["setting_thumb_width"])
         self.label_thumb_height.setText(texts["setting_thumb_height"])
         self.label_export_video_silent.setText(texts["setting_export_video_silent"])
-        self.label_remote_max_frames.setText(texts["setting_remote_max_frames"])
         self.label_embedding_batch_size.setText(texts["setting_embedding_batch_size"])
+        self.label_chunk_policy.setText(texts["setting_chunk_policy"])
         self.label_similarity_threshold.setText(texts["setting_similarity_threshold"])
-        self.label_max_chunk_duration.setText(texts["setting_max_chunk_duration"])
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
-        self.label_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode"])
-        self.label_chunk_segmentation_strategy.setText(texts["setting_chunk_segmentation_strategy"])
+        self.label_min_chunk_duration.setText(texts["setting_min_chunk_duration"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
         self.label_experimental_hw_decode.setText(texts["setting_experimental_hw_decode"])
         self.label_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu"])
@@ -896,28 +998,16 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_active_model_profile.setText(
             _fallback_text(texts, "setting_active_model_profile", "当前模型", "Active Model")
         )
-        current_chunk_similarity_mode = self.input_chunk_similarity_mode.currentData()
-        self.input_chunk_similarity_mode.blockSignals(True)
-        self.input_chunk_similarity_mode.clear()
-        self.input_chunk_similarity_mode.addItem(texts["setting_chunk_similarity_mode_chunk"], "chunk")
-        self.input_chunk_similarity_mode.addItem(texts["setting_chunk_similarity_mode_frame"], "frame")
-        restore_index = self.input_chunk_similarity_mode.findData(current_chunk_similarity_mode)
-        self.input_chunk_similarity_mode.setCurrentIndex(0 if restore_index < 0 else restore_index)
-        self.input_chunk_similarity_mode.blockSignals(False)
-        current_chunk_segmentation_strategy = self.input_chunk_segmentation_strategy.currentData()
-        self.input_chunk_segmentation_strategy.blockSignals(True)
-        self.input_chunk_segmentation_strategy.clear()
-        self.input_chunk_segmentation_strategy.addItem(
-            texts["setting_chunk_segmentation_strategy_legacy"],
-            "legacy",
-        )
-        self.input_chunk_segmentation_strategy.addItem(
-            texts["setting_chunk_segmentation_strategy_delta_ema"],
-            "delta_ema",
-        )
-        restore_index = self.input_chunk_segmentation_strategy.findData(current_chunk_segmentation_strategy)
-        self.input_chunk_segmentation_strategy.setCurrentIndex(0 if restore_index < 0 else restore_index)
-        self.input_chunk_segmentation_strategy.blockSignals(False)
+        current_chunk_policy = self.input_chunk_policy.currentData()
+        self.input_chunk_policy.blockSignals(True)
+        self.input_chunk_policy.clear()
+        self.input_chunk_policy.addItem(texts["setting_chunk_policy_balanced"], "balanced")
+        self.input_chunk_policy.addItem(texts["setting_chunk_policy_sensitive"], "sensitive")
+        self.input_chunk_policy.addItem(texts["setting_chunk_policy_stable"], "stable")
+        self.input_chunk_policy.addItem(texts["setting_chunk_policy_custom"], "custom")
+        restore_index = self.input_chunk_policy.findData(current_chunk_policy)
+        self.input_chunk_policy.setCurrentIndex(0 if restore_index < 0 else restore_index)
+        self.input_chunk_policy.blockSignals(False)
         current_prefer_gpu = self.input_prefer_gpu.currentData()
         self.input_prefer_gpu.blockSignals(True)
         self.input_prefer_gpu.clear()
@@ -1012,13 +1102,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_thumb_width.setText(texts["setting_thumb_width_hint"])
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
         self.hint_export_video_silent.setText(texts["setting_export_video_silent_hint"])
-        self.hint_remote_max_frames.setText(texts["setting_remote_max_frames_hint"])
         self.hint_embedding_batch_size.setText(texts["setting_embedding_batch_size_hint"])
+        self.hint_indexing_note.setText(texts["setting_indexing_note"])
+        self.hint_chunk_policy.setText(texts["setting_chunk_policy_hint"])
+        self._refresh_chunk_advanced_visibility()
         self.hint_similarity_threshold.setText(texts["setting_similarity_threshold_hint"])
-        self.hint_max_chunk_duration.setText(texts["setting_max_chunk_duration_hint"])
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
-        self.hint_chunk_similarity_mode.setText(texts["setting_chunk_similarity_mode_hint"])
-        self.hint_chunk_segmentation_strategy.setText(texts["setting_chunk_segmentation_strategy_hint"])
+        self.hint_min_chunk_duration.setText(texts["setting_min_chunk_duration_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
         self.hint_experimental_hw_decode.setText(texts["setting_experimental_hw_decode_hint"])
         self.hint_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu_hint"])
@@ -1065,13 +1155,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_thumb_width,
             self.label_thumb_height,
             self.label_export_video_silent,
-            self.label_remote_max_frames,
             self.label_embedding_batch_size,
+            self.label_chunk_policy,
             self.label_similarity_threshold,
-            self.label_max_chunk_duration,
             self.label_min_chunk_size,
-            self.label_chunk_similarity_mode,
-            self.label_chunk_segmentation_strategy,
+            self.label_min_chunk_duration,
             self.label_prefer_gpu,
             self.label_experimental_hw_decode,
             self.label_gpu_probe_unknown_keep_gpu,

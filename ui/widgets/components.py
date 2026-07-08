@@ -1,6 +1,7 @@
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
 from ui.widgets.chunk_timeline import ChunkTimelineWidget
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.preview_panel import PreviewPanel
-from ui.widgets.result_table import LinkResultTable, ResultTable
+from ui.widgets.result_table import ResultTable
 from ui.widgets.result_view import ResultView
 from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
@@ -44,6 +45,9 @@ from ui.widgets.scaffold import (
 )
 from ui.widgets.search_panel import SearchPanel
 from ui.widgets.styles import repolish_widget
+from ui.widgets.video_download_page import VideoDownloadPage
+
+LinkSearchPage = VideoDownloadPage
 
 
 def _fallback_text(texts, key, zh_text, en_text):
@@ -226,6 +230,28 @@ class SettingDetailPopup(QFrame):
         super().closeEvent(event)
 
 
+def _apply_sidebar_icon_font(button: QToolButton, *, point_size: int = 14) -> None:
+    font = QFont(button.font())
+    font.setPointSize(point_size)
+    font.setBold(True)
+    button.setFont(font)
+
+
+def _apply_sidebar_footer_icon_size(button: QToolButton) -> None:
+    height = COMPONENT_SIZES["sidebar_action_height"]
+    button.setFixedHeight(height)
+    button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
+def _make_sidebar_icon_button() -> QToolButton:
+    button = QToolButton()
+    button.setObjectName("SidebarIconButton")
+    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+    button.setIconSize(QSize(20, 20))
+    _apply_sidebar_footer_icon_size(button)
+    return button
+
+
 class NavigationSidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -285,13 +311,48 @@ class NavigationSidebar(QWidget):
         self.btn_about.setObjectName("SidebarFooterButton")
         self.btn_language = QPushButton("EN")
         self.btn_language.setObjectName("SidebarFooterGhost")
-        self.btn_theme = QPushButton("Dark")
-        self.btn_theme.setObjectName("SidebarFooterButton")
 
-        for button in [self.btn_notice, self.btn_about, self.btn_language, self.btn_theme]:
+        self.footer_icon_row = QWidget()
+        footer_icon_layout = QHBoxLayout(self.footer_icon_row)
+        footer_icon_layout.setContentsMargins(0, 0, 0, 0)
+        footer_icon_layout.setSpacing(6)
+
+        self.btn_theme = QToolButton()
+        self.btn_theme.setObjectName("SidebarIconButton")
+        self.btn_theme.setText("☀")
+        self.btn_theme.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        _apply_sidebar_footer_icon_size(self.btn_theme)
+        _apply_sidebar_icon_font(self.btn_theme)
+
+        self.btn_donate = QToolButton()
+        self.btn_donate.setObjectName("SidebarDonateButton")
+        self.btn_donate.setText("❤")
+        self.btn_donate.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        _apply_sidebar_footer_icon_size(self.btn_donate)
+        _apply_sidebar_icon_font(self.btn_donate)
+
+        self.btn_github = _make_sidebar_icon_button()
+        self.btn_bilibili = _make_sidebar_icon_button()
+        self.btn_qq = _make_sidebar_icon_button()
+
+        for button in (
+            self.btn_theme,
+            self.btn_donate,
+            self.btn_github,
+            self.btn_bilibili,
+            self.btn_qq,
+        ):
+            footer_icon_layout.addWidget(button, 1)
+
+        for button in [self.btn_notice, self.btn_about, self.btn_language]:
             button.setCursor(Qt.PointingHandCursor)
             button.setFixedHeight(COMPONENT_SIZES["sidebar_action_height"])
             layout.addWidget(button)
+
+        for button in [self.btn_theme, self.btn_donate, self.btn_github, self.btn_bilibili, self.btn_qq]:
+            button.setCursor(Qt.PointingHandCursor)
+
+        layout.addWidget(self.footer_icon_row)
 
     def _build_nav_button(self, text, checked=False):
         button = QPushButton(text)
@@ -346,13 +407,11 @@ class SearchPage(QWidget):
         self.text_search = self.search_panel.text_search
         self.search_mode = self.search_panel.search_mode
         self.search_mode_label = self.search_panel.search_mode_label
-        self.search_precision_toggle = self.search_panel.search_precision_toggle
-        self.search_precision_label = self.search_panel.search_precision_label
-        self.search_precision_cluster = self.search_panel.search_precision_cluster
-        self.search_video_discovery_toggle = self.search_panel.search_video_discovery_toggle
-        self.search_video_discovery_label = self.search_panel.search_video_discovery_label
-        self.search_video_discovery_cluster = self.search_panel.search_video_discovery_cluster
+        self.image_search_mode = self.search_panel.image_search_mode
+        self.image_search_mode_label = self.search_panel.image_search_mode_label
+        self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
+        self.search_granularity_cluster = self.search_panel.text_granularity_cluster
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
         self.btn_mobile_qr = self.search_panel.btn_mobile_qr
@@ -364,7 +423,7 @@ class SearchPage(QWidget):
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row
-        self.search_image_options_group = self.search_panel.search_image_options_group
+        self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
 
@@ -448,8 +507,6 @@ class LibraryPage(QWidget):
         self.btn_add_lib.setObjectName("UpdateButton")
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
-        self.btn_rebuild_index_vectors = QPushButton()
-        self.btn_rebuild_index_vectors.setObjectName("GhostButton")
         self.btn_stop_index = QPushButton()
         self.btn_stop_index.setObjectName("DangerGhostButton")
         self.btn_stop_index.setEnabled(False)
@@ -469,7 +526,6 @@ class LibraryPage(QWidget):
         self.btn_debug_system_oom.setVisible(False)
         toolbar.addWidget(self.btn_add_lib)
         toolbar.addWidget(self.btn_sync_db)
-        toolbar.addWidget(self.btn_rebuild_index_vectors)
         toolbar.addSpacing(4)
         toolbar.addWidget(_toolbar_divider())
         toolbar.addSpacing(4)
@@ -540,6 +596,22 @@ def _understanding_field_label(text=""):
     label.setObjectName("CardHint")
     label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     label.setFixedWidth(COMPONENT_SIZES.get("understanding_form_label_width", 96))
+    return label
+
+
+def _understanding_value_hint(text=""):
+    label = QLabel(text)
+    label.setObjectName("CardHint")
+    label.setWordWrap(True)
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+    return label
+
+
+def _understanding_picker_label(text=""):
+    label = QLabel(text)
+    label.setObjectName("CardHint")
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     return label
 
 
@@ -635,11 +707,9 @@ class UnderstandingEvidencePage(QWidget):
         config_form.addWidget(self.label_vlm_provider_preset, 2, 0)
         config_form.addWidget(self.input_vlm_provider_preset, 2, 1)
 
-        self.hint_vlm_preset_summary = QLabel()
-        self.hint_vlm_preset_summary.setObjectName("CardHint")
-        self.hint_vlm_preset_summary.setWordWrap(True)
+        self.hint_vlm_preset_summary = _understanding_value_hint()
         self.hint_vlm_preset_summary.hide()
-        config_form.addWidget(self.hint_vlm_preset_summary, 3, 0, 1, 2)
+        config_form.addWidget(self.hint_vlm_preset_summary, 3, 1)
 
         self.label_remote_vlm_api_key = _understanding_field_label()
         self.input_remote_vlm_api_key = QLineEdit()
@@ -732,21 +802,25 @@ class UnderstandingEvidencePage(QWidget):
 
         picker_row = QHBoxLayout()
         picker_row.setSpacing(10)
-        self.scope_label = _understanding_field_label()
+        picker_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.scope_label = _understanding_picker_label()
         self.scope_combo = QComboBox()
         self.scope_combo.setObjectName("SearchModeSelect")
         self.scope_combo.setMinimumWidth(180)
         self.scope_combo.setMaximumWidth(280)
-        self.video_label = _understanding_field_label()
+        self.scope_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.video_label = _understanding_picker_label()
         self.video_combo = QComboBox()
         self.video_combo.setObjectName("SearchModeSelect")
         self.video_combo.setMinimumWidth(240)
-        self.video_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.video_combo.setMaximumWidth(520)
+        self.video_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         picker_row.addWidget(self.scope_label, 0)
         picker_row.addWidget(self.scope_combo, 0)
         picker_row.addSpacing(8)
         picker_row.addWidget(self.video_label, 0)
-        picker_row.addWidget(self.video_combo, 1)
+        picker_row.addWidget(self.video_combo, 0)
+        picker_row.addStretch(1)
         workspace_layout.addLayout(picker_row)
 
         timeline_header = QHBoxLayout()
@@ -891,166 +965,4 @@ class UnderstandingEvidencePage(QWidget):
 
     def expand_config_panel(self) -> None:
         self._set_config_expanded(True)
-
-
-class LinkSearchPage(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        self.scaffold = PageScaffold()
-        root.addWidget(self.scaffold)
-        self.header = self.scaffold.header
-        page_body = self.scaffold.content_layout
-
-        self.notice_card = VSCard(variant="notice", margins=(16, 12, 16, 12), spacing=0)
-        notice_layout = self.notice_card.content_layout
-        self.notice_body = QLabel()
-        self.notice_body.setObjectName("NoticeBody")
-        self.notice_body.setWordWrap(True)
-        notice_layout.addWidget(self.notice_body)
-        page_body.addWidget(self.notice_card)
-
-        self.control_card = VSCard(spacing=12)
-        control_layout = self.control_card.content_layout
-
-        self.input_link = QLineEdit()
-        self.input_link.setObjectName("SearchInput")
-        self.query_image_label = QLabel()
-        self.query_image_label.setObjectName("ImageDropZone")
-        self.query_image_label.setAlignment(Qt.AlignCenter)
-        self.query_image_label.setWordWrap(True)
-        self.query_image_label.setFixedHeight(COMPONENT_SIZES.get("link_query_preview_min_height", 210))
-        self.query_image_label.setMinimumWidth(0)
-        self.query_image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-        self.mode_label = QLabel()
-        self.mode_label.setObjectName("CardHint")
-        self.mode_combo = QComboBox()
-        self.mode_combo.setObjectName("SearchModeSelect")
-        self.mode_combo.setFixedWidth(COMPONENT_SIZES["settings_input_width"] + 72)
-        self.build_links_input = QTextEdit()
-        self.build_links_input.setObjectName("SearchInput")
-        self.build_links_input.setMinimumHeight(140)
-        mode_row.addWidget(self.mode_label)
-        mode_row.addWidget(self.mode_combo)
-        mode_row.addStretch()
-
-        self.btn_build = QPushButton()
-        self.btn_build.setObjectName("PrimaryButton")
-        self.btn_build.setMinimumWidth(126)
-        self.btn_run = QPushButton()
-        self.btn_run.setObjectName("SearchButton")
-        self.btn_run.setMinimumWidth(156)
-        self.btn_clear = QPushButton()
-        self.btn_clear.setObjectName("DangerGhostButton")
-        self.btn_clear.setMinimumWidth(98)
-        self.btn_import = QPushButton()
-        self.btn_import.setObjectName("NeutralToolButton")
-        self.btn_import.setMinimumWidth(126)
-        self.btn_export = QPushButton()
-        self.btn_export.setObjectName("NeutralToolButton")
-        self.btn_export.setMinimumWidth(126)
-        self.btn_link_details = QPushButton()
-        self.btn_link_details.setObjectName("AccentGhostButton")
-        self.btn_link_details.setMinimumWidth(126)
-        self.btn_open_cache = QPushButton()
-        self.btn_open_cache.setObjectName("NeutralToolButton")
-        self.btn_open_cache.setMinimumWidth(126)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFixedHeight(COMPONENT_SIZES["progress_bar_height"])
-        self.progress_bar.setVisible(False)
-
-        self.build_title = QLabel()
-        self.build_title.setObjectName("CardTitle")
-        self.build_hint = QLabel()
-        self.build_hint.setObjectName("CardHint")
-        self.build_hint.setWordWrap(True)
-        self.search_title = QLabel()
-        self.search_title.setObjectName("CardTitle")
-        self.search_hint = QLabel()
-        self.search_hint.setObjectName("CardHint")
-        self.search_hint.setWordWrap(True)
-        self.lbl_build_status = QLabel()
-        self.lbl_build_status.setObjectName("StatusLabel")
-        self.lbl_build_status.setWordWrap(True)
-        self.lbl_search_status = QLabel()
-        self.lbl_search_status.setObjectName("StatusLabel")
-        self.lbl_search_status.setWordWrap(True)
-
-        build_utility_row = QGridLayout()
-        build_utility_row.setHorizontalSpacing(8)
-        build_utility_row.setVerticalSpacing(8)
-        build_utility_row.addWidget(self.btn_build, 0, 0)
-        build_utility_row.addWidget(self.btn_import, 0, 1)
-        build_utility_row.addWidget(self.btn_export, 0, 2)
-        build_utility_row.addWidget(self.btn_link_details, 1, 0)
-        build_utility_row.addWidget(self.btn_open_cache, 1, 1)
-        build_utility_row.setColumnStretch(0, 1)
-        build_utility_row.setColumnStretch(1, 1)
-        build_utility_row.setColumnStretch(2, 1)
-
-        build_status_row = QHBoxLayout()
-        build_status_row.setSpacing(12)
-        build_status_row.addWidget(self.progress_bar, 2)
-        build_status_row.addWidget(self.lbl_build_status, 3)
-
-        build_panel = QWidget()
-        build_layout = QVBoxLayout(build_panel)
-        build_layout.setContentsMargins(0, 0, 0, 0)
-        build_layout.setSpacing(10)
-        build_layout.addWidget(self.build_title)
-        build_layout.addWidget(self.build_hint)
-        build_layout.addWidget(self.build_links_input)
-        build_layout.addLayout(mode_row)
-        build_layout.addLayout(build_utility_row)
-        build_layout.addLayout(build_status_row)
-
-        search_action_row = QHBoxLayout()
-        search_action_row.setSpacing(8)
-        search_action_row.addWidget(self.btn_run, 1)
-        search_action_row.addWidget(self.btn_clear)
-
-        search_panel = QWidget()
-        search_layout = QVBoxLayout(search_panel)
-        search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.setSpacing(10)
-        search_layout.addWidget(self.search_title)
-        search_layout.addWidget(self.search_hint)
-        search_layout.addWidget(self.input_link)
-        search_layout.addWidget(self.query_image_label)
-        search_layout.addLayout(search_action_row)
-        search_layout.addWidget(self.lbl_search_status)
-
-        section_row = QHBoxLayout()
-        section_row.setSpacing(16)
-        section_row.addWidget(build_panel, 1)
-        section_row.addWidget(search_panel, 1)
-
-        control_layout.addLayout(section_row)
-        self.controls_title = self.build_title
-        self.controls_hint = self.build_hint
-        self.lbl_status = self.lbl_search_status
-        page_body.addWidget(self.control_card)
-
-        self.results_card = VSCard()
-        results_layout = self.results_card.content_layout
-        self.results_title = QLabel()
-        self.results_title.setObjectName("CardTitle")
-        self.result_view = ResultView(
-            table=LinkResultTable(),
-            min_table_height=COMPONENT_SIZES["result_table_min_height"],
-        )
-        self.result_table = self.result_view.table
-        results_layout.addWidget(self.results_title)
-        results_layout.addWidget(self.result_view)
-        page_body.addWidget(self.results_card, 1)
-
 

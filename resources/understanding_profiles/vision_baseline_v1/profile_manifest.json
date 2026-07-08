@@ -1,0 +1,31 @@
+{
+  "kind": "understanding_profile",
+  "manifest_version": 1,
+  "id": "vision_baseline_v1",
+  "display_name": "视觉基础版",
+  "package_version": "1.0.0",
+  "install_relpath": "profiles/vision_baseline_v1",
+  "requires": {
+    "components": [
+      "vision/image_caption/qwen3-vl-remote"
+    ],
+    "optional_components": [
+      "vision/object_detection/yolo11n"
+    ]
+  },
+  "pipeline": [
+    {
+      "step": "object_detection",
+      "component": "vision/object_detection/yolo11n",
+      "enabled": true
+    },
+    {
+      "step": "image_caption",
+      "component": "vision/image_caption/qwen3-vl-remote",
+      "enabled": true
+    }
+  ],
+  "defaults": {
+    "keyframe_strategy": "midpoint"
+  }
+}

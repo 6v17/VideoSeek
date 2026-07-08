@@ -171,23 +171,11 @@ def get_global_model_asset_paths(config=None):
     }
 
 
-def get_remote_model_asset_paths(config=None):
-    model_dirs = get_local_model_asset_dirs(config=config)
-    remote_dir = os.path.join(model_dirs["base_dir"], "remote")
-    return {
-        "remote_dir": remote_dir,
-        "remote_index_file": os.path.join(remote_dir, "remote_index.faiss"),
-        "remote_vector_file": os.path.join(remote_dir, "remote_vectors.npy"),
-    }
-
-
 def get_model_profile_storage_paths(config=None):
     model_dirs = get_local_model_asset_dirs(config=config)
     global_paths = get_global_model_asset_paths(config=config)
-    remote_paths = get_remote_model_asset_paths(config=config)
     merged = dict(model_dirs)
     merged.update(global_paths)
-    merged.update(remote_paths)
     return merged
 
 
@@ -268,6 +256,17 @@ def get_search_mode(config=None) -> str:
     return mode if mode in allowed else str(DEFAULT_CONFIG["search_mode"])
 
 
+def get_image_search_mode(config=None) -> str:
+    cfg = _app_cfg(config)
+    mode = str(cfg.get("image_search_mode", DEFAULT_CONFIG["image_search_mode"]) or "").strip().lower()
+    allowed = CONFIG_ENUMS["image_search_mode"]
+    if mode in allowed:
+        return mode
+    if bool(cfg.get("search_video_discovery_enabled", DEFAULT_CONFIG["search_video_discovery_enabled"])):
+        return "video_discovery"
+    return str(DEFAULT_CONFIG["image_search_mode"])
+
+
 def get_search_precision_mode(config=None) -> str:
     # Session-only UI toggle; never read persisted config.
     return str(DEFAULT_CONFIG["search_precision_mode"])
@@ -309,14 +308,6 @@ def get_frame_neighbor_rerank_window(config=None) -> int:
         return int(DEFAULT_CONFIG["frame_neighbor_rerank_window"])
 
 
-def get_remote_max_frames(config=None) -> int:
-    cfg = _app_cfg(config)
-    try:
-        return int(cfg.get("remote_max_frames", DEFAULT_CONFIG["remote_max_frames"]))
-    except (TypeError, ValueError):
-        return int(DEFAULT_CONFIG["remote_max_frames"])
-
-
 def get_config_fps(config=None) -> float:
     cfg = _app_cfg(config)
     try:
@@ -334,12 +325,15 @@ def get_similarity_threshold(config=None) -> float:
         return float(DEFAULT_CONFIG["similarity_threshold"])
 
 
-def get_max_chunk_duration(config=None) -> float:
+def get_chunk_policy(config=None) -> str:
+    from src.core.chunk_policy import DEFAULT_CHUNK_POLICY, normalize_chunk_policy_id
+
     cfg = _app_cfg(config)
-    try:
-        return float(cfg.get("max_chunk_duration", DEFAULT_CONFIG["max_chunk_duration"]))
-    except (TypeError, ValueError):
-        return float(DEFAULT_CONFIG["max_chunk_duration"])
+    policy = str(cfg.get("chunk_policy", DEFAULT_CONFIG.get("chunk_policy", DEFAULT_CHUNK_POLICY)) or "").strip().lower()
+    allowed = CONFIG_ENUMS["chunk_policy"]
+    if policy in allowed:
+        return policy
+    return normalize_chunk_policy_id(DEFAULT_CHUNK_POLICY)
 
 
 def get_min_chunk_size(config=None) -> int:
@@ -350,39 +344,13 @@ def get_min_chunk_size(config=None) -> int:
         return int(DEFAULT_CONFIG["min_chunk_size"])
 
 
-def get_chunk_similarity_mode(config=None) -> str:
+def get_min_chunk_duration(config=None) -> float:
     cfg = _app_cfg(config)
-    mode = str(cfg.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"]) or "").strip().lower()
-    allowed = CONFIG_ENUMS["chunk_similarity_mode"]
-    return mode if mode in allowed else str(DEFAULT_CONFIG["chunk_similarity_mode"])
-
-
-def get_chunk_segmentation_strategy(config=None) -> str:
-    cfg = _app_cfg(config)
-    strategy = str(
-        cfg.get("chunk_segmentation_strategy", DEFAULT_CONFIG["chunk_segmentation_strategy"]) or ""
-    ).strip().lower()
-    allowed = CONFIG_ENUMS["chunk_segmentation_strategy"]
-    return strategy if strategy in allowed else str(DEFAULT_CONFIG["chunk_segmentation_strategy"])
-
-
-def _bounded_chunk_float(config, key, default):
-    cfg = _app_cfg(config)
-    minimum, maximum = CONFIG_BOUNDS.get(key, (0.0, 1.0))
+    minimum, maximum = CONFIG_BOUNDS.get("min_chunk_duration", (0.0, 30.0))
     try:
-        value = float(cfg.get(key, default))
+        value = float(cfg.get("min_chunk_duration", DEFAULT_CONFIG["min_chunk_duration"]))
     except (TypeError, ValueError):
-        value = float(default)
-    return max(minimum, min(maximum, value))
-
-
-def _bounded_chunk_int(config, key, default):
-    cfg = _app_cfg(config)
-    minimum, maximum = CONFIG_BOUNDS.get(key, (1, 12))
-    try:
-        value = int(cfg.get(key, default))
-    except (TypeError, ValueError):
-        value = int(default)
+        value = float(DEFAULT_CONFIG["min_chunk_duration"])
     return max(minimum, min(maximum, value))
 
 
@@ -390,21 +358,8 @@ def build_chunk_config(config=None) -> dict:
     cfg = _app_cfg(config)
     return chunk_config_payload(
         similarity_threshold=get_similarity_threshold(cfg),
-        max_chunk_duration=get_max_chunk_duration(cfg),
         min_chunk_size=get_min_chunk_size(cfg),
-        similarity_mode=get_chunk_similarity_mode(cfg),
-        segmentation_strategy=get_chunk_segmentation_strategy(cfg),
-        delta_ema_alpha=_bounded_chunk_float(cfg, "chunk_delta_ema_alpha", DEFAULT_CONFIG["chunk_delta_ema_alpha"]),
-        delta_high_threshold=_bounded_chunk_float(
-            cfg, "chunk_delta_high_threshold", DEFAULT_CONFIG["chunk_delta_high_threshold"]
-        ),
-        delta_low_threshold=_bounded_chunk_float(
-            cfg, "chunk_delta_low_threshold", DEFAULT_CONFIG["chunk_delta_low_threshold"]
-        ),
-        delta_rise_frames=_bounded_chunk_int(cfg, "chunk_delta_rise_frames", DEFAULT_CONFIG["chunk_delta_rise_frames"]),
-        delta_stable_frames=_bounded_chunk_int(
-            cfg, "chunk_delta_stable_frames", DEFAULT_CONFIG["chunk_delta_stable_frames"]
-        ),
+        min_chunk_duration=get_min_chunk_duration(cfg),
     )
 
 

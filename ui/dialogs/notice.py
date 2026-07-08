@@ -7,13 +7,31 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QTextBrowser,
     QVBoxLayout,
 )
 
+from src.app.config import get_app_version
 from src.app.i18n import get_texts
+from ui.dialogs.html_links import ExternalLinkTextBrowser
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
+
+
+def build_notice_meta_text(notice, version_info, texts) -> str:
+    parts: list[str] = []
+    current_version = str((version_info or {}).get("current_version") or get_app_version() or "").strip()
+    if current_version:
+        parts.append(texts["version_label"].format(version=current_version))
+
+    notice_version = str((notice or {}).get("notice_version") or "").strip()
+    if notice_version and notice_version != current_version:
+        parts.append(texts["notice_meta_version"].format(version=notice_version))
+
+    notice_date = str((notice or {}).get("notice_date") or "").strip()
+    if notice_date:
+        parts.append(texts["notice_meta_date"].format(date=notice_date))
+
+    return " | ".join(parts)
 
 
 class NoticeDialog(QDialog):
@@ -50,10 +68,16 @@ class NoticeDialog(QDialog):
         subtitle.setObjectName("Hint")
         subtitle.setWordWrap(True)
 
-        content = QTextBrowser()
+        meta_text = build_notice_meta_text(notice, version_info, texts)
+        meta = QLabel(meta_text)
+        meta.setObjectName("DialogMetaLabel")
+        meta.setWordWrap(True)
+        if not meta_text:
+            meta.hide()
+
+        content = ExternalLinkTextBrowser()
         content.setObjectName("DialogBodyBrowser")
         content.setReadOnly(True)
-        content.setOpenExternalLinks(True)
         if notice.get("format") == "html":
             content.setHtml(notice.get("body", texts["notice_body"]))
         else:
@@ -91,6 +115,8 @@ class NoticeDialog(QDialog):
 
         form.addWidget(title)
         form.addWidget(subtitle)
+        if meta_text:
+            form.addWidget(meta)
         form.addWidget(content)
         form.addLayout(button_row)
         layout.addWidget(shell)

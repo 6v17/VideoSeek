@@ -74,6 +74,65 @@ def _resolve_profile_resource_dir(profile):
     return os.path.join(model_root, _provider_dir(provider), variant)
 
 
+def _profile_required_files(profile):
+    files_map = profile.get("files")
+    if isinstance(files_map, dict):
+        from_profile = [str(value or "").strip() for value in files_map.values() if str(value or "").strip()]
+        if from_profile:
+            return from_profile
+    provider = str(profile.get("provider", "") or "").strip()
+    return list(PROVIDER_REQUIRED_MODEL_FILES.get(provider, REQUIRED_MODEL_FILES))
+
+
+def _profile_files_ready(profile):
+    resource_dir = _resolve_profile_resource_dir(profile)
+    if not resource_dir or not os.path.isdir(resource_dir):
+        return False
+    required_files = _profile_required_files(profile)
+    if not required_files:
+        return False
+    return all(os.path.exists(os.path.join(resource_dir, name)) for name in required_files)
+
+
+def _find_profile_by_id(profiles, profile_id):
+    profile_id = str(profile_id or "").strip()
+    if not profile_id:
+        return None
+    for item in profiles:
+        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == profile_id:
+            return item
+    return None
+
+
+def _pick_ready_profile_id(profiles, candidate_ids):
+    for profile_id in reversed(candidate_ids):
+        profile = _find_profile_by_id(profiles, profile_id)
+        if profile and _profile_files_ready(profile):
+            return profile_id
+    for profile_id in reversed(candidate_ids):
+        if _find_profile_by_id(profiles, profile_id):
+            return profile_id
+    return ""
+
+
+def _resolve_active_profile_after_import(models, profiles, touched_profile_ids):
+    active_profile_id = str(models.get("active_profile", "") or "").strip()
+    if not touched_profile_ids:
+        return active_profile_id
+
+    active_profile = _find_profile_by_id(profiles, active_profile_id)
+    if active_profile and _profile_files_ready(active_profile):
+        return active_profile_id
+
+    if not active_profile:
+        return _pick_ready_profile_id(profiles, touched_profile_ids) or active_profile_id
+
+    replacement_id = _pick_ready_profile_id(profiles, touched_profile_ids)
+    if replacement_id and replacement_id != active_profile_id:
+        return replacement_id
+    return active_profile_id
+
+
 def _resolve_profile_asset_base_dir(config, profile):
     data_paths = get_data_paths(config=config)
     data_dir = str(data_paths.get("data_dir", "") or "").strip()
@@ -161,8 +220,9 @@ def _safe_extract_zip(zip_path, output_dir):
 def _install_extracted_packages(extracted_root, model_root):
     manifests = _discover_manifest_files(extracted_root)
     if not manifests:
-        return 0
+        return 0, []
     installed = 0
+    installed_manifests = []
     for manifest_file in manifests:
         try:
             with open(manifest_file, "r", encoding="utf-8") as handle:
@@ -181,7 +241,8 @@ def _install_extracted_packages(extracted_root, model_root):
         os.makedirs(os.path.dirname(target_dir), exist_ok=True)
         shutil.copytree(src_dir, target_dir)
         installed += 1
-    return installed
+        installed_manifests.append(os.path.join(target_dir, "model_manifest.json"))
+    return installed, installed_manifests
 
 
 def import_model_package_zip(model_root, zip_path, sha256_file=None, require_checksum=False):
@@ -207,25 +268,38 @@ def import_model_package_zip(model_root, zip_path, sha256_file=None, require_che
         extract_dir = os.path.join(temp_dir, "extracted")
         os.makedirs(extract_dir, exist_ok=True)
         _safe_extract_zip(zip_path, extract_dir)
-        installed_count = _install_extracted_packages(extract_dir, root)
+        installed_count, installed_manifests = _install_extracted_packages(extract_dir, root)
         if installed_count <= 0:
             raise RuntimeError("No model_manifest.json found inside zip package.")
 
-    result = import_model_packages(root)
+    result = import_model_packages(root, manifest_files=installed_manifests)
     result["packages_installed"] = installed_count
     result["checksum_verified"] = bool(expected_sha256)
     return result
 
 
-def import_model_packages(model_root):
+def import_model_packages(model_root, manifest_files=None):
     config = load_config()
     if get_config_schema_version(config=config) < 2:
         raise RuntimeError("Model package import requires config schema v2")
 
     root = os.path.normpath(os.path.abspath(os.fspath(model_root)))
-    manifests = _discover_manifest_files(root)
+    if manifest_files is not None:
+        manifests = []
+        for manifest_file in manifest_files:
+            path = os.path.normpath(os.path.abspath(os.fspath(str(manifest_file or "").strip())))
+            if path and os.path.isfile(path):
+                manifests.append(path)
+    else:
+        manifests = _discover_manifest_files(root)
     if not manifests:
-        return {"imported": 0, "updated": 0, "errors": ["No model_manifest.json found under model_dir."]}
+        return {
+            "imported": 0,
+            "updated": 0,
+            "errors": ["No model_manifest.json found under model_dir."],
+            "active_profile": str((config.get("models") or {}).get("active_profile", "") or "").strip(),
+            "active_profile_switched": False,
+        }
 
     models = config.get("models")
     if not isinstance(models, dict):
@@ -247,6 +321,7 @@ def import_model_packages(model_root):
     imported = 0
     updated = 0
     errors = []
+    touched_profile_ids = []
 
     for manifest_file in manifests:
         try:
@@ -352,6 +427,7 @@ def import_model_packages(model_root):
             else:
                 profiles[existing_idx[profile_id]] = new_profile
                 updated += 1
+                touched_profile_ids.append(profile_id)
         else:
             should_append_new_profile = True
         if should_append_new_profile:
@@ -359,10 +435,27 @@ def import_model_packages(model_root):
             profiles.append(new_profile)
             existing_idx[profile_id] = len(profiles) - 1
             imported += 1
+            touched_profile_ids.append(profile_id)
 
+    active_profile_switched = False
     if imported or updated:
+        models["profiles"] = profiles
+        previous_active_profile = str(models.get("active_profile", "") or "").strip()
+        models["active_profile"] = _resolve_active_profile_after_import(
+            models,
+            profiles,
+            touched_profile_ids,
+        )
+        active_profile_switched = models["active_profile"] != previous_active_profile
+        config["models"] = models
         save_config(config)
-    return {"imported": imported, "updated": updated, "errors": errors}
+    return {
+        "imported": imported,
+        "updated": updated,
+        "errors": errors,
+        "active_profile": str(models.get("active_profile", "") or "").strip(),
+        "active_profile_switched": active_profile_switched,
+    }
 
 
 def remove_model_profile(profile_id):

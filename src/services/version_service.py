@@ -1,10 +1,9 @@
 import json
-import urllib.error
-import urllib.request
 
 from src.app.app_meta import get_app_meta
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
+from src.services.remote_fetch_cache import DEFAULT_REMOTE_USER_AGENT, fetch_cached_text
 
 
 def get_local_version_status(language):
@@ -28,12 +27,18 @@ def get_version_status(language):
 
     latest_version = str(remote_data.get("version") or current_version)
     download_url = str(remote_data.get("download_url") or "")
-    has_update = _compare_versions(latest_version, current_version) > 0
-    status_key = "version_update_available" if has_update else "version_up_to_date"
+    compare = _compare_versions(latest_version, current_version)
+    has_update = compare > 0
+    if has_update:
+        status_text = texts["version_update_available"].format(version=latest_version)
+    elif compare == 0:
+        status_text = texts["version_up_to_date"].format(version=current_version)
+    else:
+        status_text = texts["version_label"].format(version=current_version)
     return {
         "current_version": current_version,
         "latest_version": latest_version,
-        "status_text": texts[status_key].format(version=latest_version),
+        "status_text": status_text,
         "download_url": download_url,
         "has_update": has_update,
     }
@@ -42,18 +47,15 @@ def get_version_status(language):
 def fetch_remote_version():
     app_meta = get_app_meta()
     version_url = app_meta.get("version_url", "").strip()
-    timeout = app_meta.get("remote_timeout", 4)
     if not version_url:
         return None
 
-    request = urllib.request.Request(
-        version_url,
-        headers={"User-Agent": "VideoSeek/version-check"},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+        raw_text = fetch_cached_text(version_url, kind="json", user_agent=DEFAULT_REMOTE_USER_AGENT)
+        if not raw_text:
+            return None
+        data = json.loads(raw_text)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None
 
     if not isinstance(data, dict):

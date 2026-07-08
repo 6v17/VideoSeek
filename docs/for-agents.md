@@ -6,8 +6,8 @@
 
 **怎么用：**
 
-1. 粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（行为规则 + 实例快照 + `search_presets`）。
-2. 查字段 / 默认值 / 响应形状 → **`GET /api/v1/agent-doc?format=json`** 读 `content`，或 `?format=text` 纯 Markdown。
+1. 粘贴 **`GET /api/v1/agent-starter`** 的 `starter_text`（精简 binding + 实例快照；预设最多 8 条 id/name）。
+2. 查字段 / playbook / 重试策略 → **`GET /api/v1/agent-doc?format=json`** 或 `?format=text`（§5）。
 3. 路径字段必须来自 API 响应（见 §2.2）；勿扫盘、勿猜路径、勿猜文件名。
 
 | 前提 | 动作 |
@@ -24,12 +24,15 @@
 | GET | `/agent-starter` | 粘贴块 + 实时快照 |
 | GET | `/agent-doc` | 完整本文 |
 | GET | `/libraries` | 库列表 → `scope.library_paths` |
-| GET | `/libraries/videos` | 库内视频 → `scope.video_paths` |
+| GET | `/videos` | 已同步视频列表（全库；可选 `library_path` 筛选）→ `video_path` / `scope.video_paths` |
+| GET | `/libraries/videos` | 同 `/videos`，兼容旧路径 |
 | GET | `/search/presets` | 预设列表 |
 | GET | `/search/presets/{preset_id}` | 单个预设 |
 | POST | `/search` | 单次搜索 |
 | POST | `/search/batch` | 批量搜索（可内嵌导出） |
 | GET | `/search/telemetry` | 截图搜诊断（可选） |
+| GET | `/videos/evidence/status` | 批量查询是否已有理解笔录（轻量） |
+| GET | `/videos/evidence` | 理解笔录（可选；读盘优先，可触发生成） |
 | POST | `/export/manifest` | 生成剪辑清单 JSON |
 | POST | `/export/clip` | 导出单个片段 |
 | POST | `/export/clips/batch` | 批量导出片段 |
@@ -38,7 +41,7 @@
 
 ## 1. 能力与边界
 
-- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段。
+- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段；**可选**读取/生成理解笔录（描述服务 caption 为主，YOLO 检测为可选附加）。
 - **不支持：** 精确台词/剧情检索；自动成片；修改索引或用户设置（除非用户在对话中明确要求）。
 
 ---
@@ -55,13 +58,13 @@
 |------|------|------|
 | 400 | `invalid_request` | 请求体/参数不合法（含 Pydantic 校验失败） |
 | 404 | `invalid_request` / `doc_not_found` | 库/视频/源文件不存在；或 `agent-doc` 缺 md |
-| 409 | `index_not_ready` | 索引未就绪或 per-library 索引升级中 |
-| 422 | `query_failed` / `export_failed` | 搜索/导出执行失败 |
-| 503 | `engine_busy` | 超时、并发满、FFmpeg 不可用、导出队列忙 |
+| 409 | `index_not_ready` / `understanding_not_ready` | 索引未就绪；或理解资源未就绪且 `ensure=true` |
+| 422 | `query_failed` / `export_failed` / `no_chunks` / `video_not_found` | 搜索/导出/理解执行失败 |
+| 503 | `engine_busy` / `understanding_timeout` | 超时、并发满、FFmpeg 不可用、导出队列忙；理解生成超时 |
 
 ### 2.2 路径规则（必读）
 
-- **`video_path`**：必须**原样**来自 `hits[]`、`/libraries/videos`，或导出响应；禁止按显示名/语义/终端乱码猜中文文件名。
+- **`video_path`**：必须**原样**来自 `hits[]`、`GET /videos`（或 `/libraries/videos`）、或导出响应；禁止按显示名/语义/终端乱码猜中文文件名。
 - **`library_path`**：必须来自 `/libraries` 的 `library_path`。
 - **写出路径**（`output_path`、`export.output_dir`、`write_path`）：**不得**落在已索引库根目录内（防覆盖源媒体）。
 - Python 写 JSON：`ensure_ascii=False`；POST body 用 UTF-8。
@@ -82,11 +85,11 @@
 |------|------|
 | **省略 `scope`** | 使用 VideoSeek 桌面当前保存的搜索范围 |
 | `library_paths` | 只搜这些库（路径来自 `/libraries`） |
-| `video_paths` | 只搜这些绝对路径（来自 `/libraries/videos` 或 hits） |
+| `video_paths` | 只搜这些绝对路径（来自 `GET /videos`、`/libraries/videos` 或 hits） |
 | `use_saved_scope: true` | 显式使用桌面保存的范围（无 paths 时） |
 | 同时给 paths | **显式 paths 优先**于 `use_saved_scope` |
 
-响应 `meta` 会回显：`scope_applied`、`scope_library_paths`、`scope_video_paths`、`scope_uses_per_library_indexes`、`saved_search_scope_mode`。
+响应 `meta` 会回显：`scope_applied`、`scope_library_paths`、`scope_video_paths`、`scope_uses_per_library_indexes`（true 表示本次按库过滤 Lance 加载，**非** legacy FAISS 分库直查）、`saved_search_scope_mode`。
 
 ---
 
@@ -116,9 +119,11 @@
 
 | 字段 | 说明 |
 |------|------|
-| `index_ready` | 当前 mode 下全局索引是否可用 |
-| `index_stale` / `global_index_state` | 索引新鲜度 |
-| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate` 等 |
+| `index_ready` | 当前 mode 下 Lance 向量库是否可用（`lance_search_is_ready`） |
+| `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
+| `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
+| `index_stale` / `global_index_state` | 兼容字段；本地搜索实际以 Lance 是否就绪、桌面是否在同步为准 |
+| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `video_evidence`, `video_evidence_ready` 等 |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
 | `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
@@ -127,9 +132,15 @@
 | `max_batch_queries` | 64 |
 | `max_batch_export_clips` | 64 |
 | `batch_timeout_sec` | batch 基础超时 |
-| `library_indexes_upgrade_needed` | true 时需重启并完成迁移 |
+| `library_indexes_upgrade_needed` | 兼容字段；Lance 主线恒为 **false**（`needs_search_index_upgrade` 已 no-op） |
 | `agent_api_default_image_precision` | 图搜默认 `fast` 或 `precise` |
 | `search_telemetry_enabled` | 遥测开关 |
+| `understanding_ready` | 描述服务是否就绪（VLM caption）；false 时勿 `ensure=true`。YOLO 为可选附加 |
+| `active_understanding_profile` | 当前理解方案 id |
+| `understanding_missing_components` | 未就绪时的缺失**必需**组件 id 列表 |
+| `understanding_optional_missing_components` | 可选组件缺失（如 YOLO）；不影响 `understanding_ready` |
+| `capabilities.video_evidence` | 理解笔录 API 是否可用（`GET /videos/evidence` 端点存在，恒为 true） |
+| `capabilities.video_evidence_ready` | 与 `understanding_ready` 相同；可生成/触发生成时为 true |
 
 ---
 
@@ -141,12 +152,15 @@
 
 | 字段 | 说明 |
 |------|------|
-| `starter_text` | **粘贴给外部 AI 的主文本** |
+| `starter_text` | **粘贴给外部 AI 的主文本**；内含「读完请先告诉用户」— Agent 第一条回复须向用户说明能做什么 |
 | `full_doc_path` | 本机 `docs/for-agents.md` 绝对路径（可读文件） |
 | `full_doc_rel` | `docs/for-agents.md` |
-| `meta.search_preset_count` | 快照里预设条数 |
+| `meta.search_preset_count` | 实例预设总数 |
+| `meta.search_preset_snapshot_count` | 快照内 preset 条数（≤8） |
 
-`starter_text` 内嵌 JSON 快照含：`api_base`, `index_ready`, `capabilities`, `search_presets[]`（id/name/query/summary）等。
+`starter_text` 结构：**读完请先告诉用户** → **Policy kernel** → **三条铁律** → 紧凑 JSON 快照（`search_presets[]` 仅 id/name；全量 `GET /search/presets`）。
+
+开头 **「读完请先告诉用户」** 要求 Agent 第一条回复向用户介绍能做什么；playbook 与字段细节见 **agent-doc §5**。
 
 ---
 
@@ -168,27 +182,47 @@
 | `display_name` | 展示名 |
 | `index_state` | 库索引状态 |
 | `video_count_total` / `video_count_indexed_ready` / `video_count_missing_source` | 计数 |
-| `per_library_index_ready` | 该库 per-library 索引是否就绪 |
+| `per_library_index_ready` | 该库是否有 `asset_state=ready` 视频且已在 Lance 中可搜（legacy 字段名；非 FAISS 分库文件） |
+| `sync_in_progress` | 该库是否正在同步（见 `/health` `index_sync_in_progress`） |
 | `offline` | 库目录是否存在 |
 
 ---
 
-### 4.5 `GET /libraries/videos`
+### 4.5 `GET /videos` · `GET /libraries/videos`
 
-**Query（必填/可选）：**
+列出**已同步且可检索**的视频（默认 `ready_only=true`：`asset_state=ready` 且源文件存在）。
+
+**Query：**
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
-| `library_path` | **必填** | 来自 `/libraries` |
-| `ready_only` | `true` | 只返回 `asset_state=ready` 且源文件存在 |
+| `library_path` | 省略=全库 | 来自 `/libraries`；指定则只列该库 |
+| `video_id` | — | 精确查单条；未找到 → 404 |
+| `q` | — | 按 `video_rel_path` / 文件名 / `video_id` / 库名子串匹配（不区分大小写） |
+| `has_evidence` | — | `true` 只列已有笔录；`false` 只列尚无笔录 |
+| `ready_only` | `true` | 只返回已同步就绪且源文件存在的视频 |
 | `limit` | 500 | 最大 2000 |
 | `offset` | 0 | 分页 |
 
-**响应 `videos[]` 每项：** `video_path`（绝对路径）, `video_rel_path`, `video_id`, `asset_state`, `source_exists`
+**响应 `videos[]` 每项：** `video_path`（绝对路径）, `video_rel_path`, `video_id`, `library_path`, `library_display_name`, `asset_state`, `source_exists`, **`has_evidence`**
 
-**meta：** `returned`, `total_listed`, `total_ready`, `offset`, `limit`, `ready_only`
+指定 `library_path` 时，响应根级还会回显 `library_path` / `library_display_name`。
 
-库不存在 → 404。
+**meta：** `returned`, `total_listed`, `total_ready`, `offset`, `limit`, `ready_only`, `libraries_scanned`, **`filters`**
+
+库不存在（传了错误 `library_path`）→ 404。`video_id` 不存在 → 404。
+
+**推荐链路：** `/libraries` → `/videos?q=…` 或 `/videos?library_path=…` → 取 `video_path` → `/search`（`scope.video_paths`）→ `/videos/evidence`
+
+**示例：**
+
+```http
+GET /api/v1/videos
+GET /api/v1/videos?library_path=D:/222库路径
+GET /api/v1/videos?video_id=abc123
+GET /api/v1/videos?q=ep03&has_evidence=false
+GET /api/v1/libraries/videos?library_path=D:/222库路径
+```
 
 ---
 
@@ -428,27 +462,107 @@
 
 ---
 
-## 5. 能力组合（字段级）
+### 4.11.5 `GET /videos/evidence/status`
 
-### 搜索
+批量查询是否已有落盘的理解笔录（不读 chunk 正文，不触发生成）。
 
-| 端点 | 能力 |
+**Query：**
+
+| 参数 | 说明 |
 |------|------|
-| `POST /search` | 单次 query；返回 `hits[]` |
-| `POST /search/batch` | 多 query 或 `image_folder`；返回 `results[]` |
-| `POST /search/batch` + `export` | 同上，并在 `export.output_dir` 写入 mp4；响应含 `export` 块 |
+| `video_ids` | 必填；可重复 query（`video_ids=a&video_ids=b`）或逗号分隔 |
 
-### 导出（可独立调用）
+最多 **64** 个 id。
 
-| 端点 | 输入 | 输出 |
+**响应 `items[]`：** `{ "video_id", "has_evidence", "generation_status", "chunks_completed", "chunk_total" }`
+
+`has_evidence=true` 含 `in_progress` 已有 chunk；`generation_status=completed` 表示整片完成。
+
+---
+
+### 4.12 `GET /videos/evidence`
+
+**可选模块。** 读取（或按需生成）单视频理解笔录：chunk 级 YOLO 检测 + 描述服务 caption，可选整片 `summary`。不影响搜索/索引。
+
+**Query：**
+
+| 参数 | 必填 | 说明 |
 |------|------|------|
-| `POST /export/manifest` | `items[]` 或 `sources` | manifest JSON；可选 `write_path` |
-| `POST /export/clip` | 单条 `video_path` + 区间 + `output_path` | 单个 mp4 |
-| `POST /export/clips/batch` | `items[]`（每项含 `output_path`） | 多个 mp4 |
+| `video_id` 或 `video_path` | 二选一 | 与 search / libraries 路径规范一致 |
+| `start_sec` / `end_sec` | 否 | 与笔录 chunk **时间重叠**过滤；仅影响响应，不改落盘 |
+| `ensure` | 否，默认 `false` | `true`：无笔录或 **`in_progress` 未完成**时触发生成/续跑；`false`：仅读盘 |
 
-内嵌 `export` 文件名：`{client_request_id或query}_rank{NN}.mp4`（冲突加后缀）。`clips/batch` 的 `items[]` 支持自定义 `output_path`。
+**成功响应要点：**
 
-是否组合上述端点，见 **`GET /agent-starter`**。
+| 字段 | 说明 |
+|------|------|
+| `evidence_available` | 是否有可用笔录（含 `in_progress` 已完成的 chunk） |
+| `video_id`, `video` | 视频标识与路径 |
+| `chunks[]` | 过滤后的 chunk 证据（`evidence.vision.object_detection` / `image_caption`） |
+| `summary` | 整片总结对象 `{ "text": string, "source": string }`（若有；`text` 为描述正文） |
+| `provenance` | 生成来源与 profile |
+| `meta.generation_status` | `missing` / `in_progress` / `completed` |
+| `meta.chunks_completed` / `meta.chunk_total` | 生成进度 |
+| `meta.generated_by` | API 本次触发生成时为 `"agent_api"` |
+| `meta.understanding_timeout_sec` | 本次请求超时预算（按**剩余** chunk 估算） |
+
+无笔录且 `ensure=false` → **HTTP 200**，`evidence_available: false`，`chunks: []`（非错误）。
+
+**超时（503 `understanding_timeout`）：** 生成可能已部分落盘；用 `ensure=false` 看 `meta.chunks_completed/chunk_total`，再 **`ensure=true` 续跑**（与 GUI 理解页相同 checkpoint 机制）。
+
+**推荐编排：**
+
+```text
+GET /health → understanding_ready?
+POST /search → hits
+GET /videos/evidence/status → 是否已有/是否 in_progress
+GET /videos/evidence?…&ensure=false
+  → 无笔录则询问用户是否 ensure=true
+GET /videos/evidence?…&ensure=true
+  → 完成或续跑；503 时看进度后重试 ensure=true
+```
+
+---
+
+## 5. Agent playbook（non-binding）
+
+**不覆盖** starter 内 Policy kernel。用户意图匹配时选用；字段细节见 §4。
+
+### 5.1 search vs 理解笔录
+
+| 用户意图 | 用什么 | 说明 |
+|----------|--------|------|
+| 在库里**找**镜头 | `POST /search` 或 `/search/batch` | CLIP 画面匹配 → `hits[]` |
+| **解释**某段在发生什么 | `GET /videos/evidence` | 需 `understanding_ready`；通常在 search 给出 `video_path` + 时间窗**之后** |
+| 找片 + 说明 + 导出 | search → evidence → export | 笔录不是第三种搜索 |
+| 台词 / 剧情 / 自动解说 | **不适用** | 非 ASR |
+
+### 5.2 可选场景
+
+| 场景 | 优先用法 |
+|------|----------|
+| 参考图 / 截图文件夹 | `query_type: image_path` 或 batch 的 `image_folder` |
+| 精确瞬间 | `mode: frame` + `expand_frame_hits: true` |
+| 较长氛围 / 动作段 | `mode: chunk`（无命中时**先问用户**再切换） |
+| 解释 hit | `GET /videos/evidence/status` → `ensure=false` → 用户同意 → `ensure=true`（`in_progress` 可续跑） |
+| 要 mp4 | batch + `export`（`encode_mode: copy`，默认） |
+| 要剪辑清单 JSON | `POST /export/manifest`（用户明确要求） |
+| 要重编码 | `encode_mode: original`（用户明确要求） |
+| 多个 beat | `POST /search/batch`（≤64）；`keep_per_source`、`dedupe`、`silent` |
+| 多库 | `GET /libraries` → `scope.library_paths`；看 `sync_in_progress` |
+| 图搜异常 | `GET /search/telemetry` |
+
+### 5.3 搜索无命中（禁止扫盘）
+
+| 步骤 | 允许 | 禁止 |
+|------|------|------|
+| 1 | 换 query / 加大 `top_k` / 试 `chunk` / 缩 `scope` | `ls`、`find`、猜文件名 |
+| 2 | `GET /videos?q=…` 或 `?library_path=…` → `scope.video_paths` 重试 | 拼 `video_path` |
+| 3 | 仍无 hit → 告知用户；路径来自 `/videos` 时可整片 `GET /videos/evidence` | 扫盘碰运气 |
+
+**典型链路：** `GET /health` → `GET /libraries` → search/batch → 可选 `/videos/evidence` → export 或 manifest。
+
+binding 以 **`GET /agent-starter`** 内 Policy kernel 为准。
 
 ---
 

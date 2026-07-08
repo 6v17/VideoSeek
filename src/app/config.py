@@ -48,8 +48,6 @@ def build_data_storage_paths(data_root, storage_dir_name=STORAGE_DIR_NAME):
         "cross_vector_file": os.path.join(storage_dir, "global", "cross_video_vectors.npy"),
         "cross_chunk_index_file": os.path.join(storage_dir, "global", "cross_chunk_index.faiss"),
         "cross_chunk_vector_file": os.path.join(storage_dir, "global", "cross_chunk_vectors.npy"),
-        "remote_index_file": os.path.join(storage_dir, "remote", "remote_index.faiss"),
-        "remote_vector_file": os.path.join(storage_dir, "remote", "remote_vectors.npy"),
     }
 
 DEFAULT_UNDERSTANDING_CONFIG = {
@@ -97,6 +95,13 @@ DEFAULT_CONFIG = {
     "preview_seconds": 6,
     "preview_width": 640,
     "preview_height": 360,
+    "preview_encode_preset": "ultrafast",
+    "preview_encode_tune": "zerolatency",
+    "preview_encode_crf": 32,
+    "preview_encode_audio_bitrate": "128k",
+    "export_encode_preset": "fast",
+    "export_encode_crf": 18,
+    "export_encode_audio_bitrate": "192k",
     "thumb_width": 130,
     "thumb_height": 75,
     "prefer_gpu": True,
@@ -104,19 +109,14 @@ DEFAULT_CONFIG = {
     "gpu_probe_unknown_keep_gpu": False,
     "embedding_batch_size": 16,
     "close_window_action": "exit",
+    "chunk_policy": "balanced",
     "similarity_threshold": 0.85,
-    "max_chunk_duration": 5.0,
     "min_chunk_size": 2,
-    "chunk_similarity_mode": "chunk",
-    "chunk_segmentation_strategy": "legacy",
-    "chunk_delta_ema_alpha": 0.35,
-    "chunk_delta_high_threshold": 0.15,
-    "chunk_delta_low_threshold": 0.08,
-    "chunk_delta_rise_frames": 2,
-    "chunk_delta_stable_frames": 2,
+    "min_chunk_duration": 0.0,
     "search_mode": "frame",
+    "image_search_mode": "frame",
     "search_precision_mode": "fast",
-    "search_video_discovery_enabled": True,
+    "search_video_discovery_enabled": False,
     "search_scope_mode": "all",
     "search_scope_library_paths": [],
     "search_scope_video_paths": [],
@@ -124,7 +124,14 @@ DEFAULT_CONFIG = {
     "model_dir": get_default_model_dir(),
     "data_root": APP_DATA_DIR,
     **build_data_storage_paths(APP_DATA_DIR),
-    "remote_max_frames": 2000,
+    "download_default_dir": "",
+    "download_cookie_file": "",
+    "download_cookie_mode": "file",
+    "download_cookie_browser": "edge",
+    "download_mode": "default_dir",
+    "download_target_library": "",
+    "download_auto_index": False,
+    "download_quality": "best",
     "auto_cleanup_missing_files": False,
     "export_video_silent": False,
     "export_encode_mode": "original",
@@ -162,18 +169,14 @@ CONFIG_BOUNDS = {
     "preview_seconds": (2, 20),
     "preview_width": (160, 1920),
     "preview_height": (90, 1080),
+    "preview_encode_crf": (0, 51),
+    "export_encode_crf": (0, 51),
     "thumb_width": (80, 480),
     "thumb_height": (45, 320),
-    "remote_max_frames": (200, 20000),
     "embedding_batch_size": (1, 64),
     "similarity_threshold": (0.1, 1.0),
-    "max_chunk_duration": (1.0, 60.0),
     "min_chunk_size": (1, 50),
-    "chunk_delta_ema_alpha": (0.05, 0.95),
-    "chunk_delta_high_threshold": (0.01, 0.8),
-    "chunk_delta_low_threshold": (0.01, 0.8),
-    "chunk_delta_rise_frames": (1, 12),
-    "chunk_delta_stable_frames": (1, 12),
+    "min_chunk_duration": (0.0, 30.0),
 }
 
 CONFIG_INT_KEYS = {
@@ -185,19 +188,18 @@ CONFIG_INT_KEYS = {
     "preview_seconds",
     "preview_width",
     "preview_height",
+    "preview_encode_crf",
+    "export_encode_crf",
     "thumb_width",
     "thumb_height",
-    "remote_max_frames",
     "embedding_batch_size",
     "min_chunk_size",
-    "chunk_delta_rise_frames",
-    "chunk_delta_stable_frames",
 }
 
 CONFIG_ENUMS = {
-    "chunk_similarity_mode": {"chunk", "frame"},
-    "chunk_segmentation_strategy": {"legacy", "delta_ema"},
+    "chunk_policy": {"balanced", "sensitive", "stable", "custom"},
     "search_mode": {"frame", "chunk"},
+    "image_search_mode": {"chunk", "frame", "video_discovery", "precise"},
     "search_precision_mode": {"fast", "precise"},
     "image_pixel_rerank_probe_mode": {"index", "fixed"},
     "agent_api_default_image_precision": {"fast", "precise"},
@@ -205,6 +207,9 @@ CONFIG_ENUMS = {
     "search_scope_mode": {"all", "selected"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
+    "download_mode": {"default_dir", "library"},
+    "download_cookie_mode": {"none", "file", "browser"},
+    "download_cookie_browser": {"chrome", "edge", "firefox", "brave", "chromium", "opera", "vivaldi"},
     "close_window_action": {"exit", "tray"},
 }
 
@@ -216,8 +221,6 @@ PATH_KEYS = {
     "cross_vector_file",
     "cross_chunk_index_file",
     "cross_chunk_vector_file",
-    "remote_index_file",
-    "remote_vector_file",
 }
 
 DERIVED_DATA_PATH_KEYS = {
@@ -228,8 +231,22 @@ DERIVED_DATA_PATH_KEYS = {
     "mobile_upload_dir",
     "remote_build_cache_dir",
     "link_cache_dir",
+    "downloads_dir",
     "remote_build_report_file",
 }
+
+OBSOLETE_CHUNK_CONFIG_KEYS = (
+    "max_chunk_duration",
+    "chunk_split_confirm_frames",
+    "chunk_similarity_mode",
+    "chunk_segmentation_strategy",
+    "chunk_merge_adjacent_threshold",
+    "chunk_delta_ema_alpha",
+    "chunk_delta_high_threshold",
+    "chunk_delta_low_threshold",
+    "chunk_delta_rise_frames",
+    "chunk_delta_stable_frames",
+)
 
 LEGACY_DEFAULT_CONFIG = {
     **DEFAULT_CONFIG,
@@ -294,6 +311,7 @@ def _derived_storage_paths_from_layout(storage_paths: dict) -> dict:
         "mobile_upload_dir": os.path.join(data_dir, "mobile_uploads"),
         "remote_build_cache_dir": os.path.join(data_dir, "remote_build_cache"),
         "link_cache_dir": os.path.join(data_dir, "link_cache"),
+        "downloads_dir": os.path.join(data_dir, "downloads"),
         "remote_build_report_file": os.path.join(data_dir, "remote", "build_report.json"),
     }
 
@@ -441,6 +459,19 @@ def _sanitize_understanding_settings(config):
     return sanitized
 
 
+def _sanitize_chunk_settings(config):
+    """Drop retired chunk keys from config.json."""
+    sanitized = dict(config)
+    changed = False
+
+    for key in OBSOLETE_CHUNK_CONFIG_KEYS:
+        if key in sanitized:
+            sanitized.pop(key, None)
+            changed = True
+
+    return sanitized, changed
+
+
 def _sanitize_general_settings(config):
     sanitized = dict(config)
 
@@ -459,6 +490,8 @@ def _sanitize_general_settings(config):
 
     # Removed setting: strip from older config.json on load/save.
     sanitized.pop("ffmpeg_hwaccel", None)
+    sanitized.pop("remote_max_frames", None)
+    sanitized.pop("vector_search_backend", None)
 
     sanitized["prefer_gpu"] = _coerce_bool(
         sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]),
@@ -480,6 +513,10 @@ def _sanitize_general_settings(config):
         sanitized.get("export_video_silent", DEFAULT_CONFIG["export_video_silent"]),
         DEFAULT_CONFIG["export_video_silent"],
     )
+    quality = str(sanitized.get("download_quality", DEFAULT_CONFIG["download_quality"]) or "").strip().lower()
+    if quality != "best" and not quality.isdigit():
+        quality = DEFAULT_CONFIG["download_quality"]
+    sanitized["download_quality"] = quality
     export_mode = str(sanitized.get("export_encode_mode", DEFAULT_CONFIG["export_encode_mode"]) or "").strip().lower()
     if export_mode not in CONFIG_ENUMS["export_encode_mode"]:
         export_mode = DEFAULT_CONFIG["export_encode_mode"]
@@ -584,15 +621,10 @@ def load_config():
         )
         config = _sanitize_sampling_settings(config)
         config = _sanitize_understanding_settings(config)
+        config, chunk_migrated = _sanitize_chunk_settings(config)
         config = _sanitize_general_settings(config)
         config = _migrate_legacy_storage_if_needed(config)
-        # Migrate legacy cap from old builds; 300 causes long videos to look capped at ~299s.
-        try:
-            if int(config.get("remote_max_frames", 0)) == 300:
-                config["remote_max_frames"] = DEFAULT_CONFIG["remote_max_frames"]
-        except Exception:
-            config["remote_max_frames"] = DEFAULT_CONFIG["remote_max_frames"]
-        if should_persist_new_defaults or os.path.normpath(config_path) != os.path.normpath(CONFIG_FILE):
+        if should_persist_new_defaults or chunk_migrated or os.path.normpath(config_path) != os.path.normpath(CONFIG_FILE):
             save_config(config)
         return config
 
@@ -610,6 +642,7 @@ def save_config(config):
     has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
     has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
     config = _sanitize_understanding_settings(_sanitize_sampling_settings(_apply_default_values(raw_config)))
+    config, _chunk_migrated = _sanitize_chunk_settings(config)
     if has_explicit_data_root:
         config = _normalize_data_root(config, os.path.dirname(CONFIG_FILE))
         config = _apply_data_root_storage_paths(config)
@@ -665,6 +698,12 @@ def should_report_startup_migration_summary(result):
     if not isinstance(result, dict):
         return False
     if bool(result.get("search_index_upgraded")):
+        return True
+    if int(result.get("lance_videos_imported", 0) or 0) > 0:
+        return True
+    if int(result.get("lance_legacy_removed", 0) or 0) > 0:
+        return True
+    if int(result.get("lance_videos_failed", 0) or 0) > 0:
         return True
     if int(result.get("migrated_video_ids", 0) or 0) > 0:
         return True

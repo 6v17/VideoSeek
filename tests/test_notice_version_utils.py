@@ -4,11 +4,31 @@ import types
 import unittest
 from unittest.mock import patch
 
-sys.modules.setdefault("cv2", types.SimpleNamespace())
-sys.modules.setdefault("numpy", types.SimpleNamespace())
-sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
-sys.modules.setdefault("faiss", types.SimpleNamespace())
-sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
+try:
+    import cv2 as _real_cv2
+    sys.modules["cv2"] = _real_cv2
+except ImportError:
+    sys.modules.setdefault("cv2", types.SimpleNamespace())
+try:
+    import numpy as _real_numpy
+    sys.modules["numpy"] = _real_numpy
+except ImportError:
+    sys.modules.setdefault("numpy", types.SimpleNamespace())
+try:
+    import onnxruntime as _real_ort
+    sys.modules["onnxruntime"] = _real_ort
+except ImportError:
+    sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
+try:
+    import faiss as _real_faiss
+    sys.modules["faiss"] = _real_faiss
+except ImportError:
+    sys.modules.setdefault("faiss", types.SimpleNamespace())
+try:
+    import ftfy as _real_ftfy
+    sys.modules["ftfy"] = _real_ftfy
+except ImportError:
+    sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
 sys.modules.setdefault("regex", __import__("re"))
 
 from src.core import clip_embedding
@@ -35,7 +55,9 @@ class NoticeServiceTests(unittest.TestCase):
         self.assertEqual(result["title"], "Update")
         self.assertEqual(result["format"], "html")
         self.assertIn("1. one", result["body"])
-        self.assertIn("1.0.2 | 2026-04-01", result["subtitle"])
+        self.assertEqual(result["notice_version"], "1.0.2")
+        self.assertEqual(result["notice_date"], "2026-04-01")
+        self.assertNotIn("1.0.2", result["subtitle"])
 
     def test_normalize_notice_falls_back_to_plain_for_unknown_format(self):
         texts = {"notice_heading": "Heading", "notice_subtitle": "Subtitle", "notice_body": "Body"}
@@ -43,6 +65,22 @@ class NoticeServiceTests(unittest.TestCase):
         result = notice_service._normalize_notice({"format": "markdown"}, texts)
 
         self.assertEqual(result["format"], "plain")
+
+    @patch("src.services.remote_html_assets._fetch_image_data_uri", return_value="data:image/png;base64,abc")
+    def test_normalize_notice_inlines_remote_html_images(self, _mock_fetch):
+        texts = {"notice_heading": "Heading", "notice_subtitle": "Subtitle", "notice_body": "Body"}
+
+        result = notice_service._normalize_notice(
+            {
+                "body": "<p>tip</p><img src='https://example.com/wechat-reward.png' width='200' />",
+                "format": "html",
+            },
+            texts,
+        )
+
+        self.assertIn("data:image/png;base64,abc", result["body"])
+        self.assertIn('href="https://example.com/wechat-reward.png"', result["body"])
+        self.assertNotIn("src='https://example.com/wechat-reward.png'", result["body"])
 
 
 class AboutServiceTests(unittest.TestCase):
@@ -94,6 +132,18 @@ class VersionServiceTests(unittest.TestCase):
 
         self.assertTrue(result["has_update"])
         self.assertEqual(result["download_url"], "https://example.com/releases")
+
+    @patch("src.services.version_service.fetch_remote_version")
+    @patch("src.services.version_service.get_app_version")
+    def test_get_version_status_when_local_is_ahead_of_remote(self, mock_get_app_version, mock_fetch_remote_version):
+        mock_get_app_version.return_value = "1.0.86"
+        mock_fetch_remote_version.return_value = {"version": "1.0.85"}
+
+        result = version_service.get_version_status("zh")
+
+        self.assertFalse(result["has_update"])
+        self.assertEqual(result["status_text"], "版本 1.0.86")
+        self.assertNotIn("1.0.85", result["status_text"])
 
 
 class UtilsConfigSyncTests(unittest.TestCase):

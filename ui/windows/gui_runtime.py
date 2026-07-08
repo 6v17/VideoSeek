@@ -6,6 +6,7 @@ import json
 import os
 import webbrowser
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from src.app.app_meta import get_app_meta
@@ -271,6 +272,37 @@ class RuntimeGuiMixin:
     def check_runtime_resources(self, show_dialog=True):
         return self.runtime_resource_controller.check_resources(show_dialog=show_dialog)
 
+    def refresh_runtime_resource_ui(self, *, sync_dialog=True):
+        """Re-read disk/config status, refresh page banners, and optionally sync the import dialog."""
+        from src.services.runtime_resource_service import (
+            get_runtime_resource_location_text,
+            get_runtime_resource_status,
+        )
+
+        def _apply():
+            status = get_runtime_resource_status()
+            self.push_resources_status(status)
+            if not sync_dialog:
+                return
+            controller = getattr(self, "runtime_resource_controller", None)
+            dialog = getattr(controller, "dialog", None) if controller is not None else None
+            if dialog is None or not dialog.isVisible() or getattr(dialog, "_downloading", False):
+                return
+            if status.get("resources_ready"):
+                dialog.set_manage_state()
+                return
+            dialog.set_missing_state(
+                status["display_files"],
+                get_runtime_resource_location_text(
+                    status=status,
+                    include_ffmpeg=not status["ffmpeg_ready"] or not status["model_ready"],
+                ),
+                download_enabled=status["download_enabled"],
+            )
+
+        _apply()
+        QTimer.singleShot(0, _apply)
+
     def start_runtime_resource_download(self):
         self.runtime_resource_controller.start_download()
 
@@ -290,29 +322,37 @@ class RuntimeGuiMixin:
         webbrowser.open(target_url)
 
     def _finish_runtime_resource_download(self, result):
-        self.check_runtime_resources(show_dialog=False)
         self.settings_page.input_model_dir.setText(result.get("model_dir", get_configured_model_dir()))
         if result.get("ffmpeg_path"):
             self.settings_page.input_ffmpeg_path.setText(result["ffmpeg_path"])
+        self.refresh_runtime_resource_ui(sync_dialog=True)
         self.push_inference_status()
 
     def _apply_runtime_resource_status(self, status):
         model_ready = bool(status.get("model_ready", self.ui_state.model_ready))
         resources_ready = bool(status.get("resources_ready", self.ui_state.resources_ready))
         self.search_page.btn_search.setEnabled(model_ready)
-        self.network_search_controller.refresh_status()
         self.library_page.btn_sync_db.setEnabled(resources_ready)
         if resources_ready:
             if getattr(self, "_startup_complete", False):
                 self._start_runtime_warmup()
             else:
                 self._defer_runtime_warmup = True
+        disabled_text = self.texts.get("model_features_disabled", "")
         if not resources_ready:
-            status_text = self.texts["model_features_disabled"]
+            status_text = disabled_text
             self.search_page.lbl_status.setText(status_text)
-            self.link_page.lbl_build_status.setText(status_text)
-            self.link_page.lbl_search_status.setText(status_text)
+            self.link_page.lbl_status.setText(status_text)
             self.library_page.lbl_status.setText(status_text)
+        elif disabled_text:
+            ready_text = self.texts.get("ready", "")
+            for label in (
+                getattr(self.search_page, "lbl_status", None),
+                getattr(self.library_page, "lbl_status", None),
+                getattr(self.link_page, "lbl_status", None),
+            ):
+                if label is not None and label.text().strip() == disabled_text.strip():
+                    label.setText(ready_text)
         self._update_runtime_banner(status)
 
     def _update_runtime_banner(self, status):

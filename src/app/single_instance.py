@@ -57,6 +57,8 @@ class SingleInstanceServer:
         if socket is None:
             return
         socket.readyRead.connect(lambda sock=socket: self._handle_socket(sock))
+        if socket.bytesAvailable() > 0:
+            self._handle_socket(socket)
 
     def _handle_socket(self, socket: QLocalSocket) -> None:
         if socket.bytesAvailable() > 0 and socket.readAll() == _ACTIVATE_MESSAGE:

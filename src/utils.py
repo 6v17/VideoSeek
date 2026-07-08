@@ -427,6 +427,7 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
     preview_seconds = float(config.get("preview_seconds", 6))
     preview_width = config.get("preview_width", 640)
     preview_height = config.get("preview_height", 360)
+    encode = _preview_encode_settings(config)
 
     input_path = os.fspath(input_path)
     output_path = os.fspath(output_path)
@@ -458,15 +459,15 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
         "-c:v",
         "libx264",
         "-preset",
-        "ultrafast",
+        encode["preset"],
         "-tune",
-        "zerolatency",
+        encode["tune"],
         "-crf",
-        "32",
+        encode["crf"],
         "-c:a",
         "aac",
         "-b:a",
-        "128k",
+        encode["audio_bitrate"],
         "-movflags",
         "+faststart",
         output_path,
@@ -647,8 +648,13 @@ def build_export_original_clip_command(
     *,
     silent=False,
     encode_mode=None,
+    config=None,
 ):
+    from src.app.config import load_config
+
     ffmpeg = get_ffmpeg_path()
+    cfg = config or load_config()
+    encode = _export_encode_settings(cfg)
     input_path = os.fspath(input_path)
     output_path = os.fspath(output_path)
     start_sec = max(0.0, float(start_sec))
@@ -698,9 +704,9 @@ def build_export_original_clip_command(
             "-c:v",
             "libx264",
             "-preset",
-            "fast",
+            encode["preset"],
             "-crf",
-            "18",
+            encode["crf"],
             "-pix_fmt",
             "yuv420p",
         ]
@@ -715,13 +721,30 @@ def build_export_original_clip_command(
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",
+                encode["audio_bitrate"],
                 "-movflags",
                 "+faststart",
                 output_path,
             ]
         )
     return cmd
+
+
+def _preview_encode_settings(config):
+    return {
+        "preset": str(config.get("preview_encode_preset", "ultrafast")),
+        "tune": str(config.get("preview_encode_tune", "zerolatency")),
+        "crf": str(int(config.get("preview_encode_crf", 32))),
+        "audio_bitrate": str(config.get("preview_encode_audio_bitrate", "128k")),
+    }
+
+
+def _export_encode_settings(config):
+    return {
+        "preset": str(config.get("export_encode_preset", "fast")),
+        "crf": str(int(config.get("export_encode_crf", 18))),
+        "audio_bitrate": str(config.get("export_encode_audio_bitrate", "192k")),
+    }
 
 
 def _build_hidden_startupinfo():
@@ -1130,6 +1153,17 @@ def build_preview_cache_path(video_path, start_sec):
 def libx264_param():
     # Retained intentionally until ffmpeg codec selection is fully inlined.
     return "libx264"
+
+
+def is_windows_admin() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def open_in_explorer(video_path):

@@ -459,6 +459,14 @@ def validate_profile_manifest(
     for index, component_id in enumerate(components):
         _require_text(component_id, f"requires.components[{index}]")
 
+    optional_components = requires.get("optional_components", [])
+    if optional_components is None:
+        optional_components = []
+    if not isinstance(optional_components, list):
+        raise UnderstandingManifestError("requires.optional_components must be a list")
+    for index, component_id in enumerate(optional_components):
+        _require_text(component_id, f"requires.optional_components[{index}]")
+
     pipeline = data.get("pipeline")
     if not isinstance(pipeline, list) or not pipeline:
         raise UnderstandingManifestError("pipeline must be a non-empty list")
@@ -811,6 +819,10 @@ def ensure_understanding_profiles_installed(model_dir: str | None = None) -> lis
         target_dir = get_profile_dir(profile_id, model_dir=resolved_model_dir)
         target_manifest = get_profile_manifest_path(profile_id, model_dir=resolved_model_dir)
         if os.path.isfile(target_manifest):
+            try:
+                shutil.copy2(manifest_path, target_manifest)
+            except OSError as exc:
+                logger.warning("Failed to refresh builtin profile manifest %s: %s", target_manifest, exc)
             continue
         source_dir = os.path.dirname(manifest_path)
         if os.path.isdir(target_dir):
@@ -850,9 +862,54 @@ def ensure_understanding_components_installed(model_dir: str | None = None) -> l
 def get_required_component_ids(profile_manifest: Mapping[str, Any]) -> list[str]:
     requires = _require_mapping(profile_manifest.get("requires"), "requires")
     components = requires.get("components")
-    if not isinstance(components, list):
-        raise UnderstandingManifestError("requires.components must be a list")
+    if not isinstance(components, list) or not components:
+        raise UnderstandingManifestError("requires.components must be a non-empty list")
     return [_require_text(item, "requires.components") for item in components]
+
+
+def get_optional_component_ids(profile_manifest: Mapping[str, Any]) -> list[str]:
+    requires = _require_mapping(profile_manifest.get("requires"), "requires")
+    components = requires.get("optional_components", [])
+    if components is None:
+        return []
+    if not isinstance(components, list):
+        raise UnderstandingManifestError("requires.optional_components must be a list")
+    return [_require_text(item, "requires.optional_components") for item in components]
+
+
+def is_component_installed(component_id: str, model_dir: str | None = None) -> bool:
+    component_text = str(component_id or "").strip()
+    if not component_text:
+        return False
+    for item in scan_understanding_components(model_dir=model_dir):
+        if str(item.get("id", "") or "").strip() == component_text:
+            return bool(item.get("installed"))
+    return False
+
+
+def _missing_components_for_ids(
+    component_ids: list[str],
+    *,
+    config: Mapping[str, Any] | None = None,
+    model_dir: str | None = None,
+    remote_probe: Mapping[str, Any] | None = None,
+    check_remote: bool = True,
+) -> list[str]:
+    installed = {
+        str(item.get("id", "") or "").strip()
+        for item in scan_understanding_components(model_dir=model_dir)
+        if item.get("installed")
+    }
+    missing = [component_id for component_id in component_ids if component_id not in installed]
+
+    if check_remote:
+        probe = remote_probe if remote_probe is not None else probe_remote_vlm(config, timeout_sec=3.0)
+        remote_ok = bool(probe.get("reachable")) and bool(probe.get("model_available"))
+        if not remote_ok:
+            for component_id in component_ids:
+                if _component_delivery(component_id, model_dir=model_dir) == "remote" and component_id not in missing:
+                    missing.append(component_id)
+    return missing
 
 
 def _component_delivery(component_id: str, model_dir: str | None = None) -> str:
@@ -878,21 +935,34 @@ def get_missing_components_for_profile(
 ) -> list[str]:
     profile_manifest = load_profile_manifest(profile_id, model_dir=model_dir)
     required_ids = get_required_component_ids(profile_manifest)
-    installed = {
-        str(item.get("id", "") or "").strip()
-        for item in scan_understanding_components(model_dir=model_dir)
-        if item.get("installed")
-    }
-    missing = [component_id for component_id in required_ids if component_id not in installed]
+    return _missing_components_for_ids(
+        required_ids,
+        config=config,
+        model_dir=model_dir,
+        remote_probe=remote_probe,
+        check_remote=check_remote,
+    )
 
-    if check_remote:
-        probe = remote_probe if remote_probe is not None else probe_remote_vlm(config, timeout_sec=3.0)
-        remote_ok = bool(probe.get("reachable")) and bool(probe.get("model_available"))
-        if not remote_ok:
-            for component_id in required_ids:
-                if _component_delivery(component_id, model_dir=model_dir) == "remote" and component_id not in missing:
-                    missing.append(component_id)
-    return missing
+
+def get_missing_optional_components_for_profile(
+    profile_id: str,
+    *,
+    config: Mapping[str, Any] | None = None,
+    model_dir: str | None = None,
+    remote_probe: Mapping[str, Any] | None = None,
+    check_remote: bool = False,
+) -> list[str]:
+    profile_manifest = load_profile_manifest(profile_id, model_dir=model_dir)
+    optional_ids = get_optional_component_ids(profile_manifest)
+    if not optional_ids:
+        return []
+    return _missing_components_for_ids(
+        optional_ids,
+        config=config,
+        model_dir=model_dir,
+        remote_probe=remote_probe,
+        check_remote=check_remote,
+    )
 
 
 def get_understanding_resource_status(
@@ -901,6 +971,7 @@ def get_understanding_resource_status(
     *,
     probe_remote: bool = True,
     remote_probe_timeout_sec: float = 3.0,
+    install_bootstrap: bool = True,
 ) -> dict[str, Any]:
     normalized_config = normalize_understanding_config(config)
     active_profile_id = get_active_understanding_profile_id(normalized_config)
@@ -912,10 +983,12 @@ def get_understanding_resource_status(
         remote_vlm = {"skipped": True}
 
     missing_components: list[str] = []
+    optional_missing_components: list[str] = []
     profile_error = ""
     try:
-        ensure_understanding_profiles_installed(model_dir=resolved_model_dir or None)
-        ensure_understanding_components_installed(model_dir=resolved_model_dir or None)
+        if install_bootstrap:
+            ensure_understanding_profiles_installed(model_dir=resolved_model_dir or None)
+            ensure_understanding_components_installed(model_dir=resolved_model_dir or None)
         missing_components = get_missing_components_for_profile(
             active_profile_id,
             config=normalized_config,
@@ -923,9 +996,17 @@ def get_understanding_resource_status(
             remote_probe=remote_vlm if probe_remote else None,
             check_remote=probe_remote,
         )
+        optional_missing_components = get_missing_optional_components_for_profile(
+            active_profile_id,
+            config=normalized_config,
+            model_dir=resolved_model_dir or None,
+            remote_probe=remote_vlm if probe_remote else None,
+            check_remote=False,
+        )
     except Exception as exc:
         profile_error = str(exc)
         missing_components = []
+        optional_missing_components = []
 
     components = scan_understanding_components(model_dir=resolved_model_dir or None)
     installed_components = [item["id"] for item in components if item.get("installed")]
@@ -936,6 +1017,7 @@ def get_understanding_resource_status(
         "understanding_root": get_understanding_root(resolved_model_dir) if resolved_model_dir else "",
         "installed_components": installed_components,
         "missing_components": missing_components,
+        "optional_missing_components": optional_missing_components,
         "components": components,
         "profile_error": profile_error,
         "remote_vlm": remote_vlm,

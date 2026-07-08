@@ -1,6 +1,8 @@
 import cv2
 import os
-import traceback
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
+
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 
@@ -16,13 +18,48 @@ from src.services.understanding_import_service import classify_package_zip, impo
 from src.services.understanding_resource_service import SEARCH_MODEL_MANIFEST_FILENAME, UNDERSTANDING_MANIFEST_FILENAME
 from src.services.model_service import download_models
 from src.services.notice_service import get_notice_payload
-from src.services.remote_library_service import build_remote_library_from_links
-from src.services.remote_search_service import run_remote_search
+from src.services.video_download_service import download_video, probe_video_links
 from src.services.search_service import warmup_search_runtime
 from src.services.version_service import get_version_status
 from ui.playback.vlc_player import warmup_vlc_runtime
 
 logger = get_logger("workers")
+
+
+@dataclass
+class SearchConfig:
+    query: Any = None
+    is_text: bool = True
+    scope_library_paths: List[str] = field(default_factory=list)
+    scope_video_paths: List[str] = field(default_factory=list)
+    query_vector: Any = None
+    search_mode: Optional[str] = None
+    top_k: Optional[int] = None
+    min_score: Optional[float] = None
+    search_precision_mode: Optional[str] = None
+    pixel_query_data: Any = None
+    preview_anchor_sec: Optional[float] = None
+    locate_anchor_score: Optional[float] = None
+    locate_score_margin: Optional[float] = None
+    video_discovery_enabled: Optional[bool] = None
+
+
+class FetchWorkerBase(QThread):
+    result_ready = Signal(dict)
+
+    def __init__(self, language, parent=None):
+        super().__init__(parent)
+        self.language = language
+
+    def run(self):
+        try:
+            result = self._fetch_data()
+            self.result_ready.emit(result)
+        except Exception as exc:
+            logger.warning("%s failed: %s", self.__class__.__name__, exc)
+
+    def _fetch_data(self):
+        raise NotImplementedError
 
 
 class StartupMigrationWorker(QThread):
@@ -51,38 +88,9 @@ class SearchWorker(QThread):
     progress_signal = Signal(str)
     finished = Signal()
 
-    def __init__(
-        self,
-        query=None,
-        is_text=True,
-        scope_library_paths=None,
-        scope_video_paths=None,
-        query_vector=None,
-        search_mode=None,
-        top_k=None,
-        min_score=None,
-        search_precision_mode=None,
-        pixel_query_data=None,
-        preview_anchor_sec=None,
-        locate_anchor_score=None,
-        locate_score_margin=None,
-        video_discovery_enabled=None,
-    ):
+    def __init__(self, config: SearchConfig):
         super().__init__()
-        self.query = query
-        self.is_text = bool(is_text)
-        self.scope_library_paths = list(scope_library_paths or [])
-        self.scope_video_paths = list(scope_video_paths or [])
-        self.query_vector = query_vector
-        self.search_mode = search_mode
-        self.top_k = top_k
-        self.min_score = min_score
-        self.search_precision_mode = search_precision_mode
-        self.pixel_query_data = pixel_query_data
-        self.preview_anchor_sec = preview_anchor_sec
-        self.locate_anchor_score = locate_anchor_score
-        self.locate_score_margin = locate_score_margin
-        self.video_discovery_enabled = video_discovery_enabled
+        self.config = config
         self.locate_warning_key = None
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
@@ -91,43 +99,43 @@ class SearchWorker(QThread):
             self.progress_signal.emit(key)
 
     def run(self):
+        config = self.config
         try:
             from src.services.search_service import filter_hits_by_min_score, run_search
 
-            mode = str(self.search_mode or "").strip().lower()
+            mode = str(config.search_mode or "").strip().lower()
             base_kwargs = {
-                "query_data": self.query,
-                "is_text": self.is_text,
-                "top_k": self.top_k,
-                "scope_video_paths": self.scope_video_paths or None,
-                "scope_library_paths": self.scope_library_paths or None,
-                "query_vector": self.query_vector,
+                "query_data": config.query,
+                "is_text": config.is_text,
+                "top_k": config.top_k,
+                "scope_video_paths": config.scope_video_paths or None,
+                "scope_library_paths": config.scope_library_paths or None,
+                "query_vector": config.query_vector,
             }
             results = run_search(
                 search_mode=mode or None,
-                search_precision_mode=self.search_precision_mode,
-                pixel_query_data=self.pixel_query_data,
-                preview_anchor_sec=self.preview_anchor_sec,
-                locate_anchor_score=self.locate_anchor_score,
-                locate_score_margin=self.locate_score_margin,
-                video_discovery_enabled=self.video_discovery_enabled,
+                search_precision_mode=config.search_precision_mode,
+                pixel_query_data=config.pixel_query_data,
+                preview_anchor_sec=config.preview_anchor_sec,
+                locate_anchor_score=config.locate_anchor_score,
+                locate_score_margin=config.locate_score_margin,
+                video_discovery_enabled=config.video_discovery_enabled,
                 progress_callback=self._emit_progress,
                 **base_kwargs,
             )
-            results = filter_hits_by_min_score(results, self.min_score)
+            results = filter_hits_by_min_score(results, config.min_score)
             from src.services.search_service import locate_crop_confidence_warning_key
 
             self.locate_warning_key = locate_crop_confidence_warning_key(
                 list(results) if results is not None else [],
-                self.query,
-                preview_anchor_sec=self.preview_anchor_sec,
-                pixel_query_data=self.pixel_query_data,
+                config.query,
+                preview_anchor_sec=config.preview_anchor_sec,
+                pixel_query_data=config.pixel_query_data,
             )
             self.result_ready.emit(list(results) if results is not None else [])
         except Exception as exc:
-            traceback.print_exc()
+            logger.exception("Search worker failed")
             error_text = str(exc).strip() or repr(exc)
-            print(f"Search Error: {error_text}")
             self.error_signal.emit(error_text)
         finally:
             self.finished.emit()
@@ -140,7 +148,7 @@ class SearchWarmupWorker(QThread):
         try:
             warmup_search_runtime()
         except Exception as exc:
-            print(f"Search Warmup Error: {exc}")
+            logger.warning("Search warmup failed: %s", exc)
         finally:
             self.finished.emit()
 
@@ -152,7 +160,7 @@ class PreviewWarmupWorker(QThread):
         try:
             warmup_vlc_runtime()
         except Exception as exc:
-            print(f"Preview Warmup Error: {exc}")
+            logger.warning("Preview warmup failed: %s", exc)
         finally:
             self.finished.emit()
 
@@ -196,23 +204,6 @@ class IndexUpdateWorker(QThread):
             elif self.debug_failure == "system_oom":
                 os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = "1"
                 os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
-            if self.index_from_vectors_only:
-                from src.workflows.update_video import rebuild_indexes_from_vectors_flow
-
-                logger.info(
-                    "Index rebuild-from-vectors worker starting: target_lib=%s",
-                    self.target_lib,
-                )
-                stats = rebuild_indexes_from_vectors_flow(
-                    target_lib=self.target_lib,
-                    progress_callback=lambda progress, text: self.progress_signal.emit(progress, text),
-                    should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
-                    rebuild_global=self.rebuild_global_assets,
-                )
-                has_search_assets = bool(stats.get("global_built")) or int(stats.get("per_video_rebuilt", 0) or 0) > 0
-                self.finished_signal.emit(True, False, has_search_assets, issues)
-                return
-
             from src.core.clip_embedding import get_engine_runtime_status, prepare_inference_runtime
             from src.workflows.update_video import update_videos_flow
 
@@ -448,49 +439,19 @@ class ThumbLoader(QThread):
             self.thumb_ready.emit(table_row, pixmap)
 
 
-class VersionCheckWorker(QThread):
-    result_ready = Signal(dict)
-
-    def __init__(self, language):
-        super().__init__()
-        self.language = language
-
-    def run(self):
-        try:
-            result = get_version_status(self.language)
-            self.result_ready.emit(result)
-        except Exception as exc:
-            print(f"Version Check Error: {exc}")
+class VersionCheckWorker(FetchWorkerBase):
+    def _fetch_data(self):
+        return get_version_status(self.language)
 
 
-class NoticeFetchWorker(QThread):
-    result_ready = Signal(dict)
-
-    def __init__(self, language):
-        super().__init__()
-        self.language = language
-
-    def run(self):
-        try:
-            result = get_notice_payload(self.language)
-            self.result_ready.emit(result)
-        except Exception as exc:
-            print(f"Notice Fetch Error: {exc}")
+class NoticeFetchWorker(FetchWorkerBase):
+    def _fetch_data(self):
+        return get_notice_payload(self.language)
 
 
-class AboutFetchWorker(QThread):
-    result_ready = Signal(dict)
-
-    def __init__(self, language):
-        super().__init__()
-        self.language = language
-
-    def run(self):
-        try:
-            result = get_about_payload(self.language)
-            self.result_ready.emit(result)
-        except Exception as exc:
-            print(f"About Fetch Error: {exc}")
+class AboutFetchWorker(FetchWorkerBase):
+    def _fetch_data(self):
+        return get_about_payload(self.language)
 
 
 class ResourceDownloadWorker(QThread):
@@ -533,47 +494,89 @@ class ResourceDownloadWorker(QThread):
             self.error_signal.emit(str(exc))
 
 
-class RemoteSearchWorker(QThread):
+class VideoDownloadProbeWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
     finished = Signal()
 
-    def __init__(self, query_data, is_text):
+    def __init__(self, links):
         super().__init__()
-        self.query_data = query_data
-        self.is_text = is_text
+        self.links = list(links or [])
 
     def run(self):
         try:
-            results = run_remote_search(self.query_data, is_text=self.is_text)
-            self.result_ready.emit(results or [])
+            results = probe_video_links(self.links)
+            self.result_ready.emit(results)
         except Exception as exc:
             self.error_signal.emit(str(exc))
         finally:
             self.finished.emit()
 
 
-class RemoteLibraryBuildWorker(QThread):
-    progress_signal = Signal(int, str)
-    finished_signal = Signal(dict)
+class VideoDownloadBatchWorker(QThread):
+    task_started = Signal(int, str, str)
+    task_progress = Signal(int, int, str)
+    task_finished = Signal(int, dict)
+    batch_finished = Signal(dict)
     error_signal = Signal(str)
+    finished = Signal()
 
-    def __init__(self, links, mode):
+    def __init__(self, jobs, *, output_dir):
         super().__init__()
-        self.links = links
-        self.mode = mode
+        self.jobs = list(jobs or [])
+        self.output_dir = str(output_dir or "")
 
     def run(self):
+        import time
+
+        from src.app.config import load_config
+        from src.services.video_download_service import download_video
+
+        started = time.time()
+        success_count = 0
+        failed_count = 0
         try:
-            result = build_remote_library_from_links(
-                self.links,
-                mode=self.mode,
-                incremental=True,
-                progress_callback=lambda value, text: self.progress_signal.emit(value, text),
-            )
-            self.finished_signal.emit(result)
+            base_config = load_config()
+            for index, job in enumerate(self.jobs):
+                url = str(job.get("url", "") or "")
+                title = str(job.get("title", "") or url)
+                quality = str(job.get("quality", "best") or "best")
+                self.task_started.emit(index, title, url)
+
+                def _progress(percent, text, idx=index):
+                    self.task_progress.emit(idx, int(percent), str(text))
+
+                config = dict(base_config)
+                config["download_quality"] = quality
+                result = download_video(
+                    url,
+                    output_dir=self.output_dir,
+                    progress_callback=_progress,
+                    config=config,
+                )
+                payload = {
+                    "ok": result.ok,
+                    "url": result.url,
+                    "title": result.title,
+                    "file_path": result.file_path,
+                    "reason_code": result.reason_code,
+                    "strategy_used": result.strategy_used,
+                }
+                if result.ok:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                self.task_finished.emit(index, payload)
+            summary = {
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "duration_sec": round(time.time() - started, 3),
+            }
+            self.batch_finished.emit(summary)
         except Exception as exc:
             self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
 
 
 class LocalVectorDetailsWorker(QThread):

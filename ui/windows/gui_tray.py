@@ -187,7 +187,7 @@ class TrayGuiMixin:
         if hasattr(self, "_preview_dialog") and self._preview_dialog is not None:
             self._preview_dialog.shutdown_player(fast=True)
         self.search_controller.shutdown()
-        self.network_search_controller.shutdown()
+        self.video_download_controller.shutdown()
         from ui.threading_utils import shutdown_thread
 
         shutdown_thread(getattr(self, "_model_package_import_worker", None), stop_first=True)

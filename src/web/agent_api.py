@@ -34,9 +34,17 @@ from src.services.agent_clip_service import (
     execute_agent_batch_export_clips,
     execute_agent_export_clip,
 )
+from src.services.agent_evidence_service import (
+    AgentEvidenceError,
+    build_agent_understanding_health_fields,
+    get_agent_video_evidence,
+    list_agent_evidence_status,
+    resolve_understanding_timeout_sec,
+    resolve_understanding_pending_chunk_count,
+)
 from src.utils import normalize_export_encode_mode
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
-from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos
+from src.services.agent_library_service import list_agent_libraries, list_agent_videos
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
@@ -268,9 +276,7 @@ def _index_snapshot(mode: str, config=None) -> Dict[str, Any]:
     if video_paths:
         unique_paths = {str(path) for path in video_paths if path}
     index_ready = search_index is not None and vector_count > 0
-    from src.services.library_service import get_global_index_state
-
-    global_state = str(get_global_index_state() or "").strip().lower()
+    global_state = "fresh"
     frame_vector_count = _index_vector_count(frame_index)
     chunk_vector_count = _index_vector_count(chunk_index)
     library_snapshot = _library_index_snapshot(cfg)
@@ -297,7 +303,7 @@ def _build_index_id(spec: Dict[str, Any], snapshot: Dict[str, Any]) -> str:
     return f"{embedding_space}_{dimension}_{metric}_{state}"
 
 
-def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
+def _build_capabilities(snapshot: Dict[str, Any], *, understanding_ready: bool = False) -> Dict[str, bool]:
     ffmpeg_info = _build_ffmpeg_info()
     return {
         "text_search": True,
@@ -313,6 +319,8 @@ def _build_capabilities(snapshot: Dict[str, Any]) -> Dict[str, bool]:
         "search_precision": True,
         "search_telemetry": True,
         "crop_locate": True,
+        "video_evidence": True,
+        "video_evidence_ready": bool(understanding_ready),
     }
 
 
@@ -351,6 +359,10 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     timeouts = _agent_timeout_settings(config)
     from src.services.search_telemetry import is_telemetry_enabled
 
+    understanding_fields = build_agent_understanding_health_fields(config=config, probe_remote=False)
+    from src.services.indexing_runtime_status import get_index_sync_status
+
+    sync_status = get_index_sync_status()
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -358,6 +370,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "index_ready": bool(snapshot["index_ready"]),
         "index_stale": bool(snapshot["index_stale"]),
         "global_index_state": snapshot["global_index_state"],
+        **sync_status,
         "index_id": _build_index_id(spec, snapshot),
         "search_mode_default": get_search_mode(config),
         "search_mode_checked": mode,
@@ -366,7 +379,10 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "embedding_space": spec.get("embedding_space"),
         "dimension": int(spec.get("dimension") or 0),
         "metric": spec.get("metric"),
-        "capabilities": _build_capabilities(snapshot),
+        "capabilities": _build_capabilities(
+            snapshot,
+            understanding_ready=bool(understanding_fields.get("understanding_ready")),
+        ),
         "ffmpeg": _build_ffmpeg_info(),
         "video_count": _count_library_videos(),
         "vector_count": snapshot["vector_count"],
@@ -387,6 +403,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
+        **understanding_fields,
     }
 
 
@@ -1406,11 +1423,14 @@ class AgentApiService:
         self.app.get("/api/v1/agent-doc")(self._agent_doc)
         self.app.get("/api/v1/libraries")(self._libraries)
         self.app.get("/api/v1/libraries/videos")(self._library_videos)
+        self.app.get("/api/v1/videos")(self._videos)
         self.app.get("/api/v1/search/presets")(self._search_presets)
         self.app.get("/api/v1/search/presets/{preset_id}")(self._search_preset_detail)
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
+        self.app.get("/api/v1/videos/evidence/status")(self._video_evidence_status)
+        self.app.get("/api/v1/videos/evidence")(self._video_evidence)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
         self.app.post("/api/v1/export/clip")(self._export_clip)
         self.app.post("/api/v1/export/clips/batch")(self._export_clips_batch)
@@ -1541,15 +1561,41 @@ class AgentApiService:
 
     async def _library_videos(
         self,
-        library_path: str,
+        library_path: Optional[str] = None,
+        video_id: Optional[str] = None,
+        q: Optional[str] = None,
+        has_evidence: Optional[bool] = None,
+        ready_only: bool = True,
+        limit: int = 500,
+        offset: int = 0,
+    ):
+        return await self._videos(
+            library_path=library_path,
+            video_id=video_id,
+            q=q,
+            has_evidence=has_evidence,
+            ready_only=ready_only,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def _videos(
+        self,
+        library_path: Optional[str] = None,
+        video_id: Optional[str] = None,
+        q: Optional[str] = None,
+        has_evidence: Optional[bool] = None,
         ready_only: bool = True,
         limit: int = 500,
         offset: int = 0,
     ):
         try:
             payload = await asyncio.to_thread(
-                list_agent_library_videos,
+                list_agent_videos,
                 library_path,
+                video_id=video_id,
+                q=q,
+                has_evidence=has_evidence,
                 ready_only=ready_only,
                 limit=limit,
                 offset=offset,
@@ -1559,7 +1605,7 @@ class AgentApiService:
         except ValueError as exc:
             raise_api_error(400, "invalid_request", str(exc))
         except Exception as exc:
-            logger.exception("Agent library videos failed.")
+            logger.exception("Agent synced videos list failed.")
             raise_api_error(500, "query_failed", str(exc))
         return JSONResponse(payload)
 
@@ -1580,6 +1626,87 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent search telemetry failed.")
             raise_api_error(500, "query_failed", str(exc))
+
+    async def _video_evidence_status(self, video_ids: Optional[List[str]] = None):
+        ids = [str(item).strip() for item in (video_ids or []) if str(item).strip()]
+        if len(ids) == 1 and "," in ids[0]:
+            ids = [part.strip() for part in ids[0].split(",") if part.strip()]
+        try:
+            payload = await asyncio.to_thread(list_agent_evidence_status, ids)
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent evidence status failed.")
+            raise_api_error(500, "query_failed", str(exc))
+        return JSONResponse(payload)
+
+    async def _video_evidence(
+        self,
+        video_id: Optional[str] = None,
+        video_path: Optional[str] = None,
+        start_sec: Optional[float] = None,
+        end_sec: Optional[float] = None,
+        ensure: bool = False,
+    ):
+        config = load_config()
+        timeout_sec = resolve_understanding_timeout_sec(chunk_count=1, config=config)
+        try:
+            from src.services.agent_evidence_service import resolve_agent_video_id
+
+            resolved_video_id = await asyncio.to_thread(
+                resolve_agent_video_id,
+                video_id=video_id,
+                video_path=video_path,
+                config=config,
+            )
+            pending_chunks = await asyncio.to_thread(
+                resolve_understanding_pending_chunk_count,
+                video_id=resolved_video_id,
+                config=config,
+            )
+            timeout_sec = resolve_understanding_timeout_sec(
+                chunk_count=pending_chunks,
+                config=config,
+            )
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(
+                    get_agent_video_evidence,
+                    video_id=video_id,
+                    video_path=video_path,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    ensure=ensure,
+                    config=config,
+                ),
+                timeout=timeout_sec,
+            )
+        except AgentEvidenceError as exc:
+            raise_api_error(exc.status_code, exc.code, exc.message)
+        except asyncio.TimeoutError:
+            partial = await asyncio.to_thread(
+                get_agent_video_evidence,
+                video_id=video_id,
+                video_path=video_path,
+                start_sec=start_sec,
+                end_sec=end_sec,
+                ensure=False,
+                config=config,
+            )
+            progress = (partial.get("meta") or {}) if isinstance(partial.get("meta"), dict) else {}
+            completed = int(progress.get("chunks_completed") or 0)
+            total = int(progress.get("chunk_total") or 0)
+            detail = (
+                f"Understanding evidence timed out after {int(timeout_sec)} seconds."
+                + (f" Partial progress: {completed}/{total} chunks on disk — retry ensure=true to resume." if completed else " Retry ensure=true to resume if generation was in progress.")
+            )
+            raise_api_error(503, "understanding_timeout", detail)
+        except Exception as exc:
+            logger.exception("Agent video evidence failed.")
+            raise_api_error(500, "query_failed", str(exc))
+        payload.setdefault("meta", {})
+        if isinstance(payload.get("meta"), dict):
+            payload["meta"]["understanding_timeout_sec"] = int(timeout_sec)
+        return payload
 
     async def _search(self, body: AgentSearchRequest):
         started = time.perf_counter()

@@ -19,15 +19,6 @@ class LocalSearchCol(IntEnum):
     ACTIONS = 6
 
 
-class NetworkLinkCol(IntEnum):
-    ORDER = 0
-    TITLE = 1
-    TIME = 2
-    SCORE = 3
-    SOURCE = 4
-    ACTIONS = 5
-
-
 @dataclass(frozen=True)
 class TableColumnSpec:
     key: str
@@ -68,18 +59,5 @@ LOCAL_SEARCH_TABLE_SPEC = TableSpec(
         TableColumnSpec("mode", width=74),
         TableColumnSpec("score", width=74),
         TableColumnSpec("actions", width=360),
-    ),
-)
-
-NETWORK_LINK_TABLE_SPEC = TableSpec(
-    texts_header_key="network_result_headers",
-    row_height=72,
-    columns=(
-        TableColumnSpec("order", width=46),
-        TableColumnSpec("title", resize="stretch"),
-        TableColumnSpec("time", width=90),
-        TableColumnSpec("score", width=74),
-        TableColumnSpec("source", width=300),
-        TableColumnSpec("actions", width=116),
     ),
 )

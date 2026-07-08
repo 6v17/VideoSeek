@@ -4,12 +4,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QTextBrowser,
     QVBoxLayout,
 )
 
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
+from ui.dialogs.html_links import ExternalLinkTextBrowser
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
@@ -43,7 +43,11 @@ class AboutDialog(QDialog):
         subtitle = QLabel(subtitle_text)
         subtitle.setObjectName("Hint")
         subtitle.setWordWrap(True)
-        version = QLabel(texts["version_label"].format(version=get_app_version()))
+        version = QLabel(
+            texts["version_label"].format(
+                version=str(version_info.get("current_version") or get_app_version())
+            )
+        )
         version.setObjectName("DialogMetaLabel")
         version_status = QLabel(version_info.get("status_text", texts["version_check_unavailable"]))
         version_status.setObjectName("DialogMetaLabel")
@@ -53,10 +57,9 @@ class AboutDialog(QDialog):
         divider.setFrameShape(QFrame.HLine)
         divider.setObjectName("DialogDivider")
 
-        body = QTextBrowser()
+        body = ExternalLinkTextBrowser()
         body.setObjectName("DialogBodyBrowser")
         body.setReadOnly(True)
-        body.setOpenExternalLinks(True)
         if about.get("format") == "html":
             body.setHtml(about.get("body", texts["about_body"]))
         else:

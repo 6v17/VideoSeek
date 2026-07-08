@@ -3,20 +3,21 @@ import json
 import pytest
 
 import src.services.search_telemetry as telemetry
+import src.services.search_telemetry_store as telemetry_store
 
 
 @pytest.fixture(autouse=True)
 def reset_telemetry_state(monkeypatch, tmp_path):
     telemetry_file = tmp_path / "search_telemetry.json"
-    monkeypatch.setattr(telemetry, "get_telemetry_file_path", lambda: str(telemetry_file))
-    monkeypatch.setattr(telemetry, "is_telemetry_enabled", lambda config=None: True)
-    with telemetry._lock:
-        telemetry._state = None
-        telemetry._pending_playback = None
+    monkeypatch.setattr(telemetry_store, "get_telemetry_file_path", lambda: str(telemetry_file))
+    monkeypatch.setattr(telemetry_store, "is_telemetry_enabled", lambda config=None: True)
+    with telemetry_store._lock:
+        telemetry_store._state = None
+        telemetry_store._pending_playback = None
     yield
-    with telemetry._lock:
-        telemetry._state = None
-        telemetry._pending_playback = None
+    with telemetry_store._lock:
+        telemetry_store._state = None
+        telemetry_store._pending_playback = None
 
 
 def test_record_crop_locate_anchor_updates_summary():
@@ -150,8 +151,8 @@ def test_persistence_round_trip(tmp_path):
         clip_score=0.8,
     )
 
-    with telemetry._lock:
-        telemetry._state = None
+    with telemetry_store._lock:
+        telemetry_store._state = None
 
     reloaded = telemetry.get_telemetry_summary()
     assert reloaded["crop_locate"]["total"] == 1
@@ -181,8 +182,14 @@ def test_locate_bias_auto_tune_disabled_by_default():
 
 
 def test_record_locate_clip_window_does_not_apply_segmented_bias_without_gating(monkeypatch):
-    monkeypatch.setattr(telemetry, "_LOCATE_CLIP_BIAS_SEGMENT_INTERVAL", 2)
-    monkeypatch.setattr(telemetry, "_LOCATE_CLIP_BIAS_SEGMENT_MIN_ERRORS", 2)
+    monkeypatch.setattr(
+        "src.services.search_telemetry_store.LOCATE_CLIP_BIAS_SEGMENT_INTERVAL",
+        2,
+    )
+    monkeypatch.setattr(
+        "src.services.locate_segmentation_gating.MIN_BIAS_SEGMENT_ERRORS",
+        2,
+    )
     telemetry.record_locate_clip_window(
         window_sec=20.0,
         score=0.78,

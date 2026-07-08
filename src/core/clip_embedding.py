@@ -38,8 +38,8 @@ from src.core.onnx_vision_engine import (
     format_exception_detail as _format_exception_detail,
     truncate_log_text as _truncate_log_text,
 )
-from src.core.faiss_index import create_clip_index
 from src.core.semantic_chunking import SemanticChunkStreamBuilder, build_semantic_chunks
+from src.core.tokenizer import tokenize
 from src.storage.asset_store import save_vector_payload
 from src.storage.config_store import (
     build_chunk_config,
@@ -48,7 +48,6 @@ from src.storage.config_store import (
     get_active_model_resource_dir,
     get_effective_prefer_gpu,
 )
-from src.core.tokenizer import tokenize
 from src.utils import (
     ensure_folder_exists,
     ensure_model_files,
@@ -1331,7 +1330,6 @@ def generate_vectors_and_index_for_video(
         progress_reporter.emit("chunk", force=True)
     t_chunks = time.perf_counter()
     from src.core.gpu_vector_ops import gpu_to_numpy, is_cupy_array, vstack_gpu
-    from src.core.faiss_index import faiss_gpu_available
 
     if use_full_gpu and vector_parts and is_cupy_array(vector_parts[0]):
         t_stack = time.perf_counter()
@@ -1352,50 +1350,31 @@ def generate_vectors_and_index_for_video(
     vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
     index_file = os.path.normpath(os.path.join(index_dir, f"{video_id}_index.faiss"))
 
-    ensure_folder_exists(vector_file)
+    save_s = 0.0
+    faiss_s = 0.0
+    index = None
     if progress_reporter is not None:
         progress_reporter.emit("save", force=True)
     t_save = time.perf_counter()
-    save_vector_payload(
-        vectors,
-        timestamps,
-        vector_file,
-        chunks=chunks,
-        chunk_config=chunk_config,
-        embedding_spec=get_active_embedding_spec(config=runtime_config),
-    )
     save_s = time.perf_counter() - t_save
-
-    ensure_folder_exists(index_file)
-    t_faiss = time.perf_counter()
-    index = create_clip_index(
-        vectors,
-        index_file,
-        prefer_gpu=bool(use_full_gpu and faiss_gpu_available()),
-    )
-    faiss_s = time.perf_counter() - t_faiss
-
-    total_s = time.perf_counter() - wall_start
-    parts_s = pipe_s + stack_s + chunks_s + save_s + faiss_s
     logger.info(
-        "Per-video index %s: stack_vectors %.2fs semantic_chunks %.2fs save_payload %.2fs faiss_index %.2fs "
+        "Per-video index %s: stack_vectors %.2fs semantic_chunks %.2fs lance_persist deferred %.2fs "
         "| parts_sum=%.2fs wall_total=%.2fs",
         log_tag,
         stack_s,
         chunks_s,
         save_s,
-        faiss_s,
-        parts_s,
-        total_s,
+        stack_s + chunks_s + save_s,
+        time.perf_counter() - wall_start,
     )
-    return vectors, timestamps, index
+    return vectors, timestamps, index, chunks
 
 
 def _register_default_inference_engines():
     register_inference_engine("clip_onnx", lambda: CLIPOnnxEngine())
 
     def _siglip_factory():
-        from src.core.siglip_provider_draft import SigLIP2OnnxEngine
+        from src.core.siglip_provider import SigLIP2OnnxEngine
 
         runtime_config = load_config()
         return SigLIP2OnnxEngine(get_active_model_resource_dir(config=runtime_config))

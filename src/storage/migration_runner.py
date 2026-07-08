@@ -13,7 +13,6 @@ from src.storage.config_store import (
     get_global_model_asset_paths,
     get_local_model_asset_dirs,
     get_model_profile_storage_paths,
-    get_remote_model_asset_paths,
     resolve_provider_dir,
 )
 from src.storage.video_id_migration import (
@@ -70,13 +69,11 @@ def _ensure_expected_asset_dirs(config):
     try:
         model_dirs = get_local_model_asset_dirs(config=config)
         global_paths = get_global_model_asset_paths(config=config)
-        remote_paths = get_remote_model_asset_paths(config=config)
         for path in (
             model_dirs.get("vector_dir"),
             model_dirs.get("index_dir"),
             model_dirs.get("base_dir"),
             global_paths.get("global_dir"),
-            remote_paths.get("remote_dir"),
             os.path.dirname(model_dirs.get("meta_file", "") or ""),
         ):
             if path:
@@ -107,9 +104,6 @@ def _already_migrated(config, meta):
     except Exception:
         return False
     if not os.path.isdir(global_paths["global_dir"]):
-        return False
-    remote_paths = get_remote_model_asset_paths(config=config)
-    if not os.path.isdir(remote_paths["remote_dir"]):
         return False
     return True
 
@@ -344,36 +338,6 @@ def _migrate_global_asset_files(config):
     return migrated_files
 
 
-def _migrate_remote_asset_files(config):
-    profile = get_active_model_profile(config=config)
-    profile_id = str(profile.get("id", "") or "").strip()
-    legacy_remote_dir = (
-        os.path.join(get_configured_data_root(config), "data", "model_assets", profile_id, "remote")
-        if profile_id
-        else ""
-    )
-    remote_paths = get_remote_model_asset_paths(config=config)
-    os.makedirs(remote_paths["remote_dir"], exist_ok=True)
-    migrated_files = 0
-    legacy_targets = (
-        (str(config.get("remote_index_file", "") or "").strip(), remote_paths["remote_index_file"]),
-        (str(config.get("remote_vector_file", "") or "").strip(), remote_paths["remote_vector_file"]),
-        (os.path.join(legacy_remote_dir, "remote_index.faiss"), remote_paths["remote_index_file"]),
-        (os.path.join(legacy_remote_dir, "remote_vectors.npy"), remote_paths["remote_vector_file"]),
-    )
-    for legacy_file, target_file in legacy_targets:
-        if not legacy_file or not os.path.exists(legacy_file):
-            continue
-        if os.path.normcase(os.path.normpath(legacy_file)) == os.path.normcase(os.path.normpath(target_file)):
-            continue
-        os.makedirs(os.path.dirname(target_file), exist_ok=True)
-        if os.path.exists(target_file):
-            continue
-        shutil.move(legacy_file, target_file)
-        migrated_files += 1
-    return migrated_files
-
-
 def _migrate_model_resource_files(config):
     profile = get_active_model_profile(config=config)
     files = dict(profile.get("files") or {})
@@ -505,23 +469,6 @@ def _migrate_global_payloads(config):
     return migrated
 
 
-def _migrate_remote_payload(config):
-    remote_paths = get_remote_model_asset_paths(config=config)
-    remote_file = str(remote_paths["remote_vector_file"] or "").strip()
-    if not remote_file or not os.path.exists(remote_file):
-        return 0
-    try:
-        payload = load_numpy_payload(remote_file)
-    except Exception as exc:
-        logger.warning("Skipping unreadable remote payload during migration: %s (%s)", remote_file, exc)
-        return 0
-    payload, changed = _inject_embedding_spec(payload, asset_type="remote_index_vectors")
-    if not changed:
-        return 0
-    save_numpy_payload(remote_file, payload)
-    return 1
-
-
 def _data_dir_has_user_payload(config):
     """True when ``data/`` exists and contains at least one file (new installs are skipped)."""
     data_dir = os.path.join(get_configured_data_root(config), "data")
@@ -584,51 +531,45 @@ def _write_migration_state(config, backup_dir):
 
 
 def needs_search_index_schema_migration(config=None):
-    """True when v2 per-library search indexes must be built from cached vectors."""
+    """True when Lance startup migration still has pending import/cleanup work."""
     runtime_config = config or load_config()
     try:
-        meta = _load_meta_for_startup(runtime_config)
-        from src.services.search_index_schema import needs_search_index_upgrade
+        from src.storage.lance_migration_runner import needs_lance_startup_migration
 
-        return needs_search_index_upgrade(meta, config=runtime_config)
+        return needs_lance_startup_migration(runtime_config)
     except Exception:
         logger.warning("Failed to evaluate search index schema migration need", exc_info=True)
         return False
 
 
-def _migrate_search_index_v2(config, progress_callback=None):
-    from src.services.search_index_schema import needs_search_index_upgrade
-    from src.workflows.update_video import upgrade_search_index_flow
-
-    meta = _load_meta_for_startup(config)
-    if not needs_search_index_upgrade(meta, config=config):
-        logger.info("Search index schema migration skipped: already up to date")
-        return {
-            "upgraded": False,
-            "libraries_built": 0,
-            "libraries_cleared": 0,
-            "libraries_skipped": 0,
-            "global_built": False,
-        }
-
-    logger.info("Running forced search index schema migration during startup")
-    _emit(progress_callback, 97, "正在升级搜索索引结构")
-
-    def _upgrade_progress(value, text):
-        mapped = 97 + max(0, min(2, int(int(value) * 2 / 100)))
-        _emit(progress_callback, mapped, text or "正在升级搜索索引结构")
-
-    stats = upgrade_search_index_flow(
-        progress_callback=_upgrade_progress,
-        rebuild_global=True,
-    )
-    return {
-        "upgraded": True,
-        "libraries_built": int(stats.get("libraries_built", 0) or 0),
-        "libraries_cleared": int(stats.get("libraries_cleared", 0) or 0),
-        "libraries_skipped": int(stats.get("libraries_skipped", 0) or 0),
-        "global_built": bool(stats.get("global_built")),
+def _empty_search_index_migration_result(**extra):
+    payload = {
+        "upgraded": False,
+        "libraries_built": 0,
+        "libraries_cleared": 0,
+        "libraries_skipped": 0,
+        "global_built": False,
+        "lance_profiles_migrated": 0,
+        "lance_videos_imported": 0,
+        "lance_videos_failed": 0,
+        "lance_legacy_removed": 0,
     }
+    payload.update(extra)
+    return payload
+
+
+def _migrate_search_index_v2(config, progress_callback=None):
+    from src.storage.lance_migration_runner import (
+        needs_lance_startup_migration,
+        run_lance_startup_migration,
+    )
+
+    if needs_lance_startup_migration(config):
+        logger.info("Running Lance vector startup migration")
+        return run_lance_startup_migration(config, progress_callback=progress_callback)
+
+    logger.info("Lance vector storage is active; no FAISS search index migration required.")
+    return _empty_search_index_migration_result()
 
 
 def _apply_post_schema_maintenance(config, progress_callback=None):
@@ -647,6 +588,9 @@ def _attach_maintenance_summary(payload, video_id_result, search_index_result):
     merged["search_index_upgraded"] = bool(search_index_result.get("upgraded"))
     merged["search_index_libraries_built"] = int(search_index_result.get("libraries_built", 0) or 0)
     merged["search_index_global_built"] = bool(search_index_result.get("global_built"))
+    merged["lance_videos_imported"] = int(search_index_result.get("lance_videos_imported", 0) or 0)
+    merged["lance_videos_failed"] = int(search_index_result.get("lance_videos_failed", 0) or 0)
+    merged["lance_legacy_removed"] = int(search_index_result.get("lance_legacy_removed", 0) or 0)
     if search_index_result.get("upgraded"):
         merged["migrated"] = True
     return merged
@@ -806,17 +750,11 @@ def run_startup_migration(progress_callback=None):
     _emit(progress_callback, 76, "正在迁移全局索引资产目录")
     global_asset_files = _migrate_global_asset_files(latest_config)
 
-    _emit(progress_callback, 80, "正在迁移远程索引资产目录")
-    remote_asset_files = _migrate_remote_asset_files(latest_config)
-
     _emit(progress_callback, 82, "正在迁移模型资源目录")
     model_resource_files = _migrate_model_resource_files(latest_config)
 
-    _emit(progress_callback, 84, "正在升级全局索引元数据结构")
+    _emit(progress_callback, 86, "正在升级全局索引元数据结构")
     global_count = _migrate_global_payloads(latest_config)
-
-    _emit(progress_callback, 86, "正在升级远程索引元数据结构")
-    remote_count = _migrate_remote_payload(latest_config)
 
     _emit(progress_callback, 90, "正在清理旧目录")
     cleaned_legacy_dirs = _cleanup_legacy_empty_dirs(latest_config)
@@ -836,11 +774,10 @@ def run_startup_migration(progress_callback=None):
 
     _emit(progress_callback, 100, "数据结构迁移完成")
     logger.info(
-        "Startup migration finished: schema_version=%s migrated_local=%s migrated_global=%s migrated_remote=%s search_index_upgraded=%s",
+        "Startup migration finished: schema_version=%s migrated_local=%s migrated_global=%s search_index_upgraded=%s",
         TARGET_SCHEMA_VERSION,
         local_count,
         global_count,
-        remote_count,
         bool(search_index_result.get("upgraded")),
     )
     return _attach_maintenance_summary(
@@ -852,10 +789,10 @@ def run_startup_migration(progress_callback=None):
             "migrated_meta_file": int(migrated_meta_file),
             "migrated_local_asset_files": int(local_asset_files),
             "migrated_global_asset_files": int(global_asset_files),
-            "migrated_remote_asset_files": int(remote_asset_files),
+            "migrated_remote_asset_files": 0,
             "migrated_model_resource_files": int(model_resource_files),
             "migrated_global_payloads": int(global_count),
-            "migrated_remote_payloads": int(remote_count),
+            "migrated_remote_payloads": 0,
             "cleaned_legacy_dirs": int(cleaned_legacy_dirs),
         },
         video_id_result,

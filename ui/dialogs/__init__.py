@@ -6,6 +6,7 @@ from .legacy_resource_table import LegacyResourceTableDialog
 from .link_editor import LinkEditorDialog
 from .mobile_bridge import MobileBridgeDialog
 from .model_download import ModelDownloadDialog
+from .donate import DonateDialog
 from .notice import NoticeDialog
 from .resource_table import ResourceTableDialog
 from .sampling_rules import SamplingRulesDialog
@@ -17,6 +18,7 @@ __all__ = [
     "LinkEditorDialog",
     "MobileBridgeDialog",
     "ModelDownloadDialog",
+    "DonateDialog",
     "NoticeDialog",
     "ResourceTableDialog",
     "SamplingRulesDialog",

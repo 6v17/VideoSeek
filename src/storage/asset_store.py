@@ -40,24 +40,6 @@ def save_vector_payload(vectors, timestamps, vector_file, chunks=None, chunk_con
         embedding_spec=embedding_spec,
     )
 
-
-def save_remote_vector_payload(vector_file, payload):
-    from src.core.faiss_index import atomic_save_numpy
-
-    atomic_save_numpy(vector_file, payload)
-
-
-def load_remote_vector_payload(vector_file):
-    data = np.load(vector_file, allow_pickle=True).item()
-    return {
-        "vector": np.asarray(data.get("vector", np.empty((0, 0), dtype=np.float32)), dtype=np.float32),
-        "timestamps": [float(value) for value in data.get("timestamps", [])],
-        "paths": [str(value) for value in data.get("paths", [])],
-        "source_links": [str(value) for value in data.get("source_links", [])],
-        "titles": [str(value) for value in data.get("titles", [])],
-    }
-
-
 def load_numpy_payload(npy_file):
     return np.load(npy_file, allow_pickle=True).item()
 

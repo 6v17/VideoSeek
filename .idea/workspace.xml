@@ -4,28 +4,31 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/cuda-experiment.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/cuda-experiment.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/inference_providers.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/inference_providers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/understanding/ort_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/understanding/ort_runtime.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_inference_providers.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_inference_providers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
-  <component name="ChangesViewManager">
+  <component name="ChangesViewManager" show_ignored="true">
     <option name="groupingKeys">
       <option value="directory" />
       <option value="repository" />
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="270" />
+    <option name="cachedIndexableFilesCount" value="338" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -38,7 +41,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="master" />
+        <entry key="$PROJECT_DIR$" value="feat/cuda-experiment" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -80,23 +83,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.1476248627041759" />
-      <entry key="MS500" value="1.7489209607143281" />
-      <entry key="S2" value="3.066084190512692" />
-      <entry key="S5" value="5.954129000071963" />
-      <entry key="S10" value="9.853016143220803" />
-      <entry key="S30" value="16.94405924663961" />
-      <entry key="S60" value="20.771168973786466" />
-      <entry key="M2" value="26.722692483056747" />
-      <entry key="M5" value="51.79476815954621" />
-      <entry key="M10" value="93.13145247423338" />
-      <entry key="M15" value="127.72982210631537" />
-      <entry key="M30" value="213.26757655782728" />
-      <entry key="H1" value="362.59001229809286" />
-      <entry key="H2" value="597.1637828523601" />
-      <entry key="H4" value="869.120311366359" />
-      <entry key="D1" value="1602.5939333914987" />
-      <entry key="W1" value="1998.4259457233813" />
+      <entry key="MS100" value="1.0121019546710024" />
+      <entry key="MS500" value="1.6682938532851228" />
+      <entry key="S2" value="3.52686317012069" />
+      <entry key="S5" value="5.88985821689247" />
+      <entry key="S10" value="7.516918907471562" />
+      <entry key="S30" value="9.829916308488352" />
+      <entry key="S60" value="14.596575687907603" />
+      <entry key="M2" value="24.0430168165147" />
+      <entry key="M5" value="39.68806458534536" />
+      <entry key="M10" value="51.04979532902636" />
+      <entry key="M15" value="60.535671310451946" />
+      <entry key="M30" value="89.72059588573255" />
+      <entry key="H1" value="148.8662843750686" />
+      <entry key="H2" value="304.79620597813783" />
+      <entry key="H4" value="672.3209087145748" />
+      <entry key="D1" value="2154.368911977107" />
+      <entry key="W1" value="2959.146012747072" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -118,23 +121,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="1.1075475680418627" />
-      <entry key="MS500" value="1.7359111353937269" />
-      <entry key="S2" value="3.060560461265657" />
-      <entry key="S5" value="5.949934627156213" />
-      <entry key="S10" value="9.84955493903391" />
-      <entry key="S30" value="16.94207246505002" />
-      <entry key="S60" value="20.769950614279004" />
-      <entry key="M2" value="26.721905717046408" />
-      <entry key="M5" value="51.79414453250461" />
-      <entry key="M10" value="93.13088067438652" />
-      <entry key="M15" value="127.72929329795281" />
-      <entry key="M30" value="213.267123863292" />
-      <entry key="H1" value="362.58961409358795" />
-      <entry key="H2" value="597.1634442752973" />
-      <entry key="H4" value="869.1200597096392" />
-      <entry key="D1" value="1602.593853511143" />
-      <entry key="W1" value="1998.4259313770176" />
+      <entry key="MS100" value="0.9709603981439708" />
+      <entry key="MS500" value="1.6557476185447422" />
+      <entry key="S2" value="3.5207203041299593" />
+      <entry key="S5" value="5.885790783912489" />
+      <entry key="S10" value="7.51432120058274" />
+      <entry key="S30" value="9.82877761418382" />
+      <entry key="S60" value="14.595716476431356" />
+      <entry key="M2" value="24.04228599312866" />
+      <entry key="M5" value="39.68755878271764" />
+      <entry key="M10" value="51.04946046593942" />
+      <entry key="M15" value="60.53539987921629" />
+      <entry key="M30" value="89.72038442788377" />
+      <entry key="H1" value="148.8661043257141" />
+      <entry key="H2" value="304.7960211965774" />
+      <entry key="H4" value="672.3207052630751" />
+      <entry key="D1" value="2154.3688026086184" />
+      <entry key="W1" value="2959.1459912177097" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -148,39 +151,39 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "DefaultHtmlFileTemplate": "HTML File",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.core.executor": "Debug",
-    "Python.main.executor": "Run",
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "feat/cuda-experiment",
-    "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "D:/PycharmProjects/VideoSeek/resources",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;DefaultHtmlFileTemplate&quot;: &quot;HTML File&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.core.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/VideoSeek/docs/assets&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;ml.llm.LLMThirdPartyAiProvidersConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\PycharmProjects\VideoSeek\docs\assets" />
       <recent name="D:\PycharmProjects\VideoSeek\resources" />
       <recent name="D:\PycharmProjects\VideoSeek\face_model" />
       <recent name="D:\PycharmProjects\VideoSeek" />
       <recent name="D:\PycharmProjects\VideoSeek\vlc_lib" />
-      <recent name="D:\PycharmProjects\VideoSeek\static" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\PycharmProjects\VideoSeek\models\chinese-clip\vit-base-patch16" />
@@ -244,8 +247,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.24374.152" />
-        <option value="bundled-python-sdk-c59985aa861c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.24374.152" />
+        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.26222.68" />
+        <option value="bundled-python-sdk-50341a9f1f9c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.26222.68" />
       </set>
     </attachedChunks>
   </component>
@@ -466,214 +469,25 @@
       <workItem from="1782392206578" duration="11019000" />
       <workItem from="1782474044093" duration="8271000" />
       <workItem from="1782529924939" duration="5854000" />
-    </task>
-    <task id="LOCAL-00079" summary="局域网HEIC格式图片上传Bug修复">
-      <option name="closed" value="true" />
-      <created>1779030530532</created>
-      <option name="number" value="00079" />
-      <option name="presentableId" value="LOCAL-00079" />
-      <option name="project" value="LOCAL" />
-      <updated>1779030530533</updated>
-    </task>
-    <task id="LOCAL-00080" summary="迁移数据非阻塞">
-      <option name="closed" value="true" />
-      <created>1779106048964</created>
-      <option name="number" value="00080" />
-      <option name="presentableId" value="LOCAL-00080" />
-      <option name="project" value="LOCAL" />
-      <updated>1779106048965</updated>
-    </task>
-    <task id="LOCAL-00081" summary="更新说明">
-      <option name="closed" value="true" />
-      <created>1779187815493</created>
-      <option name="number" value="00081" />
-      <option name="presentableId" value="LOCAL-00081" />
-      <option name="project" value="LOCAL" />
-      <updated>1779187815493</updated>
-    </task>
-    <task id="LOCAL-00082" summary="更新说明">
-      <option name="closed" value="true" />
-      <created>1779188328754</created>
-      <option name="number" value="00082" />
-      <option name="presentableId" value="LOCAL-00082" />
-      <option name="project" value="LOCAL" />
-      <updated>1779188328755</updated>
-    </task>
-    <task id="LOCAL-00083" summary="移除远古旧版本迁移代码">
-      <option name="closed" value="true" />
-      <created>1779536050161</created>
-      <option name="number" value="00083" />
-      <option name="presentableId" value="LOCAL-00083" />
-      <option name="project" value="LOCAL" />
-      <updated>1779536050161</updated>
-    </task>
-    <task id="LOCAL-00084" summary="增加GPU解码抽帧（试验性）">
-      <option name="closed" value="true" />
-      <created>1779683638226</created>
-      <option name="number" value="00084" />
-      <option name="presentableId" value="LOCAL-00084" />
-      <option name="project" value="LOCAL" />
-      <updated>1779683638227</updated>
-    </task>
-    <task id="LOCAL-00085" summary="加了搜索接口，供agent使用（beta）">
-      <option name="closed" value="true" />
-      <created>1779705980280</created>
-      <option name="number" value="00085" />
-      <option name="presentableId" value="LOCAL-00085" />
-      <option name="project" value="LOCAL" />
-      <updated>1779705980280</updated>
-    </task>
-    <task id="LOCAL-00086" summary="给agent调用api的说明书">
-      <option name="closed" value="true" />
-      <created>1779706038580</created>
-      <option name="number" value="00086" />
-      <option name="presentableId" value="LOCAL-00086" />
-      <option name="project" value="LOCAL" />
-      <updated>1779706038580</updated>
-    </task>
-    <task id="LOCAL-00087" summary="加了搜索接口，供agent使用（beta）">
-      <option name="closed" value="true" />
-      <created>1779706083437</created>
-      <option name="number" value="00087" />
-      <option name="presentableId" value="LOCAL-00087" />
-      <option name="project" value="LOCAL" />
-      <updated>1779706083437</updated>
-    </task>
-    <task id="LOCAL-00088" summary="加了搜索接口，供agent使用（beta）">
-      <option name="closed" value="true" />
-      <created>1779712564610</created>
-      <option name="number" value="00088" />
-      <option name="presentableId" value="LOCAL-00088" />
-      <option name="project" value="LOCAL" />
-      <updated>1779712564611</updated>
-    </task>
-    <task id="LOCAL-00089" summary="引入chinese-clip模型，优化核心链路，增加预设标签">
-      <option name="closed" value="true" />
-      <created>1779939387060</created>
-      <option name="number" value="00089" />
-      <option name="presentableId" value="LOCAL-00089" />
-      <option name="project" value="LOCAL" />
-      <updated>1779939387061</updated>
-    </task>
-    <task id="LOCAL-00090" summary="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配">
-      <option name="closed" value="true" />
-      <created>1780159069437</created>
-      <option name="number" value="00090" />
-      <option name="presentableId" value="LOCAL-00090" />
-      <option name="project" value="LOCAL" />
-      <updated>1780159069437</updated>
-    </task>
-    <task id="LOCAL-00091" summary="更新说明">
-      <option name="closed" value="true" />
-      <created>1780191449495</created>
-      <option name="number" value="00091" />
-      <option name="presentableId" value="LOCAL-00091" />
-      <option name="project" value="LOCAL" />
-      <updated>1780191449496</updated>
-    </task>
-    <task id="LOCAL-00092" summary="精搜优化">
-      <option name="closed" value="true" />
-      <created>1780197220513</created>
-      <option name="number" value="00092" />
-      <option name="presentableId" value="LOCAL-00092" />
-      <option name="project" value="LOCAL" />
-      <updated>1780197220513</updated>
-    </task>
-    <task id="LOCAL-00093" summary="搜索界面重构">
-      <option name="closed" value="true" />
-      <created>1780246088632</created>
-      <option name="number" value="00093" />
-      <option name="presentableId" value="LOCAL-00093" />
-      <option name="project" value="LOCAL" />
-      <updated>1780246088632</updated>
-    </task>
-    <task id="LOCAL-00094" summary="搜索优化">
-      <option name="closed" value="true" />
-      <created>1780288276151</created>
-      <option name="number" value="00094" />
-      <option name="presentableId" value="LOCAL-00094" />
-      <option name="project" value="LOCAL" />
-      <updated>1780288276151</updated>
-    </task>
-    <task id="LOCAL-00095" summary="搜索优化">
-      <option name="closed" value="true" />
-      <created>1780289415303</created>
-      <option name="number" value="00095" />
-      <option name="presentableId" value="LOCAL-00095" />
-      <option name="project" value="LOCAL" />
-      <updated>1780289415304</updated>
-    </task>
-    <task id="LOCAL-00096" summary="搜索优化">
-      <option name="closed" value="true" />
-      <created>1780315095461</created>
-      <option name="number" value="00096" />
-      <option name="presentableId" value="LOCAL-00096" />
-      <option name="project" value="LOCAL" />
-      <updated>1780315095461</updated>
-    </task>
-    <task id="LOCAL-00097" summary="块级搜索bug修复，增加默认预设">
-      <option name="closed" value="true" />
-      <created>1780367771135</created>
-      <option name="number" value="00097" />
-      <option name="presentableId" value="LOCAL-00097" />
-      <option name="project" value="LOCAL" />
-      <updated>1780367771135</updated>
-    </task>
-    <task id="LOCAL-00098" summary="导出优化，新增批量快速导出接口，供agent使用">
-      <option name="closed" value="true" />
-      <created>1780374053463</created>
-      <option name="number" value="00098" />
-      <option name="presentableId" value="LOCAL-00098" />
-      <option name="project" value="LOCAL" />
-      <updated>1780374053463</updated>
-    </task>
-    <task id="LOCAL-00099" summary="完善api调用说明">
-      <option name="closed" value="true" />
-      <created>1780375314874</created>
-      <option name="number" value="00099" />
-      <option name="presentableId" value="LOCAL-00099" />
-      <option name="project" value="LOCAL" />
-      <updated>1780375314875</updated>
-    </task>
-    <task id="LOCAL-00100" summary="减少写配置因为权限问题导致失败">
-      <option name="closed" value="true" />
-      <created>1780573325053</created>
-      <option name="number" value="00100" />
-      <option name="presentableId" value="LOCAL-00100" />
-      <option name="project" value="LOCAL" />
-      <updated>1780573325053</updated>
-    </task>
-    <task id="LOCAL-00101" summary="给本机接口说明加上了安装目录解析，避免agent找不到说明文档">
-      <option name="closed" value="true" />
-      <created>1780816433967</created>
-      <option name="number" value="00101" />
-      <option name="presentableId" value="LOCAL-00101" />
-      <option name="project" value="LOCAL" />
-      <updated>1780816433967</updated>
-    </task>
-    <task id="LOCAL-00102" summary="移除无用说明">
-      <option name="closed" value="true" />
-      <created>1780820034526</created>
-      <option name="number" value="00102" />
-      <option name="presentableId" value="LOCAL-00102" />
-      <option name="project" value="LOCAL" />
-      <updated>1780820034526</updated>
-    </task>
-    <task id="LOCAL-00103" summary="修复搜索范围选择功能">
-      <option name="closed" value="true" />
-      <created>1780838448828</created>
-      <option name="number" value="00103" />
-      <option name="presentableId" value="LOCAL-00103" />
-      <option name="project" value="LOCAL" />
-      <updated>1780838448828</updated>
-    </task>
-    <task id="LOCAL-00104" summary="更新说明文件">
-      <option name="closed" value="true" />
-      <created>1781194406263</created>
-      <option name="number" value="00104" />
-      <option name="presentableId" value="LOCAL-00104" />
-      <option name="project" value="LOCAL" />
-      <updated>1781194406263</updated>
+      <workItem from="1782553183333" duration="2918000" />
+      <workItem from="1782611494949" duration="2839000" />
+      <workItem from="1782614526199" duration="2065000" />
+      <workItem from="1782621309148" duration="691000" />
+      <workItem from="1782646805727" duration="14496000" />
+      <workItem from="1782696773783" duration="9978000" />
+      <workItem from="1782730785200" duration="3042000" />
+      <workItem from="1782823708508" duration="13004000" />
+      <workItem from="1782880230315" duration="1857000" />
+      <workItem from="1782882102686" duration="4756000" />
+      <workItem from="1782991338802" duration="10079000" />
+      <workItem from="1783074854106" duration="5031000" />
+      <workItem from="1783160676471" duration="19012000" />
+      <workItem from="1783222075603" duration="4186000" />
+      <workItem from="1783335915559" duration="677000" />
+      <workItem from="1783346276698" duration="576000" />
+      <workItem from="1783346886797" duration="34000" />
+      <workItem from="1783398947232" duration="1396000" />
+      <workItem from="1783485187992" duration="3024000" />
     </task>
     <task id="LOCAL-00105" summary="更新说明文件">
       <option name="closed" value="true" />
@@ -859,7 +673,215 @@
       <option name="project" value="LOCAL" />
       <updated>1782486563104</updated>
     </task>
-    <option name="localTasksCounter" value="128" />
+    <task id="LOCAL-00128" summary="与master分支同步">
+      <option name="closed" value="true" />
+      <created>1782537614678</created>
+      <option name="number" value="00128" />
+      <option name="presentableId" value="LOCAL-00128" />
+      <option name="project" value="LOCAL" />
+      <updated>1782537614678</updated>
+    </task>
+    <task id="LOCAL-00129" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782556178528</created>
+      <option name="number" value="00129" />
+      <option name="presentableId" value="LOCAL-00129" />
+      <option name="project" value="LOCAL" />
+      <updated>1782556178528</updated>
+    </task>
+    <task id="LOCAL-00130" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782556197087</created>
+      <option name="number" value="00130" />
+      <option name="presentableId" value="LOCAL-00130" />
+      <option name="project" value="LOCAL" />
+      <updated>1782556197087</updated>
+    </task>
+    <task id="LOCAL-00131" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613070583</created>
+      <option name="number" value="00131" />
+      <option name="presentableId" value="LOCAL-00131" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613070583</updated>
+    </task>
+    <task id="LOCAL-00132" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613256838</created>
+      <option name="number" value="00132" />
+      <option name="presentableId" value="LOCAL-00132" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613256838</updated>
+    </task>
+    <task id="LOCAL-00133" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613704578</created>
+      <option name="number" value="00133" />
+      <option name="presentableId" value="LOCAL-00133" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613704578</updated>
+    </task>
+    <task id="LOCAL-00134" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782613891519</created>
+      <option name="number" value="00134" />
+      <option name="presentableId" value="LOCAL-00134" />
+      <option name="project" value="LOCAL" />
+      <updated>1782613891519</updated>
+    </task>
+    <task id="LOCAL-00135" summary="大文件重构">
+      <option name="closed" value="true" />
+      <created>1782652048488</created>
+      <option name="number" value="00135" />
+      <option name="presentableId" value="LOCAL-00135" />
+      <option name="project" value="LOCAL" />
+      <updated>1782652048488</updated>
+    </task>
+    <task id="LOCAL-00136" summary="更新友情链接及LICENSE">
+      <option name="closed" value="true" />
+      <created>1782660462635</created>
+      <option name="number" value="00136" />
+      <option name="presentableId" value="LOCAL-00136" />
+      <option name="project" value="LOCAL" />
+      <updated>1782660462635</updated>
+    </task>
+    <task id="LOCAL-00137" summary="更新友情链接及LICENSE">
+      <option name="closed" value="true" />
+      <created>1782660954613</created>
+      <option name="number" value="00137" />
+      <option name="presentableId" value="LOCAL-00137" />
+      <option name="project" value="LOCAL" />
+      <updated>1782660954614</updated>
+    </task>
+    <task id="LOCAL-00138" summary="更新test">
+      <option name="closed" value="true" />
+      <created>1782661642507</created>
+      <option name="number" value="00138" />
+      <option name="presentableId" value="LOCAL-00138" />
+      <option name="project" value="LOCAL" />
+      <updated>1782661642507</updated>
+    </task>
+    <task id="LOCAL-00139" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1782662168174</created>
+      <option name="number" value="00139" />
+      <option name="presentableId" value="LOCAL-00139" />
+      <option name="project" value="LOCAL" />
+      <updated>1782662168174</updated>
+    </task>
+    <task id="LOCAL-00140" summary="更新test">
+      <option name="closed" value="true" />
+      <created>1782662430975</created>
+      <option name="number" value="00140" />
+      <option name="presentableId" value="LOCAL-00140" />
+      <option name="project" value="LOCAL" />
+      <updated>1782662430975</updated>
+    </task>
+    <task id="LOCAL-00141" summary="更新test">
+      <option name="closed" value="true" />
+      <created>1782663176561</created>
+      <option name="number" value="00141" />
+      <option name="presentableId" value="LOCAL-00141" />
+      <option name="project" value="LOCAL" />
+      <updated>1782663176561</updated>
+    </task>
+    <task id="LOCAL-00142" summary="ui微调">
+      <option name="closed" value="true" />
+      <created>1782697882297</created>
+      <option name="number" value="00142" />
+      <option name="presentableId" value="LOCAL-00142" />
+      <option name="project" value="LOCAL" />
+      <updated>1782697882298</updated>
+    </task>
+    <task id="LOCAL-00143" summary="视频理解yolo检测改为非必须">
+      <option name="closed" value="true" />
+      <created>1782703781608</created>
+      <option name="number" value="00143" />
+      <option name="presentableId" value="LOCAL-00143" />
+      <option name="project" value="LOCAL" />
+      <updated>1782703781608</updated>
+    </task>
+    <task id="LOCAL-00144" summary="api视频理解功能说明更新">
+      <option name="closed" value="true" />
+      <created>1782705415294</created>
+      <option name="number" value="00144" />
+      <option name="presentableId" value="LOCAL-00144" />
+      <option name="project" value="LOCAL" />
+      <updated>1782705415294</updated>
+    </task>
+    <task id="LOCAL-00145" summary="api完善">
+      <option name="closed" value="true" />
+      <created>1782707628828</created>
+      <option name="number" value="00145" />
+      <option name="presentableId" value="LOCAL-00145" />
+      <option name="project" value="LOCAL" />
+      <updated>1782707628828</updated>
+    </task>
+    <task id="LOCAL-00146" summary="api完善">
+      <option name="closed" value="true" />
+      <created>1782709198624</created>
+      <option name="number" value="00146" />
+      <option name="presentableId" value="LOCAL-00146" />
+      <option name="project" value="LOCAL" />
+      <updated>1782709198624</updated>
+    </task>
+    <task id="LOCAL-00147" summary="修复新用户导入模型显示BUG">
+      <option name="closed" value="true" />
+      <created>1782732057139</created>
+      <option name="number" value="00147" />
+      <option name="presentableId" value="LOCAL-00147" />
+      <option name="project" value="LOCAL" />
+      <updated>1782732057140</updated>
+    </task>
+    <task id="LOCAL-00148" summary="移除网络库，新增视频下载功能，优化chunk切分">
+      <option name="closed" value="true" />
+      <created>1783079379562</created>
+      <option name="number" value="00148" />
+      <option name="presentableId" value="LOCAL-00148" />
+      <option name="project" value="LOCAL" />
+      <updated>1783079379563</updated>
+    </task>
+    <task id="LOCAL-00149" summary="改用LanceDB向量数据库，移除废弃功能及无用设置">
+      <option name="closed" value="true" />
+      <created>1783171834576</created>
+      <option name="number" value="00149" />
+      <option name="presentableId" value="LOCAL-00149" />
+      <option name="project" value="LOCAL" />
+      <updated>1783171834576</updated>
+    </task>
+    <task id="LOCAL-00150" summary="修复无数据迁移弹窗报错">
+      <option name="closed" value="true" />
+      <created>1783346355009</created>
+      <option name="number" value="00150" />
+      <option name="presentableId" value="LOCAL-00150" />
+      <option name="project" value="LOCAL" />
+      <updated>1783346355010</updated>
+    </task>
+    <task id="LOCAL-00151" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1783400719603</created>
+      <option name="number" value="00151" />
+      <option name="presentableId" value="LOCAL-00151" />
+      <option name="project" value="LOCAL" />
+      <updated>1783400719617</updated>
+    </task>
+    <task id="LOCAL-00152" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1783400775331</created>
+      <option name="number" value="00152" />
+      <option name="presentableId" value="LOCAL-00152" />
+      <option name="project" value="LOCAL" />
+      <updated>1783400775331</updated>
+    </task>
+    <task id="LOCAL-00153" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1783401032935</created>
+      <option name="number" value="00153" />
+      <option name="presentableId" value="LOCAL-00153" />
+      <option name="project" value="LOCAL" />
+      <updated>1783401032935</updated>
+    </task>
+    <option name="localTasksCounter" value="154" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -889,19 +911,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="引入chinese-clip模型，优化核心链路，增加预设标签" />
-    <MESSAGE value="移除混剪溯源，太鸡肋了，优化了其他，增加了精匹配" />
-    <MESSAGE value="更新说明" />
-    <MESSAGE value="精搜优化" />
-    <MESSAGE value="搜索界面重构" />
-    <MESSAGE value="搜索优化" />
-    <MESSAGE value="块级搜索bug修复，增加默认预设" />
-    <MESSAGE value="导出优化，新增批量快速导出接口，供agent使用" />
-    <MESSAGE value="完善api调用说明" />
-    <MESSAGE value="减少写配置因为权限问题导致失败" />
-    <MESSAGE value="给本机接口说明加上了安装目录解析，避免agent找不到说明文档" />
-    <MESSAGE value="移除无用说明" />
-    <MESSAGE value="修复搜索范围选择功能" />
     <MESSAGE value="更新说明文件" />
     <MESSAGE value="搜索功能优化，局域网搜索功能对齐pc端" />
     <MESSAGE value="优化了agent使用本软件的说明" />
@@ -914,7 +923,20 @@
     <MESSAGE value="vlm动态并发吃帧，加入云api选择" />
     <MESSAGE value="更新readme" />
     <MESSAGE value="更新" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新" />
+    <MESSAGE value="与master分支同步" />
+    <MESSAGE value="大文件重构" />
+    <MESSAGE value="更新友情链接及LICENSE" />
+    <MESSAGE value="更新test" />
+    <MESSAGE value="ui微调" />
+    <MESSAGE value="视频理解yolo检测改为非必须" />
+    <MESSAGE value="api视频理解功能说明更新" />
+    <MESSAGE value="api完善" />
+    <MESSAGE value="修复新用户导入模型显示BUG" />
+    <MESSAGE value="移除网络库，新增视频下载功能，优化chunk切分" />
+    <MESSAGE value="改用LanceDB向量数据库，移除废弃功能及无用设置" />
+    <MESSAGE value="修复无数据迁移弹窗报错" />
+    <MESSAGE value="更新说明" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新说明" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

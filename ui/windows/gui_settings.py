@@ -12,6 +12,11 @@ from src.app.config import (
     load_config,
     save_config,
 )
+from src.core.chunk_policy import (
+    CHUNK_POLICY_CUSTOM,
+    detect_chunk_policy,
+    resolve_chunk_policy_values,
+)
 from src.core.clip_embedding import reset_engine
 from src.services.storage_service import (
     cleanup_old_data_root as cleanup_old_data_root_service,
@@ -132,45 +137,45 @@ class SettingsGuiMixin:
         )
         export_video_silent = bool(config.get("export_video_silent", DEFAULT_CONFIG["export_video_silent"]))
         self.settings_page.input_export_video_silent.setCurrentIndex(1 if export_video_silent else 0)
-        self.settings_page.input_remote_max_frames.setValue(
-            int(config.get("remote_max_frames", DEFAULT_CONFIG["remote_max_frames"]))
-        )
         self.settings_page.input_embedding_batch_size.setValue(
             int(config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"]))
         )
-        search_mode = config.get("search_mode", DEFAULT_CONFIG["search_mode"])
-        self.search_page.search_mode.setCurrentIndex(0 if search_mode == "frame" else 1)
-        video_discovery_enabled = bool(
-            config.get(
-                "search_video_discovery_enabled",
-                DEFAULT_CONFIG["search_video_discovery_enabled"],
-            )
-        )
-        toggle = self.search_page.search_video_discovery_toggle
-        toggle.blockSignals(True)
-        toggle.setChecked(video_discovery_enabled)
-        toggle.blockSignals(False)
+        from src.storage.config_store import get_image_search_mode
+
+        if hasattr(self, "_refresh_search_panel_state"):
+            self._refresh_search_panel_state()
+        search_mode = str(config.get("search_mode", DEFAULT_CONFIG["search_mode"]) or "frame").strip().lower()
+        text_mode_index = self.search_page.search_mode.findData(search_mode)
+        if text_mode_index < 0:
+            text_mode_index = self.search_page.search_mode.findData("frame")
+        if text_mode_index >= 0:
+            self.search_page.search_mode.blockSignals(True)
+            self.search_page.search_mode.setCurrentIndex(text_mode_index)
+            self.search_page.search_mode.blockSignals(False)
+        image_search_mode = get_image_search_mode(config)
+        image_mode_index = self.search_page.image_search_mode.findData(image_search_mode)
+        if image_mode_index < 0:
+            image_mode_index = self.search_page.image_search_mode.findData("frame")
+        if image_mode_index >= 0:
+            self.search_page.image_search_mode.blockSignals(True)
+            self.search_page.image_search_mode.setCurrentIndex(image_mode_index)
+            self.search_page.image_search_mode.blockSignals(False)
         self.settings_page.input_similarity_threshold.setValue(
             config.get("similarity_threshold", DEFAULT_CONFIG["similarity_threshold"])
-        )
-        self.settings_page.input_max_chunk_duration.setValue(
-            config.get("max_chunk_duration", DEFAULT_CONFIG["max_chunk_duration"])
         )
         self.settings_page.input_min_chunk_size.setValue(
             config.get("min_chunk_size", DEFAULT_CONFIG["min_chunk_size"])
         )
-        chunk_similarity_mode = config.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"])
-        self.settings_page.input_chunk_similarity_mode.setCurrentIndex(
-            0 if chunk_similarity_mode == "chunk" else 1
+        self.settings_page.input_min_chunk_duration.setValue(
+            config.get("min_chunk_duration", DEFAULT_CONFIG["min_chunk_duration"])
         )
-        chunk_segmentation_strategy = config.get(
-            "chunk_segmentation_strategy",
-            DEFAULT_CONFIG["chunk_segmentation_strategy"],
-        )
-        strategy_index = self.settings_page.input_chunk_segmentation_strategy.findData(chunk_segmentation_strategy)
-        self.settings_page.input_chunk_segmentation_strategy.setCurrentIndex(
-            0 if strategy_index < 0 else strategy_index
-        )
+        chunk_policy_id = detect_chunk_policy(config)
+        stored_policy = str(config.get("chunk_policy", "") or "").strip().lower()
+        if stored_policy and stored_policy != CHUNK_POLICY_CUSTOM and stored_policy == chunk_policy_id:
+            self.settings_page.set_chunk_policy_id(stored_policy)
+        else:
+            self.settings_page.set_chunk_policy_id(chunk_policy_id)
+        self.settings_page.sync_chunk_advanced_visibility()
         prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
         self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
         experimental_hw_decode = bool(
@@ -226,13 +231,11 @@ class SettingsGuiMixin:
             self.settings_page.input_thumb_width,
             self.settings_page.input_thumb_height,
             self.settings_page.input_export_video_silent,
-            self.settings_page.input_remote_max_frames,
             self.settings_page.input_embedding_batch_size,
+            self.settings_page.input_chunk_policy,
             self.settings_page.input_similarity_threshold,
-            self.settings_page.input_max_chunk_duration,
             self.settings_page.input_min_chunk_size,
-            self.settings_page.input_chunk_similarity_mode,
-            self.settings_page.input_chunk_segmentation_strategy,
+            self.settings_page.input_min_chunk_duration,
             self.settings_page.input_prefer_gpu,
             self.settings_page.input_experimental_hw_decode,
             self.settings_page.input_gpu_probe_unknown_keep_gpu,
@@ -253,6 +256,43 @@ class SettingsGuiMixin:
                 widget.currentIndexChanged.connect(self._mark_settings_dirty)
             elif hasattr(widget, "textChanged"):
                 widget.textChanged.connect(self._mark_settings_dirty)
+        self._bind_chunk_policy_handlers()
+
+    def _bind_chunk_policy_handlers(self):
+        if getattr(self, "_chunk_policy_handlers_bound", False):
+            return
+        self._chunk_policy_handlers_bound = True
+        self.settings_page.input_chunk_policy.currentIndexChanged.connect(self._on_chunk_policy_changed)
+        chunk_editors = [
+            self.settings_page.input_similarity_threshold,
+            self.settings_page.input_min_chunk_size,
+            self.settings_page.input_min_chunk_duration,
+        ]
+        for widget in chunk_editors:
+            if hasattr(widget, "valueChanged"):
+                widget.valueChanged.connect(self._on_chunk_policy_field_changed)
+            elif hasattr(widget, "currentIndexChanged"):
+                widget.currentIndexChanged.connect(self._on_chunk_policy_field_changed)
+
+    def _on_chunk_policy_changed(self, *_args):
+        if self._settings_loading or self.settings_page.is_chunk_policy_syncing():
+            return
+        policy_id = self.settings_page.get_chunk_policy_id()
+        preset_values = resolve_chunk_policy_values(policy_id)
+        if preset_values:
+            self.settings_page.apply_chunk_policy_values(preset_values)
+        if policy_id == CHUNK_POLICY_CUSTOM:
+            self.settings_page.set_chunk_advanced_expanded(True)
+        else:
+            self.settings_page.set_chunk_advanced_expanded(False)
+        self._mark_settings_dirty()
+
+    def _on_chunk_policy_field_changed(self, *_args):
+        if self._settings_loading or self.settings_page.is_chunk_policy_syncing():
+            return
+        self.settings_page.set_chunk_policy_id(CHUNK_POLICY_CUSTOM)
+        self.settings_page.set_chunk_advanced_expanded(True)
+        self._mark_settings_dirty()
 
     def _mark_settings_dirty(self, *_args):
         if self._settings_loading:
@@ -335,16 +375,11 @@ class SettingsGuiMixin:
             previous_embedding_batch_size = int(
                 config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"])
             )
-            previous_max_chunk_duration = float(
-                config.get("max_chunk_duration", DEFAULT_CONFIG["max_chunk_duration"])
-            )
             previous_min_chunk_size = int(config.get("min_chunk_size", DEFAULT_CONFIG["min_chunk_size"]))
-            previous_chunk_similarity_mode = str(
-                config.get("chunk_similarity_mode", DEFAULT_CONFIG["chunk_similarity_mode"])
+            previous_min_chunk_duration = float(
+                config.get("min_chunk_duration", DEFAULT_CONFIG["min_chunk_duration"])
             )
-            previous_chunk_segmentation_strategy = str(
-                config.get("chunk_segmentation_strategy", DEFAULT_CONFIG["chunk_segmentation_strategy"])
-            )
+            previous_chunk_policy = str(config.get("chunk_policy", DEFAULT_CONFIG.get("chunk_policy", "balanced")))
             previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
             previous_gpu_probe_unknown_keep_gpu = bool(
                 config.get("gpu_probe_unknown_keep_gpu", DEFAULT_CONFIG["gpu_probe_unknown_keep_gpu"])
@@ -383,12 +418,9 @@ class SettingsGuiMixin:
                 return
             new_similarity_threshold = float(self.settings_page.input_similarity_threshold.value())
             new_embedding_batch_size = int(self.settings_page.input_embedding_batch_size.value())
-            new_max_chunk_duration = float(self.settings_page.input_max_chunk_duration.value())
             new_min_chunk_size = int(self.settings_page.input_min_chunk_size.value())
-            new_chunk_similarity_mode = str(self.settings_page.input_chunk_similarity_mode.currentData())
-            new_chunk_segmentation_strategy = str(
-                self.settings_page.input_chunk_segmentation_strategy.currentData()
-            )
+            new_min_chunk_duration = float(self.settings_page.input_min_chunk_duration.value())
+            new_chunk_policy = str(self.settings_page.get_chunk_policy_id())
             config["fps"] = new_fps
             config["sampling_fps_mode"] = new_sampling_fps_mode
             # Preserve the user's rule set even while fixed mode is active so
@@ -423,13 +455,11 @@ class SettingsGuiMixin:
             config["thumb_width"] = self.settings_page.input_thumb_width.value()
             config["thumb_height"] = self.settings_page.input_thumb_height.value()
             config["export_video_silent"] = bool(self.settings_page.input_export_video_silent.currentData())
-            config["remote_max_frames"] = int(self.settings_page.input_remote_max_frames.value())
             config["embedding_batch_size"] = new_embedding_batch_size
             config["similarity_threshold"] = new_similarity_threshold
-            config["max_chunk_duration"] = new_max_chunk_duration
             config["min_chunk_size"] = new_min_chunk_size
-            config["chunk_similarity_mode"] = new_chunk_similarity_mode
-            config["chunk_segmentation_strategy"] = new_chunk_segmentation_strategy
+            config["min_chunk_duration"] = new_min_chunk_duration
+            config["chunk_policy"] = new_chunk_policy
             config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
             config["experimental_hw_decode"] = bool(
                 self.settings_page.input_experimental_hw_decode.currentData()
@@ -497,10 +527,9 @@ class SettingsGuiMixin:
             )
             chunk_changed = (
                 previous_similarity_threshold != new_similarity_threshold
-                or previous_max_chunk_duration != new_max_chunk_duration
                 or previous_min_chunk_size != new_min_chunk_size
-                or previous_chunk_similarity_mode != new_chunk_similarity_mode
-                or previous_chunk_segmentation_strategy != new_chunk_segmentation_strategy
+                or previous_min_chunk_duration != new_min_chunk_duration
+                or previous_chunk_policy != new_chunk_policy
             )
             if (
                 previous_prefer_gpu != config["prefer_gpu"]

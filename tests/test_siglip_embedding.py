@@ -5,7 +5,6 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.modules.pop("numpy", None)
 import numpy as np
 
 
@@ -72,11 +71,11 @@ class SigLIPEncodeImagesTests(unittest.TestCase):
         text_session = MagicMock()
         text_session.get_providers.return_value = ["CPUExecutionProvider"]
 
-        with patch("src.core.siglip_provider_draft.ort.InferenceSession", side_effect=[vision_session, text_session]):
-            with patch("src.core.siglip_provider_draft.build_session_options", return_value=MagicMock()):
-                with patch("src.core.siglip_provider_draft.load_config", return_value={"embedding_batch_size": batch_size}):
-                    with patch("src.core.siglip_provider_draft.get_effective_prefer_gpu", return_value=False):
-                        from src.core.siglip_provider_draft import SigLIP2OnnxEngine
+        with patch("src.core.siglip_provider.ort.InferenceSession", side_effect=[vision_session, text_session]):
+            with patch("src.core.siglip_provider.build_session_options", return_value=MagicMock()):
+                with patch("src.core.siglip_provider.load_config", return_value={"embedding_batch_size": batch_size}):
+                    with patch("src.core.siglip_provider.get_effective_prefer_gpu", return_value=False):
+                        from src.core.siglip_provider import SigLIP2OnnxEngine
 
                         with patch.object(
                             SigLIP2OnnxEngine,
@@ -120,14 +119,14 @@ class SigLIPEncodeImagesTests(unittest.TestCase):
         out = np.empty((3, 224, 224), dtype=np.float32)
         frame = np.full((224, 224, 3), 127, dtype=np.uint8)
 
-        with patch("src.core.siglip_provider_draft.cv2.resize") as mock_resize:
+        with patch("src.core.siglip_provider.cv2.resize") as mock_resize:
             engine.preprocess_into(frame, out)
 
         mock_resize.assert_not_called()
         self.assertAlmostEqual(float(out[0, 0, 0]), -1.0 / 255.0, places=5)
 
     def test_run_visual_batch_splits_failed_batch_until_single_frame(self):
-        from src.core.siglip_provider_draft import SigLIP2OnnxEngine
+        from src.core.siglip_provider import SigLIP2OnnxEngine
 
         class FakeSession:
             def __init__(self):
@@ -159,7 +158,7 @@ class SigLIPEncodeImagesTests(unittest.TestCase):
         self.assertEqual(engine.visual_session.batch_sizes, [2, 1, 1])
 
     def test_run_visual_batch_falls_back_to_cpu_after_gpu_single_frame_failure(self):
-        from src.core.siglip_provider_draft import SigLIP2OnnxEngine
+        from src.core.siglip_provider import SigLIP2OnnxEngine
 
         class FailingGpuSession:
             def __init__(self):

@@ -53,9 +53,33 @@ def get_search_index_schema_version(meta) -> int:
     return normalize_search_index_schema_version((meta or {}).get("search_index_schema_version", SEARCH_INDEX_SCHEMA_V1))
 
 
+def needs_search_index_upgrade(meta, config=None) -> bool:
+    return False
+
+
 def library_index_is_ready(library_path: str, config=None) -> bool:
-    paths = get_library_index_paths(library_path, config=config)
-    return os.path.isfile(paths["frame_index_file"]) and os.path.isfile(paths["frame_vector_file"])
+    from src.storage.asset_store import load_model_metadata
+    from src.storage.config_store import get_local_model_asset_dirs
+    from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
+
+    meta = load_model_metadata(config=config)
+    if not library_has_ready_videos(meta, library_path):
+        return False
+    profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    if not lance_search_is_ready(profile_base_dir):
+        return False
+    lance_ids = get_lance_indexed_video_ids(profile_base_dir)
+    lib_key = canonicalize_library_path(library_path)
+    for root_path, lib_data in (meta or {}).get("libraries", {}).items():
+        if canonicalize_library_path(root_path) != lib_key:
+            continue
+        for info in (lib_data or {}).get("files", {}).values():
+            if str(info.get("asset_state", "")).strip().lower() != "ready":
+                continue
+            video_id = str(info.get("vid", "")).strip()
+            if video_id and video_id in lance_ids:
+                return True
+    return False
 
 
 def clear_library_search_index(library_path: str, config=None) -> None:
@@ -74,8 +98,6 @@ def clear_library_search_index(library_path: str, config=None) -> None:
 
 
 def get_library_search_index_status(meta, library_path: str, config=None) -> str:
-    if get_search_index_schema_version(meta) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
-        return LIBRARY_SEARCH_INDEX_STATUS_NEEDS_UPGRADE
     if not library_has_ready_videos(meta, library_path):
         return LIBRARY_SEARCH_INDEX_STATUS_NOT_APPLICABLE
     if library_index_is_ready(library_path, config=config):
@@ -138,20 +160,6 @@ def _library_search_index_is_marked_ready(lib_data) -> bool:
         normalize_search_index_schema_version(lib_data.get("search_index_schema_version"))
         >= TARGET_SEARCH_INDEX_SCHEMA_VERSION
     )
-
-
-def needs_search_index_upgrade(meta, config=None) -> bool:
-    if get_search_index_schema_version(meta) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
-        return True
-    for root_path, lib_data in (meta or {}).get("libraries", {}).items():
-        lib_data = lib_data if isinstance(lib_data, dict) else {}
-        if _library_search_index_is_marked_ready(lib_data) and library_index_is_ready(root_path, config=config):
-            continue
-        if not library_has_ready_videos(meta, root_path):
-            continue
-        if not library_index_is_ready(root_path, config=config):
-            return True
-    return False
 
 
 def mark_search_index_schema_upgraded(meta, *, target_lib=None) -> None:

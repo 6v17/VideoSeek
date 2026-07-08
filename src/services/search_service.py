@@ -1,48 +1,25 @@
-import os
-from typing import List, Sequence
+"""Local frame/chunk semantic search orchestration."""
 
-import cv2
+from __future__ import annotations
+
+import os
+from typing import List
+
 import faiss
 import numpy as np
 
 from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_text_embedding
-from src.app.config import DEFAULT_CONFIG, load_config
+from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from src.domain.search_hit import SearchHit, coerce_search_hit
+from src.domain.search_hit import SearchHit
 from src.services.indexing_service import load_video_chunks_by_id
 from src.services.search_scope import (
     apply_search_scope,
-    build_indexed_video_lookup,
     is_search_scoped,
-    normalize_scope_path,
     resolve_fetch_top_k,
     resolve_per_video_fetch_top_k,
 )
-from src.storage.config_store import get_local_model_asset_dirs
-from src.core.faiss_index import load_clip_index
-from src.services.search_index_schema import (
-    TARGET_SEARCH_INDEX_SCHEMA_VERSION,
-    get_library_index_paths,
-    get_search_index_schema_version,
-    library_index_is_ready,
-)
-from src.storage.asset_store import load_model_metadata
-from src.storage.config_store import (
-    get_active_model_profile,
-    get_frame_neighbor_rerank_enabled,
-    get_frame_neighbor_rerank_top_n,
-    get_global_model_asset_paths,
-    get_search_mode,
-    get_search_top_k,
-    is_precise_image_search,
-)
-from src.services.image_search_rerank import (
-    apply_image_pixel_rerank,
-    is_likely_cropped_query_image,
-    merge_index_step_lookup,
-    reset_index_step_lookup,
-    refine_hit_time_with_pixel,
-)
+from src.services.image_search_rerank import apply_image_pixel_rerank, is_likely_cropped_query_image
 from src.services.search_profiling import (
     build_profile_meta_from_config,
     is_profiling_enabled,
@@ -55,7 +32,6 @@ from src.services.search_progress import (
     emit_search_progress,
     set_search_progress_callback,
 )
-
 from src.services.search_assets import (
     _CHUNK_ASSET_INFO,
     _FRAME_ASSET_INFO,
@@ -70,7 +46,7 @@ from src.services.search_assets import (
 from src.services.search_locate import (
     _LOCATE_CROP_MIN_CLIP_SCORE,
     _resolve_rerank_query,
-    apply_locate_crop_anchor_stability,
+    apply_locate_crop_anchor_stability as _apply_locate_crop_anchor_stability,
     compute_locate_confidence,
     compute_locate_score_margin,
     format_clip_score_percent,
@@ -80,525 +56,91 @@ from src.services.search_locate import (
     resolve_locate_clip_window_sec,
     should_allow_pixel_refine,
 )
-
-_apply_locate_crop_anchor_stability = apply_locate_crop_anchor_stability
+from src.services.search_chunk_pipeline import (
+    _aggregate_frame_hits_to_chunks,
+    _collect_frame_candidates_for_chunk_search,
+    _finalize_frame_hits,
+    _load_global_chunk_ranges_by_path,
+    _prepare_frame_candidates_for_chunk_aggregate,
+    _run_chunk_search_via_frames,
+    _run_chunk_search_via_precise_frames,
+)
+from src.services.search_fetch_policy import (
+    _precise_pixel_localize_top_n,
+    _resolve_frame_fetch_top_k,
+    _resolve_stage1_global_fetch_k,
+)
+from src.services.search_frame_query import (
+    _search_frame_results_in_time_window,
+    _search_frame_results_with_ids,
+)
+from src.services.search_hit_utils import (
+    _merge_search_hits,
+    _merge_search_index_steps,
+    _reset_search_index_steps,
+    _resolve_scoped_video_targets,
+    _scope_filter_hits_with_seeds,
+    _use_precise_image_pipeline,
+)
+from src.services.search_locate_pipeline import (
+    _refine_precise_seed_hits,
+    _resolve_locate_result_top_k,
+    _search_locate_anchor_window_hits,
+    _search_locate_crop_trusted_hits,
+)
+from src.services.search_neighbor_rerank import (
+    _apply_bounded_neighbor_refine,
+    _apply_frame_neighbor_rerank,
+    _collect_neighbor_frame_ids,
+    _expand_neighbor_rerank_candidates,
+    _neighbor_candidate_score,
+    _neighbor_rerank_enabled,
+)
+from src.services.search_query import filter_hits_by_min_score
+from src.services.search_video_discovery import (
+    _aggregate_hits_to_video_discovery,
+    _apply_video_discovery_presentation,
+    _cap_hits_per_video,
+    _locate_frames_in_recalled_videos,
+    _resolve_video_discovery_enabled,
+    _top_video_paths_from_hits,
+    _use_video_discovery_results,
+)
+from src.storage.config_store import get_active_model_profile, get_global_model_asset_paths, get_search_mode, get_search_top_k
 
 logger = get_logger("search_service")
 
 
-def _merge_search_hits(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
-    if top_k <= 0:
-        return []
-    ordered = sorted(hits, key=lambda item: float(item.score), reverse=True)
-    return ordered[:top_k]
-
-
-def _resolve_scoped_video_targets(scope_video_paths, config):
-    meta = load_model_metadata(config=config)
-    lookup = build_indexed_video_lookup(meta)
-    targets = []
-    seen: set[str] = set()
-    for raw in scope_video_paths or []:
-        abs_path = normalize_scope_path(raw)
-        video_id = lookup.get(abs_path)
-        if not video_id:
-            normalized_case = os.path.normcase(abs_path)
-            for path, candidate_id in lookup.items():
-                if os.path.normcase(str(path)) == normalized_case:
-                    video_id = candidate_id
-                    abs_path = normalize_scope_path(str(path))
-                    break
-        if not video_id or abs_path in seen:
-            continue
-        seen.add(abs_path)
-        targets.append((abs_path, video_id))
-    return targets
-
-
-def _use_precise_image_pipeline(is_text: bool, config, search_precision_mode=None) -> bool:
+def build_query_vector(query_data, is_text=False):
     if is_text:
-        return False
-    return is_precise_image_search(config, search_precision_mode)
+        query_vector = get_text_embedding(query_data)
+    elif isinstance(query_data, str):
+        from src.core.image_io import load_image_bgr
 
-
-def _dedupe_nearby_hits(hits: List[SearchHit], bucket_sec: float = 1.0) -> List[SearchHit]:
-    if not hits:
-        return []
-    bucket = max(0.25, float(bucket_sec))
-    best: dict[tuple[str, int], SearchHit] = {}
-    for hit in hits:
-        key = (str(hit.video_path), int(float(hit.start_sec) / bucket))
-        if key not in best or float(hit.score) > float(best[key].score):
-            best[key] = hit
-    return sorted(best.values(), key=lambda item: float(item.score), reverse=True)
-
-
-_GLOBAL_VIDEO_RECALL_LIMIT = 20
-_GLOBAL_PER_VIDEO_SEED_CAP = 5
-_GLOBAL_STAGE1_FETCH_CAP = 400
-_GLOBAL_STAGE2_PER_VIDEO_K = 100
-_PRECISE_PIXEL_LOCALIZE_TOP_N = 3
-_PRECISE_FETCH_CAP = 200
-_PRECISE_SEED_MAX_SHIFT_SEC = 5.0
-_PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
-_PRECISE_NEIGHBOR_BLEND = 0.1
-_LOCATE_ANCHOR_WINDOW_SEC = 30.0
-_LOCATE_CROP_ANCHOR_WINDOW_SEC = 5.0
-_LOCATE_CLIP_WINDOW_TIGHT_SEC = 10.0
-_LOCATE_CLIP_WINDOW_MEDIUM_SEC = 20.0
-_LOCATE_CLIP_WINDOW_WIDE_SEC = 40.0
-_LOCATE_CLIP_WINDOW_HIGH_SCORE = 0.85
-_LOCATE_CLIP_WINDOW_HIGH_MARGIN = 0.10
-_LOCATE_CLIP_WINDOW_MEDIUM_SCORE = 0.70
-_LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN = 0.05
-_LOCATE_CLIP_CONFIDENCE_LOW = 0.42
-_LOCATE_CLIP_CONFIDENCE_HIGH = 0.99
-_LOCATE_PIXEL_MAX_SHIFT_SEC = 5.0
-_LOCATE_PIXEL_LOCALIZE_TOP_N = 3
-_LOCATE_RESULT_TOP_K = 3
-_LOCATE_CROP_RESULT_TOP_K = 1
-_LOCATE_CROP_STABILITY_POOL_K = 12
-_LOCATE_CROP_ANCHOR_MIN_GAIN = 0.03
-_CLIP_CONFIDENCE_VERY_HIGH = 0.85
-_CLIP_CONFIDENCE_HIGH = 0.70
-_CLIP_CONFIDENCE_MEDIUM = 0.60
-_ANCHOR_BRUTEFORCE_MAX_FRAMES = 48
-_ANCHOR_BRUTEFORCE_PREFILTER_MULTIPLIER = 2
-
-
-def _search_frame_results_in_time_window(
-    query_vector,
-    index,
-    timestamps,
-    video_paths,
-    *,
-    center_sec: float,
-    window_sec: float,
-    top_k: int,
-    preloaded_vectors=None,
-):
-    actual_k = min(max(1, int(top_k)), int(getattr(index, "ntotal", 0) or 0))
-    if actual_k <= 0:
-        return [], []
-    if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
-        return [], []
-    query_dim = int(query_vector.shape[1])
-    index_dim = int(getattr(index, "d", 0))
-    if index_dim > 0 and query_dim != index_dim:
-        raise RuntimeError(
-            f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
-            "Current model uses a different embedding space. Please rebuild the index for the active model."
-        )
-
-    center = max(0.0, float(center_sec))
-    window = max(1.0, float(window_sec))
-    try:
-        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
-        return [], []
-
-    candidate_ids: List[int] = []
-    total = min(len(video_paths), len(timestamps), int(getattr(index, "ntotal", 0) or 0))
-    for idx in range(total):
-        if abs(float(timestamps[idx]) - center) <= window:
-            candidate_ids.append(idx)
-    if not candidate_ids:
-        return [], []
-    if len(candidate_ids) > _ANCHOR_BRUTEFORCE_MAX_FRAMES:
-        prefilter_limit = min(
-            len(candidate_ids),
-            _ANCHOR_BRUTEFORCE_MAX_FRAMES * _ANCHOR_BRUTEFORCE_PREFILTER_MULTIPLIER,
-        )
-        candidate_ids.sort(key=lambda idx: abs(float(timestamps[idx]) - center))
-        candidate_ids = candidate_ids[:prefilter_limit]
-
-    vector_matrix = None
-    if preloaded_vectors is not None:
-        try:
-            matrix = np.asarray(preloaded_vectors, dtype=np.float32)
-            if matrix.ndim == 2 and matrix.shape[0] >= total:
-                vector_matrix = matrix
-        except Exception:
-            vector_matrix = None
-
-    vector_cache: dict[int, np.ndarray] = {}
-    score_cache: dict[int, float] = {}
-    scored: List[tuple[float, int]] = []
-    for idx in candidate_ids:
-        score = _neighbor_candidate_score(
-            query,
-            index,
-            int(idx),
-            vector_cache,
-            score_cache,
-            vector_matrix=vector_matrix,
-        )
-        if score is None:
-            continue
-        scored.append((float(score), int(idx)))
-    if not scored:
-        return [], []
-
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    if len(scored) > _ANCHOR_BRUTEFORCE_MAX_FRAMES:
-        scored = scored[: _ANCHOR_BRUTEFORCE_MAX_FRAMES]
-    matched_results: List[SearchHit] = []
-    matched_ids: List[int] = []
-    for score, idx in scored[:actual_k]:
-        timestamp = float(timestamps[idx])
-        matched_results.append(
-            SearchHit(timestamp, timestamp, score, str(video_paths[idx]))
-        )
-        matched_ids.append(int(idx))
-    return matched_results, matched_ids
-
-
-def _clamp_time_near_seed(time_sec: float, seed_sec: float, max_shift_sec: float) -> float:
-    seed = max(0.0, float(seed_sec))
-    delta = max(0.0, float(max_shift_sec))
-    value = max(0.0, float(time_sec))
-    return min(max(value, seed - delta), seed + delta)
-
-
-def _scope_filter_hits_with_seeds(
-    hits: List[SearchHit],
-    seed_times: List[float],
-    *,
-    video_paths: Sequence[str] | None = None,
-    library_paths: Sequence[str] | None = None,
-    top_k: int | None = None,
-) -> tuple[List[SearchHit], List[float]]:
-    if not hits:
-        return [], []
-    if len(seed_times) != len(hits):
-        seed_times = [float(hit.start_sec) for hit in hits]
-    scoped_hits = apply_search_scope(
-        hits,
-        video_paths=video_paths,
-        library_paths=library_paths,
-        top_k=top_k,
-    )
-    if len(scoped_hits) == len(hits):
-        return scoped_hits, list(seed_times)
-    allowed = {
-        (
-            normalize_scope_path(str(hit.video_path or "")),
-            round(float(hit.start_sec), 3),
-            round(float(hit.end_sec), 3),
-        )
-        for hit in scoped_hits
-    }
-    filtered_hits: List[SearchHit] = []
-    filtered_seeds: List[float] = []
-    for hit, seed in zip(hits, seed_times):
-        key = (
-            normalize_scope_path(str(hit.video_path or "")),
-            round(float(hit.start_sec), 3),
-            round(float(hit.end_sec), 3),
-        )
-        if key in allowed:
-            filtered_hits.append(hit)
-            filtered_seeds.append(float(seed))
-    if top_k is not None and int(top_k) > 0:
-        filtered_hits = filtered_hits[: int(top_k)]
-        filtered_seeds = filtered_seeds[: int(top_k)]
-    return filtered_hits, filtered_seeds
-
-
-def _resolve_locate_result_top_k(top_k: int, *, crop_query: bool = False) -> int:
-    if crop_query:
-        return _LOCATE_CROP_RESULT_TOP_K
-    try:
-        requested = int(top_k)
-    except (TypeError, ValueError):
-        requested = _LOCATE_RESULT_TOP_K
-    return max(1, min(requested, _LOCATE_RESULT_TOP_K))
-
-
-def _locate_anchor_window_hits_from_index(
-    query_vector,
-    anchor_sec: float,
-    locate_k: int,
-    window_sec: float,
-    *,
-    search_index,
-    timestamps,
-    video_paths,
-    preloaded_vectors=None,
-    skip_neighbor_refine: bool = False,
-) -> List[SearchHit]:
-    matched_results, matched_ids = _search_frame_results_in_time_window(
-        query_vector,
-        search_index,
-        timestamps,
-        video_paths,
-        center_sec=anchor_sec,
-        window_sec=window_sec,
-        top_k=locate_k,
-        preloaded_vectors=preloaded_vectors,
-    )
-    if not matched_results:
-        return []
-    if skip_neighbor_refine:
-        return _merge_search_hits(matched_results, locate_k)
-    refined = _apply_bounded_neighbor_refine(
-        matched_results,
-        matched_ids,
-        query_vector,
-        search_index,
-        timestamps,
-        video_paths,
-    )
-    return _merge_search_hits(refined, locate_k)
-
-
-def _search_locate_anchor_window_hits(
-    query_vector,
-    target_video_path: str,
-    anchor_sec: float,
-    top_k: int,
-    config,
-    *,
-    per_video_index=None,
-    per_video_timestamps=None,
-    per_video_paths=None,
-    per_video_vectors=None,
-    window_sec: float | None = None,
-    skip_neighbor_refine: bool = False,
-) -> List[SearchHit]:
-    """Locate stage1: per-video anchor window first; global index only as fallback."""
-    locate_k = max(1, int(top_k))
-    anchor = max(0.0, float(anchor_sec))
-    window = max(1.0, float(window_sec if window_sec is not None else _LOCATE_ANCHOR_WINDOW_SEC))
-    target_key = normalize_scope_path(str(target_video_path or ""))
-
-    if per_video_index is not None:
-        per_video_hits = _locate_anchor_window_hits_from_index(
-            query_vector,
-            anchor,
-            locate_k,
-            window,
-            search_index=per_video_index,
-            timestamps=per_video_timestamps,
-            video_paths=per_video_paths,
-            preloaded_vectors=per_video_vectors,
-            skip_neighbor_refine=skip_neighbor_refine,
-        )
-        if per_video_hits:
-            return per_video_hits
-
-    global_index, global_ts, global_paths = load_search_assets(config)
-    if global_index is not None and int(getattr(global_index, "ntotal", 0) or 0) > 0:
-        fetch_k = _resolve_frame_fetch_top_k(locate_k, True, False, config, precise_image=True)
-        global_hits, global_ids = _search_frame_results_with_ids(
-            query_vector,
-            global_index,
-            global_ts,
-            global_paths,
-            top_k=fetch_k,
-        )
-        in_window: List[SearchHit] = []
-        in_window_ids: List[int] = []
-        for hit, frame_id in zip(global_hits, global_ids):
-            if normalize_scope_path(str(hit.video_path or "")) != target_key:
-                continue
-            if abs(float(hit.start_sec) - anchor) > window:
-                continue
-            in_window.append(hit)
-            in_window_ids.append(int(frame_id))
-        if in_window:
-            if skip_neighbor_refine:
-                merged = _merge_search_hits(in_window, locate_k)
-            else:
-                refined = _apply_bounded_neighbor_refine(
-                    in_window,
-                    in_window_ids,
-                    query_vector,
-                    global_index,
-                    global_ts,
-                    global_paths,
-                )
-                merged = _merge_search_hits(refined, locate_k)
-            if merged:
-                return merged
-
-    if window <= _LOCATE_PIXEL_MAX_SHIFT_SEC + 1e-6:
-        return [SearchHit(anchor, anchor, 0.0, str(target_video_path))]
-    return []
-
-
-def _search_locate_crop_trusted_hits(
-    query_vector,
-    target_video_path: str,
-    anchor_sec: float,
-    config,
-    *,
-    per_video_index=None,
-    per_video_timestamps=None,
-    per_video_paths=None,
-    per_video_vectors=None,
-) -> List[SearchHit]:
-    """Screenshot locate: trust fast-search anchor, only score frames within ±5s."""
-    pool = _search_locate_anchor_window_hits(
-        query_vector,
-        target_video_path,
-        anchor_sec,
-        _LOCATE_CROP_STABILITY_POOL_K,
-        config,
-        per_video_index=per_video_index,
-        per_video_timestamps=per_video_timestamps,
-        per_video_paths=per_video_paths,
-        per_video_vectors=per_video_vectors,
-        window_sec=_LOCATE_CROP_ANCHOR_WINDOW_SEC,
-        skip_neighbor_refine=True,
-    )
-    return apply_locate_crop_anchor_stability(pool, anchor_sec, target_video_path)
-
-
-def _apply_bounded_neighbor_refine(
-    results,
-    frame_ids,
-    query_vector,
-    search_index,
-    timestamps,
-    video_paths,
-    *,
-    max_top_n: int | None = None,
-    max_shift_sec: float = _PRECISE_SEED_MAX_SHIFT_SEC,
-    window_sec: float = _PRECISE_NEIGHBOR_WINDOW_SEC,
-    neighbor_blend: float = _PRECISE_NEIGHBOR_BLEND,
-):
-    if not results or not frame_ids:
-        return list(results or [])
-    try:
-        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
-        return list(results or [])
-
-    configured_top_n = int(get_frame_neighbor_rerank_top_n({}) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
-    max_index = min(len(results), len(frame_ids), int(max_top_n or configured_top_n))
-    if max_index <= 0:
-        return list(results or [])
-
-    reranked = list(results)
-    vector_cache: dict[int, np.ndarray] = {}
-    score_cache: dict[int, float] = {}
-    blend = max(0.0, min(float(neighbor_blend), 1.0))
-    for rank in range(max_index):
-        base_id = frame_ids[rank]
-        if base_id < 0 or base_id >= len(video_paths):
-            continue
-        hit = reranked[rank]
-        seed_time = float(hit.start_sec)
-        base_score = float(hit.score)
-        best_timestamp = seed_time
-        best_neighbor_score = base_score
-        base_path = video_paths[base_id]
-        for candidate_id in _collect_neighbor_frame_ids(base_id, timestamps, video_paths, window_sec):
-            if not _same_scope_video_path(video_paths[candidate_id], base_path):
-                continue
-            candidate_ts = float(timestamps[candidate_id])
-            if abs(candidate_ts - seed_time) > max_shift_sec:
-                continue
-            score = _neighbor_candidate_score(
-                query,
-                search_index,
-                int(candidate_id),
-                vector_cache,
-                score_cache,
+        image = load_image_bgr(query_data)
+        if image is None:
+            raise RuntimeError(
+                "Could not load query image. Use JPG/PNG/WEBP, or install pillow-heif for iPhone HEIC photos."
             )
-            if score is None:
-                continue
-            if score > best_neighbor_score:
-                best_neighbor_score = float(score)
-                best_timestamp = candidate_ts
-        if best_neighbor_score > base_score:
-            adjusted_time = _clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
-            blended_score = ((1.0 - blend) * base_score) + (blend * best_neighbor_score)
-            reranked[rank] = SearchHit(adjusted_time, adjusted_time, blended_score, str(hit.video_path))
-    return reranked
+        query_vector = get_clip_embeddings_batch([image])
+    else:
+        query_vector = get_clip_embeddings_batch([query_data])
+
+    query_vector = query_vector.astype("float32")
+    faiss.normalize_L2(query_vector)
+    return query_vector
 
 
-def _refine_precise_seed_hits(
-    query_data,
-    hits: List[SearchHit],
-    top_k: int,
-    config,
-    *,
-    seed_times: Sequence[float] | None = None,
-    pixel_query_data=None,
-    locate_anchor_sec: float | None = None,
-    locate_anchor_score: float | None = None,
-    locate_score_margin: float | None = None,
-) -> List[SearchHit]:
-    """Localize frozen recall seeds: pixel (and optional bounded neighbor upstream) only."""
-    if not hits:
-        return []
-    prepared = _dedupe_nearby_hits(hits, bucket_sec=1.0)
-    frozen = _merge_search_hits(prepared, top_k)
-    if not frozen:
-        return []
-    rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
-    crop_query = is_likely_cropped_query_image(rerank_query)
-    clip_seeds = [float(t) for t in (seed_times or [hit.start_sec for hit in frozen])]
-    if len(clip_seeds) != len(frozen):
-        clip_seeds = [float(hit.start_sec) for hit in frozen]
-
-    if crop_query:
-        limit = 1 if locate_anchor_sec is not None else max(1, int(top_k))
-        return frozen[:limit]
-
-    if locate_anchor_sec is not None:
-        if not should_allow_pixel_refine(
-            is_crop=False,
-            score=locate_anchor_score,
-            margin=locate_score_margin,
-        ):
-            return frozen[: max(1, int(top_k))]
-
-        anchor = max(0.0, float(locate_anchor_sec))
-        locate_limit = max(1, min(_LOCATE_PIXEL_LOCALIZE_TOP_N, len(frozen)))
-        head = frozen[:locate_limit]
-        clip_seeds = [
-            _clamp_time_near_seed(float(hit.start_sec), anchor, _LOCATE_PIXEL_MAX_SHIFT_SEC)
-            for hit in head
-        ]
-        pixel_head = apply_image_pixel_rerank(
-            rerank_query,
-            head,
-            config=config,
-            top_k=locate_limit,
-            seed_times=clip_seeds,
-            max_time_shift_sec=_LOCATE_PIXEL_MAX_SHIFT_SEC,
-            preserve_order=True,
-        ) if head else []
-        output: List[SearchHit] = []
-        for index, hit in enumerate(frozen):
-            if index < len(pixel_head):
-                output.append(pixel_head[index])
-            else:
-                output.append(hit)
-        return output[: max(1, int(top_k))]
-
-    localize_n = _precise_pixel_localize_top_n(config, frozen)
-    head = frozen[:localize_n]
-    pixel_head = apply_image_pixel_rerank(
-        rerank_query,
-        head,
-        config=config,
-        top_k=localize_n,
-        seed_times=clip_seeds[:localize_n],
-        max_time_shift_sec=_PRECISE_SEED_MAX_SHIFT_SEC,
-        preserve_order=True,
-    ) if head else []
-    # Keep CLIP recall order; pixel may nudge time but must not reshuffle candidates.
-    output: List[SearchHit] = []
-    for index, hit in enumerate(frozen):
-        if index < len(pixel_head):
-            output.append(pixel_head[index])
-        else:
-            output.append(hit)
-    return output[: max(1, int(top_k))]
+def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
+    if query_vector is not None:
+        vector = np.asarray(query_vector, dtype=np.float32)
+        if vector.ndim == 1:
+            vector = vector.reshape(1, -1)
+        elif vector.ndim != 2 or vector.shape[0] != 1:
+            raise RuntimeError("Invalid query vector. Please retry the search.")
+        faiss.normalize_L2(vector)
+        return vector
+    return build_query_vector(query_data, is_text=is_text)
 
 
 def _run_frame_search_per_videos(
@@ -833,950 +375,6 @@ def _run_chunk_search_per_videos(query_vector, scope_video_paths, top_k, config)
     return _merge_search_hits(merged_hits, top_k)
 
 
-def build_query_vector(query_data, is_text=False):
-    if is_text:
-        query_vector = get_text_embedding(query_data)
-    elif isinstance(query_data, str):
-        from src.core.image_io import load_image_bgr
-
-        image = load_image_bgr(query_data)
-        if image is None:
-            raise RuntimeError(
-                "Could not load query image. Use JPG/PNG/WEBP, or install pillow-heif for iPhone HEIC photos."
-            )
-        query_vector = get_clip_embeddings_batch([image])
-    else:
-        query_vector = get_clip_embeddings_batch([query_data])
-
-    query_vector = query_vector.astype("float32")
-    faiss.normalize_L2(query_vector)
-    return query_vector
-
-
-def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
-    if query_vector is not None:
-        vector = np.asarray(query_vector, dtype=np.float32)
-        if vector.ndim == 1:
-            vector = vector.reshape(1, -1)
-        elif vector.ndim != 2 or vector.shape[0] != 1:
-            raise RuntimeError("Invalid query vector. Please retry the search.")
-        faiss.normalize_L2(vector)
-        return vector
-    return build_query_vector(query_data, is_text=is_text)
-
-
-def filter_hits_by_min_score(hits, min_score) -> List[SearchHit]:
-    if min_score is None:
-        return list(hits or [])
-    try:
-        threshold = float(min_score)
-    except (TypeError, ValueError):
-        return list(hits or [])
-    return [hit for hit in (hits or []) if float(getattr(hit, "score", 0.0) or 0.0) >= threshold]
-
-
-def _search_frame_results_with_ids(query_vector, index, timestamps, video_paths, top_k):
-    actual_k = min(top_k, index.ntotal)
-    if actual_k <= 0:
-        return [], []
-    if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
-        raise RuntimeError("Invalid query vector. Please retry the search.")
-    query_dim = int(query_vector.shape[1])
-    index_dim = int(getattr(index, "d", 0))
-    if index_dim > 0 and query_dim != index_dim:
-        raise RuntimeError(
-            f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
-            "Current model uses a different embedding space. Please rebuild the index for the active model."
-        )
-
-    distances, indices = index.search(query_vector, actual_k)
-    matched_results = []
-    matched_ids = []
-    for rank, index_value in enumerate(indices[0]):
-        if index_value == -1 or index_value >= len(video_paths):
-            continue
-        timestamp = float(timestamps[index_value])
-        video_path = video_paths[index_value]
-        matched_results.append(SearchHit(timestamp, timestamp, float(distances[0][rank]), video_path))
-        matched_ids.append(int(index_value))
-    return matched_results, matched_ids
-
-
-def _neighbor_rerank_enabled(config, is_text: bool = False, precise_image: bool = False) -> bool:
-    if is_text or precise_image:
-        return False
-    return bool(get_frame_neighbor_rerank_enabled(config))
-
-
-def _cap_hits_per_video(hits: List[SearchHit], cap: int) -> List[SearchHit]:
-    if not hits or cap <= 0:
-        return list(hits or [])
-    buckets: dict[str, List[SearchHit]] = {}
-    for hit in hits:
-        path = str(hit.video_path or "")
-        buckets.setdefault(path, []).append(hit)
-    capped: List[SearchHit] = []
-    for items in buckets.values():
-        ordered = sorted(items, key=lambda item: float(item.score), reverse=True)
-        capped.extend(ordered[: int(cap)])
-    return sorted(capped, key=lambda item: float(item.score), reverse=True)
-
-
-def _use_video_discovery_results(
-    is_text: bool,
-    precise_image: bool,
-    scoped: bool,
-    *,
-    video_discovery_enabled: bool = True,
-) -> bool:
-    if not video_discovery_enabled:
-        return False
-    return (not is_text) and (not precise_image) and (not scoped)
-
-
-def _resolve_video_discovery_enabled(config, explicit: bool | None) -> bool:
-    if explicit is not None:
-        return bool(explicit)
-    from src.storage.config_store import get_search_video_discovery_enabled
-
-    return get_search_video_discovery_enabled(config)
-
-
-def _aggregate_hits_to_video_discovery(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
-    best: dict[str, SearchHit] = {}
-    for hit in hits or []:
-        path = str(hit.video_path or "").strip()
-        if not path:
-            continue
-        current = best.get(path)
-        if current is None or float(hit.score) > float(current.score):
-            best[path] = hit
-    ordered = sorted(best.values(), key=lambda item: float(item.score), reverse=True)
-    limit = max(1, int(top_k))
-    discovery: List[SearchHit] = []
-    for hit in ordered[:limit]:
-        preview_sec = float(hit.start_sec)
-        if float(hit.end_sec) > float(hit.start_sec) + 0.5:
-            preview_sec = (float(hit.start_sec) + float(hit.end_sec)) / 2.0
-        discovery.append(
-            SearchHit(
-                preview_sec,
-                preview_sec,
-                float(hit.score),
-                str(hit.video_path),
-                match_kind="video",
-            )
-        )
-    return discovery
-
-
-def _apply_video_discovery_presentation(
-    hits: List[SearchHit],
-    top_k: int,
-    *,
-    enabled: bool,
-) -> List[SearchHit]:
-    if not enabled or not hits:
-        return list(hits or [])
-    diversified = _cap_hits_per_video(hits, _GLOBAL_PER_VIDEO_SEED_CAP)
-    aggregated = _aggregate_hits_to_video_discovery(diversified, top_k)
-    return aggregated or list(hits or [])
-
-
-def _top_video_paths_from_hits(hits: List[SearchHit], limit: int) -> List[str]:
-    best: dict[str, float] = {}
-    for hit in hits or []:
-        path = str(hit.video_path or "").strip()
-        if not path:
-            continue
-        score = float(getattr(hit, "score", 0.0) or 0.0)
-        prev = best.get(path)
-        if prev is None or score > prev:
-            best[path] = score
-    ranked = sorted(best.items(), key=lambda item: (-item[1], item[0]))
-    cap = max(1, int(limit))
-    return [path for path, _ in ranked[:cap]]
-
-
-def _locate_frames_in_recalled_videos(
-    query_vector,
-    stage1_hits: List[SearchHit],
-    config,
-    *,
-    is_text=False,
-    ensure_video_paths: Sequence[str] | None = None,
-) -> List[SearchHit]:
-    """Stage2: refine inside recalled videos without discarding stage1 seeds."""
-    if is_text or not stage1_hits:
-        return list(stage1_hits or [])
-    diversified = _cap_hits_per_video(stage1_hits, _GLOBAL_PER_VIDEO_SEED_CAP)
-    candidate_videos = _top_video_paths_from_hits(diversified, _GLOBAL_VIDEO_RECALL_LIMIT)
-    if not candidate_videos:
-        candidate_videos = _top_video_paths_from_hits(stage1_hits, _GLOBAL_VIDEO_RECALL_LIMIT)
-    if ensure_video_paths:
-        required = [
-            abs_path
-            for abs_path, _video_id in _resolve_scoped_video_targets(ensure_video_paths, config)
-        ]
-        merged: List[str] = []
-        seen: set[str] = set()
-        for path in list(required) + list(candidate_videos):
-            key = str(path or "").strip()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            merged.append(key)
-        candidate_videos = merged[: max(_GLOBAL_VIDEO_RECALL_LIMIT, len(required))]
-    if not candidate_videos:
-        return list(stage1_hits)
-    stage1_by_video: dict[str, List[SearchHit]] = {}
-    for hit in stage1_hits:
-        key = normalize_scope_path(str(hit.video_path or ""))
-        if not key:
-            continue
-        stage1_by_video.setdefault(key, []).append(hit)
-    frame_hits: List[SearchHit] = []
-    per_k = int(_GLOBAL_STAGE2_PER_VIDEO_K)
-    processed_videos: set[str] = set()
-    for abs_path, video_id in _resolve_scoped_video_targets(candidate_videos, config):
-        path_key = normalize_scope_path(abs_path)
-        processed_videos.add(path_key)
-        stage1_video_hits = stage1_by_video.get(path_key, [])
-        search_index, timestamps, video_paths, _vector_matrix = _load_per_video_frame_assets(video_id, abs_path, config)
-        if search_index is None:
-            frame_hits.extend(stage1_video_hits)
-            continue
-        _merge_search_index_steps(video_paths, timestamps)
-        matched_results, matched_ids = _search_frame_results_with_ids(
-            query_vector,
-            search_index,
-            timestamps,
-            video_paths,
-            top_k=per_k,
-        )
-        matched_results = _apply_frame_neighbor_rerank(
-            matched_results,
-            matched_ids,
-            query_vector,
-            search_index,
-            timestamps,
-            video_paths,
-            config,
-            is_text=is_text,
-            precise_image=True,
-        )
-        frame_hits.extend(_merge_search_hits(stage1_video_hits + matched_results, per_k))
-    if not frame_hits:
-        return list(stage1_hits)
-    stage1_preserved = [
-        hit
-        for hit in stage1_hits
-        if normalize_scope_path(str(hit.video_path or "")) not in processed_videos
-    ]
-    combined = frame_hits + stage1_preserved
-    merge_limit = max(len(stage1_hits), per_k * len(candidate_videos))
-    return _merge_search_hits(combined, merge_limit)
-
-
-def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
-    base = resolve_fetch_top_k(top_k, True)
-    try:
-        multiplier = int(config.get("image_search_fetch_multiplier", DEFAULT_CONFIG["image_search_fetch_multiplier"]))
-    except (TypeError, ValueError):
-        multiplier = int(DEFAULT_CONFIG["image_search_fetch_multiplier"])
-    multiplier = max(1, min(multiplier, 8))
-    expanded = max(base * multiplier, base + 15)
-    return min(_GLOBAL_STAGE1_FETCH_CAP, expanded)
-
-
-_IN_VIDEO_PIXEL_LOCALIZE_CAP = 15
-
-
-def _precise_pixel_localize_top_n(config, hits: List[SearchHit] | None = None) -> int:
-    from src.services.image_search_rerank import _image_pixel_rerank_top_n
-
-    prepared_count = len(hits or [])
-    unique_videos = {
-        str(getattr(hit, "video_path", "") or "").strip()
-        for hit in (hits or [])
-        if str(getattr(hit, "video_path", "") or "").strip()
-    }
-    if len(unique_videos) == 1 and prepared_count > 0:
-        configured = _image_pixel_rerank_top_n(config, prepared_count)
-        return max(1, min(configured, _IN_VIDEO_PIXEL_LOCALIZE_CAP, prepared_count))
-    configured = _image_pixel_rerank_top_n(config, _PRECISE_PIXEL_LOCALIZE_TOP_N)
-    return max(1, min(configured, _PRECISE_PIXEL_LOCALIZE_TOP_N, prepared_count or _PRECISE_PIXEL_LOCALIZE_TOP_N))
-
-
-def _resolve_frame_fetch_top_k(
-    top_k: int,
-    scoped: bool,
-    is_text: bool,
-    config,
-    precise_image: bool = False,
-) -> int:
-    if is_text or not precise_image:
-        return resolve_fetch_top_k(top_k, scoped)
-    fetch_k = resolve_fetch_top_k(top_k, scoped or True)
-    try:
-        multiplier = int(config.get("image_search_fetch_multiplier", DEFAULT_CONFIG["image_search_fetch_multiplier"]))
-    except (TypeError, ValueError):
-        multiplier = int(DEFAULT_CONFIG["image_search_fetch_multiplier"])
-    multiplier = max(1, min(multiplier, 8))
-    expanded = max(fetch_k * multiplier, fetch_k + 15)
-    return min(_PRECISE_FETCH_CAP, expanded)
-
-
-def _reset_search_index_steps() -> None:
-    reset_index_step_lookup()
-
-
-def _merge_search_index_steps(video_paths, timestamps) -> None:
-    if video_paths is None or timestamps is None:
-        return
-    merge_index_step_lookup(video_paths, timestamps)
-
-
-def _finalize_frame_hits(
-    query_data,
-    is_text: bool,
-    hits: List[SearchHit],
-    top_k: int,
-    config,
-    precise_image: bool = False,
-    pixel_query_data=None,
-    seed_times: Sequence[float] | None = None,
-) -> List[SearchHit]:
-    if is_text or not precise_image:
-        return _merge_search_hits(hits, top_k)
-    return _refine_precise_seed_hits(
-        query_data,
-        hits,
-        top_k,
-        config,
-        seed_times=seed_times,
-        pixel_query_data=pixel_query_data,
-    )
-
-
-def _neighbor_rerank_window_sec(config, is_text: bool, precise_image: bool = False) -> float:
-    cfg = config or {}
-    if "frame_neighbor_rerank_window_sec" in cfg:
-        try:
-            return max(0.5, float(cfg["frame_neighbor_rerank_window_sec"]))
-        except (TypeError, ValueError):
-            pass
-    if precise_image and not is_text:
-        return 2.0
-    try:
-        frame_window = int(cfg.get("frame_neighbor_rerank_window", DEFAULT_CONFIG["frame_neighbor_rerank_window"]))
-    except (TypeError, ValueError):
-        frame_window = int(DEFAULT_CONFIG["frame_neighbor_rerank_window"])
-    try:
-        fps = float(cfg.get("fps", DEFAULT_CONFIG["fps"]) or DEFAULT_CONFIG["fps"])
-    except (TypeError, ValueError):
-        fps = float(DEFAULT_CONFIG["fps"])
-    return max(1.0, float(frame_window) / max(fps, 0.1))
-
-
-def _same_scope_video_path(left, right) -> bool:
-    return str(left or "") == str(right or "")
-
-
-def _collect_neighbor_frame_ids(base_id: int, timestamps, video_paths, window_sec: float) -> List[int]:
-    total = len(video_paths)
-    if base_id < 0 or base_id >= total:
-        return []
-
-    base_path = video_paths[base_id]
-    base_ts = float(timestamps[base_id])
-    window = max(0.0, float(window_sec))
-    neighbor_ids = [base_id]
-
-    cursor = base_id - 1
-    while cursor >= 0 and _same_scope_video_path(video_paths[cursor], base_path):
-        ts = float(timestamps[cursor])
-        if base_ts - ts > window:
-            break
-        neighbor_ids.append(cursor)
-        cursor -= 1
-
-    cursor = base_id + 1
-    while cursor < total and _same_scope_video_path(video_paths[cursor], base_path):
-        ts = float(timestamps[cursor])
-        if ts - base_ts > window:
-            break
-        neighbor_ids.append(cursor)
-        cursor += 1
-
-    return neighbor_ids
-
-
-def _reconstruct_index_vector(search_index, candidate_id: int, cache: dict[int, np.ndarray]) -> np.ndarray | None:
-    key = int(candidate_id)
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
-    try:
-        vector = np.asarray(search_index.reconstruct(key), dtype=np.float32).reshape(-1)
-    except Exception:
-        return None
-    cache[key] = vector
-    return vector
-
-
-def _resolve_candidate_vector(
-    search_index,
-    candidate_id: int,
-    cache: dict[int, np.ndarray],
-    *,
-    vector_matrix: np.ndarray | None = None,
-) -> np.ndarray | None:
-    key = int(candidate_id)
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
-    if vector_matrix is not None:
-        try:
-            if 0 <= key < int(vector_matrix.shape[0]):
-                vector = np.asarray(vector_matrix[key], dtype=np.float32).reshape(-1)
-                cache[key] = vector
-                return vector
-        except Exception as exc:
-            logger.debug("Vector matrix lookup failed for key %s: %s", key, exc)
-    return _reconstruct_index_vector(search_index, key, cache)
-
-
-def _neighbor_candidate_score(
-    query: np.ndarray,
-    search_index,
-    candidate_id: int,
-    vector_cache: dict[int, np.ndarray],
-    score_cache: dict[int, float],
-    *,
-    vector_matrix: np.ndarray | None = None,
-) -> float | None:
-    key = int(candidate_id)
-    if key in score_cache:
-        return score_cache[key]
-    candidate_vector = _resolve_candidate_vector(
-        search_index,
-        key,
-        vector_cache,
-        vector_matrix=vector_matrix,
-    )
-    if candidate_vector is None:
-        return None
-    score = float(np.dot(query, candidate_vector))
-    score_cache[key] = score
-    return score
-
-
-def _apply_frame_neighbor_rerank(
-    results,
-    frame_ids,
-    query_vector,
-    search_index,
-    timestamps,
-    video_paths,
-    config,
-    is_text: bool = False,
-    precise_image: bool = False,
-):
-    if not results or not frame_ids:
-        return results
-    if not _neighbor_rerank_enabled(config, is_text=is_text, precise_image=precise_image):
-        return results
-
-    max_top_n = int(get_frame_neighbor_rerank_top_n(config) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
-    window_sec = _neighbor_rerank_window_sec(config, is_text=is_text, precise_image=precise_image)
-    if max_top_n <= 0 or window_sec <= 0:
-        return results
-
-    try:
-        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
-        return results
-
-    reranked = list(results)
-    max_index = min(len(results), len(frame_ids), max_top_n)
-    vector_cache: dict[int, np.ndarray] = {}
-    score_cache: dict[int, float] = {}
-    for rank in range(max_index):
-        base_id = frame_ids[rank]
-        if base_id < 0 or base_id >= len(video_paths):
-            continue
-
-        base_path = video_paths[base_id]
-        hit = reranked[rank]
-        best_score = float(hit.score)
-        best_timestamp = float(hit.start_sec)
-
-        for candidate_id in _collect_neighbor_frame_ids(base_id, timestamps, video_paths, window_sec):
-            if not _same_scope_video_path(video_paths[candidate_id], base_path):
-                continue
-            score = _neighbor_candidate_score(
-                query,
-                search_index,
-                int(candidate_id),
-                vector_cache,
-                score_cache,
-            )
-            if score is None:
-                logger.debug(
-                    "Neighbor rerank reconstruct failed for id=%s",
-                    candidate_id,
-                )
-                continue
-            if score > best_score:
-                best_score = score
-                best_timestamp = float(timestamps[candidate_id])
-
-        reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(base_path))
-    return reranked
-
-
-def _expand_neighbor_rerank_candidates(
-    results,
-    frame_ids,
-    query_vector,
-    search_index,
-    timestamps,
-    video_paths,
-    config,
-    is_text: bool = False,
-    precise_image: bool = False,
-    *,
-    seed_top_n: int | None = None,
-) -> List[SearchHit]:
-    """Score every neighbor frame around each FAISS seed (not only the best one)."""
-    if not results or not frame_ids:
-        return list(results or [])
-    if not _neighbor_rerank_enabled(config, is_text=is_text, precise_image=precise_image):
-        return list(results or [])
-
-    configured_top_n = int(get_frame_neighbor_rerank_top_n(config) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
-    max_top_n = int(seed_top_n) if seed_top_n is not None else configured_top_n
-    max_top_n = max(1, min(max_top_n, len(results), len(frame_ids)))
-    window_sec = _neighbor_rerank_window_sec(config, is_text=is_text, precise_image=precise_image)
-    if window_sec <= 0:
-        return list(results or [])
-
-    try:
-        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
-        return list(results or [])
-
-    candidates: dict[tuple[str, int], SearchHit] = {}
-    vector_cache: dict[int, np.ndarray] = {}
-    score_cache: dict[int, float] = {}
-    for rank in range(max_top_n):
-        base_id = frame_ids[rank]
-        if base_id < 0 or base_id >= len(video_paths):
-            continue
-        base_path = str(video_paths[base_id])
-        for candidate_id in _collect_neighbor_frame_ids(base_id, timestamps, video_paths, window_sec):
-            if not _same_scope_video_path(video_paths[candidate_id], base_path):
-                continue
-            score = _neighbor_candidate_score(
-                query,
-                search_index,
-                int(candidate_id),
-                vector_cache,
-                score_cache,
-            )
-            if score is None:
-                logger.debug(
-                    "Neighbor candidate reconstruct failed for id=%s",
-                    candidate_id,
-                )
-                continue
-            ts = float(timestamps[candidate_id])
-            key = (base_path, int(round(ts * 1000)))
-            hit = SearchHit(ts, ts, score, base_path)
-            if key not in candidates or score > float(candidates[key].score):
-                candidates[key] = hit
-
-    for hit in results:
-        key = (str(hit.video_path), int(round(float(hit.start_sec) * 1000)))
-        if key not in candidates or float(hit.score) > float(candidates[key].score):
-            candidates[key] = hit
-
-    return sorted(candidates.values(), key=lambda item: float(item.score), reverse=True)
-
-
-def _resolve_neighbor_seed_top_n(
-    config,
-    fetch_k: int,
-    top_k: int,
-    *,
-    precise_image: bool,
-) -> int:
-    """How many FAISS seeds get neighbor expansion (CLIP-only, must stay bounded)."""
-    if not _neighbor_rerank_enabled(config, is_text=False, precise_image=precise_image):
-        return max(1, min(int(fetch_k), int(top_k)))
-    try:
-        configured = int(get_frame_neighbor_rerank_top_n(config) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
-    except (TypeError, ValueError):
-        configured = int(DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
-    target = max(configured, int(top_k) * 2, 12)
-    return max(1, min(int(fetch_k), target, 32))
-
-
-def _prepare_frame_candidates_for_chunk_aggregate(hits: List[SearchHit]) -> List[SearchHit]:
-    if not hits:
-        return []
-    # CLIP-only pool for chunk aggregation. Pixel rerank runs after aggregation
-    # on the final top-k segments; doing it here on hundreds of frames is too slow.
-    return sorted(hits, key=lambda item: float(item.score), reverse=True)
-
-
-def _collect_frame_candidates_for_chunk_search(
-    query_data,
-    *,
-    is_text=False,
-    top_k=None,
-    scope_video_paths=None,
-    scope_library_paths=None,
-    query_vector=None,
-    search_precision_mode=None,
-    pixel_query_data=None,
-    precise_image=False,
-    config=None,
-) -> List[SearchHit]:
-    config = config or load_config()
-    if top_k is None:
-        top_k = get_search_top_k(config)
-    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
-    query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
-    if precise_image:
-        fetch_k = (
-            _resolve_stage1_global_fetch_k(top_k, config)
-            if not scoped
-            else _resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
-        )
-    else:
-        fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped)
-    neighbor_seed_n = _resolve_neighbor_seed_top_n(config, fetch_k, top_k, precise_image=precise_image)
-    candidates: List[SearchHit] = []
-
-    if scoped and scope_video_paths:
-        per_k = resolve_per_video_fetch_top_k(fetch_k, len(scope_video_paths))
-        per_seed_n = _resolve_neighbor_seed_top_n(config, per_k, top_k, precise_image=precise_image)
-        for abs_path, video_id in _resolve_scoped_video_targets(scope_video_paths, config):
-            search_index, timestamps, video_paths, _vector_matrix = _load_per_video_frame_assets(video_id, abs_path, config)
-            if search_index is None:
-                continue
-            _merge_search_index_steps(video_paths, timestamps)
-            matched_results, matched_ids = _search_frame_results_with_ids(
-                query_vector,
-                search_index,
-                timestamps,
-                video_paths,
-                top_k=per_k,
-            )
-            candidates.extend(
-                _expand_neighbor_rerank_candidates(
-                    matched_results,
-                    matched_ids,
-                    query_vector,
-                    search_index,
-                    timestamps,
-                    video_paths,
-                    config,
-                    is_text=is_text,
-                    precise_image=precise_image,
-                    seed_top_n=per_seed_n,
-                )
-            )
-    elif (
-        scoped
-        and scope_library_paths
-        and not scope_video_paths
-        and _library_indexes_ready(config, scope_library_paths)
-    ):
-        library_fetch_k = fetch_k
-        library_seed_n = neighbor_seed_n
-        for library_path in scope_library_paths:
-            search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
-            if search_index is None:
-                continue
-            _merge_search_index_steps(video_paths, timestamps)
-            matched_results, matched_ids = _search_frame_results_with_ids(
-                query_vector,
-                search_index,
-                timestamps,
-                video_paths,
-                top_k=library_fetch_k,
-            )
-            candidates.extend(
-                _expand_neighbor_rerank_candidates(
-                    matched_results,
-                    matched_ids,
-                    query_vector,
-                    search_index,
-                    timestamps,
-                    video_paths,
-                    config,
-                    is_text=is_text,
-                    precise_image=precise_image,
-                    seed_top_n=library_seed_n,
-                )
-            )
-    else:
-        global_fetch_k = fetch_k
-        search_index, timestamps, video_paths = load_search_assets(config)
-        if search_index is None:
-            return []
-        _merge_search_index_steps(video_paths, timestamps)
-        _check_asset_profile_compatibility(config, _FRAME_ASSET_INFO, asset_label="frame")
-        matched_results, matched_ids = _search_frame_results_with_ids(
-            query_vector,
-            search_index,
-            timestamps,
-            video_paths,
-            top_k=global_fetch_k,
-        )
-        candidates = _expand_neighbor_rerank_candidates(
-            matched_results,
-            matched_ids,
-            query_vector,
-            search_index,
-            timestamps,
-            video_paths,
-            config,
-            is_text=is_text,
-            precise_image=precise_image,
-            seed_top_n=neighbor_seed_n,
-        )
-        candidates = apply_search_scope(
-            candidates,
-            video_paths=scope_video_paths,
-            library_paths=scope_library_paths,
-            top_k=None,
-        )
-
-    return _prepare_frame_candidates_for_chunk_aggregate(candidates)
-
-
-def _resolve_video_id_for_path(video_path: str, config) -> str | None:
-    from src.services.search_scope import build_indexed_video_lookup, normalize_scope_path
-    from src.storage.asset_store import load_model_metadata
-
-    lookup = build_indexed_video_lookup(load_model_metadata(config=config))
-    normalized = normalize_scope_path(video_path)
-    video_id = lookup.get(normalized)
-    if video_id:
-        return video_id
-    normalized_case = os.path.normcase(normalized)
-    for path, candidate_id in lookup.items():
-        if os.path.normcase(str(path)) == normalized_case:
-            return candidate_id
-    return None
-
-
-def _chunk_hit_from_range(frame_hit: SearchHit, chunk_start: float, chunk_end: float) -> SearchHit:
-    start = float(chunk_start)
-    end = float(chunk_end)
-    if end <= start:
-        end = start + 0.1
-    return SearchHit(start, end, float(frame_hit.score), str(frame_hit.video_path))
-
-
-def _load_global_chunk_ranges_by_path(config) -> dict[str, list[tuple[float, float]]]:
-    assets = load_chunk_search_assets(config)
-    if not assets:
-        return {}
-    _index, ranges, paths = assets
-    if _index is None or ranges is None or paths is None:
-        return {}
-    by_path: dict[str, list[tuple[float, float]]] = {}
-    range_count = min(len(ranges), len(paths))
-    for idx in range(range_count):
-        path = normalize_scope_path(str(paths[idx]))
-        time_range = ranges[idx]
-        by_path.setdefault(path, []).append((float(time_range[0]), float(time_range[1])))
-    return by_path
-
-
-def _lookup_path_in_index(path_index: dict[str, list[tuple[float, float]]], video_path: str):
-    normalized = normalize_scope_path(video_path)
-    values = path_index.get(normalized)
-    if values:
-        return values
-    normalized_case = os.path.normcase(normalized)
-    for path, items in path_index.items():
-        if os.path.normcase(path) == normalized_case:
-            return items
-    return None
-
-
-def _find_range_for_timestamp(ranges, timestamp: float):
-    ts = float(timestamp)
-    tolerance = 0.25
-    for index, (start, end) in enumerate(ranges or []):
-        if (start - tolerance) <= ts <= (end + tolerance):
-            return index, start, end
-    return None, None, None
-
-
-def _chunk_ranges_for_video(
-    video_path: str,
-    config,
-    *,
-    range_index: dict[str, list[tuple[float, float]]] | None = None,
-) -> list[tuple[float, float]]:
-    range_index = range_index if range_index is not None else _load_global_chunk_ranges_by_path(config)
-    indexed = _lookup_path_in_index(range_index, video_path)
-    if indexed:
-        return indexed
-    video_id = _resolve_video_id_for_path(video_path, config)
-    if not video_id:
-        return []
-    chunks = load_video_chunks_by_id(video_id, config)
-    return [(float(chunk["start"]), float(chunk["end"])) for chunk in chunks]
-
-
-def _resolve_chunk_precise_frame_fetch_k(top_k: int, scoped: bool) -> int:
-    normalized = max(1, int(top_k))
-    expanded = max(normalized * 6, normalized + 30)
-    if scoped:
-        expanded = max(expanded, normalized * 3 + 15)
-    return min(200, expanded)
-
-
-def _aggregate_frame_hits_to_chunks(hits: List[SearchHit], top_k: int, config) -> List[SearchHit]:
-    if not hits:
-        return []
-    range_index = _load_global_chunk_ranges_by_path(config)
-    range_cache: dict[str, list[tuple[float, float]]] = {}
-    seen: set[tuple[str, int]] = set()
-    aggregated: List[SearchHit] = []
-    limit = max(1, int(top_k))
-    ordered_hits = sorted(hits, key=lambda item: float(item.score), reverse=True)
-
-    for hit in ordered_hits:
-        video_path = str(hit.video_path or "")
-        path_key = normalize_scope_path(video_path)
-        if path_key not in range_cache:
-            range_cache[path_key] = _chunk_ranges_for_video(
-                video_path,
-                config,
-                range_index=range_index,
-            )
-        chunk_idx, chunk_start, chunk_end = _find_range_for_timestamp(range_cache[path_key], hit.start_sec)
-        if chunk_idx is None:
-            logger.debug(
-                "Chunk aggregate skipped hit outside indexed ranges: %s @ %.3fs",
-                video_path,
-                float(hit.start_sec),
-            )
-            continue
-        dedupe_key = (path_key, int(chunk_idx))
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        aggregated.append(_chunk_hit_from_range(hit, chunk_start, chunk_end))
-        if len(aggregated) >= limit:
-            break
-    return aggregated
-
-
-def _run_chunk_search_via_frames(
-    query_data,
-    *,
-    is_text=False,
-    top_k=None,
-    scope_video_paths=None,
-    scope_library_paths=None,
-    query_vector=None,
-    search_precision_mode=None,
-    pixel_query_data=None,
-    precise_image=False,
-    config=None,
-) -> List[SearchHit]:
-    config = config or load_config()
-    if top_k is None:
-        top_k = get_search_top_k(config)
-    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
-    if precise_image:
-        frame_fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
-    else:
-        frame_fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped)
-    logger.info(
-        "Chunk image search via frames (precise=%s, frame_fetch_k=%s)",
-        precise_image,
-        frame_fetch_k,
-    )
-    frame_hits = _collect_frame_candidates_for_chunk_search(
-        query_data,
-        is_text=is_text,
-        top_k=top_k,
-        scope_video_paths=scope_video_paths,
-        scope_library_paths=scope_library_paths,
-        query_vector=query_vector,
-        search_precision_mode=search_precision_mode if precise_image else "fast",
-        pixel_query_data=pixel_query_data,
-        precise_image=precise_image,
-        config=config,
-    )
-    if precise_image:
-        return _finalize_frame_hits(
-            query_data,
-            is_text,
-            frame_hits,
-            top_k,
-            config,
-            precise_image=True,
-            pixel_query_data=pixel_query_data,
-        )
-    with profile_phase("chunk_aggregate"):
-        aggregated = _aggregate_frame_hits_to_chunks(frame_hits, top_k, config)
-    if aggregated:
-        return _finalize_frame_hits(
-            query_data,
-            is_text,
-            aggregated,
-            top_k,
-            config,
-            precise_image=precise_image,
-            pixel_query_data=pixel_query_data,
-        )
-    if frame_hits:
-        logger.warning(
-            "Chunk aggregate mapped 0 segments from %s frame hits; returning frame results",
-            len(frame_hits),
-        )
-        return _merge_search_hits(frame_hits, top_k)
-    return []
-
-
-def _run_chunk_search_via_precise_frames(
-    query_data,
-    *,
-    is_text=False,
-    top_k=None,
-    scope_video_paths=None,
-    scope_library_paths=None,
-    query_vector=None,
-    search_precision_mode=None,
-    pixel_query_data=None,
-    config=None,
-) -> List[SearchHit]:
-    return _run_chunk_search_via_frames(
-        query_data,
-        is_text=is_text,
-        top_k=top_k,
-        scope_video_paths=scope_video_paths,
-        scope_library_paths=scope_library_paths,
-        query_vector=query_vector,
-        search_precision_mode=search_precision_mode,
-        pixel_query_data=pixel_query_data,
-        precise_image=True,
-        config=config,
-    )
-
-
 def run_search(
     query_data,
     is_text=False,
@@ -1796,9 +394,14 @@ def run_search(
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
-    mode = str(search_mode or get_search_mode(config)).strip().lower()
-    if mode not in {"frame", "chunk"}:
-        mode = get_search_mode(config)
+    # Image queries default to frame search (matches search UI hint); callers can
+    # pass search_mode="chunk" explicitly when segment aggregation is intended.
+    if not is_text and search_mode is None:
+        mode = "frame"
+    else:
+        mode = str(search_mode or get_search_mode(config)).strip().lower()
+        if mode not in {"frame", "chunk"}:
+            mode = get_search_mode(config)
     profile_enabled = profile if profile is not None else is_profiling_enabled(config)
     profile_meta = build_profile_meta_from_config(
         config,
@@ -2224,3 +827,19 @@ def warmup_search_runtime():
     get_engine()
     load_search_assets(config)
     load_chunk_search_assets(config)
+
+
+__all__ = [
+    "_LOCATE_CROP_MIN_CLIP_SCORE",
+    "build_query_vector",
+    "compute_locate_score_margin",
+    "filter_hits_by_min_score",
+    "format_clip_score_percent",
+    "load_chunk_search_assets",
+    "load_search_assets",
+    "locate_crop_confidence_warning_key",
+    "resolve_clip_confidence_tier_key",
+    "run_chunk_search",
+    "run_search",
+    "warmup_search_runtime",
+]

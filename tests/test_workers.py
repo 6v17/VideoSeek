@@ -1,18 +1,8 @@
 import unittest
 import os
-import sys
 from unittest.mock import patch
 
-# test_controllers stubs PySide6 and ui.workers; remove stubs so the real Qt worker module loads.
-for _name in (
-    "ui.workers",
-    "PySide6",
-    "PySide6.QtCore",
-    "PySide6.QtWidgets",
-    "PySide6.QtGui",
-):
-    sys.modules.pop(_name, None)
-from ui.workers import IndexUpdateWorker
+from ui.workers import IndexUpdateWorker, SearchConfig, SearchWorker, VersionCheckWorker
 
 
 class WorkersTests(unittest.TestCase):
@@ -110,6 +100,36 @@ class WorkersTests(unittest.TestCase):
         self.assertEqual(seen, {"gpu": "1", "system": None})
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM"))
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"))
+
+    @patch("ui.workers.get_version_status", return_value={"ok": True})
+    def test_version_check_worker_emits_result(self, _mock_get_version_status):
+        emitted = []
+        worker = VersionCheckWorker("zh")
+        worker.result_ready.connect(emitted.append)
+
+        worker.run()
+
+        self.assertEqual(emitted, [{"ok": True}])
+
+    @patch("ui.workers.get_version_status", side_effect=RuntimeError("network down"))
+    def test_version_check_worker_swallows_fetch_errors(self, _mock_get_version_status):
+        emitted = []
+        worker = VersionCheckWorker("zh")
+        worker.result_ready.connect(emitted.append)
+
+        worker.run()
+
+        self.assertEqual(emitted, [])
+
+    @patch("src.services.search_service.run_search", side_effect=RuntimeError("search failed"))
+    def test_search_worker_emits_error_signal(self, _mock_run_search):
+        errors = []
+        worker = SearchWorker(SearchConfig(query="cat", is_text=True))
+        worker.error_signal.connect(errors.append)
+
+        worker.run()
+
+        self.assertEqual(errors, ["search failed"])
 
 
 if __name__ == "__main__":

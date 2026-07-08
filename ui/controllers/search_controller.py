@@ -6,7 +6,7 @@ from src.app.logging_utils import get_logger
 from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
 from ui.threading_utils import shutdown_thread
 from ui.views.table_visibility import visible_table_row_range
-from ui.workers import SearchWarmupWorker, SearchWorker, ThumbLoader
+from ui.workers import SearchConfig, SearchWarmupWorker, SearchWorker, ThumbLoader
 
 logger = get_logger("search_controller")
 
@@ -74,20 +74,22 @@ class SearchController(QObject):
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["searching"])
 
         self.worker = SearchWorker(
-            query=query,
-            is_text=is_text,
-            scope_library_paths=self._scope_library_paths,
-            scope_video_paths=scope_video_paths,
-            query_vector=query_vector,
-            search_mode=search_mode,
-            top_k=top_k,
-            min_score=min_score,
-            search_precision_mode=search_precision_mode,
-            pixel_query_data=pixel_query_data,
-            preview_anchor_sec=preview_anchor_sec,
-            locate_anchor_score=locate_anchor_score,
-            locate_score_margin=locate_score_margin,
-            video_discovery_enabled=video_discovery_enabled,
+            SearchConfig(
+                query=query,
+                is_text=is_text,
+                scope_library_paths=self._scope_library_paths,
+                scope_video_paths=list(scope_video_paths or []),
+                query_vector=query_vector,
+                search_mode=search_mode,
+                top_k=top_k,
+                min_score=min_score,
+                search_precision_mode=search_precision_mode,
+                pixel_query_data=pixel_query_data,
+                preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
+                video_discovery_enabled=video_discovery_enabled,
+            )
         )
         self.worker.result_ready.connect(self._display_results)
         self.worker.error_signal.connect(self._handle_search_error)
@@ -97,7 +99,7 @@ class SearchController(QObject):
 
     def start_preset_search(self, preset_id):
         from src.services.search_request_service import resolve_search_query_inputs
-        from src.services.search_scope import resolve_active_search_mode, resolve_effective_search_scope
+        from src.services.search_scope import resolve_effective_search_scope
 
         query_part = resolve_search_query_inputs(preset_id=preset_id)
         preset = query_part["preset"]
@@ -119,7 +121,11 @@ class SearchController(QObject):
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             query_vector=query_part.get("query_vector"),
-            search_mode=resolve_active_search_mode(),
+            search_mode=self.parent_window._resolve_effective_search_mode(
+                is_text=is_text,
+                has_image=has_image,
+                search_precision_mode=search_precision_mode,
+            ),
             top_k=query_part.get("default_top_k"),
             min_score=query_part.get("default_min_score"),
             search_precision_mode=search_precision_mode,

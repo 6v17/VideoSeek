@@ -1,7 +1,7 @@
 import os
 
 from src.app.config import load_config
-from src.core.faiss_index import load_clip_index
+from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_model_metadata, load_vector_payload, save_model_metadata
 from src.storage.config_store import get_local_model_asset_dirs
 from src.utils import canonicalize_library_path
@@ -11,12 +11,8 @@ from src.services.search_index_schema import (
     get_library_search_index_status,
     get_search_index_schema_version,
     LIBRARY_SEARCH_INDEX_STATUS_STALE,
-    list_library_search_index_summaries,
     needs_search_index_upgrade,
 )
-
-GLOBAL_INDEX_STATE_FRESH = "fresh"
-GLOBAL_INDEX_STATE_STALE = "stale"
 
 
 def needs_search_index_schema_upgrade(config=None):
@@ -95,54 +91,6 @@ def list_libraries():
     return normalized
 
 
-def get_global_index_state():
-    config = load_config()
-    meta = load_model_metadata(config=config)
-    state = _normalize_global_index_state(meta.get("global_index_state", GLOBAL_INDEX_STATE_FRESH))
-    if not state:
-        return GLOBAL_INDEX_STATE_FRESH
-    return state
-
-
-def _normalize_global_index_state(state):
-    normalized_state = str(state or "").strip().lower()
-    if normalized_state not in {GLOBAL_INDEX_STATE_FRESH, GLOBAL_INDEX_STATE_STALE}:
-        return ""
-    return normalized_state
-
-
-def _set_global_index_state_on_meta(meta, state):
-    normalized_state = _normalize_global_index_state(state)
-    if not normalized_state:
-        return False
-    previous_state = _normalize_global_index_state(meta.get("global_index_state", GLOBAL_INDEX_STATE_FRESH))
-    if not previous_state:
-        previous_state = GLOBAL_INDEX_STATE_FRESH
-    if previous_state == normalized_state:
-        return False
-    meta["global_index_state"] = normalized_state
-    return True
-
-
-def set_global_index_state(state, meta=None):
-    if meta is not None:
-        return _set_global_index_state_on_meta(meta, state)
-    config = load_config()
-    meta = load_model_metadata(config=config)
-    if not _set_global_index_state_on_meta(meta, state):
-        return False
-    save_model_metadata(meta, config=config)
-    return True
-
-
-def mark_global_index_stale(meta=None):
-    return set_global_index_state(GLOBAL_INDEX_STATE_STALE, meta=meta)
-
-
-def mark_global_index_fresh(meta=None):
-    return set_global_index_state(GLOBAL_INDEX_STATE_FRESH, meta=meta)
-
-
 def list_partial_libraries(include_offline=False):
     libraries = list_libraries()
     partial = []
@@ -203,40 +151,26 @@ def remove_library(path, delete_video_data):
         if info.get("vid") and info.get("vid") not in remaining_video_ids
     }
 
-    library_changed_search_assets = _library_changes_search_assets(library, config)
-
     clear_library_search_index(normalized_path, config=config)
     del meta["libraries"][normalized_path]
-    if library_changed_search_assets:
-        mark_global_index_stale(meta=meta)
     try:
         garbage_collect_orphan_library_indexes(meta, config=config)
     except Exception:
         pass
     save_model_metadata(meta, config=config)
 
-    for video_id in removable_video_ids:
-        delete_video_data(video_id, config)
+    if removable_video_ids:
+        for video_id in removable_video_ids:
+            delete_video_data(video_id, config)
+        try:
+            from src.storage.lance_store import compact_lance_storage, garbage_collect_orphan_lance_videos
+
+            garbage_collect_orphan_lance_videos(meta, config=config)
+            compact_lance_storage(get_local_model_asset_dirs(config=config)["base_dir"])
+        except Exception as exc:
+            get_logger("library_service").warning("Post-removal Lance cleanup failed: %s", exc)
 
     return True
-
-
-def _library_changes_search_assets(library, config):
-    model_dirs = get_local_model_asset_dirs(config=config)
-    vector_dir = str(model_dirs.get("vector_dir", "")).strip()
-    index_dir = str(model_dirs.get("index_dir", "")).strip()
-    for info in library.get("files", {}).values():
-        video_id = str(info.get("vid", "")).strip()
-        if not video_id:
-            continue
-        asset_state = str(info.get("asset_state", "")).strip().lower()
-        vector_file = os.path.join(vector_dir, f"{video_id}_vectors.npy") if vector_dir else ""
-        index_file = os.path.join(index_dir, f"{video_id}_index.faiss") if index_dir else ""
-        if (vector_file and os.path.exists(vector_file)) or (index_file and os.path.exists(index_file)):
-            return True
-        if asset_state and asset_state != "sync_failed":
-            return True
-    return False
 
 
 def _read_vector_health(vector_file):
@@ -262,34 +196,56 @@ def _read_vector_health(vector_file):
     return True, True
 
 
-def _read_index_health(index_file):
-    if not os.path.exists(index_file):
-        return False, False
-    try:
-        return True, load_clip_index(index_file) is not None
-    except Exception:
-        return True, False
-
-
-def _effective_asset_state(info, source_exists, vector_exists, vector_ok, index_exists, index_ok):
+def _effective_asset_state(info, source_exists, vector_exists, vector_ok, lance_ready):
     stored_state = str(info.get("asset_state", "")).strip().lower()
     if not source_exists:
         return "missing_source"
-    if stored_state == "sync_failed" and (not vector_exists or not vector_ok or not index_exists or not index_ok):
+    if stored_state == "sync_failed" and (not vector_exists or not vector_ok or not lance_ready):
         return "sync_failed"
-    if not vector_exists or not index_exists:
+    if not vector_exists:
         return "missing_asset"
-    if not vector_ok or not index_ok:
+    if not vector_ok or not lance_ready:
         return "broken_asset"
     return "ready"
 
 
 def list_local_vector_details(validate_contents=False):
+    from src.storage.lance_search_index import (
+        get_lance_indexed_video_ids,
+        get_lance_video_row_counts,
+        lance_search_is_ready,
+    )
+    from src.storage.lance_store import (
+        allocate_lance_dir_bytes_by_weight,
+        estimate_lance_video_payload_bytes,
+        get_lance_dir,
+        read_lance_profile_summary,
+        sum_legacy_vector_npy_bytes,
+    )
+
     config = load_config()
     libraries = list_libraries()
     model_dirs = get_local_model_asset_dirs(config=config)
+    profile_base_dir = os.path.normpath(model_dirs["base_dir"])
     vector_dir = os.path.normpath(model_dirs["vector_dir"])
-    index_dir = os.path.normpath(model_dirs["index_dir"])
+    lance_dir = os.path.normpath(get_lance_dir(profile_base_dir))
+    lance_table_ready = lance_search_is_ready(profile_base_dir)
+    lance_video_ids = get_lance_indexed_video_ids(profile_base_dir) if lance_table_ready else frozenset()
+    lance_video_counts = get_lance_video_row_counts(profile_base_dir) if lance_table_ready else {}
+    lance_summary = read_lance_profile_summary(profile_base_dir)
+    lance_dir_bytes = int(lance_summary.get("lance_dir_bytes", 0) or 0)
+    legacy_vector_dir_bytes = sum_legacy_vector_npy_bytes(vector_dir)
+    embedding_dim = int(lance_summary.get("dimension", 0) or 0)
+    lance_weight_by_video = {
+        video_id: estimate_lance_video_payload_bytes(
+            counts.get("frame_count", 0),
+            counts.get("chunk_count", 0),
+            dimension=embedding_dim,
+        )
+        for video_id, counts in lance_video_counts.items()
+    }
+    lance_active_bytes = sum(lance_weight_by_video.values())
+    lance_bytes_by_video = allocate_lance_dir_bytes_by_weight(lance_active_bytes, lance_weight_by_video)
     entries = []
 
     for library_path, library_data in libraries.items():
@@ -299,29 +255,39 @@ def list_local_vector_details(validate_contents=False):
             if not video_id:
                 continue
             video_path = os.path.normpath(os.path.join(library_path, rel_path))
-            vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
-            index_file = os.path.normpath(os.path.join(index_dir, f"{video_id}_index.faiss"))
+            legacy_npy_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
             source_exists = os.path.exists(video_path)
+            legacy_npy_exists = os.path.exists(legacy_npy_file)
+            lance_ready = video_id in lance_video_ids
+            video_counts = lance_video_counts.get(video_id, {})
+            lance_frame_count = int(video_counts.get("frame_count", 0) or 0)
+            lance_chunk_count = int(video_counts.get("chunk_count", 0) or 0)
+            lance_storage_bytes = int(lance_bytes_by_video.get(video_id, 0) or 0) if lance_ready else 0
+            legacy_npy_bytes = 0
+            if legacy_npy_exists:
+                try:
+                    legacy_npy_bytes = os.path.getsize(legacy_npy_file)
+                except OSError:
+                    legacy_npy_bytes = 0
+            storage_bytes = lance_storage_bytes + legacy_npy_bytes
             if validate_contents:
-                vector_exists, vector_ok = _read_vector_health(vector_file)
-                index_exists, index_ok = _read_index_health(index_file)
+                legacy_npy_ok = False
+                if legacy_npy_exists:
+                    _, legacy_npy_ok = _read_vector_health(legacy_npy_file)
                 asset_state = _effective_asset_state(
                     info,
                     source_exists=source_exists,
-                    vector_exists=vector_exists,
-                    vector_ok=vector_ok,
-                    index_exists=index_exists,
-                    index_ok=index_ok,
+                    vector_exists=legacy_npy_exists or lance_ready,
+                    vector_ok=legacy_npy_ok or lance_ready,
+                    lance_ready=lance_ready,
                 )
             else:
-                vector_exists = os.path.exists(vector_file)
-                index_exists = os.path.exists(index_file)
                 stored_state = str(info.get("asset_state", "")).strip().lower()
                 if not source_exists:
                     asset_state = "missing_source"
                 elif stored_state == "sync_failed":
                     asset_state = "sync_failed"
-                elif not vector_exists or not index_exists:
+                elif not lance_ready and not legacy_npy_exists:
                     asset_state = "missing_asset"
                 else:
                     asset_state = "ready"
@@ -332,28 +298,44 @@ def list_local_vector_details(validate_contents=False):
                     "video_id": video_id,
                     "source_exists": source_exists,
                     "asset_state": asset_state,
-                    "vector_file": vector_file,
-                    "index_file": index_file,
-                    "vector_exists": vector_exists,
-                    "index_exists": index_exists,
+                    "lance_ready": lance_ready,
+                    "lance_frame_count": lance_frame_count,
+                    "lance_chunk_count": lance_chunk_count,
+                    "lance_storage_bytes": lance_storage_bytes,
+                    "legacy_npy_bytes": legacy_npy_bytes,
+                    "storage_bytes": storage_bytes,
+                    "legacy_npy_exists": legacy_npy_exists,
+                    "legacy_npy_file": legacy_npy_file if legacy_npy_exists else "",
                     "sync_failure_reason": str(info.get("sync_failure_reason", "")).strip().lower(),
+                    # Legacy export fields kept for older tooling.
+                    "vector_file": legacy_npy_file,
+                    "vector_exists": legacy_npy_exists or lance_ready,
+                    "index_exists": lance_ready,
+                    "index_file": "",
                 }
             )
 
     entries.sort(key=lambda item: (item["library_path"], item["video_rel_path"]))
-    meta = load_model_metadata(config=config)
-    library_index_root = ""
-    summaries = list_library_search_index_summaries(meta, config=config)
-    if summaries:
-        library_index_root = str(summaries[0].get("library_index_dir", "") or "")
-        library_index_root = os.path.dirname(library_index_root) if library_index_root else ""
+    total_storage_bytes = lance_active_bytes + legacy_vector_dir_bytes
     return {
-        "vector_dir": vector_dir,
-        "index_dir": index_dir,
-        "library_index_root": library_index_root,
-        "library_summaries": summaries,
+        "schema_version": 2,
+        "profile_base_dir": profile_base_dir,
+        "lance_dir": lance_dir,
+        "legacy_vector_dir": vector_dir,
+        "lance_summary": lance_summary,
+        "storage_summary": {
+            "lance_dir_bytes": lance_dir_bytes,
+            "lance_active_bytes": lance_active_bytes,
+            "legacy_vector_dir_bytes": legacy_vector_dir_bytes,
+            "total_storage_bytes": total_storage_bytes,
+        },
         "entries": entries,
         "total_entries": len(entries),
+        # Deprecated keys retained for exported JSON compatibility.
+        "vector_dir": vector_dir,
+        "index_dir": os.path.normpath(model_dirs["index_dir"]),
+        "library_index_root": "",
+        "library_summaries": [],
     }
 
 

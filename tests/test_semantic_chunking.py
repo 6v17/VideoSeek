@@ -1,5 +1,3 @@
-import sys
-import types
 import unittest
 from unittest.mock import patch
 
@@ -9,12 +7,6 @@ except ImportError:  # pragma: no cover
     np = None
 if np is not None and not hasattr(np, "asarray"):  # pragma: no cover
     np = None
-
-sys.modules.setdefault("cv2", types.SimpleNamespace())
-sys.modules.setdefault("onnxruntime", types.SimpleNamespace())
-sys.modules.setdefault("faiss", types.SimpleNamespace())
-sys.modules.setdefault("ftfy", types.SimpleNamespace(fix_text=lambda text: text))
-sys.modules.setdefault("regex", __import__("re"))
 
 from src.domain.search_hit import SearchHit
 
@@ -55,6 +47,8 @@ if np is not None:
     from src.core.semantic_chunking import (
         build_semantic_chunks,
         build_semantic_chunks_streaming,
+        merge_short_chunks,
+        normalize_chunk_config_snapshot,
         unpack_chunks,
     )
     from src.services import indexing_service
@@ -68,7 +62,7 @@ else:  # pragma: no cover
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class SemanticChunkingTests(unittest.TestCase):
-    def test_build_semantic_chunks_splits_on_low_chunk_similarity(self):
+    def test_dual_check_splits_on_sharp_cut(self):
         embeddings = np.asarray(
             [
                 [1.0, 0.0],
@@ -84,37 +78,34 @@ class SemanticChunkingTests(unittest.TestCase):
             embeddings,
             timestamps,
             similarity_threshold=0.85,
-            max_chunk_duration=10.0,
             min_chunk_size=2,
-            similarity_mode="chunk",
         )
 
         self.assertEqual(len(chunks), 2)
         self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
         self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (2.0, 3.0))
 
-    def test_build_semantic_chunks_supports_frame_similarity_mode(self):
+    def test_dual_check_keeps_chunk_when_mean_similarity_recovers(self):
         embeddings = np.asarray(
             [
                 [1.0, 0.0],
-                [0.9, 0.1],
-                [0.8, 0.2],
+                [0.98, 0.02],
+                [0.90, 0.10],
+                [0.97, 0.03],
             ],
             dtype=np.float32,
         )
-        timestamps = [0.0, 1.0, 2.0]
+        timestamps = [0.0, 1.0, 2.0, 3.0]
 
         chunks = build_semantic_chunks(
             embeddings,
             timestamps,
-            similarity_threshold=0.7,
-            max_chunk_duration=10.0,
-            min_chunk_size=1,
-            similarity_mode="frame",
+            similarity_threshold=0.85,
+            min_chunk_size=2,
         )
 
         self.assertEqual(len(chunks), 1)
-        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 2.0))
+        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 3.0))
 
     def test_streaming_chunks_match_single_pass(self):
         embeddings = np.asarray(
@@ -130,9 +121,8 @@ class SemanticChunkingTests(unittest.TestCase):
         timestamps = [0.0, 1.0, 2.0, 3.0, 4.0]
         kwargs = {
             "similarity_threshold": 0.85,
-            "max_chunk_duration": 10.0,
             "min_chunk_size": 2,
-            "similarity_mode": "chunk",
+            "min_chunk_duration": 0.0,
         }
 
         single = build_semantic_chunks(embeddings, timestamps, **kwargs)
@@ -147,96 +137,65 @@ class SemanticChunkingTests(unittest.TestCase):
             self.assertEqual((left["start"], left["end"]), (right["start"], right["end"]))
             np.testing.assert_allclose(left["embedding"], right["embedding"], rtol=1e-5, atol=1e-5)
 
-    def test_build_semantic_chunks_respects_max_duration(self):
-        embeddings = np.asarray(
-            [
-                [1.0, 0.0],
-                [1.0, 0.0],
-                [1.0, 0.0],
-            ],
-            dtype=np.float32,
+    def test_identical_frames_stay_in_one_chunk(self):
+        embeddings = np.asarray([[1.0, 0.0]] * 12, dtype=np.float32)
+        timestamps = [float(index) for index in range(12)]
+
+        chunks = build_semantic_chunks(embeddings, timestamps, similarity_threshold=0.85)
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 11.0))
+
+    def test_merge_short_chunks_combines_short_tail(self):
+        records = [
+            {
+                "start": 0.0,
+                "end": 1.0,
+                "vectors": [np.asarray([1.0, 0.0], dtype=np.float32)],
+                "times": [0.0],
+            },
+            {
+                "start": 1.0,
+                "end": 1.5,
+                "vectors": [np.asarray([0.98, 0.02], dtype=np.float32)],
+                "times": [1.5],
+            },
+        ]
+
+        merged = merge_short_chunks(records, min_duration=2.0)
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual((merged[0]["start"], merged[0]["end"]), (0.0, 1.5))
+        self.assertEqual(len(merged[0]["vectors"]), 2)
+
+    def test_normalize_chunk_config_snapshot_ignores_retired_keys(self):
+        normalized = normalize_chunk_config_snapshot(
+            {
+                "similarity_threshold": 0.85,
+                "min_chunk_size": 2,
+                "min_chunk_duration": 0.0,
+                "max_chunk_duration": 5.0,
+                "chunk_merge_adjacent_threshold": 0.9,
+            }
         )
-        timestamps = [0.0, 3.0, 6.5]
-
-        chunks = build_semantic_chunks(
-            embeddings,
-            timestamps,
-            similarity_threshold=0.1,
-            max_chunk_duration=5.0,
-            min_chunk_size=1,
-            similarity_mode="chunk",
+        self.assertEqual(
+            normalized,
+            {
+                "similarity_threshold": 0.85,
+                "min_chunk_size": 2,
+                "min_chunk_duration": 0.0,
+            },
         )
-
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 3.0))
-        self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (6.5, 6.5))
-
-    def test_delta_ema_strategy_splits_on_sustained_change(self):
-        embeddings = np.asarray(
-            [
-                [1.0, 0.0],
-                [0.98, 0.02],
-                [0.0, 1.0],
-                [0.02, 0.98],
-            ],
-            dtype=np.float32,
-        )
-        timestamps = [0.0, 1.0, 2.0, 3.0]
-
-        chunks = build_semantic_chunks(
-            embeddings,
-            timestamps,
-            max_chunk_duration=10.0,
-            min_chunk_size=2,
-            segmentation_strategy="delta_ema",
-            delta_ema_alpha=0.5,
-            delta_high_threshold=0.15,
-            delta_rise_frames=2,
-        )
-
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
-        self.assertEqual((chunks[1]["start"], chunks[1]["end"]), (2.0, 3.0))
-
-    def test_delta_ema_streaming_matches_single_pass(self):
-        embeddings = np.asarray(
-            [
-                [1.0, 0.0],
-                [0.98, 0.02],
-                [0.0, 1.0],
-                [0.02, 0.98],
-            ],
-            dtype=np.float32,
-        )
-        timestamps = [0.0, 1.0, 2.0, 3.0]
-        kwargs = {
-            "max_chunk_duration": 10.0,
-            "min_chunk_size": 2,
-            "segmentation_strategy": "delta_ema",
-            "delta_ema_alpha": 0.5,
-            "delta_high_threshold": 0.15,
-            "delta_rise_frames": 2,
-        }
-
-        single = build_semantic_chunks(embeddings, timestamps, **kwargs)
-        streaming = build_semantic_chunks_streaming(
-            [embeddings[:2], embeddings[2:]],
-            timestamps,
-            **kwargs,
-        )
-
-        self.assertEqual(len(single), len(streaming))
-        for left, right in zip(single, streaming):
-            self.assertEqual((left["start"], left["end"]), (right["start"], right["end"]))
 
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class IndexingChunkUpgradeTests(unittest.TestCase):
+    @patch("src.services.indexing_service.os.path.isfile", return_value=True)
+    @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays")
     @patch("src.services.indexing_service.get_local_model_asset_dirs")
-    @patch("src.services.indexing_service.save_vector_payload")
     @patch("src.services.indexing_service.load_vector_payload")
     def test_load_video_chunks_by_id_builds_chunks_from_existing_vectors(
-        self, mock_load_payload, mock_save_payload, mock_model_dirs
+        self, mock_load_payload, mock_model_dirs, mock_upsert_lance, _mock_isfile
     ):
         mock_model_dirs.return_value = {
             "base_dir": "base",
@@ -250,22 +209,21 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         }
         config = _schema_v2_config(
             similarity_threshold=0.85,
-            max_chunk_duration=5.0,
             min_chunk_size=2,
-            chunk_similarity_mode="chunk",
         )
 
         chunks = indexing_service.load_video_chunks_by_id("video-1", config)
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
-        mock_save_payload.assert_called_once()
+        mock_upsert_lance.assert_called_once()
 
+    @patch("src.services.indexing_service.os.path.isfile", return_value=True)
+    @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays")
     @patch("src.services.indexing_service.get_local_model_asset_dirs")
-    @patch("src.services.indexing_service.save_vector_payload")
     @patch("src.services.indexing_service.load_vector_payload")
     def test_load_video_chunks_by_id_rebuilds_when_chunk_config_changes(
-        self, mock_load_payload, mock_save_payload, mock_model_dirs
+        self, mock_load_payload, mock_model_dirs, mock_upsert_lance, _mock_isfile
     ):
         mock_model_dirs.return_value = {
             "base_dir": "base",
@@ -283,23 +241,20 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
             },
             "chunk_config": {
                 "similarity_threshold": 0.9,
-                "max_chunk_duration": 5.0,
                 "min_chunk_size": 2,
                 "similarity_mode": "chunk",
+                "max_chunk_duration": 5.0,
             },
         }
         config = _schema_v2_config(
             similarity_threshold=0.85,
-            max_chunk_duration=5.0,
             min_chunk_size=2,
-            chunk_similarity_mode="chunk",
         )
 
         indexing_service.load_video_chunks_by_id("video-1", config)
 
-        mock_save_payload.assert_called_once()
-        saved_chunk_config = mock_save_payload.call_args.kwargs["chunk_config"]
-        self.assertEqual(saved_chunk_config["similarity_threshold"], 0.85)
+        mock_upsert_lance.assert_called_once()
+        self.assertEqual(mock_upsert_lance.call_args.kwargs["chunks"][0]["start"], 0.0)
 
     def test_unpack_chunks_reconstructs_chunk_list(self):
         payload = {
@@ -313,88 +268,25 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         self.assertEqual(len(chunks), 2)
         self.assertEqual((chunks[0]["start"], chunks[1]["end"]), (0.0, 3.0))
 
-    @patch("src.services.indexing_service.get_global_model_asset_paths")
-    @patch("src.services.indexing_service.atomic_save_numpy")
-    @patch("src.services.indexing_service.create_clip_index")
-    @patch("src.services.indexing_service.ensure_folder_exists")
-    def test_merge_and_save_all_chunks_persists_ranges(
-        self, _mock_ensure_folder, mock_create_index, mock_atomic_save, mock_global_paths
-    ):
-        mock_global_paths.return_value = {
-            "global_dir": "source/global",
-            "cross_index_file": "source/global/cross_video_index.faiss",
-            "cross_vector_file": "source/global/cross_video_vectors.npy",
-            "cross_chunk_index_file": "source/global/cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "source/global/cross_chunk_vectors.npy",
-        }
-        config = _schema_v2_config()
-        vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
-        ranges = [(0.0, 1.0), (2.0, 3.0)]
-        paths = ["a.mp4", "b.mp4"]
-
-        indexing_service.merge_and_save_all_chunks(vectors, ranges, paths, config)
-
-        mock_create_index.assert_called_once()
-        saved_payload = mock_atomic_save.call_args[0][1]
-        self.assertEqual(saved_payload["ranges"].shape, (2, 2))
-        self.assertEqual(saved_payload["paths"], paths)
-        self.assertEqual(saved_payload["format_version"], 2)
-        self.assertNotIn("vector", saved_payload)
-
-    @patch("src.services.indexing_service.get_global_model_asset_paths")
-    @patch("src.services.indexing_service.atomic_save_numpy")
-    @patch("src.services.indexing_service.create_clip_index")
-    @patch("src.services.indexing_service.ensure_folder_exists")
-    def test_merge_and_save_all_vectors_omits_duplicate_vector_payload(
-        self,
-        _mock_ensure_folder,
-        mock_create_index,
-        mock_atomic_save,
-        mock_global_paths,
-    ):
-        mock_global_paths.return_value = {
-            "global_dir": "source/global",
-            "cross_index_file": "source/global/cross_video_index.faiss",
-            "cross_vector_file": "source/global/cross_video_vectors.npy",
-            "cross_chunk_index_file": "source/global/cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "source/global/cross_chunk_vectors.npy",
-        }
-        config = _schema_v2_config()
-        vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
-        timestamps = np.asarray([0.0, 2.0], dtype=np.float32)
-        paths = ["a.mp4", "b.mp4"]
-
-        indexing_service.merge_and_save_all_vectors(vectors, timestamps, paths, config)
-
-        mock_create_index.assert_called_once()
-        saved_payload = mock_atomic_save.call_args[0][1]
-        self.assertEqual(saved_payload["timestamps"].shape, (2,))
-        self.assertEqual(saved_payload["paths"], paths)
-        self.assertEqual(saved_payload["format_version"], 2)
-        self.assertNotIn("vector", saved_payload)
-
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class ChunkSearchTests(unittest.TestCase):
-    @patch("src.services.search_service.get_global_model_asset_paths")
-    @patch("src.services.search_service.load_clip_index")
-    @patch("src.services.search_service.np.load")
-    @patch("src.services.search_service.os.path.exists", return_value=True)
+    @patch("src.services.search_assets.load_lance_chunk_search_assets")
+    @patch("src.services.search_assets.lance_search_is_ready", return_value=True)
+    @patch(
+        "src.services.search_assets.get_local_model_asset_dirs",
+        return_value={"base_dir": "source/profile"},
+    )
     def test_load_chunk_search_assets_reads_ranges(
-        self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
+        self, _mock_dirs, _mock_ready, mock_load_lance
     ):
-        mock_global_paths.return_value = {
-            "global_dir": "g",
-            "cross_index_file": "cross_video_index.faiss",
-            "cross_vector_file": "cross_video_vectors.npy",
-            "cross_chunk_index_file": "cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "cross_chunk_vectors.npy",
-        }
-        mock_load_index.return_value = object()
-        mock_np_load.return_value.item.return_value = {
-            "ranges": np.asarray([[0.0, 1.0]], dtype=np.float32),
-            "paths": ["video.mp4"],
-        }
+        mock_load_lance.return_value = (
+            object(),
+            np.asarray([[0.0, 1.0]], dtype=np.float32),
+            ["video.mp4"],
+        )
+
+        from src.services import search_service
 
         index, ranges, paths = search_service.load_chunk_search_assets(_schema_v2_config())
 
@@ -402,53 +294,22 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertEqual(ranges.shape, (1, 2))
         self.assertEqual(paths, ["video.mp4"])
 
-    @patch("src.services.search_service.get_global_model_asset_paths")
-    @patch("src.services.search_service.load_clip_index")
-    @patch("src.services.search_service.np.load")
-    @patch("src.services.search_service.os.path.exists", return_value=True)
-    def test_load_search_assets_accepts_legacy_payload_with_vector_field(
-        self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
+    @patch("src.services.search_assets.load_lance_frame_search_assets")
+    @patch("src.services.search_assets.lance_search_is_ready", return_value=True)
+    @patch(
+        "src.services.search_assets.get_local_model_asset_dirs",
+        return_value={"base_dir": "source/profile"},
+    )
+    def test_load_search_assets_reads_timestamps(
+        self, _mock_dirs, _mock_ready, mock_load_lance
     ):
-        mock_global_paths.return_value = {
-            "global_dir": "g",
-            "cross_index_file": "cross_video_index.faiss",
-            "cross_vector_file": "cross_video_vectors.npy",
-            "cross_chunk_index_file": "cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "cross_chunk_vectors.npy",
-        }
-        mock_load_index.return_value = object()
-        mock_np_load.return_value.item.return_value = {
-            "vector": np.asarray([[1.0, 0.0]], dtype=np.float32),
-            "timestamps": np.asarray([0.0], dtype=np.float32),
-            "paths": ["video.mp4"],
-        }
+        mock_load_lance.return_value = (
+            object(),
+            np.asarray([0.0], dtype=np.float32),
+            ["video.mp4"],
+        )
 
-        index, timestamps, paths = search_service.load_search_assets(_schema_v2_config())
-
-        self.assertIsNotNone(index)
-        self.assertEqual(timestamps.shape, (1,))
-        self.assertEqual(paths, ["video.mp4"])
-
-    @patch("src.services.search_service.get_global_model_asset_paths")
-    @patch("src.services.search_service.load_clip_index")
-    @patch("src.services.search_service.np.load")
-    @patch("src.services.search_service.os.path.exists", return_value=True)
-    def test_load_search_assets_accepts_compact_payload_without_vector_field(
-        self, _mock_exists, mock_np_load, mock_load_index, mock_global_paths
-    ):
-        mock_global_paths.return_value = {
-            "global_dir": "g",
-            "cross_index_file": "cross_video_index.faiss",
-            "cross_vector_file": "cross_video_vectors.npy",
-            "cross_chunk_index_file": "cross_chunk_index.faiss",
-            "cross_chunk_vector_file": "cross_chunk_vectors.npy",
-        }
-        mock_load_index.return_value = object()
-        mock_np_load.return_value.item.return_value = {
-            "format_version": 2,
-            "timestamps": np.asarray([0.0], dtype=np.float32),
-            "paths": ["video.mp4"],
-        }
+        from src.services import search_service
 
         index, timestamps, paths = search_service.load_search_assets(_schema_v2_config())
 
@@ -463,16 +324,11 @@ class ChunkSearchTests(unittest.TestCase):
         result = search_service.run_search("query", is_text=True, top_k=5)
 
         self.assertEqual(result, [SearchHit(0.0, 0.0, 0.0, "chunk.mp4")])
-        mock_run_chunk_search.assert_called_once_with(
-            "query",
-            is_text=True,
-            top_k=5,
-            scope_video_paths=None,
-            scope_library_paths=None,
-            query_vector=None,
-            search_precision_mode=None,
-            pixel_query_data=None,
-        )
+        mock_run_chunk_search.assert_called_once()
+        _, kwargs = mock_run_chunk_search.call_args
+        self.assertEqual(kwargs["top_k"], 5)
+        self.assertIsNone(kwargs["scope_video_paths"])
+        self.assertIsNone(kwargs["scope_library_paths"])
 
     def test_aggregate_frame_hits_to_chunks_groups_by_segment(self):
         from src.services.search_scope import normalize_scope_path
@@ -489,7 +345,7 @@ class ChunkSearchTests(unittest.TestCase):
             SearchHit(2.0, 2.0, 0.9, video_path),
             SearchHit(6.0, 6.0, 0.8, video_path),
         ]
-        with patch("src.services.search_service._load_global_chunk_ranges_by_path", return_value=range_index):
+        with patch("src.services.search_chunk_pipeline._load_global_chunk_ranges_by_path", return_value=range_index):
             aggregated = search_service._aggregate_frame_hits_to_chunks(frame_hits, 5, {})
         self.assertEqual(len(aggregated), 2)
         self.assertAlmostEqual(float(aggregated[0].score), 0.9)
@@ -498,8 +354,8 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertAlmostEqual(float(aggregated[1].score), 0.8)
         self.assertAlmostEqual(float(aggregated[1].start_sec), 4.0)
 
-    @patch("src.services.search_service._aggregate_frame_hits_to_chunks", return_value=[])
-    @patch("src.services.search_service._collect_frame_candidates_for_chunk_search")
+    @patch("src.services.search_chunk_pipeline._aggregate_frame_hits_to_chunks", return_value=[])
+    @patch("src.services.search_chunk_pipeline._collect_frame_candidates_for_chunk_search")
     def test_chunk_image_search_falls_back_to_frame_hits(self, mock_collect, _mock_aggregate):
         mock_collect.return_value = [SearchHit(12.0, 12.0, 0.91, "D:/lib/a.mp4")]
         results = search_service._run_chunk_search_via_frames(
@@ -530,12 +386,14 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertIn((video_path, 1.0), prepared_by_video)
         self.assertIn((video_path, 2.0), prepared_by_video)
 
-    @patch("src.services.search_service.load_search_assets")
-    @patch("src.services.search_service._search_frame_results_with_ids")
+    @patch("src.services.search_chunk_pipeline._check_asset_profile_compatibility")
+    @patch("src.services.search_chunk_pipeline.load_search_assets")
+    @patch("src.services.search_chunk_pipeline._search_frame_results_with_ids")
     def test_collect_frame_candidates_expands_neighbors_for_chunk_aggregate(
         self,
         mock_search,
         mock_load_assets,
+        _mock_check_profile,
     ):
         class DummyIndex:
             def reconstruct(self, idx):
@@ -566,7 +424,7 @@ class ChunkSearchTests(unittest.TestCase):
             is_text=False,
             top_k=5,
             query_vector=query_vector,
-            precise_image=True,
+            precise_image=False,
             config=config,
         )
         hit_times = sorted(float(hit.start_sec) for hit in hits if hit.video_path == video_path)
@@ -606,7 +464,7 @@ class ChunkSearchTests(unittest.TestCase):
             timestamps,
             paths,
             config,
-            precise_image=True,
+            precise_image=False,
             seed_top_n=1,
         )
         self.assertGreaterEqual(len(expanded), 2)

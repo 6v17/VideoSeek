@@ -10,6 +10,8 @@ class SearchPanelStateMixin:
     SEARCH_TAB_TEXT = "text"
     SEARCH_TAB_COMPOSE = "compose"
 
+    IMAGE_SEARCH_MODES = ("chunk", "frame", "video_discovery", "precise")
+
     def _search_has_image_query(self) -> bool:
         return bool(str(getattr(self, "current_img_path", "") or "").strip())
 
@@ -72,68 +74,108 @@ class SearchPanelStateMixin:
             return False
         return not bool(get_search_scope_library_paths())
 
-    def _search_precision_mode_from_ui(self) -> str:
-        toggle = self.search_page.search_precision_toggle
-        return "precise" if toggle.isChecked() else "fast"
+    def _image_search_mode_from_ui(self) -> str:
+        if hasattr(self, "search_page"):
+            mode = str(self.search_page.image_search_mode.currentData() or "").strip().lower()
+            if mode in self.IMAGE_SEARCH_MODES:
+                return mode
+        from src.storage.config_store import get_image_search_mode
+
+        return get_image_search_mode()
+
+    def _set_image_search_mode_ui(self, mode: str) -> None:
+        normalized = str(mode or "frame").strip().lower()
+        if normalized not in self.IMAGE_SEARCH_MODES:
+            normalized = "frame"
+        combo = self.search_page.image_search_mode
+        combo.blockSignals(True)
+        index = combo.findData(normalized)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        combo.blockSignals(False)
 
     def _set_search_precision_mode_ui(self, mode: str) -> None:
         self._set_search_query_tab(self.SEARCH_TAB_IMAGE)
-        toggle = self.search_page.search_precision_toggle
-        toggle.blockSignals(True)
-        toggle.setChecked(str(mode or "").strip().lower() == "precise")
-        toggle.blockSignals(False)
+        if str(mode or "").strip().lower() == "precise":
+            self._set_image_search_mode_ui("precise")
+        else:
+            self._set_image_search_mode_ui("frame")
         self._refresh_search_panel_state()
 
-    def _update_search_precision_toggle_ui(self) -> None:
-        if not hasattr(self, "search_page"):
-            return
-        texts = getattr(self, "texts", {}) or {}
-        toggle = self.search_page.search_precision_toggle
-        is_on = toggle.isChecked()
-        toggle.setProperty("precisionState", "on" if is_on else "off")
-        toggle.setText(
-            texts.get("search_precision_on" if is_on else "search_precision_off", "ON" if is_on else "OFF")
-        )
-        toggle.style().unpolish(toggle)
-        toggle.style().polish(toggle)
-        toggle.update()
-
     def _search_precision_effective(self, *, is_text: bool, has_image: bool) -> bool:
-        if is_text:
+        if is_text and not has_image:
             return False
         return bool(has_image)
 
     def _resolve_search_precision_mode(self, *, is_text: bool, has_image: bool) -> str:
         if not self._search_precision_effective(is_text=is_text, has_image=has_image):
             return "fast"
-        return self._search_precision_mode_from_ui()
-
-    def _search_video_discovery_from_ui(self) -> bool:
-        toggle = self.search_page.search_video_discovery_toggle
-        return bool(toggle.isChecked())
+        return "precise" if self._image_search_mode_from_ui() == "precise" else "fast"
 
     def _resolve_video_discovery_enabled(self, *, is_text: bool, has_image: bool) -> bool:
         if is_text or not has_image:
             return False
-        if self._resolve_search_precision_mode(is_text=is_text, has_image=has_image) == "precise":
+        if self._image_search_mode_from_ui() != "video_discovery":
             return False
         if not self._search_scope_is_global():
             return False
-        return self._search_video_discovery_from_ui()
+        return True
 
-    def _update_search_video_discovery_toggle_ui(self) -> None:
+    def _resolve_effective_search_mode(
+        self,
+        *,
+        is_text: bool,
+        has_image: bool,
+        search_precision_mode: str | None = None,
+    ) -> str:
+        if is_text and not has_image:
+            from src.services.search_scope import resolve_active_search_mode
+
+            return resolve_active_search_mode()
+        image_mode = self._image_search_mode_from_ui()
+        if image_mode in {"video_discovery", "precise"}:
+            return "frame"
+        return image_mode
+
+    def _populate_text_search_mode_combo(self) -> None:
         if not hasattr(self, "search_page"):
             return
+        page = self.search_page
         texts = getattr(self, "texts", {}) or {}
-        toggle = self.search_page.search_video_discovery_toggle
-        is_on = toggle.isChecked()
-        toggle.setProperty("videoDiscoveryState", "on" if is_on else "off")
-        toggle.setText(
-            texts.get("search_video_discovery_on" if is_on else "search_video_discovery_off", "ON" if is_on else "OFF")
-        )
-        toggle.style().unpolish(toggle)
-        toggle.style().polish(toggle)
-        toggle.update()
+        current_mode = page.search_mode.currentData()
+        page.search_mode.blockSignals(True)
+        page.search_mode.clear()
+        page.search_mode.addItem(texts.get("setting_search_mode_frame", "Frame"), "frame")
+        page.search_mode.addItem(texts.get("setting_search_mode_chunk", "Chunk"), "chunk")
+        target = "chunk" if current_mode == "chunk" else "frame"
+        target_index = page.search_mode.findData(target)
+        if target_index >= 0:
+            page.search_mode.setCurrentIndex(target_index)
+        page.search_mode.blockSignals(False)
+
+    def _populate_image_search_mode_combo(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        page = self.search_page
+        texts = getattr(self, "texts", {}) or {}
+        current_mode = page.image_search_mode.currentData()
+        page.image_search_mode.blockSignals(True)
+        page.image_search_mode.clear()
+        labels = {
+            "chunk": texts.get("search_image_mode_chunk", texts.get("setting_search_mode_chunk", "Chunk")),
+            "frame": texts.get("search_image_mode_frame", texts.get("setting_search_mode_frame", "Frame")),
+            "video_discovery": texts.get("search_image_mode_video_discovery", texts.get("search_video_discovery_label", "Best per video")),
+            "precise": texts.get("search_image_mode_precise", texts.get("search_precision_label", "Deep search")),
+        }
+        for mode in self.IMAGE_SEARCH_MODES:
+            page.image_search_mode.addItem(labels[mode], mode)
+        normalized = str(current_mode or "frame").strip().lower()
+        if normalized not in self.IMAGE_SEARCH_MODES:
+            normalized = "frame"
+        target_index = page.image_search_mode.findData(normalized)
+        if target_index >= 0:
+            page.image_search_mode.setCurrentIndex(target_index)
+        page.image_search_mode.blockSignals(False)
 
     def _refresh_search_panel_state(self) -> None:
         if not hasattr(self, "search_page"):
@@ -159,27 +201,23 @@ class SearchPanelStateMixin:
             btn_save_preset.setText(texts.get("search_compose_save_preset", "Save as preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
 
-        show_image_precision = active_tab == self.SEARCH_TAB_IMAGE
-        page.search_precision_cluster.setVisible(show_image_precision)
+        page.text_granularity_cluster.setVisible(active_tab == self.SEARCH_TAB_TEXT)
+        page.image_search_mode_cluster.setVisible(active_tab == self.SEARCH_TAB_IMAGE)
 
-        show_video_discovery = active_tab in (self.SEARCH_TAB_IMAGE, self.SEARCH_TAB_COMPOSE)
-        show_video_discovery = show_video_discovery and not page.search_precision_toggle.isChecked()
-        page.search_video_discovery_cluster.setVisible(show_video_discovery)
-        page.search_image_options_group.setVisible(show_image_precision or show_video_discovery)
+        if active_tab == self.SEARCH_TAB_TEXT:
+            page.search_mode_label.setText(texts.get("setting_search_mode", ""))
+            self._populate_text_search_mode_combo()
+            hint = texts.get("search_text_mode_hint", texts.get("search_mode_hint", ""))
+            page.search_mode_label.setToolTip(hint)
+            page.search_mode.setToolTip(hint)
 
-        precision_hint = texts.get("search_precision_hint", "")
-        page.search_precision_label.setToolTip(precision_hint)
-        page.search_precision_toggle.setToolTip("")
-        self._update_search_precision_toggle_ui()
+        if active_tab == self.SEARCH_TAB_IMAGE:
+            page.image_search_mode_label.setText(texts.get("search_image_mode_label", texts.get("setting_search_mode", "")))
+            self._populate_image_search_mode_combo()
+            hint = texts.get("search_image_mode_hint", "")
+            page.image_search_mode_label.setToolTip(hint)
+            page.image_search_mode.setToolTip(hint)
 
-        page.search_video_discovery_label.setText(texts.get("search_video_discovery_label", ""))
-        page.search_video_discovery_label.setToolTip(texts.get("search_video_discovery_hint", ""))
-        page.search_video_discovery_toggle.setToolTip("")
-        self._update_search_video_discovery_toggle_ui()
-
-        chunk_hint = texts.get("search_mode_hint", "")
-        page.search_mode_label.setToolTip(chunk_hint)
-        page.search_mode.setToolTip(chunk_hint)
         self._refresh_search_model_display()
 
     def _refresh_search_model_display(self) -> None:
@@ -201,7 +239,7 @@ class SearchPanelStateMixin:
             )
             hint = format_text_search_model_hint(texts, config=config)
             page.lbl_text_model_hint.setText(hint)
-            page.lbl_text_model_hint.setVisible(bool(hint))
+            page.lbl_text_model_hint.setVisible(bool(hint) and self._search_active_tab() == self.SEARCH_TAB_TEXT)
         except Exception:
             page.lbl_active_model.setText("")
             page.lbl_text_model_hint.setVisible(False)
@@ -212,15 +250,12 @@ class SearchPanelStateMixin:
     def _on_search_query_tab_changed(self, _index: int = 0) -> None:
         self._refresh_search_panel_state()
 
-    def _on_search_precision_toggled(self, _checked=False) -> None:
-        self._refresh_search_panel_state()
-
-    def _on_search_video_discovery_toggled(self, _checked=False) -> None:
-        self._save_search_video_discovery_enabled()
-        self._refresh_search_panel_state()
-
     def _on_search_mode_changed(self) -> None:
         self._save_search_mode()
+        self._refresh_search_panel_state()
+
+    def _on_image_search_mode_changed(self) -> None:
+        self._save_image_search_mode()
         self._refresh_search_panel_state()
 
     def open_compose_search_tab(self) -> None:

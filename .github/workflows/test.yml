@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: VideoSeek
+          environment-file: environment.yml
+          auto-update-conda: true
+          python-version: "3.10"
+
+      - name: Run tests
+        run: python -m pytest tests/ -q --tb=line

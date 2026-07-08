@@ -335,8 +335,9 @@ class VideoIdMigrationTests(unittest.TestCase):
                 },
             }
             with patch("src.storage.migration_runner.load_config", return_value=config):
-                self.assertFalse(needs_background_startup_migration())
-                quick = run_startup_migration_quick()
+                with patch("src.storage.migration_runner.needs_search_index_schema_migration", return_value=False):
+                    self.assertFalse(needs_background_startup_migration())
+                    quick = run_startup_migration_quick()
             self.assertFalse(quick.get("needs_background"))
 
 

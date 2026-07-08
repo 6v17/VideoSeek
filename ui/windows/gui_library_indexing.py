@@ -9,19 +9,20 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QGraphicsOpacityEffect,
 
 from src.app.config import load_config
 from src.app.indexing_progress import format_progress_text
-from src.services.indexing_service import list_missing_library_files
+from src.services.indexing_service import filter_index_problem_issues, list_missing_library_files
 from src.services.library_service import (
-    GLOBAL_INDEX_STATE_STALE,
     add_library,
-    get_global_index_state,
     list_libraries,
+    list_local_vector_details,
     remove_library as remove_library_entry,
 )
 from src.storage.asset_store import load_model_metadata
 from src.workflows.update_video import delete_physical_video_data
+from src.storage.lance_store import format_byte_size
 from src.utils import open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
 from ui.views.table_views import populate_library_table
+from ui.workers import LocalVectorDetailsWorker
 
 
 class LibraryIndexingGuiMixin:
@@ -39,7 +40,6 @@ class LibraryIndexingGuiMixin:
                 self.open_library_folder,
                 self.texts,
             )
-            self._refresh_global_index_ui()
             if hasattr(self, "_refresh_search_scope_ui"):
                 self._refresh_search_scope_ui()
             if hasattr(self, "_refresh_understanding_scope_options"):
@@ -62,7 +62,7 @@ class LibraryIndexingGuiMixin:
             result = add_library(path)
             if result.get("added"):
                 self.refresh_library_table()
-                status_text = self._with_global_index_notice(self.texts["library_added"])
+                status_text = self.texts["library_added"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
             elif result.get("reason") == "overlap":
@@ -81,7 +81,7 @@ class LibraryIndexingGuiMixin:
         try:
             if remove_library_entry(path, delete_physical_video_data):
                 self.refresh_library_table()
-                status_text = self._with_global_index_notice(self.texts["library_removed"])
+                status_text = self.texts["library_removed"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
             else:
@@ -96,21 +96,6 @@ class LibraryIndexingGuiMixin:
             target_lib=target_lib,
             force_cleanup_missing_files=False,
             rebuild_global_assets=rebuild_global_assets,
-        )
-
-    def rebuild_index_from_vectors(self, target_lib=None):
-        if not self._ensure_startup_migration_idle("feature_indexing"):
-            return
-        if not self.show_confirm_dialog(
-            self.texts["rebuild_index_vectors_confirm_title"],
-            self.texts["rebuild_index_vectors_confirm_body"],
-        ):
-            return
-        self._start_index_update(
-            target_lib=target_lib,
-            force_cleanup_missing_files=False,
-            rebuild_global_assets=True,
-            index_from_vectors_only=True,
         )
 
     def start_debug_gpu_oom(self):
@@ -245,14 +230,12 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_add_lib.setEnabled(False)
             self._apply_index_issue_button_state(False)
             self.library_page.btn_cleanup_missing.setEnabled(False)
-            self.library_page.btn_rebuild_index_vectors.setEnabled(False)
             if getattr(self, "_debug_tools_enabled", False):
                 self.library_page.btn_debug_gpu_oom.setEnabled(False)
                 self.library_page.btn_debug_system_oom.setEnabled(False)
             self.library_page.progress_bar.setVisible(True)
             self._last_index_issues = []
             self._last_index_issue_target = target_lib
-            self._last_index_from_vectors_only = bool(index_from_vectors_only)
             self.refresh_library_table()
             start_kwargs = {
                 "target_lib": target_lib,
@@ -293,27 +276,21 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_stop_index.setVisible(False)
         self.library_page.btn_add_lib.setEnabled(True)
         self.library_page.btn_cleanup_missing.setEnabled(True)
-        self.library_page.btn_rebuild_index_vectors.setEnabled(True)
         if getattr(self, "_debug_tools_enabled", False):
             self.library_page.btn_debug_gpu_oom.setEnabled(True)
             self.library_page.btn_debug_system_oom.setEnabled(True)
         self.library_page.progress_bar.setVisible(False)
         self.push_inference_status()
         self.refresh_library_table()
-        issue_count = len(issues or [])
-        self._last_index_issues = list(issues or [])
+        issue_list = filter_index_problem_issues(issues)
+        issue_count = len(issue_list)
+        self._last_index_issues = issue_list
         self._last_index_issue_target = target_lib
         self._apply_index_issue_button_state(issue_count > 0)
         if stopped:
             status_text = self.texts["index_stopped"]
         elif success:
-            if getattr(self, "_last_index_from_vectors_only", False):
-                status_text = (
-                    self.texts["index_rebuild_vectors_done_single"]
-                    if target_lib
-                    else self.texts["index_rebuild_vectors_done"]
-                )
-            elif has_search_assets:
+            if has_search_assets:
                 status_text = self.texts["index_updated_single"] if target_lib else self.texts["index_updated"]
             else:
                 status_text = self.texts["index_updated_empty_single"] if target_lib else self.texts["index_updated_empty"]
@@ -321,13 +298,11 @@ class LibraryIndexingGuiMixin:
                 status_text = f"{status_text} {self.texts['index_issue_summary'].format(count=issue_count)}"
         else:
             status_text = self.texts["index_failed"]
-        if not rebuild_global_assets:
-            status_text = self._with_global_index_notice(status_text)
         self.library_page.lbl_status.setText(status_text)
         self._refresh_search_session_hint()
         if hasattr(self, "_refresh_understanding_ui"):
             self._refresh_understanding_ui()
-        self._show_index_issue_guidance(issues or [])
+        self._show_index_issue_guidance(issue_list)
         if hasattr(self, "_sync_tray_stop_action"):
             self._sync_tray_stop_action()
         if self._close_when_indexing_stops:
@@ -403,43 +378,6 @@ class LibraryIndexingGuiMixin:
             button=self.texts["index_issues_button"],
         )
         self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
-
-    def _get_global_index_state(self):
-        try:
-            return get_global_index_state()
-        except Exception:
-            return ""
-
-    def _is_global_index_stale(self):
-        return self._get_global_index_state() == GLOBAL_INDEX_STATE_STALE
-
-    def _with_global_index_notice(self, status_text):
-        base_text = str(status_text or "").strip()
-        stale_text = self.texts.get("global_index_stale_status", "").strip()
-        if not stale_text or not self._is_global_index_stale():
-            return base_text
-        if stale_text in base_text:
-            return base_text
-        if not base_text:
-            return stale_text
-        return f"{base_text} {stale_text}"
-
-    def _refresh_global_index_ui(self):
-        is_stale = self._is_global_index_stale()
-        update_button = self.library_page.btn_sync_db
-        update_button.setText(self.texts["update_index_pending"] if is_stale else self.texts["update_index"])
-        update_button.setToolTip(self.texts["global_index_stale_status"] if is_stale else "")
-        if not self.indexing_controller.is_running():
-            update_button.setObjectName("WarningButton" if is_stale else "PrimaryButton")
-            update_button.style().unpolish(update_button)
-            update_button.style().polish(update_button)
-            update_button.update()
-            current_status = self.library_page.lbl_status.text().strip()
-            stale_status = self.texts["global_index_stale_status"]
-            if is_stale and current_status in {"", self.texts["ready"], stale_status}:
-                self.library_page.lbl_status.setText(stale_status)
-            elif not is_stale and current_status == stale_status:
-                self.library_page.lbl_status.setText(self.texts["ready"])
 
     def _apply_index_issue_button_state(self, has_issues):
         button = self.library_page.btn_index_issues
@@ -563,4 +501,230 @@ class LibraryIndexingGuiMixin:
             dialog.status_hint.setText(self.texts["details_nothing_selected"])
             return
         QApplication.clipboard().setText(target_path)
+        dialog.status_hint.setText(self.texts["details_copy_done"])
+
+    def show_local_vector_details(self):
+        try:
+            detail = list_local_vector_details(validate_contents=False)
+            headers = self.texts["library_vectors_headers"]
+            ready_state_text = self._local_vector_asset_state_text("ready")
+            rows, payloads = self._build_local_vector_detail_rows(detail)
+            storage_summary = detail.get("storage_summary") or {}
+            subtitle = self.texts["library_vectors_subtitle"].format(
+                total=detail["total_entries"],
+                lance_dir=detail.get("lance_dir", ""),
+                frame_rows=int((detail.get("lance_summary") or {}).get("frame_rows", 0) or 0),
+                chunk_rows=int((detail.get("lance_summary") or {}).get("chunk_rows", 0) or 0),
+                video_count=int((detail.get("lance_summary") or {}).get("indexed_video_count", 0) or 0),
+                total_storage=format_byte_size(storage_summary.get("total_storage_bytes", 0)),
+                lance_storage=format_byte_size(
+                    storage_summary.get("lance_active_bytes", storage_summary.get("lance_dir_bytes", 0))
+                ),
+                legacy_storage=format_byte_size(storage_summary.get("legacy_vector_dir_bytes", 0)),
+            )
+            dialog = ResourceTableDialog(
+                parent=self,
+                is_dark=self.is_dark_mode,
+                language=self.language,
+                title=self.texts["library_vectors_title"],
+                subtitle=subtitle,
+                headers=headers,
+                rows=rows,
+                row_payloads=payloads,
+                export_default_name="local_vector_index_details.json",
+                stretch_column=2,
+                allow_sorting=False,
+                fixed_column_widths={
+                    0: 52,
+                    1: 220,
+                    3: 280,
+                    4: 96,
+                    5: 72,
+                    6: 72,
+                    7: 88,
+                    8: 86,
+                    9: 86,
+                    10: 132,
+                    11: 200,
+                },
+                issue_row_predicate=lambda row, ready_text=ready_state_text: row[10] != ready_text,
+                extra_actions=[
+                    {
+                        "label": self.texts["details_open_selected"],
+                        "object_name": "Ghost",
+                        "handler": self._open_selected_vector_detail_path,
+                    },
+                    {
+                        "label": self.texts["details_copy_selected"],
+                        "object_name": "Ghost",
+                        "handler": self._copy_selected_vector_detail_path,
+                    },
+                ],
+                row_double_click_handler=self._open_vector_detail_payload,
+            )
+            dialog.set_summary_text(self.texts["library_vectors_validation_loading"])
+            self._start_local_vector_detail_validation(dialog)
+            dialog.exec()
+        except Exception as exc:
+            self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
+
+    def _build_local_vector_detail_rows(self, detail):
+        rows = []
+        payloads = []
+        lance_dir = str(detail.get("lance_dir", "") or "")
+        for index, item in enumerate(detail["entries"], start=1):
+            payload = dict(item)
+            payload["lance_dir"] = lance_dir
+            frame_count = int(item.get("lance_frame_count", 0) or 0)
+            chunk_count = int(item.get("lance_chunk_count", 0) or 0)
+            storage_bytes = int(item.get("storage_bytes", 0) or 0)
+            rows.append(
+                [
+                    index,
+                    item["library_path"],
+                    item["video_rel_path"],
+                    item.get("video_id", ""),
+                    self.texts["details_yes"] if item.get("lance_ready") else self.texts["details_no"],
+                    str(frame_count) if item.get("lance_ready") else "-",
+                    str(chunk_count) if item.get("lance_ready") else "-",
+                    format_byte_size(storage_bytes) if storage_bytes > 0 else "-",
+                    self.texts["details_yes"] if item.get("legacy_npy_exists") else self.texts["details_no"],
+                    self.texts["details_yes"] if item.get("source_exists") else self.texts["details_no"],
+                    self._local_vector_asset_state_text(item.get("asset_state", "")),
+                    self._local_vector_failure_reason_text(item.get("sync_failure_reason", "")),
+                ]
+            )
+            payloads.append(payload)
+        return rows, payloads
+
+    def _start_local_vector_detail_validation(self, dialog):
+        worker = LocalVectorDetailsWorker()
+        self._local_vector_detail_worker = worker
+        worker.result_ready.connect(
+            lambda detail, dlg=dialog: self._finish_local_vector_detail_validation(
+                dlg,
+                detail,
+            )
+        )
+        worker.error_signal.connect(
+            lambda _message, dlg=dialog: self._fail_local_vector_detail_validation(dlg)
+        )
+        worker.finished.connect(lambda active_worker=worker: self._cleanup_local_vector_detail_worker(active_worker))
+        worker.start()
+
+    def _finish_local_vector_detail_validation(self, dialog, detail):
+        if dialog is None or not dialog.isVisible():
+            return
+        rows, payloads = self._build_local_vector_detail_rows(detail)
+        dialog.set_rows(rows, payloads)
+        dialog.set_summary_text(self.texts["library_vectors_validation_done"])
+
+    def _fail_local_vector_detail_validation(self, dialog):
+        if dialog is None or not dialog.isVisible():
+            return
+        dialog.set_summary_text(self.texts["library_vectors_validation_failed"])
+
+    def _cleanup_local_vector_detail_worker(self, worker):
+        if self._local_vector_detail_worker is worker:
+            self._local_vector_detail_worker = None
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+
+    def _local_vector_asset_state_text(self, asset_state):
+        state_key = str(asset_state or "").strip().lower() or "ready"
+        return self.texts.get(f"library_asset_state_{state_key}", state_key)
+
+    def _local_vector_failure_reason_text(self, reason):
+        reason_key = str(reason or "").strip().lower()
+        if not reason_key:
+            return ""
+        return self.texts.get(f"library_sync_failure_reason_{reason_key}", reason_key)
+
+    def _open_vector_detail_payload(self, dialog, payload, item=None):
+        column = item.column() if item is not None else 1
+        library_path = str(payload.get("library_path", "")).strip()
+        video_rel_path = str(payload.get("video_rel_path", "")).strip()
+        video_id = str(payload.get("video_id", "")).strip()
+        legacy_npy_file = str(payload.get("legacy_npy_file") or payload.get("vector_file", "")).strip()
+        lance_dir = str(payload.get("lance_dir", "")).strip()
+
+        if column == 1:
+            if not library_path:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            open_folder_in_explorer(library_path)
+            dialog.status_hint.setText(library_path)
+            return
+
+        if column == 2:
+            if not library_path or not video_rel_path:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            video_path = os.path.join(library_path, video_rel_path)
+            if os.path.exists(video_path):
+                open_in_explorer(video_path)
+                dialog.status_hint.setText(video_path)
+            else:
+                open_folder_in_explorer(library_path)
+                dialog.status_hint.setText(video_path)
+            return
+
+        if column == 3:
+            if not video_id:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            QApplication.clipboard().setText(video_id)
+            dialog.status_hint.setText(self.texts["details_copy_done"])
+            return
+
+        if column == 4:
+            target_dir = lance_dir
+            if not target_dir:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            open_folder_in_explorer(target_dir) if os.path.isdir(target_dir) else open_in_explorer(target_dir)
+            dialog.status_hint.setText(target_dir)
+            return
+
+        if column == 7:
+            lance_bytes = int(payload.get("lance_storage_bytes", 0) or 0)
+            legacy_bytes = int(payload.get("legacy_npy_bytes", 0) or 0)
+            dialog.status_hint.setText(
+                f"Lance {format_byte_size(lance_bytes)} + legacy {format_byte_size(legacy_bytes)}"
+            )
+            return
+
+        if column == 8:
+            if not legacy_npy_file:
+                dialog.status_hint.setText(self.texts["details_nothing_selected"])
+                return
+            if os.path.exists(legacy_npy_file):
+                open_in_explorer(legacy_npy_file)
+            else:
+                open_folder_in_explorer(os.path.dirname(legacy_npy_file))
+            dialog.status_hint.setText(legacy_npy_file)
+
+    def _open_selected_vector_detail_path(self, dialog):
+        selected = dialog.get_selected_payloads()
+        if not selected:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        self._open_vector_detail_payload(dialog, selected[0], dialog.table.currentItem())
+
+    def _copy_selected_vector_detail_path(self, dialog):
+        selected = dialog.get_selected_payloads()
+        if not selected:
+            dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        payload = selected[0]
+        target_path = (
+            payload.get("video_id")
+            or payload.get("legacy_npy_file")
+            or payload.get("lance_dir")
+            or payload.get("vector_file")
+            or ""
+        )
+        QApplication.clipboard().setText(str(target_path))
         dialog.status_hint.setText(self.texts["details_copy_done"])

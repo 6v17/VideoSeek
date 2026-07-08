@@ -1,6 +1,4 @@
-APP_META = {
-
-}
+APP_META = {}
 
 
 def get_app_meta():
