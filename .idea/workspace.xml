@@ -6,7 +6,15 @@
   <component name="ChangeListManager">
     <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -478,15 +486,8 @@
       <workItem from="1783335915559" duration="677000" />
       <workItem from="1783346276698" duration="576000" />
       <workItem from="1783346886797" duration="34000" />
-      <workItem from="1783398947232" duration="1321000" />
-    </task>
-    <task id="LOCAL-00104" summary="更新说明文件">
-      <option name="closed" value="true" />
-      <created>1781194406263</created>
-      <option name="number" value="00104" />
-      <option name="presentableId" value="LOCAL-00104" />
-      <option name="project" value="LOCAL" />
-      <updated>1781194406263</updated>
+      <workItem from="1783398947232" duration="1396000" />
+      <workItem from="1783485187992" duration="3024000" />
     </task>
     <task id="LOCAL-00105" summary="更新说明文件">
       <option name="closed" value="true" />
@@ -872,7 +873,15 @@
       <option name="project" value="LOCAL" />
       <updated>1783400775331</updated>
     </task>
-    <option name="localTasksCounter" value="153" />
+    <task id="LOCAL-00153" summary="更新说明">
+      <option name="closed" value="true" />
+      <created>1783401032935</created>
+      <option name="number" value="00153" />
+      <option name="presentableId" value="LOCAL-00153" />
+      <option name="project" value="LOCAL" />
+      <updated>1783401032935</updated>
+    </task>
+    <option name="localTasksCounter" value="154" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

@@ -99,7 +99,7 @@ class SearchController(QObject):
 
     def start_preset_search(self, preset_id):
         from src.services.search_request_service import resolve_search_query_inputs
-        from src.services.search_scope import resolve_active_search_mode, resolve_effective_search_scope
+        from src.services.search_scope import resolve_effective_search_scope
 
         query_part = resolve_search_query_inputs(preset_id=preset_id)
         preset = query_part["preset"]
@@ -121,7 +121,11 @@ class SearchController(QObject):
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             query_vector=query_part.get("query_vector"),
-            search_mode=resolve_active_search_mode(),
+            search_mode=self.parent_window._resolve_effective_search_mode(
+                is_text=is_text,
+                has_image=has_image,
+                search_precision_mode=search_precision_mode,
+            ),
             top_k=query_part.get("default_top_k"),
             min_score=query_part.get("default_min_score"),
             search_precision_mode=search_precision_mode,

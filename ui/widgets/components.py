@@ -407,13 +407,11 @@ class SearchPage(QWidget):
         self.text_search = self.search_panel.text_search
         self.search_mode = self.search_panel.search_mode
         self.search_mode_label = self.search_panel.search_mode_label
-        self.search_precision_toggle = self.search_panel.search_precision_toggle
-        self.search_precision_label = self.search_panel.search_precision_label
-        self.search_precision_cluster = self.search_panel.search_precision_cluster
-        self.search_video_discovery_toggle = self.search_panel.search_video_discovery_toggle
-        self.search_video_discovery_label = self.search_panel.search_video_discovery_label
-        self.search_video_discovery_cluster = self.search_panel.search_video_discovery_cluster
+        self.image_search_mode = self.search_panel.image_search_mode
+        self.image_search_mode_label = self.search_panel.image_search_mode_label
+        self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
+        self.search_granularity_cluster = self.search_panel.text_granularity_cluster
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
         self.btn_mobile_qr = self.search_panel.btn_mobile_qr
@@ -425,7 +423,7 @@ class SearchPage(QWidget):
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row
-        self.search_image_options_group = self.search_panel.search_image_options_group
+        self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
 

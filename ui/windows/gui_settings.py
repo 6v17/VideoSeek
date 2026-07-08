@@ -140,18 +140,26 @@ class SettingsGuiMixin:
         self.settings_page.input_embedding_batch_size.setValue(
             int(config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"]))
         )
-        search_mode = config.get("search_mode", DEFAULT_CONFIG["search_mode"])
-        self.search_page.search_mode.setCurrentIndex(0 if search_mode == "frame" else 1)
-        video_discovery_enabled = bool(
-            config.get(
-                "search_video_discovery_enabled",
-                DEFAULT_CONFIG["search_video_discovery_enabled"],
-            )
-        )
-        toggle = self.search_page.search_video_discovery_toggle
-        toggle.blockSignals(True)
-        toggle.setChecked(video_discovery_enabled)
-        toggle.blockSignals(False)
+        from src.storage.config_store import get_image_search_mode
+
+        if hasattr(self, "_refresh_search_panel_state"):
+            self._refresh_search_panel_state()
+        search_mode = str(config.get("search_mode", DEFAULT_CONFIG["search_mode"]) or "frame").strip().lower()
+        text_mode_index = self.search_page.search_mode.findData(search_mode)
+        if text_mode_index < 0:
+            text_mode_index = self.search_page.search_mode.findData("frame")
+        if text_mode_index >= 0:
+            self.search_page.search_mode.blockSignals(True)
+            self.search_page.search_mode.setCurrentIndex(text_mode_index)
+            self.search_page.search_mode.blockSignals(False)
+        image_search_mode = get_image_search_mode(config)
+        image_mode_index = self.search_page.image_search_mode.findData(image_search_mode)
+        if image_mode_index < 0:
+            image_mode_index = self.search_page.image_search_mode.findData("frame")
+        if image_mode_index >= 0:
+            self.search_page.image_search_mode.blockSignals(True)
+            self.search_page.image_search_mode.setCurrentIndex(image_mode_index)
+            self.search_page.image_search_mode.blockSignals(False)
         self.settings_page.input_similarity_threshold.setValue(
             config.get("similarity_threshold", DEFAULT_CONFIG["similarity_threshold"])
         )

@@ -269,8 +269,7 @@ class MainWindow(
         self.search_page.btn_expand_preview.clicked.connect(self.open_current_preview_dialog)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
-        self.search_page.search_precision_toggle.toggled.connect(self._on_search_precision_toggled)
-        self.search_page.search_video_discovery_toggle.toggled.connect(self._on_search_video_discovery_toggled)
+        self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
         self.search_page.text_search.textChanged.connect(self._refresh_search_panel_state)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
@@ -420,16 +419,6 @@ class MainWindow(
 
         self.search_page.header.title.setText(t["search_page_title"])
         self.search_page.header.subtitle.setText(t["search_page_desc"])
-        current_mode = self.search_page.search_mode.currentData()
-        self.search_page.search_mode_label.setText(t["setting_search_mode"])
-        self.search_page.search_mode.blockSignals(True)
-        self.search_page.search_mode.clear()
-        self.search_page.search_mode.addItem(t["setting_search_mode_frame"], "frame")
-        self.search_page.search_mode.addItem(t["setting_search_mode_chunk"], "chunk")
-        self.search_page.search_mode.setCurrentIndex(1 if current_mode == "chunk" else 0)
-        self.search_page.search_mode.blockSignals(False)
-        self.search_page.search_precision_label.setText(t["search_precision_label"])
-        self.search_page.search_video_discovery_label.setText(t.get("search_video_discovery_label", ""))
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
@@ -750,6 +739,11 @@ class MainWindow(
             True,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
+            search_mode=self._resolve_effective_search_mode(
+                is_text=True,
+                has_image=False,
+                search_precision_mode=search_precision_mode,
+            ),
             search_precision_mode=search_precision_mode,
         )
         return True
@@ -784,7 +778,11 @@ class MainWindow(
             False,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
-            search_mode="frame",
+            search_mode=self._resolve_effective_search_mode(
+                is_text=False,
+                has_image=True,
+                search_precision_mode=search_precision_mode,
+            ),
             search_precision_mode=search_precision_mode,
             video_discovery_enabled=self._resolve_video_discovery_enabled(
                 is_text=False,
@@ -802,7 +800,7 @@ class MainWindow(
         sync_ui=True,
     ):
         from src.services.search_preset_service import build_compose_search_plan
-        from src.services.search_scope import resolve_active_search_mode, resolve_default_active_search_scope
+        from src.services.search_scope import resolve_default_active_search_scope
 
         query = str(raw_query or "").strip()
         paths = [str(path or "").strip() for path in (image_paths or []) if str(path or "").strip()]
@@ -864,7 +862,11 @@ class MainWindow(
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             query_vector=plan["query_vector"],
-            search_mode=resolve_active_search_mode(),
+            search_mode=self._resolve_effective_search_mode(
+                is_text=bool(plan["is_text"]),
+                has_image=bool(plan["has_image"]),
+                search_precision_mode=search_precision_mode,
+            ),
             top_k=plan.get("top_k"),
             min_score=plan.get("min_score"),
             search_precision_mode=search_precision_mode,
@@ -1094,12 +1096,16 @@ class MainWindow(
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
 
-    def _save_search_video_discovery_enabled(self):
+    def _save_image_search_mode(self):
         try:
             config = load_config()
-            config["search_video_discovery_enabled"] = bool(
-                self.search_page.search_video_discovery_toggle.isChecked()
-            )
+            image_mode = str(
+                self.search_page.image_search_mode.currentData() or DEFAULT_CONFIG["image_search_mode"]
+            ).strip().lower()
+            if image_mode not in self.IMAGE_SEARCH_MODES:
+                image_mode = str(DEFAULT_CONFIG["image_search_mode"])
+            config["image_search_mode"] = image_mode
+            config["search_video_discovery_enabled"] = image_mode == "video_discovery"
             save_config(config)
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)

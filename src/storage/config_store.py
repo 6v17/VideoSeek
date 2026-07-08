@@ -256,6 +256,17 @@ def get_search_mode(config=None) -> str:
     return mode if mode in allowed else str(DEFAULT_CONFIG["search_mode"])
 
 
+def get_image_search_mode(config=None) -> str:
+    cfg = _app_cfg(config)
+    mode = str(cfg.get("image_search_mode", DEFAULT_CONFIG["image_search_mode"]) or "").strip().lower()
+    allowed = CONFIG_ENUMS["image_search_mode"]
+    if mode in allowed:
+        return mode
+    if bool(cfg.get("search_video_discovery_enabled", DEFAULT_CONFIG["search_video_discovery_enabled"])):
+        return "video_discovery"
+    return str(DEFAULT_CONFIG["image_search_mode"])
+
+
 def get_search_precision_mode(config=None) -> str:
     # Session-only UI toggle; never read persisted config.
     return str(DEFAULT_CONFIG["search_precision_mode"])

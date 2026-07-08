@@ -114,6 +114,7 @@ DEFAULT_CONFIG = {
     "min_chunk_size": 2,
     "min_chunk_duration": 0.0,
     "search_mode": "frame",
+    "image_search_mode": "frame",
     "search_precision_mode": "fast",
     "search_video_discovery_enabled": False,
     "search_scope_mode": "all",
@@ -198,6 +199,7 @@ CONFIG_INT_KEYS = {
 CONFIG_ENUMS = {
     "chunk_policy": {"balanced", "sensitive", "stable", "custom"},
     "search_mode": {"frame", "chunk"},
+    "image_search_mode": {"chunk", "frame", "video_discovery", "precise"},
     "search_precision_mode": {"fast", "precise"},
     "image_pixel_rerank_probe_mode": {"index", "fixed"},
     "agent_api_default_image_precision": {"fast", "precise"},
