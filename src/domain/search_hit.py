@@ -13,6 +13,7 @@ class SearchHit:
     score: float
     video_path: str
     match_kind: str = "frame"
+    video_id: str = ""
 
     def as_tuple(self) -> Tuple[float, float, float, str]:
         return (self.start_sec, self.end_sec, self.score, self.video_path)

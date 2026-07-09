@@ -71,6 +71,7 @@ from src.services.search_fetch_policy import (
     _resolve_stage1_global_fetch_k,
 )
 from src.services.search_frame_query import (
+    _search_chunk_results,
     _search_frame_results_in_time_window,
     _search_frame_results_with_ids,
 )
@@ -412,7 +413,7 @@ def run_search(
     _reset_search_index_steps()
     set_search_progress_callback(progress_callback)
     try:
-        return _run_search_impl(
+        results = _run_search_impl(
             query_data=query_data,
             is_text=is_text,
             top_k=top_k,
@@ -431,6 +432,10 @@ def run_search(
             locate_score_margin=locate_score_margin,
             video_discovery_enabled=video_discovery_enabled,
         )
+        from src.services.search_scope import filter_hits_with_existing_sources, load_searchable_path_index
+
+        path_index = load_searchable_path_index(config=config)
+        return filter_hits_with_existing_sources(results, path_index=path_index, config=config)
     finally:
         clear_search_progress_callback()
 
@@ -756,28 +761,23 @@ def run_chunk_search(
                     search_index, ranges, video_paths = load_library_chunk_search_assets(library_path, config)
                 if search_index is None:
                     continue
-                actual_k = min(top_k, search_index.ntotal)
-                if actual_k <= 0:
-                    continue
                 with profile_phase("faiss_search"):
-                    distances, indices = search_index.search(query_vector, actual_k)
-                for rank, index_value in enumerate(indices[0]):
-                    if index_value == -1 or index_value >= len(video_paths):
-                        continue
-                    time_range = ranges[index_value]
-                    merged_hits.append(
-                        SearchHit(
-                            float(time_range[0]),
-                            float(time_range[1]),
-                            float(distances[0][rank]),
-                            video_paths[index_value],
+                    merged_hits.extend(
+                        _search_chunk_results(
+                            query_vector,
+                            search_index,
+                            ranges,
+                            video_paths,
+                            top_k=top_k,
                         )
                     )
             results = _merge_search_hits(merged_hits, top_k)
             record_search_profile_result_count(len(results))
             return results
 
-        fetch_k = resolve_fetch_top_k(top_k, scoped)
+        from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
+
+        fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped)
         with profile_phase("load_assets"):
             search_index, ranges, video_paths = load_chunk_search_assets(config)
         if search_index is None:
@@ -789,27 +789,13 @@ def run_chunk_search(
         if actual_k <= 0:
             record_search_profile_result_count(0)
             return []
-        if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
-            raise RuntimeError("Invalid query vector. Please retry the search.")
-        query_dim = int(query_vector.shape[1])
-        index_dim = int(getattr(search_index, "d", 0))
-        if index_dim > 0 and query_dim != index_dim:
-            raise RuntimeError(
-                f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
-                "Current model uses a different embedding space. Please rebuild the index for the active model."
-            )
-
         with profile_phase("faiss_search"):
-            distances, indices = search_index.search(query_vector, actual_k)
-        matched_results = []
-        for rank, index_value in enumerate(indices[0]):
-            if index_value == -1 or index_value >= len(video_paths):
-                continue
-            time_range = ranges[index_value]
-            start_time = float(time_range[0])
-            end_time = float(time_range[1])
-            matched_results.append(
-                SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
+            matched_results = _search_chunk_results(
+                query_vector,
+                search_index,
+                ranges,
+                video_paths,
+                top_k=actual_k,
             )
         with profile_phase("scope_filter"):
             results = apply_search_scope(
@@ -823,10 +809,7 @@ def run_chunk_search(
 
 
 def warmup_search_runtime():
-    config = load_config()
     get_engine()
-    load_search_assets(config)
-    load_chunk_search_assets(config)
 
 
 __all__ = [

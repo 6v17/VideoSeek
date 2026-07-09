@@ -12,7 +12,7 @@ class PreviewPanel(VSCard):
         super().__init__(parent)
         layout = self.content_layout
         baseline = int(COMPONENT_SIZES["search_compare_baseline_height"])
-        compare_extra = 24
+        compare_extra = 22
 
         preview_header = QHBoxLayout()
         preview_header.setContentsMargins(0, 0, 0, 0)

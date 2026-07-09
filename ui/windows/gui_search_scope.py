@@ -29,7 +29,7 @@ class SearchScopeGuiMixin:
 
     def _refresh_search_scope_entries(self) -> None:
         try:
-            detail = list_local_vector_details(validate_contents=False)
+            detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
             self._search_scope_entries_cache = list(detail.get("entries", []))
         except Exception:
             self._search_scope_entries_cache = []

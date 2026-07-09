@@ -3,9 +3,9 @@ import time
 from PySide6.QtCore import QObject
 
 from src.app.logging_utils import get_logger
+from src.app.search_results_paging import SEARCH_RESULTS_PAGE_SIZE, slice_search_results_page
 from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
 from ui.threading_utils import shutdown_thread
-from ui.views.table_visibility import visible_table_row_range
 from ui.workers import SearchConfig, SearchWarmupWorker, SearchWorker, ThumbLoader
 
 logger = get_logger("search_controller")
@@ -24,12 +24,13 @@ class SearchController(QObject):
         self._warmup_started = False
         self._is_shutdown = False
         self._last_coarse_results = []
+        self._all_results = []
+        self._current_page = 0
+        self._last_search_duration = 0.0
+        self._result_display_context = {}
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
-
-    def _visible_result_rows(self, table):
-        return set(visible_table_row_range(table))
 
     def is_search_running(self) -> bool:
         worker = self.worker
@@ -138,7 +139,31 @@ class SearchController(QObject):
 
     def clear_results(self):
         self.stop_thumbnail_loading()
+        self._all_results = []
+        self._current_page = 0
+        self._result_display_context = {}
         self._result_view().clear()
+        self._sync_results_pager()
+
+    def go_to_results_page(self, page_index: int) -> None:
+        if not self._all_results:
+            return
+        pages = max(1, (len(self._all_results) + SEARCH_RESULTS_PAGE_SIZE - 1) // SEARCH_RESULTS_PAGE_SIZE)
+        self._current_page = max(0, min(int(page_index), pages - 1))
+        self._render_current_page()
+        table = self._result_view().table
+        if table.rowCount() > 0:
+            table.scrollToTop()
+
+    def _sync_results_pager(self) -> None:
+        pager = getattr(self.parent_window.search_page, "results_pager", None)
+        if pager is None:
+            return
+        pager.configure(
+            total_count=len(self._all_results),
+            current_page=self._current_page,
+            page_size=SEARCH_RESULTS_PAGE_SIZE,
+        )
 
     def shutdown(self):
         self._is_shutdown = True
@@ -213,13 +238,18 @@ class SearchController(QObject):
         if not is_locate_run:
             self._last_coarse_results = list(results or [])
         self.parent_window.push_inference_status()
+        self._all_results = list(results or [])
+        self._current_page = 0
+        self._last_search_duration = max(0.0, time.time() - self.start_time)
+
         result_view = self._result_view()
-        if not results:
+        if not self._all_results:
+            self._result_display_context = {}
             result_view.clear()
+            self._sync_results_pager()
             self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["no_results"])
             return
 
-        texts = self.parent_window.texts
         clip_score_mode = False
         low_confidence_threshold = None
         image_path = str(getattr(self.parent_window, "current_img_path", "") or "").strip()
@@ -234,19 +264,51 @@ class SearchController(QObject):
             except Exception as exc:
                 logger.debug("Crop query clip-score UI hint skipped: %s", exc)
 
-        result_view.populate_local(
+        self._result_display_context = {
+            "clip_score_mode": clip_score_mode,
+            "low_confidence_score": low_confidence_threshold,
+        }
+        self._render_current_page()
+
+    def _render_current_page(self) -> None:
+        results = self._all_results
+        if not results:
+            self._result_view().clear()
+            self._sync_results_pager()
+            return
+
+        texts = self.parent_window.texts
+        context = dict(self._result_display_context or {})
+        page_results = slice_search_results_page(
             results,
+            self._current_page,
+            SEARCH_RESULTS_PAGE_SIZE,
+        )
+        rank_offset = self._current_page * SEARCH_RESULTS_PAGE_SIZE
+        result_view = self._result_view()
+        result_view.populate_local(
+            page_results,
             self.parent_window.handle_play,
             self.parent_window.open_result_in_explorer,
             self.parent_window.handle_export_clip,
             texts,
             on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
             on_add_to_shot_list=getattr(self.parent_window, "add_hit_to_shot_list", None),
-            clip_score_mode=clip_score_mode,
-            low_confidence_score=low_confidence_threshold,
+            clip_score_mode=bool(context.get("clip_score_mode")),
+            low_confidence_score=context.get("low_confidence_score"),
+            rank_offset=rank_offset,
         )
-        duration = time.time() - self.start_time
-        status_text = texts["search_done"].format(duration=duration, count=len(results))
+        self._sync_results_pager()
+        self._update_results_status_text(results, context)
+        self._start_page_thumbnails(page_results)
+
+    def _update_results_status_text(self, results, context: dict) -> None:
+        texts = self.parent_window.texts
+        duration = float(self._last_search_duration or 0.0)
+        total_count = len(results or [])
+        status_text = texts["search_done"].format(duration=duration, count=total_count)
+
+        clip_score_mode = bool(context.get("clip_score_mode"))
         if clip_score_mode:
             try:
                 from src.domain.search_hit import coerce_search_hit
@@ -298,7 +360,11 @@ class SearchController(QObject):
                 status_text = f"{status_text} · {warn}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
-        self.thumb_thread = ThumbLoader(results, priority_rows=self._visible_result_rows(result_view.table))
+    def _start_page_thumbnails(self, page_results) -> None:
+        self.stop_thumbnail_loading()
+        if not page_results:
+            return
+        self.thumb_thread = ThumbLoader(page_results)
         self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
 

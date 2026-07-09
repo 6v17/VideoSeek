@@ -471,6 +471,47 @@ QPushButton:disabled {
 #SearchResultsActions {
     background: transparent;
 }
+#SearchResultsPager {
+    background: transparent;
+}
+QPushButton#SearchResultsPagerButton {
+    background-color: transparent;
+    border: 1px solid __ACCENT__;
+    border-radius: 6px;
+    color: __ACCENT__;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 0 8px;
+    min-height: 22px;
+    max-height: 24px;
+}
+QPushButton#SearchResultsPagerButton:hover:enabled {
+    background-color: __ACCENT_SOFT__;
+    border-color: __ACCENT_HOVER__;
+    color: __ACCENT_HOVER__;
+}
+QPushButton#SearchResultsPagerButton:pressed:enabled {
+    background-color: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    padding-top: 1px;
+}
+QPushButton#SearchResultsPagerButton:disabled {
+    background-color: transparent;
+    border-color: __ACCENT__;
+    color: __MUTED__;
+    font-weight: 600;
+}
+#SearchResultsPagerInfo {
+    background-color: transparent;
+    border: 1px solid __ACCENT__;
+    border-radius: 6px;
+    padding: 0 10px;
+    min-height: 22px;
+    max-height: 24px;
+    color: __HEADLINE__;
+    font-weight: 600;
+    font-size: 11px;
+}
 #PresetImageThumb {
     background: __FIELD__;
     border: 1px solid __LINE__;

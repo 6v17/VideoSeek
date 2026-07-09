@@ -25,7 +25,7 @@ from src.core.onnx_vision_engine import (
     format_exception_detail as _format_exception_detail,
     truncate_log_text as _truncate_log_text,
 )
-from src.core.semantic_chunking import SemanticChunkStreamBuilder
+from src.core.semantic_chunking import SemanticChunkStreamBuilder, chunk_builder_kwargs
 from src.core.tokenizer import tokenize
 from src.storage.config_store import build_chunk_config
 from src.storage.asset_store import save_vector_payload
@@ -960,7 +960,7 @@ def generate_vectors_and_index_for_video(
     runtime_config = load_config()
     estimated_frame_total = _estimate_index_frame_total(video_path, config=runtime_config)
     chunk_config = build_chunk_config(runtime_config)
-    chunk_builder = SemanticChunkStreamBuilder(**chunk_config)
+    chunk_builder = SemanticChunkStreamBuilder(**chunk_builder_kwargs(chunk_config))
     progress_reporter = (
         IndexingProgressReporter(
             progress_callback,

@@ -201,8 +201,14 @@ class SearchPanelStateMixin:
             btn_save_preset.setText(texts.get("search_compose_save_preset", "Save as preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
 
-        page.text_granularity_cluster.setVisible(active_tab == self.SEARCH_TAB_TEXT)
-        page.image_search_mode_cluster.setVisible(active_tab == self.SEARCH_TAB_IMAGE)
+        mode_stack = getattr(page, "search_mode_options_stack", None)
+        if mode_stack is not None:
+            if active_tab == self.SEARCH_TAB_TEXT:
+                mode_stack.setCurrentIndex(0)
+            elif active_tab == self.SEARCH_TAB_IMAGE:
+                mode_stack.setCurrentIndex(1)
+            else:
+                mode_stack.setCurrentIndex(2)
 
         if active_tab == self.SEARCH_TAB_TEXT:
             page.search_mode_label.setText(texts.get("setting_search_mode", ""))

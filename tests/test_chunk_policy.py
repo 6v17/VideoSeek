@@ -15,7 +15,9 @@ from src.core.chunk_policy import (
 class ChunkPolicyTests(unittest.TestCase):
     def test_resolve_balanced_preset(self):
         values = resolve_chunk_policy_values(CHUNK_POLICY_BALANCED)
-        self.assertEqual(values["similarity_threshold"], 0.85)
+        self.assertEqual(values["similarity_threshold"], 0.87)
+        self.assertEqual(values["chunk_edge_threshold"], 0.85)
+        self.assertEqual(values["max_chunk_duration"], 90.0)
         self.assertEqual(values["min_chunk_duration"], 0.0)
         self.assertEqual(values["min_chunk_size"], 2)
 
@@ -31,7 +33,8 @@ class ChunkPolicyTests(unittest.TestCase):
     def test_apply_sensitive_preset(self):
         config = apply_chunk_policy({}, CHUNK_POLICY_SENSITIVE)
         self.assertEqual(config["chunk_policy"], CHUNK_POLICY_SENSITIVE)
-        self.assertEqual(config["similarity_threshold"], 0.88)
+        self.assertEqual(config["similarity_threshold"], 0.90)
+        self.assertEqual(config["chunk_edge_threshold"], 0.88)
         self.assertEqual(config["min_chunk_duration"], 0.0)
 
     def test_apply_custom_does_not_overwrite_values(self):

@@ -702,7 +702,9 @@ class UnderstandingGuiMixin:
                     state=state,
                 )
             )
-        duration_sec = max((float(segment.end_sec) for segment in segments), default=0.0)
+        duration_sec = float(self._understanding_video_context.get("duration_sec") or 0.0)
+        if duration_sec <= 0:
+            duration_sec = max((float(segment.end_sec) for segment in segments), default=0.0)
         page.chunk_timeline.set_segments(segments, duration_sec=duration_sec)
         self._refresh_understanding_video_summary(evidence)
         if segments:

@@ -20,6 +20,12 @@ def load_model_metadata(config=None):
 def save_model_metadata(meta, config=None):
     paths = get_model_profile_storage_paths(config=config)
     save_metadata(meta, paths["meta_file"])
+    try:
+        from src.services.search_scope import invalidate_searchable_path_index_cache
+
+        invalidate_searchable_path_index_cache()
+    except Exception:
+        pass
 
 
 def load_vector_payload(vector_file):

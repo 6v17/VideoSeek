@@ -3,13 +3,30 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.domain.search_hit import SearchHit
 
+_PATH_INDEX_CACHE: dict[str, tuple[float, "SearchablePathIndex"]] = {}
+
+
+def _canonical_file_path(path: str) -> str:
+    return os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip())))
+
+
+def _path_is_file(path: str) -> bool:
+    text = str(path or "").strip()
+    if not text:
+        return False
+    try:
+        return os.path.isfile(text)
+    except OSError:
+        return False
+
 
 def normalize_scope_path(path: str) -> str:
-    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip()))))
+    return os.path.normcase(_canonical_file_path(path))
 
 
 def iter_indexed_video_entries(meta) -> Iterable[Tuple[str, str, dict]]:
@@ -56,6 +73,8 @@ def list_ready_video_paths_for_libraries(library_paths: Optional[Sequence[str]],
             continue
         if not any(video_path_under_library_root(abs_path, root) for root in roots):
             continue
+        if not video_source_exists(abs_path):
+            continue
         if abs_path in seen:
             continue
         seen.add(abs_path)
@@ -67,7 +86,7 @@ def count_indexed_ready_videos(config=None) -> int:
     from src.services.library_service import list_local_vector_details
 
     try:
-        detail = list_local_vector_details(validate_contents=False)
+        detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
     except Exception:
         return 0
     count = 0
@@ -287,6 +306,111 @@ def video_path_under_library_root(video_path: str, library_root: str) -> bool:
     if normalized_video == normalized_root:
         return True
     return normalized_video.startswith(normalized_root + os.sep)
+
+
+def video_source_exists(video_path: str) -> bool:
+    text = str(video_path or "").strip()
+    if not text:
+        return False
+    if _path_is_file(text):
+        return True
+    canonical = _canonical_file_path(text)
+    return _path_is_file(canonical)
+
+
+@dataclass(frozen=True)
+class SearchablePathIndex:
+    by_video_id: Dict[str, str]
+    by_normalized_path: Dict[str, str]
+
+    @classmethod
+    def from_meta(cls, meta) -> "SearchablePathIndex":
+        by_video_id: Dict[str, str] = {}
+        by_normalized_path: Dict[str, str] = {}
+        for abs_path, video_id, info in iter_indexed_video_entries(meta):
+            asset_state = str(info.get("asset_state", "")).strip().lower()
+            if asset_state == "missing_source":
+                continue
+            if not _path_is_file(abs_path):
+                continue
+            canonical = _canonical_file_path(abs_path)
+            by_video_id[video_id] = canonical
+            by_normalized_path[normalize_scope_path(canonical)] = canonical
+            by_normalized_path[normalize_scope_path(abs_path)] = canonical
+        return cls(by_video_id=by_video_id, by_normalized_path=by_normalized_path)
+
+    def resolve_path(self, video_path: str = "", video_id: str = "") -> str | None:
+        vid = str(video_id or "").strip()
+        if vid:
+            canonical = self.by_video_id.get(vid)
+            if canonical and _path_is_file(canonical):
+                return canonical
+        raw = str(video_path or "").strip()
+        if not raw:
+            return None
+        normalized = normalize_scope_path(raw)
+        canonical = self.by_normalized_path.get(normalized)
+        if canonical and _path_is_file(canonical):
+            return canonical
+        if _path_is_file(raw):
+            return _canonical_file_path(raw)
+        if _path_is_file(normalized):
+            return normalized
+        return None
+
+
+def load_searchable_path_index(config=None) -> SearchablePathIndex:
+    from src.app.config import load_config
+    from src.storage.asset_store import load_model_metadata
+    from src.storage.config_store import get_local_model_asset_dirs
+
+    cfg = config or load_config()
+    meta_file = get_local_model_asset_dirs(config=cfg)["meta_file"]
+    try:
+        meta_mtime = os.path.getmtime(meta_file)
+    except OSError:
+        meta_mtime = 0.0
+    cache_key = os.path.normpath(meta_file)
+    cached = _PATH_INDEX_CACHE.get(cache_key)
+    if cached is not None and cached[0] == meta_mtime:
+        return cached[1]
+    index = SearchablePathIndex.from_meta(load_model_metadata(config=cfg))
+    _PATH_INDEX_CACHE[cache_key] = (meta_mtime, index)
+    return index
+
+
+def invalidate_searchable_path_index_cache() -> None:
+    _PATH_INDEX_CACHE.clear()
+
+
+def filter_hits_with_existing_sources(
+    hits: List[SearchHit],
+    *,
+    path_index: SearchablePathIndex | None = None,
+    config=None,
+) -> List[SearchHit]:
+    if not hits:
+        return []
+    index = path_index or load_searchable_path_index(config=config)
+    filtered: List[SearchHit] = []
+    for hit in hits:
+        resolved = index.resolve_path(hit.video_path, hit.video_id)
+        if not resolved:
+            continue
+        if resolved == hit.video_path and not hit.video_id:
+            filtered.append(hit)
+            continue
+        filtered.append(
+            SearchHit(
+                hit.start_sec,
+                hit.end_sec,
+                hit.score,
+                resolved,
+                match_kind=hit.match_kind,
+                video_id=hit.video_id,
+            )
+        )
+    return filtered
 
 
 def filter_hits_by_video_paths(hits: List[SearchHit], video_paths: Optional[Sequence[str]]) -> List[SearchHit]:

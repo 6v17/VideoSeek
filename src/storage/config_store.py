@@ -354,12 +354,34 @@ def get_min_chunk_duration(config=None) -> float:
     return max(minimum, min(maximum, value))
 
 
+def get_chunk_edge_threshold(config=None) -> float:
+    cfg = _app_cfg(config)
+    minimum, maximum = CONFIG_BOUNDS.get("chunk_edge_threshold", (0.1, 1.0))
+    try:
+        value = float(cfg.get("chunk_edge_threshold", DEFAULT_CONFIG["chunk_edge_threshold"]))
+    except (TypeError, ValueError):
+        value = float(DEFAULT_CONFIG["chunk_edge_threshold"])
+    return max(minimum, min(maximum, value))
+
+
+def get_max_chunk_duration(config=None) -> float:
+    cfg = _app_cfg(config)
+    minimum, maximum = CONFIG_BOUNDS.get("max_chunk_duration", (0.0, 600.0))
+    try:
+        value = float(cfg.get("max_chunk_duration", DEFAULT_CONFIG["max_chunk_duration"]))
+    except (TypeError, ValueError):
+        value = float(DEFAULT_CONFIG["max_chunk_duration"])
+    return max(minimum, min(maximum, value))
+
+
 def build_chunk_config(config=None) -> dict:
     cfg = _app_cfg(config)
     return chunk_config_payload(
         similarity_threshold=get_similarity_threshold(cfg),
+        chunk_edge_threshold=get_chunk_edge_threshold(cfg),
         min_chunk_size=get_min_chunk_size(cfg),
         min_chunk_duration=get_min_chunk_duration(cfg),
+        max_chunk_duration=get_max_chunk_duration(cfg),
     )
 
 

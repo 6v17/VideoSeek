@@ -405,7 +405,7 @@ class ThumbLoader(QThread):
 
             hit = coerce_search_hit(raw)
             video_path = str(hit.video_path or "").strip()
-            if not video_path:
+            if not video_path or not os.path.isfile(video_path):
                 self.thumb_ready.emit(table_row, None)
                 continue
 

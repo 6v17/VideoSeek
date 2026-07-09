@@ -11,7 +11,12 @@ from src.core.faiss_index import create_clip_index, load_clip_index, save_vector
 from src.services.search_assets import invalidate_search_asset_caches, load_chunk_search_assets, load_search_assets
 from src.services.search_frame_query import _search_frame_results_with_ids
 from src.storage.asset_store import save_metadata
-from src.storage.lance_search_index import InMemoryFlatSearchIndex, get_lance_video_row_counts, load_lance_frame_search_assets
+from src.storage.lance_search_index import (
+    InMemoryFlatSearchIndex,
+    LanceTableSearchIndex,
+    get_lance_video_row_counts,
+    load_lance_frame_search_assets,
+)
 from src.storage.lance_store import (
     allocate_lance_dir_bytes_by_weight,
     format_byte_size,
@@ -90,9 +95,10 @@ class LanceSearchTests(unittest.TestCase):
             invalidate_search_asset_caches()
             search_index, loaded_ts, loaded_paths = load_search_assets(config)
             self.assertIsNotNone(search_index)
+            self.assertIsInstance(search_index, LanceTableSearchIndex)
             self.assertEqual(int(search_index.ntotal), 6)
-            self.assertEqual(len(loaded_ts), 6)
-            self.assertEqual(len(loaded_paths), 6)
+            self.assertIsNone(loaded_ts)
+            self.assertIsNone(loaded_paths)
 
             query = np.asarray(vectors[2], dtype=np.float32).reshape(1, -1)
             hits, _ids = _search_frame_results_with_ids(
@@ -103,7 +109,7 @@ class LanceSearchTests(unittest.TestCase):
                 top_k=3,
             )
             self.assertTrue(hits)
-            self.assertEqual(hits[0].video_path, loaded_paths[2])
+            self.assertEqual(hits[0].video_path, os.path.join(tmp, "clip.mp4"))
 
     def test_upsert_profile_video_vectors_updates_lance(self):
         try:
@@ -148,7 +154,40 @@ class LanceSearchTests(unittest.TestCase):
             self.assertFalse(result.get("error"))
             loaded = load_lance_frame_search_assets(profile_dir, video_id="vid999")
             self.assertIsNotNone(loaded[0])
+            self.assertIsInstance(loaded[0], InMemoryFlatSearchIndex)
             self.assertEqual(int(loaded[0].ntotal), 3)
+
+    def test_lance_table_search_matches_in_memory(self):
+        try:
+            import lancedb  # noqa: F401
+        except ImportError:
+            self.skipTest("lancedb not installed")
+
+        vectors = np.random.randn(32, 16).astype(np.float32)
+        vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            db = lancedb.connect(tmp)
+            rows = [
+                {
+                    "video_id": "vid001",
+                    "library_path": tmp,
+                    "video_path": os.path.join(tmp, "clip.mp4"),
+                    "timestamp": float(index),
+                    "frame_index": index,
+                    "vector": vectors[index].tolist(),
+                }
+                for index in range(len(vectors))
+            ]
+            table = db.create_table("frames", rows)
+            query = np.random.randn(1, 16).astype(np.float32)
+            query /= np.linalg.norm(query)
+
+            memory_index = InMemoryFlatSearchIndex(vectors)
+            lance_index = LanceTableSearchIndex(table)
+            mem_dist, mem_ids = memory_index.search(query, 5)
+            lance_dist, lance_ids = lance_index.search(query, 5)
+            np.testing.assert_allclose(mem_dist, lance_dist, rtol=1e-4, atol=1e-4)
+            self.assertEqual(mem_ids.shape, lance_ids.shape)
 
     def test_get_lance_video_row_counts_returns_per_video_totals(self):
         try:

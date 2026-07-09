@@ -5,15 +5,18 @@ from unittest.mock import patch
 
 from src.domain.search_hit import SearchHit
 from src.services.search_scope import (
+    SearchablePathIndex,
     apply_search_scope,
     filter_hits_by_library_paths,
     filter_hits_by_video_paths,
+    filter_hits_with_existing_sources,
     resolve_default_active_search_scope,
     resolve_effective_search_scope,
     resolve_explicit_scope_library_paths,
     resolve_fetch_top_k,
     scope_request_is_explicit,
     video_path_under_library_root,
+    video_source_exists,
 )
 
 
@@ -55,13 +58,61 @@ class SearchScopeTests(unittest.TestCase):
             self.assertTrue(video_path_under_library_root(lib_root, lib_root))
             self.assertFalse(video_path_under_library_root("D:/other/clip.mp4", lib_root))
 
-    def test_apply_search_scope_trims_top_k(self):
+    def test_resolve_source_filtered_fetch_top_k_expands_global_recall(self):
+        from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
+
+        self.assertEqual(resolve_source_filtered_fetch_top_k(20, False), 100)
+        self.assertEqual(resolve_source_filtered_fetch_top_k(20, True), 500)
+
+    @patch("src.services.search_scope.video_source_exists", return_value=True)
+    def test_apply_search_scope_trims_top_k(self, _mock_exists):
         hits = [
             SearchHit(float(i), float(i), 1.0 - i * 0.1, f"D:/clip_{i}.mp4")
             for i in range(5)
         ]
         trimmed = apply_search_scope(hits, top_k=2)
         self.assertEqual(len(trimmed), 2)
+
+    def test_filter_hits_with_existing_sources(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            existing_path = handle.name
+        try:
+            hits = [
+                SearchHit(1.0, 1.0, 0.9, existing_path),
+                SearchHit(2.0, 2.0, 0.8, "D:/missing/clip.mp4"),
+                SearchHit(3.0, 3.0, 0.7, ""),
+            ]
+            filtered = filter_hits_with_existing_sources(hits)
+            self.assertEqual(len(filtered), 1)
+            self.assertEqual(filtered[0].video_path, existing_path)
+        finally:
+            os.unlink(existing_path)
+
+    def test_filter_hits_with_existing_sources_resolves_stale_lance_path(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            existing_path = handle.name
+        try:
+            meta = {
+                "libraries": {
+                    os.path.dirname(existing_path): {
+                        "files": {
+                            os.path.basename(existing_path): {
+                                "vid": "v1",
+                                "asset_state": "ready",
+                            }
+                        }
+                    }
+                }
+            }
+            path_index = SearchablePathIndex.from_meta(meta)
+            hits = [SearchHit(1.0, 1.0, 0.9, "D:/old/moved/clip.mp4", video_id="v1")]
+            filtered = filter_hits_with_existing_sources(hits, path_index=path_index)
+            self.assertEqual(len(filtered), 1)
+            from src.services.search_scope import normalize_scope_path
+
+            self.assertEqual(normalize_scope_path(filtered[0].video_path), normalize_scope_path(existing_path))
+        finally:
+            os.unlink(existing_path)
 
     @patch("src.services.search_scope.resolve_active_search_video_scope", return_value=["D:/a.mp4"])
     def test_resolve_default_active_search_scope_prefers_videos(self, _mock_videos):
@@ -120,6 +171,22 @@ class SearchScopeTests(unittest.TestCase):
         )
         self.assertEqual(videos, ["D:/preset.mp4"])
         self.assertIsNone(libraries)
+
+    @patch("src.storage.asset_store.save_metadata")
+    @patch(
+        "src.storage.asset_store.get_model_profile_storage_paths",
+        return_value={"meta_file": "D:/meta.json"},
+    )
+    def test_save_model_metadata_invalidates_path_index_cache(self, _mock_paths, _mock_save):
+        import src.services.search_scope as search_scope
+        from src.storage.asset_store import save_model_metadata
+
+        search_scope._PATH_INDEX_CACHE["D:/meta.json"] = (
+            1.0,
+            SearchablePathIndex(by_video_id={}, by_normalized_path={}),
+        )
+        save_model_metadata({})
+        self.assertEqual(search_scope._PATH_INDEX_CACHE, {})
 
 
 if __name__ == "__main__":

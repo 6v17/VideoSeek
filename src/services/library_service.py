@@ -12,7 +12,9 @@ from src.services.search_index_schema import (
     get_search_index_schema_version,
     LIBRARY_SEARCH_INDEX_STATUS_STALE,
     needs_search_index_upgrade,
+    prune_legacy_search_index_artifacts,
 )
+from src.services.indexing_runtime_status import get_index_sync_status, library_sync_in_progress
 
 
 def needs_search_index_schema_upgrade(config=None):
@@ -28,6 +30,22 @@ def get_installed_search_index_schema_version(config=None):
 
 
 def resolve_library_card_status(library_path, library_data, texts, meta=None, config=None):
+    sync_status = get_index_sync_status()
+    if sync_status.get("index_sync_in_progress"):
+        target = str(sync_status.get("index_sync_target_library_path") or "").strip()
+        if not target or library_sync_in_progress(library_path, sync_status=sync_status):
+            total = int(sync_status.get("index_sync_progress_total") or 0)
+            current = int(sync_status.get("index_sync_progress_current") or 0)
+            if total > 0:
+                return (
+                    texts.get("lib_syncing_progress", "{current}/{total}").format(
+                        current=current,
+                        total=total,
+                    ),
+                    "partial",
+                )
+            return texts.get("lib_syncing", texts.get("lib_partial", "Partial")), "partial"
+
     exists = os.path.exists(library_path)
     has_index = len((library_data or {}).get("files", {})) > 0
     state = str((library_data or {}).get("index_state", "")).strip().lower()
@@ -70,25 +88,73 @@ def _paths_overlap(path_a, path_b):
     return common_path in {normalized_a, normalized_b}
 
 
-def list_libraries():
+def list_libraries(*, maintain: bool = False):
     config = load_config()
     meta = load_model_metadata(config=config)
     libraries = meta.get("libraries", {})
     normalized = _normalize_library_map(libraries)
-    if normalized != libraries:
-        removed_paths = set(libraries.keys()) - set(normalized.keys())
-        for old_path in removed_paths:
-            try:
-                clear_library_search_index(old_path, config=config)
-            except Exception:
-                pass
-        meta["libraries"] = normalized
+    if maintain:
+        if normalized != libraries:
+            removed_paths = set(libraries.keys()) - set(normalized.keys())
+            for old_path in removed_paths:
+                try:
+                    clear_library_search_index(old_path, config=config)
+                except Exception:
+                    pass
+            meta["libraries"] = normalized
+            save_model_metadata(meta, config=config)
+        try:
+            garbage_collect_orphan_library_indexes(meta, config=config)
+        except Exception:
+            pass
+    return normalized
+
+
+def maintain_library_metadata():
+    """Normalize library paths, prune orphan legacy indexes, and drop stale FAISS artifacts."""
+    config = load_config()
+    meta = load_model_metadata(config=config)
+    libraries = list_libraries(maintain=True)
+    if _repair_false_partial_library_states(meta):
         save_model_metadata(meta, config=config)
     try:
-        garbage_collect_orphan_library_indexes(meta, config=config)
-    except Exception:
-        pass
-    return normalized
+        from src.storage.lance_store import drop_lance_vector_indexes
+        from src.storage.config_store import get_local_model_asset_dirs
+
+        drop_lance_vector_indexes(get_local_model_asset_dirs(config=config)["base_dir"])
+    except Exception as exc:
+        get_logger("library_service").warning("Lance ANN index cleanup failed: %s", exc)
+    try:
+        prune_legacy_search_index_artifacts(meta, config=config)
+    except Exception as exc:
+        get_logger("library_service").warning("Legacy search index cleanup failed: %s", exc)
+    return libraries
+
+
+def _repair_false_partial_library_states(meta) -> bool:
+    """Recover from legacy bug that marked every library partial when a full sync was stopped."""
+    from src.services.indexing_runtime_status import get_index_sync_status
+
+    if get_index_sync_status().get("index_sync_in_progress"):
+        return False
+    libraries = (meta or {}).get("libraries", {})
+    if not libraries:
+        return False
+    partial_libraries = [
+        path
+        for path, data in libraries.items()
+        if str((data or {}).get("index_state", "")).strip().lower() == "partial"
+    ]
+    if not partial_libraries or len(partial_libraries) != len(libraries):
+        return False
+    changed = False
+    for path in partial_libraries:
+        data = libraries.get(path, {})
+        if not (data or {}).get("files"):
+            continue
+        data["index_state"] = "ready"
+        changed = True
+    return changed
 
 
 def list_partial_libraries(include_offline=False):
@@ -209,7 +275,7 @@ def _effective_asset_state(info, source_exists, vector_exists, vector_ok, lance_
     return "ready"
 
 
-def list_local_vector_details(validate_contents=False):
+def list_local_vector_details(validate_contents=False, *, include_storage_stats=True):
     from src.storage.lance_search_index import (
         get_lance_indexed_video_ids,
         get_lance_video_row_counts,
@@ -231,21 +297,29 @@ def list_local_vector_details(validate_contents=False):
     lance_dir = os.path.normpath(get_lance_dir(profile_base_dir))
     lance_table_ready = lance_search_is_ready(profile_base_dir)
     lance_video_ids = get_lance_indexed_video_ids(profile_base_dir) if lance_table_ready else frozenset()
-    lance_video_counts = get_lance_video_row_counts(profile_base_dir) if lance_table_ready else {}
-    lance_summary = read_lance_profile_summary(profile_base_dir)
-    lance_dir_bytes = int(lance_summary.get("lance_dir_bytes", 0) or 0)
-    legacy_vector_dir_bytes = sum_legacy_vector_npy_bytes(vector_dir)
-    embedding_dim = int(lance_summary.get("dimension", 0) or 0)
-    lance_weight_by_video = {
-        video_id: estimate_lance_video_payload_bytes(
-            counts.get("frame_count", 0),
-            counts.get("chunk_count", 0),
-            dimension=embedding_dim,
-        )
-        for video_id, counts in lance_video_counts.items()
-    }
-    lance_active_bytes = sum(lance_weight_by_video.values())
-    lance_bytes_by_video = allocate_lance_dir_bytes_by_weight(lance_active_bytes, lance_weight_by_video)
+    if include_storage_stats:
+        lance_video_counts = get_lance_video_row_counts(profile_base_dir) if lance_table_ready else {}
+        lance_summary = read_lance_profile_summary(profile_base_dir, include_dir_size=True)
+        lance_dir_bytes = int(lance_summary.get("lance_dir_bytes", 0) or 0)
+        legacy_vector_dir_bytes = sum_legacy_vector_npy_bytes(vector_dir)
+        embedding_dim = int(lance_summary.get("dimension", 0) or 0)
+        lance_weight_by_video = {
+            video_id: estimate_lance_video_payload_bytes(
+                counts.get("frame_count", 0),
+                counts.get("chunk_count", 0),
+                dimension=embedding_dim,
+            )
+            for video_id, counts in lance_video_counts.items()
+        }
+        lance_active_bytes = sum(lance_weight_by_video.values())
+        lance_bytes_by_video = allocate_lance_dir_bytes_by_weight(lance_active_bytes, lance_weight_by_video)
+    else:
+        lance_video_counts = {}
+        lance_summary = {"ready": lance_table_ready, "indexed_video_count": len(lance_video_ids)}
+        lance_dir_bytes = 0
+        legacy_vector_dir_bytes = 0
+        lance_active_bytes = 0
+        lance_bytes_by_video = {}
     entries = []
 
     for library_path, library_data in libraries.items():

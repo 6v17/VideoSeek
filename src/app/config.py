@@ -80,7 +80,7 @@ DEFAULT_CONFIG = {
     "fps": 1,
     "sampling_fps_mode": "dynamic",
     "sampling_fps_rules": "0-10m=2; 10m-=1",
-    "search_top_k": 20,
+    "search_top_k": 100,
     "frame_neighbor_rerank_enabled": False,
     "frame_neighbor_rerank_top_n": 10,
     "frame_neighbor_rerank_window": 2,
@@ -110,9 +110,11 @@ DEFAULT_CONFIG = {
     "embedding_batch_size": 16,
     "close_window_action": "exit",
     "chunk_policy": "balanced",
-    "similarity_threshold": 0.85,
+    "similarity_threshold": 0.87,
+    "chunk_edge_threshold": 0.85,
     "min_chunk_size": 2,
     "min_chunk_duration": 0.0,
+    "max_chunk_duration": 90.0,
     "search_mode": "frame",
     "image_search_mode": "frame",
     "search_precision_mode": "fast",
@@ -175,8 +177,10 @@ CONFIG_BOUNDS = {
     "thumb_height": (45, 320),
     "embedding_batch_size": (1, 64),
     "similarity_threshold": (0.1, 1.0),
+    "chunk_edge_threshold": (0.1, 1.0),
     "min_chunk_size": (1, 50),
     "min_chunk_duration": (0.0, 30.0),
+    "max_chunk_duration": (0.0, 600.0),
 }
 
 CONFIG_INT_KEYS = {
@@ -236,7 +240,6 @@ DERIVED_DATA_PATH_KEYS = {
 }
 
 OBSOLETE_CHUNK_CONFIG_KEYS = (
-    "max_chunk_duration",
     "chunk_split_confirm_frames",
     "chunk_similarity_mode",
     "chunk_segmentation_strategy",
@@ -483,6 +486,10 @@ def _sanitize_general_settings(config):
             maximum,
             as_int=key in CONFIG_INT_KEYS,
         )
+
+    # Legacy default (20) cannot fill multiple 20-item pages; bump once for pagination UX.
+    if int(sanitized.get("search_top_k", DEFAULT_CONFIG["search_top_k"])) == 20:
+        sanitized["search_top_k"] = DEFAULT_CONFIG["search_top_k"]
 
     for key, allowed_values in CONFIG_ENUMS.items():
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()

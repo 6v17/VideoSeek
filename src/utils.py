@@ -1168,6 +1168,9 @@ def is_windows_admin() -> bool:
 
 def open_in_explorer(video_path):
     path = os.fspath(video_path)
+    if not str(path or "").strip():
+        logger.warning("File does not exist: %s", video_path)
+        return False
     if not os.path.exists(path):
         logger.warning("File does not exist: %s", video_path)
         return False
@@ -1207,9 +1210,12 @@ def open_folder_in_explorer(folder_path):
 
 def get_single_thumbnail(video_path, time_sec):
     # Retained intentionally: imported dynamically inside ThumbLoader.run().
+    path = str(video_path or "").strip()
+    if not path or not os.path.isfile(path):
+        return None
     safe_time = max(0.0, float(time_sec))
     # Fast path: keep one lightweight local decoder process.
-    capture = cv2.VideoCapture(video_path)
+    capture = cv2.VideoCapture(path)
     try:
         if capture.isOpened():
             capture.set(cv2.CAP_PROP_POS_MSEC, safe_time * 1000.0)

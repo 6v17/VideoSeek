@@ -34,6 +34,7 @@ from ui.widgets.chunk_timeline import ChunkTimelineWidget
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import ResultTable
+from ui.widgets.search_results_pager import SearchResultsPager
 from ui.widgets.result_view import ResultView
 from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
@@ -412,6 +413,7 @@ class SearchPage(QWidget):
         self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
         self.search_granularity_cluster = self.search_panel.text_granularity_cluster
+        self.search_mode_options_stack = self.search_panel.search_mode_options_stack
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
         self.btn_mobile_qr = self.search_panel.btn_mobile_qr
@@ -423,7 +425,6 @@ class SearchPage(QWidget):
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row
-        self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
 
@@ -467,14 +468,17 @@ class SearchPage(QWidget):
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
-        results_toolbar.addWidget(self.lbl_status, 2)
-        results_toolbar.addWidget(self.search_presets_bar, 3)
+        results_toolbar.addWidget(self.lbl_status, 1)
+        results_toolbar.addWidget(self.search_presets_bar, 2)
         results_toolbar.addWidget(self.results_actions, 0)
 
+        self.results_pager = SearchResultsPager()
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
         self.result_table = self.result_view.table
         results_layout.addWidget(self.results_title)
         results_layout.addLayout(results_toolbar)
+        results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
+        results_layout.setSpacing(8)
         results_layout.addWidget(self.result_view)
         page_body.addWidget(self.results_card, 4)
 

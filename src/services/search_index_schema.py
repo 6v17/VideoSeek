@@ -60,7 +60,7 @@ def needs_search_index_upgrade(meta, config=None) -> bool:
 def library_index_is_ready(library_path: str, config=None) -> bool:
     from src.storage.asset_store import load_model_metadata
     from src.storage.config_store import get_local_model_asset_dirs
-    from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
+    from src.storage.lance_search_index import lance_search_is_ready
 
     meta = load_model_metadata(config=config)
     if not library_has_ready_videos(meta, library_path):
@@ -68,7 +68,6 @@ def library_index_is_ready(library_path: str, config=None) -> bool:
     profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
     if not lance_search_is_ready(profile_base_dir):
         return False
-    lance_ids = get_lance_indexed_video_ids(profile_base_dir)
     lib_key = canonicalize_library_path(library_path)
     for root_path, lib_data in (meta or {}).get("libraries", {}).items():
         if canonicalize_library_path(root_path) != lib_key:
@@ -76,8 +75,7 @@ def library_index_is_ready(library_path: str, config=None) -> bool:
         for info in (lib_data or {}).get("files", {}).values():
             if str(info.get("asset_state", "")).strip().lower() != "ready":
                 continue
-            video_id = str(info.get("vid", "")).strip()
-            if video_id and video_id in lance_ids:
+            if str(info.get("vid", "")).strip():
                 return True
     return False
 
@@ -105,24 +103,119 @@ def get_library_search_index_status(meta, library_path: str, config=None) -> str
     return LIBRARY_SEARCH_INDEX_STATUS_STALE
 
 
+def legacy_faiss_index_artifacts_present(config=None) -> bool:
+    from src.storage.config_store import get_global_model_asset_paths, get_local_model_asset_dirs
+    from src.storage.video_id_migration import legacy_npy_vectors_present
+
+    if legacy_npy_vectors_present(config):
+        return True
+
+    model_dirs = get_local_model_asset_dirs(config=config)
+    index_dir = str(model_dirs.get("index_dir", "") or "")
+    if index_dir and os.path.isdir(index_dir):
+        for name in os.listdir(index_dir):
+            if name.lower().endswith("_index.faiss"):
+                return True
+
+    global_dir = str(get_global_model_asset_paths(config=config).get("global_dir", "") or "")
+    if not global_dir or not os.path.isdir(global_dir):
+        return False
+    for name in os.listdir(global_dir):
+        lower = name.lower()
+        if lower.endswith(".faiss") or lower.endswith(".npy"):
+            return True
+    library_root = os.path.join(global_dir, "library_indexes")
+    return os.path.isdir(library_root) and bool(os.listdir(library_root))
+
+
+def prune_legacy_search_index_artifacts(meta, config=None) -> dict:
+    """Remove legacy FAISS/global index files once Lance search is active."""
+    from src.storage.config_store import get_global_model_asset_paths, get_local_model_asset_dirs
+    from src.storage.lance_search_index import lance_search_is_ready
+    from src.storage.video_id_migration import legacy_npy_vectors_present
+
+    if legacy_npy_vectors_present(config):
+        return {"removed_files": 0, "removed_dirs": 0, "skipped": "legacy_npy_present"}
+
+    profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    if not lance_search_is_ready(profile_base_dir):
+        return {"removed_files": 0, "removed_dirs": 0, "skipped": "lance_not_ready"}
+
+    removed_files = 0
+    removed_dirs = 0
+
+    model_dirs = get_local_model_asset_dirs(config=config)
+    index_dir = str(model_dirs.get("index_dir", "") or "")
+    if index_dir and os.path.isdir(index_dir):
+        for name in os.listdir(index_dir):
+            if not name.lower().endswith("_index.faiss"):
+                continue
+            try:
+                os.remove(os.path.join(index_dir, name))
+                removed_files += 1
+            except OSError:
+                pass
+
+    global_dir = str(get_global_model_asset_paths(config=config).get("global_dir", "") or "")
+    if global_dir and os.path.isdir(global_dir):
+        for name in os.listdir(global_dir):
+            lower = name.lower()
+            if not (lower.endswith(".faiss") or lower.endswith(".npy")):
+                continue
+            try:
+                os.remove(os.path.join(global_dir, name))
+                removed_files += 1
+            except OSError:
+                pass
+        library_root = os.path.join(global_dir, "library_indexes")
+        if os.path.isdir(library_root):
+            try:
+                shutil.rmtree(library_root)
+                removed_dirs += 1
+            except OSError:
+                pass
+
+    removed_dirs += garbage_collect_orphan_library_indexes(meta, config=config)
+    return {"removed_files": removed_files, "removed_dirs": removed_dirs, "skipped": ""}
+
+
 def list_library_search_index_summaries(meta, config=None) -> list[dict]:
     summaries = []
     for library_path in sorted((meta or {}).get("libraries", {}).keys()):
         status = get_library_search_index_status(meta, library_path, config=config)
-        paths = get_library_index_paths(library_path, config=config)
+        lance_ready = status == LIBRARY_SEARCH_INDEX_STATUS_READY
         summaries.append(
             {
                 "library_path": library_path,
                 "status": status,
-                "library_index_dir": paths.get("library_dir", ""),
-                "frame_index_ready": os.path.isfile(paths.get("frame_index_file", "")),
-                "chunk_index_ready": os.path.isfile(paths.get("chunk_index_file", "")),
+                "library_index_dir": "",
+                "frame_index_ready": lance_ready,
+                "chunk_index_ready": lance_ready,
             }
         )
     return summaries
 
 
 def garbage_collect_orphan_library_indexes(meta, config=None) -> int:
+    from src.storage.video_id_migration import legacy_npy_vectors_present
+
+    if not legacy_faiss_index_artifacts_present(config) and not legacy_npy_vectors_present(config):
+        global_dir = ""
+        try:
+            from src.storage.config_store import get_global_model_asset_paths
+
+            global_dir = get_global_model_asset_paths(config=config).get("global_dir", "")
+        except Exception:
+            pass
+        library_root = os.path.join(global_dir, "library_indexes") if global_dir else ""
+        if library_root and os.path.isdir(library_root):
+            try:
+                shutil.rmtree(library_root)
+                return 1
+            except OSError:
+                pass
+        return 0
+
     from src.storage.config_store import get_global_model_asset_paths
 
     global_dir = get_global_model_asset_paths(config=config).get("global_dir", "")

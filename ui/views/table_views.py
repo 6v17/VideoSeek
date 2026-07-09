@@ -116,6 +116,7 @@ def populate_result_table(
     *,
     clip_score_mode: bool = False,
     low_confidence_score: float | None = None,
+    rank_offset: int = 0,
 ):
     table.setRowCount(0)
     display_texts = texts
@@ -141,7 +142,7 @@ def populate_result_table(
         )
         table.insertRow(row)
 
-        order_item = QTableWidgetItem(str(row + 1))
+        order_item = QTableWidgetItem(str(rank_offset + row + 1))
         order_item.setTextAlignment(Qt.AlignCenter)
         order_item.setData(
             Qt.UserRole,
@@ -172,7 +173,7 @@ def populate_result_table(
 
         low_confidence = (
             low_confidence_score is not None
-            and row == 0
+            and rank_offset + row == 0
             and float(score) < float(low_confidence_score)
         )
         score_item = _format_score_cell(
@@ -294,8 +295,8 @@ def _build_library_row_card(
     repolish_widget(status)
     status.setAlignment(Qt.AlignCenter)
     status.setWordWrap(True)
-    status.setMinimumWidth(88)
-    status.setMaximumWidth(118)
+    status.setMinimumWidth(96)
+    status.setMaximumWidth(148)
 
     actions = _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts)
     actions.setMinimumWidth(196)

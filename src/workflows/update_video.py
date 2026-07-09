@@ -83,8 +83,6 @@ def update_videos_flow(
     garbage_collect_indices()
     config = load_config()
     meta = load_model_metadata(config=config)
-    _set_library_index_state(meta, "partial", target_lib=target_lib)
-    save_model_metadata(meta, config=config)
 
     should_cleanup_missing_files = force_cleanup_missing_files or config.get("auto_cleanup_missing_files", False)
 
@@ -130,8 +128,7 @@ def update_videos_flow(
             scan_s,
             time.perf_counter() - flow_start,
         )
-        if getattr(exc, "search_assets_changed", False):
-            save_model_metadata(meta, config=config)
+        save_model_metadata(meta, config=config)
         raise
     scan_s = time.perf_counter() - t_scan
     failed_videos, _scan_search_assets_changed = scan_result
@@ -158,6 +155,12 @@ def update_videos_flow(
 
     _finalize_library_index_state(meta, target_lib=target_lib)
     save_model_metadata(meta, config=config)
+    try:
+        from src.services.library_service import maintain_library_metadata
+
+        maintain_library_metadata()
+    except Exception as exc:
+        logger.warning("Post-index library metadata maintenance failed: %s", exc)
     has_search_assets = _has_ready_search_assets(meta)
     logger.info(
         "Index update complete: cleanup=%.2fs scan_libraries=%.2fs has_search_assets=%s total=%.2fs",
@@ -214,7 +217,12 @@ def delete_physical_video_data(video_id, config):
 
 
 def garbage_collect_indices():
+    from src.storage.video_id_migration import legacy_npy_vectors_present
+
     config = load_config()
+    if not legacy_npy_vectors_present(config):
+        return
+
     meta = load_model_metadata(config=config)
 
     valid_ids = set()

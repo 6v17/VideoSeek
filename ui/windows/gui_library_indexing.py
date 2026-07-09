@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtWidgets import QApplication, QFileDialog, QGraphicsOpacityEffect, QAbstractItemView
@@ -268,6 +269,11 @@ class LibraryIndexingGuiMixin:
             self._sync_tray_stop_action()
         self.library_page.progress_bar.setValue(value)
         self.library_page.lbl_status.setText(format_progress_text(text, self.texts))
+        now = time.monotonic()
+        last_refresh = float(getattr(self, "_library_table_progress_refresh_at", 0.0) or 0.0)
+        if now - last_refresh >= 0.6:
+            self._library_table_progress_refresh_at = now
+            self.refresh_library_table()
 
     def _finish_indexing(self, success, target_lib, stopped=False, has_search_assets=False, issues=None, rebuild_global_assets=True):
         self.ui_state.set_indexing_running(False)

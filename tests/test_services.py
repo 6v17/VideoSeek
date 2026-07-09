@@ -236,6 +236,27 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(label, "Library index stale")
         self.assertEqual(state, "partial")
 
+    @patch("src.services.library_service.get_index_sync_status")
+    def test_resolve_library_card_status_shows_sync_progress(self, mock_sync_status):
+        mock_sync_status.return_value = {
+            "index_sync_in_progress": True,
+            "index_sync_target_library_path": "",
+            "index_sync_progress_current": 2341,
+            "index_sync_progress_total": 5000,
+        }
+        texts = {
+            "lib_syncing_progress": "Syncing {current}/{total}",
+            "lib_syncing": "Syncing",
+            "delete": "delete",
+        }
+        label, state = library_service.resolve_library_card_status(
+            "D:\\videos",
+            {"files": {"a.mp4": {"asset_state": "ready"}}, "index_state": "partial"},
+            texts,
+        )
+        self.assertEqual(label, "Syncing 2341/5000")
+        self.assertEqual(state, "partial")
+
     def test_cleanup_missing_library_files_removes_deleted_entries(self):
         meta = {
             "libraries": {
@@ -368,6 +389,176 @@ class IndexingServiceTests(unittest.TestCase):
             sorted(Path(path).name for path in result),
             ["clip.mp4", "scene.mkv"],
         )
+
+    def test_load_library_video_file_list_reuses_cached_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "clip.mp4").write_bytes(b"")
+            lib_data = {}
+            first = indexing_service.load_library_video_file_list(str(root), lib_data, refresh=True)
+            with patch("src.services.indexing_service.discover_video_files") as mock_discover:
+                mock_discover.side_effect = AssertionError("discover_video_files should not run for warm cache")
+                second = indexing_service.load_library_video_file_list(str(root), lib_data, refresh=False)
+            self.assertEqual(len(first), 1)
+            self.assertEqual(len(second), 1)
+            self.assertIn("discover_cache", lib_data)
+            self.assertIn("dir_snapshots", lib_data["discover_cache"])
+
+    def test_discover_video_files_incremental_reuses_unchanged_subtree(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            stable = root / "stable"
+            changed = root / "changed"
+            stable.mkdir()
+            changed.mkdir()
+            (stable / "keep.mp4").write_bytes(b"")
+            (changed / "old.mp4").write_bytes(b"")
+            lib_data = {}
+            indexing_service.refresh_library_video_file_list(str(root), lib_data)
+            (changed / "old.mp4").unlink()
+            (changed / "new.mp4").write_bytes(b"")
+
+            result = indexing_service.discover_video_files_incremental(str(root), lib_data)
+
+            self.assertEqual(sorted(Path(path).name for path in result), ["keep.mp4", "new.mp4"])
+            self.assertIn("stable", lib_data["discover_cache"]["dir_snapshots"])
+            self.assertIn("changed", lib_data["discover_cache"]["dir_snapshots"])
+
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
+    @patch("src.services.indexing_service.discover_video_files")
+    @patch("src.services.indexing_service.os.path.exists")
+    def test_reconcile_library_file_paths_uses_known_abs_paths(
+        self,
+        mock_exists,
+        mock_discover,
+        _mock_video_hash,
+        _mock_legacy_hash,
+        _mock_valid_source,
+    ):
+        mock_discover.side_effect = AssertionError("discover_video_files should not run when known paths provided")
+        root_path = "D:\\videos"
+        lib_files = {"old\\clip.mp4": {"vid": "vid_a", "asset_state": "ready", "mod_time": 100.0}}
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized == "D:/videos/new/clip.mp4":
+                return True
+            if normalized == "D:/videos/old/clip.mp4":
+                return False
+            return normalized == "D:/videos"
+
+        mock_exists.side_effect = fake_exists
+
+        reconciled = indexing_service.reconcile_library_file_paths(
+            root_path,
+            lib_files,
+            known_abs_paths=["D:\\videos\\new\\clip.mp4"],
+        )
+
+        self.assertEqual(reconciled, 1)
+        self.assertIn("new\\clip.mp4", lib_files)
+        mock_discover.assert_not_called()
+
+    @patch("src.storage.lance_store.end_lance_index_batch")
+    @patch("src.storage.lance_store.begin_lance_index_batch")
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
+    @patch("src.services.indexing_service.process_single_video")
+    @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
+    @patch("src.services.indexing_service._collect_library_scan_plan")
+    def test_scan_target_libraries_uses_global_file_progress(
+        self,
+        mock_scan_plan,
+        _mock_cleanup_invalid,
+        mock_process_single_video,
+        _mock_load_chunks,
+        _mock_model_dirs,
+        _mock_begin_batch,
+        _mock_end_batch,
+    ):
+        meta = {"libraries": {"D:\\videos": {"files": {}}}}
+        progress_events = []
+        mock_scan_plan.return_value = [
+            ("D:\\videos", meta["libraries"]["D:\\videos"], ["D:\\videos\\a.mp4", "D:\\videos\\b.mp4"]),
+        ]
+        mock_process_single_video.return_value = (None, None, False, False)
+
+        indexing_service.scan_target_libraries(
+            meta,
+            {},
+            lambda _path: "vid_a",
+            persist_meta_callback=None,
+            progress_callback=lambda value, text: progress_events.append((value, text)),
+        )
+
+        self.assertEqual(mock_process_single_video.call_count, 2)
+        first_kwargs = mock_process_single_video.call_args_list[0].kwargs
+        second_kwargs = mock_process_single_video.call_args_list[1].kwargs
+        self.assertEqual(first_kwargs["file_index"], 1)
+        self.assertEqual(first_kwargs["file_total"], 2)
+        self.assertEqual(second_kwargs["file_index"], 2)
+        self.assertEqual(second_kwargs["file_total"], 2)
+
+    @patch("src.storage.lance_store.end_lance_index_batch")
+    @patch("src.storage.lance_store.begin_lance_index_batch")
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.process_single_video")
+    @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
+    @patch("src.services.indexing_service._collect_library_scan_plan")
+    def test_scan_target_libraries_marks_only_active_library_partial_on_stop(
+        self,
+        mock_scan_plan,
+        _mock_cleanup_invalid,
+        mock_process_single_video,
+        _mock_model_dirs,
+        _mock_begin_batch,
+        _mock_end_batch,
+    ):
+        meta = {
+            "libraries": {
+                "D:\\done": {"files": {"a.mp4": {"vid": "v1"}}, "index_state": "ready"},
+                "D:\\active": {"files": {}, "index_state": "ready"},
+                "D:\\waiting": {"files": {"b.mp4": {"vid": "v2"}}, "index_state": "ready"},
+            }
+        }
+        mock_scan_plan.return_value = [
+            ("D:\\done", meta["libraries"]["D:\\done"], ["D:\\done\\a.mp4"]),
+            ("D:\\active", meta["libraries"]["D:\\active"], ["D:\\active\\c.mp4"]),
+            ("D:\\waiting", meta["libraries"]["D:\\waiting"], ["D:\\waiting\\b.mp4"]),
+        ]
+        mock_process_single_video.return_value = (None, None, False, False)
+        stop_after = {"count": 0}
+
+        def stop_callback():
+            stop_after["count"] += 1
+            return stop_after["count"] >= 4
+
+        with self.assertRaises(indexing_service.IndexUpdateInterrupted):
+            indexing_service.scan_target_libraries(
+                meta,
+                {},
+                lambda _path: "vid",
+                should_stop_callback=stop_callback,
+            )
+
+        self.assertEqual(meta["libraries"]["D:\\done"]["index_state"], "ready")
+        self.assertEqual(meta["libraries"]["D:\\active"]["index_state"], "partial")
+        self.assertEqual(meta["libraries"]["D:\\waiting"]["index_state"], "ready")
+
+    def test_repair_false_partial_library_states_when_all_libraries_stuck_partial(self):
+        meta = {
+            "libraries": {
+                "D:\\a": {"files": {"a.mp4": {"vid": "v1"}}, "index_state": "partial"},
+                "D:\\b": {"files": {"b.mp4": {"vid": "v2"}}, "index_state": "partial"},
+            }
+        }
+        with patch("src.services.library_service.get_index_sync_status", return_value={"index_sync_in_progress": False}):
+            changed = library_service._repair_false_partial_library_states(meta)
+        self.assertTrue(changed)
+        self.assertEqual(meta["libraries"]["D:\\a"]["index_state"], "ready")
+        self.assertEqual(meta["libraries"]["D:\\b"]["index_state"], "ready")
 
     @patch("src.services.indexing_service._is_valid_video_source", return_value=False)
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -820,7 +1011,7 @@ class IndexingServiceTests(unittest.TestCase):
         lib_files = meta["libraries"][root_path]["files"]
         self.assertNotIn("old\\clip.mp4", lib_files)
         self.assertIn("new\\clip.mp4", lib_files)
-        self.assertEqual(persist_calls, ["saved", "saved"])
+        self.assertEqual(persist_calls, ["saved"])
 
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
@@ -1152,12 +1343,13 @@ class IndexingServiceTests(unittest.TestCase):
         mock_load_meta,
         mock_save_meta,
     ):
+        mock_load_meta.return_value["libraries"]["D:\\videos"]["index_state"] = "ready"
         with self.assertRaises(RuntimeError):
             update_video.update_videos_flow()
 
         saved_meta = mock_load_meta.return_value
-        self.assertEqual(saved_meta["libraries"]["D:\\videos"]["index_state"], "partial")
-        self.assertTrue(mock_save_meta.called)
+        self.assertEqual(saved_meta["libraries"]["D:\\videos"]["index_state"], "ready")
+        self.assertFalse(mock_save_meta.called)
 
     @patch("src.workflows.update_video.save_model_metadata")
     @patch(

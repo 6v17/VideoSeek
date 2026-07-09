@@ -272,9 +272,16 @@ def _index_snapshot(mode: str, config=None) -> Dict[str, Any]:
         video_paths = frame_paths
 
     vector_count = _index_vector_count(search_index)
-    unique_paths = set()
     if video_paths:
-        unique_paths = {str(path) for path in video_paths if path}
+        indexed_video_paths = len({str(path) for path in video_paths if path})
+    elif frame_index is not None:
+        from src.storage.config_store import get_local_model_asset_dirs
+        from src.storage.lance_search_index import get_lance_indexed_video_ids
+
+        profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+        indexed_video_paths = len(get_lance_indexed_video_ids(profile_base_dir))
+    else:
+        indexed_video_paths = 0
     index_ready = search_index is not None and vector_count > 0
     global_state = "fresh"
     frame_vector_count = _index_vector_count(frame_index)
@@ -283,7 +290,7 @@ def _index_snapshot(mode: str, config=None) -> Dict[str, Any]:
     return {
         "index_ready": index_ready,
         "vector_count": vector_count,
-        "indexed_video_paths": len(unique_paths),
+        "indexed_video_paths": indexed_video_paths,
         "global_index_state": global_state or "fresh",
         "index_stale": global_state == "stale",
         "frame_index_ready": frame_index is not None and frame_vector_count > 0,

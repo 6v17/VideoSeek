@@ -69,6 +69,14 @@ def format_progress_text(text: str, texts: dict) -> str:
             )
         return texts.get("index_progress_file_open", "{name}").format(name=name)
 
+    if stage == "scan":
+        if file_total > 0:
+            return texts.get("index_progress_scan", "Syncing videos {current}/{total}").format(
+                current=file_index,
+                total=file_total,
+            )
+        return texts.get("index_progress_scan_open", "Syncing videos…")
+
     count_suffix = ""
     if total > 0:
         count_suffix = f"{done}/{total}"
@@ -89,6 +97,13 @@ def format_progress_text(text: str, texts: dict) -> str:
         return texts.get("index_progress_global", "Building global search index…")
     if stage == "reuse":
         return texts.get("index_progress_reuse", "{name}: reusing cached vectors").format(name=name)
+    if stage == "lance_index":
+        if total > 0:
+            return texts.get(
+                "index_progress_lance_index",
+                "Optimizing vector search index ({count} vectors)",
+            ).format(count=total)
+        return texts.get("index_progress_lance_index_open", "Optimizing vector search index…")
     if stage == "rebuild_index":
         if file_total > 0:
             return texts.get("index_progress_rebuild_index", "{current}/{total}: rebuilding index from vectors").format(

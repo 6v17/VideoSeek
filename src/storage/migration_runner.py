@@ -19,6 +19,7 @@ from src.storage.video_id_migration import (
     VIDEO_ID_FORMAT_VERSION,
     _legacy_video_ids_pending_fast,
     _trust_fast_video_id_check,
+    legacy_npy_vectors_present,
     migrate_legacy_video_ids,
 )
 
@@ -620,10 +621,11 @@ def needs_background_startup_migration(config=None):
     meta = _load_meta_for_startup(runtime_config)
     if not _already_migrated(runtime_config, meta):
         return True
-    if not _trust_fast_video_id_check(runtime_config):
-        return True
-    if _legacy_video_ids_pending_fast(runtime_config, verify_saved_ids=False):
-        return True
+    if legacy_npy_vectors_present(runtime_config):
+        if not _trust_fast_video_id_check(runtime_config):
+            return True
+        if _legacy_video_ids_pending_fast(runtime_config, verify_saved_ids=False):
+            return True
     return needs_search_index_schema_migration(runtime_config)
 
 

@@ -157,6 +157,7 @@ class MainWindow(
         self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
+        self.search_page.results_pager.page_changed.connect(self.search_controller.go_to_results_page)
         self.video_download_controller = VideoDownloadController(self)
         self.video_download_controller.refresh_default_dir_label()
         self.video_download_controller.load_settings_from_config()
@@ -437,6 +438,8 @@ class MainWindow(
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
         self.result_table.apply_header_labels(t)
         self.search_page.result_view.set_empty_message(t["no_results"])
+        self.search_page.results_pager.set_texts(t)
+        self.search_controller._sync_results_pager()
 
         self.link_page.header.title.setText(t["link_page_title"])
         self.link_page.header.subtitle.setText(t["link_page_desc"])
@@ -560,6 +563,12 @@ class MainWindow(
         if getattr(self, "_defer_runtime_warmup", False):
             self._defer_runtime_warmup = False
             self._start_runtime_warmup()
+        try:
+            from src.services.library_service import maintain_library_metadata
+
+            maintain_library_metadata()
+        except Exception:
+            pass
         self.refresh_library_table()
         self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
