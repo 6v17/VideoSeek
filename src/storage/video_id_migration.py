@@ -8,7 +8,7 @@ import os
 from src.app.config import get_configured_data_root, get_data_storage_paths, load_config
 from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_metadata, load_vector_payload, save_metadata
-from src.utils import get_legacy_video_hash, get_video_hash
+from src.storage.video_identity import get_legacy_video_hash, get_video_hash
 
 logger = get_logger("video_id_migration")
 

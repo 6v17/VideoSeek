@@ -4,7 +4,7 @@ from typing import List
 
 from src.app.config import CONFIG_BOUNDS, CONFIG_ENUMS, DEFAULT_CONFIG, get_data_storage_paths, load_config, save_config
 from src.core.semantic_chunking import chunk_config_payload
-from src.utils import canonicalize_library_path
+from src.storage.video_identity import canonicalize_library_path
 
 _PROVIDER_DEFAULT_DIMENSION = {
     "clip_onnx": 512,

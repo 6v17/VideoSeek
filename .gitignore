@@ -1,0 +1,49 @@
+# Bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Local / IDE noise (tracked project files under .idea/ stay as-is)
+.idea/workspace.xml
+.idea/shelf/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Build / packaging
+dist/
+build/
+*.egg-info/
+*.spec
+main.build/
+main.dist/
+
+# Local Lance / profile scratch (do not add new artifacts)
+profile/lance/
+**/__manifest__/
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+onnx_test_output.txt
+sensevoice/onnx_test_output.txt
+
+# Local secrets / machine config copies
+.env
+.env.*
+!.env.example

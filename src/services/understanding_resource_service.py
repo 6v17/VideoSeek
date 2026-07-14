@@ -6,6 +6,7 @@ import os
 from typing import Any, Mapping
 
 from src.app.config import load_config, save_config
+from src.app.logging_utils import get_logger
 from src.core.understanding.types import (
     UnderstandingInputKind,
     UnderstandingModality,
@@ -28,6 +29,8 @@ from src.services.understanding_paths import (
     get_understanding_root,
 )
 from src.utils import get_configured_model_dir
+
+logger = get_logger("understanding_resource_service")
 
 UNDERSTANDING_COMPONENT_KIND = "understanding_component"
 UNDERSTANDING_PROFILE_KIND = "understanding_profile"

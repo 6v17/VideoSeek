@@ -710,7 +710,8 @@ class LibraryIndexingGuiMixin:
                 open_in_explorer(legacy_npy_file)
             else:
                 open_folder_in_explorer(os.path.dirname(legacy_npy_file))
-            dialog.status_hint.setText(legacy_npy_file)
+            hint = self.texts.get("library_vectors_legacy_npy_hint", "").format(path=legacy_npy_file)
+            dialog.status_hint.setText(hint or legacy_npy_file)
 
     def _open_selected_vector_detail_path(self, dialog):
         selected = dialog.get_selected_payloads()
@@ -727,8 +728,8 @@ class LibraryIndexingGuiMixin:
         payload = selected[0]
         target_path = (
             payload.get("video_id")
-            or payload.get("legacy_npy_file")
             or payload.get("lance_dir")
+            or payload.get("legacy_npy_file")
             or payload.get("vector_file")
             or ""
         )

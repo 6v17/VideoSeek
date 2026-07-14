@@ -6,11 +6,10 @@ import numpy as np
 
 from src.app.indexing_progress import IndexingProgressReporter
 from src.app.logging_utils import get_logger
-from src.core.semantic_chunking import build_semantic_chunks, chunk_builder_kwargs, normalize_chunk_config_snapshot, unpack_chunks
+from src.core.semantic_chunking import build_semantic_chunks, chunk_builder_kwargs, normalize_chunk_config_snapshot
 from src.core.clip_embedding import generate_vectors_and_index_for_video
 from src.core.extract_frames import FrameExtractionError
 from src.core.timestamp_health import assess_index_timestamp_health
-from src.storage.asset_store import load_vector_payload
 from src.storage.config_store import (
     build_chunk_config,
     get_active_embedding_spec,
@@ -44,31 +43,23 @@ def _sync_video_vectors_to_lance(
     chunk_config=None,
 ):
     try:
-        from src.storage.lance_store import (
-            should_use_lance_storage,
-            upsert_profile_video_vectors,
-            upsert_profile_video_vectors_from_arrays,
-        )
+        from src.storage.lance_store import upsert_profile_video_vectors_from_arrays
 
-        if not should_use_lance_storage(config):
-            return
-        if vectors is not None and timestamps is not None:
-            upsert_profile_video_vectors_from_arrays(
+        if vectors is None or timestamps is None:
+            logger.warning(
+                "Skip Lance sync for %s: frame arrays required (legacy npy upsert removed)",
                 video_id,
-                vectors,
-                timestamps,
-                config=config,
-                library_path=library_path or "",
-                video_path=abs_path,
-                chunks=chunks,
-                chunk_config=chunk_config,
             )
             return
-        upsert_profile_video_vectors(
+        upsert_profile_video_vectors_from_arrays(
             video_id,
+            vectors,
+            timestamps,
             config=config,
             library_path=library_path or "",
             video_path=abs_path,
+            chunks=chunks,
+            chunk_config=chunk_config,
         )
     except Exception as exc:
         logger.warning("Failed to sync Lance vectors for %s: %s", video_id, exc)
@@ -230,27 +221,27 @@ def _rename_per_video_assets(vector_dir, index_dir, old_vid, new_vid):
 
 
 def _load_vectors_from_disk(video_id, config):
+    """Load frame vectors for a video id from Lance only.
+
+    Legacy ``*_vectors.npy`` is migration-only. If Lance has no rows but an npy
+    sidecar still exists, log a clear hint and return a miss so callers re-index
+    or wait for startup Lance import.
+    """
+    from src.storage.lance_search_index import load_lance_video_frame_arrays
+
     model_dirs = get_local_model_asset_dirs(config=config)
     vector_file = os.path.join(model_dirs["vector_dir"], f"{video_id}_vectors.npy")
+    vectors, timestamps = load_lance_video_frame_arrays(model_dirs["base_dir"], video_id)
+    if _has_usable_vectors(vectors, timestamps):
+        return vectors, timestamps, vector_file
+
     if os.path.isfile(vector_file):
-        try:
-            data = load_vector_payload(vector_file)
-        except Exception as exc:
-            logger.warning("Unreadable cached vectors for %s: %s", video_id, exc)
-            return None, None, vector_file
-        if isinstance(data, dict):
-            vectors = data.get("vector")
-            timestamps = data.get("timestamps")
-            if vectors is not None and timestamps is not None:
-                return vectors, timestamps, vector_file
-
-    from src.storage.lance_search_index import load_lance_video_frame_arrays
-    from src.storage.lance_store import should_use_lance_storage
-
-    if should_use_lance_storage(config):
-        vectors, timestamps = load_lance_video_frame_arrays(model_dirs["base_dir"], video_id)
-        if _has_usable_vectors(vectors, timestamps):
-            return vectors, timestamps, vector_file
+        logger.warning(
+            "Lance has no vectors for %s but legacy npy still exists (%s). "
+            "Run startup migration or re-index; indexing no longer reads npy.",
+            video_id,
+            vector_file,
+        )
     return None, None, vector_file
 
 
@@ -311,10 +302,7 @@ def _resolve_reusable_cached_vectors(abs_path, saved, config):
 def _try_reuse_lance_indexed_video(abs_path, saved, config):
     """Skip vector load and Lance upsert when meta and Lance already agree on this file."""
     from src.storage.lance_search_index import lance_video_has_vectors
-    from src.storage.lance_store import should_use_lance_storage
 
-    if not should_use_lance_storage(config):
-        return None
     if str(saved.get("asset_state", "")).strip().lower() != "ready":
         return None
     saved_vid = str(saved.get("vid", "") or "").strip()
@@ -342,94 +330,53 @@ def load_video_vectors_by_id(video_id, config):
 
 
 def load_video_chunks_by_id(video_id, config):
-    from src.storage.lance_store import should_use_lance_storage
-
     model_dirs = get_local_model_asset_dirs(config=config)
     video_id = str(video_id or "").strip()
     if not video_id:
         return []
 
-    if should_use_lance_storage(config):
-        from src.storage.lance_search_index import load_lance_video_frame_arrays
+    from src.storage.lance_search_index import load_lance_video_frame_arrays
 
-        vectors, timestamps = load_lance_video_frame_arrays(model_dirs["base_dir"], video_id)
-        if not _has_usable_vectors(vectors, timestamps):
-            return []
-        chunks, rebuilt, chunk_config = _ensure_video_chunks(
-            video_id,
-            vectors,
-            timestamps,
-            config,
-        )
-        if rebuilt:
-            from src.storage.lance_store import upsert_profile_video_vectors_from_arrays
-
-            upsert_profile_video_vectors_from_arrays(
-                video_id,
-                vectors,
-                timestamps,
-                config=config,
-                chunks=chunks,
-                chunk_config=chunk_config,
-            )
-        return chunks
-
-    vector_file = os.path.join(model_dirs["vector_dir"], f"{video_id}_vectors.npy")
-    npy_data = {}
-    vectors = None
-    timestamps = None
-    if os.path.isfile(vector_file):
-        loaded = load_vector_payload(vector_file)
-        if isinstance(loaded, dict):
-            npy_data = loaded
-            vectors = npy_data.get("vector")
-            timestamps = npy_data.get("timestamps")
+    vectors, timestamps = load_lance_video_frame_arrays(model_dirs["base_dir"], video_id)
     if not _has_usable_vectors(vectors, timestamps):
         return []
-    chunks, _rebuilt, _chunk_config = _ensure_video_chunks(
+    chunks, rebuilt, chunk_config = _ensure_video_chunks(
         video_id,
         vectors,
         timestamps,
         config,
-        npy_data=npy_data,
     )
+    if rebuilt:
+        from src.storage.lance_store import upsert_profile_video_vectors_from_arrays
+
+        upsert_profile_video_vectors_from_arrays(
+            video_id,
+            vectors,
+            timestamps,
+            config=config,
+            chunks=chunks,
+            chunk_config=chunk_config,
+        )
     return chunks
 
 
-def _ensure_video_chunks(video_id, vectors, timestamps, config, *, npy_data=None):
-    from src.storage.lance_store import get_stored_chunk_config, should_use_lance_storage
+def _ensure_video_chunks(video_id, vectors, timestamps, config):
+    from src.storage.lance_store import get_stored_chunk_config
     from src.storage.lance_search_index import load_lance_video_chunks
 
     current_chunk_config = build_chunk_config(config)
     video_id = str(video_id or "").strip()
 
-    if should_use_lance_storage(config):
-        profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
-        chunks = load_lance_video_chunks(profile_base_dir, video_id)
-        saved_chunk_config = get_stored_chunk_config(profile_base_dir, video_id)
-        if (
-            chunks
-            and normalize_chunk_config_snapshot(saved_chunk_config) == current_chunk_config
-        ):
-            return chunks, False, current_chunk_config
-
-        logger.info("Rebuilding semantic chunks in Lance for video %s", video_id)
-        chunks = build_semantic_chunks(
-            vectors,
-            timestamps,
-            **chunk_builder_kwargs(current_chunk_config),
-        )
-        return chunks, True, current_chunk_config
-
-    saved_chunk_config = npy_data.get("chunk_config") if isinstance(npy_data, dict) else None
-    chunks = unpack_chunks(npy_data.get("chunks")) if isinstance(npy_data, dict) else []
+    profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    chunks = load_lance_video_chunks(profile_base_dir, video_id)
+    saved_chunk_config = get_stored_chunk_config(profile_base_dir, video_id)
     if (
         chunks
         and normalize_chunk_config_snapshot(saved_chunk_config) == current_chunk_config
     ):
         return chunks, False, current_chunk_config
 
-    logger.info("Rebuilding semantic chunks from legacy vectors for video %s", video_id)
+    logger.info("Rebuilding semantic chunks in Lance for video %s", video_id)
     chunks = build_semantic_chunks(
         vectors,
         timestamps,
@@ -485,104 +432,6 @@ def list_missing_library_files(meta, config, target_lib=None):
                     "abs_path": abs_path,
                     "video_id": lib_files[rel_path].get("vid"),
                 }
-
-
-def collect_existing_vectors(meta, config, target_lib=None):
-    all_vectors, all_timestamps, all_paths = [], [], []
-    target_key = canonicalize_library_path(target_lib) if target_lib else None
-
-    for root_path, lib_data in meta["libraries"].items():
-        if target_key and canonicalize_library_path(root_path) == target_key:
-            continue
-
-        for rel_path, info in lib_data.get("files", {}).items():
-            vectors, timestamps = load_video_vectors_by_id(info["vid"], config)
-            if vectors is None:
-                continue
-            all_vectors.append(vectors)
-            all_timestamps.extend(timestamps)
-            all_paths.extend([os.path.join(root_path, rel_path)] * len(timestamps))
-
-    return all_vectors, all_timestamps, all_paths
-
-
-def _library_roots_for_global_merge(meta, target_lib=None, include_all_libraries=True):
-    target_key = canonicalize_library_path(target_lib) if target_lib else None
-    for root_path, lib_data in meta.get("libraries", {}).items():
-        if not include_all_libraries and target_key and canonicalize_library_path(root_path) != target_key:
-            continue
-        yield root_path, lib_data
-
-
-def iter_ready_library_frame_sources(meta, config, target_lib=None, include_all_libraries=True):
-    """Yield per-video frame vectors from on-disk payloads (one video in memory at a time)."""
-    for root_path, lib_data in _library_roots_for_global_merge(meta, target_lib, include_all_libraries):
-        if not os.path.exists(root_path):
-            continue
-        lib_files = lib_data.get("files", {})
-        for rel_path, info in lib_files.items():
-            if str(info.get("asset_state", "")).strip().lower() != "ready":
-                continue
-            abs_path = os.path.join(root_path, rel_path)
-            if not os.path.exists(abs_path):
-                continue
-            video_id = info.get("vid")
-            if not video_id:
-                continue
-            vectors, timestamps = load_video_vectors_by_id(video_id, config)
-            if not _has_usable_vectors(vectors, timestamps):
-                continue
-            yield np.asarray(vectors, dtype=np.float32), timestamps, abs_path
-
-
-def iter_ready_library_chunk_sources(meta, config, target_lib=None, include_all_libraries=True):
-    for root_path, lib_data in _library_roots_for_global_merge(meta, target_lib, include_all_libraries):
-        if not os.path.exists(root_path):
-            continue
-        for rel_path, info in lib_data.get("files", {}).items():
-            if str(info.get("asset_state", "")).strip().lower() != "ready":
-                continue
-            abs_path = os.path.join(root_path, rel_path)
-            if not os.path.exists(abs_path):
-                continue
-            video_id = info.get("vid")
-            if not video_id:
-                continue
-            chunks = load_video_chunks_by_id(video_id, config)
-            if not chunks:
-                continue
-            for chunk in chunks:
-                yield np.asarray(chunk["embedding"], dtype=np.float32), (float(chunk["start"]), float(chunk["end"])), abs_path
-
-
-def count_searchable_frame_sources(meta, config, target_lib=None, include_all_libraries=True):
-    total = 0
-    for _vectors, timestamps, _abs_path in iter_ready_library_frame_sources(
-        meta, config, target_lib=target_lib, include_all_libraries=include_all_libraries
-    ):
-        total += len(timestamps)
-    return total
-
-
-def collect_existing_chunks(meta, config, target_lib=None):
-    all_chunk_vectors, all_chunk_ranges, all_chunk_paths = [], [], []
-    target_key = canonicalize_library_path(target_lib) if target_lib else None
-
-    for root_path, lib_data in meta["libraries"].items():
-        if target_key and canonicalize_library_path(root_path) == target_key:
-            continue
-
-        for rel_path, info in lib_data.get("files", {}).items():
-            chunks = load_video_chunks_by_id(info["vid"], config)
-            if not chunks:
-                continue
-            abs_path = os.path.join(root_path, rel_path)
-            for chunk in chunks:
-                all_chunk_vectors.append(chunk["embedding"])
-                all_chunk_ranges.append((chunk["start"], chunk["end"]))
-                all_chunk_paths.append(abs_path)
-
-    return all_chunk_vectors, all_chunk_ranges, all_chunk_paths
 
 
 def discover_video_files(root_path):
@@ -1040,7 +889,6 @@ def process_single_video(
         logger.info("Indexing video %s", os.path.basename(abs_path))
         model_dirs = get_local_model_asset_dirs(config=config)
         os.makedirs(model_dirs["vector_dir"], exist_ok=True)
-        os.makedirs(model_dirs["index_dir"], exist_ok=True)
         t_gen = time.perf_counter()
         vectors, timestamps, _, chunks = generate_vectors_and_index_for_video(
             abs_path,

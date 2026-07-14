@@ -149,8 +149,8 @@ class VersionServiceTests(unittest.TestCase):
 class UtilsConfigSyncTests(unittest.TestCase):
     @patch("src.app.config.save_config")
     @patch("src.app.config.load_config")
-    @patch("src.utils.resolve_model_dir_info")
-    @patch("src.utils.get_default_model_dir")
+    @patch("src.infra.model_paths.resolve_model_dir_info")
+    @patch("src.infra.model_paths.get_default_model_dir")
     @patch("src.storage.config_store.get_effective_model_dir")
     def test_sync_model_dir_to_config_writes_default_back(
         self,
@@ -173,9 +173,9 @@ class UtilsConfigSyncTests(unittest.TestCase):
 
     @patch("src.app.config.save_config")
     @patch("src.app.config.load_config")
-    @patch("src.utils.resolve_model_dir_info")
-    @patch("src.utils.get_default_model_dir")
-    @patch("src.utils.os.path.isdir")
+    @patch("src.infra.model_paths.resolve_model_dir_info")
+    @patch("src.infra.model_paths.get_default_model_dir")
+    @patch("src.infra.model_paths.os.path.isdir")
     @patch("src.storage.config_store.get_effective_model_dir")
     @patch("src.storage.config_store.get_active_model_profile")
     def test_sync_model_dir_to_config_replaces_missing_custom_path(
@@ -205,7 +205,7 @@ class UtilsConfigSyncTests(unittest.TestCase):
 
     @patch("src.app.config.save_config")
     @patch("src.app.config.load_config")
-    @patch("src.utils.os.path.isdir")
+    @patch("src.infra.model_paths.os.path.isdir")
     @patch("src.storage.config_store.get_effective_model_dir")
     @patch("src.storage.config_store.get_active_model_profile")
     def test_sync_model_dir_to_config_prefers_valid_top_level_when_runtime_stale(
@@ -254,7 +254,7 @@ class UtilsConfigSyncTests(unittest.TestCase):
 
     @patch("src.app.config.save_config")
     @patch("src.app.config.load_config")
-    @patch("src.utils.resolve_ffmpeg_path_info")
+    @patch("src.infra.ffmpeg_paths.resolve_ffmpeg_path_info")
     def test_sync_ffmpeg_path_to_config_writes_detected_path(
         self,
         mock_resolve_ffmpeg_path_info,

@@ -2,7 +2,7 @@ import os
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from src.storage.asset_store import load_model_metadata, load_vector_payload, save_model_metadata
+from src.storage.asset_store import load_model_metadata, save_model_metadata
 from src.storage.config_store import get_local_model_asset_dirs
 from src.utils import canonicalize_library_path
 from src.services.search_index_schema import (
@@ -239,38 +239,18 @@ def remove_library(path, delete_video_data):
     return True
 
 
-def _read_vector_health(vector_file):
-    if not os.path.exists(vector_file):
-        return False, False
-    try:
-        data = load_vector_payload(vector_file)
-    except Exception:
-        return True, False
-    if not isinstance(data, dict):
-        return True, False
-    vectors = data.get("vector")
-    timestamps = data.get("timestamps")
-    if vectors is None or timestamps is None:
-        return True, False
-    try:
-        vector_count = len(vectors)
-        timestamp_count = len(timestamps)
-    except TypeError:
-        return True, False
-    if vector_count <= 0 or vector_count != timestamp_count:
-        return True, False
-    return True, True
-
-
 def _effective_asset_state(info, source_exists, vector_exists, vector_ok, lance_ready):
+    """Ready only when Lance has the video. Legacy npy alone is broken/migration pending."""
     stored_state = str(info.get("asset_state", "")).strip().lower()
     if not source_exists:
         return "missing_source"
-    if stored_state == "sync_failed" and (not vector_exists or not vector_ok or not lance_ready):
+    if stored_state == "sync_failed" and (not lance_ready):
         return "sync_failed"
-    if not vector_exists:
+    if not lance_ready:
+        if vector_exists:
+            return "broken_asset"
         return "missing_asset"
-    if not vector_ok or not lance_ready:
+    if not vector_ok:
         return "broken_asset"
     return "ready"
 
@@ -345,23 +325,22 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
                     legacy_npy_bytes = 0
             storage_bytes = lance_storage_bytes + legacy_npy_bytes
             if validate_contents:
-                legacy_npy_ok = False
-                if legacy_npy_exists:
-                    _, legacy_npy_ok = _read_vector_health(legacy_npy_file)
                 asset_state = _effective_asset_state(
                     info,
                     source_exists=source_exists,
                     vector_exists=legacy_npy_exists or lance_ready,
-                    vector_ok=legacy_npy_ok or lance_ready,
+                    vector_ok=lance_ready,
                     lance_ready=lance_ready,
                 )
             else:
                 stored_state = str(info.get("asset_state", "")).strip().lower()
                 if not source_exists:
                     asset_state = "missing_source"
-                elif stored_state == "sync_failed":
+                elif stored_state == "sync_failed" and not lance_ready:
                     asset_state = "sync_failed"
-                elif not lance_ready and not legacy_npy_exists:
+                elif not lance_ready and legacy_npy_exists:
+                    asset_state = "broken_asset"
+                elif not lance_ready:
                     asset_state = "missing_asset"
                 else:
                     asset_state = "ready"
@@ -381,9 +360,9 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
                     "legacy_npy_exists": legacy_npy_exists,
                     "legacy_npy_file": legacy_npy_file if legacy_npy_exists else "",
                     "sync_failure_reason": str(info.get("sync_failure_reason", "")).strip().lower(),
-                    # Legacy export fields kept for older tooling.
+                    # Legacy export fields kept for older tooling / migration UI.
                     "vector_file": legacy_npy_file,
-                    "vector_exists": legacy_npy_exists or lance_ready,
+                    "vector_exists": lance_ready,
                     "index_exists": lance_ready,
                     "index_file": "",
                 }

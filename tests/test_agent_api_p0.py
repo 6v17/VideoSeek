@@ -48,8 +48,8 @@ class AgentApiP0Tests(unittest.TestCase):
         self.assertIn("clip_window", payload)
         self.assertEqual(payload["duration_sec"], 6.0)
 
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_scope_filters_hits(self, mock_run_search, mock_snapshot):
         mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
         mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/keep.mp4")]
@@ -69,9 +69,9 @@ class AgentApiP0Tests(unittest.TestCase):
         self.assertEqual(kwargs.get("scope_video_paths"), ["D:/keep.mp4"])
         self.assertIsNone(kwargs.get("scope_library_paths"))
 
-    @patch("src.web.agent_api._per_library_indexes_ready", return_value=True)
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._per_library_indexes_ready", return_value=True)
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_scope_library_paths_uses_per_library_route(self, mock_run_search, mock_snapshot, _mock_ready):
         mock_snapshot.return_value = {
             "index_ready": False,

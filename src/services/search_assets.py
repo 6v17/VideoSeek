@@ -43,10 +43,28 @@ def _profile_base_dir(config) -> str:
     return get_local_model_asset_dirs(config=config)["base_dir"]
 
 
+def _log_lance_assets_missing(profile_base_dir: str, *, kind: str, config=None) -> None:
+    from src.storage.video_id_migration import legacy_npy_vectors_present
+
+    if legacy_npy_vectors_present(config):
+        logger.error(
+            "Lance %s search assets are missing under %s, but legacy npy vectors still exist. "
+            "Finish startup Lance migration or re-index; search will not read npy.",
+            kind,
+            profile_base_dir,
+        )
+        return
+    logger.warning(
+        "Lance %s search assets are missing under %s. Please sync / re-index vectors first.",
+        kind,
+        profile_base_dir,
+    )
+
+
 def load_search_assets(config):
     profile_base_dir = _profile_base_dir(config)
     if not lance_search_is_ready(profile_base_dir):
-        logger.warning("Lance frame search assets are missing. Please sync vectors first.")
+        _log_lance_assets_missing(profile_base_dir, kind="frame", config=config)
         return None, None, None
 
     cache_key = lance_cache_key_for_profile(profile_base_dir, table_name="frames")
@@ -55,7 +73,7 @@ def load_search_assets(config):
 
     value = load_lance_frame_search_assets(profile_base_dir)
     if value[0] is None:
-        logger.warning("Lance frame search assets are missing. Please sync vectors first.")
+        _log_lance_assets_missing(profile_base_dir, kind="frame", config=config)
         return None, None, None
     _FRAME_ASSET_CACHE["key"] = cache_key
     _FRAME_ASSET_CACHE["value"] = value
@@ -65,7 +83,7 @@ def load_search_assets(config):
 def load_chunk_search_assets(config):
     profile_base_dir = _profile_base_dir(config)
     if not lance_search_is_ready(profile_base_dir):
-        logger.warning("Lance chunk search assets are missing. Please sync vectors first.")
+        _log_lance_assets_missing(profile_base_dir, kind="chunk", config=config)
         return None, None, None
 
     cache_key = lance_cache_key_for_profile(profile_base_dir, table_name="chunks")
@@ -74,7 +92,7 @@ def load_chunk_search_assets(config):
 
     value = load_lance_chunk_search_assets(profile_base_dir)
     if value[0] is None:
-        logger.warning("Lance chunk search assets are missing. Please sync vectors first.")
+        _log_lance_assets_missing(profile_base_dir, kind="chunk", config=config)
         return None, None, None
     _CHUNK_ASSET_CACHE["key"] = cache_key
     _CHUNK_ASSET_CACHE["value"] = value

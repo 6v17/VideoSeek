@@ -363,7 +363,6 @@ class SemanticChunkingTests(unittest.TestCase):
 
 @unittest.skipIf(np is None, "numpy is required for semantic chunking tests")
 class IndexingChunkUpgradeTests(unittest.TestCase):
-    @patch("src.storage.lance_store.should_use_lance_storage", return_value=True)
     @patch("src.storage.lance_store.get_stored_chunk_config", return_value=None)
     @patch("src.storage.lance_search_index.load_lance_video_chunks", return_value=[])
     @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays")
@@ -376,7 +375,6 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         mock_upsert_lance,
         _mock_load_lance_chunks,
         _mock_stored_config,
-        _mock_should_lance,
     ):
         mock_model_dirs.return_value = {
             "base_dir": "base",
@@ -399,7 +397,6 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         self.assertEqual((chunks[0]["start"], chunks[0]["end"]), (0.0, 1.0))
         mock_upsert_lance.assert_called_once()
 
-    @patch("src.storage.lance_store.should_use_lance_storage", return_value=True)
     @patch("src.storage.lance_store.get_stored_chunk_config")
     @patch("src.storage.lance_search_index.load_lance_video_chunks")
     @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays")
@@ -412,7 +409,6 @@ class IndexingChunkUpgradeTests(unittest.TestCase):
         mock_upsert_lance,
         mock_load_lance_chunks,
         mock_stored_config,
-        _mock_should_lance,
     ):
         mock_model_dirs.return_value = {
             "base_dir": "base",

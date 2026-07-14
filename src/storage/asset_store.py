@@ -1,7 +1,7 @@
 import numpy as np
 
 from src.storage.config_store import get_model_profile_storage_paths
-from src.utils import load_meta, save_meta
+from src.storage.meta_io import load_meta, save_meta
 
 
 def load_metadata(meta_file):

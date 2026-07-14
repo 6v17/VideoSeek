@@ -13,7 +13,7 @@ from src.app.logging_utils import get_logger
 from src.core.faiss_index import _normalize_vectors, load_vectors
 from src.core.semantic_chunking import unpack_chunks
 from src.storage.asset_store import load_metadata
-from src.utils import canonicalize_library_path
+from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("lance_store")
 
@@ -822,6 +822,15 @@ def upsert_profile_video_vectors(
     library_path: str = "",
     video_path: str = "",
 ) -> dict:
+    """Import one video from legacy ``*_vectors.npy`` into Lance.
+
+    Hot-path indexing must use ``upsert_profile_video_vectors_from_arrays``.
+    This helper remains for migration tooling and tests only.
+    """
+    logger.warning(
+        "upsert_profile_video_vectors reads legacy npy for %s; prefer array upsert or startup migration",
+        video_id,
+    )
     from src.storage.config_store import get_local_model_asset_dirs
 
     video_id = str(video_id or "").strip()

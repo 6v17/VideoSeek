@@ -18,7 +18,7 @@ from src.storage.lance_store import (
     get_lance_dir,
     get_lance_state_file,
 )
-from src.utils import canonicalize_library_path
+from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("lance_search_index")
 

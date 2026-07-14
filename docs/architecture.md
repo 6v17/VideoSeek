@@ -18,6 +18,11 @@
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
 | `understanding_service.py` | 理解笔录生成、读盘/写盘、`EvidenceBundle` 编排 |
 | `understanding_resource_service.py` | YOLO / profile 扫描、描述服务探测、`understanding_ready` |
+| `src/infra/` | 路径 / FFmpeg 等基础设施（从 `utils` 拆出；见 [`engineering.md`](engineering.md)） |
+
+工程约定（新功能边界、legacy 禁扩、lint）：[`docs/engineering.md`](engineering.md)。
+
+**存储：** 索引写入与搜索读取均为 **Lance-only**。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
 
 **理解笔录**为可选扩展，不阻塞搜索与索引；契约与分阶段说明见 [`docs/ai/understanding_evidence.md`](ai/understanding_evidence.md)。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
 

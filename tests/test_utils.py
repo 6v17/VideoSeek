@@ -36,9 +36,9 @@ class ExportEncodeModeTests(unittest.TestCase):
 
 
 class ResolveFfmpegPathInfoTests(unittest.TestCase):
-    @patch("src.utils.shutil.which", return_value=None)
-    @patch("src.utils.os.path.exists", return_value=False)
-    @patch("src.utils.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
+    @patch("src.infra.ffmpeg_paths.shutil.which", return_value=None)
+    @patch("src.infra.ffmpeg_paths.os.path.exists", return_value=False)
+    @patch("src.infra.ffmpeg_paths.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
     @patch("src.app.config.load_config", return_value={})
     def test_resolve_ffmpeg_path_info_missing(
         self,
@@ -52,9 +52,9 @@ class ResolveFfmpegPathInfoTests(unittest.TestCase):
         self.assertEqual(path, "")
         self.assertEqual(source, "missing")
 
-    @patch("src.utils.shutil.which", return_value="/usr/bin/ffmpeg")
-    @patch("src.utils.os.path.exists", return_value=False)
-    @patch("src.utils.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
+    @patch("src.infra.ffmpeg_paths.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("src.infra.ffmpeg_paths.os.path.exists", return_value=False)
+    @patch("src.infra.ffmpeg_paths.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
     @patch("src.app.config.load_config", return_value={})
     def test_resolve_ffmpeg_path_info_falls_back_to_system_path(
         self,
@@ -68,8 +68,8 @@ class ResolveFfmpegPathInfoTests(unittest.TestCase):
         self.assertEqual(path, "/usr/bin/ffmpeg")
         self.assertEqual(source, "system")
 
-    @patch("src.utils.os.path.exists")
-    @patch("src.utils.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
+    @patch("src.infra.ffmpeg_paths.os.path.exists")
+    @patch("src.infra.ffmpeg_paths.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
     @patch("src.app.config.load_config", return_value={"ffmpeg_path": "D:/cfg/ffmpeg.exe"})
     def test_resolve_ffmpeg_path_info_prefers_configured_path(
         self,
@@ -86,8 +86,8 @@ class ResolveFfmpegPathInfoTests(unittest.TestCase):
 
 
 class PreviewClipEncodeConfigTests(unittest.TestCase):
-    @patch("src.utils.subprocess.run")
-    @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
+    @patch("src.media.export_clip.subprocess.run")
+    @patch("src.media.export_clip.get_ffmpeg_path", return_value="ffmpeg")
     @patch(
         "src.app.config.load_config",
         return_value={
@@ -100,7 +100,7 @@ class PreviewClipEncodeConfigTests(unittest.TestCase):
             "preview_encode_audio_bitrate": "96k",
         },
     )
-    @patch("src.utils.os.path.exists", return_value=False)
+    @patch("src.media.export_clip.os.path.exists", return_value=False)
     def test_create_preview_clip_uses_configured_encode_settings(
         self,
         _mock_exists,
@@ -120,9 +120,9 @@ class PreviewClipEncodeConfigTests(unittest.TestCase):
 
 
 class ExportClipEncodeConfigTests(unittest.TestCase):
-    @patch("src.utils.get_ffmpeg_path", return_value="ffmpeg")
-    @patch("src.utils.ensure_folder_exists")
-    @patch("src.utils.os.path.exists", return_value=False)
+    @patch("src.media.export_clip.get_ffmpeg_path", return_value="ffmpeg")
+    @patch("src.media.export_clip.ensure_folder_exists")
+    @patch("src.media.export_clip.os.path.exists", return_value=False)
     def test_build_export_original_clip_command_uses_configured_encode_settings(
         self,
         _mock_exists,
@@ -150,7 +150,7 @@ class ExportClipEncodeConfigTests(unittest.TestCase):
 
 class CanonicalizeLibraryPathTests(unittest.TestCase):
     def test_canonicalize_library_path_normalizes_separators_and_case(self):
-        with patch("src.utils.os.name", "nt"):
+        with patch("src.storage.video_identity.os.name", "nt"):
             result = utils.canonicalize_library_path("D:/Videos\\Demo")
 
         self.assertEqual(result, os.path.normcase(os.path.normpath("D:/Videos/Demo")))

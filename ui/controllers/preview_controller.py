@@ -4,8 +4,7 @@ from PySide6.QtCore import QUrl
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from ui.threading_utils import shutdown_thread
-from src.utils import (
+from src.media.export_clip import (
     _resolve_base_clip_window,
     build_preview_cache_path,
     create_preview_clip,
@@ -13,6 +12,7 @@ from src.utils import (
     resolve_export_clip_window,
     start_export_original_clip_process,
 )
+from ui.threading_utils import shutdown_thread
 from ui.playback.vlc_player import VlcPreviewPlayer
 from ui.workers import PreviewWarmupWorker
 

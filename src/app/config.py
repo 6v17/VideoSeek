@@ -3,13 +3,8 @@ import os
 
 from src.app.app_meta import get_app_meta
 from src.app.logging_utils import get_logger
-from src.utils import (
-    get_app_data_dir,
-    get_default_model_dir,
-    get_resource_path,
-    normalize_sampling_fps_mode,
-    normalize_sampling_fps_rules_text,
-)
+from src.infra.paths import get_app_data_dir, get_default_model_dir, get_resource_path
+from src.media.sampling_fps import normalize_sampling_fps_mode, normalize_sampling_fps_rules_text
 
 logger = get_logger("config")
 _LAST_MIGRATION_NOTICE = None

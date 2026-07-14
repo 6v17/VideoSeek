@@ -28,7 +28,6 @@ from src.core.onnx_vision_engine import (
 from src.core.semantic_chunking import SemanticChunkStreamBuilder, chunk_builder_kwargs
 from src.core.tokenizer import tokenize
 from src.storage.config_store import build_chunk_config
-from src.storage.asset_store import save_vector_payload
 from src.storage.config_store import (
     get_active_embedding_spec,
     get_active_model_profile,
@@ -1093,12 +1092,7 @@ def generate_vectors_and_index_for_video(
     stack_s = time.perf_counter() - t_stack
     free_memory()
 
-    vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
-    index_file = os.path.normpath(os.path.join(index_dir, f"{video_id}_index.faiss"))
-
     save_s = 0.0
-    faiss_s = 0.0
-    index = None
     if progress_reporter is not None:
         progress_reporter.emit("save", force=True)
     t_save = time.perf_counter()
@@ -1113,7 +1107,7 @@ def generate_vectors_and_index_for_video(
         stack_s + chunks_s + save_s,
         time.perf_counter() - wall_start,
     )
-    return vectors, timestamps, index, chunks
+    return vectors, timestamps, None, chunks
 
 
 def _register_default_inference_engines():
