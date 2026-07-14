@@ -848,7 +848,8 @@ class UnderstandingGuiMixin:
             return
         if hasattr(self, "_refresh_understanding_scope_options"):
             self._refresh_understanding_scope_options()
-        self._refresh_understanding_page_fast(install_bootstrap=True)
+        # Bootstrap copies run once after startup; avoid redoing them on every page visit.
+        self._refresh_understanding_page_fast(install_bootstrap=False)
 
     def _refresh_understanding_page_fast(self, *, install_bootstrap: bool = False):
         status = self._fetch_understanding_resource_status(

@@ -43,6 +43,21 @@ class PresetChip(QFrame):
             return
         super().mousePressEvent(event)
 
+    def wheelEvent(self, event):  # noqa: N802
+        # Forward wheel to the preset track's horizontal scrollbar (chips would otherwise swallow it).
+        parent = self.parentWidget()
+        while parent is not None:
+            if isinstance(parent, SearchPresetsBar):
+                delta = event.angleDelta().y() or event.angleDelta().x()
+                if delta:
+                    bar = parent.scroll.horizontalScrollBar()
+                    bar.setValue(bar.value() - delta)
+                    event.accept()
+                    return
+                break
+            parent = parent.parentWidget()
+        event.ignore()
+
 
 class SearchPresetsBar(QWidget):
     preset_clicked = Signal(str)
@@ -127,14 +142,22 @@ class SearchPresetsBar(QWidget):
 
     def eventFilter(self, obj, event):  # noqa: N802
         if obj is self.scroll.viewport() and event.type() == QEvent.Type.Wheel:
-            wheel = event
-            if isinstance(wheel, QWheelEvent):
-                delta = wheel.angleDelta().y() or wheel.angleDelta().x()
+            if isinstance(event, QWheelEvent):
+                delta = event.angleDelta().y() or event.angleDelta().x()
                 if delta:
                     bar = self.scroll.horizontalScrollBar()
                     bar.setValue(bar.value() - delta)
                     return True
         return super().eventFilter(obj, event)
+
+    def wheelEvent(self, event):  # noqa: N802
+        delta = event.angleDelta().y() or event.angleDelta().x()
+        if delta:
+            bar = self.scroll.horizontalScrollBar()
+            bar.setValue(bar.value() - delta)
+            event.accept()
+            return
+        event.ignore()
 
     def _content_width(self) -> int:
         spacing = self.chips_layout.spacing()

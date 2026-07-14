@@ -608,7 +608,7 @@ def list_ready_video_entries(*, library_path: str | None = None, config=None) ->
     from src.services.library_service import list_local_vector_details
 
     cfg = dict(config or load_config())
-    details = list_local_vector_details(validate_contents=False)
+    details = list_local_vector_details(validate_contents=False, include_storage_stats=False)
     entries = list(details.get("entries") or [])
     target_library = canonicalize_library_path(library_path) if library_path else ""
     ready_entries: list[dict[str, Any]] = []

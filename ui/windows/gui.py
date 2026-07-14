@@ -1,7 +1,7 @@
 from collections import deque
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QPixmap, QWheelEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -60,6 +60,7 @@ from ui.widgets.sidebar_icons import (
 from ui.controllers.indexing_controller import IndexingController
 from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
+from ui.widgets.preview_panel import _scroll_ancestor_vertically
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
 from ui.controllers.video_download_controller import VideoDownloadController
@@ -242,7 +243,9 @@ class MainWindow(
         if dont_native_ancestors is not None:
             self.video_widget.setAttribute(dont_native_ancestors, True)
         self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.video_widget.installEventFilter(self)
         self.search_page.preview_host.mouseDoubleClickEvent = self.open_current_preview_dialog
+        self.search_page.btn_manage_presets.installEventFilter(self)
         self.search_page.preview_host_layout.addWidget(self.video_widget, 1)
 
         self.result_table = self.search_page.result_table
@@ -339,6 +342,18 @@ class MainWindow(
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(page_widget)
         return scroll
+
+    def eventFilter(self, watched, event):  # noqa: N802
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            if watched is getattr(self, "video_widget", None) or watched is getattr(
+                getattr(self, "search_page", None), "btn_manage_presets", None
+            ):
+                # Native video surface / focused buttons would otherwise swallow page scrolling.
+                if _scroll_ancestor_vertically(watched, event):
+                    return True
+                event.ignore()
+                return False
+        return super().eventFilter(watched, event)
 
     def _nav_page_index(self, page_name: str) -> int:
         return self._NAV_PAGE_ORDER.index(page_name)
@@ -574,6 +589,20 @@ class MainWindow(
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
         self._apply_agent_api_settings()
+        QTimer.singleShot(0, self._bootstrap_understanding_resources)
+
+    def _bootstrap_understanding_resources(self):
+        """Copy built-in understanding profiles/components once after startup (off the page-click path)."""
+        try:
+            from src.services.understanding_resource_service import (
+                ensure_understanding_components_installed,
+                ensure_understanding_profiles_installed,
+            )
+
+            ensure_understanding_profiles_installed()
+            ensure_understanding_components_installed()
+        except Exception:
+            pass
 
     def show_notice(self):
         had_update = bool(self.version_info and self.version_info.get("has_update"))
