@@ -130,9 +130,10 @@ class SearchIndexSchemaTests(unittest.TestCase):
                 self.assertTrue(os.path.isdir(valid_dir))
                 self.assertFalse(os.path.exists(orphan_dir))
 
+    @patch("src.storage.video_id_migration.is_lance_migration_completed", return_value=False)
     @patch("src.storage.lance_search_index.lance_search_is_ready", return_value=True)
     @patch("src.storage.video_id_migration.legacy_npy_vectors_present", return_value=False)
-    def test_prune_legacy_search_index_artifacts(self, _mock_npy, _mock_lance):
+    def test_prune_legacy_search_index_artifacts(self, _mock_npy, _mock_lance, _mock_completed):
         with tempfile.TemporaryDirectory() as asset_root:
             index_dir = os.path.join(asset_root, "index")
             global_dir = os.path.join(asset_root, "global")

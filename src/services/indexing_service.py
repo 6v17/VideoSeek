@@ -41,7 +41,8 @@ def _sync_video_vectors_to_lance(
     timestamps=None,
     chunks=None,
     chunk_config=None,
-):
+) -> bool:
+    """Write frame/chunk rows to Lance. Returns True only on a successful upsert."""
     try:
         from src.storage.lance_store import upsert_profile_video_vectors_from_arrays
 
@@ -50,8 +51,8 @@ def _sync_video_vectors_to_lance(
                 "Skip Lance sync for %s: frame arrays required (legacy npy upsert removed)",
                 video_id,
             )
-            return
-        upsert_profile_video_vectors_from_arrays(
+            return False
+        result = upsert_profile_video_vectors_from_arrays(
             video_id,
             vectors,
             timestamps,
@@ -61,8 +62,57 @@ def _sync_video_vectors_to_lance(
             chunks=chunks,
             chunk_config=chunk_config,
         )
+        error = str((result or {}).get("error", "") or "").strip()
+        if error:
+            logger.error("Lance upsert rejected for %s: %s", video_id, error)
+            return False
+        return True
     except Exception as exc:
-        logger.warning("Failed to sync Lance vectors for %s: %s", video_id, exc)
+        logger.error("Failed to sync Lance vectors for %s: %s", video_id, exc, exc_info=True)
+        return False
+
+
+def _delete_lance_video_vectors(video_id, config) -> None:
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return
+    try:
+        from src.storage.lance_store import delete_profile_video_vectors
+
+        delete_profile_video_vectors(video_id, config=config)
+    except Exception as exc:
+        logger.warning("Failed to delete Lance vectors for old video id %s: %s", video_id, exc)
+
+
+def _mark_lance_sync_failed(
+    lib_files,
+    rel_path,
+    video_id,
+    video_mod_time,
+    *,
+    issue_callback,
+    library_path,
+    abs_path,
+    detail="",
+):
+    metadata_updated = _upsert_file_record(
+        lib_files,
+        rel_path,
+        video_id,
+        video_mod_time,
+        "sync_failed",
+        sync_failure_reason="processing_error",
+    )
+    _emit_issue(
+        issue_callback,
+        library_path or "",
+        rel_path,
+        abs_path,
+        action="skipped",
+        reason="processing_error",
+        detail=detail or "Lance vector sync failed.",
+    )
+    return metadata_updated
 
 
 class IndexUpdateInterrupted(InterruptedError):
@@ -200,26 +250,6 @@ def filter_index_problem_issues(issues):
     return [item for item in (issues or []) if is_index_problem_issue(item)]
 
 
-def _per_video_asset_paths(vector_dir, index_dir, video_id):
-    return {
-        "vectors": os.path.join(vector_dir, f"{video_id}_vectors.npy"),
-        "index": os.path.join(index_dir, f"{video_id}_index.faiss"),
-    }
-
-
-def _rename_per_video_assets(vector_dir, index_dir, old_vid, new_vid):
-    if not old_vid or not new_vid or old_vid == new_vid:
-        return
-    for key, folder, suffix in (
-        ("vectors", vector_dir, "_vectors.npy"),
-        ("index", index_dir, "_index.faiss"),
-    ):
-        src = os.path.join(folder, f"{old_vid}{suffix}")
-        dst = os.path.join(folder, f"{new_vid}{suffix}")
-        if os.path.isfile(src) and not os.path.isfile(dst):
-            os.replace(src, dst)
-
-
 def _load_vectors_from_disk(video_id, config):
     """Load frame vectors for a video id from Lance only.
 
@@ -246,10 +276,7 @@ def _load_vectors_from_disk(video_id, config):
 
 
 def _resolve_reusable_cached_vectors(abs_path, saved, config):
-    """Find on-disk vectors for this file even when meta vid or mtime no longer match current hash."""
-    model_dirs = get_local_model_asset_dirs(config=config)
-    vector_dir = model_dirs["vector_dir"]
-    index_dir = model_dirs["index_dir"]
+    """Find Lance vectors for this file even when meta vid no longer matches current hash."""
     try:
         current_vid = get_video_hash(abs_path)
     except OSError:
@@ -271,27 +298,8 @@ def _resolve_reusable_cached_vectors(abs_path, saved, config):
         vectors, timestamps, _vector_file = _load_vectors_from_disk(disk_vid, config)
         if not _has_usable_vectors(vectors, timestamps):
             continue
-        canonical_vid = current_vid
-        if disk_vid != canonical_vid:
-            paths = _per_video_asset_paths(vector_dir, index_dir, canonical_vid)
-            if os.path.isfile(paths["vectors"]):
-                vectors, timestamps, _ = _load_vectors_from_disk(canonical_vid, config)
-                if not _has_usable_vectors(vectors, timestamps):
-                    continue
-            else:
-                try:
-                    _rename_per_video_assets(vector_dir, index_dir, disk_vid, canonical_vid)
-                except OSError as exc:
-                    logger.warning(
-                        "Cannot align cached asset id %s -> %s for %s: %s",
-                        disk_vid,
-                        canonical_vid,
-                        abs_path,
-                        exc,
-                    )
-                    continue
         return {
-            "canonical_vid": canonical_vid,
+            "canonical_vid": current_vid,
             "disk_vid": disk_vid,
             "vectors": vectors,
             "timestamps": timestamps,
@@ -840,7 +848,6 @@ def process_single_video(
             timestamps = cached["timestamps"]
             disk_vid = cached["disk_vid"]
             t_reuse = time.perf_counter()
-            metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
             if progress_reporter is not None:
                 progress_reporter.emit("reuse", force=True)
             reuse_s = time.perf_counter() - t_reuse
@@ -860,22 +867,40 @@ def process_single_video(
                     reuse_s,
                     len(timestamps),
                 )
+            # Prefer chunks already stored under the source Lance id when re-keying.
+            chunk_source_id = disk_vid if disk_vid != video_id else video_id
             chunks, chunks_rebuilt, chunk_config = _ensure_video_chunks(
-                video_id,
+                chunk_source_id,
                 vectors,
                 timestamps,
                 config,
             )
-            _sync_video_vectors_to_lance(
+            write_chunks = chunks_rebuilt or disk_vid != video_id
+            synced = _sync_video_vectors_to_lance(
                 video_id,
                 config,
                 library_path,
                 abs_path,
                 vectors=vectors,
                 timestamps=timestamps,
-                chunks=chunks if chunks_rebuilt else None,
-                chunk_config=chunk_config if chunks_rebuilt else None,
+                chunks=chunks if write_chunks else None,
+                chunk_config=chunk_config if write_chunks else None,
             )
+            if not synced:
+                metadata_updated = _mark_lance_sync_failed(
+                    lib_files,
+                    rel_path,
+                    video_id,
+                    video_mod_time,
+                    issue_callback=issue_callback,
+                    library_path=library_path,
+                    abs_path=abs_path,
+                    detail=f"reuse sync failed (disk_vid={disk_vid})",
+                )
+                return None, None, metadata_updated, bool(saved.get("vid"))
+            if disk_vid != video_id:
+                _delete_lance_video_vectors(disk_vid, config)
+            metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
             return vectors, timestamps, metadata_updated, False
 
         video_id = get_video_hash(abs_path)
@@ -936,6 +961,28 @@ def process_single_video(
                     len(timestamps),
                 )
             return None, None, metadata_updated, bool(saved.get("vid"))
+        synced = _sync_video_vectors_to_lance(
+            video_id,
+            config,
+            library_path,
+            abs_path,
+            vectors=vectors,
+            timestamps=timestamps,
+            chunks=chunks,
+            chunk_config=build_chunk_config(config),
+        )
+        if not synced:
+            metadata_updated = _mark_lance_sync_failed(
+                lib_files,
+                rel_path,
+                video_id,
+                video_mod_time,
+                issue_callback=issue_callback,
+                library_path=library_path,
+                abs_path=abs_path,
+                detail="full index Lance sync failed",
+            )
+            return None, None, metadata_updated, bool(saved.get("vid"))
         metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
         health = assess_index_timestamp_health(abs_path, timestamps, config=config)
         if health.get("warnings"):
@@ -948,16 +995,6 @@ def process_single_video(
                 reason="timestamp_drift",
                 detail=health.get("detail", ""),
             )
-        _sync_video_vectors_to_lance(
-            video_id,
-            config,
-            library_path,
-            abs_path,
-            vectors=vectors,
-            timestamps=timestamps,
-            chunks=chunks,
-            chunk_config=build_chunk_config(config),
-        )
         return vectors, timestamps, metadata_updated, True
     except InterruptedError:
         raise

@@ -207,6 +207,67 @@ class StartupMigrationGateTests(unittest.TestCase):
             ):
                 self.assertTrue(migration_runner_module.needs_background_startup_migration(config))
 
+    def test_needs_background_false_when_lance_migration_completed_even_with_npy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = os.path.join(tmp, "profile")
+            data_dir = os.path.join(data_root, "data")
+            model_assets = os.path.join(
+                data_dir, "model_assets", "openai-clip", "vit-base-patch32"
+            )
+            vector_dir = os.path.join(model_assets, "vector")
+            for path in (
+                vector_dir,
+                os.path.join(model_assets, "index"),
+                os.path.join(model_assets, "global"),
+            ):
+                os.makedirs(path, exist_ok=True)
+            with open(os.path.join(vector_dir, "abc_vectors.npy"), "wb") as handle:
+                handle.write(b"placeholder")
+            meta_file = os.path.join(model_assets, "meta.json")
+            with open(meta_file, "w", encoding="utf-8") as handle:
+                json.dump({"libraries": {}, "schema_version": 2}, handle)
+            state_file = os.path.join(data_dir, "migration_state.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "completed": True,
+                        "schema_version": 2,
+                        "lance_migration": {"completed": True},
+                    },
+                    handle,
+                )
+            config = {
+                "schema_version": 2,
+                "data_root": data_root,
+                "model_dir": os.path.join(data_root, "models"),
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "model_dir": os.path.join(data_root, "models"),
+                                "model_variant": "vit-base-patch32",
+                            },
+                            "files": {
+                                "visual": "clip_visual.onnx",
+                                "text": "clip_text.onnx",
+                            },
+                        }
+                    ],
+                },
+            }
+            with (
+                patch.object(migration_runner_module, "load_config", return_value=config),
+                patch.object(
+                    migration_runner_module,
+                    "legacy_npy_vectors_present",
+                ) as mock_npy,
+            ):
+                self.assertFalse(migration_runner_module.needs_background_startup_migration(config))
+                mock_npy.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

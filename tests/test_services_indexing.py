@@ -650,7 +650,47 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertFalse(search_assets_changed)
         self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "too_short")
 
-    @patch("src.services.indexing_service._sync_video_vectors_to_lance")
+    @patch("src.storage.lance_store.upsert_profile_video_vectors_from_arrays", return_value={"error": "boom", "video_id": "vid_a"})
+    def test_sync_video_vectors_to_lance_returns_false_on_upsert_error(self, _mock_upsert):
+        ok = indexing_service._sync_video_vectors_to_lance(
+            "vid_a",
+            {},
+            "D:\\lib",
+            "D:\\lib\\clip.mp4",
+            vectors=np.array([[1.0, 0.0]], dtype=np.float32),
+            timestamps=np.array([0.0], dtype=np.float32),
+        )
+        self.assertFalse(ok)
+
+    @patch("src.services.indexing_service._load_vectors_from_disk")
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="legacy")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_new")
+    def test_resolve_reusable_cached_vectors_returns_disk_and_canonical_ids(
+        self,
+        _mock_hash,
+        _mock_legacy,
+        mock_load,
+    ):
+        vectors = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0], dtype=np.float32)
+
+        def _load(video_id, _config):
+            if video_id == "vid_old":
+                return vectors, timestamps, "unused.npy"
+            return None, None, "unused.npy"
+
+        mock_load.side_effect = _load
+        cached = indexing_service._resolve_reusable_cached_vectors(
+            "D:\\lib\\clip.mp4",
+            {"vid": "vid_old"},
+            {},
+        )
+        self.assertEqual(cached["canonical_vid"], "vid_new")
+        self.assertEqual(cached["disk_vid"], "vid_old")
+        self.assertEqual(cached["vectors"].tolist(), vectors.tolist())
+
+    @patch("src.services.indexing_service._ensure_video_chunks", return_value=([], False, {}))
+    @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=True)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
     @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -662,6 +702,7 @@ class IndexingServiceTests(unittest.TestCase):
         mock_reuse,
         _mock_model_dirs,
         mock_sync_lance,
+        _mock_chunks,
     ):
         vectors = np.array([[1.0, 0.0]], dtype=np.float32)
         timestamps = np.array([0.0], dtype=np.float32)
@@ -686,6 +727,163 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(reused_vectors.tolist(), vectors.tolist())
         self.assertEqual(reused_timestamps.tolist(), timestamps.tolist())
         self.assertEqual(lib_files["clip.mp4"]["asset_state"], "ready")
+        mock_sync_lance.assert_called_once()
+        self.assertEqual(lib_files["clip.mp4"]["vid"], "vid_a")
+
+    @patch("src.services.indexing_service._ensure_video_chunks", return_value=([], False, {}))
+    @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=False)
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    def test_process_single_video_marks_sync_failed_when_lance_reuse_sync_fails(
+        self,
+        _mock_stream,
+        _mock_getmtime,
+        mock_reuse,
+        _mock_model_dirs,
+        mock_sync_lance,
+        _mock_chunks,
+    ):
+        vectors = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0], dtype=np.float32)
+        mock_reuse.return_value = {
+            "canonical_vid": "vid_a",
+            "disk_vid": "vid_a",
+            "vectors": vectors,
+            "timestamps": timestamps,
+        }
+        lib_files = {"clip.mp4": {"vid": "vid_a", "mod_time": 123.0}}
+
+        reused_vectors, reused_timestamps, metadata_updated, search_assets_changed = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+        )
+
+        self.assertIsNone(reused_vectors)
+        self.assertIsNone(reused_timestamps)
+        self.assertTrue(metadata_updated)
+        self.assertTrue(search_assets_changed)
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
+        mock_sync_lance.assert_called_once()
+
+    @patch("src.services.indexing_service._delete_lance_video_vectors")
+    @patch("src.services.indexing_service._ensure_video_chunks", return_value=([{"start": 0}], True, {"algo": 1}))
+    @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=True)
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    def test_process_single_video_rekeys_lance_id_after_successful_reuse_sync(
+        self,
+        _mock_stream,
+        _mock_getmtime,
+        mock_reuse,
+        _mock_model_dirs,
+        mock_sync_lance,
+        mock_chunks,
+        mock_delete_old,
+    ):
+        vectors = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0], dtype=np.float32)
+        mock_reuse.return_value = {
+            "canonical_vid": "vid_new",
+            "disk_vid": "vid_old",
+            "vectors": vectors,
+            "timestamps": timestamps,
+        }
+        lib_files = {"clip.mp4": {"vid": "vid_old", "mod_time": 100.0}}
+
+        reused_vectors, _timestamps, metadata_updated, _changed = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_new",
+        )
+
+        self.assertEqual(reused_vectors.tolist(), vectors.tolist())
+        self.assertTrue(metadata_updated)
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "ready")
+        self.assertEqual(lib_files["clip.mp4"]["vid"], "vid_new")
+        mock_chunks.assert_called_once()
+        self.assertEqual(mock_chunks.call_args.args[0], "vid_old")
+        mock_sync_lance.assert_called_once()
+        self.assertEqual(mock_sync_lance.call_args.args[0], "vid_new")
+        self.assertIsNotNone(mock_sync_lance.call_args.kwargs.get("chunks"))
+        mock_delete_old.assert_called_once_with("vid_old", {"index_dir": "index", "vector_dir": "vector"})
+
+    @patch("src.services.indexing_service._sync_video_vectors_to_lance")
+    @patch("src.services.indexing_service._try_reuse_lance_indexed_video", return_value={"canonical_vid": "vid_a"})
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    def test_process_single_video_fast_lance_reuse_skips_upsert(
+        self,
+        _mock_stream,
+        _mock_getmtime,
+        _mock_fast_reuse,
+        mock_sync_lance,
+    ):
+        lib_files = {"clip.mp4": {"vid": "vid_a", "mod_time": 123.0, "asset_state": "ready"}}
+
+        result = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+        )
+
+        self.assertIs(result[0], indexing_service._SKIP_VIDEO_ALREADY_INDEXED)
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "ready")
+        mock_sync_lance.assert_not_called()
+
+    @patch("src.services.indexing_service.build_chunk_config", return_value={})
+    @patch("src.services.indexing_service.assess_index_timestamp_health", return_value={})
+    @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=False)
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch(
+        "src.services.indexing_service.generate_vectors_and_index_for_video",
+        return_value=(np.array([[1.0, 0.0]], dtype=np.float32), np.array([0.0], dtype=np.float32), None, []),
+    )
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
+    @patch("src.services.indexing_service._resolve_reusable_cached_vectors", return_value=None)
+    @patch("src.services.indexing_service._try_reuse_lance_indexed_video", return_value=None)
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    def test_process_single_video_marks_sync_failed_when_full_index_lance_sync_fails(
+        self,
+        _mock_stream,
+        _mock_getmtime,
+        _mock_fast,
+        _mock_reuse,
+        _mock_video_hash,
+        _mock_legacy,
+        _mock_generate,
+        _mock_model_dirs,
+        mock_sync_lance,
+        _mock_health,
+        _mock_chunk_cfg,
+    ):
+        lib_files = {}
+
+        vectors, timestamps, metadata_updated, search_assets_changed = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+        )
+
+        self.assertIsNone(vectors)
+        self.assertIsNone(timestamps)
+        self.assertTrue(metadata_updated)
+        self.assertFalse(search_assets_changed)
+        self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
         mock_sync_lance.assert_called_once()
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})

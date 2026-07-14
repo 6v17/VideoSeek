@@ -116,16 +116,25 @@ def _legacy_cleanup_paths(paths: list[str]) -> list[str]:
     return pending
 
 
+def is_lance_migration_completed(config=None) -> bool:
+    from src.app.config import load_config
+
+    return bool(_read_lance_migration_state(config or load_config()).get("completed"))
+
+
 def needs_lance_startup_migration(config=None) -> bool:
     from src.app.config import load_config
 
     runtime_config = config or load_config()
+    # Once recorded complete, do not re-listdir vector/index dirs every startup.
+    # Sidecar ``*_vectors.npy`` may remain by design after import.
+    if is_lance_migration_completed(runtime_config):
+        return False
+
     profiles = list(iter_model_asset_storage_roots(config=runtime_config))
     if not profiles:
         return False
 
-    lance_state = _read_lance_migration_state(runtime_config)
-    migration_completed = bool(lance_state.get("completed"))
     pending_import = False
     pending_cleanup = False
     for root in profiles:
@@ -134,8 +143,6 @@ def needs_lance_startup_migration(config=None) -> bool:
             pending_import = True
         if lance_search_is_ready(base_dir):
             legacy_paths = collect_legacy_vector_paths(base_dir)
-            if migration_completed:
-                legacy_paths = _legacy_cleanup_paths(legacy_paths)
             if legacy_paths:
                 pending_cleanup = True
 

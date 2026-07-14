@@ -6,7 +6,7 @@ Short rules for keeping VideoSeek maintainable. Architecture overview: [`archite
 
 1. **New features go through `src/services/`** — UI and Agent HTTP only schedule; they do not copy business logic.
 2. **Do not extend legacy npy / FAISS index paths** — Lance is the write/read path. Legacy code is maintenance-only until removed.
-3. **Indexing/search reads are Lance-only** — `_load_vectors_from_disk` / search assets do not load `*_vectors.npy`. Startup migration still imports npy → Lance; leftover npy is cleaned after `lance_migration.completed`. Library details mark npy-only videos as `broken_asset`, not `ready`.
+3. **Indexing/search reads are Lance-only** — `_load_vectors_from_disk` / search assets do not load `*_vectors.npy`. Startup migration still imports npy → Lance; after `lance_migration.completed`, startup gates trust that flag and skip vector-dir listdir (sidecar npy may remain). Library details mark npy-only videos as `broken_asset`, not `ready`.
 4. **Do not import private (`_foo`) symbols across packages** — if another module needs it, make a public helper or move it.
 5. **Prefer new modules under ~400 lines** — when touching a god file, extract the piece you need instead of growing it.
 

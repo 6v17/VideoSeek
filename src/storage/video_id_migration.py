@@ -92,8 +92,19 @@ def _vector_ids_on_disk(vector_dir):
     return ids
 
 
+def is_lance_migration_completed(config=None) -> bool:
+    """True when startup already finished Lance import/cleanup and recorded the flag."""
+    state = _read_migration_state(config or load_config())
+    payload = state.get("lance_migration")
+    return isinstance(payload, dict) and bool(payload.get("completed"))
+
+
 def legacy_npy_vectors_present(config=None) -> bool:
-    """True when any model profile still has per-video ``*_vectors.npy`` payloads."""
+    """True when any model profile still has per-video ``*_vectors.npy`` payloads.
+
+    Always scans disk. Startup gates should prefer ``is_lance_migration_completed``
+    so leftover post-migration sidecars do not force a vector-dir listdir every launch.
+    """
     for storage_root in iter_model_asset_storage_roots(config):
         vector_dir = str(storage_root.get("vector_dir", "") or "").strip()
         if not vector_dir or not os.path.isdir(vector_dir):
@@ -104,7 +115,9 @@ def legacy_npy_vectors_present(config=None) -> bool:
 
 
 def _skip_legacy_video_id_checks(config=None) -> bool:
-    """Lance-only installs without legacy npy no longer need per-video hash verification."""
+    """Skip per-video hash verification once Lance migration completed, or when no npy remains."""
+    if is_lance_migration_completed(config):
+        return True
     return not legacy_npy_vectors_present(config)
 
 

@@ -132,7 +132,11 @@ def prune_legacy_search_index_artifacts(meta, config=None) -> dict:
     """Remove legacy FAISS/global index files once Lance search is active."""
     from src.storage.config_store import get_global_model_asset_paths, get_local_model_asset_dirs
     from src.storage.lance_search_index import lance_search_is_ready
-    from src.storage.video_id_migration import legacy_npy_vectors_present
+    from src.storage.video_id_migration import is_lance_migration_completed, legacy_npy_vectors_present
+
+    if is_lance_migration_completed(config):
+        # Startup Lance migration already handled FAISS cleanup; leftover npy are sidecars.
+        return {"removed_files": 0, "removed_dirs": 0, "skipped": "lance_migration_completed"}
 
     if legacy_npy_vectors_present(config):
         return {"removed_files": 0, "removed_dirs": 0, "skipped": "legacy_npy_present"}

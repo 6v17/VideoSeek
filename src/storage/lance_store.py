@@ -972,12 +972,22 @@ def upsert_profile_video_vectors_from_arrays(
         return {"error": str(exc)}
 
     db = _connect_lance(profile_base_dir)
-    _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
-    _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
-    if frame_rows:
-        _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
-    if chunk_rows:
-        _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
+    try:
+        _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
+        _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
+        if frame_rows:
+            _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
+        if chunk_rows:
+            _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
+    except Exception as exc:
+        logger.error(
+            "Lance delete/append failed for %s after validated row build; "
+            "table may be missing this video until the next successful sync: %s",
+            video_id,
+            exc,
+            exc_info=True,
+        )
+        return {"error": str(exc), "video_id": video_id, "frame_rows": 0, "chunk_rows": 0}
 
     if isinstance(chunk_config, dict):
         set_stored_chunk_config(profile_base_dir, video_id, chunk_config)

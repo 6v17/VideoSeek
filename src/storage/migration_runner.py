@@ -617,11 +617,15 @@ def _load_meta_for_startup(config):
 
 def needs_background_startup_migration(config=None):
     """True when startup must run full migration off the UI thread."""
+    from src.storage.video_id_migration import is_lance_migration_completed
+
     runtime_config = config or load_config()
     meta = _load_meta_for_startup(runtime_config)
     if not _already_migrated(runtime_config, meta):
         return True
-    if legacy_npy_vectors_present(runtime_config):
+    # Trust the recorded Lance flag: leftover npy sidecars after completed migration
+    # must not force a vector-dir listdir (or video-id scan) on every launch.
+    if not is_lance_migration_completed(runtime_config) and legacy_npy_vectors_present(runtime_config):
         if not _trust_fast_video_id_check(runtime_config):
             return True
         if _legacy_video_ids_pending_fast(runtime_config, verify_saved_ids=False):
