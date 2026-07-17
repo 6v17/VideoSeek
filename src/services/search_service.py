@@ -812,6 +812,87 @@ def warmup_search_runtime():
     get_engine()
 
 
+def run_dialogue_search(
+    query: str,
+    *,
+    top_k=None,
+    scope_video_paths=None,
+    scope_library_paths=None,
+    min_score=None,
+    config=None,
+    query_vector=None,
+    match_mode: str = "segment",
+) -> tuple[List[SearchHit], str, str]:
+    """Dialogue search over Lance ``dialogue_segments``.
+
+    ``match_mode``: ``segment`` (ASR substring), ``semantic`` (CLIP text), or
+    ``auto`` (segment then semantic).
+
+    Returns ``(hits, message, matched_by)`` where ``matched_by`` is
+    ``keyword`` / ``vector`` / ``""``.
+    """
+    from src.storage.config_store import get_local_model_asset_dirs, get_search_top_k
+    from src.storage.lance_dialogue_search import get_dialogue_index_stats, search_dialogue
+
+    cfg = dict(config or load_config())
+    text = str(query or "").strip()
+    if not text:
+        return [], "empty query", ""
+
+    try:
+        resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
+    except (TypeError, ValueError):
+        resolved_top_k = get_search_top_k(cfg)
+    resolved_top_k = max(1, min(200, resolved_top_k))
+
+    # Over-fetch when scoped so post-filter still has candidates.
+    fetch_k = resolve_fetch_top_k(
+        resolved_top_k,
+        is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths),
+    )
+
+    profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+    stats = get_dialogue_index_stats(config=cfg, profile_base_dir=profile_base_dir)
+    if not stats.get("dialogue_index_ready"):
+        return [], "no dialogue index for active profile (build dialogue index first)", ""
+
+    routed = search_dialogue(
+        text,
+        config=cfg,
+        profile_base_dir=profile_base_dir,
+        top_k=fetch_k,
+        query_vector=query_vector,
+        match_mode=match_mode,
+    )
+    dialogue_hits = list(routed.get("hits") or [])
+    matched_by = str(routed.get("matched_by") or "").strip()
+    hits = [
+        SearchHit(
+            start_sec=float(item.start_sec),
+            end_sec=float(item.end_sec),
+            score=float(item.score),
+            video_path=str(item.video_path),
+            match_kind="dialogue",
+            video_id=str(item.video_id or ""),
+            matched_text=str(item.text or ""),
+        )
+        for item in dialogue_hits
+    ]
+    hits = apply_search_scope(
+        hits,
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        top_k=resolved_top_k,
+    )
+    if min_score is not None:
+        hits = filter_hits_by_min_score(hits, min_score)
+
+    if not hits:
+        message = str(routed.get("message") or "").strip() or "no dialogue matches"
+        return [], message, matched_by
+    return hits, "", matched_by
+
+
 __all__ = [
     "_LOCATE_CROP_MIN_CLIP_SCORE",
     "build_query_vector",
@@ -823,6 +904,7 @@ __all__ = [
     "locate_crop_confidence_warning_key",
     "resolve_clip_confidence_tier_key",
     "run_chunk_search",
+    "run_dialogue_search",
     "run_search",
     "warmup_search_runtime",
 ]

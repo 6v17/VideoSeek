@@ -161,13 +161,19 @@ def _build_ffmpeg_info() -> Dict[str, Any]:
     }
 
 
-def _build_capabilities(snapshot: Dict[str, Any], *, understanding_ready: bool = False) -> Dict[str, bool]:
+def _build_capabilities(
+    snapshot: Dict[str, Any],
+    *,
+    understanding_ready: bool = False,
+    dialogue_index_ready: bool = False,
+) -> Dict[str, bool]:
     ffmpeg_info = _build_ffmpeg_info()
     return {
         "text_search": True,
         "image_search": True,
         "frame_search": bool(snapshot.get("frame_index_ready")),
         "chunk_search": bool(snapshot.get("chunk_index_ready")),
+        "dialogue_search": bool(dialogue_index_ready),
         "export_manifest": True,
         "export_clip": bool(ffmpeg_info.get("ffmpeg_available")),
         "library_discovery": True,
@@ -192,8 +198,11 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
 
     understanding_fields = build_agent_understanding_health_fields(config=config, probe_remote=False)
     from src.services.indexing_runtime_status import get_index_sync_status
+    from src.storage.lance_dialogue_search import get_dialogue_index_stats
 
     sync_status = get_index_sync_status()
+    dialogue_stats = get_dialogue_index_stats(config=config)
+    dialogue_ready = bool(dialogue_stats.get("dialogue_index_ready"))
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -213,6 +222,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "capabilities": _build_capabilities(
             snapshot,
             understanding_ready=bool(understanding_fields.get("understanding_ready")),
+            dialogue_index_ready=dialogue_ready,
         ),
         "ffmpeg": _build_ffmpeg_info(),
         "video_count": _count_library_videos(),
@@ -234,5 +244,8 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
+        "dialogue_index_ready": dialogue_ready,
+        "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
+        "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
         **understanding_fields,
     }

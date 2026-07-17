@@ -1,0 +1,38 @@
+{
+  "kind": "understanding_component",
+  "manifest_version": 1,
+  "id": "audio/speech_to_text/sensevoice-small",
+  "modality": "audio",
+  "task": "speech_to_text",
+  "model_id": "sensevoice-small",
+  "display_name": "SenseVoice Small ASR (ONNX INT8)",
+  "package_version": "1.0.0",
+  "description": "SenseVoice-Small speech-to-text for chunk audio (INT8 ONNX).",
+  "install_relpath": "components/audio/speech_to_text/sensevoice-small",
+  "input_kind": "chunk_audio",
+  "output_kind": "transcript",
+  "engine": {
+    "registry_key": "audio.speech_to_text.sensevoice_small"
+  },
+  "required_files": [
+    "model_quant.onnx",
+    "tokens.json",
+    "am.mvn",
+    "config.yaml",
+    "configuration.json"
+  ],
+  "files": {
+    "model": "model_quant.onnx"
+  },
+  "runtime": {
+    "prefer_gpu": false,
+    "provider_hints": [
+      "CPUExecutionProvider"
+    ]
+  },
+  "params": {
+    "quantize": true,
+    "language": "auto",
+    "use_itn": true
+  }
+}

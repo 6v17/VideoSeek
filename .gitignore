@@ -1,5 +1,6 @@
 # Bytecode / caches
 __pycache__/
+.cache/
 *.py[cod]
 *$py.class
 *.pyo
@@ -47,3 +48,13 @@ sensevoice/onnx_test_output.txt
 .env
 .env.*
 !.env.example
+
+# Private planning / process notes (keep local; not for public repo)
+docs/ai/
+docs/planned_features.md
+docs/pyside6_ui_architecture.md
+docs/migration_forced_upgrade_checklist.md
+docs/video_download_page_design.md
+docs/remote_links.example.txt
+.ai/
+article.md

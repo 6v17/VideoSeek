@@ -860,6 +860,34 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #SearchQueryTabs QTabBar::tab:hover {
     background: __BUTTON_SOFT_HOVER__;
 }
+#LibraryTabs::pane {
+    border: none;
+    background: transparent;
+    top: 0;
+    padding-top: 10px;
+}
+#LibraryTabs QTabBar::tab {
+    background: __BUTTON_SOFT__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+    min-width: 112px;
+    min-height: 36px;
+    padding: 10px 28px;
+    margin-right: 8px;
+    color: __MUTED__;
+    font-size: 14px;
+    font-weight: 700;
+}
+#LibraryTabs QTabBar::tab:selected {
+    background: __ACCENT_SOFT__;
+    border: 1px solid __ACCENT__;
+    color: __ACCENT__;
+}
+#LibraryTabs QTabBar::tab:hover:!selected {
+    background: __BUTTON_SOFT_HOVER__;
+    color: __TEXT__;
+    border-color: __LINE_STRONG__;
+}
 #SearchMobileRow {
     background: transparent;
 }
@@ -1380,6 +1408,57 @@ QListWidget#ModelFileList::item:hover {
 QListWidget#ModelFileList::item:selected {
     background: __FIELD__;
     color: __HEADLINE__;
+    border-color: __ACCENT__;
+}
+QListWidget#DialogueLibraryList {
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    outline: 0;
+}
+QListWidget#DialogueLibraryList::item {
+    padding: 0;
+    margin: 0 0 8px 0;
+    border: none;
+    background: transparent;
+}
+QListWidget#DialogueLibraryList::item:selected {
+    background: transparent;
+}
+#DialogueLibraryRow {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 14px;
+}
+#DialogueLibraryRow[selected="true"] {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
+#DialogueLibraryRow:hover {
+    border-color: __LINE_STRONG__;
+}
+#DialogueLibraryRowTitle {
+    color: __HEADLINE__;
+    font-size: 14px;
+    font-weight: 700;
+}
+#DialogueLibraryRowMeta {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+}
+#DialogueLibraryRowBadge {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+}
+#DialogueLibraryRowBadge[ready="true"] {
+    color: __ACCENT__;
+    background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
 }
 #SolidDangerButton {

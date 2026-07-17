@@ -57,6 +57,7 @@ class SearchController(QObject):
         scope_video_paths=None,
         query_vector=None,
         search_mode=None,
+        search_kind=None,
         top_k=None,
         min_score=None,
         search_precision_mode=None,
@@ -82,6 +83,7 @@ class SearchController(QObject):
                 scope_video_paths=list(scope_video_paths or []),
                 query_vector=query_vector,
                 search_mode=search_mode,
+                search_kind=search_kind,
                 top_k=top_k,
                 min_score=min_score,
                 search_precision_mode=search_precision_mode,
@@ -358,6 +360,28 @@ class SearchController(QObject):
                 else:
                     warn = warn_template
                 status_text = f"{status_text} · {warn}"
+        dialogue_message = str(getattr(self.worker, "dialogue_status_message", "") or "").strip()
+        if dialogue_message:
+            dialogue_keys = {
+                "no dialogue index for active profile (build dialogue index first)": "search_dialogue_no_index",
+                "no dialogue matches": "search_dialogue_no_matches",
+                "empty query": "search_empty_dialogue",
+            }
+            key = dialogue_keys.get(dialogue_message)
+            localized = texts.get(key, dialogue_message) if key else dialogue_message
+            if results:
+                status_text = f"{status_text} · {localized}"
+            else:
+                status_text = localized
+        matched_by = str(getattr(self.worker, "dialogue_matched_by", "") or "").strip()
+        if results and matched_by:
+            mode_key = (
+                "search_dialogue_match_semantic"
+                if matched_by == "vector"
+                else "search_dialogue_match_segment"
+            )
+            mode_label = texts.get(mode_key, matched_by)
+            status_text = f"{status_text} · {mode_label}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
     def _start_page_thumbnails(self, page_results) -> None:

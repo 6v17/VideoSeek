@@ -241,11 +241,17 @@ def build_agent_starter_text(
     index_ready = bool(health.get("index_ready"))
 
     if lang == "en":
-        intro = "VideoSeek — localhost CLIP search + export; optional understanding evidence (not ASR)."
+        intro = (
+            "VideoSeek — localhost CLIP visual search + export; optional understanding evidence; "
+            "optional dialogue search via search_kind=dialogue when dialogue_index_ready."
+        )
         snapshot_title = "## Instance"
         not_ready = "Index not ready — ask the user to sync in VideoSeek before searching."
     else:
-        intro = "VideoSeek — 本机 CLIP 画面搜索 + 导出；可选理解笔录（非 ASR）。"
+        intro = (
+            "VideoSeek — 本机 CLIP 画面搜索 + 导出；可选理解笔录；"
+            "台词检索在 dialogue_index_ready 时用 search_kind=dialogue。"
+        )
         snapshot_title = "## 当前实例"
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步后再搜索。"
 
@@ -257,6 +263,8 @@ def build_agent_starter_text(
         "search_mode_default": health.get("search_mode_default"),
         "capabilities": caps if isinstance(caps, dict) else {},
         "understanding_ready": bool(health.get("understanding_ready")),
+        "dialogue_index_ready": bool(health.get("dialogue_index_ready")),
+        "dialogue_indexed_videos": health.get("dialogue_indexed_videos"),
         "search_presets": preset_summaries,
     }
     if preset_total > len(preset_summaries):

@@ -1,0 +1,38 @@
+{
+  "kind": "understanding_component",
+  "manifest_version": 1,
+  "id": "audio/speech_to_text/sensevoice-small",
+  "modality": "audio",
+  "task": "speech_to_text",
+  "model_id": "sensevoice-small",
+  "display_name": "SenseVoice Small ASR (ONNX FP32)",
+  "package_version": "1.0.0",
+  "description": "SenseVoice-Small speech-to-text for chunk audio (FP32 ONNX).",
+  "install_relpath": "components/audio/speech_to_text/sensevoice-small",
+  "input_kind": "chunk_audio",
+  "output_kind": "transcript",
+  "engine": {
+    "registry_key": "audio.speech_to_text.sensevoice_small"
+  },
+  "required_files": [
+    "model.onnx",
+    "tokens.json",
+    "am.mvn",
+    "config.yaml",
+    "configuration.json"
+  ],
+  "files": {
+    "model": "model.onnx"
+  },
+  "runtime": {
+    "prefer_gpu": false,
+    "provider_hints": [
+      "CPUExecutionProvider"
+    ]
+  },
+  "params": {
+    "quantize": false,
+    "language": "auto",
+    "use_itn": true
+  }
+}

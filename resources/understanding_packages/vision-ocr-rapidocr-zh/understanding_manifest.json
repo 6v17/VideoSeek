@@ -1,0 +1,37 @@
+{
+  "kind": "understanding_component",
+  "manifest_version": 1,
+  "id": "vision/ocr/rapidocr-zh",
+  "modality": "vision",
+  "task": "ocr",
+  "model_id": "rapidocr-zh",
+  "display_name": "RapidOCR Chinese Subtitles (ONNX)",
+  "package_version": "1.0.0",
+  "description": "PP-OCR ONNX models for hard-subtitle / on-screen text recognition via RapidOCR + onnxruntime (DirectML capable).",
+  "install_relpath": "components/vision/ocr/rapidocr-zh",
+  "input_kind": "frame_bgr",
+  "output_kind": "text_lines",
+  "engine": {
+    "registry_key": "vision.ocr.rapidocr_zh"
+  },
+  "required_files": [
+    "ch_PP-OCRv4_det_infer.onnx",
+    "ch_PP-OCRv4_rec_infer.onnx"
+  ],
+  "files": {
+    "det": "ch_PP-OCRv4_det_infer.onnx",
+    "rec": "ch_PP-OCRv4_rec_infer.onnx",
+    "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"
+  },
+  "runtime": {
+    "prefer_gpu": true,
+    "provider_hints": [
+      "DmlExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  },
+  "params": {
+    "lang": "ch",
+    "ocr_version": "PP-OCRv4"
+  }
+}

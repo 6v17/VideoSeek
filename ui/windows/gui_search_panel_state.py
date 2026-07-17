@@ -9,6 +9,7 @@ class SearchPanelStateMixin:
     SEARCH_TAB_IMAGE = "image"
     SEARCH_TAB_TEXT = "text"
     SEARCH_TAB_COMPOSE = "compose"
+    SEARCH_TAB_DIALOGUE = "dialogue"
 
     IMAGE_SEARCH_MODES = ("chunk", "frame", "video_discovery", "precise")
 
@@ -19,6 +20,11 @@ class SearchPanelStateMixin:
         if not hasattr(self, "search_page"):
             return False
         return bool(self.search_page.search_panel.text_query())
+
+    def _search_has_dialogue_query(self) -> bool:
+        if not hasattr(self, "search_page"):
+            return False
+        return bool(self.search_page.search_panel.dialogue_query())
 
     def _search_has_compose_query(self) -> bool:
         if not hasattr(self, "search_page"):
@@ -39,6 +45,8 @@ class SearchPanelStateMixin:
             return self.SEARCH_TAB_TEXT
         if index == 2:
             return self.SEARCH_TAB_COMPOSE
+        if index == 3:
+            return self.SEARCH_TAB_DIALOGUE
         return self.SEARCH_TAB_IMAGE
 
     def _set_search_query_tab(self, tab: str) -> None:
@@ -52,6 +60,8 @@ class SearchPanelStateMixin:
             target = 1
         elif normalized == self.SEARCH_TAB_COMPOSE:
             target = 2
+        elif normalized == self.SEARCH_TAB_DIALOGUE:
+            target = 3
         else:
             target = 0
         if tabs.currentIndex() != target:
@@ -63,6 +73,8 @@ class SearchPanelStateMixin:
             return "text" if self._search_has_text_query() else "empty"
         if tab == self.SEARCH_TAB_COMPOSE:
             return "compose" if self._search_has_compose_query() else "empty"
+        if tab == self.SEARCH_TAB_DIALOGUE:
+            return "dialogue" if self._search_has_dialogue_query() else "empty"
         return "image" if self._search_has_image_query() else "empty"
 
     def _search_scope_is_global(self) -> bool:
@@ -177,6 +189,28 @@ class SearchPanelStateMixin:
             page.image_search_mode.setCurrentIndex(target_index)
         page.image_search_mode.blockSignals(False)
 
+    def _populate_dialogue_search_mode_combo(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        page = self.search_page
+        combo = getattr(page, "dialogue_search_mode", None)
+        if combo is None:
+            return
+        texts = getattr(self, "texts", {}) or {}
+        combo.blockSignals(True)
+        combo.clear()
+        # Semantic match is deferred; keyword-only UI.
+        combo.addItem(texts.get("search_dialogue_match_segment", "Keyword"), "segment")
+        combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+        cluster = getattr(page, "dialogue_search_mode_cluster", None)
+        if cluster is not None:
+            cluster.setVisible(False)
+
+    def _dialogue_match_mode_from_ui(self) -> str:
+        # Keyword/substring only until subtitle semantic search is enabled.
+        return "segment"
+
     def _refresh_search_panel_state(self) -> None:
         if not hasattr(self, "search_page"):
             return
@@ -191,6 +225,8 @@ class SearchPanelStateMixin:
             tabs.setTabText(0, texts.get("search_tab_image", "Image"))
             tabs.setTabText(1, texts.get("search_tab_text", "Text"))
             tabs.setTabText(2, texts.get("search_tab_compose", "Compose"))
+            if tabs.count() > 3:
+                tabs.setTabText(3, texts.get("search_tab_dialogue", "Dialogue"))
 
         compose_form = getattr(page.search_panel, "compose_form", None)
         if compose_form is not None:
@@ -207,7 +243,11 @@ class SearchPanelStateMixin:
                 mode_stack.setCurrentIndex(0)
             elif active_tab == self.SEARCH_TAB_IMAGE:
                 mode_stack.setCurrentIndex(1)
+            elif active_tab == self.SEARCH_TAB_DIALOGUE:
+                # Match-mode combo is hidden (keyword-only); reuse empty compose slot.
+                mode_stack.setCurrentIndex(2)
             else:
+                # compose: no granularity controls
                 mode_stack.setCurrentIndex(2)
 
         if active_tab == self.SEARCH_TAB_TEXT:
@@ -224,7 +264,37 @@ class SearchPanelStateMixin:
             page.image_search_mode_label.setToolTip(hint)
             page.image_search_mode.setToolTip(hint)
 
+        if active_tab == self.SEARCH_TAB_DIALOGUE:
+            self._populate_dialogue_search_mode_combo()
+            dialogue_mode = getattr(page, "dialogue_search_mode", None)
+            if dialogue_mode is not None:
+                dialogue_mode.setToolTip(
+                    texts.get("search_dialogue_match_segment_hint", "")
+                )
+
+        dialogue_hint = getattr(page, "lbl_dialogue_hint", None)
+        if dialogue_hint is not None:
+            dialogue_hint.setText(self._dialogue_search_hint_text(texts))
+            dialogue_hint.setVisible(active_tab == self.SEARCH_TAB_DIALOGUE)
+
         self._refresh_search_model_display()
+
+    def _dialogue_search_hint_text(self, texts) -> str:
+        fallback = texts.get(
+            "search_dialogue_match_segment_hint",
+            "Keyword/substring match on OCR subtitle text.",
+        )
+        ready_key = "search_dialogue_match_segment_hint_ready"
+        try:
+            from src.storage.lance_dialogue_search import get_dialogue_index_stats
+
+            stats = get_dialogue_index_stats()
+            indexed = int(stats.get("dialogue_indexed_videos") or 0)
+            if indexed > 0:
+                return texts.get(ready_key, fallback).format(count=indexed)
+        except Exception:
+            pass
+        return fallback
 
     def _refresh_search_model_display(self) -> None:
         if not hasattr(self, "search_page"):
@@ -262,6 +332,9 @@ class SearchPanelStateMixin:
 
     def _on_image_search_mode_changed(self) -> None:
         self._save_image_search_mode()
+        self._refresh_search_panel_state()
+
+    def _on_dialogue_search_mode_changed(self) -> None:
         self._refresh_search_panel_state()
 
     def open_compose_search_tab(self) -> None:

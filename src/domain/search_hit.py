@@ -6,7 +6,7 @@ from typing import Any, Iterable, List, Tuple, Union
 
 @dataclass(frozen=True)
 class SearchHit:
-    """One ranked match from local frame/chunk search (shared UI + worker protocol)."""
+    """One ranked match from local frame/chunk/dialogue search (shared UI + worker protocol)."""
 
     start_sec: float
     end_sec: float
@@ -14,6 +14,7 @@ class SearchHit:
     video_path: str
     match_kind: str = "frame"
     video_id: str = ""
+    matched_text: str = ""
 
     def as_tuple(self) -> Tuple[float, float, float, str]:
         return (self.start_sec, self.end_sec, self.score, self.video_path)

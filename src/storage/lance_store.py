@@ -20,7 +20,16 @@ logger = get_logger("lance_store")
 LANCE_DIR_NAME = "lance"
 FRAMES_TABLE_NAME = "frames"
 CHUNKS_TABLE_NAME = "chunks"
+DIALOGUE_SEGMENTS_TABLE_NAME = "dialogue_segments"
 LANCE_STORAGE_VERSION = 1
+DIALOGUE_INDEX_STATE_READY = "ready"
+DIALOGUE_INDEX_STATE_MISSING = "missing"
+DIALOGUE_INDEX_STATE_FAILED = "failed"
+_DIALOGUE_INDEX_STATES = {
+    DIALOGUE_INDEX_STATE_READY,
+    DIALOGUE_INDEX_STATE_MISSING,
+    DIALOGUE_INDEX_STATE_FAILED,
+}
 LANCE_ANN_MIN_ROWS = 2000
 LANCE_ANN_ENABLED = False
 _INDEX_BATCH_DEPTH: dict[str, int] = {}
@@ -201,7 +210,7 @@ def ensure_lance_vector_indexes(
     db = _connect_lance(profile_base_dir)
     built: list[str] = []
     skipped: list[str] = []
-    for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME):
+    for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME):
         if table_name not in _list_table_names(db):
             skipped.append(table_name)
             continue
@@ -245,7 +254,7 @@ def drop_lance_vector_indexes(profile_base_dir: str) -> dict:
 
     db = _connect_lance(profile_base_dir)
     dropped: list[str] = []
-    for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME):
+    for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME):
         if table_name not in _list_table_names(db):
             continue
         table = db.open_table(table_name)
@@ -276,7 +285,7 @@ def compact_lance_storage(profile_base_dir: str) -> None:
         return
     try:
         db = _connect_lance(profile_base_dir)
-        for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME):
+        for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME):
             if table_name not in _list_table_names(db):
                 continue
             db.open_table(table_name).optimize()
@@ -381,6 +390,28 @@ def chunks_table_schema(dimension: int) -> pa.Schema:
     )
 
 
+def dialogue_segments_table_schema(dimension: int) -> pa.Schema:
+    return pa.schema(
+        [
+            pa.field("video_id", pa.string()),
+            pa.field("library_path", pa.string()),
+            pa.field("video_path", pa.string()),
+            pa.field("start", pa.float32()),
+            pa.field("end", pa.float32()),
+            pa.field("text", pa.string()),
+            pa.field("language", pa.string()),
+            pa.field("asr_source", pa.string()),
+            pa.field("embedding_spec", pa.string()),
+            _vector_field_name(dimension),
+        ]
+    )
+
+
+def serialize_embedding_spec(spec: dict | None) -> str:
+    payload = dict(spec or {})
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def _read_import_state(profile_base_dir: str) -> dict:
     state_file = get_lance_state_file(profile_base_dir)
     if not os.path.isfile(state_file):
@@ -433,6 +464,45 @@ def set_stored_chunk_config(profile_base_dir: str, video_id: str, chunk_config: 
     videos = dict(state.get("videos") or {})
     entry = dict(videos.get(video_id) or {})
     entry["chunk_config"] = dict(chunk_config)
+    videos[video_id] = entry
+    state["videos"] = videos
+    _write_import_state(profile_base_dir, state)
+
+
+def get_dialogue_index_state(profile_base_dir: str, video_id: str) -> str:
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return DIALOGUE_INDEX_STATE_MISSING
+    state = _read_import_state(profile_base_dir)
+    videos = state.get("videos")
+    if not isinstance(videos, dict):
+        return DIALOGUE_INDEX_STATE_MISSING
+    entry = videos.get(video_id)
+    if not isinstance(entry, dict):
+        return DIALOGUE_INDEX_STATE_MISSING
+    value = str(entry.get("dialogue_index_state", "") or "").strip().lower()
+    if value in _DIALOGUE_INDEX_STATES:
+        return value
+    return DIALOGUE_INDEX_STATE_MISSING
+
+
+def set_dialogue_index_state(
+    profile_base_dir: str,
+    video_id: str,
+    dialogue_index_state: str,
+    *,
+    extras: dict | None = None,
+) -> None:
+    video_id = str(video_id or "").strip()
+    state_value = str(dialogue_index_state or "").strip().lower()
+    if not video_id or state_value not in _DIALOGUE_INDEX_STATES:
+        return
+    state = _read_import_state(profile_base_dir)
+    videos = dict(state.get("videos") or {})
+    entry = dict(videos.get(video_id) or {})
+    entry["dialogue_index_state"] = state_value
+    if extras:
+        entry.update(dict(extras))
     videos[video_id] = entry
     state["videos"] = videos
     _write_import_state(profile_base_dir, state)
@@ -793,6 +863,9 @@ def refresh_import_state(profile_base_dir: str) -> dict:
             dimension = len(vector_value or [])
     if CHUNKS_TABLE_NAME in _list_table_names(db):
         chunk_rows = int(db.open_table(CHUNKS_TABLE_NAME).count_rows())
+    dialogue_rows = 0
+    if DIALOGUE_SEGMENTS_TABLE_NAME in _list_table_names(db):
+        dialogue_rows = int(db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME).count_rows())
     vector_dir = os.path.join(profile_base_dir, "vector")
     videos_total = _count_profile_ready_videos(profile_base_dir)
     if os.path.isdir(vector_dir):
@@ -808,6 +881,7 @@ def refresh_import_state(profile_base_dir: str) -> dict:
             "videos_failed": 0,
             "frame_rows": frame_rows,
             "chunk_rows": chunk_rows,
+            "dialogue_rows": dialogue_rows,
             "dimension": dimension,
         },
     )
@@ -878,8 +952,158 @@ def delete_profile_video_vectors(video_id: str, config=None) -> None:
     db = _connect_lance(profile_base_dir)
     _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
     _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
+    _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
+    set_dialogue_index_state(profile_base_dir, video_id, DIALOGUE_INDEX_STATE_MISSING)
     refresh_import_state(profile_base_dir)
     _invalidate_lance_search_caches(profile_base_dir)
+
+
+def list_dialogue_transcript_segments(
+    video_id: str = "",
+    *,
+    config=None,
+    profile_base_dir: str = "",
+) -> list[dict]:
+    """Return deduped ASR transcript rows (text/time), ignoring embedding_spec.
+
+    Dialogue text is managed independently of the active CLIP profile; vectors are
+    regenerated separately when the search model changes.
+    """
+    from src.storage.config_store import get_local_model_asset_dirs
+
+    if profile_base_dir:
+        base_dir = os.path.normpath(profile_base_dir)
+    else:
+        base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    if not os.path.isdir(get_lance_dir(base_dir)):
+        return []
+    db = _connect_lance(base_dir)
+    if DIALOGUE_SEGMENTS_TABLE_NAME not in _list_table_names(db):
+        return []
+    table = db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME)
+    builder = table.search().select(
+        ["video_id", "video_path", "library_path", "start", "end", "text", "language", "asr_source"]
+    )
+    vid = str(video_id or "").strip()
+    if vid:
+        builder = builder.where(f"video_id = '{vid.replace(chr(39), chr(39)+chr(39))}'")
+    try:
+        arrow = builder.limit(200_000).to_arrow()
+    except Exception as exc:
+        logger.error("List dialogue transcripts failed: %s", exc)
+        return []
+
+    rows: list[dict] = []
+    seen: set[tuple[str, float, float, str]] = set()
+    for index in range(arrow.num_rows):
+        text = str(arrow["text"][index].as_py() or "").strip()
+        if not text:
+            continue
+        video_key = str(arrow["video_id"][index].as_py() or "")
+        start = float(arrow["start"][index].as_py() or 0.0)
+        end = float(arrow["end"][index].as_py() or 0.0)
+        key = (video_key, round(start, 3), round(end, 3), text)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "video_id": video_key,
+                "video_path": str(arrow["video_path"][index].as_py() or ""),
+                "library_path": str(arrow["library_path"][index].as_py() or ""),
+                "start": start,
+                "end": end,
+                "text": text,
+                "language": str(arrow["language"][index].as_py() or "").strip(),
+                "asr_source": str(arrow["asr_source"][index].as_py() or "").strip(),
+            }
+        )
+    rows.sort(key=lambda item: (item["video_id"], item["start"], item["end"]))
+    return rows
+
+
+def upsert_profile_dialogue_segments(
+    video_id: str,
+    segments: list[dict],
+    *,
+    library_path: str = "",
+    video_path: str = "",
+    embedding_spec: dict | None = None,
+    config=None,
+    profile_base_dir: str = "",
+) -> dict:
+    """Replace all dialogue_segments rows for one video.
+
+    Each segment dict needs: start, end, text, language, asr_source, vector (1d float array).
+    """
+    from src.storage.config_store import get_local_model_asset_dirs
+
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return {"error": "missing video_id", "segment_rows": 0}
+
+    if profile_base_dir:
+        base_dir = os.path.normpath(profile_base_dir)
+    else:
+        base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+
+    spec = dict(embedding_spec or {})
+    try:
+        dimension = int(spec.get("dimension") or 0)
+    except (TypeError, ValueError):
+        dimension = 0
+    if dimension <= 0 and segments:
+        sample = np.asarray((segments[0] or {}).get("vector"), dtype=np.float32).reshape(-1)
+        dimension = int(sample.shape[0])
+    if dimension <= 0:
+        return {"error": "missing embedding dimension", "segment_rows": 0}
+
+    spec_json = serialize_embedding_spec(spec)
+    lib_path = canonicalize_library_path(library_path) if library_path else ""
+    media_path = os.path.normpath(str(video_path or ""))
+    rows: list[dict] = []
+    for item in segments or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "") or "").strip()
+        if not text:
+            continue
+        embedding = np.asarray(item.get("vector"), dtype=np.float32).reshape(-1)
+        if embedding.size != dimension:
+            raise ValueError(
+                f"Dialogue vector dimension mismatch for {video_id}: "
+                f"expected {dimension}, got {embedding.shape[0]}"
+            )
+        norm = float(np.linalg.norm(embedding))
+        if norm > 0:
+            embedding = embedding / norm
+        rows.append(
+            {
+                "video_id": video_id,
+                "library_path": lib_path,
+                "video_path": media_path,
+                "start": float(item.get("start", 0.0) or 0.0),
+                "end": float(item.get("end", 0.0) or 0.0),
+                "text": text,
+                "language": str(item.get("language", "") or "").strip(),
+                "asr_source": str(item.get("asr_source", "") or "").strip(),
+                "embedding_spec": spec_json,
+                "vector": embedding.astype(np.float32).tolist(),
+            }
+        )
+
+    db = _connect_lance(base_dir)
+    _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
+    if rows:
+        _append_rows_to_table(
+            db,
+            DIALOGUE_SEGMENTS_TABLE_NAME,
+            dialogue_segments_table_schema(dimension),
+            rows,
+        )
+    refresh_import_state(base_dir)
+    _invalidate_lance_search_caches(base_dir)
+    return {"video_id": video_id, "segment_rows": len(rows), "dimension": dimension}
 
 
 def resolve_vector_search_backend(config=None) -> str:

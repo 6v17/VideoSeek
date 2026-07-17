@@ -18,6 +18,8 @@ class AgentSearchRequest(BaseModel):
     query: Optional[str] = None
     preset_id: Optional[str] = None
     query_type: str = "text"
+    # visual (default) | dialogue — orthogonal to mode frame/chunk
+    search_kind: Optional[str] = None
     top_k: Optional[int] = None
     mode: Optional[str] = None
     min_score: Optional[float] = None
@@ -46,6 +48,7 @@ class AgentBatchSearchRequest(BaseModel):
 
     queries: List[AgentSearchRequest] = Field(default_factory=list)
     image_folder: Optional[str] = None
+    search_kind: Optional[str] = None
     top_k: Optional[int] = None
     mode: Optional[str] = None
     min_score: Optional[float] = None

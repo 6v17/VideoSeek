@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
     QTextEdit,
     QTableWidget,
     QTableWidgetItem,
@@ -403,14 +404,19 @@ class SearchPage(QWidget):
         self.query_card = self.search_panel
         self.lbl_active_model = self.search_panel.lbl_active_model
         self.lbl_text_model_hint = self.search_panel.lbl_text_model_hint
+        self.lbl_dialogue_hint = self.search_panel.lbl_dialogue_hint
         self.search_query_tabs = self.search_panel.search_query_tabs
         self.img_label = self.search_panel.img_label
         self.text_search = self.search_panel.text_search
+        self.dialogue_search = self.search_panel.dialogue_search
         self.search_mode = self.search_panel.search_mode
         self.search_mode_label = self.search_panel.search_mode_label
         self.image_search_mode = self.search_panel.image_search_mode
         self.image_search_mode_label = self.search_panel.image_search_mode_label
         self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
+        self.dialogue_search_mode = self.search_panel.dialogue_search_mode
+        self.dialogue_search_mode_label = self.search_panel.dialogue_search_mode_label
+        self.dialogue_search_mode_cluster = self.search_panel.dialogue_search_mode_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
         self.search_granularity_cluster = self.search_panel.text_granularity_cluster
         self.search_mode_options_stack = self.search_panel.search_mode_options_stack
@@ -483,6 +489,43 @@ class SearchPage(QWidget):
         page_body.addWidget(self.results_card, 4)
 
 
+class DialogueLibraryRow(QFrame):
+    """Compact card row for the shared dialogue library list."""
+
+    def __init__(self, title: str, meta: str, badge: str, *, ready: bool = False, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DialogueLibraryRow")
+        self.setProperty("selected", False)
+        self.setMinimumHeight(64)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(4)
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("DialogueLibraryRowTitle")
+        self.title_label.setWordWrap(False)
+        self.meta_label = QLabel(meta)
+        self.meta_label.setObjectName("DialogueLibraryRowMeta")
+        self.meta_label.setWordWrap(False)
+        text_col.addWidget(self.title_label)
+        text_col.addWidget(self.meta_label)
+
+        self.badge_label = QLabel(badge)
+        self.badge_label.setObjectName("DialogueLibraryRowBadge")
+        self.badge_label.setProperty("ready", bool(ready))
+        self.badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addLayout(text_col, 1)
+        layout.addWidget(self.badge_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def set_selected(self, selected: bool):
+        self.setProperty("selected", bool(selected))
+        repolish_widget(self)
+
+
 class LibraryPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -495,9 +538,6 @@ class LibraryPage(QWidget):
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
-        self.toolbar_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
-        toolbar_card_layout = self.toolbar_card.content_layout
-
         def _toolbar_divider():
             divider = QFrame()
             divider.setFrameShape(QFrame.VLine)
@@ -505,6 +545,21 @@ class LibraryPage(QWidget):
             divider.setObjectName("ToolbarDivider")
             return divider
 
+        self.library_tabs = QTabWidget()
+        self.library_tabs.setObjectName("LibraryTabs")
+        self.library_tabs.setDocumentMode(True)
+        self.library_tabs.tabBar().setExpanding(False)
+        self.library_tabs.tabBar().setDrawBase(False)
+        self.library_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
+
+        # --- Tab: visual video library ---
+        self.visual_tab = QWidget()
+        visual_layout = QVBoxLayout(self.visual_tab)
+        visual_layout.setContentsMargins(0, 8, 0, 0)
+        visual_layout.setSpacing(10)
+
+        self.toolbar_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
+        toolbar_card_layout = self.toolbar_card.content_layout
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
         self.btn_add_lib = QPushButton()
@@ -543,14 +598,8 @@ class LibraryPage(QWidget):
         toolbar.addWidget(self.btn_debug_system_oom)
         toolbar.addStretch()
         toolbar.addWidget(self.btn_stop_index)
-
-        self.progress_status = VSProgressStatusRow()
-        self.progress_bar = self.progress_status.progress_bar
-        self.lbl_status = self.progress_status.status_label
-
         toolbar_card_layout.addLayout(toolbar)
-        toolbar_card_layout.addWidget(self.progress_status)
-        page_body.addWidget(self.toolbar_card)
+        visual_layout.addWidget(self.toolbar_card)
 
         self.table_card = VSCard()
         table_layout = self.table_card.content_layout
@@ -592,7 +641,64 @@ class LibraryPage(QWidget):
         table_layout.addWidget(self.table_title)
         table_layout.addWidget(self.library_column_header)
         table_layout.addWidget(self.library_scroll, 1)
-        page_body.addWidget(self.table_card, 1)
+        visual_layout.addWidget(self.table_card, 1)
+
+        # --- Tab: shared dialogue library ---
+        self.dialogue_tab = QWidget()
+        dialogue_layout = QVBoxLayout(self.dialogue_tab)
+        dialogue_layout.setContentsMargins(0, 8, 0, 0)
+        dialogue_layout.setSpacing(10)
+
+        self.dialogue_toolbar_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
+        dialogue_toolbar_layout = self.dialogue_toolbar_card.content_layout
+        dialogue_toolbar = QHBoxLayout()
+        dialogue_toolbar.setSpacing(8)
+        self.btn_build_dialogue_index = QPushButton()
+        self.btn_build_dialogue_index.setObjectName("PrimaryButton")
+        self.btn_reembed_dialogue = QPushButton()
+        self.btn_reembed_dialogue.setObjectName("AccentGhostButton")
+        self.btn_export_dialogue = QPushButton()
+        self.btn_export_dialogue.setObjectName("GhostButton")
+        self.btn_refresh_dialogue_library = QPushButton()
+        self.btn_refresh_dialogue_library.setObjectName("GhostButton")
+        self.btn_stop_dialogue_index = QPushButton()
+        self.btn_stop_dialogue_index.setObjectName("DangerGhostButton")
+        self.btn_stop_dialogue_index.setEnabled(False)
+        self.btn_stop_dialogue_index.setVisible(False)
+        dialogue_toolbar.addWidget(self.btn_build_dialogue_index)
+        dialogue_toolbar.addWidget(self.btn_reembed_dialogue)
+        dialogue_toolbar.addWidget(self.btn_export_dialogue)
+        dialogue_toolbar.addWidget(self.btn_refresh_dialogue_library)
+        dialogue_toolbar.addStretch()
+        dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
+        dialogue_toolbar_layout.addLayout(dialogue_toolbar)
+        self.lbl_dialogue_library_hint = QLabel()
+        self.lbl_dialogue_library_hint.setObjectName("CardHint")
+        self.lbl_dialogue_library_hint.setWordWrap(True)
+        dialogue_toolbar_layout.addWidget(self.lbl_dialogue_library_hint)
+        dialogue_layout.addWidget(self.dialogue_toolbar_card)
+
+        self.dialogue_table_card = VSCard()
+        dialogue_table_layout = self.dialogue_table_card.content_layout
+        self.dialogue_table_title = QLabel()
+        self.dialogue_table_title.setObjectName("CardTitle")
+        self.dialogue_list = QListWidget()
+        self.dialogue_list.setObjectName("DialogueLibraryList")
+        self.dialogue_list.setMinimumHeight(300)
+        self.dialogue_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        dialogue_table_layout.addWidget(self.dialogue_table_title)
+        dialogue_table_layout.addWidget(self.dialogue_list, 1)
+        dialogue_layout.addWidget(self.dialogue_table_card, 1)
+
+        self.library_tabs.addTab(self.visual_tab, "")
+        self.library_tabs.addTab(self.dialogue_tab, "")
+        page_body.addWidget(self.library_tabs, 1)
+
+        # Shared progress row (visual indexing + dialogue jobs)
+        self.progress_status = VSProgressStatusRow()
+        self.progress_bar = self.progress_status.progress_bar
+        self.lbl_status = self.progress_status.status_label
+        page_body.addWidget(self.progress_status)
 
 
 def _understanding_field_label(text=""):

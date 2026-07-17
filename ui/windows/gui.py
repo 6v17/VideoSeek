@@ -151,6 +151,7 @@ class MainWindow(
         self.indexing_controller.runtime_status_changed.connect(self.push_inference_status)
         self.indexing_controller.error_occurred.connect(self._handle_indexing_error)
         self.indexing_controller.finished.connect(self._finish_indexing)
+        self.dialogue_index_worker = None
         self.understanding_controller = UnderstandingController(self)
         self.understanding_controller.status_changed.connect(self._update_understanding_progress)
         self.understanding_controller.error_occurred.connect(self._handle_understanding_error)
@@ -274,6 +275,10 @@ class MainWindow(
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
         self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
+        if hasattr(self.search_page, "dialogue_search_mode"):
+            self.search_page.dialogue_search_mode.currentIndexChanged.connect(
+                self._on_dialogue_search_mode_changed
+            )
         self.search_page.text_search.textChanged.connect(self._refresh_search_panel_state)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
@@ -290,7 +295,13 @@ class MainWindow(
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
+        self.library_page.btn_build_dialogue_index.clicked.connect(self.start_dialogue_index)
+        self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
+        self.library_page.btn_refresh_dialogue_library.clicked.connect(self.refresh_dialogue_library_table)
+        self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
+        self.library_page.btn_stop_dialogue_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
+        self.library_page.library_tabs.currentChanged.connect(self._on_library_tab_changed)
         self.library_page.btn_index_issues.clicked.connect(self.show_last_index_issue_details)
         self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
         self.library_page.btn_vector_details.clicked.connect(self.show_local_vector_details)
@@ -475,10 +486,41 @@ class MainWindow(
 
         self.library_page.header.title.setText(t["library_page_title"])
         self.library_page.header.subtitle.setText(t["library_page_desc"])
+        self.library_page.library_tabs.setTabText(0, t.get("library_tab_visual", "Videos"))
+        self.library_page.library_tabs.setTabText(1, t.get("library_tab_dialogue", "Dialogue"))
         self.library_page.table_title.setText(t["library_table_title"])
+        self.library_page.dialogue_table_title.setText(
+            t.get("dialogue_library_table_title", "Extracted dialogue")
+        )
+        self.library_page.lbl_dialogue_library_hint.setText(
+            t.get(
+                "dialogue_library_hint",
+                "Dialogue text is shared across search models. After switching models, re-embed vectors — no ASR again.",
+            )
+        )
         self.library_page.btn_add_lib.setText(t["add_folder"])
         self.library_page.btn_sync_db.setText(t["update_index"])
+        self.library_page.btn_build_dialogue_index.setText(t.get("build_dialogue_index", "Build dialogue index"))
+        self.library_page.btn_build_dialogue_index.setToolTip(
+            t.get("build_dialogue_index_hint", "")
+        )
+        self.library_page.btn_reembed_dialogue.setText(
+            t.get("reembed_dialogue_index", "Re-embed dialogue vectors")
+        )
+        self.library_page.btn_reembed_dialogue.setToolTip(
+            t.get("reembed_dialogue_index_hint", "")
+        )
+        self.library_page.btn_export_dialogue.setText(
+            t.get("export_dialogue_library", "Export dialogue")
+        )
+        self.library_page.btn_export_dialogue.setToolTip(
+            t.get("export_dialogue_library_hint", "")
+        )
+        self.library_page.btn_refresh_dialogue_library.setText(
+            t.get("refresh_dialogue_library", "Refresh")
+        )
         self.library_page.btn_stop_index.setText(t["stop"])
+        self.library_page.btn_stop_dialogue_index.setText(t["stop"])
         self.library_page.btn_index_issues.setText(t["index_issues_button"])
         self.library_page.btn_cleanup_missing.setText(t["cleanup_missing_vectors"])
         self.library_page.btn_vector_details.setText(t["library_vectors_detail"])
@@ -728,6 +770,16 @@ class MainWindow(
             self._start_compose_search()
             return
 
+        if active_tab == self.SEARCH_TAB_DIALOGUE:
+            dialogue_query = self.search_page.search_panel.dialogue_query()
+            if not dialogue_query:
+                self.search_page.lbl_status.setText(
+                    self.texts.get("search_empty_dialogue", self.texts["empty_query"])
+                )
+                return
+            self._run_dialogue_search(dialogue_query)
+            return
+
         text_query = self.search_page.search_panel.text_query()
         if active_tab == self.SEARCH_TAB_TEXT:
             if not text_query:
@@ -783,6 +835,37 @@ class MainWindow(
                 search_precision_mode=search_precision_mode,
             ),
             search_precision_mode=search_precision_mode,
+        )
+        return True
+
+    def _run_dialogue_search(self, raw_query, *, sync_ui=True):
+        query = str(raw_query or "").strip()
+        if not query:
+            self.search_page.lbl_status.setText(
+                self.texts.get("search_empty_dialogue", self.texts["empty_query"])
+            )
+            return False
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+        if sync_ui:
+            self.switch_page("search")
+            self._set_search_query_tab(self.SEARCH_TAB_DIALOGUE)
+            self.search_page.search_panel.set_dialogue_query(query)
+
+        from src.services.search_scope import resolve_default_active_search_scope
+
+        scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
+        match_mode = "segment"
+        if hasattr(self, "_dialogue_match_mode_from_ui"):
+            match_mode = self._dialogue_match_mode_from_ui()
+        self.search_controller.start_search(
+            query,
+            True,
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            search_kind="dialogue",
+            search_mode=match_mode,
         )
         return True
 
@@ -1151,6 +1234,7 @@ class MainWindow(
     def clear_all_content(self):
         self.current_img_path = None
         self.search_page.search_panel.clear_text_query()
+        self.search_page.search_panel.clear_dialogue_query()
         self.search_page.search_panel.compose_form.clear()
         self.search_page.img_label.clear()
         self.search_page.img_label.setText(self.texts["image_drop_hint"])

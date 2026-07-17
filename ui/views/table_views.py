@@ -142,6 +142,9 @@ def populate_result_table(
         )
         table.insertRow(row)
 
+        match_kind = str(getattr(hit, "match_kind", "frame") or "frame")
+        matched_text = str(getattr(hit, "matched_text", "") or "").strip()
+
         order_item = QTableWidgetItem(str(rank_offset + row + 1))
         order_item.setTextAlignment(Qt.AlignCenter)
         order_item.setData(
@@ -151,24 +154,35 @@ def populate_result_table(
                 "start_sec": float(start_sec),
                 "end_sec": float(end_sec),
                 "score": float(score),
-                "match_kind": str(getattr(hit, "match_kind", "frame") or "frame"),
+                "match_kind": match_kind,
+                "matched_text": matched_text,
             },
         )
         table.setItem(row, LocalSearchCol.ORDER, order_item)
 
         table.setCellWidget(row, LocalSearchCol.PREVIEW, make_thumb_label(text=texts["thumb_loading"]))
 
-        name_item = QTableWidgetItem(os.path.basename(video_path))
+        base_name = os.path.basename(video_path)
+        if match_kind == "dialogue" and matched_text:
+            snippet = matched_text if len(matched_text) <= 40 else f"{matched_text[:39]}…"
+            name_item = QTableWidgetItem(f"{base_name}\n{snippet}")
+            name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+        else:
+            name_item = QTableWidgetItem(base_name)
+            name_item.setToolTip(video_path)
         name_item.setTextAlignment(Qt.AlignCenter)
-        name_item.setToolTip(video_path)
         table.setItem(row, LocalSearchCol.VIDEO, name_item)
 
-        time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=getattr(hit, "match_kind", "frame")))
+        time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=match_kind))
         time_item.setTextAlignment(Qt.AlignCenter)
+        if match_kind == "dialogue" and matched_text:
+            time_item.setToolTip(matched_text)
         table.setItem(row, LocalSearchCol.RANGE, time_item)
 
-        mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts, match_kind=getattr(hit, "match_kind", "frame")))
+        mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts, match_kind=match_kind))
         mode_item.setTextAlignment(Qt.AlignCenter)
+        if match_kind == "dialogue" and matched_text:
+            mode_item.setToolTip(matched_text)
         table.setItem(row, LocalSearchCol.MODE, mode_item)
 
         low_confidence = (
@@ -195,7 +209,7 @@ def populate_result_table(
                 on_locate,
                 on_export,
                 texts,
-                match_kind=getattr(hit, "match_kind", "frame"),
+                match_kind=match_kind,
                 on_deep_locate=on_deep_locate,
                 on_add_to_shot_list=on_add_to_shot_list,
                 anchor_score=float(score),
@@ -431,6 +445,8 @@ def _format_time_range(start_sec, end_sec, texts=None, match_kind="frame"):
 def _result_mode_label(start_sec, end_sec, texts, match_kind="frame"):
     if str(match_kind or "") == "video":
         return texts.get("result_mode_video", texts["result_mode_frame"])
+    if str(match_kind or "") == "dialogue":
+        return texts.get("result_mode_dialogue", texts.get("search_tab_dialogue", "Dialogue"))
     if abs(float(end_sec) - float(start_sec)) < 1e-3:
         return texts["result_mode_frame"]
     return texts["result_mode_chunk"]

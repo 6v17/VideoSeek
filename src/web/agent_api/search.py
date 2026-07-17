@@ -23,7 +23,7 @@ from src.services.search_scope import (
     resolve_fetch_top_k,
     scope_request_is_explicit,
 )
-from src.services.search_service import run_chunk_search, run_search
+from src.services.search_service import run_chunk_search, run_dialogue_search, run_search
 from src.storage.config_store import get_search_mode, get_search_scope_mode, get_search_top_k
 
 from .constants import (
@@ -281,6 +281,16 @@ def _expand_clip_window(
     }
 
 
+def _normalize_search_kind(value: Optional[str]) -> str:
+    kind = str(value or "").strip().lower()
+    if kind in {"", "visual", "auto", "image", "text", "compose"}:
+        # image/text/compose stay on visual CLIP path; Agent uses query_type for those.
+        return "visual"
+    if kind == "dialogue":
+        return "dialogue"
+    raise ValueError(f"Unsupported search_kind: {value!r}. Use visual or dialogue.")
+
+
 def _enrich_hit_payload(
     hit: SearchHit,
     *,
@@ -311,6 +321,7 @@ def _enrich_hit_payload(
         "duration_sec": max(0.0, end_sec - start_sec),
         "start_timecode": _format_timecode(start_sec),
         "end_timecode": _format_timecode(end_sec),
+        "match_kind": str(getattr(hit, "match_kind", "") or mode or "frame"),
         "clip_window": {
             "start_sec": start_sec,
             "end_sec": end_sec,
@@ -319,6 +330,12 @@ def _enrich_hit_payload(
             "raw_end_sec": float(window["raw_end_sec"]),
         },
     }
+    matched_text = str(getattr(hit, "matched_text", "") or "").strip()
+    if matched_text:
+        payload["matched_text"] = matched_text
+    video_id = str(getattr(hit, "video_id", "") or "").strip()
+    if video_id:
+        payload["video_id"] = video_id
     if duration is not None:
         payload["video_duration_sec"] = duration
     return payload
@@ -533,6 +550,10 @@ def get_agent_search_telemetry(*, locale: str = "zh", config=None) -> Dict[str, 
 
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     config = load_config()
+    search_kind = _normalize_search_kind(body.search_kind)
+    if search_kind == "dialogue":
+        return _execute_agent_dialogue_search(body, config=config)
+
     resolved = _resolve_agent_search_inputs(body, config=config)
     preview_anchor_sec = _resolve_preview_anchor_sec(body, resolved)
     if preview_anchor_sec is not None:
@@ -588,6 +609,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
         "ok": True,
         "query": resolved["query_label"],
         "query_type": resolved["query_type"],
+        "search_kind": "visual",
         "mode": mode,
         "client_request_id": body.client_request_id,
         "hits": _hits_to_payload(
@@ -619,11 +641,79 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     return response
 
 
+def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> Dict[str, Any]:
+    from src.storage.lance_dialogue_search import get_dialogue_index_stats
+
+    cfg = config or load_config()
+    query = str(body.query or "").strip()
+    if not query:
+        raise ValueError("dialogue search requires a non-empty text query")
+    query_type = str(body.query_type or "text").strip().lower() or "text"
+    if query_type not in {"text", ""}:
+        raise ValueError("dialogue search only supports query_type=text")
+
+    top_k = _clamp_top_k(body.top_k)
+    scope_video_paths, scope_library_paths = _resolve_agent_search_scope(body, config=cfg)
+    fetch_k = _resolve_fetch_top_k_for_paths(
+        top_k,
+        scope_video_paths,
+        scope_library_paths,
+        config=cfg,
+    )
+    dialogue_stats = get_dialogue_index_stats(config=cfg)
+
+    with _search_semaphore:
+        hits, message, matched_by = run_dialogue_search(
+            query,
+            top_k=top_k,
+            scope_video_paths=scope_video_paths,
+            scope_library_paths=scope_library_paths,
+            min_score=body.min_score,
+            config=cfg,
+            match_mode="auto",
+        )
+
+    scope_meta = _build_scope_meta(
+        _scope_from_resolved_paths(scope_video_paths, scope_library_paths),
+        config=cfg,
+    )
+    response = {
+        "api_version": API_VERSION,
+        "ok": True,
+        "query": query,
+        "query_type": "text",
+        "search_kind": "dialogue",
+        "mode": "dialogue",
+        "client_request_id": body.client_request_id,
+        "hits": _hits_to_payload(
+            hits,
+            mode="dialogue",
+            expand_frame_hits=False,
+            pad_before_sec=0.0,
+            pad_after_sec=0.0,
+        ),
+        "meta": {
+            "returned": len(hits),
+            "top_k": top_k,
+            "fetch_top_k": fetch_k,
+            "dialogue_index_ready": bool(dialogue_stats.get("dialogue_index_ready")),
+            "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
+            "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
+            "dialogue_matched_by": matched_by,
+            **scope_meta,
+        },
+    }
+    if message:
+        response["message"] = message
+    return response
+
+
 def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchRequest) -> AgentSearchRequest:
     return AgentSearchRequest(
         query=item.query,
         preset_id=item.preset_id,
         query_type=item.query_type,
+        search_kind=item.search_kind if item.search_kind is not None else batch.search_kind,
         top_k=item.top_k if item.top_k is not None else batch.top_k,
         mode=item.mode if item.mode is not None else batch.mode,
         min_score=item.min_score if item.min_score is not None else batch.min_score,

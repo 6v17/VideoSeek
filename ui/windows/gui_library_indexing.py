@@ -99,6 +99,364 @@ class LibraryIndexingGuiMixin:
             rebuild_global_assets=rebuild_global_assets,
         )
 
+    def start_dialogue_index(self):
+        self._start_dialogue_index_job(mode="auto")
+
+    def start_dialogue_reembed(self):
+        # Force OCR rebuild (button label: re-extract subtitles).
+        self._start_dialogue_index_job(mode="ocr")
+
+    def _on_library_tab_changed(self, index: int):
+        if int(index) == 1:
+            self.refresh_dialogue_library_table()
+
+    def refresh_dialogue_library_table(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QListWidgetItem
+
+        from src.services.dialogue_index_service import list_shared_dialogue_library
+        from ui.widgets.components import DialogueLibraryRow
+
+        list_widget = self.library_page.dialogue_list
+        if not getattr(self, "_dialogue_library_selection_hooked", False):
+            list_widget.itemSelectionChanged.connect(self._sync_dialogue_library_row_selection)
+            self._dialogue_library_selection_hooked = True
+        list_widget.clear()
+        try:
+            rows = list_shared_dialogue_library()
+        except Exception as exc:
+            list_widget.addItem(str(exc))
+            return
+        if not rows:
+            list_widget.addItem(
+                self.texts.get("dialogue_library_empty", "No shared dialogue yet.")
+            )
+            return
+        for item in rows:
+            name = os.path.basename(str(item.get("video_path") or "")) or str(item.get("video_id") or "")
+            vector_ok = bool(item.get("has_current_vectors"))
+            vector_label = self.texts.get(
+                "dialogue_library_vector_yes" if vector_ok else "dialogue_library_vector_no",
+                "yes" if vector_ok else "no",
+            )
+            meta = self.texts.get(
+                "dialogue_library_row_meta",
+                "{segments} lines",
+            ).format(segments=int(item.get("segment_count") or 0))
+            row_item = QListWidgetItem()
+            row_item.setData(Qt.ItemDataRole.UserRole, str(item.get("video_id") or ""))
+            row_widget = DialogueLibraryRow(name, meta, vector_label, ready=vector_ok)
+            row_item.setSizeHint(row_widget.sizeHint())
+            list_widget.addItem(row_item)
+            list_widget.setItemWidget(row_item, row_widget)
+        self._sync_dialogue_library_row_selection()
+
+    def _sync_dialogue_library_row_selection(self):
+        from ui.widgets.components import DialogueLibraryRow
+
+        list_widget = self.library_page.dialogue_list
+        for index in range(list_widget.count()):
+            item = list_widget.item(index)
+            if item is None:
+                continue
+            widget = list_widget.itemWidget(item)
+            if isinstance(widget, DialogueLibraryRow):
+                widget.set_selected(bool(item.isSelected()))
+
+    def export_dialogue_library(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+        from src.services.dialogue_export_service import export_dialogue_transcripts
+        from src.storage.dialogue_transcript_store import list_dialogue_transcript_records
+
+        title = self.texts.get("export_dialogue_library_title", "Export dialogue")
+        records = list_dialogue_transcript_records()
+        if not records:
+            self.show_info_dialog(
+                title,
+                self.texts.get("export_dialogue_library_empty", "No shared dialogue to export."),
+                kind="info",
+            )
+            return
+
+        selected_ids: list[str] = []
+        for item in self.library_page.dialogue_list.selectedItems():
+            video_id = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            if video_id:
+                selected_ids.append(video_id)
+
+        format_labels = [
+            self.texts.get("export_dialogue_format_srt", "SRT (.srt)"),
+            self.texts.get("export_dialogue_format_txt", "TXT (.txt)"),
+            self.texts.get("export_dialogue_format_json", "JSON (.json)"),
+        ]
+        format_keys = ["srt", "txt", "json"]
+        chosen, ok = QInputDialog.getItem(
+            self,
+            title,
+            self.texts.get("export_dialogue_library_pick_format", "Choose export format"),
+            format_labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        try:
+            fmt = format_keys[format_labels.index(chosen)]
+        except ValueError:
+            fmt = "srt"
+
+        out_dir = QFileDialog.getExistingDirectory(
+            self,
+            self.texts.get("export_dialogue_library_pick_dir", "Choose export folder"),
+        )
+        if not out_dir:
+            return
+
+        result = export_dialogue_transcripts(
+            out_dir,
+            format=fmt,
+            video_ids=selected_ids or None,
+        )
+        if not result.get("ok") and int(result.get("exported") or 0) <= 0:
+            self.show_error_dialog(
+                self.texts.get("export_dialogue_library_failed", "Dialogue export failed"),
+                str(result.get("error") or "export failed"),
+            )
+            return
+        self.show_info_dialog(
+            self.texts.get("success_title", "Success"),
+            self.texts.get(
+                "export_dialogue_library_done",
+                "Exported {count} file(s) to:\n{path}",
+            ).format(count=int(result.get("exported") or 0), path=result.get("output_dir") or out_dir),
+            kind="success",
+        )
+        self.library_page.lbl_status.setText(
+            self.texts.get(
+                "export_dialogue_library_done",
+                "Exported {count} file(s).",
+            ).format(count=int(result.get("exported") or 0), path=result.get("output_dir") or out_dir)
+        )
+
+    def _format_dialogue_stage(self, stage_token: str) -> str:
+        token = str(stage_token or "").strip()
+        if not token:
+            return ""
+        head = token.split("|", 1)[0]
+        detail = ""
+        if token.startswith("dialogue_embed|"):
+            parts = token.split("|")
+            if len(parts) >= 3:
+                detail = f"{parts[1]}/{parts[2]}"
+            head = "dialogue_embed"
+        mapping = {
+            "dialogue_extract": "dialogue_stage_extract",
+            "dialogue_asr": "dialogue_stage_asr",
+            "dialogue_merge": "dialogue_stage_merge",
+            "dialogue_save_transcript": "dialogue_stage_save_transcript",
+            "dialogue_reuse_transcripts": "dialogue_stage_reuse",
+            "dialogue_embed": "dialogue_stage_embed",
+            "dialogue_upsert": "dialogue_stage_upsert",
+            "dialogue_done": "dialogue_stage_done",
+            "dialogue_index_done": "dialogue_stage_done",
+            "subtitle_extract_audio": "dialogue_stage_extract",
+            "subtitle_probe": "dialogue_stage_extract",
+            "subtitle_vad": "dialogue_stage_asr",
+            "subtitle_ocr": "dialogue_stage_asr",
+            "subtitle_merge": "dialogue_stage_merge",
+            "subtitle_reuse": "dialogue_stage_reuse",
+            "subtitle_done": "dialogue_stage_done",
+        }
+        if head.startswith("subtitle_ocr"):
+            head = "subtitle_ocr"
+        key = mapping.get(head, "")
+        if not key:
+            return token
+        template = self.texts.get(key, token)
+        try:
+            return template.format(detail=detail)
+        except Exception:
+            return template
+
+    def _start_dialogue_index_job(self, *, mode: str = "auto"):
+        if not self._ensure_startup_migration_idle("feature_indexing"):
+            return
+        if self.indexing_controller.is_running() or self._dialogue_index_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+        if not self.check_runtime_resources():
+            self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
+
+        from src.services.dialogue_index_service import (
+            ensure_dialogue_asr_ready,
+            list_dialogue_index_targets,
+            list_dialogue_reembed_targets,
+        )
+        from src.storage.dialogue_transcript_store import (
+            ensure_shared_transcripts,
+            list_dialogue_transcript_records,
+        )
+
+        self.library_page.library_tabs.setCurrentIndex(1)
+        mode_value = str(mode or "auto").strip().lower() or "auto"
+        reembed = mode_value == "reembed"
+        title_key = "reembed_dialogue_index" if reembed else "build_dialogue_index"
+        title = self.texts.get(title_key, title_key)
+
+        if reembed:
+            targets = list_dialogue_reembed_targets()
+            if not targets:
+                self.show_info_dialog(
+                    title,
+                    self.texts.get(
+                        "reembed_dialogue_index_no_targets",
+                        "No dialogue transcripts to re-embed.",
+                    ),
+                    kind="info",
+                )
+                return
+            confirm = self.texts.get(
+                "reembed_dialogue_index_confirm",
+                "Re-embed dialogue vectors for {count} videos?",
+            ).format(count=len(targets))
+            running = self.texts.get(
+                "reembed_dialogue_index_running",
+                "Re-embedding dialogue vectors...",
+            )
+        else:
+            targets = list_dialogue_index_targets()
+            if not targets:
+                self.show_info_dialog(
+                    title,
+                    self.texts.get("build_dialogue_index_no_targets", "No ready videos to index."),
+                    kind="info",
+                )
+                return
+            ensure_shared_transcripts()
+            existing_ids = {
+                str(row.get("video_id") or "").strip()
+                for row in list_dialogue_transcript_records()
+            }
+            needs_asr = any(
+                str((item or {}).get("video_id") or "").strip() not in existing_ids for item in targets
+            )
+            if needs_asr:
+                asr_ready, asr_error = ensure_dialogue_asr_ready()
+                if not asr_ready:
+                    self.show_info_dialog(
+                        title,
+                        self.texts.get(
+                            "build_dialogue_index_missing_asr",
+                            "Import RapidOCR first (Understanding / Settings → Import Model).",
+                        )
+                        + (f"\n\n{asr_error}" if asr_error else ""),
+                        kind="warning",
+                    )
+                    return
+            confirm = self.texts.get(
+                "build_dialogue_index_confirm",
+                "Build dialogue index for {count} videos?",
+            ).format(count=len(targets))
+            running = self.texts.get("build_dialogue_index_running", "Building dialogue index...")
+
+        if not self.show_confirm_dialog(self.texts["confirm_title"], confirm, kind="info"):
+            return
+
+        from ui.workers import DialogueIndexWorker
+
+        self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_build_dialogue_index.setEnabled(False)
+        self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_export_dialogue.setEnabled(False)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self.library_page.btn_stop_dialogue_index.setEnabled(True)
+        self.library_page.btn_stop_dialogue_index.setVisible(True)
+        self.library_page.progress_bar.setVisible(True)
+        self.library_page.progress_bar.setValue(0)
+        self.library_page.lbl_status.setText(running)
+        self._dialogue_index_ui_mode = mode_value
+
+        worker = DialogueIndexWorker(targets=targets, mode=mode_value)
+        self.dialogue_index_worker = worker
+        worker.progress_signal.connect(self._update_dialogue_index_progress)
+        worker.error_signal.connect(self._handle_dialogue_index_error)
+        worker.finished_signal.connect(self._finish_dialogue_index)
+        worker.start()
+
+    def _dialogue_index_running(self) -> bool:
+        worker = getattr(self, "dialogue_index_worker", None)
+        return bool(worker is not None and worker.isRunning())
+
+    def _update_dialogue_index_progress(self, value, text):
+        self.library_page.progress_bar.setValue(int(value))
+        raw = str(text or "")
+        reembed = str(getattr(self, "_dialogue_index_ui_mode", "") or "") == "reembed"
+        if raw.startswith("dialogue_index|"):
+            parts = raw.split("|")
+            if len(parts) >= 3:
+                stage_token = "|".join(parts[3:]) if len(parts) > 3 else ""
+                stage = self._format_dialogue_stage(stage_token) or stage_token or "…"
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "build_dialogue_index_progress",
+                        "Dialogue {current}/{total}: {stage}",
+                    ).format(current=parts[1], total=parts[2], stage=stage)
+                )
+                return
+        self.library_page.lbl_status.setText(
+            self.texts.get(
+                "reembed_dialogue_index_running" if reembed else "build_dialogue_index_running",
+                "Building dialogue index...",
+            )
+        )
+
+    def _handle_dialogue_index_error(self, message):
+        self.show_error_dialog(
+            self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+            message,
+        )
+
+    def _finish_dialogue_index(self, success, stopped, summary):
+        self.dialogue_index_worker = None
+        self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_build_dialogue_index.setEnabled(True)
+        self.library_page.btn_reembed_dialogue.setEnabled(True)
+        self.library_page.btn_export_dialogue.setEnabled(True)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+        self.library_page.btn_add_lib.setEnabled(True)
+        self.library_page.btn_cleanup_missing.setEnabled(True)
+        self.library_page.btn_stop_dialogue_index.setEnabled(False)
+        self.library_page.btn_stop_dialogue_index.setVisible(False)
+        self.library_page.progress_bar.setVisible(False)
+        payload = dict(summary or {})
+        reembed = str(payload.get("mode") or getattr(self, "_dialogue_index_ui_mode", "") or "") == "reembed"
+        self._dialogue_index_ui_mode = ""
+        if stopped:
+            status = self.texts.get("build_dialogue_index_stopped", "Dialogue index stopped.")
+        elif success:
+            done_key = "reembed_dialogue_index_done" if reembed else "build_dialogue_index_done"
+            status = self.texts.get(
+                done_key,
+                "Dialogue index done: {ok} ok, {failed} failed, {segments} segments.",
+            ).format(
+                ok=int(payload.get("ok", 0) or 0),
+                failed=int(payload.get("failed", 0) or 0),
+                segments=int(payload.get("segment_rows", 0) or 0),
+                reused=int(payload.get("reused", 0) or 0),
+            )
+        else:
+            status = self.texts.get("build_dialogue_index_failed", "Dialogue index failed")
+        self.library_page.lbl_status.setText(status)
+        self.refresh_library_table()
+        self.refresh_dialogue_library_table()
+        if hasattr(self, "_sync_tray_stop_action"):
+            self._sync_tray_stop_action()
+
     def start_debug_gpu_oom(self):
         self._start_index_update(debug_failure="gpu_oom")
 
@@ -223,9 +581,13 @@ class LibraryIndexingGuiMixin:
                 self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
                 return
             self.switch_page("library")
-            if self.indexing_controller.is_running():
+            if self.indexing_controller.is_running() or self._dialogue_index_running():
+                self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
                 return
             self.library_page.btn_sync_db.setEnabled(False)
+            self.library_page.btn_build_dialogue_index.setEnabled(False)
+            self.library_page.btn_reembed_dialogue.setEnabled(False)
+            self.library_page.btn_export_dialogue.setEnabled(False)
             self.library_page.btn_stop_index.setEnabled(True)
             self.library_page.btn_stop_index.setVisible(True)
             self.library_page.btn_add_lib.setEnabled(False)
@@ -237,6 +599,8 @@ class LibraryIndexingGuiMixin:
             self.library_page.progress_bar.setVisible(True)
             self._last_index_issues = []
             self._last_index_issue_target = target_lib
+            self._indexing_progress_file_index = 0
+            self._indexing_progress_ui_at = 0.0
             self.refresh_library_table()
             start_kwargs = {
                 "target_lib": target_lib,
@@ -258,6 +622,13 @@ class LibraryIndexingGuiMixin:
             self.show_error_dialog(self.texts["index_start_failed"], exc)
 
     def stop_update_index(self):
+        if self._dialogue_index_running():
+            worker = getattr(self, "dialogue_index_worker", None)
+            if worker is not None and hasattr(worker, "stop"):
+                worker.stop()
+                self.library_page.lbl_status.setText(self.texts["index_stop_requested"])
+                self.library_page.btn_stop_index.setEnabled(False)
+            return
         if not self.indexing_controller.is_running():
             return
         if self.indexing_controller.request_stop():
@@ -265,19 +636,38 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_stop_index.setEnabled(False)
 
     def _update_indexing_progress(self, value, text):
-        if hasattr(self, "_sync_tray_stop_action"):
-            self._sync_tray_stop_action()
-        self.library_page.progress_bar.setValue(value)
-        self.library_page.lbl_status.setText(format_progress_text(text, self.texts))
+        from src.app.indexing_progress import parse_progress_token
+
         now = time.monotonic()
-        last_refresh = float(getattr(self, "_library_table_progress_refresh_at", 0.0) or 0.0)
-        if now - last_refresh >= 0.6:
-            self._library_table_progress_refresh_at = now
+        raw = str(text or "")
+        payload = parse_progress_token(raw) or {}
+        file_index = int(payload.get("file_index") or 0)
+        stage = str(payload.get("stage") or "").strip().lower()
+        last_file = int(getattr(self, "_indexing_progress_file_index", 0) or 0)
+        file_changed = bool(file_index and file_index != last_file)
+        if file_changed:
+            self._indexing_progress_file_index = file_index
+
+        # Full library rebuild is expensive (destroy/recreate cards + reload meta).
+        # Only do it when the active video changes — not on every decode tick.
+        if file_changed or stage == "file":
             self.refresh_library_table()
+            if hasattr(self, "_sync_tray_stop_action"):
+                self._sync_tray_stop_action()
+
+        last_ui = float(getattr(self, "_indexing_progress_ui_at", 0.0) or 0.0)
+        if not file_changed and now - last_ui < 0.2:
+            return
+        self._indexing_progress_ui_at = now
+        self.library_page.progress_bar.setValue(int(value))
+        self.library_page.lbl_status.setText(format_progress_text(raw, self.texts))
 
     def _finish_indexing(self, success, target_lib, stopped=False, has_search_assets=False, issues=None, rebuild_global_assets=True):
         self.ui_state.set_indexing_running(False)
         self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_build_dialogue_index.setEnabled(True)
+        self.library_page.btn_reembed_dialogue.setEnabled(True)
+        self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.btn_stop_index.setEnabled(False)
         self.library_page.btn_stop_index.setVisible(False)
         self.library_page.btn_add_lib.setEnabled(True)

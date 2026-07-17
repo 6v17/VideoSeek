@@ -65,6 +65,7 @@ class SearchPanel(VSCard):
     TAB_IMAGE = 0
     TAB_TEXT = 1
     TAB_COMPOSE = 2
+    TAB_DIALOGUE = 3
 
     def __init__(self, parent=None):
         card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 12))
@@ -115,6 +116,16 @@ class SearchPanel(VSCard):
         self.lbl_text_model_hint.setObjectName("StatusHint")
         self.lbl_text_model_hint.setWordWrap(True)
 
+        self.dialogue_search = QTextEdit()
+        self.dialogue_search.setObjectName("SearchInput")
+        self.dialogue_search.setMinimumHeight(68)
+        self.dialogue_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.dialogue_search.setAcceptRichText(False)
+
+        self.lbl_dialogue_hint = QLabel()
+        self.lbl_dialogue_hint.setObjectName("StatusHint")
+        self.lbl_dialogue_hint.setWordWrap(True)
+
         mode_combo_width = max(combo_width, int(COMPONENT_SIZES.get("search_image_mode_combo_width", 108)))
         mode_cluster_width = field_label_width + field_gap + mode_combo_width
         options_row_height = int(COMPONENT_SIZES.get("search_image_options_row_height", 28))
@@ -163,10 +174,28 @@ class SearchPanel(VSCard):
         self.search_mode_options_stack.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         )
+        self.dialogue_search_mode_label = QLabel()
+        self.dialogue_search_mode_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.dialogue_search_mode_label)
+        self.dialogue_search_mode = QComboBox()
+        self.dialogue_search_mode.setObjectName("SearchModeSelect")
+        self.dialogue_search_mode.setFixedWidth(mode_combo_width)
+        self.dialogue_search_mode.setSizePolicy(combo_policy)
+        self.dialogue_search_mode_cluster = QWidget()
+        dialogue_mode_row = QHBoxLayout(self.dialogue_search_mode_cluster)
+        dialogue_mode_row.setContentsMargins(0, 0, 0, 0)
+        dialogue_mode_row.setSpacing(field_gap)
+        dialogue_mode_row.addWidget(self.dialogue_search_mode_label, 0)
+        dialogue_mode_row.addWidget(self.dialogue_search_mode, 0)
+        dialogue_mode_row.addStretch(1)
+        _configure_field_group(self.dialogue_search_mode_cluster, width=mode_cluster_width)
+        self.dialogue_search_mode_cluster.setFixedHeight(options_row_height)
+
         self.search_mode_options_stack.addWidget(self.text_granularity_cluster)
         self.search_mode_options_stack.addWidget(self.image_search_mode_cluster)
         self.search_mode_options_placeholder = QWidget()
         self.search_mode_options_stack.addWidget(self.search_mode_options_placeholder)
+        self.search_mode_options_stack.addWidget(self.dialogue_search_mode_cluster)
 
         tab_page_height = int(COMPONENT_SIZES["image_drop_min_height"]) + int(
             COMPONENT_SIZES.get("search_query_tab_page_margins_v", 12)
@@ -196,6 +225,14 @@ class SearchPanel(VSCard):
         compose_tab_layout.setSpacing(0)
         compose_tab_layout.addWidget(self.compose_form, 1)
 
+        self.dialogue_tab = QWidget()
+        self.dialogue_tab.setFixedHeight(tab_page_height)
+        dialogue_tab_layout = QVBoxLayout(self.dialogue_tab)
+        dialogue_tab_layout.setContentsMargins(4, 8, 4, 4)
+        dialogue_tab_layout.setSpacing(8)
+        dialogue_tab_layout.addWidget(self.dialogue_search, 1)
+        dialogue_tab_layout.addWidget(self.lbl_dialogue_hint, 0, Qt.AlignmentFlag.AlignTop)
+
         self.search_query_tabs = QTabWidget()
         self.search_query_tabs.setObjectName("SearchQueryTabs")
         self.search_query_tabs.setFixedHeight(compute_search_query_tabs_height())
@@ -203,6 +240,7 @@ class SearchPanel(VSCard):
         self.search_query_tabs.addTab(self.image_tab, "")
         self.search_query_tabs.addTab(self.text_tab, "")
         self.search_query_tabs.addTab(self.compose_tab, "")
+        self.search_query_tabs.addTab(self.dialogue_tab, "")
 
         self.search_scope_label = QLabel()
         self.search_scope_label.setObjectName("InlineFieldLabel")
@@ -289,3 +327,12 @@ class SearchPanel(VSCard):
 
     def clear_text_query(self) -> None:
         self.text_search.clear()
+
+    def dialogue_query(self) -> str:
+        return self.dialogue_search.toPlainText().strip()
+
+    def set_dialogue_query(self, text: str) -> None:
+        self.dialogue_search.setPlainText(str(text or ""))
+
+    def clear_dialogue_query(self) -> None:
+        self.dialogue_search.clear()
