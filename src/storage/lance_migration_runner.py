@@ -94,8 +94,10 @@ def cleanup_legacy_vector_files_for_profile(profile_base_dir: str) -> int:
 
 
 def _mark_profile_search_index_ready(profile_base_dir: str) -> None:
+    from src.storage.profile_library_store import get_library_db_path
+
     meta_file = os.path.join(profile_base_dir, "meta.json")
-    if not os.path.isfile(meta_file):
+    if not os.path.isfile(meta_file) and not os.path.isfile(get_library_db_path(profile_base_dir)):
         return
     meta = load_metadata(meta_file)
     if not isinstance(meta, dict):

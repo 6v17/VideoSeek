@@ -18,6 +18,7 @@ from src.services.search_scope import (
     is_search_scoped,
     resolve_fetch_top_k,
     resolve_per_video_fetch_top_k,
+    resolve_scope_video_ids,
 )
 from src.services.image_search_rerank import apply_image_pixel_rerank, is_likely_cropped_query_image
 from src.services.search_profiling import (
@@ -821,15 +822,15 @@ def run_dialogue_search(
     min_score=None,
     config=None,
     query_vector=None,
-    match_mode: str = "segment",
+    match_mode: str = "exact",
 ) -> tuple[List[SearchHit], str, str]:
     """Dialogue search over Lance ``dialogue_segments``.
 
-    ``match_mode``: ``segment`` (ASR substring), ``semantic`` (CLIP text), or
-    ``auto`` (segment then semantic).
+    ``match_mode``: ``exact``/``segment`` (substring), ``fuzzy`` (typo-tolerant),
+    ``semantic`` (CLIP text), or ``auto`` (exact then semantic).
 
     Returns ``(hits, message, matched_by)`` where ``matched_by`` is
-    ``keyword`` / ``vector`` / ``""``.
+    ``keyword`` / ``keyword_fuzzy`` / ``vector`` / ``""``.
     """
     from src.storage.config_store import get_local_model_asset_dirs, get_search_top_k
     from src.storage.lance_dialogue_search import get_dialogue_index_stats, search_dialogue
@@ -856,13 +857,26 @@ def run_dialogue_search(
     if not stats.get("dialogue_index_ready"):
         return [], "no dialogue index for active profile (build dialogue index first)", ""
 
+    scoped_video_ids = resolve_scope_video_ids(
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        config=cfg,
+    )
+    if scoped_video_ids is not None and not scoped_video_ids:
+        return [], "no dialogue matches", ""
+
+    # When scoped to concrete videos, fetch_k need not be inflated — the loader
+    # already only opens those transcript files.
+    search_top_k = resolved_top_k if scoped_video_ids is not None else fetch_k
+
     routed = search_dialogue(
         text,
         config=cfg,
         profile_base_dir=profile_base_dir,
-        top_k=fetch_k,
+        top_k=search_top_k,
         query_vector=query_vector,
         match_mode=match_mode,
+        video_ids=scoped_video_ids,
     )
     dialogue_hits = list(routed.get("hits") or [])
     matched_by = str(routed.get("matched_by") or "").strip()

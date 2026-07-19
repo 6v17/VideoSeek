@@ -279,7 +279,10 @@ class MainWindow(
             self.search_page.dialogue_search_mode.currentIndexChanged.connect(
                 self._on_dialogue_search_mode_changed
             )
-        self.search_page.text_search.textChanged.connect(self._refresh_search_panel_state)
+        # Do not rebuild scope/library details on every keystroke.
+        self.search_page.text_search.textChanged.connect(
+            lambda *_: self._refresh_search_panel_state(refresh_scope=False)
+        )
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self._init_search_scope_state()
@@ -294,14 +297,16 @@ class MainWindow(
         self.link_page.btn_clear_legacy.clicked.connect(self.clear_legacy_network_data)
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
-        self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
+        self.library_page.btn_sync_db.clicked.connect(
+            lambda: self.start_update_index(checked_only=True)
+        )
         self.library_page.btn_build_dialogue_index.clicked.connect(self.start_dialogue_index)
         self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
         self.library_page.btn_refresh_dialogue_library.clicked.connect(self.refresh_dialogue_library_table)
         self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
         self.library_page.btn_stop_dialogue_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
-        self.library_page.library_tabs.currentChanged.connect(self._on_library_tab_changed)
+        self.library_page.library_stack.currentChanged.connect(self._on_library_tab_changed)
         self.library_page.btn_index_issues.clicked.connect(self.show_last_index_issue_details)
         self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
         self.library_page.btn_vector_details.clicked.connect(self.show_local_vector_details)
@@ -486,11 +491,17 @@ class MainWindow(
 
         self.library_page.header.title.setText(t["library_page_title"])
         self.library_page.header.subtitle.setText(t["library_page_desc"])
-        self.library_page.library_tabs.setTabText(0, t.get("library_tab_visual", "Videos"))
-        self.library_page.library_tabs.setTabText(1, t.get("library_tab_dialogue", "Dialogue"))
+        self.library_page.btn_tab_visual.setText(t.get("library_tab_visual", "Videos"))
+        self.library_page.btn_tab_dialogue.setText(t.get("library_tab_dialogue", "Dialogue"))
         self.library_page.table_title.setText(t["library_table_title"])
         self.library_page.dialogue_table_title.setText(
             t.get("dialogue_library_table_title", "Extracted dialogue")
+        )
+        self.library_page.lbl_shared_library_hint.setText(
+            t.get(
+                "library_shared_add_hint",
+                "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
+            )
         )
         self.library_page.lbl_dialogue_library_hint.setText(
             t.get(
@@ -499,7 +510,19 @@ class MainWindow(
             )
         )
         self.library_page.btn_add_lib.setText(t["add_folder"])
-        self.library_page.btn_sync_db.setText(t["update_index"])
+        self.library_page.btn_sync_db.setText(
+            t.get("sync_selected_videos", t.get("update_index", "Sync selected"))
+        )
+        self.library_page.visual_video_tree.set_action_texts(
+            open_text=t.get("open_folder", "Open"),
+            remove_text=t.get("delete", "Delete"),
+            empty_text=t.get("library_list_empty", ""),
+        )
+        self.library_page.subtitle_video_tree.set_action_texts(
+            open_text=t.get("open_folder", "Open"),
+            remove_text=t.get("delete", "Delete"),
+            empty_text=t.get("dialogue_library_empty", ""),
+        )
         self.library_page.btn_build_dialogue_index.setText(t.get("build_dialogue_index", "Build dialogue index"))
         self.library_page.btn_build_dialogue_index.setToolTip(
             t.get("build_dialogue_index_hint", "")
@@ -620,18 +643,22 @@ class MainWindow(
         if getattr(self, "_defer_runtime_warmup", False):
             self._defer_runtime_warmup = False
             self._start_runtime_warmup()
-        try:
-            from src.services.library_service import maintain_library_metadata
-
-            maintain_library_metadata()
-        except Exception:
-            pass
+        # Show UI first; heavy orphan/index cleanup can wait until the event loop is idle.
         self.refresh_library_table()
         self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
         self._apply_agent_api_settings()
         QTimer.singleShot(0, self._bootstrap_understanding_resources)
+        QTimer.singleShot(1500, self._idle_maintain_library_metadata)
+
+    def _idle_maintain_library_metadata(self) -> None:
+        try:
+            from src.services.library_service import maintain_library_metadata
+
+            maintain_library_metadata()
+        except Exception:
+            pass
 
     def _bootstrap_understanding_resources(self):
         """Copy built-in understanding profiles/components once after startup (off the page-click path)."""
@@ -856,7 +883,7 @@ class MainWindow(
         from src.services.search_scope import resolve_default_active_search_scope
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
-        match_mode = "segment"
+        match_mode = "exact"
         if hasattr(self, "_dialogue_match_mode_from_ui"):
             match_mode = self._dialogue_match_mode_from_ui()
         self.search_controller.start_search(

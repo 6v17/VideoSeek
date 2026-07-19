@@ -491,26 +491,45 @@ class UnderstandingGuiMixin:
         combo = page.video_combo
         current = combo.currentData(Qt.ItemDataRole.UserRole)
         target_lib = self._selected_understanding_target_lib()
+        empty_text = self.texts.get("understanding_video_none", "No indexed videos")
+        filter_text = self.texts.get("understanding_video_filter", "Filter videos…")
+        if hasattr(combo, "set_placeholders"):
+            combo.set_placeholders(empty=empty_text, filter_text=filter_text)
+
         combo.blockSignals(True)
-        combo.clear()
-        entries = list_ready_video_entries(library_path=target_lib, config=load_config())
-        for entry in entries:
-            video_id = str(entry.get("video_id", "") or "").strip()
-            if not video_id:
-                continue
-            rel_path = str(entry.get("video_rel_path", "") or video_id).strip()
-            library_path = str(entry.get("library_path", "") or "").strip()
-            label = rel_path if not target_lib else f"{library_path} / {rel_path}" if library_path else rel_path
-            combo.addItem(label, video_id)
-        if combo.count() == 0:
-            combo.addItem(self.texts.get("understanding_video_none", "No indexed videos"), "")
-        restore_index = 0
-        if current:
-            found = combo.findData(current, Qt.ItemDataRole.UserRole)
-            if found >= 0:
-                restore_index = found
-        combo.setCurrentIndex(restore_index)
-        combo.blockSignals(False)
+        try:
+            entries = list_ready_video_entries(library_path=target_lib, config=load_config())
+            items: list[tuple[str, str]] = []
+            # When browsing all libraries, prefix with folder name to disambiguate.
+            show_lib_prefix = not bool(target_lib)
+            for entry in entries:
+                video_id = str(entry.get("video_id", "") or "").strip()
+                if not video_id:
+                    continue
+                rel_path = str(entry.get("video_rel_path", "") or video_id).strip()
+                library_path = str(entry.get("library_path", "") or "").strip()
+                if show_lib_prefix and library_path:
+                    lib_name = os.path.basename(os.path.normpath(library_path)) or library_path
+                    label = f"{lib_name} / {rel_path}"
+                else:
+                    label = rel_path
+                items.append((label, video_id))
+            if hasattr(combo, "set_items"):
+                combo.set_items(items, current_data=current)
+            else:
+                combo.clear()
+                for label, video_id in items:
+                    combo.addItem(label, video_id)
+                if combo.count() == 0:
+                    combo.addItem(empty_text, "")
+                restore_index = 0
+                if current:
+                    found = combo.findData(current, Qt.ItemDataRole.UserRole)
+                    if found >= 0:
+                        restore_index = found
+                combo.setCurrentIndex(restore_index)
+        finally:
+            combo.blockSignals(False)
         self._load_understanding_video_timeline()
 
     def _selected_understanding_video_id(self):

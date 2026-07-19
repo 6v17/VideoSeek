@@ -8,21 +8,15 @@ from unittest.mock import MagicMock, patch
 if "faiss" not in sys.modules:
     sys.modules["faiss"] = MagicMock()
 
+import src.services  # noqa: F401
+import src.storage  # noqa: F401
+
 if "src.services.library_service" not in sys.modules:
     _fake_library_service = types.ModuleType("src.services.library_service")
     _fake_library_service.list_libraries = MagicMock(return_value={})
     sys.modules["src.services.library_service"] = _fake_library_service
-
-if "src.storage" not in sys.modules:
-    sys.modules["src.storage"] = types.ModuleType("src.storage")
-if "src.storage.config_store" not in sys.modules:
-    _fake_config_store = types.ModuleType("src.storage.config_store")
-    _fake_config_store.get_search_scope_mode = MagicMock(return_value="all")
-    sys.modules["src.storage.config_store"] = _fake_config_store
-if "src.storage.asset_store" not in sys.modules:
-    _fake_asset_store = types.ModuleType("src.storage.asset_store")
-    _fake_asset_store.load_model_metadata = MagicMock(return_value={})
-    sys.modules["src.storage.asset_store"] = _fake_asset_store
+# Make ``src.services.library_service`` attribute-importable for unittest.mock.patch.
+src.services.library_service = sys.modules["src.services.library_service"]
 
 from types import SimpleNamespace
 
@@ -141,6 +135,22 @@ class AgentLibraryServiceTests(unittest.TestCase):
     def test_list_agent_videos_unknown_video_id(self, _mock_libraries):
         with self.assertRaises(KeyError):
             list_agent_videos(video_id="missing")
+
+    @patch("src.services.library_service.list_libraries")
+    def test_list_agent_videos_pages_without_materializing_all(self, mock_list_libraries):
+        with tempfile.TemporaryDirectory() as lib_dir:
+            files = {}
+            for index in range(5):
+                name = f"v{index}.mp4"
+                path = os.path.join(lib_dir, name)
+                with open(path, "wb") as handle:
+                    handle.write(b"0")
+                files[name] = {"vid": f"id{index}", "asset_state": "ready"}
+            mock_list_libraries.return_value = {lib_dir: {"files": files}}
+            page = list_agent_videos(ready_only=True, limit=2, offset=2)
+            self.assertEqual(page["meta"]["total_listed"], 5)
+            self.assertEqual(page["meta"]["returned"], 2)
+            self.assertEqual([row["video_id"] for row in page["videos"]], ["id2", "id3"])
 
 
 class AgentClipServiceTests(unittest.TestCase):

@@ -29,6 +29,7 @@ class IndexingController(QObject):
         rebuild_global_assets=True,
         debug_failure="",
         index_from_vectors_only=False,
+        video_ids=None,
     ):
         if self.is_running():
             return False
@@ -42,6 +43,7 @@ class IndexingController(QObject):
             "cleanup_missing_entries": cleanup_missing_entries,
             "rebuild_global_assets": rebuild_global_assets,
             "index_from_vectors_only": index_from_vectors_only,
+            "video_ids": video_ids,
         }
         if debug_failure:
             worker_kwargs["debug_failure"] = debug_failure

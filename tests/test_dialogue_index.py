@@ -173,180 +173,77 @@ class DialogueLanceStoreTests(unittest.TestCase):
 
 
 class DialogueIndexServiceTests(unittest.TestCase):
-    def test_index_video_dialogue_orchestrates_pipeline(self):
+    def test_index_video_dialogue_maps_asr_mode_to_ocr(self):
         from src.services import dialogue_index_service as service
 
         with tempfile.TemporaryDirectory() as tmp:
             media = os.path.join(tmp, "clip.mp4")
             with open(media, "wb") as handle:
                 handle.write(b"fake")
-            profile = os.path.join(tmp, "profile")
-            os.makedirs(profile, exist_ok=True)
-            wav_path = os.path.join(tmp, "out.wav")
-            with open(wav_path, "wb") as handle:
-                handle.write(b"RIFF")
 
-            with mock.patch.object(service, "ensure_dialogue_asr_ready", return_value=(True, "")), mock.patch.object(
-                service, "get_local_model_asset_dirs", return_value={"base_dir": profile}
-            ), mock.patch.object(
-                service,
-                "get_active_embedding_spec",
+            with mock.patch(
+                "src.services.subtitle_index_service.index_video_subtitles",
                 return_value={
-                    "model_id": "clip",
-                    "provider": "openai-clip",
-                    "embedding_space": "clip",
-                    "dimension": 4,
-                    "metric": "ip",
+                    "ok": True,
+                    "video_id": "vid9",
+                    "segment_rows": 1,
+                    "mode": "ocr",
+                    "asr_source": "vision/ocr/rapidocr",
                 },
-            ), mock.patch.object(service, "extract_audio_wav", return_value=wav_path), mock.patch.object(
-                service,
-                "transcribe_wav",
-                return_value=[
-                    {
-                        "start": 0.1,
-                        "end": 1.2,
-                        "text": "test dialogue line",
-                        "language": "en",
-                        "asr_source": "audio/speech_to_text/faster-whisper-medium",
-                    }
-                ],
-            ) as transcribe_mock, mock.patch.object(
-                service, "save_dialogue_transcript", return_value={"ok": True, "segment_count": 1}
-            ) as save_mock, mock.patch.object(
-                service,
-                "get_text_embedding",
-                return_value=np.asarray([1, 0, 0, 0], dtype=np.float32),
-            ), mock.patch.object(
-                service,
-                "upsert_profile_dialogue_segments",
-                return_value={"segment_rows": 1, "dimension": 4},
-            ) as upsert_mock, mock.patch.object(service, "set_dialogue_index_state") as state_mock:
+            ) as index_mock:
                 result = service.index_video_dialogue(
                     "vid9",
                     media,
                     library_path=tmp,
                     mode="asr",
                 )
-            save_mock.assert_called_once()
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["segment_rows"], 1)
-            self.assertEqual(result["asr_source"], "audio/speech_to_text/faster-whisper-medium")
-            self.assertEqual(result["mode"], "asr")
-            upsert_mock.assert_called_once()
-            state_mock.assert_called()
-            transcribe_mock.assert_called_once()
+            self.assertEqual(index_mock.call_args.kwargs.get("mode"), "ocr")
 
-    def test_reembed_reuses_transcripts_without_asr(self):
+    def test_reembed_maps_to_reuse_mode(self):
         from src.services import dialogue_index_service as service
 
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = os.path.join(tmp, "profile")
-            os.makedirs(profile, exist_ok=True)
-            existing = [
-                {
-                    "video_id": "vid9",
-                    "video_path": os.path.join(tmp, "clip.mp4"),
-                    "library_path": tmp,
-                    "start": 0.1,
-                    "end": 1.2,
-                    "text": "stored dialogue line",
-                    "language": "en",
-                    "asr_source": "audio/speech_to_text/faster-whisper-medium",
-                }
-            ]
-            with mock.patch.object(
-                service, "get_local_model_asset_dirs", return_value={"base_dir": profile}
-            ), mock.patch.object(
-                service,
-                "get_active_embedding_spec",
-                return_value={
-                    "model_id": "clip-b",
-                    "provider": "openai-clip",
-                    "embedding_space": "clip-b",
-                    "dimension": 4,
-                    "metric": "ip",
-                },
-            ), mock.patch.object(
-                service, "_load_existing_transcripts", return_value=existing
-            ), mock.patch.object(
-                service, "ensure_dialogue_asr_ready", return_value=(False, "should not run")
-            ) as asr_ready_mock, mock.patch.object(
-                service, "extract_audio_wav"
-            ) as extract_mock, mock.patch.object(
-                service, "transcribe_wav"
-            ) as transcribe_mock, mock.patch.object(
-                service,
-                "get_text_embedding",
-                return_value=np.asarray([0, 1, 0, 0], dtype=np.float32),
-            ), mock.patch.object(
-                service,
-                "upsert_profile_dialogue_segments",
-                return_value={"segment_rows": 1, "dimension": 4},
-            ) as upsert_mock, mock.patch.object(service, "set_dialogue_index_state"):
-                result = service.index_video_dialogue(
-                    "vid9",
-                    "",
-                    library_path=tmp,
-                    mode="reembed",
-                )
+        with mock.patch(
+            "src.services.subtitle_index_service.index_video_subtitles",
+            return_value={
+                "ok": True,
+                "video_id": "vid9",
+                "segment_rows": 1,
+                "mode": "reuse",
+                "reused_transcripts": True,
+            },
+        ) as index_mock:
+            result = service.index_video_dialogue(
+                "vid9",
+                "",
+                library_path="D:/lib",
+                mode="reembed",
+            )
 
-            self.assertTrue(result["ok"])
-            self.assertTrue(result["reused_transcripts"])
-            self.assertEqual(result["mode"], "reembed")
-            asr_ready_mock.assert_not_called()
-            extract_mock.assert_not_called()
-            transcribe_mock.assert_not_called()
-            upsert_mock.assert_called_once()
-            rows = upsert_mock.call_args.args[1]
-            self.assertEqual(rows[0]["text"], "stored dialogue line")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["reused_transcripts"])
+        self.assertEqual(index_mock.call_args.kwargs.get("mode"), "reuse")
 
-    def test_auto_reuses_existing_transcripts(self):
+    def test_auto_passes_through_to_subtitle_index(self):
         from src.services import dialogue_index_service as service
 
         with tempfile.TemporaryDirectory() as tmp:
             media = os.path.join(tmp, "clip.mp4")
             with open(media, "wb") as handle:
                 handle.write(b"fake")
-            profile = os.path.join(tmp, "profile")
-            os.makedirs(profile, exist_ok=True)
-            existing = [
-                {
-                    "video_id": "vid9",
-                    "video_path": media,
-                    "library_path": tmp,
-                    "start": 0.0,
-                    "end": 1.0,
-                    "text": "reuse me",
-                    "language": "en",
-                    "asr_source": "audio/speech_to_text/faster-whisper-medium",
-                }
-            ]
-            with mock.patch.object(
-                service, "get_local_model_asset_dirs", return_value={"base_dir": profile}
-            ), mock.patch.object(
-                service,
-                "get_active_embedding_spec",
+
+            with mock.patch(
+                "src.services.subtitle_index_service.index_video_subtitles",
                 return_value={
-                    "model_id": "clip",
-                    "provider": "openai-clip",
-                    "embedding_space": "clip",
-                    "dimension": 4,
-                    "metric": "ip",
+                    "ok": True,
+                    "video_id": "vid9",
+                    "segment_rows": 1,
+                    "mode": "reuse",
+                    "reused_transcripts": True,
                 },
-            ), mock.patch.object(
-                service, "_load_existing_transcripts", return_value=existing
-            ), mock.patch.object(
-                service, "transcribe_wav"
-            ) as transcribe_mock, mock.patch.object(
-                service,
-                "get_text_embedding",
-                return_value=np.asarray([1, 0, 0, 0], dtype=np.float32),
-            ), mock.patch.object(
-                service,
-                "upsert_profile_dialogue_segments",
-                return_value={"segment_rows": 1, "dimension": 4},
-            ), mock.patch.object(service, "set_dialogue_index_state"):
+            ) as index_mock:
                 result = service.index_video_dialogue(
                     "vid9",
                     media,
@@ -356,7 +253,7 @@ class DialogueIndexServiceTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertTrue(result["reused_transcripts"])
-            transcribe_mock.assert_not_called()
+            self.assertEqual(index_mock.call_args.kwargs.get("mode"), "auto")
 
 
 class SharedDialogueTranscriptStoreTests(unittest.TestCase):
@@ -386,6 +283,63 @@ class SharedDialogueTranscriptStoreTests(unittest.TestCase):
                 rows = list_shared_transcript_segments("vid_shared")
                 self.assertEqual(len(rows), 1)
                 self.assertEqual(rows[0]["text"], "公用台词")
+
+    def test_summaries_skip_segment_payload(self):
+        from src.storage.dialogue_transcript_store import (
+            list_dialogue_transcript_summaries,
+            save_dialogue_transcript,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": tmp},
+            ):
+                save_dialogue_transcript(
+                    "vid_a",
+                    [{"start": 0.0, "end": 1.0, "text": "alpha", "language": "en"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "a.mp4"),
+                )
+                rows = list_dialogue_transcript_summaries()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["video_id"], "vid_a")
+                self.assertEqual(rows[0]["segment_count"], 1)
+                self.assertNotIn("segments", rows[0])
+
+    def test_keyword_search_respects_video_ids_scope(self):
+        from src.storage.dialogue_transcript_store import save_dialogue_transcript
+        from src.storage.lance_dialogue_search import keyword_search_dialogue
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": tmp},
+            ):
+                for video_id, text in (
+                    ("vid_keep", "find me please"),
+                    ("vid_skip", "find me please"),
+                ):
+                    save_dialogue_transcript(
+                        video_id,
+                        [{"start": 0.0, "end": 1.0, "text": text, "language": "en"}],
+                        library_path=tmp,
+                        video_path=os.path.join(tmp, f"{video_id}.mp4"),
+                    )
+                with mock.patch(
+                    "src.storage.dialogue_transcript_store.ensure_shared_transcripts",
+                    return_value=0,
+                ), mock.patch(
+                    "src.storage.dialogue_transcript_store.has_any_dialogue_transcript",
+                    return_value=True,
+                ):
+                    hits = keyword_search_dialogue(
+                        "find me",
+                        video_ids=["vid_keep"],
+                        top_k=10,
+                    )
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0].video_id, "vid_keep")
 
 
 if __name__ == "__main__":

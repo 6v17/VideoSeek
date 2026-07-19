@@ -34,7 +34,8 @@ LANCE_ANN_MIN_ROWS = 2000
 LANCE_ANN_ENABLED = False
 _INDEX_BATCH_DEPTH: dict[str, int] = {}
 _INDEX_BATCH_PROGRESS: dict[str, ProgressCallback | None] = {}
-META_PERSIST_INTERVAL = 25
+# Compact meta flushes during scan; larger interval cuts I/O at 10k+ libraries.
+META_PERSIST_INTERVAL = 100
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -158,8 +159,12 @@ def lance_index_batch_active(profile_base_dir: str) -> bool:
 
 
 def _count_profile_ready_videos(profile_base_dir: str) -> int:
-    meta_file = os.path.join(os.path.normpath(profile_base_dir), "meta.json")
-    if not os.path.isfile(meta_file):
+    from src.storage.profile_library_store import get_library_db_path
+
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    meta_file = os.path.join(profile_base_dir, "meta.json")
+    db_path = get_library_db_path(profile_base_dir)
+    if not os.path.isfile(meta_file) and not os.path.isfile(db_path):
         return 0
     meta = load_metadata(meta_file)
     count = 0
@@ -413,26 +418,19 @@ def serialize_embedding_spec(spec: dict | None) -> str:
 
 
 def _read_import_state(profile_base_dir: str) -> dict:
-    state_file = get_lance_state_file(profile_base_dir)
-    if not os.path.isfile(state_file):
-        return {}
+    from src.storage.profile_library_store import load_import_state_dict
+
     try:
-        with open(state_file, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Unreadable Lance import state %s: %s", state_file, exc)
+        return load_import_state_dict(profile_base_dir)
+    except Exception as exc:
+        logger.warning("Unreadable profile library import state %s: %s", profile_base_dir, exc)
         return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _write_import_state(profile_base_dir: str, payload: dict) -> None:
-    lance_dir = get_lance_dir(profile_base_dir)
-    os.makedirs(lance_dir, exist_ok=True)
-    state_file = get_lance_state_file(profile_base_dir)
-    temp_path = f"{state_file}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-    os.replace(temp_path, state_file)
+    from src.storage.profile_library_store import save_import_state_dict
+
+    save_import_state_dict(profile_base_dir, payload if isinstance(payload, dict) else {})
 
 
 def _merge_import_state_videos(previous: dict, payload: dict) -> dict:
@@ -443,44 +441,21 @@ def _merge_import_state_videos(previous: dict, payload: dict) -> dict:
 
 
 def get_stored_chunk_config(profile_base_dir: str, video_id: str):
-    video_id = str(video_id or "").strip()
-    if not video_id:
-        return None
-    state = _read_import_state(profile_base_dir)
-    videos = state.get("videos")
-    if not isinstance(videos, dict):
-        return None
-    entry = videos.get(video_id)
-    if not isinstance(entry, dict):
-        return None
-    return entry.get("chunk_config")
+    from src.storage.profile_library_store import get_stored_chunk_config as _get_chunk
+
+    return _get_chunk(profile_base_dir, video_id)
 
 
 def set_stored_chunk_config(profile_base_dir: str, video_id: str, chunk_config: dict) -> None:
-    video_id = str(video_id or "").strip()
-    if not video_id or not isinstance(chunk_config, dict):
-        return
-    state = _read_import_state(profile_base_dir)
-    videos = dict(state.get("videos") or {})
-    entry = dict(videos.get(video_id) or {})
-    entry["chunk_config"] = dict(chunk_config)
-    videos[video_id] = entry
-    state["videos"] = videos
-    _write_import_state(profile_base_dir, state)
+    from src.storage.profile_library_store import set_stored_chunk_config as _set_chunk
+
+    _set_chunk(profile_base_dir, video_id, chunk_config)
 
 
 def get_dialogue_index_state(profile_base_dir: str, video_id: str) -> str:
-    video_id = str(video_id or "").strip()
-    if not video_id:
-        return DIALOGUE_INDEX_STATE_MISSING
-    state = _read_import_state(profile_base_dir)
-    videos = state.get("videos")
-    if not isinstance(videos, dict):
-        return DIALOGUE_INDEX_STATE_MISSING
-    entry = videos.get(video_id)
-    if not isinstance(entry, dict):
-        return DIALOGUE_INDEX_STATE_MISSING
-    value = str(entry.get("dialogue_index_state", "") or "").strip().lower()
+    from src.storage.profile_library_store import get_dialogue_index_state as _get_dialogue
+
+    value = str(_get_dialogue(profile_base_dir, video_id) or "").strip().lower()
     if value in _DIALOGUE_INDEX_STATES:
         return value
     return DIALOGUE_INDEX_STATE_MISSING
@@ -493,19 +468,14 @@ def set_dialogue_index_state(
     *,
     extras: dict | None = None,
 ) -> None:
-    video_id = str(video_id or "").strip()
-    state_value = str(dialogue_index_state or "").strip().lower()
-    if not video_id or state_value not in _DIALOGUE_INDEX_STATES:
-        return
-    state = _read_import_state(profile_base_dir)
-    videos = dict(state.get("videos") or {})
-    entry = dict(videos.get(video_id) or {})
-    entry["dialogue_index_state"] = state_value
-    if extras:
-        entry.update(dict(extras))
-    videos[video_id] = entry
-    state["videos"] = videos
-    _write_import_state(profile_base_dir, state)
+    from src.storage.profile_library_store import set_dialogue_index_state as _set_dialogue
+
+    _set_dialogue(
+        profile_base_dir,
+        video_id,
+        dialogue_index_state,
+        extras=extras,
+    )
 
 
 def _connect_lance(profile_base_dir: str):
@@ -775,7 +745,8 @@ def import_npy_to_lance(
         summary["errors"].append(f"vector dir not found: {vector_dir}")
         return summary
 
-    meta = load_metadata(meta_file) if os.path.isfile(meta_file) else {}
+    # load_metadata reads profile library.db (and migrates legacy meta.json if present).
+    meta = load_metadata(meta_file)
     video_lookup = build_video_lookup(meta)
     npy_files = sorted(
         name

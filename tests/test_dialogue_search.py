@@ -55,7 +55,7 @@ class RunDialogueSearchTests(unittest.TestCase):
             ],
             "message": "",
         }
-        hits, message, matched_by = run_dialogue_search("スポンサー", top_k=5, match_mode="segment")
+        hits, message, matched_by = run_dialogue_search("スポンサー", top_k=5, match_mode="exact")
         self.assertEqual(message, "")
         self.assertEqual(matched_by, "keyword")
         self.assertEqual(len(hits), 1)
@@ -63,7 +63,31 @@ class RunDialogueSearchTests(unittest.TestCase):
         self.assertEqual(hits[0].match_kind, "dialogue")
         self.assertEqual(hits[0].matched_text, "スポンサー")
         mock_search.assert_called()
-        self.assertEqual(mock_search.call_args.kwargs.get("match_mode"), "segment")
+        self.assertEqual(mock_search.call_args.kwargs.get("match_mode"), "exact")
+
+        mock_search.reset_mock()
+        mock_search.return_value = {
+            "matched_by": "keyword_fuzzy",
+            "hits": [
+                DialogueSearchHit(
+                    video_id="v1",
+                    video_path="D:/a.mp4",
+                    library_path="D:/",
+                    start_sec=1.0,
+                    end_sec=2.0,
+                    text="スポンサー",
+                    language="ja",
+                    score=0.75,
+                    matched_by="keyword_fuzzy",
+                )
+            ],
+            "message": "",
+        }
+        hits, message, matched_by = run_dialogue_search("スポンサ", top_k=5, match_mode="fuzzy")
+        self.assertEqual(message, "")
+        self.assertEqual(matched_by, "keyword_fuzzy")
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(mock_search.call_args.kwargs.get("match_mode"), "fuzzy")
 
 
 class AgentDialogueSearchTests(unittest.TestCase):

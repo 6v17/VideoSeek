@@ -108,7 +108,7 @@ class SearchWorker(QThread):
 
             kind = str(config.search_kind or "").strip().lower()
             if kind == "dialogue":
-                match_mode = str(config.search_mode or "segment").strip().lower() or "segment"
+                match_mode = str(config.search_mode or "exact").strip().lower() or "exact"
                 results, message, matched_by = run_dialogue_search(
                     str(config.query or ""),
                     top_k=config.top_k,
@@ -212,11 +212,13 @@ class DialogueIndexWorker(QThread):
             "reused": 0,
         }
         total = max(1, len(self.targets))
+        stopped = False
+        success = False
         try:
             for index, item in enumerate(self.targets):
                 if self._stop_requested or self.isInterruptionRequested():
-                    self.finished_signal.emit(False, True, summary)
-                    return
+                    stopped = True
+                    break
                 video_id = str((item or {}).get("video_id", "") or "").strip()
                 video_path = str((item or {}).get("video_path", "") or "").strip()
                 library_path = str((item or {}).get("library_path", "") or "").strip()
@@ -248,12 +250,21 @@ class DialogueIndexWorker(QThread):
                     summary["failed"] += 1
                     err = str(result.get("error", "") or "failed")
                     summary["errors"].append(f"{video_id}: {err}")
-            self.progress_signal.emit(100, "dialogue_index_done")
-            self.finished_signal.emit(True, False, summary)
+            if not stopped:
+                self.progress_signal.emit(
+                    100,
+                    f"dialogue_index|{total}|{total}|dialogue_index_done",
+                )
+                success = True
         except Exception as exc:
             logger.exception("Dialogue index worker failed")
             self.error_signal.emit(str(exc).strip() or repr(exc))
-            self.finished_signal.emit(False, False, summary)
+            success = False
+        finally:
+            # Always release the UI (buttons stay disabled until this fires).
+            # Copy summary: queued signal delivery must not share a mutable dict
+            # with this thread while run() is unwinding.
+            self.finished_signal.emit(success, stopped, dict(summary))
 
 
 class IndexUpdateWorker(QThread):
@@ -270,6 +281,7 @@ class IndexUpdateWorker(QThread):
         rebuild_global_assets=True,
         debug_failure="",
         index_from_vectors_only=False,
+        video_ids=None,
     ):
         super().__init__()
         self.target_lib = target_lib
@@ -278,6 +290,7 @@ class IndexUpdateWorker(QThread):
         self.rebuild_global_assets = bool(rebuild_global_assets)
         self.index_from_vectors_only = bool(index_from_vectors_only)
         self.debug_failure = str(debug_failure or "").strip().lower()
+        self.video_ids = list(video_ids) if video_ids is not None else None
         self._stop_requested = False
 
     def stop(self):
@@ -328,6 +341,7 @@ class IndexUpdateWorker(QThread):
                 cleanup_missing_entries=self.cleanup_missing_entries,
                 issue_callback=issues.append,
                 rebuild_global_assets=self.rebuild_global_assets,
+                video_ids=self.video_ids,
             )
             self.finished_signal.emit(True, False, result[0] is not None, issues)
         except InterruptedError:

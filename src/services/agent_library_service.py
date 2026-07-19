@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set
 
 from src.app.config import load_config
 from src.services.indexing_runtime_status import get_index_sync_status, library_sync_in_progress
@@ -89,25 +89,6 @@ def _video_matches_query(row: Dict[str, Any], query: str) -> bool:
     return any(needle in str(item).lower() for item in haystacks if str(item).strip())
 
 
-def _apply_video_list_filters(
-    rows: List[Dict[str, Any]],
-    *,
-    video_id: Optional[str] = None,
-    q: Optional[str] = None,
-    has_evidence: Optional[bool] = None,
-) -> List[Dict[str, Any]]:
-    filtered = rows
-    video_id_text = str(video_id or "").strip()
-    if video_id_text:
-        filtered = [row for row in filtered if str(row.get("video_id", "") or "").strip() == video_id_text]
-    if q:
-        filtered = [row for row in filtered if _video_matches_query(row, q)]
-    if has_evidence is not None:
-        want_evidence = bool(has_evidence)
-        filtered = [row for row in filtered if bool(row.get("has_evidence")) == want_evidence]
-    return filtered
-
-
 def list_agent_libraries(config=None) -> Dict[str, Any]:
     from src.services.library_service import list_libraries
     from src.storage.asset_store import load_model_metadata
@@ -155,18 +136,23 @@ def list_agent_libraries(config=None) -> Dict[str, Any]:
     }
 
 
-def _collect_library_video_rows(
+def _iter_library_video_rows(
     library_path: str,
     library_data: dict,
     *,
     ready_only: bool,
     evidence_video_ids: Set[str],
-) -> List[Dict[str, Any]]:
+    probe_source_exists: bool = False,
+) -> Iterator[Dict[str, Any]]:
+    """Yield video rows for one library.
+
+    By default trusts meta ``asset_state`` for readiness (no per-file ``isfile``).
+    Set ``probe_source_exists=True`` only for rows that will be returned to clients.
+    """
     files = library_data.get("files", {}) if isinstance(library_data, dict) else {}
     if not isinstance(files, dict):
         files = {}
 
-    rows: List[Dict[str, Any]] = []
     for rel_path in sorted(files.keys(), key=lambda p: str(p).lower()):
         info = files.get(rel_path, {})
         if not isinstance(info, dict):
@@ -177,23 +163,43 @@ def _collect_library_video_rows(
             continue
         abs_path = os.path.normpath(os.path.join(library_path, rel_text))
         asset_state = str(info.get("asset_state", "") or "").strip().lower() or "unknown"
-        source_exists = os.path.isfile(abs_path)
-        if ready_only:
-            if asset_state != "ready" or not source_exists:
+        if ready_only and asset_state != "ready":
+            continue
+        # Cheap existence: trust meta unless caller asks to probe the page rows.
+        source_exists = asset_state != "missing_source"
+        if probe_source_exists:
+            source_exists = os.path.isfile(abs_path)
+            if ready_only and not source_exists:
                 continue
-        rows.append(
-            {
-                "video_path": abs_path,
-                "video_rel_path": rel_text.replace("\\", "/"),
-                "video_id": video_id,
-                "library_path": library_path,
-                "library_display_name": _library_display_name(library_path),
-                "asset_state": asset_state,
-                "source_exists": source_exists,
-                "has_evidence": video_id in evidence_video_ids,
-            }
+        yield {
+            "video_path": abs_path,
+            "video_rel_path": rel_text.replace("\\", "/"),
+            "video_id": video_id,
+            "library_path": library_path,
+            "library_display_name": _library_display_name(library_path),
+            "asset_state": asset_state,
+            "source_exists": source_exists,
+            "has_evidence": video_id in evidence_video_ids,
+        }
+
+
+def _collect_library_video_rows(
+    library_path: str,
+    library_data: dict,
+    *,
+    ready_only: bool,
+    evidence_video_ids: Set[str],
+) -> List[Dict[str, Any]]:
+    """Compatibility helper — materializes one library (tests / small scopes)."""
+    return list(
+        _iter_library_video_rows(
+            library_path,
+            library_data,
+            ready_only=ready_only,
+            evidence_video_ids=evidence_video_ids,
+            probe_source_exists=True,
         )
-    return rows
+    )
 
 
 def list_agent_videos(
@@ -212,47 +218,62 @@ def list_agent_videos(
     cfg = config or load_config()
     libraries = list_libraries()
     evidence_video_ids = _indexed_evidence_video_ids(config=cfg)
-    rows: List[Dict[str, Any]] = []
+    video_id_text = str(video_id or "").strip()
+    safe_limit = max(1, min(int(limit or _DEFAULT_VIDEO_PAGE_LIMIT), _MAX_VIDEO_PAGE_LIMIT))
+    safe_offset = max(0, int(offset or 0))
 
     if library_path:
         resolved_key = _resolve_library_key(library_path, libraries)
         if resolved_key is None:
             raise KeyError(f"Library not found: {library_path}")
-        rows = _collect_library_video_rows(
+        library_keys = [resolved_key]
+        libraries_scanned = 1
+        scoped_library_path = resolved_key
+    else:
+        library_keys = sorted(libraries.keys(), key=lambda p: normalize_scope_path(p))
+        libraries_scanned = len(library_keys)
+        scoped_library_path = None
+
+    # Stream-filter: count all matches from meta; probe isfile only for the page.
+    total_listed = 0
+    total_ready = 0
+    page: List[Dict[str, Any]] = []
+    matched_any_for_video_id = False
+
+    for resolved_key in library_keys:
+        for row in _iter_library_video_rows(
             resolved_key,
             libraries.get(resolved_key, {}),
             ready_only=ready_only,
             evidence_video_ids=evidence_video_ids,
-        )
-        libraries_scanned = 1
-        scoped_library_path = resolved_key
-    else:
-        for resolved_key in sorted(libraries.keys(), key=lambda p: normalize_scope_path(p)):
-            rows.extend(
-                _collect_library_video_rows(
-                    resolved_key,
-                    libraries.get(resolved_key, {}),
-                    ready_only=ready_only,
-                    evidence_video_ids=evidence_video_ids,
-                )
-            )
-        libraries_scanned = len(libraries)
-        scoped_library_path = None
+            probe_source_exists=False,
+        ):
+            if video_id_text and str(row.get("video_id") or "").strip() != video_id_text:
+                continue
+            if video_id_text:
+                matched_any_for_video_id = True
+            if q and not _video_matches_query(row, q):
+                continue
+            if has_evidence is not None and bool(row.get("has_evidence")) != bool(has_evidence):
+                continue
 
-    filtered_rows = _apply_video_list_filters(
-        rows,
-        video_id=video_id,
-        q=q,
-        has_evidence=has_evidence,
-    )
-    video_id_text = str(video_id or "").strip()
-    if video_id_text and not filtered_rows:
+            probed = dict(row)
+            exists = os.path.isfile(str(probed.get("video_path") or ""))
+            probed["source_exists"] = exists
+            if ready_only and not exists:
+                continue
+
+            index = total_listed
+            total_listed += 1
+            if str(probed.get("asset_state") or "") == "ready" and exists:
+                total_ready += 1
+
+            if index < safe_offset or len(page) >= safe_limit:
+                continue
+            page.append(probed)
+
+    if video_id_text and not matched_any_for_video_id:
         raise KeyError(f"Video not found: {video_id_text}")
-
-    total_ready = sum(1 for row in filtered_rows if row["asset_state"] == "ready" and row["source_exists"])
-    safe_limit = max(1, min(int(limit or _DEFAULT_VIDEO_PAGE_LIMIT), _MAX_VIDEO_PAGE_LIMIT))
-    safe_offset = max(0, int(offset or 0))
-    page = filtered_rows[safe_offset : safe_offset + safe_limit]
 
     payload: Dict[str, Any] = {
         "api_version": API_VERSION,
@@ -260,7 +281,7 @@ def list_agent_videos(
         "videos": page,
         "meta": {
             "returned": len(page),
-            "total_listed": len(filtered_rows),
+            "total_listed": total_listed,
             "total_ready": total_ready,
             "offset": safe_offset,
             "limit": safe_limit,

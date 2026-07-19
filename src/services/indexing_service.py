@@ -277,12 +277,34 @@ def _load_vectors_from_disk(video_id, config):
 
 def _resolve_reusable_cached_vectors(abs_path, saved, config):
     """Find Lance vectors for this file even when meta vid no longer matches current hash."""
+    saved_vid = str(saved.get("vid", "") or "").strip()
+    try:
+        video_mod_time = os.path.getmtime(abs_path)
+    except OSError:
+        video_mod_time = None
+
+    # Fast path: unchanged mtime → reuse saved vid without hashing 10MiB.
+    saved_mtime = saved.get("mod_time")
+    if (
+        video_mod_time is not None
+        and saved_vid
+        and saved_mtime is not None
+        and float(saved_mtime) == float(video_mod_time)
+    ):
+        vectors, timestamps, _vector_file = _load_vectors_from_disk(saved_vid, config)
+        if _has_usable_vectors(vectors, timestamps):
+            return {
+                "canonical_vid": saved_vid,
+                "disk_vid": saved_vid,
+                "vectors": vectors,
+                "timestamps": timestamps,
+            }
+
     try:
         current_vid = get_video_hash(abs_path)
     except OSError:
         return None
 
-    saved_vid = str(saved.get("vid", "") or "").strip()
     candidate_ids = []
     for vid in (current_vid, saved_vid):
         if vid and vid not in candidate_ids:
@@ -307,28 +329,34 @@ def _resolve_reusable_cached_vectors(abs_path, saved, config):
     return None
 
 
-def _try_reuse_lance_indexed_video(abs_path, saved, config):
-    """Skip vector load and Lance upsert when meta and Lance already agree on this file."""
-    from src.storage.lance_search_index import lance_video_has_vectors
+def _try_reuse_lance_indexed_video(abs_path, saved, config, *, indexed_ids=None):
+    """Skip vector load and Lance upsert when meta and Lance already agree on this file.
 
+    Trusts ``mod_time`` before hashing. When ``indexed_ids`` is provided (scan batch
+    cache), avoids per-video Lance count queries.
+    """
     if str(saved.get("asset_state", "")).strip().lower() != "ready":
         return None
     saved_vid = str(saved.get("vid", "") or "").strip()
     if not saved_vid:
         return None
     try:
-        current_vid = get_video_hash(abs_path)
         video_mod_time = os.path.getmtime(abs_path)
     except OSError:
-        return None
-    if saved_vid != current_vid:
         return None
     saved_mtime = saved.get("mod_time")
     if saved_mtime is None or float(saved_mtime) != float(video_mod_time):
         return None
-    profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
-    if not lance_video_has_vectors(profile_base_dir, saved_vid):
-        return None
+    # mtime unchanged → keep saved_vid; do not re-hash the file body.
+    if indexed_ids is not None:
+        if saved_vid not in indexed_ids:
+            return None
+    else:
+        from src.storage.lance_search_index import lance_video_has_vectors
+
+        profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+        if not lance_video_has_vectors(profile_base_dir, saved_vid):
+            return None
     return {"canonical_vid": saved_vid}
 
 
@@ -627,9 +655,24 @@ def _collect_library_scan_plan(meta, target_lib=None):
     return plan
 
 
+def _looks_like_video_file(abs_path: str) -> bool:
+    """Cheap extension/size check — no ffprobe / OpenCV."""
+    if _is_excluded_video_path(abs_path):
+        return False
+    if not os.path.isfile(abs_path):
+        return False
+    lower = abs_path.lower()
+    if not lower.endswith(VIDEO_EXTS):
+        return False
+    try:
+        return os.path.getsize(abs_path) > 0
+    except OSError:
+        return False
+
+
 def _file_record_source_ready(root_path, rel_path):
     abs_path = os.path.join(root_path, rel_path)
-    return os.path.exists(abs_path) and _is_valid_video_source(abs_path)
+    return os.path.exists(abs_path) and _is_valid_video_source(abs_path, probe=False)
 
 
 def _video_identity_for_path(abs_path):
@@ -666,7 +709,7 @@ def reconcile_library_file_paths(root_path, lib_files, *, known_abs_paths=None):
         rel_path = os.path.relpath(abs_path, root_path)
         if rel_path in satisfied_paths:
             continue
-        if not _is_valid_video_source(abs_path):
+        if not _is_valid_video_source(abs_path, probe=False):
             continue
         orphan_candidates.append((rel_path, abs_path))
 
@@ -744,13 +787,16 @@ def _is_excluded_video_path(abs_path):
     return "__macosx" in normalized_parts
 
 
-def _is_valid_video_source(abs_path):
-    if _is_excluded_video_path(abs_path):
+def _is_valid_video_source(abs_path, *, probe: bool = True):
+    if not _looks_like_video_file(abs_path):
         return False
+    if not probe:
+        return True
     return has_readable_video_stream(abs_path)
 
 
 def cleanup_invalid_library_files(meta, config, target_lib=None, issue_callback=None):
+    """Drop meta rows that are clearly not video files (no stream probe at 10k scale)."""
     target_key = canonicalize_library_path(target_lib) if target_lib else None
     for root_path, lib_data in list(meta["libraries"].items()):
         if target_key and canonicalize_library_path(root_path) != target_key:
@@ -763,7 +809,7 @@ def cleanup_invalid_library_files(meta, config, target_lib=None, issue_callback=
             abs_path = os.path.join(root_path, rel_path)
             if not os.path.exists(abs_path):
                 continue
-            if _is_valid_video_source(abs_path):
+            if _looks_like_video_file(abs_path):
                 continue
 
             video_id = lib_files[rel_path].get("vid")
@@ -792,6 +838,7 @@ def process_single_video(
     progress_callback=None,
     file_index=1,
     file_total=1,
+    indexed_ids=None,
 ):
     video_name = os.path.basename(abs_path)
     progress_reporter = (
@@ -808,8 +855,8 @@ def process_single_video(
         if progress_reporter is not None:
             progress_reporter.emit("file", file_index, file_total, force=True)
 
-        video_mod_time = os.path.getmtime(abs_path)
-        if not _is_valid_video_source(abs_path):
+        # Extension/size only — defer stream probe until we must generate.
+        if not _is_valid_video_source(abs_path, probe=False):
             logger.warning("Skipping non-indexable video source: %s", abs_path)
             _emit_issue(
                 issue_callback,
@@ -818,16 +865,20 @@ def process_single_video(
                 abs_path,
                 action="skipped",
                 reason="invalid_video_source",
-                detail="Unreadable or unsupported video stream.",
+                detail="Missing file or unsupported extension.",
             )
             return None, None, False, False
 
+        video_mod_time = os.path.getmtime(abs_path)
         saved = lib_files.get(rel_path, {})
         forced_failure = _get_debug_forced_failure()
         if forced_failure is not None:
             raise forced_failure
 
-        lance_cached = _try_reuse_lance_indexed_video(abs_path, saved, config)
+        # Cheap reuse before any ffprobe / content hash.
+        lance_cached = _try_reuse_lance_indexed_video(
+            abs_path, saved, config, indexed_ids=indexed_ids
+        )
         if lance_cached is not None:
             video_id = lance_cached["canonical_vid"]
             metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
@@ -902,6 +953,20 @@ def process_single_video(
                 _delete_lance_video_vectors(disk_vid, config)
             metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
             return vectors, timestamps, metadata_updated, False
+
+        # About to generate — probe stream now (expensive).
+        if not _is_valid_video_source(abs_path, probe=True):
+            logger.warning("Skipping non-indexable video source: %s", abs_path)
+            _emit_issue(
+                issue_callback,
+                library_path or "",
+                rel_path,
+                abs_path,
+                action="skipped",
+                reason="invalid_video_source",
+                detail="Unreadable or unsupported video stream.",
+            )
+            return None, None, False, False
 
         video_id = get_video_hash(abs_path)
         saved_vid = str(saved.get("vid", "") or "").strip()
@@ -1045,12 +1110,25 @@ def scan_target_libraries(
     should_stop_callback=None,
     issue_callback=None,
     include_existing_assets=True,
+    video_ids=None,
 ):
     from src.storage.lance_store import META_PERSIST_INTERVAL, begin_lance_index_batch, end_lance_index_batch
     from src.services.indexing_runtime_status import set_index_sync_progress
 
+    selected_video_ids = None
+    if video_ids is not None:
+        selected_video_ids = {str(v).strip() for v in video_ids if str(v or "").strip()}
+
     search_assets_changed = False
     profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    # One Lance id set for the whole scan — reuse path avoids per-file count queries.
+    try:
+        from src.storage.lance_search_index import get_lance_indexed_video_ids
+
+        indexed_ids = get_lance_indexed_video_ids(profile_base_dir)
+    except Exception as exc:
+        logger.debug("Lance indexed-id cache unavailable for scan: %s", exc)
+        indexed_ids = None
     begin_lance_index_batch(profile_base_dir, progress_callback=progress_callback)
     pending_meta_saves = 0
 
@@ -1098,7 +1176,16 @@ def scan_target_libraries(
 
         failed_videos = []
         scan_plan = _collect_library_scan_plan(meta, target_lib=target_lib)
-        total_files = sum(len(abs_paths) for _root, _lib_data, abs_paths in scan_plan)
+
+        from src.services.library_scan_selection import plan_library_scan_paths
+
+        total_files = 0
+        for root_path, lib_data, valid_files in scan_plan:
+            lib_files = lib_data.get("files", {}) if isinstance(lib_data, dict) else {}
+            total_files += len(
+                plan_library_scan_paths(root_path, lib_files, valid_files, selected_video_ids)
+            )
+
         global_file_index = 0
         _report_scan_progress(0, total_files)
 
@@ -1119,8 +1206,11 @@ def scan_target_libraries(
             if reconciled_count:
                 _queue_meta_persist()
 
+            planned_files = plan_library_scan_paths(
+                root_path, lib_files, valid_files, selected_video_ids
+            )
             try:
-                for abs_path in valid_files:
+                for abs_path in planned_files:
                     if should_stop_callback and should_stop_callback():
                         raise IndexUpdateInterrupted(
                             "Index update stopped before finishing current library",
@@ -1142,6 +1232,7 @@ def scan_target_libraries(
                         progress_callback=progress_callback,
                         file_index=global_file_index,
                         file_total=total_files or 1,
+                        indexed_ids=indexed_ids,
                     )
                     search_assets_changed = search_assets_changed or file_search_assets_changed
                     if vectors is _SKIP_VIDEO_ALREADY_INDEXED:
@@ -1154,7 +1245,8 @@ def scan_target_libraries(
                         failed_videos.append(abs_path)
 
                 lib_data["files"] = lib_files
-                discover_video_files_incremental(root_path, lib_data)
+                if selected_video_ids is None:
+                    discover_video_files_incremental(root_path, lib_data)
                 lib_data["index_state"] = _library_index_state_after_scan(lib_data)
             except IndexUpdateInterrupted:
                 lib_data["files"] = lib_files

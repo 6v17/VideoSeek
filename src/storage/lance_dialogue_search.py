@@ -39,7 +39,7 @@ class DialogueSearchHit:
     text: str
     language: str
     score: float
-    matched_by: str  # "keyword" | "vector"
+    matched_by: str  # "keyword" | "keyword_fuzzy" | "vector"
 
 
 def _sql_literal(value: str) -> str:
@@ -75,6 +75,15 @@ def dialogue_table_row_count(profile_base_dir: str) -> int:
     return int(db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME).count_rows())
 
 
+_DIALOGUE_STATS_CACHE: dict[str, tuple[tuple[float, int], dict[str, Any]]] = {}
+
+
+def _dialogue_transcripts_cache_key(config=None) -> tuple[str, float, int]:
+    from src.storage.dialogue_transcript_store import dialogue_db_cache_token
+
+    return dialogue_db_cache_token(config=config)
+
+
 def get_dialogue_index_stats(*, config=None, profile_base_dir: str = "") -> dict[str, Any]:
     """Health/status snapshot for optional dialogue index.
 
@@ -83,11 +92,27 @@ def get_dialogue_index_stats(*, config=None, profile_base_dir: str = "") -> dict
     """
     from src.storage.dialogue_transcript_store import (
         ensure_shared_transcripts,
-        list_dialogue_transcript_records,
+        list_dialogue_transcript_summaries,
     )
 
+    cache_key = _dialogue_transcripts_cache_key(config=config)
+    root, mtime, file_count = cache_key
+    if profile_base_dir:
+        base = os.path.normpath(profile_base_dir)
+    else:
+        base = get_local_model_asset_dirs(config=config)["base_dir"]
+    cache_token = (mtime, file_count)
+    cached = _DIALOGUE_STATS_CACHE.get(root)
+    if cached is not None and cached[0] == cache_token and cached[1].get("_profile_base") == base:
+        return {k: v for k, v in cached[1].items() if not str(k).startswith("_")}
+
     ensure_shared_transcripts(config=config)
-    records = list_dialogue_transcript_records(config=config)
+    # Re-key after possible one-time import.
+    cache_key = _dialogue_transcripts_cache_key(config=config)
+    root, mtime, file_count = cache_key
+    cache_token = (mtime, file_count)
+
+    records = list_dialogue_transcript_summaries(config=config)
     transcript_ids = [
         str(item.get("video_id") or "").strip()
         for item in records
@@ -95,10 +120,6 @@ def get_dialogue_index_stats(*, config=None, profile_base_dir: str = "") -> dict
     ]
     transcript_rows = sum(int(item.get("segment_count") or 0) for item in records)
 
-    if profile_base_dir:
-        base = os.path.normpath(profile_base_dir)
-    else:
-        base = get_local_model_asset_dirs(config=config)["base_dir"]
     vector_rows = dialogue_table_row_count(base)
     state = _read_import_state(base)
     videos = state.get("videos") if isinstance(state.get("videos"), dict) else {}
@@ -109,14 +130,17 @@ def get_dialogue_index_stats(*, config=None, profile_base_dir: str = "") -> dict
         and str(entry.get("dialogue_index_state", "") or "").strip().lower() == DIALOGUE_INDEX_STATE_READY
     ]
     ready = bool(transcript_ids) or vector_rows > 0
-    return {
+    payload = {
         "dialogue_index_ready": ready,
         "dialogue_indexed_videos": len(transcript_ids) or len(vector_ready_ids),
         "dialogue_rows": int(transcript_rows) or int(vector_rows),
         "dialogue_ready_video_ids": transcript_ids or vector_ready_ids,
         "dialogue_transcript_videos": len(transcript_ids),
         "dialogue_vector_rows": int(vector_rows),
+        "_profile_base": base,
     }
+    _DIALOGUE_STATS_CACHE[root] = (cache_token, payload)
+    return {k: v for k, v in payload.items() if not str(k).startswith("_")}
 
 
 def keyword_search_dialogue(
@@ -126,75 +150,88 @@ def keyword_search_dialogue(
     profile_base_dir: str = "",
     library_path: str = "",
     video_id: str = "",
+    video_ids: list[str] | set[str] | None = None,
     top_k: int = 20,
     require_active_embedding_spec: bool = False,
+    match_mode: str = "exact",
 ) -> list[DialogueSearchHit]:
-    """Substring match on shared ASR transcripts (not bound to CLIP)."""
+    """Match shared OCR/ASR transcripts (not bound to CLIP).
+
+    ``match_mode`` ``exact`` uses SQLite INSTR substring match; ``fuzzy`` allows
+    short OCR typos via n-gram / near-substring scoring.
+    Pass ``video_ids`` (or ``video_id`` / ``library_path``) to avoid scanning the
+    whole shared store when the UI search scope is narrowed.
+    """
     from src.storage.dialogue_transcript_store import (
         ensure_shared_transcripts,
-        list_shared_transcript_segments,
+        fuzzy_dialogue_accepts,
+        fuzzy_dialogue_match_score,
+        has_any_dialogue_transcript,
+        iter_matching_transcript_segment_rows,
+        normalize_dialogue_query,
     )
 
     text = str(query or "").strip()
     if not text:
         return []
 
+    mode = str(match_mode or "exact").strip().lower()
+    if mode in {"fuzzy", "tolerant", "approx"}:
+        mode = "fuzzy"
+    elif mode in {"segment", "keyword", "literal", "exact"}:
+        mode = "exact"
+    else:
+        mode = "exact"
+
     ensure_shared_transcripts(config=config)
     want_video = str(video_id or "").strip()
     want_lib = canonicalize_library_path(library_path) if library_path else ""
-    segments = list_shared_transcript_segments(want_video, config=config)
+    want_ids = None
+    if video_ids is not None:
+        want_ids = {str(v).strip() for v in video_ids if str(v or "").strip()}
+        if not want_ids:
+            return []
 
-    # Legacy fallback: profile Lance text if shared store still empty.
-    if not segments and not require_active_embedding_spec:
-        if profile_base_dir:
-            base = os.path.normpath(profile_base_dir)
-        else:
-            base = get_local_model_asset_dirs(config=config)["base_dir"]
-        if os.path.isdir(get_lance_dir(base)):
-            db = _connect_lance(base)
-            if DIALOGUE_SEGMENTS_TABLE_NAME in _list_table_names(db):
-                table = db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME)
-                where = _scope_where(library_path=library_path, video_id=video_id)
-                builder = table.search().select(
-                    ["video_id", "video_path", "library_path", "start", "end", "text", "language"]
-                )
-                if where:
-                    builder = builder.where(where)
-                try:
-                    arrow = builder.limit(50_000).to_arrow()
-                    for index in range(arrow.num_rows):
-                        segments.append(
-                            {
-                                "video_id": str(arrow["video_id"][index].as_py() or ""),
-                                "video_path": str(arrow["video_path"][index].as_py() or ""),
-                                "library_path": str(arrow["library_path"][index].as_py() or ""),
-                                "start": float(arrow["start"][index].as_py() or 0.0),
-                                "end": float(arrow["end"][index].as_py() or 0.0),
-                                "text": str(arrow["text"][index].as_py() or ""),
-                                "language": str(arrow["language"][index].as_py() or ""),
-                            }
-                        )
-                except Exception as exc:
-                    logger.error("Dialogue keyword legacy scan failed: %s", exc)
-
-    needle = text.casefold()
+    needle = normalize_dialogue_query(text)
     hits: list[DialogueSearchHit] = []
     seen: set[tuple[str, float, float, str]] = set()
-    for item in segments:
+    limit = max(int(top_k), 1)
+    matched_by = "keyword_fuzzy" if mode == "fuzzy" else "keyword"
+
+    def _consume(item: dict[str, Any]) -> bool:
         row_text = str(item.get("text", "") or "")
-        if needle not in row_text.casefold():
-            continue
+        if not row_text:
+            return False
+        row_cf = row_text.casefold()
+        score = item.get("score")
+        if score is None:
+            if mode == "exact":
+                if needle not in row_cf:
+                    return False
+                score = 1.0
+            else:
+                score = fuzzy_dialogue_match_score(row_cf, needle)
+                if not fuzzy_dialogue_accepts(float(score), needle):
+                    return False
+        else:
+            score = float(score)
+            if mode == "exact" and needle not in row_cf:
+                return False
+            if mode == "fuzzy" and not fuzzy_dialogue_accepts(score, needle):
+                return False
         video_key = str(item.get("video_id", "") or "")
         if want_video and video_key != want_video:
-            continue
+            return False
+        if want_ids is not None and video_key not in want_ids:
+            return False
         row_lib = canonicalize_library_path(str(item.get("library_path", "") or ""))
         if want_lib and row_lib != want_lib:
-            continue
+            return False
         start_sec = float(item.get("start", 0.0) or 0.0)
         end_sec = float(item.get("end", 0.0) or 0.0)
         dedupe_key = (video_key, round(start_sec, 3), round(end_sec, 3), row_text)
         if dedupe_key in seen:
-            continue
+            return False
         seen.add(dedupe_key)
         hits.append(
             DialogueSearchHit(
@@ -205,12 +242,69 @@ def keyword_search_dialogue(
                 end_sec=end_sec,
                 text=row_text,
                 language=str(item.get("language", "") or ""),
-                score=1.0,
-                matched_by="keyword",
+                score=float(score),
+                matched_by=matched_by if score < 1.0 else "keyword",
             )
         )
-        if len(hits) >= max(int(top_k), 1):
-            break
+        return len(hits) >= limit
+
+    for item in iter_matching_transcript_segment_rows(
+        text,
+        config=config,
+        video_id=want_video,
+        video_ids=want_ids,
+        library_path=want_lib,
+        limit=limit,
+        match_mode=mode,
+    ):
+        if _consume(item):
+            return hits
+
+    # Legacy fallback: profile Lance text if shared store still empty.
+    if hits or has_any_dialogue_transcript(config=config) or require_active_embedding_spec:
+        return hits
+
+    if profile_base_dir:
+        base = os.path.normpath(profile_base_dir)
+    else:
+        base = get_local_model_asset_dirs(config=config)["base_dir"]
+    if not os.path.isdir(get_lance_dir(base)):
+        return hits
+    db = _connect_lance(base)
+    if DIALOGUE_SEGMENTS_TABLE_NAME not in _list_table_names(db):
+        return hits
+    table = db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME)
+    where = _scope_where(library_path=library_path, video_id=video_id)
+    builder = table.search().select(
+        ["video_id", "video_path", "library_path", "start", "end", "text", "language"]
+    )
+    if where:
+        builder = builder.where(where)
+    try:
+        arrow = builder.limit(50_000).to_arrow()
+        legacy_rows: list[dict[str, Any]] = []
+        for index in range(arrow.num_rows):
+            item = {
+                "video_id": str(arrow["video_id"][index].as_py() or ""),
+                "video_path": str(arrow["video_path"][index].as_py() or ""),
+                "library_path": str(arrow["library_path"][index].as_py() or ""),
+                "start": float(arrow["start"][index].as_py() or 0.0),
+                "end": float(arrow["end"][index].as_py() or 0.0),
+                "text": str(arrow["text"][index].as_py() or ""),
+                "language": str(arrow["language"][index].as_py() or ""),
+            }
+            if want_ids is not None and item["video_id"] not in want_ids:
+                continue
+            if mode == "fuzzy":
+                item["score"] = fuzzy_dialogue_match_score(item["text"], needle)
+            legacy_rows.append(item)
+        if mode == "fuzzy":
+            legacy_rows.sort(key=lambda row: -float(row.get("score") or 0.0))
+        for item in legacy_rows:
+            if _consume(item):
+                break
+    except Exception as exc:
+        logger.error("Dialogue keyword legacy scan failed: %s", exc)
     return hits
 
 
@@ -303,6 +397,7 @@ def search_dialogue(
     profile_base_dir: str = "",
     library_path: str = "",
     video_id: str = "",
+    video_ids: list[str] | set[str] | None = None,
     top_k: int = 20,
     query_vector=None,
     match_mode: str = "auto",
@@ -310,17 +405,24 @@ def search_dialogue(
     """Search dialogue rows.
 
     ``match_mode``:
-    - ``segment`` / ``keyword``: substring match on ASR text only
+    - ``exact`` / ``segment`` / ``keyword``: contiguous substring on OCR/ASR text
+    - ``fuzzy``: typo-tolerant keyword match on OCR/ASR text
     - ``semantic`` / ``vector``: CLIP text vector only
-    - ``auto``: keyword first, then vector fallback (legacy / Agent default)
+    - ``auto``: exact keyword first, then vector fallback (legacy / Agent default)
     """
     mode = str(match_mode or "auto").strip().lower()
-    if mode in {"segment", "keyword", "literal"}:
-        mode = "segment"
+    keyword_mode = "exact"
+    if mode in {"fuzzy", "tolerant", "approx"}:
+        mode = "fuzzy"
+        keyword_mode = "fuzzy"
+    elif mode in {"segment", "keyword", "literal", "exact"}:
+        mode = "exact"
+        keyword_mode = "exact"
     elif mode in {"semantic", "vector"}:
         mode = "semantic"
     else:
         mode = "auto"
+        keyword_mode = "exact"
 
     def _keyword() -> list[DialogueSearchHit]:
         return keyword_search_dialogue(
@@ -329,7 +431,9 @@ def search_dialogue(
             profile_base_dir=profile_base_dir,
             library_path=library_path,
             video_id=video_id,
+            video_ids=video_ids,
             top_k=top_k,
+            match_mode=keyword_mode,
         )
 
     def _vector() -> list[DialogueSearchHit]:
@@ -350,11 +454,18 @@ def search_dialogue(
             top_k=top_k,
         )
 
-    if mode == "segment":
+    if mode in {"exact", "fuzzy"}:
         hits = _keyword()
+        matched = "keyword_fuzzy" if mode == "fuzzy" else "keyword"
+        if hits and mode == "fuzzy":
+            # Prefer reporting fuzzy only when at least one non-exact hit exists.
+            if any(str(item.matched_by) == "keyword_fuzzy" for item in hits):
+                matched = "keyword_fuzzy"
+            else:
+                matched = "keyword"
         if not hits:
-            return {"matched_by": "keyword", "hits": [], "message": "no dialogue matches"}
-        return {"matched_by": "keyword", "hits": hits, "message": ""}
+            return {"matched_by": matched, "hits": [], "message": "no dialogue matches"}
+        return {"matched_by": matched, "hits": hits, "message": ""}
 
     if mode == "semantic":
         text = str(query or "").strip()

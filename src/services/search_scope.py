@@ -282,6 +282,51 @@ def is_search_scoped(
     return False
 
 
+def resolve_scope_video_ids(
+    *,
+    video_paths: Optional[Sequence[str]] = None,
+    library_paths: Optional[Sequence[str]] = None,
+    config=None,
+) -> Optional[List[str]]:
+    """Map active search scope to video ids for store-level filtering.
+
+    Returns ``None`` when the search is unscoped (caller should scan all).
+    Returns an empty list when scoped but no matching indexed videos exist.
+    """
+    if not is_search_scoped(video_paths=video_paths, library_paths=library_paths):
+        return None
+
+    from src.app.config import load_config
+    from src.storage.asset_store import load_model_metadata
+
+    meta = load_model_metadata(config=config or load_config())
+    lookup = build_indexed_video_lookup(meta)
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    path_set = _normalized_video_path_set(video_paths)
+    if path_set is not None:
+        for abs_path, video_id in lookup.items():
+            if abs_path not in path_set:
+                continue
+            if video_id and video_id not in seen:
+                seen.add(video_id)
+                ordered.append(video_id)
+        return ordered
+
+    roots = _normalized_library_roots(library_paths)
+    if not roots:
+        return []
+    for abs_path, video_id, _info in iter_indexed_video_entries(meta):
+        if not video_id or video_id in seen:
+            continue
+        if not any(video_path_under_library_root(abs_path, root) for root in roots):
+            continue
+        seen.add(video_id)
+        ordered.append(video_id)
+    return ordered
+
+
 def _normalized_video_path_set(video_paths: Optional[Sequence[str]]) -> Optional[set[str]]:
     if not video_paths:
         return None
@@ -363,19 +408,17 @@ def load_searchable_path_index(config=None) -> SearchablePathIndex:
     from src.app.config import load_config
     from src.storage.asset_store import load_model_metadata
     from src.storage.config_store import get_local_model_asset_dirs
+    from src.storage.profile_library_store import library_db_cache_token
 
     cfg = config or load_config()
-    meta_file = get_local_model_asset_dirs(config=cfg)["meta_file"]
-    try:
-        meta_mtime = os.path.getmtime(meta_file)
-    except OSError:
-        meta_mtime = 0.0
-    cache_key = os.path.normpath(meta_file)
+    base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+    cache_key, meta_mtime, revision = library_db_cache_token(base_dir)
+    cache_token = (meta_mtime, revision)
     cached = _PATH_INDEX_CACHE.get(cache_key)
-    if cached is not None and cached[0] == meta_mtime:
+    if cached is not None and cached[0] == cache_token:
         return cached[1]
     index = SearchablePathIndex.from_meta(load_model_metadata(config=cfg))
-    _PATH_INDEX_CACHE[cache_key] = (meta_mtime, index)
+    _PATH_INDEX_CACHE[cache_key] = (cache_token, index)
     return index
 
 

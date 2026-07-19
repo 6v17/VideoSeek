@@ -16,6 +16,16 @@ from src.services.search_index_schema import (
 )
 from src.services.indexing_runtime_status import get_index_sync_status, library_sync_in_progress
 
+_VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
+
+
+def _iter_library_video_paths(root_path: str):
+    for current_root, dir_names, files in os.walk(root_path):
+        dir_names[:] = [name for name in dir_names if name.lower() != "__macosx"]
+        for filename in files:
+            if filename.lower().endswith(_VIDEO_EXTS):
+                yield os.path.join(current_root, filename)
+
 
 def needs_search_index_schema_upgrade(config=None):
     cfg = config or load_config()
@@ -192,6 +202,117 @@ def add_library(path):
     return {"added": True, "reason": "", "path": normalized_path}
 
 
+def register_library_videos(*, config=None, library_path: str | None = None) -> dict:
+    """Discover videos under registered libraries and ensure meta file records exist.
+
+    Shared foundation for visual sync and subtitle OCR: assigns ``video_id`` without
+    building CLIP vectors. Newly seen files get ``asset_state=missing_asset``.
+    Existing ready/failed states are left unchanged when the source still exists.
+    """
+    from src.utils import get_video_hash
+
+    cfg = config or load_config()
+    meta = load_model_metadata(config=cfg)
+    meta["libraries"] = _normalize_library_map(meta.get("libraries", {}))
+    target = canonicalize_library_path(library_path) if library_path else ""
+
+    registered = 0
+    updated = 0
+    changed = False
+
+    for root_path, lib_data in list(meta.get("libraries", {}).items()):
+        if not isinstance(lib_data, dict):
+            continue
+        root_key = canonicalize_library_path(root_path)
+        if target and root_key != target:
+            continue
+        if not os.path.isdir(root_path):
+            continue
+
+        lib_files = lib_data.setdefault("files", {})
+        if not isinstance(lib_files, dict):
+            lib_files = {}
+            lib_data["files"] = lib_files
+
+        for abs_path in _iter_library_video_paths(root_path):
+            if not os.path.isfile(abs_path):
+                continue
+            rel_path = os.path.relpath(abs_path, root_path)
+            try:
+                video_mod_time = os.path.getmtime(abs_path)
+            except OSError:
+                continue
+
+            previous = dict(lib_files.get(rel_path, {}) or {})
+            video_id = str(previous.get("vid", "") or "").strip()
+            if not video_id:
+                try:
+                    video_id = get_video_hash(abs_path)
+                except OSError:
+                    continue
+                registered += 1
+
+            state = str(previous.get("asset_state", "") or "").strip().lower()
+            if state in {"", "missing_source"}:
+                state = "missing_asset"
+
+            next_info = dict(previous)
+            next_info["vid"] = video_id
+            next_info["mod_time"] = video_mod_time
+            next_info["asset_state"] = state
+            if state != "sync_failed":
+                next_info.pop("sync_failure_reason", None)
+
+            if next_info != previous:
+                lib_files[rel_path] = next_info
+                updated += 1
+                changed = True
+
+        lib_data["files"] = lib_files
+
+    if changed:
+        save_model_metadata(meta, config=cfg)
+    return {"registered": registered, "updated": updated, "changed": changed}
+
+
+def list_library_video_entries(*, config=None, register: bool = True) -> list[dict]:
+    """Registered library videos for UI trees (does not require visual sync)."""
+    cfg = config or load_config()
+    if register:
+        register_library_videos(config=cfg)
+    meta = load_model_metadata(config=cfg)
+    libraries = _normalize_library_map(meta.get("libraries", {}))
+    entries: list[dict] = []
+    for root_path, lib_data in libraries.items():
+        if not isinstance(lib_data, dict):
+            continue
+        library_path = canonicalize_library_path(root_path)
+        files = lib_data.get("files") or {}
+        if not isinstance(files, dict):
+            continue
+        for rel_path, info in files.items():
+            if not isinstance(info, dict):
+                continue
+            video_id = str(info.get("vid", "") or "").strip()
+            if not video_id:
+                continue
+            video_path = os.path.normpath(os.path.join(root_path, str(rel_path or "")))
+            source_exists = os.path.isfile(video_path)
+            entries.append(
+                {
+                    "library_path": library_path,
+                    "video_path": video_path,
+                    "video_rel_path": str(rel_path or "").replace("\\", "/"),
+                    "video_id": video_id,
+                    "asset_state": str(info.get("asset_state", "") or "").strip().lower(),
+                    "source_exists": source_exists,
+                    "sync_failure_reason": str(info.get("sync_failure_reason", "") or "").strip().lower(),
+                }
+            )
+    entries.sort(key=lambda item: (item["library_path"].lower(), item["video_rel_path"].lower()))
+    return entries
+
+
 def remove_library(path, delete_video_data):
     config = load_config()
     meta = load_model_metadata(config=config)
@@ -302,6 +423,9 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
         lance_bytes_by_video = {}
     entries = []
 
+    # Fast UI path: trust meta + Lance id set; skip per-file exists()/npy probes.
+    probe_filesystem = bool(validate_contents or include_storage_stats)
+
     for library_path, library_data in libraries.items():
         files = library_data.get("files", {})
         for rel_path, info in files.items():
@@ -310,9 +434,14 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
                 continue
             video_path = os.path.normpath(os.path.join(library_path, rel_path))
             legacy_npy_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
-            source_exists = os.path.exists(video_path)
-            legacy_npy_exists = os.path.exists(legacy_npy_file)
             lance_ready = video_id in lance_video_ids
+            stored_state = str(info.get("asset_state", "")).strip().lower()
+            if probe_filesystem:
+                source_exists = os.path.exists(video_path)
+                legacy_npy_exists = os.path.exists(legacy_npy_file)
+            else:
+                source_exists = stored_state != "missing_source"
+                legacy_npy_exists = False
             video_counts = lance_video_counts.get(video_id, {})
             lance_frame_count = int(video_counts.get("frame_count", 0) or 0)
             lance_chunk_count = int(video_counts.get("chunk_count", 0) or 0)
@@ -333,7 +462,6 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
                     lance_ready=lance_ready,
                 )
             else:
-                stored_state = str(info.get("asset_state", "")).strip().lower()
                 if not source_exists:
                     asset_state = "missing_source"
                 elif stored_state == "sync_failed" and not lance_ready:

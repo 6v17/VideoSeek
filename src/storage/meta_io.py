@@ -56,14 +56,22 @@ def _commit_meta_file(temp_path, meta_file):
         raise
 
 
-def save_meta(meta, meta_file):
+def save_meta(meta, meta_file, *, pretty: bool = True):
+    """Atomically write ``meta.json``.
+
+    Use ``pretty=False`` on hot scan flushes — compact JSON is much smaller/faster
+    at 10k+ videos. Final/user-facing saves can keep ``pretty=True``.
+    """
     ensure_folder_exists(meta_file)
     folder = os.path.dirname(meta_file) or "."
     fd, temp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".json", dir=folder)
     os.close(fd)
     try:
         with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(meta, handle, indent=4, ensure_ascii=False)
+            if pretty:
+                json.dump(meta, handle, indent=4, ensure_ascii=False)
+            else:
+                json.dump(meta, handle, ensure_ascii=False, separators=(",", ":"))
         _commit_meta_file(temp_path, meta_file)
         temp_path = ""
     finally:

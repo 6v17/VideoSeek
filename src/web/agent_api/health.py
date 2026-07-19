@@ -13,10 +13,10 @@ from src.services.search_index_schema import (
     needs_search_index_upgrade,
 )
 from src.services.search_request_service import default_agent_image_precision_mode
-from src.services.search_service import load_chunk_search_assets, load_search_assets
 from src.services.agent_clip_service import _MAX_BATCH_EXPORT_CLIPS
 from src.storage.config_store import (
     get_active_embedding_spec,
+    get_local_model_asset_dirs,
     get_search_mode,
     get_search_scope_mode,
 )
@@ -71,10 +71,6 @@ def _count_library_videos() -> int:
     return total
 
 
-def _index_vector_count(search_index) -> int:
-    return int(getattr(search_index, "ntotal", 0) or 0) if search_index is not None else 0
-
-
 def _library_index_snapshot(config=None) -> Dict[str, Any]:
     from src.storage.asset_store import load_model_metadata
 
@@ -98,41 +94,33 @@ def _library_index_snapshot(config=None) -> Dict[str, Any]:
 
 
 def _index_snapshot(mode: str, config=None) -> Dict[str, Any]:
+    """Cheap index readiness snapshot — Lance row counts only, no FAISS materialization."""
+    from src.storage.lance_store import read_lance_profile_summary
+
     cfg = config or load_config()
-    frame_index, _frame_ts, frame_paths = load_search_assets(cfg)
-    chunk_index, _chunk_ranges, chunk_paths = load_chunk_search_assets(cfg)
-
-    if mode == "chunk":
-        search_index = chunk_index
-        video_paths = chunk_paths
+    profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+    lance = read_lance_profile_summary(profile_base_dir, include_dir_size=False)
+    frame_vector_count = int(lance.get("frame_rows") or 0)
+    chunk_vector_count = int(lance.get("chunk_rows") or 0)
+    indexed_video_paths = int(lance.get("indexed_video_count") or 0)
+    frame_ready = bool(lance.get("ready")) and frame_vector_count > 0
+    chunk_ready = chunk_vector_count > 0
+    if str(mode or "").strip().lower() == "chunk":
+        vector_count = chunk_vector_count
+        index_ready = chunk_ready
     else:
-        search_index = frame_index
-        video_paths = frame_paths
-
-    vector_count = _index_vector_count(search_index)
-    if video_paths:
-        indexed_video_paths = len({str(path) for path in video_paths if path})
-    elif frame_index is not None:
-        from src.storage.config_store import get_local_model_asset_dirs
-        from src.storage.lance_search_index import get_lance_indexed_video_ids
-
-        profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
-        indexed_video_paths = len(get_lance_indexed_video_ids(profile_base_dir))
-    else:
-        indexed_video_paths = 0
-    index_ready = search_index is not None and vector_count > 0
+        vector_count = frame_vector_count
+        index_ready = frame_ready
     global_state = "fresh"
-    frame_vector_count = _index_vector_count(frame_index)
-    chunk_vector_count = _index_vector_count(chunk_index)
     library_snapshot = _library_index_snapshot(cfg)
     return {
         "index_ready": index_ready,
         "vector_count": vector_count,
         "indexed_video_paths": indexed_video_paths,
-        "global_index_state": global_state or "fresh",
+        "global_index_state": global_state,
         "index_stale": global_state == "stale",
-        "frame_index_ready": frame_index is not None and frame_vector_count > 0,
-        "chunk_index_ready": chunk_index is not None and chunk_vector_count > 0,
+        "frame_index_ready": frame_ready,
+        "chunk_index_ready": chunk_ready,
         "frame_vector_count": frame_vector_count,
         "chunk_vector_count": chunk_vector_count,
         **library_snapshot,

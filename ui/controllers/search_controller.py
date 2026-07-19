@@ -375,12 +375,16 @@ class SearchController(QObject):
                 status_text = localized
         matched_by = str(getattr(self.worker, "dialogue_matched_by", "") or "").strip()
         if results and matched_by:
-            mode_key = (
-                "search_dialogue_match_semantic"
-                if matched_by == "vector"
-                else "search_dialogue_match_segment"
+            if matched_by == "vector":
+                mode_key = "search_dialogue_match_semantic"
+            elif matched_by == "keyword_fuzzy":
+                mode_key = "search_dialogue_match_fuzzy"
+            else:
+                mode_key = "search_dialogue_match_exact"
+            mode_label = texts.get(
+                mode_key,
+                texts.get("search_dialogue_match_segment", matched_by),
             )
-            mode_label = texts.get(mode_key, matched_by)
             status_text = f"{status_text} · {mode_label}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 

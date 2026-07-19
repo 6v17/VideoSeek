@@ -30,7 +30,6 @@ from src.media.probe import get_video_duration_seconds
 from src.storage.config_store import get_local_model_asset_dirs
 from src.storage.dialogue_transcript_store import (
     ensure_shared_transcripts,
-    list_dialogue_transcript_records,
     list_shared_transcript_segments,
     save_dialogue_transcript,
 )
@@ -103,17 +102,19 @@ def ensure_subtitle_ocr_ready(*, config=None) -> tuple[bool, str]:
 
 
 def list_subtitle_index_targets(*, config=None) -> list[dict[str, str]]:
-    """Ready library videos on disk (same candidate set as former dialogue targets)."""
+    """Library videos on disk (no visual sync required; add-library is enough)."""
     from src.services.dialogue_index_service import list_dialogue_index_targets
 
     return list_dialogue_index_targets(config=config)
 
 
 def list_subtitle_library(*, config=None) -> list[dict[str, Any]]:
+    from src.storage.dialogue_transcript_store import list_dialogue_transcript_summaries
+
     ensure_shared_transcripts(config=config)
     by_id = {item["video_id"]: item for item in list_subtitle_index_targets(config=config)}
     rows: list[dict[str, Any]] = []
-    for record in list_dialogue_transcript_records(config=config):
+    for record in list_dialogue_transcript_summaries(config=config):
         video_id = str(record.get("video_id") or "").strip()
         if not video_id:
             continue
@@ -174,18 +175,25 @@ def index_video_subtitles(
     if mode_value == "reuse":
         if not existing:
             return {"ok": False, "error": "no shared subtitles to reuse", "segment_rows": 0, "mode": "reuse"}
+        try:
+            set_dialogue_index_state(
+                profile_base_dir,
+                video_id,
+                DIALOGUE_INDEX_STATE_READY,
+                extras={
+                    "dialogue_segment_rows": len(existing),
+                    "dialogue_asr_source": str((existing[0] or {}).get("asr_source") or OCR_SOURCE_ID),
+                    "dialogue_error": "",
+                },
+            )
+        except Exception as state_exc:
+            logger.warning(
+                "Subtitle reuse state update failed for %s: %s",
+                video_id,
+                state_exc,
+            )
         if progress_callback:
             progress_callback(1.0, "subtitle_reuse")
-        set_dialogue_index_state(
-            profile_base_dir,
-            video_id,
-            DIALOGUE_INDEX_STATE_READY,
-            extras={
-                "dialogue_segment_rows": len(existing),
-                "dialogue_asr_source": str((existing[0] or {}).get("asr_source") or OCR_SOURCE_ID),
-                "dialogue_error": "",
-            },
-        )
         return {
             "ok": True,
             "video_id": video_id,
@@ -226,18 +234,25 @@ def index_video_subtitles(
                 asr_source=OCR_SOURCE_ID,
                 config=config,
             )
+            try:
+                set_dialogue_index_state(
+                    profile_base_dir,
+                    video_id,
+                    DIALOGUE_INDEX_STATE_READY,
+                    extras={
+                        "dialogue_segment_rows": 0,
+                        "dialogue_asr_source": OCR_SOURCE_ID,
+                        "dialogue_error": "",
+                    },
+                )
+            except Exception as state_exc:
+                logger.warning(
+                    "Empty-subtitle state update failed for %s: %s",
+                    video_id,
+                    state_exc,
+                )
             if progress_callback:
                 progress_callback(1.0, "subtitle_done")
-            set_dialogue_index_state(
-                profile_base_dir,
-                video_id,
-                DIALOGUE_INDEX_STATE_READY,
-                extras={
-                    "dialogue_segment_rows": 0,
-                    "dialogue_asr_source": OCR_SOURCE_ID,
-                    "dialogue_error": "",
-                },
-            )
             return {
                 "ok": True,
                 "video_id": video_id,
@@ -335,16 +350,23 @@ def index_video_subtitles(
             )
             return {"ok": False, "error": save.get("error") or "save failed", "segment_rows": 0, "mode": "ocr"}
 
-        set_dialogue_index_state(
-            profile_base_dir,
-            video_id,
-            DIALOGUE_INDEX_STATE_READY,
-            extras={
-                "dialogue_segment_rows": int(save.get("segment_count") or len(cues)),
-                "dialogue_asr_source": OCR_SOURCE_ID,
-                "dialogue_error": "",
-            },
-        )
+        try:
+            set_dialogue_index_state(
+                profile_base_dir,
+                video_id,
+                DIALOGUE_INDEX_STATE_READY,
+                extras={
+                    "dialogue_segment_rows": int(save.get("segment_count") or len(cues)),
+                    "dialogue_asr_source": OCR_SOURCE_ID,
+                    "dialogue_error": "",
+                },
+            )
+        except Exception as state_exc:
+            logger.warning(
+                "Subtitle transcript saved but dialogue index state update failed for %s: %s",
+                video_id,
+                state_exc,
+            )
         if progress_callback:
             progress_callback(1.0, "subtitle_done")
         return {
@@ -359,10 +381,13 @@ def index_video_subtitles(
         }
     except Exception as exc:
         logger.exception("Subtitle index failed for %s: %s", video_id, exc)
-        set_dialogue_index_state(
-            profile_base_dir,
-            video_id,
-            DIALOGUE_INDEX_STATE_FAILED,
-            extras={"dialogue_error": str(exc)},
-        )
+        try:
+            set_dialogue_index_state(
+                profile_base_dir,
+                video_id,
+                DIALOGUE_INDEX_STATE_FAILED,
+                extras={"dialogue_error": str(exc)},
+            )
+        except Exception:
+            pass
         return {"ok": False, "error": str(exc), "segment_rows": 0, "mode": "ocr"}

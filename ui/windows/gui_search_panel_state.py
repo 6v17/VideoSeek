@@ -197,25 +197,46 @@ class SearchPanelStateMixin:
         if combo is None:
             return
         texts = getattr(self, "texts", {}) or {}
+        current_mode = str(combo.currentData() or "").strip().lower()
         combo.blockSignals(True)
         combo.clear()
-        # Semantic match is deferred; keyword-only UI.
-        combo.addItem(texts.get("search_dialogue_match_segment", "Keyword"), "segment")
-        combo.setCurrentIndex(0)
+        combo.addItem(texts.get("search_dialogue_match_exact", "Exact"), "exact")
+        combo.addItem(texts.get("search_dialogue_match_fuzzy", "Fuzzy"), "fuzzy")
+        # Prefer preserved selection; migrate legacy "segment" → exact.
+        if current_mode in {"fuzzy", "tolerant", "approx"}:
+            target = "fuzzy"
+        else:
+            target = "exact"
+        target_index = combo.findData(target)
+        if target_index >= 0:
+            combo.setCurrentIndex(target_index)
+        else:
+            combo.setCurrentIndex(0)
         combo.blockSignals(False)
         cluster = getattr(page, "dialogue_search_mode_cluster", None)
         if cluster is not None:
-            cluster.setVisible(False)
+            cluster.setVisible(True)
+        label = getattr(page, "dialogue_search_mode_label", None)
+        if label is not None:
+            label.setText(texts.get("search_dialogue_match_label", "Match mode"))
 
     def _dialogue_match_mode_from_ui(self) -> str:
-        # Keyword/substring only until subtitle semantic search is enabled.
-        return "segment"
+        if not hasattr(self, "search_page"):
+            return "exact"
+        combo = getattr(self.search_page, "dialogue_search_mode", None)
+        if combo is None:
+            return "exact"
+        mode = str(combo.currentData() or "exact").strip().lower()
+        if mode in {"fuzzy", "tolerant", "approx"}:
+            return "fuzzy"
+        return "exact"
 
-    def _refresh_search_panel_state(self) -> None:
+    def _refresh_search_panel_state(self, *, refresh_scope: bool = True) -> None:
         if not hasattr(self, "search_page"):
             return
 
-        self._refresh_search_scope_ui()
+        if refresh_scope:
+            self._refresh_search_scope_ui()
 
         page = self.search_page
         texts = getattr(self, "texts", {}) or {}
@@ -244,8 +265,7 @@ class SearchPanelStateMixin:
             elif active_tab == self.SEARCH_TAB_IMAGE:
                 mode_stack.setCurrentIndex(1)
             elif active_tab == self.SEARCH_TAB_DIALOGUE:
-                # Match-mode combo is hidden (keyword-only); reuse empty compose slot.
-                mode_stack.setCurrentIndex(2)
+                mode_stack.setCurrentIndex(3)
             else:
                 # compose: no granularity controls
                 mode_stack.setCurrentIndex(2)
@@ -267,10 +287,21 @@ class SearchPanelStateMixin:
         if active_tab == self.SEARCH_TAB_DIALOGUE:
             self._populate_dialogue_search_mode_combo()
             dialogue_mode = getattr(page, "dialogue_search_mode", None)
+            mode = self._dialogue_match_mode_from_ui()
+            hint_key = (
+                "search_dialogue_match_fuzzy_hint"
+                if mode == "fuzzy"
+                else "search_dialogue_match_exact_hint"
+            )
+            tip = texts.get(
+                hint_key,
+                texts.get("search_dialogue_match_segment_hint", ""),
+            )
             if dialogue_mode is not None:
-                dialogue_mode.setToolTip(
-                    texts.get("search_dialogue_match_segment_hint", "")
-                )
+                dialogue_mode.setToolTip(tip)
+            label = getattr(page, "dialogue_search_mode_label", None)
+            if label is not None:
+                label.setToolTip(tip)
 
         dialogue_hint = getattr(page, "lbl_dialogue_hint", None)
         if dialogue_hint is not None:
@@ -280,16 +311,36 @@ class SearchPanelStateMixin:
         self._refresh_search_model_display()
 
     def _dialogue_search_hint_text(self, texts) -> str:
-        fallback = texts.get(
-            "search_dialogue_match_segment_hint",
-            "Keyword/substring match on OCR subtitle text.",
-        )
-        ready_key = "search_dialogue_match_segment_hint_ready"
+        mode = self._dialogue_match_mode_from_ui()
+        if mode == "fuzzy":
+            fallback = texts.get(
+                "search_dialogue_match_fuzzy_hint",
+                "Fuzzy match tolerates short OCR typos in subtitle text.",
+            )
+            ready_key = "search_dialogue_match_fuzzy_hint_ready"
+        else:
+            fallback = texts.get(
+                "search_dialogue_match_exact_hint",
+                texts.get(
+                    "search_dialogue_match_segment_hint",
+                    "Exact substring match on OCR subtitle text.",
+                ),
+            )
+            ready_key = "search_dialogue_match_exact_hint_ready"
         try:
+            import time
+
             from src.storage.lance_dialogue_search import get_dialogue_index_stats
 
-            stats = get_dialogue_index_stats()
-            indexed = int(stats.get("dialogue_indexed_videos") or 0)
+            # Typing/tab switches must not re-walk all transcript files.
+            now = time.monotonic()
+            cached = getattr(self, "_dialogue_stats_cache", None)
+            if cached and (now - float(cached.get("at", 0.0))) < 30.0:
+                indexed = int(cached.get("indexed") or 0)
+            else:
+                stats = get_dialogue_index_stats()
+                indexed = int(stats.get("dialogue_indexed_videos") or 0)
+                self._dialogue_stats_cache = {"at": now, "indexed": indexed}
             if indexed > 0:
                 return texts.get(ready_key, fallback).format(count=indexed)
         except Exception:

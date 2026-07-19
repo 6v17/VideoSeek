@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 
 from src.services.library_service import list_local_vector_details, needs_search_index_schema_upgrade
-from src.services.search_scope import count_indexed_ready_videos, normalize_scope_path
-from src.services.search_scope import list_ready_video_paths_for_libraries
+from src.services.search_scope import list_ready_video_paths_for_libraries, normalize_scope_path
 from src.storage.config_store import (
     get_search_scope_library_paths,
     get_search_scope_mode,
@@ -21,23 +20,39 @@ class SearchScopeGuiMixin:
         self._search_scope_mode = get_search_scope_mode()
         self._search_scope_video_paths = get_search_scope_video_paths()
         self._search_scope_entries_cache: list = []
+        self._search_scope_entries_dirty = True
+
+    def _search_scope_ready_count(self) -> int:
+        return sum(
+            1
+            for ent in self._search_scope_entries_cache
+            if str(ent.get("asset_state", "")).strip().lower() == "ready"
+            and bool(ent.get("source_exists", True))
+        )
 
     def _search_scope_picker_available(self) -> bool:
         if needs_search_index_schema_upgrade():
             return False
-        return count_indexed_ready_videos() >= 2
+        return self._search_scope_ready_count() >= 2
 
-    def _refresh_search_scope_entries(self) -> None:
+    def _refresh_search_scope_entries(self, *, force: bool = False) -> None:
+        if not force and not getattr(self, "_search_scope_entries_dirty", True) and self._search_scope_entries_cache:
+            return
         try:
             detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
             self._search_scope_entries_cache = list(detail.get("entries", []))
+            self._search_scope_entries_dirty = False
         except Exception:
             self._search_scope_entries_cache = []
+            self._search_scope_entries_dirty = True
 
-    def _refresh_search_scope_ui(self) -> None:
+    def invalidate_search_scope_entries_cache(self) -> None:
+        self._search_scope_entries_dirty = True
+
+    def _refresh_search_scope_ui(self, *, force_entries: bool = False) -> None:
         if not hasattr(self, "search_page"):
             return
-        self._refresh_search_scope_entries()
+        self._refresh_search_scope_entries(force=force_entries)
         show_scope = self._search_scope_picker_available()
         self.search_page.search_scope_cluster.setVisible(show_scope)
 
@@ -86,7 +101,7 @@ class SearchScopeGuiMixin:
         self.search_page.search_scope_select.set_display_text(display, tooltip=summary)
 
     def open_search_scope_editor(self) -> None:
-        self._refresh_search_scope_entries()
+        self._refresh_search_scope_entries(force=True)
         if not self._search_scope_entries_cache:
             return
         dialog = SearchScopeEditorDialog(

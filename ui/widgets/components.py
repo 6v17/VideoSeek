@@ -5,6 +5,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
-    QTabWidget,
+    QTabWidget,  # retained for other pages
     QTextEdit,
     QTableWidget,
     QTableWidgetItem,
@@ -47,6 +48,8 @@ from ui.widgets.scaffold import (
 )
 from ui.widgets.search_panel import SearchPanel
 from ui.widgets.styles import repolish_widget
+from ui.widgets.library_video_tree import LibraryGroupedVideoTree
+from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.video_download_page import VideoDownloadPage
 
 LinkSearchPage = VideoDownloadPage
@@ -545,25 +548,68 @@ class LibraryPage(QWidget):
             divider.setObjectName("ToolbarDivider")
             return divider
 
-        self.library_tabs = QTabWidget()
-        self.library_tabs.setObjectName("LibraryTabs")
-        self.library_tabs.setDocumentMode(True)
-        self.library_tabs.tabBar().setExpanding(False)
-        self.library_tabs.tabBar().setDrawBase(False)
-        self.library_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
+        # Shared strip: add folder + mode switch (peers)
+        self.shared_toolbar_card = QFrame()
+        self.shared_toolbar_card.setObjectName("LibrarySharedStrip")
+        shared_outer = QHBoxLayout(self.shared_toolbar_card)
+        shared_outer.setContentsMargins(4, 2, 4, 2)
+        shared_outer.setSpacing(10)
 
-        # --- Tab: visual video library ---
+        self.btn_add_lib = QPushButton()
+        self.btn_add_lib.setObjectName("UpdateButton")
+
+        self.mode_segment = QFrame()
+        self.mode_segment.setObjectName("LibraryModeSegment")
+        mode_row = QHBoxLayout(self.mode_segment)
+        mode_row.setContentsMargins(3, 3, 3, 3)
+        mode_row.setSpacing(2)
+        self.btn_tab_visual = QPushButton()
+        self.btn_tab_visual.setObjectName("LibraryModeBtn")
+        self.btn_tab_visual.setCheckable(True)
+        self.btn_tab_visual.setChecked(True)
+        self.btn_tab_visual.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_tab_dialogue = QPushButton()
+        self.btn_tab_dialogue.setObjectName("LibraryModeBtn")
+        self.btn_tab_dialogue.setCheckable(True)
+        self.btn_tab_dialogue.setCursor(Qt.CursorShape.PointingHandCursor)
+        mode_row.addWidget(self.btn_tab_visual)
+        mode_row.addWidget(self.btn_tab_dialogue)
+        self._library_mode_group = QButtonGroup(self)
+        self._library_mode_group.setExclusive(True)
+        self._library_mode_group.addButton(self.btn_tab_visual, 0)
+        self._library_mode_group.addButton(self.btn_tab_dialogue, 1)
+        self._library_mode_group.idClicked.connect(self.set_library_mode)
+
+        self.lbl_shared_library_hint = QLabel()
+        self.lbl_shared_library_hint.setObjectName("CardHint")
+        self.lbl_shared_library_hint.setWordWrap(True)
+
+        shared_outer.addWidget(self.btn_add_lib, 0)
+        shared_outer.addWidget(self.mode_segment, 0)
+        shared_outer.addWidget(self.lbl_shared_library_hint, 1)
+        page_body.addWidget(self.shared_toolbar_card)
+
+        self.library_stack = QStackedWidget()
+        self.library_stack.setObjectName("LibraryStack")
+        # Compatibility alias: older code used QTabWidget APIs.
+        self.library_tabs = self.library_stack
+
+        # --- Panel: visual video library (one card: actions + tree) ---
         self.visual_tab = QWidget()
         visual_layout = QVBoxLayout(self.visual_tab)
         visual_layout.setContentsMargins(0, 8, 0, 0)
-        visual_layout.setSpacing(10)
+        visual_layout.setSpacing(0)
 
-        self.toolbar_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
-        toolbar_card_layout = self.toolbar_card.content_layout
+        self.table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
+        self.toolbar_card = self.table_card
+        table_layout = self.table_card.content_layout
+
+        self.table_title = QLabel()
+        self.table_title.setObjectName("CardTitle")
+        self.table_title.setVisible(False)
+
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
-        self.btn_add_lib = QPushButton()
-        self.btn_add_lib.setObjectName("UpdateButton")
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
         self.btn_stop_index = QPushButton()
@@ -583,74 +629,40 @@ class LibraryPage(QWidget):
         self.btn_debug_system_oom = QPushButton()
         self.btn_debug_system_oom.setObjectName("GhostButton")
         self.btn_debug_system_oom.setVisible(False)
-        toolbar.addWidget(self.btn_add_lib)
         toolbar.addWidget(self.btn_sync_db)
         toolbar.addSpacing(4)
         toolbar.addWidget(_toolbar_divider())
         toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_index_issues)
-        toolbar.addSpacing(4)
-        toolbar.addWidget(_toolbar_divider())
-        toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_cleanup_missing)
         toolbar.addWidget(self.btn_vector_details)
         toolbar.addWidget(self.btn_debug_gpu_oom)
         toolbar.addWidget(self.btn_debug_system_oom)
         toolbar.addStretch()
         toolbar.addWidget(self.btn_stop_index)
-        toolbar_card_layout.addLayout(toolbar)
-        visual_layout.addWidget(self.toolbar_card)
+        table_layout.addLayout(toolbar)
 
-        self.table_card = VSCard()
-        table_layout = self.table_card.content_layout
-        self.table_title = QLabel()
-        self.table_title.setObjectName("CardTitle")
-        self.library_column_header = QFrame()
-        self.library_column_header.setObjectName("LibraryListColumnHeader")
-        header_row = QHBoxLayout(self.library_column_header)
-        header_row.setContentsMargins(16, 0, 16, 8)
-        header_row.setSpacing(14)
+        self.visual_video_tree = LibraryGroupedVideoTree()
+        self.visual_video_tree.setMinimumHeight(280)
+        self.library_list = self.visual_video_tree
         self.library_column_header_labels = []
-        for spec in (
-            ("index", 40, 0),
-            ("path", 0, 1),
-            ("state", 100, 0),
-            ("actions", 200, 0),
-        ):
-            _, min_w, stretch = spec
-            cell = QLabel("")
-            cell.setObjectName("LibraryListHeaderCell")
-            cell.setAlignment(Qt.AlignCenter)
-            if min_w:
-                cell.setMinimumWidth(min_w)
-            self.library_column_header_labels.append(cell)
-            header_row.addWidget(cell, stretch)
-        self.library_scroll = QScrollArea()
-        self.library_scroll.setObjectName("LibraryListScroll")
-        self.library_scroll.setWidgetResizable(True)
-        self.library_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.library_scroll.setFrameShape(QFrame.NoFrame)
-        self.library_scroll.setMinimumHeight(300)
-        self.library_list = QWidget()
-        self.library_list.setObjectName("LibraryListHost")
-        _list_layout = QVBoxLayout(self.library_list)
-        _list_layout.setContentsMargins(0, 0, 0, 0)
-        _list_layout.setSpacing(10)
-        self.library_list._column_headers = self.library_column_header_labels
-        self.library_scroll.setWidget(self.library_list)
-        table_layout.addWidget(self.table_title)
-        table_layout.addWidget(self.library_column_header)
-        table_layout.addWidget(self.library_scroll, 1)
+        table_layout.addWidget(self.visual_video_tree, 1)
         visual_layout.addWidget(self.table_card, 1)
 
-        # --- Tab: shared dialogue library ---
+        # --- Panel: subtitle library (one card) ---
         self.dialogue_tab = QWidget()
         dialogue_layout = QVBoxLayout(self.dialogue_tab)
         dialogue_layout.setContentsMargins(0, 8, 0, 0)
-        dialogue_layout.setSpacing(10)
+        dialogue_layout.setSpacing(0)
 
-        self.dialogue_toolbar_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
-        dialogue_toolbar_layout = self.dialogue_toolbar_card.content_layout
+        self.dialogue_table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
+        self.dialogue_toolbar_card = self.dialogue_table_card
+        dialogue_table_layout = self.dialogue_table_card.content_layout
+
+        self.dialogue_table_title = QLabel()
+        self.dialogue_table_title.setObjectName("CardTitle")
+        self.dialogue_table_title.setVisible(False)
+
         dialogue_toolbar = QHBoxLayout()
         dialogue_toolbar.setSpacing(8)
         self.btn_build_dialogue_index = QPushButton()
@@ -671,34 +683,40 @@ class LibraryPage(QWidget):
         dialogue_toolbar.addWidget(self.btn_refresh_dialogue_library)
         dialogue_toolbar.addStretch()
         dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
-        dialogue_toolbar_layout.addLayout(dialogue_toolbar)
+        dialogue_table_layout.addLayout(dialogue_toolbar)
+
         self.lbl_dialogue_library_hint = QLabel()
         self.lbl_dialogue_library_hint.setObjectName("CardHint")
         self.lbl_dialogue_library_hint.setWordWrap(True)
-        dialogue_toolbar_layout.addWidget(self.lbl_dialogue_library_hint)
-        dialogue_layout.addWidget(self.dialogue_toolbar_card)
+        dialogue_table_layout.addWidget(self.lbl_dialogue_library_hint)
 
-        self.dialogue_table_card = VSCard()
-        dialogue_table_layout = self.dialogue_table_card.content_layout
-        self.dialogue_table_title = QLabel()
-        self.dialogue_table_title.setObjectName("CardTitle")
-        self.dialogue_list = QListWidget()
-        self.dialogue_list.setObjectName("DialogueLibraryList")
-        self.dialogue_list.setMinimumHeight(300)
-        self.dialogue_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        dialogue_table_layout.addWidget(self.dialogue_table_title)
-        dialogue_table_layout.addWidget(self.dialogue_list, 1)
+        self.subtitle_video_tree = LibraryGroupedVideoTree()
+        self.subtitle_video_tree.setMinimumHeight(280)
+        self.dialogue_list = self.subtitle_video_tree
+        dialogue_table_layout.addWidget(self.subtitle_video_tree, 1)
         dialogue_layout.addWidget(self.dialogue_table_card, 1)
 
-        self.library_tabs.addTab(self.visual_tab, "")
-        self.library_tabs.addTab(self.dialogue_tab, "")
-        page_body.addWidget(self.library_tabs, 1)
+        self.library_stack.addWidget(self.visual_tab)
+        self.library_stack.addWidget(self.dialogue_tab)
+        page_body.addWidget(self.library_stack, 1)
 
         # Shared progress row (visual indexing + dialogue jobs)
         self.progress_status = VSProgressStatusRow()
         self.progress_bar = self.progress_status.progress_bar
         self.lbl_status = self.progress_status.status_label
         page_body.addWidget(self.progress_status)
+
+        self.set_library_mode(0)
+
+    def set_library_mode(self, index: int) -> None:
+        idx = 0 if int(index) <= 0 else 1
+        if self.library_stack.currentIndex() != idx:
+            self.library_stack.setCurrentIndex(idx)
+        self.btn_tab_visual.setChecked(idx == 0)
+        self.btn_tab_dialogue.setChecked(idx == 1)
+
+    def library_mode(self) -> int:
+        return int(self.library_stack.currentIndex())
 
 
 def _understanding_field_label(text=""):
@@ -920,7 +938,7 @@ class UnderstandingEvidencePage(QWidget):
         self.scope_combo.setMaximumWidth(280)
         self.scope_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.video_label = _understanding_picker_label()
-        self.video_combo = QComboBox()
+        self.video_combo = SearchableIdCombo()
         self.video_combo.setObjectName("SearchModeSelect")
         self.video_combo.setMinimumWidth(240)
         self.video_combo.setMaximumWidth(520)

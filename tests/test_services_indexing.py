@@ -577,7 +577,7 @@ class IndexingServiceTests(unittest.TestCase):
                     "abs_path": "D:\\videos\\._clip.mp4",
                     "action": "skipped",
                     "reason": "invalid_video_source",
-                    "detail": "Unreadable or unsupported video stream.",
+                    "detail": "Missing file or unsupported extension.",
                 }
             ],
         )

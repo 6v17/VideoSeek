@@ -29,8 +29,18 @@ _LANCE_ROW_SCAN_LIMIT = 2_000_000
 
 
 def _lance_state_mtime(profile_base_dir: str) -> float:
+    """Cache token for Lance readiness; prefers profile ``library.db`` over legacy JSON."""
+    from src.storage.profile_library_store import get_library_db_path, library_db_cache_token
+
+    _path, mtime, revision = library_db_cache_token(profile_base_dir)
+    if mtime > 0:
+        return float(mtime) + (float(revision) * 1e-9)
     try:
         return os.path.getmtime(get_lance_state_file(profile_base_dir))
+    except OSError:
+        pass
+    try:
+        return os.path.getmtime(get_library_db_path(profile_base_dir))
     except OSError:
         return 0.0
 
@@ -366,7 +376,7 @@ def lance_search_is_ready(profile_base_dir: str) -> bool:
 
     result = False
     lance_dir = get_lance_dir(profile_base_dir)
-    if os.path.isdir(lance_dir) and os.path.isfile(get_lance_state_file(profile_base_dir)):
+    if os.path.isdir(lance_dir):
         try:
             db = _connect_lance(profile_base_dir)
             if FRAMES_TABLE_NAME in _list_table_names(db):
