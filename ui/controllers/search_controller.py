@@ -41,7 +41,7 @@ class SearchController(QObject):
         if worker is None:
             return
         self._disconnect_search_worker(worker)
-        shutdown_thread(worker, allow_terminate=False)
+        shutdown_thread(worker, allow_terminate=True, wait_ms=1500)
         if worker is self.worker:
             self.worker = None
 
@@ -171,10 +171,10 @@ class SearchController(QObject):
         self._is_shutdown = True
         self.stop_thumbnail_loading()
         self._disconnect_search_worker(self.worker)
-        shutdown_thread(self.worker, allow_terminate=False)
+        shutdown_thread(self.worker, allow_terminate=True, wait_ms=2000)
         self.worker = None
         self._disconnect_warmup_worker(self.warmup_worker)
-        shutdown_thread(self.warmup_worker, allow_terminate=False)
+        shutdown_thread(self.warmup_worker, allow_terminate=True, wait_ms=2000)
         self.warmup_worker = None
 
     def _disconnect_search_worker(self, worker):
@@ -216,7 +216,7 @@ class SearchController(QObject):
             thread.thumb_ready.disconnect(self._on_thumb_ready)
         except (RuntimeError, TypeError):
             pass
-        shutdown_thread(thread, stop_first=True, allow_terminate=False)
+        shutdown_thread(thread, stop_first=True, allow_terminate=True, wait_ms=1500)
 
     def _on_thumb_ready(self, row, pixmap):
         if self._is_shutdown:

@@ -21,6 +21,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     single_instance_server = SingleInstanceServer(parent=app)
+    app._videoseek_single_instance = single_instance_server
 
     # 设置全局字体
     font = app.font()
@@ -35,10 +36,15 @@ if __name__ == "__main__":
     single_instance_server.set_activate_handler(window._show_main_window_from_tray)
     if getattr(window, "startup_cancelled", False):
         logger.info("Startup cancelled before main window was shown")
+        single_instance_server.close()
         sys.exit(0)
     window.show()
     window.begin_startup_migration()
 
     exit_code = app.exec()
+    try:
+        single_instance_server.close()
+    except Exception:
+        pass
     logger.info("Application exiting with code %s", exit_code)
     sys.exit(exit_code)

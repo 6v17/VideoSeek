@@ -251,6 +251,11 @@ class GuiSettingsPathTests(unittest.TestCase):
                 btn_sync_db=MagicMock(),
                 btn_stop_index=MagicMock(),
                 btn_add_lib=MagicMock(),
+                btn_remove_lib=MagicMock(),
+                btn_build_dialogue_index=MagicMock(),
+                btn_reembed_dialogue=MagicMock(),
+                btn_export_dialogue=MagicMock(),
+                input_subtitle_sample_interval=MagicMock(),
                 btn_cleanup_missing=MagicMock(),
                 progress_bar=MagicMock(),
             ),
@@ -261,6 +266,8 @@ class GuiSettingsPathTests(unittest.TestCase):
                 is_running=MagicMock(return_value=False),
                 start=MagicMock(return_value=True),
             ),
+            _dialogue_index_running=MagicMock(return_value=False),
+            _remove_library_worker_running=MagicMock(return_value=False),
             _apply_index_issue_button_state=MagicMock(),
             refresh_library_table=MagicMock(),
             show_error_dialog=MagicMock(),
@@ -273,13 +280,15 @@ class GuiSettingsPathTests(unittest.TestCase):
 
         dummy.library_page.btn_sync_db.setEnabled.assert_called_once_with(False)
         dummy.library_page.btn_add_lib.setEnabled.assert_called_once_with(False)
-        dummy.refresh_library_table.assert_called_once_with()
+        dummy.library_page.btn_remove_lib.setEnabled.assert_called_once_with(False)
+        dummy.refresh_library_table.assert_not_called()
         dummy.indexing_controller.start.assert_called_once_with(
             target_lib="D:/videos",
             force_cleanup_missing_files=False,
             cleanup_missing_entries=None,
             rebuild_global_assets=False,
             index_from_vectors_only=False,
+            video_ids=None,
         )
 
     def test_cleanup_old_data_root_calls_service_and_reports_success(self):

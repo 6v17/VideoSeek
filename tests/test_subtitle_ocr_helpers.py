@@ -16,6 +16,10 @@ class SubtitleOcrHelpersTests(unittest.TestCase):
         self.assertGreaterEqual(len(times), 9)
         self.assertLessEqual(times[-1], 8.0)
 
+    def test_sample_times_allows_fine_interval(self):
+        times = sample_times_in_segment(0.0, 1.2, interval_sec=0.1, max_frames=0)
+        self.assertGreaterEqual(len(times), 5)
+
     def test_timeline_sampling_covers_duration(self):
         times = sample_times_across_timeline(30.0, interval_sec=2.0, max_frames=100)
         self.assertGreaterEqual(len(times), 2)

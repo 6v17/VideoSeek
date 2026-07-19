@@ -77,7 +77,7 @@ def resolve_subtitle_frame_budget(
     ``max_total_frames <= 0``: fully dynamic (only a large safety ceiling).
     ``max_total_frames > 0``: optional hard ceiling on top of the dynamic estimate.
     """
-    interval = max(0.35, float(sample_interval_sec))
+    interval = max(0.1, float(sample_interval_sec))
     speech = max(0.0, float(speech_sec))
     # Expected samples ≈ speech/interval, plus a little headroom for segment edges.
     expected = int(math.ceil(speech / interval)) + max(0, int(segment_count))
@@ -144,13 +144,13 @@ def index_video_subtitles(
     stop_callback: StopCallback | None = None,
     keep_wav: bool = False,
     mode: SubtitleIndexMode = "auto",
-    sample_interval_sec: float = 0.8,
+    sample_interval_sec: float = 1.2,
     max_frames_per_segment: int = 0,
     max_total_frames: int = 0,
 ) -> dict[str, Any]:
     """Extract hard-subtitle cues: VAD speech segments → sparse frames → RapidOCR.
 
-    Default sample interval is 0.8s. Per-segment frame cap is off by default
+    Default sample interval is 1.2s. Per-segment frame cap is off by default
     (``max_frames_per_segment<=0``). Whole-video OCR budget is derived from
     VAD speech duration / interval; ``max_total_frames>0`` only sets an optional ceiling.
     ``keep_wav`` is accepted for API compatibility (default uses PCM pipe).
@@ -160,6 +160,12 @@ def index_video_subtitles(
     media_path = os.path.normpath(os.path.abspath(str(video_path or "").strip())) if video_path else ""
     if not video_id:
         return {"ok": False, "error": "missing video_id", "segment_rows": 0}
+
+    try:
+        sample_interval_sec = float(sample_interval_sec)
+    except (TypeError, ValueError):
+        sample_interval_sec = 1.2
+    sample_interval_sec = max(0.1, min(6.0, sample_interval_sec))
 
     mode_value = str(mode or "auto").strip().lower()
     if mode_value not in {"auto", "ocr", "reuse"}:
@@ -275,8 +281,9 @@ def index_video_subtitles(
                 )
             )
         deduped: list[float] = []
+        min_spacing = max(0.05, min(0.35, float(sample_interval_sec) * 0.4))
         for t in sorted(times):
-            if not deduped or abs(t - deduped[-1]) >= min(0.35, float(sample_interval_sec) * 0.4):
+            if not deduped or abs(t - deduped[-1]) >= min_spacing:
                 deduped.append(t)
         times = deduped
 

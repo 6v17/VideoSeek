@@ -19,6 +19,7 @@ from src.services.search_scope import (
     resolve_fetch_top_k,
     resolve_per_video_fetch_top_k,
     resolve_scope_video_ids,
+    resolve_subtitle_scope_video_ids,
 )
 from src.services.image_search_rerank import apply_image_pixel_rerank, is_likely_cropped_query_image
 from src.services.search_profiling import (
@@ -857,7 +858,7 @@ def run_dialogue_search(
     if not stats.get("dialogue_index_ready"):
         return [], "no dialogue index for active profile (build dialogue index first)", ""
 
-    scoped_video_ids = resolve_scope_video_ids(
+    scoped_video_ids = resolve_subtitle_scope_video_ids(
         video_paths=scope_video_paths,
         library_paths=scope_library_paths,
         config=cfg,

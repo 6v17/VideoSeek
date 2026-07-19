@@ -190,10 +190,11 @@ class DialogueIndexWorker(QThread):
     finished_signal = Signal(bool, bool, dict)
     error_signal = Signal(str)
 
-    def __init__(self, targets=None, mode: str = "auto"):
+    def __init__(self, targets=None, mode: str = "auto", sample_interval_sec: float | None = None):
         super().__init__()
         self.targets = list(targets or [])
         self.mode = str(mode or "auto").strip().lower() or "auto"
+        self.sample_interval_sec = None if sample_interval_sec is None else float(sample_interval_sec)
         self._stop_requested = False
 
     def stop(self):
@@ -240,6 +241,7 @@ class DialogueIndexWorker(QThread):
                     progress_callback=_progress,
                     stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
                     mode=self.mode,
+                    sample_interval_sec=self.sample_interval_sec,
                 )
                 if result.get("ok"):
                     summary["ok"] += 1
@@ -268,32 +270,76 @@ class DialogueIndexWorker(QThread):
 
 
 class RemoveLibraryWorker(QThread):
-    """Delete a library and its exclusive Lance/index data off the UI thread."""
+    """Delete one or more libraries off the UI thread.
+
+    ``mode="visual"``: CLIP profile library + exclusive Lance data (keeps OCR).
+    ``mode="subtitle"``: global subtitle registry + OCR transcripts (keeps Lance).
+    """
 
     progress_signal = Signal(int, str)
     finished_signal = Signal(bool)
     error_signal = Signal(str)
 
-    def __init__(self, library_path: str):
+    def __init__(self, library_paths, *, mode: str = "visual"):
         super().__init__()
-        self.library_path = str(library_path or "").strip()
+        if isinstance(library_paths, (list, tuple, set)):
+            paths = [str(p or "").strip() for p in library_paths if str(p or "").strip()]
+        else:
+            text = str(library_paths or "").strip()
+            paths = [text] if text else []
+        self.library_paths = paths
+        self.mode = "subtitle" if str(mode or "").strip().lower() == "subtitle" else "visual"
 
     def run(self):
-        from src.services.library_service import remove_library
-        from src.workflows.update_video import delete_physical_video_data
-
         ok = False
         try:
-            ok = bool(
-                remove_library(
-                    self.library_path,
-                    delete_physical_video_data,
-                    progress_callback=lambda value, text: self.progress_signal.emit(
-                        int(value),
-                        str(text or ""),
-                    ),
-                )
-            )
+            paths = list(self.library_paths)
+            if not paths:
+                ok = False
+            else:
+                total = len(paths)
+                ok = True
+                for index, path in enumerate(paths):
+                    base = int((index / max(total, 1)) * 100)
+                    span = max(1, int(100 / max(total, 1)))
+
+                    def _progress(value, text, *, _base=base, _span=span, _i=index, _t=total):
+                        mapped = min(99, _base + int(max(0, min(100, int(value))) * _span / 100))
+                        raw = str(text or "")
+                        if raw.startswith("remove_library|"):
+                            self.progress_signal.emit(mapped, raw)
+                        else:
+                            self.progress_signal.emit(
+                                mapped,
+                                f"remove_library|{_i + 1}|{_t}|{path}",
+                            )
+
+                    self.progress_signal.emit(
+                        base,
+                        f"remove_library|{index + 1}|{total}|{path}",
+                    )
+                    if self.mode == "subtitle":
+                        from src.services.subtitle_library_service import remove_subtitle_library
+
+                        removed = bool(
+                            remove_subtitle_library(path, progress_callback=_progress)
+                        )
+                    else:
+                        from src.services.library_service import remove_library
+                        from src.workflows.update_video import delete_physical_video_data
+
+                        removed = bool(
+                            remove_library(
+                                path,
+                                delete_physical_video_data,
+                                progress_callback=_progress,
+                            )
+                        )
+                    if not removed:
+                        ok = False
+                        break
+                if ok:
+                    self.progress_signal.emit(100, f"remove_library|{total}|{total}|done")
         except Exception as exc:
             logger.exception("Remove library worker failed")
             self.error_signal.emit(str(exc).strip() or repr(exc))

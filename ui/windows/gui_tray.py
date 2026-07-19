@@ -191,6 +191,10 @@ class TrayGuiMixin:
         from ui.threading_utils import shutdown_thread
 
         shutdown_thread(getattr(self, "_model_package_import_worker", None), stop_first=True)
+        shutdown_thread(getattr(self, "_startup_migration_worker", None), stop_first=True, wait_ms=2000)
+        shutdown_thread(getattr(self, "dialogue_index_worker", None), stop_first=True, wait_ms=2000)
+        shutdown_thread(getattr(self, "remove_library_worker", None), stop_first=True, wait_ms=2000)
+        shutdown_thread(getattr(self, "_local_vector_detail_worker", None), wait_ms=1500)
         self.mobile_bridge_controller.shutdown()
         if hasattr(self, "agent_api_controller"):
             self.agent_api_controller.shutdown()
@@ -202,7 +206,17 @@ class TrayGuiMixin:
         self.preview_controller.shutdown()
         if hasattr(self, "_tray"):
             self._tray.hide()
-        event.accept()
         app = QApplication.instance()
+        server = getattr(app, "_videoseek_single_instance", None) if app is not None else None
+        if server is not None and hasattr(server, "close"):
+            try:
+                server.close()
+            except Exception:
+                pass
+            try:
+                setattr(app, "_videoseek_single_instance", None)
+            except Exception:
+                pass
+        event.accept()
         if app is not None:
             app.quit()

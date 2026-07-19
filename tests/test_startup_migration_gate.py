@@ -86,6 +86,98 @@ class StartupMigrationGateTests(unittest.TestCase):
             ):
                 self.assertTrue(migration_runner_module._already_migrated(config, meta))
 
+    def test_already_migrated_true_with_library_db_only(self):
+        """SQLite profiles no longer need a physical meta.json on disk."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = os.path.join(tmp, "profile")
+            data_dir = os.path.join(data_root, "data")
+            model_assets = os.path.join(
+                data_dir, "model_assets", "openai-clip", "vit-base-patch32"
+            )
+            for path in (
+                os.path.join(model_assets, "vector"),
+                os.path.join(model_assets, "index"),
+                os.path.join(model_assets, "global"),
+            ):
+                os.makedirs(path, exist_ok=True)
+            meta_file = os.path.join(model_assets, "meta.json")
+            library_db = os.path.join(model_assets, "library.db")
+            with open(library_db, "wb") as handle:
+                handle.write(b"sqlite-placeholder")
+
+            state_file = os.path.join(data_dir, "migration_state.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "completed": True,
+                        "schema_version": 2,
+                        "lance_migration": {"completed": True},
+                    },
+                    handle,
+                )
+
+            config = {
+                "schema_version": 2,
+                "data_root": data_root,
+            }
+            meta = {"libraries": {}, "schema_version": 2}
+
+            with (
+                patch.object(
+                    migration_runner_module,
+                    "get_local_model_asset_dirs",
+                    return_value={
+                        "base_dir": model_assets,
+                        "vector_dir": os.path.join(model_assets, "vector"),
+                        "index_dir": os.path.join(model_assets, "index"),
+                        "meta_file": meta_file,
+                    },
+                ),
+                patch.object(
+                    migration_runner_module,
+                    "get_global_model_asset_paths",
+                    return_value={"global_dir": os.path.join(model_assets, "global")},
+                ),
+                patch.object(
+                    migration_runner_module,
+                    "_migration_state_file",
+                    return_value=state_file,
+                ),
+            ):
+                self.assertFalse(os.path.exists(meta_file))
+                self.assertTrue(migration_runner_module._profile_meta_store_exists(meta_file))
+                self.assertTrue(migration_runner_module._already_migrated(config, meta))
+
+    def test_write_migration_state_preserves_lance_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            state_file = os.path.join(data_dir, "migration_state.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "completed": True,
+                        "schema_version": 2,
+                        "lance_migration": {"completed": True, "videos_imported": 3},
+                    },
+                    handle,
+                )
+            config = {"data_root": tmp}
+            with patch.object(
+                migration_runner_module,
+                "_migration_state_file",
+                return_value=state_file,
+            ):
+                migration_runner_module._write_migration_state(config, backup_dir="")
+            with open(state_file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            self.assertTrue(payload.get("completed"))
+            self.assertEqual(payload.get("schema_version"), 2)
+            self.assertEqual(
+                payload.get("lance_migration"),
+                {"completed": True, "videos_imported": 3},
+            )
+
     def test_create_backup_skipped_for_empty_data_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = {"data_root": tmp}

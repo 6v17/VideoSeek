@@ -152,6 +152,115 @@ def resolve_default_active_search_scope(
     return scope_video_paths, scope_library_paths
 
 
+def resolve_active_dialogue_search_library_scope(config=None) -> list[str] | None:
+    """Selected global subtitle-library roots, or None for all subtitle libraries."""
+    from src.services.subtitle_library_service import list_subtitle_search_scope_library_options
+    from src.storage.config_store import (
+        get_dialogue_search_scope_library_paths,
+        get_dialogue_search_scope_mode,
+        get_dialogue_search_scope_video_paths,
+    )
+
+    if get_dialogue_search_scope_mode(config) != "selected":
+        return None
+    if get_dialogue_search_scope_video_paths(config):
+        return None
+    if len(list_subtitle_search_scope_library_options(config=config)) < 2:
+        return None
+    paths = get_dialogue_search_scope_library_paths(config)
+    if not paths:
+        return None
+    return list(paths)
+
+
+def resolve_active_dialogue_search_video_scope(config=None) -> list[str] | None:
+    """Selected subtitle-library video paths, or None to search all subtitle videos."""
+    from src.storage.config_store import (
+        get_dialogue_search_scope_library_paths,
+        get_dialogue_search_scope_mode,
+        get_dialogue_search_scope_video_paths,
+    )
+
+    if get_dialogue_search_scope_mode(config) != "selected":
+        return None
+    video_paths = get_dialogue_search_scope_video_paths(config)
+    if video_paths:
+        return list(video_paths)
+    library_paths = get_dialogue_search_scope_library_paths(config)
+    if library_paths:
+        from src.services.subtitle_library_service import list_subtitle_search_scope_entries
+
+        roots = _normalized_library_roots(library_paths)
+        expanded: list[str] = []
+        seen: set[str] = set()
+        for item in list_subtitle_search_scope_entries(config=config):
+            if str(item.get("asset_state") or "").strip().lower() != "ready":
+                continue
+            abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+            if not abs_path or abs_path in seen:
+                continue
+            if not any(video_path_under_library_root(abs_path, root) for root in roots):
+                continue
+            seen.add(abs_path)
+            expanded.append(abs_path)
+        return expanded or None
+    return None
+
+
+def resolve_default_active_dialogue_search_scope(
+    config=None,
+) -> tuple[list[str] | None, list[str] | None]:
+    """Subtitle-tab scope: selected videos, else selected subtitle libraries, else all."""
+    scope_video_paths = resolve_active_dialogue_search_video_scope(config=config)
+    scope_library_paths = (
+        None if scope_video_paths else resolve_active_dialogue_search_library_scope(config=config)
+    )
+    return scope_video_paths, scope_library_paths
+
+
+def resolve_subtitle_scope_video_ids(
+    *,
+    video_paths: Optional[Sequence[str]] = None,
+    library_paths: Optional[Sequence[str]] = None,
+    config=None,
+) -> Optional[List[str]]:
+    """Map dialogue search scope to video ids using the global subtitle registry."""
+    if not is_search_scoped(video_paths=video_paths, library_paths=library_paths):
+        return None
+
+    from src.services.subtitle_library_service import list_subtitle_library_video_entries
+
+    entries = list_subtitle_library_video_entries(config=config, register=False)
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    path_set = _normalized_video_path_set(video_paths)
+    if path_set is not None:
+        for item in entries:
+            abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+            video_id = str(item.get("video_id") or "").strip()
+            if not abs_path or not video_id or abs_path not in path_set:
+                continue
+            if video_id not in seen:
+                seen.add(video_id)
+                ordered.append(video_id)
+        return ordered
+
+    roots = _normalized_library_roots(library_paths)
+    if not roots:
+        return []
+    for item in entries:
+        abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+        video_id = str(item.get("video_id") or "").strip()
+        if not abs_path or not video_id or video_id in seen:
+            continue
+        if not any(video_path_under_library_root(abs_path, root) for root in roots):
+            continue
+        seen.add(video_id)
+        ordered.append(video_id)
+    return ordered
+
+
 def _read_scope_fields(scope) -> tuple[Optional[List[str]], Optional[List[str]], bool]:
     if scope is None:
         return None, None, False

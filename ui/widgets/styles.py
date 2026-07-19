@@ -140,6 +140,66 @@ QRadioButton::indicator:disabled {
     border-color: __LINE__;
     background: __FIELD__;
 }
+QCheckBox {
+    color: __HEADLINE__;
+    spacing: 8px;
+    background: transparent;
+}
+QCheckBox::indicator,
+QTableView::indicator,
+QTreeView::indicator,
+QListView::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid __LINE_STRONG__;
+    background: __FIELD__;
+}
+QCheckBox::indicator:unchecked:hover,
+QTableView::indicator:unchecked:hover,
+QTreeView::indicator:unchecked:hover,
+QListView::indicator:unchecked:hover {
+    border-color: __ACCENT__;
+    background: __TRACK__;
+}
+QCheckBox::indicator:checked,
+QTableView::indicator:checked,
+QTreeView::indicator:checked,
+QListView::indicator:checked {
+    border: 1px solid __ACCENT_HOVER__;
+    background: __ACCENT__;
+    image: url("__CHECK_ICON__");
+}
+QCheckBox::indicator:checked:hover,
+QTableView::indicator:checked:hover,
+QTreeView::indicator:checked:hover,
+QListView::indicator:checked:hover {
+    border-color: __ACCENT__;
+    background: __ACCENT_HOVER__;
+}
+QCheckBox::indicator:indeterminate,
+QTableView::indicator:indeterminate,
+QTreeView::indicator:indeterminate,
+QListView::indicator:indeterminate {
+    border: 1px solid __ACCENT_HOVER__;
+    background: __ACCENT__;
+    image: url("__CHECK_PARTIAL_ICON__");
+}
+QCheckBox::indicator:disabled,
+QTableView::indicator:disabled,
+QTreeView::indicator:disabled,
+QListView::indicator:disabled {
+    border-color: __LINE__;
+    background: __BUTTON_SOFT__;
+    image: none;
+}
+QCheckBox:disabled {
+    color: __MUTED__;
+}
+#LibraryLibCheck::indicator {
+    width: 16px;
+    height: 16px;
+}
 #StatusHint {
     color: __MUTED__;
     font-size: 12px;
@@ -922,8 +982,9 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: transparent;
     border: none;
 }
-/* Same family as 添加文件夹; never set max-height (clips bottom borders). */
-#LibrarySharedStrip #UpdateButton {
+/* Same family as 添加库; never set max-height (clips bottom borders). */
+#LibrarySharedStrip #UpdateButton,
+#LibrarySharedStrip #DangerGhostButton {
     min-height: 32px;
     padding: 5px 14px;
     border-radius: 10px;
@@ -1006,7 +1067,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     border: none;
     padding: 0;
 }
-#LibraryLibAction, #LibraryLibRemove {
+#LibraryLibAction {
     background: transparent;
     border: none;
     color: __MUTED__;
@@ -1020,13 +1081,45 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: __BUTTON_SOFT__;
     color: __TEXT__;
 }
-#LibraryLibRemove:hover {
-    background: __DANGER_SOFT__;
-    color: __DANGER__;
+#LibraryLibSyncStatus {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+    min-height: 22px;
 }
 #LibraryLibBody {
     background: transparent;
     border: none;
+}
+#LibraryTreeColumnHeader {
+    background: __FIELD__;
+    border: none;
+    border-bottom: 1px solid __LINE__;
+    min-height: 32px;
+    max-height: 34px;
+}
+#LibraryTreeHeaderLabel,
+#LibraryTreeHeaderCount,
+#LibraryTreeHeaderStatus,
+#LibraryTreeHeaderAction {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 2px;
+}
+#LibraryTreeHeaderCount {
+    min-width: 36px;
+}
+#LibraryTreeHeaderStatus {
+    min-width: 88px;
+}
+#LibraryTreeHeaderAction {
+    min-width: 40px;
 }
 QTableView#LibraryGroupedLibTree {
     outline: none;
@@ -1688,6 +1781,10 @@ QDialog QCheckBox {
     spacing: 6px;
     background: transparent;
 }
+QDialog QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}
 ClickableLabel[detailActive="true"] {
     color: __ACCENT__;
     font-weight: 700;
@@ -1982,10 +2079,24 @@ QToolTip {
 """
 
 
+def _qss_url(path: str) -> str:
+    """Qt stylesheet url() path: forward slashes, escaped for Windows."""
+    import os
+
+    text = os.path.normpath(str(path or "")).replace("\\", "/")
+    return text.replace("'", "\\'")
+
+
 def build_style(colors):
+    from src.infra.paths import get_resource_path
+
     style = STYLE_TEMPLATE
     for key, value in colors.items():
         style = style.replace(f"__{key}__", value)
+    check_icon = _qss_url(get_resource_path("resources/icons/check.png"))
+    partial_icon = _qss_url(get_resource_path("resources/icons/check_partial.png"))
+    style = style.replace("__CHECK_ICON__", check_icon)
+    style = style.replace("__CHECK_PARTIAL_ICON__", partial_icon)
     return style
 
 

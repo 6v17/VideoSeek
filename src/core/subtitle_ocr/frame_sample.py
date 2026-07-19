@@ -14,7 +14,7 @@ def sample_times_in_segment(
     start_sec: float,
     end_sec: float,
     *,
-    interval_sec: float = 0.8,
+    interval_sec: float = 1.2,
     max_frames: int = 0,
     edge_pad_sec: float = 0.2,
 ) -> list[float]:
@@ -27,7 +27,7 @@ def sample_times_in_segment(
     duration = end - start
     if duration <= 1e-3:
         return [start]
-    interval = max(0.35, float(interval_sec))
+    interval = max(0.1, float(interval_sec))
     max_n = int(max_frames)
     if duration <= interval * 1.25:
         return [start + duration * 0.5]

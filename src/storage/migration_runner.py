@@ -83,6 +83,18 @@ def _ensure_expected_asset_dirs(config):
         logger.warning("Failed to ensure expected asset directories exist", exc_info=True)
 
 
+def _profile_meta_store_exists(meta_file: str) -> bool:
+    """True when profile metadata exists as meta.json and/or library.db."""
+    path = os.path.normpath(str(meta_file or ""))
+    if not path:
+        return False
+    if os.path.exists(path):
+        return True
+    # After the SQLite library store switch, meta may live only in library.db.
+    library_db = os.path.join(os.path.dirname(path), "library.db")
+    return os.path.isfile(library_db)
+
+
 def _already_migrated(config, meta):
     config_version = _read_schema_version(config.get("schema_version"), default=1)
     meta_version = _read_schema_version(meta.get("schema_version"), default=1)
@@ -98,7 +110,7 @@ def _already_migrated(config, meta):
         return False
     if not (os.path.isdir(model_dirs["vector_dir"]) and os.path.isdir(model_dirs["index_dir"])):
         return False
-    if not os.path.exists(model_dirs["meta_file"]):
+    if not _profile_meta_store_exists(model_dirs["meta_file"]):
         return False
     try:
         global_paths = get_global_model_asset_paths(config=config)
@@ -300,6 +312,17 @@ def _migrate_meta_file(config):
             shutil.move(legacy_meta, target_meta)
             return 1
     if not os.path.exists(target_meta):
+        # Profile metadata may already live only in library.db (no meta.json).
+        # Seeding an empty {"libraries": {}} through save_metadata would wipe
+        # existing SQLite library/video rows via save_profile_meta.
+        profile_base = os.path.dirname(os.path.normpath(target_meta))
+        library_db = os.path.join(profile_base, "library.db")
+        if os.path.isfile(library_db):
+            logger.info(
+                "Skip empty meta.json seed: library.db already present at %s",
+                library_db,
+            )
+            return 0
         save_metadata({"schema_version": TARGET_SCHEMA_VERSION, "libraries": {}}, target_meta)
     return 0
 
@@ -521,14 +544,20 @@ def _prune_backup_dirs(config, keep_count=1):
 def _write_migration_state(config, backup_dir):
     state_file = _migration_state_file(config)
     os.makedirs(os.path.dirname(state_file), exist_ok=True)
-    payload = {
-        "completed": True,
-        "schema_version": TARGET_SCHEMA_VERSION,
-        "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "backup_dir": backup_dir,
-    }
-    with open(state_file, "w", encoding="utf-8") as handle:
+    # Preserve Lance / video-id stamps written by later maintenance steps.
+    payload = dict(_read_migration_state(config))
+    payload.update(
+        {
+            "completed": True,
+            "schema_version": TARGET_SCHEMA_VERSION,
+            "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "backup_dir": backup_dir,
+        }
+    )
+    temp_path = f"{state_file}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(temp_path, state_file)
 
 
 def needs_search_index_schema_migration(config=None):

@@ -16,45 +16,29 @@ DialogueIndexMode = Literal["auto", "asr", "reembed", "ocr", "reuse"]
 
 
 def list_dialogue_index_targets(*, config=None) -> list[dict[str, str]]:
-    """Library videos on disk (candidates for subtitle indexing).
+    """Subtitle-library videos on disk (candidates for OCR indexing).
 
-    Does not require visual/CLIP sync. Ensures file records exist via
-    ``register_library_videos`` so a folder only needs to be added first.
+    Uses the global subtitle registry (``dialogue/library.db``), not the CLIP
+    visual library. Does not require visual sync — add-library on the subtitle
+    tab is enough.
     """
-    from src.services.library_service import register_library_videos
-    from src.storage.asset_store import load_model_metadata
-    from src.utils import canonicalize_library_path
+    from src.services.subtitle_library_service import list_subtitle_library_video_entries
 
-    cfg = config
-    register_library_videos(config=cfg)
-    meta = load_model_metadata(config=cfg)
     targets: list[dict[str, str]] = []
-    libraries = (meta or {}).get("libraries") or {}
-    if not isinstance(libraries, dict):
-        return []
-    for root_path, lib_data in libraries.items():
-        if not isinstance(lib_data, dict):
+    for item in list_subtitle_library_video_entries(config=config, register=True):
+        if not item.get("source_exists"):
             continue
-        files = lib_data.get("files") or {}
-        if not isinstance(files, dict):
+        video_id = str(item.get("video_id") or "").strip()
+        video_path = str(item.get("video_path") or "").strip()
+        if not video_id or not video_path:
             continue
-        library_path = canonicalize_library_path(root_path)
-        for rel_path, info in files.items():
-            if not isinstance(info, dict):
-                continue
-            video_id = str(info.get("vid", "") or "").strip()
-            if not video_id:
-                continue
-            video_path = os.path.normpath(os.path.join(root_path, str(rel_path or "")))
-            if not video_path or not os.path.isfile(video_path):
-                continue
-            targets.append(
-                {
-                    "video_id": video_id,
-                    "video_path": video_path,
-                    "library_path": library_path,
-                }
-            )
+        targets.append(
+            {
+                "video_id": video_id,
+                "video_path": video_path,
+                "library_path": str(item.get("library_path") or ""),
+            }
+        )
     return targets
 
 
@@ -103,6 +87,7 @@ def index_video_dialogue(
     language: str = "auto",
     keep_wav: bool = False,
     mode: DialogueIndexMode = "auto",
+    sample_interval_sec: float | None = None,
 ) -> dict[str, Any]:
     """Build shared subtitle cues (VAD + RapidOCR). ``language`` ignored."""
     del language
@@ -115,13 +100,14 @@ def index_video_dialogue(
         subtitle_mode = "reuse"
     else:
         subtitle_mode = "auto"
-    return index_video_subtitles(
-        video_id,
-        video_path,
-        library_path=library_path,
-        config=config,
-        progress_callback=progress_callback,
-        stop_callback=stop_callback,
-        keep_wav=keep_wav,
-        mode=subtitle_mode,
-    )
+    kwargs = {
+        "library_path": library_path,
+        "config": config,
+        "progress_callback": progress_callback,
+        "stop_callback": stop_callback,
+        "keep_wav": keep_wav,
+        "mode": subtitle_mode,
+    }
+    if sample_interval_sec is not None:
+        kwargs["sample_interval_sec"] = float(sample_interval_sec)
+    return index_video_subtitles(video_id, video_path, **kwargs)

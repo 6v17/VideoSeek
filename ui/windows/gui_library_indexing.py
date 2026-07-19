@@ -18,6 +18,12 @@ from src.services.library_service import (
     list_local_vector_details,
     register_library_videos,
 )
+from src.services.subtitle_library_service import (
+    add_subtitle_library,
+    list_subtitle_libraries,
+    list_subtitle_library_video_entries,
+    register_subtitle_library_videos,
+)
 from src.storage.asset_store import load_model_metadata
 from src.storage.lance_store import format_byte_size
 from src.utils import open_folder_in_explorer, open_in_explorer
@@ -34,9 +40,9 @@ class LibraryIndexingGuiMixin:
         visual = self.library_page.visual_video_tree
         subtitle = self.library_page.subtitle_video_tree
         visual.open_library_requested.connect(self.open_library_folder)
-        visual.remove_library_requested.connect(self.remove_library_entry)
         subtitle.open_library_requested.connect(self.open_library_folder)
-        subtitle.remove_library_requested.connect(self.remove_library_entry)
+        visual.selection_changed.connect(self._refresh_remove_library_button)
+        subtitle.selection_changed.connect(self._refresh_remove_library_button)
         self._library_tree_hooks_ready = True
 
     def _asset_state_label(self, asset_state: str) -> str:
@@ -51,10 +57,12 @@ class LibraryIndexingGuiMixin:
         rows = []
         for item in entries:
             state = str(item.get("asset_state") or "").strip().lower()
+            ready = state == "ready"
             rows.append(
                 {
                     **item,
                     "status_text": self._asset_state_label(state),
+                    "status_tone": "ready" if ready else "pending",
                 }
             )
         return rows, list(libraries.keys())
@@ -62,8 +70,9 @@ class LibraryIndexingGuiMixin:
     def _build_subtitle_tree_entries(self, *, register: bool = False) -> tuple[list[dict], list[str]]:
         from src.storage.dialogue_transcript_store import list_dialogue_transcript_summaries
 
-        libraries = list_libraries()
-        entries = list_library_video_entries(register=register)
+        # Global subtitle registry — independent of the active CLIP profile.
+        libraries = list_subtitle_libraries()
+        entries = list_subtitle_library_video_entries(register=register)
         transcript_by_id = {
             str(row.get("video_id") or "").strip(): row
             for row in list_dialogue_transcript_summaries()
@@ -88,20 +97,76 @@ class LibraryIndexingGuiMixin:
                     "has_transcript": has_transcript,
                     "segment_count": segment_count,
                     "status_text": status,
+                    "status_tone": "ready" if has_transcript else "pending",
                 }
             )
         return rows, list(libraries.keys())
+
+    def _is_subtitle_library_mode(self) -> bool:
+        return int(self.library_page.library_mode()) == 1
+
+    def _refresh_library_action_hints(self):
+        btn = getattr(self.library_page, "btn_remove_lib", None)
+        if btn is None:
+            return
+        if self._is_subtitle_library_mode():
+            btn.setToolTip(
+                self.texts.get(
+                    "remove_subtitle_library_hint",
+                    self.texts.get("remove_library_hint", ""),
+                )
+            )
+        else:
+            btn.setToolTip(
+                self.texts.get(
+                    "remove_visual_library_hint",
+                    self.texts.get("remove_library_hint", ""),
+                )
+            )
+
+    def _active_library_tree(self):
+        page = self.library_page
+        if int(page.library_mode()) == 1:
+            return page.subtitle_video_tree
+        return page.visual_video_tree
+
+    def _refresh_remove_library_button(self):
+        btn = getattr(self.library_page, "btn_remove_lib", None)
+        if btn is None:
+            return
+        if (
+            getattr(self, "_remove_library_running", False)
+            or self._remove_library_worker_running()
+            or self.indexing_controller.is_running()
+            or self._dialogue_index_running()
+        ):
+            btn.setEnabled(False)
+            return
+        tree = self._active_library_tree()
+        btn.setEnabled(bool(tree.collect_checked_library_paths()))
 
     def refresh_library_table(self):
         try:
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
-            remove_text = self.texts.get("delete", "Delete")
             empty_text = self.texts.get("library_list_empty", "No library folders yet.")
+            status_template = self.texts.get("library_sync_status", "{ready}/{total} synced")
             tree = self.library_page.visual_video_tree
-            tree.set_action_texts(open_text=open_text, remove_text=remove_text, empty_text=empty_text)
+            tree.set_action_texts(
+                open_text=open_text,
+                empty_text=empty_text,
+                status_template=status_template,
+                header_video=self.texts.get(
+                    "library_col_video", self.texts.get("search_scope_video_col", "Video")
+                ),
+                header_count=self.texts.get("library_col_count", "Count"),
+                header_status=self.texts.get("library_col_status", "Status"),
+                header_action=self.texts.get("library_col_action", "Action"),
+            )
             entries, library_paths = self._build_visual_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
+            self._refresh_library_action_hints()
+            self._refresh_remove_library_button()
             if hasattr(self, "invalidate_search_scope_entries_cache"):
                 self.invalidate_search_scope_entries_cache()
             if hasattr(self, "_refresh_search_scope_ui"):
@@ -136,16 +201,26 @@ class LibraryIndexingGuiMixin:
         path = QFileDialog.getExistingDirectory(self, self.texts["select_folder"])
         if not path:
             return
+        subtitle_mode = self._is_subtitle_library_mode()
         try:
-            result = add_library(path)
+            if subtitle_mode:
+                result = add_subtitle_library(path)
+            else:
+                result = add_library(path)
             if result.get("added"):
-                # Register only the new folder (may take a bit for huge dirs).
                 try:
-                    register_library_videos(library_path=result.get("path") or path)
+                    if subtitle_mode:
+                        register_subtitle_library_videos(
+                            library_path=result.get("path") or path
+                        )
+                    else:
+                        register_library_videos(library_path=result.get("path") or path)
                 except Exception:
                     pass
-                self.refresh_library_table()
-                self.refresh_dialogue_library_table()
+                if subtitle_mode:
+                    self.refresh_dialogue_library_table()
+                else:
+                    self.refresh_library_table()
                 status_text = self.texts["library_added"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
@@ -159,6 +234,14 @@ class LibraryIndexingGuiMixin:
         except Exception as exc:
             self.show_error_dialog(self.texts["library_add_failed"], exc)
 
+    def remove_selected_libraries(self):
+        tree = self._active_library_tree()
+        paths = tree.collect_checked_library_paths()
+        if not paths:
+            self._refresh_remove_library_button()
+            return
+        self.remove_library_entry(paths)
+
     def remove_library_entry(self, path):
         if getattr(self, "_remove_library_running", False) or self._remove_library_worker_running():
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
@@ -166,21 +249,51 @@ class LibraryIndexingGuiMixin:
         if self.indexing_controller.is_running() or self._dialogue_index_running():
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             return
-        if not self.show_confirm_dialog(
-            self.texts["confirm_title"],
-            self.texts["remove_library_confirm"].format(path=path),
-        ):
+        if isinstance(path, (list, tuple, set)):
+            paths = [str(p or "").strip() for p in path if str(p or "").strip()]
+        else:
+            paths = [str(path or "").strip()] if str(path or "").strip() else []
+        if not paths:
+            return
+        subtitle_mode = self._is_subtitle_library_mode()
+        if subtitle_mode:
+            single_key = "remove_subtitle_library_confirm"
+            multi_key = "remove_subtitle_libraries_confirm"
+            single_default = "Remove this subtitle library and its OCR data?\n{path}"
+            multi_default = (
+                "Remove {count} selected subtitle libraries and their OCR data?\n\n{paths}"
+            )
+        else:
+            single_key = "remove_visual_library_confirm"
+            multi_key = "remove_visual_libraries_confirm"
+            single_default = (
+                "Remove this visual library and its CLIP index from the current model?\n{path}"
+            )
+            multi_default = (
+                "Remove {count} selected visual libraries and their CLIP indexes "
+                "from the current model?\n\n{paths}"
+            )
+        if len(paths) == 1:
+            confirm = self.texts.get(single_key, single_default).format(path=paths[0])
+        else:
+            confirm = self.texts.get(multi_key, multi_default).format(
+                count=len(paths), paths="\n".join(paths)
+            )
+        if not self.show_confirm_dialog(self.texts["confirm_title"], confirm):
             return
 
         from ui.workers import RemoveLibraryWorker
 
         self._remove_library_running = True
+        self._remove_library_mode = "subtitle" if subtitle_mode else "visual"
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.input_subtitle_sample_interval.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_remove_lib.setEnabled(False)
         self.library_page.btn_cleanup_missing.setEnabled(False)
         self.library_page.progress_bar.setVisible(True)
         self.library_page.progress_bar.setValue(0)
@@ -188,7 +301,10 @@ class LibraryIndexingGuiMixin:
             self.texts.get("library_removing", "Removing library...")
         )
 
-        worker = RemoveLibraryWorker(path)
+        worker = RemoveLibraryWorker(
+            paths,
+            mode="subtitle" if subtitle_mode else "visual",
+        )
         self.remove_library_worker = worker
         worker.progress_signal.connect(self._update_remove_library_progress)
         worker.error_signal.connect(self._handle_remove_library_error)
@@ -246,6 +362,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+            self.library_page.input_subtitle_sample_interval.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self.library_page.btn_cleanup_missing.setEnabled(True)
             self.library_page.progress_bar.setVisible(False)
@@ -253,8 +370,11 @@ class LibraryIndexingGuiMixin:
                 # Defer tree rebuilds so the finished signal returns quickly.
                 from PySide6.QtCore import QTimer
 
-                QTimer.singleShot(0, self.refresh_library_table)
-                QTimer.singleShot(0, self.refresh_dialogue_library_table)
+                mode = str(getattr(self, "_remove_library_mode", "visual") or "visual")
+                if mode == "subtitle":
+                    QTimer.singleShot(0, self.refresh_dialogue_library_table)
+                else:
+                    QTimer.singleShot(0, self.refresh_library_table)
                 status_text = self.texts["library_removed"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
@@ -262,6 +382,8 @@ class LibraryIndexingGuiMixin:
                 self.library_page.lbl_status.setText(self.texts["library_remove_failed"])
         finally:
             self._remove_library_running = False
+            self._remove_library_mode = ""
+            self._refresh_remove_library_button()
 
     def start_update_index(
         self,
@@ -297,23 +419,85 @@ class LibraryIndexingGuiMixin:
         # Force OCR rebuild (button label: re-extract subtitles).
         self._start_dialogue_index_job(mode="ocr")
 
+    def load_subtitle_sample_interval(self):
+        from src.app.config import DEFAULT_CONFIG, load_config
+
+        try:
+            config = load_config()
+            value = float(
+                config.get(
+                    "subtitle_sample_interval_sec",
+                    DEFAULT_CONFIG["subtitle_sample_interval_sec"],
+                )
+            )
+        except Exception:
+            value = float(DEFAULT_CONFIG["subtitle_sample_interval_sec"])
+        value = max(0.1, min(6.0, value))
+        spin = self.library_page.input_subtitle_sample_interval
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+
+    def _read_subtitle_sample_interval(self) -> float:
+        from src.app.config import load_config, save_config
+
+        spin = self.library_page.input_subtitle_sample_interval
+        value = max(0.1, min(6.0, float(spin.value())))
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+        try:
+            config = load_config()
+            previous = config.get("subtitle_sample_interval_sec")
+            if previous is None or abs(float(previous) - value) > 1e-6:
+                config["subtitle_sample_interval_sec"] = value
+                save_config(config)
+        except Exception:
+            pass
+        return value
+
+    def _on_subtitle_sample_interval_changed(self, _value=None):
+        self._read_subtitle_sample_interval()
+
     def _on_library_tab_changed(self, index: int):
+        self._refresh_library_action_hints()
         if int(index) == 1:
             self.refresh_dialogue_library_table()
+        else:
+            self._refresh_remove_library_button()
 
     def refresh_dialogue_library_table(self):
         try:
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
-            remove_text = self.texts.get("delete", "Delete")
             empty_text = self.texts.get(
                 "dialogue_library_empty",
                 "No subtitles yet. Add a video library, then Extract subtitles.",
             )
+            status_template = self.texts.get("library_extract_status", "{ready}/{total} extracted")
             tree = self.library_page.subtitle_video_tree
-            tree.set_action_texts(open_text=open_text, remove_text=remove_text, empty_text=empty_text)
+            tree.set_action_texts(
+                open_text=open_text,
+                empty_text=empty_text,
+                status_template=status_template,
+                header_video=self.texts.get(
+                    "library_col_video", self.texts.get("search_scope_video_col", "Video")
+                ),
+                header_count=self.texts.get("library_col_count", "Count"),
+                header_status=self.texts.get("library_col_status", "Status"),
+                header_action=self.texts.get("library_col_action", "Action"),
+            )
             entries, library_paths = self._build_subtitle_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
+            self._refresh_remove_library_button()
+            if hasattr(self, "invalidate_dialogue_search_scope_entries_cache"):
+                self.invalidate_dialogue_search_scope_entries_cache()
+            if hasattr(self, "_refresh_search_scope_ui") and hasattr(self, "_search_scope_is_dialogue"):
+                try:
+                    if self._search_scope_is_dialogue():
+                        self._refresh_search_scope_ui(force_entries=True)
+                except Exception:
+                    pass
         except Exception as exc:
             self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
 
@@ -552,12 +736,16 @@ class LibraryIndexingGuiMixin:
 
         from ui.workers import DialogueIndexWorker
 
+        sample_interval_sec = self._read_subtitle_sample_interval()
+
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.input_subtitle_sample_interval.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_remove_lib.setEnabled(False)
         self.library_page.btn_cleanup_missing.setEnabled(False)
         self.library_page.btn_stop_dialogue_index.setEnabled(True)
         self.library_page.btn_stop_dialogue_index.setVisible(True)
@@ -566,7 +754,11 @@ class LibraryIndexingGuiMixin:
         self.library_page.lbl_status.setText(running)
         self._dialogue_index_ui_mode = mode_value
 
-        worker = DialogueIndexWorker(targets=targets, mode=mode_value)
+        worker = DialogueIndexWorker(
+            targets=targets,
+            mode=mode_value,
+            sample_interval_sec=sample_interval_sec,
+        )
         self.dialogue_index_worker = worker
         worker.progress_signal.connect(self._update_dialogue_index_progress)
         worker.error_signal.connect(self._handle_dialogue_index_error)
@@ -624,11 +816,13 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+            self.library_page.input_subtitle_sample_interval.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self.library_page.btn_cleanup_missing.setEnabled(True)
             self.library_page.btn_stop_dialogue_index.setEnabled(False)
             self.library_page.btn_stop_dialogue_index.setVisible(False)
             self.library_page.progress_bar.setVisible(False)
+            self._refresh_remove_library_button()
             payload = dict(summary or {})
             reembed = str(payload.get("mode") or getattr(self, "_dialogue_index_ui_mode", "") or "") == "reembed"
             self._dialogue_index_ui_mode = ""
@@ -806,9 +1000,11 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_build_dialogue_index.setEnabled(False)
             self.library_page.btn_reembed_dialogue.setEnabled(False)
             self.library_page.btn_export_dialogue.setEnabled(False)
+            self.library_page.input_subtitle_sample_interval.setEnabled(False)
             self.library_page.btn_stop_index.setEnabled(True)
             self.library_page.btn_stop_index.setVisible(True)
             self.library_page.btn_add_lib.setEnabled(False)
+            self.library_page.btn_remove_lib.setEnabled(False)
             self._apply_index_issue_button_state(False)
             self.library_page.btn_cleanup_missing.setEnabled(False)
             if getattr(self, "_debug_tools_enabled", False):
@@ -891,6 +1087,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_build_dialogue_index.setEnabled(True)
         self.library_page.btn_reembed_dialogue.setEnabled(True)
         self.library_page.btn_export_dialogue.setEnabled(True)
+        self.library_page.input_subtitle_sample_interval.setEnabled(True)
         self.library_page.btn_stop_index.setEnabled(False)
         self.library_page.btn_stop_index.setVisible(False)
         self.library_page.btn_add_lib.setEnabled(True)
@@ -901,6 +1098,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.progress_bar.setVisible(False)
         self.push_inference_status()
         self.refresh_library_table()
+        self._refresh_remove_library_button()
         issue_list = filter_index_problem_issues(issues)
         issue_count = len(issue_list)
         self._last_index_issues = issue_list

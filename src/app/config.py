@@ -117,6 +117,9 @@ DEFAULT_CONFIG = {
     "search_scope_mode": "all",
     "search_scope_library_paths": [],
     "search_scope_video_paths": [],
+    "dialogue_search_scope_mode": "all",
+    "dialogue_search_scope_library_paths": [],
+    "dialogue_search_scope_video_paths": [],
     "ffmpeg_path": "",
     "model_dir": get_default_model_dir(),
     "data_root": APP_DATA_DIR,
@@ -130,6 +133,7 @@ DEFAULT_CONFIG = {
     "download_auto_index": False,
     "download_quality": "best",
     "auto_cleanup_missing_files": False,
+    "subtitle_sample_interval_sec": 1.2,
     "export_video_silent": False,
     "export_encode_mode": "original",
     "export_copy_extra_sec": 4,
@@ -176,6 +180,7 @@ CONFIG_BOUNDS = {
     "min_chunk_size": (1, 50),
     "min_chunk_duration": (0.0, 30.0),
     "max_chunk_duration": (0.0, 600.0),
+    "subtitle_sample_interval_sec": (0.1, 6.0),
 }
 
 CONFIG_INT_KEYS = {
@@ -204,6 +209,7 @@ CONFIG_ENUMS = {
     "agent_api_default_image_precision": {"fast", "precise"},
     "export_encode_mode": {"copy", "original"},
     "search_scope_mode": {"all", "selected"},
+    "dialogue_search_scope_mode": {"all", "selected"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
     "download_mode": {"default_dir", "library"},

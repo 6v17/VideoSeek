@@ -1,65 +1,67 @@
 import os
 import tempfile
 import unittest
-from unittest import mock
+from unittest.mock import patch
+
+from src.services import subtitle_library_service
+from src.services.dialogue_index_service import list_dialogue_index_targets
+from src.storage import dialogue_transcript_store, subtitle_library_store
 
 
 class SubtitleLibraryTargetTests(unittest.TestCase):
-    def test_targets_include_unsynced_library_videos(self):
-        from src.services.dialogue_index_service import list_dialogue_index_targets
-        from src.services.library_service import register_library_videos
-
+    def test_targets_come_from_global_subtitle_library(self):
         with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            dialogue_dir = os.path.join(data_dir, "dialogue")
+            os.makedirs(dialogue_dir, exist_ok=True)
             lib_root = os.path.join(tmp, "videos")
             os.makedirs(lib_root, exist_ok=True)
             media = os.path.join(lib_root, "clip.mp4")
             with open(media, "wb") as handle:
                 handle.write(b"fake-video-bytes")
 
-            meta = {
-                "libraries": {
-                    lib_root: {"files": {}, "last_scan": "", "index_state": "pending"},
-                }
-            }
+            config = {"data_root": tmp}
 
-            def _load(config=None):
-                return meta
-
-            def _save(new_meta, config=None):
-                # save_model_metadata may pass the same dict instance.
-                if new_meta is meta:
-                    return
-                snapshot = dict(new_meta)
-                meta.clear()
-                meta.update(snapshot)
-
-            with mock.patch("src.services.library_service.load_config", return_value={}), mock.patch(
-                "src.services.library_service.load_model_metadata",
-                side_effect=_load,
-            ), mock.patch(
-                "src.services.library_service.save_model_metadata",
-                side_effect=_save,
-            ), mock.patch(
-                "src.storage.asset_store.load_model_metadata",
-                side_effect=_load,
+            with (
+                patch.object(subtitle_library_service, "load_config", return_value=config),
+                patch(
+                    "src.app.config.get_data_storage_paths",
+                    return_value={"data_dir": data_dir},
+                ),
+                patch.object(
+                    subtitle_library_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+                patch.object(
+                    dialogue_transcript_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
             ):
-                result = register_library_videos(library_path=lib_root)
-                self.assertGreaterEqual(result["registered"], 1)
+                subtitle_library_store.mark_subtitle_registry_seeded(config=config)
+                added = subtitle_library_service.add_subtitle_library(lib_root, config=config)
+                self.assertTrue(added.get("added") or added.get("ok"))
 
-                lib_key = next(iter(meta["libraries"]))
-                files = meta["libraries"][lib_key]["files"]
-                self.assertIn("clip.mp4", files)
-                info = files["clip.mp4"]
-                self.assertEqual(info["asset_state"], "missing_asset")
-                self.assertTrue(str(info.get("vid") or "").strip())
+                registered = subtitle_library_service.register_subtitle_library_videos(
+                    config=config, library_path=lib_root
+                )
+                self.assertGreaterEqual(registered["registered"], 1)
 
-                targets = list_dialogue_index_targets()
+                entries = subtitle_library_service.list_subtitle_library_video_entries(
+                    config=config, register=False
+                )
+                self.assertEqual(len(entries), 1)
+                video_id = entries[0]["video_id"]
+                self.assertTrue(video_id)
+
+                targets = list_dialogue_index_targets(config=config)
                 self.assertEqual(len(targets), 1)
+                self.assertEqual(targets[0]["video_id"], video_id)
                 self.assertEqual(
                     os.path.normcase(targets[0]["video_path"]),
                     os.path.normcase(os.path.normpath(media)),
                 )
-                self.assertEqual(targets[0]["video_id"], info["vid"])
 
 
 if __name__ == "__main__":

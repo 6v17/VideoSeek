@@ -290,8 +290,112 @@ class ModelResourceDirTests(unittest.TestCase):
             self.assertEqual(os.path.normcase(resolved), os.path.normcase(legacy_dir))
 
 
-if __name__ == "__main__":
-    unittest.main()
+class RemoveModelProfileTests(unittest.TestCase):
+    def test_remove_model_profile_deletes_resource_and_asset_dirs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_root = os.path.join(temp_dir, "models")
+            resource_dir = os.path.join(model_root, "openai-clip", "vit-base-patch32")
+            asset_dir = os.path.join(temp_dir, "data", "model_assets", "openai-clip", "vit-base-patch32")
+            os.makedirs(resource_dir, exist_ok=True)
+            os.makedirs(asset_dir, exist_ok=True)
+            with open(os.path.join(resource_dir, "clip_visual.onnx"), "wb") as handle:
+                handle.write(b"x")
+            with open(os.path.join(asset_dir, "meta.json"), "w", encoding="utf-8") as handle:
+                handle.write("{}")
+
+            other_resource = os.path.join(model_root, "chinese-clip", "vit-base-patch16")
+            other_asset = os.path.join(temp_dir, "data", "model_assets", "chinese-clip", "vit-base-patch16")
+            os.makedirs(other_resource, exist_ok=True)
+            os.makedirs(other_asset, exist_ok=True)
+
+            config = {
+                "schema_version": 2,
+                "data_root": temp_dir,
+                "model_dir": model_root,
+                "models": {
+                    "active_profile": "clip_a",
+                    "profiles": [
+                        {
+                            "id": "clip_a",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "prefer_gpu": False,
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch32",
+                            },
+                        },
+                        {
+                            "id": "clip_b",
+                            "provider": "chinese_clip_onnx",
+                            "runtime": {
+                                "prefer_gpu": False,
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch16",
+                            },
+                        },
+                    ],
+                },
+            }
+
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config") as mock_save,
+                patch(
+                    "src.services.model_package_service.get_data_paths",
+                    return_value={"data_dir": os.path.join(temp_dir, "data"), "data_root": temp_dir},
+                ),
+                patch("src.services.model_package_service._release_profile_runtime_locks"),
+            ):
+                result = model_package_service.remove_model_profile("clip_a")
+
+            self.assertEqual(result["removed_profile_id"], "clip_a")
+            self.assertEqual(result["active_profile"], "clip_b")
+            self.assertEqual([item["id"] for item in config["models"]["profiles"]], ["clip_b"])
+            self.assertTrue(mock_save.called)
+            self.assertFalse(os.path.exists(resource_dir))
+            self.assertFalse(os.path.exists(asset_dir))
+            self.assertTrue(os.path.exists(other_resource))
+            self.assertTrue(os.path.exists(other_asset))
+
+    def test_remove_model_profile_stamps_schema_v2_when_profiles_exist(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_root = os.path.join(temp_dir, "models")
+            resource_dir = os.path.join(model_root, "openai-clip", "vit-base-patch32")
+            os.makedirs(resource_dir, exist_ok=True)
+            config = {
+                "schema_version": 1,
+                "data_root": temp_dir,
+                "model_dir": model_root,
+                "models": {
+                    "active_profile": "only",
+                    "profiles": [
+                        {
+                            "id": "only",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "prefer_gpu": False,
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch32",
+                            },
+                        }
+                    ],
+                },
+            }
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config") as mock_save,
+                patch(
+                    "src.services.model_package_service.get_data_paths",
+                    return_value={"data_dir": os.path.join(temp_dir, "data"), "data_root": temp_dir},
+                ),
+                patch("src.services.model_package_service._release_profile_runtime_locks"),
+            ):
+                result = model_package_service.remove_model_profile("only")
+
+            self.assertEqual(result["active_profile"], "")
+            self.assertEqual(config["schema_version"], 2)
+            self.assertEqual(config["models"]["profiles"], [])
+            self.assertTrue(mock_save.called)
 
 
 if __name__ == "__main__":

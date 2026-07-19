@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import os
 import shutil
-import sys
 
-from src.infra.paths import get_app_data_dir
+from src.infra.paths import get_app_data_dir, get_app_install_dir
 
 
 def get_default_ffmpeg_path():
@@ -54,12 +53,9 @@ def resolve_ffmpeg_path_info():
     if os.path.exists(default_path):
         return default_path, "managed"
 
-    if getattr(sys, "frozen", False) or "__file__" not in globals():
-        base_dir = os.path.dirname(sys.executable)
-    else:
-        base_dir = os.path.abspath(".")
-
-    bundled_path = os.path.join(base_dir, "ffmpeg.exe")
+    # Prefer install dir (exe folder when packaged). Never use process cwd — shortcuts
+    # and Nuitka launches often have cwd != install root.
+    bundled_path = os.path.join(get_app_install_dir(), "ffmpeg.exe")
     if os.path.exists(bundled_path):
         return bundled_path, "bundled"
 

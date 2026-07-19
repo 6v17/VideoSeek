@@ -12,7 +12,7 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QSize, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 _LIST_VIEW_HEIGHT = 280
+_STATUS_READY = QColor("#2ec27e")
+_STATUS_PENDING = QColor("#f4c95d")
 
 
 class _ClickLabel(QLabel):
@@ -50,9 +52,17 @@ class LibraryVideoTableModel(QAbstractTableModel):
         self._rows: list[dict[str, Any]] = []
         self._checked: set[str] = set()
         self._video_icon = QIcon()
+        self._headers: list[str] = ["", ""]
 
     def set_video_icon(self, icon: QIcon) -> None:
         self._video_icon = icon
+
+    def set_headers(self, video_text: str = "", status_text: str = "") -> None:
+        next_headers = [str(video_text or ""), str(status_text or "")]
+        if next_headers == self._headers:
+            return
+        self._headers = next_headers
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, 1)
 
     def set_rows(
         self,
@@ -92,6 +102,19 @@ class LibraryVideoTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         return 2
 
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
+        if orientation != Qt.Orientation.Horizontal:
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
+            if 0 <= section < len(self._headers):
+                return self._headers[section]
+            return ""
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if section == 1:
+                return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        return None
+
     def flags(self, index: QModelIndex):
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
@@ -126,6 +149,12 @@ class LibraryVideoTableModel(QAbstractTableModel):
             return Qt.CheckState.Checked if video_id in self._checked else Qt.CheckState.Unchecked
         if role == Qt.ItemDataRole.TextAlignmentRole and col == 1:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        if role == Qt.ItemDataRole.ForegroundRole and col == 1:
+            tone = str(ent.get("status_tone") or "").strip().lower()
+            if not tone:
+                state = str(ent.get("asset_state") or "").strip().lower()
+                tone = "ready" if state == "ready" or ent.get("has_transcript") else "pending"
+            return _STATUS_READY if tone == "ready" else _STATUS_PENDING
         if role == Qt.ItemDataRole.UserRole:
             return dict(ent)
         if role == Qt.ItemDataRole.UserRole + 1:
@@ -192,7 +221,11 @@ class LibraryVideoTableModel(QAbstractTableModel):
             self.dataChanged.emit(
                 self.index(first, 1),
                 self.index(last, 1),
-                [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole],
+                [
+                    Qt.ItemDataRole.DisplayRole,
+                    Qt.ItemDataRole.ToolTipRole,
+                    Qt.ItemDataRole.ForegroundRole,
+                ],
             )
 
 
@@ -206,6 +239,7 @@ class _LibBlock:
         "body",
         "collapse",
         "count_label",
+        "status_label",
         "entries",
         "populated",
         "expanded",
@@ -222,6 +256,7 @@ class _LibBlock:
         self.body: QWidget | None = None
         self.collapse: QToolButton | None = None
         self.count_label: QLabel | None = None
+        self.status_label: QLabel | None = None
         self.entries: list[dict] = []
         self.populated = False
         self.expanded = False
@@ -234,6 +269,7 @@ class LibraryGroupedVideoTree(QWidget):
 
     open_library_requested = Signal(str)
     remove_library_requested = Signal(str)
+    selection_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -242,11 +278,55 @@ class LibraryGroupedVideoTree(QWidget):
         self._blocks: list[_LibBlock] = []
         self._empty_text = ""
         self._open_text = "Open"
-        self._remove_text = "Delete"
+        self._status_template = "{ready}/{total}"
+        self._header_video = ""
+        self._header_count = ""
+        self._header_status = ""
+        self._header_action = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(6)
+
+        self._column_header = QFrame()
+        self._column_header.setObjectName("LibraryTreeColumnHeader")
+        header_row = QHBoxLayout(self._column_header)
+        # Global select-all sits above libraries — flush left, not indented to lib checkboxes.
+        header_row.setContentsMargins(10, 0, 10, 0)
+        header_row.setSpacing(8)
+
+        self._select_all_cb = QCheckBox()
+        self._select_all_cb.setObjectName("LibraryTreeSelectAll")
+        self._select_all_cb.setTristate(True)
+        self._select_all_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._select_all_cb.stateChanged.connect(self._on_select_all_changed)
+
+        self._header_video_label = QLabel()
+        self._header_video_label.setObjectName("LibraryTreeHeaderLabel")
+        self._header_video_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+
+        self._header_count_label = QLabel()
+        self._header_count_label.setObjectName("LibraryTreeHeaderCount")
+        self._header_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._header_status_label = QLabel()
+        self._header_status_label.setObjectName("LibraryTreeHeaderStatus")
+        self._header_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        self._header_action_label = QLabel()
+        self._header_action_label.setObjectName("LibraryTreeHeaderAction")
+        self._header_action_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        header_row.addWidget(self._select_all_cb, 0)
+        header_row.addWidget(self._header_video_label, 1)
+        header_row.addWidget(self._header_count_label, 0)
+        header_row.addWidget(self._header_status_label, 0)
+        header_row.addWidget(self._header_action_label, 0)
+        self._column_header.setVisible(False)
 
         self._scroll = QScrollArea()
         self._scroll.setObjectName("LibraryGroupedScroll")
@@ -266,14 +346,46 @@ class LibraryGroupedVideoTree(QWidget):
         self._empty_label.setVisible(False)
 
         self._scroll.setWidget(self._list_host)
+        root.addWidget(self._column_header, 0)
         root.addWidget(self._empty_label)
         root.addWidget(self._scroll, 1)
+        self.selection_changed.connect(self._sync_select_all_checkbox)
 
-    def set_action_texts(self, *, open_text: str = "", remove_text: str = "", empty_text: str = "") -> None:
+    def set_action_texts(
+        self,
+        *,
+        open_text: str = "",
+        remove_text: str = "",
+        empty_text: str = "",
+        status_template: str = "",
+        header_video: str = "",
+        header_count: str = "",
+        header_status: str = "",
+        header_action: str = "",
+    ) -> None:
+        del remove_text  # legacy keyword kept for call-site compatibility
         if open_text:
             self._open_text = open_text
-        if remove_text:
-            self._remove_text = remove_text
+        if status_template:
+            self._status_template = status_template
+            for block in self._blocks:
+                self._refresh_block_status_label(block)
+        if header_video:
+            self._header_video = header_video
+            self._header_video_label.setText(header_video)
+        if header_count:
+            self._header_count = header_count
+            self._header_count_label.setText(header_count)
+        if header_status:
+            self._header_status = header_status
+            self._header_status_label.setText(header_status)
+        if header_action:
+            self._header_action = header_action
+            self._header_action_label.setText(header_action)
+        elif open_text and not self._header_action:
+            # Fallback: use the open-button label as the action column title.
+            self._header_action = open_text
+            self._header_action_label.setText(open_text)
         if empty_text:
             self._empty_text = empty_text
             self._empty_label.setText(empty_text)
@@ -301,6 +413,43 @@ class LibraryGroupedVideoTree(QWidget):
                     out.append(vid)
                     seen.add(vid)
         return out
+
+    def collect_checked_library_paths(self) -> list[str]:
+        """Libraries whose header checkbox is checked or partially checked."""
+        out: list[str] = []
+        for block in self._blocks:
+            cb = block.lib_cb
+            if cb is None:
+                continue
+            if cb.checkState() == Qt.CheckState.Unchecked:
+                continue
+            path = str(block.lib_path or "").strip()
+            if path:
+                out.append(path)
+        return out
+
+    @staticmethod
+    def _entry_is_ready(ent: dict) -> bool:
+        tone = str(ent.get("status_tone") or "").strip().lower()
+        if tone == "ready":
+            return True
+        if tone == "pending":
+            return False
+        if ent.get("has_transcript"):
+            return True
+        return str(ent.get("asset_state") or "").strip().lower() == "ready"
+
+    def _refresh_block_status_label(self, block: _LibBlock) -> None:
+        label = block.status_label
+        if label is None:
+            return
+        total = len(block.entries)
+        ready = sum(1 for ent in block.entries if self._entry_is_ready(ent))
+        template = self._status_template or "{ready}/{total}"
+        try:
+            label.setText(template.format(ready=ready, total=total))
+        except Exception:
+            label.setText(f"{ready}/{total}")
 
     def collect_checked_entries(self) -> list[dict]:
         out: list[dict] = []
@@ -349,10 +498,17 @@ class LibraryGroupedVideoTree(QWidget):
             self._empty_label.setVisible(True)
             self._empty_label.setText(self._empty_text or "")
             self._scroll.setVisible(False)
+            self._column_header.setVisible(False)
+            self._sync_select_all_checkbox()
             return
 
         self._empty_label.setVisible(False)
         self._scroll.setVisible(True)
+        self._column_header.setVisible(True)
+        self._header_video_label.setText(self._header_video or "")
+        self._header_count_label.setText(self._header_count or "")
+        self._header_status_label.setText(self._header_status or "")
+        self._header_action_label.setText(self._header_action or self._open_text or "")
 
         if expanded_lib_paths is not None:
             exp_norm = {os.path.normpath(p) for p in expanded_lib_paths if str(p).strip()}
@@ -392,6 +548,8 @@ class LibraryGroupedVideoTree(QWidget):
             self._vbox.addWidget(card)
 
         self._vbox.addStretch(1)
+        self.selection_changed.emit()
+        self._sync_select_all_checkbox()
 
     def patch_status_texts(self, by_video_id: dict[str, str]) -> None:
         """Cheap in-place status update without rebuilding cards."""
@@ -404,6 +562,7 @@ class LibraryGroupedVideoTree(QWidget):
                     ent["status_text"] = by_video_id[vid]
             if block.populated and block.model is not None:
                 block.model.update_status_texts(by_video_id)
+            self._refresh_block_status_label(block)
 
     def _clear_cards(self) -> None:
         self._blocks.clear()
@@ -482,10 +641,11 @@ class LibraryGroupedVideoTree(QWidget):
         btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_open.clicked.connect(lambda _=False, p=lib_path: self.open_library_requested.emit(p))
 
-        btn_remove = QPushButton(self._remove_text)
-        btn_remove.setObjectName("LibraryLibRemove")
-        btn_remove.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_remove.clicked.connect(lambda _=False, p=lib_path: self.remove_library_requested.emit(p))
+        status_label = QLabel()
+        status_label.setObjectName("LibraryLibSyncStatus")
+        status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        block.status_label = status_label
+        self._refresh_block_status_label(block)
 
         body = QWidget()
         body.setObjectName("LibraryLibBody")
@@ -545,8 +705,8 @@ class LibraryGroupedVideoTree(QWidget):
         top.addWidget(lib_cb, 0)
         top.addWidget(title, 1)
         top.addWidget(count_label, 0)
+        top.addWidget(status_label, 0)
         top.addWidget(btn_open, 0)
-        top.addWidget(btn_remove, 0)
         outer.addWidget(header)
         outer.addWidget(body)
         body.setVisible(block.expanded)
@@ -602,12 +762,14 @@ class LibraryGroupedVideoTree(QWidget):
                 block.wanted_ids.clear()
                 block.default_on = False
             self._sync_lib_checkbox_from_sticky(block)
+            self.selection_changed.emit()
             return
 
         if block.model is not None:
             block.model.set_all_checked(checked)
             block.wanted_ids = set(block.model.checked_video_ids())
         self._sync_lib_checkbox_from_videos(block, force=True)
+        self.selection_changed.emit()
 
     def _sync_lib_checkbox_from_sticky(self, block: _LibBlock) -> None:
         tot = sum(1 for e in block.entries if str(e.get("video_id") or "").strip())
@@ -648,5 +810,79 @@ class LibraryGroupedVideoTree(QWidget):
             else:
                 block.lib_cb.setCheckState(Qt.CheckState.PartiallyChecked)
             block.lib_cb.blockSignals(False)
+        finally:
+            self._silent = False
+        self.selection_changed.emit()
+
+    def _on_select_all_changed(self, state: int) -> None:
+        if self._silent:
+            return
+        cs = Qt.CheckState(state)
+        if cs == Qt.CheckState.PartiallyChecked:
+            # Treat partial click as "select all".
+            self._silent = True
+            try:
+                self._select_all_cb.blockSignals(True)
+                self._select_all_cb.setCheckState(Qt.CheckState.Checked)
+                self._select_all_cb.blockSignals(False)
+            finally:
+                self._silent = False
+            cs = Qt.CheckState.Checked
+        checked = cs == Qt.CheckState.Checked
+        self._silent = True
+        try:
+            for block in self._blocks:
+                if block.lib_cb is None:
+                    continue
+                block.lib_cb.blockSignals(True)
+                block.lib_cb.setCheckState(
+                    Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+                )
+                block.lib_cb.blockSignals(False)
+                if not block.populated:
+                    if checked:
+                        block.wanted_ids = {
+                            str(e.get("video_id") or "").strip()
+                            for e in block.entries
+                            if str(e.get("video_id") or "").strip()
+                        }
+                        block.default_on = True
+                    else:
+                        block.wanted_ids.clear()
+                        block.default_on = False
+                elif block.model is not None:
+                    block.model.set_all_checked(checked)
+                    block.wanted_ids = set(block.model.checked_video_ids())
+                    block.default_on = checked
+        finally:
+            self._silent = False
+        self.selection_changed.emit()
+
+    def _sync_select_all_checkbox(self) -> None:
+        cb = getattr(self, "_select_all_cb", None)
+        if cb is None:
+            return
+        total_libs = 0
+        checked_libs = 0
+        partial = False
+        for block in self._blocks:
+            if block.lib_cb is None:
+                continue
+            total_libs += 1
+            st = block.lib_cb.checkState()
+            if st == Qt.CheckState.Checked:
+                checked_libs += 1
+            elif st == Qt.CheckState.PartiallyChecked:
+                partial = True
+        self._silent = True
+        try:
+            cb.blockSignals(True)
+            if total_libs == 0 or checked_libs == 0 and not partial:
+                cb.setCheckState(Qt.CheckState.Unchecked)
+            elif checked_libs >= total_libs and not partial:
+                cb.setCheckState(Qt.CheckState.Checked)
+            else:
+                cb.setCheckState(Qt.CheckState.PartiallyChecked)
+            cb.blockSignals(False)
         finally:
             self._silent = False

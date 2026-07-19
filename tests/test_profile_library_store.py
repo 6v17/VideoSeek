@@ -111,6 +111,61 @@ class ProfileLibraryStoreTests(unittest.TestCase):
             self.assertEqual(get_stored_chunk_config(profile, "vid001")["algorithm_version"], 8)
             self.assertEqual(get_dialogue_index_state(profile, "vid001"), "failed")
 
+    def test_migrate_meta_file_does_not_wipe_existing_library_db(self):
+        from src.storage.migration_runner import _migrate_meta_file
+        from src.storage.profile_library_store import load_profile_meta, save_profile_meta
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = os.path.join(tmp, "root")
+            profile = os.path.join(
+                data_root, "data", "model_assets", "openai-clip", "vit-base-patch32"
+            )
+            os.makedirs(profile, exist_ok=True)
+            lib_path = os.path.normpath(os.path.join(tmp, "videos"))
+            os.makedirs(lib_path, exist_ok=True)
+            save_profile_meta(
+                profile,
+                {
+                    "schema_version": 2,
+                    "libraries": {
+                        lib_path: {
+                            "files": {
+                                "a.mp4": {"vid": "keep-me", "asset_state": "ready", "mod_time": 1.0}
+                            },
+                            "index_state": "ready",
+                        }
+                    },
+                },
+            )
+            self.assertFalse(os.path.exists(os.path.join(profile, "meta.json")))
+            self.assertTrue(os.path.isfile(os.path.join(profile, "library.db")))
+
+            config = {
+                "schema_version": 2,
+                "data_root": data_root,
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "model_dir": os.path.join(data_root, "models"),
+                                "model_variant": "vit-base-patch32",
+                            },
+                        }
+                    ],
+                },
+            }
+            result = _migrate_meta_file(config)
+            self.assertEqual(result, 0)
+            loaded = load_profile_meta(profile)
+            self.assertIn(lib_path, loaded["libraries"])
+            self.assertEqual(
+                loaded["libraries"][lib_path]["files"]["a.mp4"]["vid"],
+                "keep-me",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,10 @@
 Models are loaded from an imported understanding component directory
 (``vision/ocr/rapidocr-zh``). Inference uses onnxruntime; on Windows this can
 include DirectML when the RapidOCR backend / ORT build supports it.
+
+RapidOCR's real batching is recognition-side ``rec_batch_num`` (multiple text
+boxes inside one image). Detection is per-image; VideoSeek overlaps decode with
+OCR instead of stacking frames.
 """
 
 from __future__ import annotations
@@ -117,6 +121,8 @@ def _build_engine(paths: dict[str, str], *, prefer_gpu: bool):
         kwargs["use_cls"] = False
         kwargs["max_side_len"] = 960
         kwargs["det_limit_side_len"] = 640
+        # RapidOCR native batch: recognize multiple boxes in one image together.
+        kwargs["rec_batch_num"] = 6
         try:
             import onnxruntime as ort
 

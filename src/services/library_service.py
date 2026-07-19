@@ -95,8 +95,8 @@ def count_video_id_refs(
 ) -> int:
     """How many library file rows still point at ``video_id``.
 
-    Index payloads (Lance / shared transcripts) are global per id, so physical
-    deletes must only run when this returns 0.
+    Lance / visual payloads are per CLIP profile; physical deletes must only run
+    when this returns 0 for the active profile meta.
     """
     vid = str(video_id or "").strip()
     if not vid:
@@ -250,11 +250,11 @@ def add_library(path):
 
 
 def register_library_videos(*, config=None, library_path: str | None = None) -> dict:
-    """Discover videos under registered libraries and ensure meta file records exist.
+    """Discover videos under CLIP-profile libraries and ensure meta file records exist.
 
-    Shared foundation for visual sync and subtitle OCR: assigns ``video_id`` without
-    building CLIP vectors. Newly seen files get ``asset_state=missing_asset``.
-    Existing ready/failed states are left unchanged when the source still exists.
+    Assigns ``video_id`` without building CLIP vectors. Newly seen files get
+    ``asset_state=missing_asset``. Existing ready/failed states are left unchanged
+    when the source still exists. Subtitle folders use ``register_subtitle_library_videos``.
     """
     from src.utils import get_video_hash
 
@@ -361,7 +361,10 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
 
 
 def remove_library(path, delete_video_data, progress_callback=None):
-    """Remove a library entry and its exclusive index data.
+    """Remove a visual library from the active CLIP profile and exclusive Lance data.
+
+    Does not delete shared subtitle OCR (``transcripts.db``). Use
+    ``subtitle_library_service.remove_subtitle_library`` for that.
 
     ``progress_callback(percent, text)`` is optional; heavy Lance work should run
     off the UI thread via ``RemoveLibraryWorker``.
@@ -384,7 +387,7 @@ def remove_library(path, delete_video_data, progress_callback=None):
             pass
 
     # Snapshot exclusive ids before mutating meta. A video_id still referenced by
-    # any other library must keep its Lance / transcript payload.
+    # any other library in this CLIP profile must keep its Lance payload.
     removable_video_ids = sorted(
         {
             str(info.get("vid") or "").strip()
@@ -413,7 +416,7 @@ def remove_library(path, delete_video_data, progress_callback=None):
         total = len(removable_video_ids)
         for index, video_id in enumerate(removable_video_ids):
             _progress(
-                int(5 + (index / max(total, 1)) * 75),
+                int(5 + (index / max(total, 1)) * 80),
                 f"remove_library|{index + 1}|{total}|{video_id}",
             )
             try:
@@ -421,18 +424,6 @@ def remove_library(path, delete_video_data, progress_callback=None):
             except TypeError:
                 # Test doubles / older callables may not accept the kwarg.
                 delete_video_data(video_id, config)
-
-        _progress(85, "remove_library|transcripts")
-        try:
-            from src.storage.dialogue_transcript_store import delete_dialogue_transcript
-
-            for video_id in removable_video_ids:
-                try:
-                    delete_dialogue_transcript(str(video_id or ""), config=config)
-                except Exception:
-                    pass
-        except Exception as exc:
-            get_logger("library_service").warning("Dialogue transcript cleanup failed: %s", exc)
 
         _progress(90, "remove_library|compact")
         try:

@@ -296,6 +296,34 @@ def has_any_dialogue_transcript(*, config=None) -> bool:
         return False
 
 
+def list_transcript_library_paths(*, config=None) -> list[str]:
+    """Distinct non-empty library_path values recorded on shared transcripts."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    try:
+        with _db(config=config) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT library_path
+                FROM transcripts
+                WHERE library_path IS NOT NULL AND TRIM(library_path) != ''
+                ORDER BY library_path
+                """
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for row in rows:
+        raw = str(row["library_path"] or "").strip()
+        if not raw:
+            continue
+        key = canonicalize_library_path(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        paths.append(key)
+    return paths
+
+
 def _chunked(values: list[str], size: int = _IN_CHUNK) -> Iterator[list[str]]:
     for index in range(0, len(values), size):
         yield values[index : index + size]

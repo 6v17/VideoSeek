@@ -27,6 +27,9 @@ def _is_standalone_app() -> bool:
     """True for PyInstaller/Nuitka builds and other non-interpreter launches."""
     if getattr(sys, "frozen", False):
         return True
+    # Nuitka sets __compiled__ on modules; also treat as standalone when present on sys.
+    if getattr(sys, "__compiled__", None) is not None:
+        return True
     if hasattr(sys, "_MEIPASS"):
         return True
     executable = str(getattr(sys, "executable", "") or "").strip()

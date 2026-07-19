@@ -297,6 +297,7 @@ class MainWindow(
         self.link_page.btn_clear_legacy.clicked.connect(self.clear_legacy_network_data)
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
+        self.library_page.btn_remove_lib.clicked.connect(self.remove_selected_libraries)
         self.library_page.btn_sync_db.clicked.connect(
             lambda: self.start_update_index(checked_only=True)
         )
@@ -304,6 +305,9 @@ class MainWindow(
         self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
         self.library_page.btn_refresh_dialogue_library.clicked.connect(self.refresh_dialogue_library_table)
         self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
+        self.library_page.input_subtitle_sample_interval.editingFinished.connect(
+            self._on_subtitle_sample_interval_changed
+        )
         self.library_page.btn_stop_dialogue_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
         self.library_page.library_stack.currentChanged.connect(self._on_library_tab_changed)
@@ -503,25 +507,32 @@ class MainWindow(
                 "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
             )
         )
-        self.library_page.lbl_dialogue_library_hint.setText(
-            t.get(
-                "dialogue_library_hint",
-                "Dialogue text is shared across search models. After switching models, re-embed vectors — no ASR again.",
-            )
-        )
         self.library_page.btn_add_lib.setText(t["add_folder"])
+        self.library_page.btn_remove_lib.setText(t.get("remove_library", "Remove Library"))
+        if hasattr(self, "_refresh_library_action_hints"):
+            self._refresh_library_action_hints()
+        else:
+            self.library_page.btn_remove_lib.setToolTip(t.get("remove_library_hint", ""))
         self.library_page.btn_sync_db.setText(
             t.get("sync_selected_videos", t.get("update_index", "Sync selected"))
         )
         self.library_page.visual_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
-            remove_text=t.get("delete", "Delete"),
             empty_text=t.get("library_list_empty", ""),
+            status_template=t.get("library_sync_status", "{ready}/{total} synced"),
+            header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
+            header_count=t.get("library_col_count", "Count"),
+            header_status=t.get("library_col_status", "Status"),
+            header_action=t.get("library_col_action", "Action"),
         )
         self.library_page.subtitle_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
-            remove_text=t.get("delete", "Delete"),
             empty_text=t.get("dialogue_library_empty", ""),
+            status_template=t.get("library_extract_status", "{ready}/{total} extracted"),
+            header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
+            header_count=t.get("library_col_count", "Count"),
+            header_status=t.get("library_col_status", "Status"),
+            header_action=t.get("library_col_action", "Action"),
         )
         self.library_page.btn_build_dialogue_index.setText(t.get("build_dialogue_index", "Build dialogue index"))
         self.library_page.btn_build_dialogue_index.setToolTip(
@@ -533,6 +544,17 @@ class MainWindow(
         self.library_page.btn_reembed_dialogue.setToolTip(
             t.get("reembed_dialogue_index_hint", "")
         )
+        self.library_page.lbl_subtitle_sample_interval.setText(
+            t.get("subtitle_sample_interval", "Frame interval")
+        )
+        interval_tip = t.get(
+            "subtitle_sample_interval_hint",
+            "OCR frame sample interval inside speech segments (0.1–6.0s).",
+        )
+        self.library_page.lbl_subtitle_sample_interval.setToolTip(interval_tip)
+        self.library_page.input_subtitle_sample_interval.setToolTip(interval_tip)
+        if hasattr(self, "load_subtitle_sample_interval"):
+            self.load_subtitle_sample_interval()
         self.library_page.btn_export_dialogue.setText(
             t.get("export_dialogue_library", "Export dialogue")
         )
@@ -880,9 +902,9 @@ class MainWindow(
             self._set_search_query_tab(self.SEARCH_TAB_DIALOGUE)
             self.search_page.search_panel.set_dialogue_query(query)
 
-        from src.services.search_scope import resolve_default_active_search_scope
+        from src.services.search_scope import resolve_default_active_dialogue_search_scope
 
-        scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
+        scope_video_paths, scope_library_paths = resolve_default_active_dialogue_search_scope()
         match_mode = "exact"
         if hasattr(self, "_dialogue_match_mode_from_ui"):
             match_mode = self._dialogue_match_mode_from_ui()

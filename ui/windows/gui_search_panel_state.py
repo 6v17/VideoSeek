@@ -376,6 +376,8 @@ class SearchPanelStateMixin:
 
     def _on_search_query_tab_changed(self, _index: int = 0) -> None:
         self._refresh_search_panel_state()
+        if hasattr(self, "_refresh_search_scope_ui"):
+            self._refresh_search_scope_ui(force_entries=True)
 
     def _on_search_mode_changed(self) -> None:
         self._save_search_mode()
