@@ -31,8 +31,8 @@
 | POST | `/search` | 单次搜索 |
 | POST | `/search/batch` | 批量搜索（可内嵌导出） |
 | GET | `/search/telemetry` | 截图搜诊断（可选） |
-| GET | `/videos/evidence/status` | 批量查询是否已有理解笔录（轻量） |
-| GET | `/videos/evidence` | 理解笔录（可选；读盘优先，可触发生成） |
+| GET | `/videos/evidence/status` | 批量查询是否已有视频总结（轻量） |
+| GET | `/videos/evidence` | 视频总结（可选；读盘优先，可触发生成） |
 | POST | `/export/manifest` | 生成剪辑清单 JSON |
 | POST | `/export/clip` | 导出单个片段 |
 | POST | `/export/clips/batch` | 批量导出片段 |
@@ -41,7 +41,7 @@
 
 ## 1. 能力与边界
 
-- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段；**可选**读取/生成理解笔录（描述服务 caption 为主，YOLO 检测为可选附加）。
+- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；生成 manifest JSON；导出 mp4 片段；**可选**读取/生成视频总结（描述服务 caption）。
 - **不支持：** 精确台词/剧情检索；自动成片；修改索引或用户设置（除非用户在对话中明确要求）。
 
 ---
@@ -135,11 +135,11 @@
 | `library_indexes_upgrade_needed` | 兼容字段；Lance 主线恒为 **false**（`needs_search_index_upgrade` 已 no-op） |
 | `agent_api_default_image_precision` | 图搜默认 `fast` 或 `precise` |
 | `search_telemetry_enabled` | 遥测开关 |
-| `understanding_ready` | 描述服务是否就绪（VLM caption）；false 时勿 `ensure=true`。YOLO 为可选附加 |
+| `understanding_ready` | 描述服务是否就绪（VLM caption）；false 时勿 `ensure=true` |
 | `active_understanding_profile` | 当前理解方案 id |
 | `understanding_missing_components` | 未就绪时的缺失**必需**组件 id 列表 |
-| `understanding_optional_missing_components` | 可选组件缺失（如 YOLO）；不影响 `understanding_ready` |
-| `capabilities.video_evidence` | 理解笔录 API 是否可用（`GET /videos/evidence` 端点存在，恒为 true） |
+| `understanding_optional_missing_components` | 可选组件缺失列表（当前基线 profile 通常为空） |
+| `capabilities.video_evidence` | 视频总结 API 是否可用（`GET /videos/evidence` 端点存在，恒为 true） |
 | `capabilities.video_evidence_ready` | 与 `understanding_ready` 相同；可生成/触发生成时为 true |
 
 ---
@@ -199,7 +199,7 @@
 | `library_path` | 省略=全库 | 来自 `/libraries`；指定则只列该库 |
 | `video_id` | — | 精确查单条；未找到 → 404 |
 | `q` | — | 按 `video_rel_path` / 文件名 / `video_id` / 库名子串匹配（不区分大小写） |
-| `has_evidence` | — | `true` 只列已有笔录；`false` 只列尚无笔录 |
+| `has_evidence` | — | `true` 只列已有总结；`false` 只列尚无总结 |
 | `ready_only` | `true` | 只返回已同步就绪且源文件存在的视频 |
 | `limit` | 500 | 最大 2000 |
 | `offset` | 0 | 分页 |
@@ -464,7 +464,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 ### 4.11.5 `GET /videos/evidence/status`
 
-批量查询是否已有落盘的理解笔录（不读 chunk 正文，不触发生成）。
+批量查询是否已有落盘的视频总结（不读 chunk 正文，不触发生成）。
 
 **Query：**
 
@@ -482,21 +482,21 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 ### 4.12 `GET /videos/evidence`
 
-**可选模块。** 读取（或按需生成）单视频理解笔录：chunk 级 YOLO 检测 + 描述服务 caption，可选整片 `summary`。不影响搜索/索引。
+**可选模块。** 读取（或按需生成）单条视频总结：chunk 级画面描述（OpenAI 兼容 VLM）+ 可选整片 `summary`。产品路径不再运行 YOLO；响应里若仍出现 `object_detection` 多为旧落盘数据。不影响搜索/索引。
 
 **Query：**
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `video_id` 或 `video_path` | 二选一 | 与 search / libraries 路径规范一致 |
-| `start_sec` / `end_sec` | 否 | 与笔录 chunk **时间重叠**过滤；仅影响响应，不改落盘 |
-| `ensure` | 否，默认 `false` | `true`：无笔录或 **`in_progress` 未完成**时触发生成/续跑；`false`：仅读盘 |
+| `start_sec` / `end_sec` | 否 | 与总结 chunk **时间重叠**过滤；仅影响响应，不改落盘 |
+| `ensure` | 否，默认 `false` | `true`：无总结或 **`in_progress` 未完成**时触发生成/续跑；`false`：仅读盘 |
 
 **成功响应要点：**
 
 | 字段 | 说明 |
 |------|------|
-| `evidence_available` | 是否有可用笔录（含 `in_progress` 已完成的 chunk） |
+| `evidence_available` | 是否有可用总结（含 `in_progress` 已完成的 chunk） |
 | `video_id`, `video` | 视频标识与路径 |
 | `chunks[]` | 过滤后的 chunk 证据（`evidence.vision.object_detection` / `image_caption`） |
 | `summary` | 整片总结对象 `{ "text": string, "source": string }`（若有；`text` 为描述正文） |
@@ -506,7 +506,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `meta.generated_by` | API 本次触发生成时为 `"agent_api"` |
 | `meta.understanding_timeout_sec` | 本次请求超时预算（按**剩余** chunk 估算） |
 
-无笔录且 `ensure=false` → **HTTP 200**，`evidence_available: false`，`chunks: []`（非错误）。
+无总结且 `ensure=false` → **HTTP 200**，`evidence_available: false`，`chunks: []`（非错误）。
 
 **超时（503 `understanding_timeout`）：** 生成可能已部分落盘；用 `ensure=false` 看 `meta.chunks_completed/chunk_total`，再 **`ensure=true` 续跑**（与 GUI 理解页相同 checkpoint 机制）。
 
@@ -517,7 +517,7 @@ GET /health → understanding_ready?
 POST /search → hits
 GET /videos/evidence/status → 是否已有/是否 in_progress
 GET /videos/evidence?…&ensure=false
-  → 无笔录则询问用户是否 ensure=true
+  → 无总结则询问用户是否 ensure=true
 GET /videos/evidence?…&ensure=true
   → 完成或续跑；503 时看进度后重试 ensure=true
 ```
@@ -528,13 +528,13 @@ GET /videos/evidence?…&ensure=true
 
 **不覆盖** starter 内 Policy kernel。用户意图匹配时选用；字段细节见 §4。
 
-### 5.1 search vs 理解笔录
+### 5.1 search vs 视频总结
 
 | 用户意图 | 用什么 | 说明 |
 |----------|--------|------|
 | 在库里**找**镜头 | `POST /search` 或 `/search/batch` | CLIP 画面匹配 → `hits[]` |
 | **解释**某段在发生什么 | `GET /videos/evidence` | 需 `understanding_ready`；通常在 search 给出 `video_path` + 时间窗**之后** |
-| 找片 + 说明 + 导出 | search → evidence → export | 笔录不是第三种搜索 |
+| 找片 + 说明 + 导出 | search → evidence → export | 视频总结不是第三种搜索 |
 | 台词 / 剧情 / 自动解说 | **不适用** | 非 ASR |
 
 ### 5.2 可选场景

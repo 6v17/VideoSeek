@@ -84,6 +84,46 @@ def _delete_lance_video_vectors(video_id, config) -> None:
         logger.warning("Failed to delete Lance vectors for old video id %s: %s", video_id, exc)
 
 
+def _safe_delete_unreferenced_video_data(
+    meta,
+    video_id,
+    config,
+    *,
+    exclude_library_path: str | None = None,
+    exclude_rel_path: str | None = None,
+    refresh_lance_state: bool = True,
+) -> bool:
+    """Delete Lance/legacy payloads only when no library file still references the id."""
+    from src.services.library_service import count_video_id_refs
+    from src.workflows.update_video import delete_physical_video_data
+
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return False
+    refs = count_video_id_refs(
+        meta,
+        video_id,
+        exclude_library_path=exclude_library_path,
+        exclude_rel_path=exclude_rel_path,
+    )
+    if refs > 0:
+        logger.info(
+            "Keeping shared index payload for video_id=%s (%s remaining reference(s))",
+            video_id,
+            refs,
+        )
+        return False
+    try:
+        delete_physical_video_data(
+            video_id,
+            config,
+            refresh_lance_state=refresh_lance_state,
+        )
+    except TypeError:
+        delete_physical_video_data(video_id, config)
+    return True
+
+
 def _mark_lance_sync_failed(
     lib_files,
     rel_path,
@@ -329,11 +369,22 @@ def _resolve_reusable_cached_vectors(abs_path, saved, config):
     return None
 
 
-def _try_reuse_lance_indexed_video(abs_path, saved, config, *, indexed_ids=None):
+def _try_reuse_lance_indexed_video(
+    abs_path,
+    saved,
+    config,
+    *,
+    indexed_ids=None,
+    library_path: str = "",
+):
     """Skip vector load and Lance upsert when meta and Lance already agree on this file.
 
     Trusts ``mod_time`` before hashing. When ``indexed_ids`` is provided (scan batch
     cache), avoids per-video Lance count queries.
+
+    If Lance still stores another library_path for this video_id (cross-library copy
+    reuse), return None so the caller re-upserts and refreshes location columns used
+    by library-scoped search.
     """
     if str(saved.get("asset_state", "")).strip().lower() != "ready":
         return None
@@ -348,14 +399,21 @@ def _try_reuse_lance_indexed_video(abs_path, saved, config, *, indexed_ids=None)
     if saved_mtime is None or float(saved_mtime) != float(video_mod_time):
         return None
     # mtime unchanged → keep saved_vid; do not re-hash the file body.
+    profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
     if indexed_ids is not None:
         if saved_vid not in indexed_ids:
             return None
     else:
         from src.storage.lance_search_index import lance_video_has_vectors
 
-        profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
         if not lance_video_has_vectors(profile_base_dir, saved_vid):
+            return None
+    want_lib = canonicalize_library_path(library_path) if library_path else ""
+    if want_lib:
+        from src.storage.lance_search_index import get_lance_video_library_path
+
+        stored_lib = get_lance_video_library_path(profile_base_dir, saved_vid)
+        if stored_lib and stored_lib != want_lib:
             return None
     return {"canonical_vid": saved_vid}
 
@@ -839,6 +897,7 @@ def process_single_video(
     file_index=1,
     file_total=1,
     indexed_ids=None,
+    meta=None,
 ):
     video_name = os.path.basename(abs_path)
     progress_reporter = (
@@ -877,7 +936,11 @@ def process_single_video(
 
         # Cheap reuse before any ffprobe / content hash.
         lance_cached = _try_reuse_lance_indexed_video(
-            abs_path, saved, config, indexed_ids=indexed_ids
+            abs_path,
+            saved,
+            config,
+            indexed_ids=indexed_ids,
+            library_path=library_path or "",
         )
         if lance_cached is not None:
             video_id = lance_cached["canonical_vid"]
@@ -949,9 +1012,22 @@ def process_single_video(
                     detail=f"reuse sync failed (disk_vid={disk_vid})",
                 )
                 return None, None, metadata_updated, bool(saved.get("vid"))
-            if disk_vid != video_id:
-                _delete_lance_video_vectors(disk_vid, config)
             metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
+            if disk_vid != video_id:
+                # Re-key must not wipe another library still pointing at disk_vid.
+                ref_meta = meta
+                if ref_meta is None:
+                    from src.storage.asset_store import load_model_metadata
+
+                    ref_meta = load_model_metadata(config=config)
+                _safe_delete_unreferenced_video_data(
+                    ref_meta,
+                    disk_vid,
+                    config,
+                    exclude_library_path=library_path,
+                    exclude_rel_path=rel_path,
+                    refresh_lance_state=True,
+                )
             return vectors, timestamps, metadata_updated, False
 
         # About to generate — probe stream now (expensive).
@@ -1233,6 +1309,7 @@ def scan_target_libraries(
                         file_index=global_file_index,
                         file_total=total_files or 1,
                         indexed_ids=indexed_ids,
+                        meta=meta,
                     )
                     search_assets_changed = search_assets_changed or file_search_assets_changed
                     if vectors is _SKIP_VIDEO_ALREADY_INDEXED:

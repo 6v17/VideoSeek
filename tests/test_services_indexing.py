@@ -176,6 +176,82 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertNotIn("global_index_state", mock_load_meta.return_value)
         mock_save_meta.assert_called_once()
 
+    def test_count_video_id_refs_shared_across_libraries(self):
+        meta = {
+            "libraries": {
+                "D:\\lib_a": {"files": {"a.mp4": {"vid": "shared"}}},
+                "D:\\lib_b": {"files": {"b.mp4": {"vid": "shared"}, "c.mp4": {"vid": "only_b"}}},
+            }
+        }
+        self.assertEqual(library_service.count_video_id_refs(meta, "shared"), 2)
+        self.assertTrue(library_service.video_id_is_shared(meta, "shared"))
+        self.assertEqual(
+            library_service.count_video_id_refs(
+                meta,
+                "shared",
+                exclude_library_path="D:\\lib_a",
+            ),
+            1,
+        )
+        self.assertEqual(library_service.count_video_id_refs(meta, "only_b"), 1)
+        self.assertFalse(library_service.video_id_is_shared(meta, "only_b"))
+
+    @patch("src.storage.lance_store.compact_lance_storage")
+    @patch("src.storage.lance_store.garbage_collect_orphan_lance_videos", return_value=[])
+    @patch("src.services.library_service.garbage_collect_orphan_library_indexes")
+    @patch("src.services.library_service.clear_library_search_index")
+    @patch(
+        "src.services.library_service.get_local_model_asset_dirs",
+        return_value={"vector_dir": "source/vector", "index_dir": "source/index", "base_dir": "profile"},
+    )
+    @patch("src.services.library_service.save_model_metadata")
+    @patch(
+        "src.services.library_service.load_model_metadata",
+        return_value={
+            "libraries": {
+                "D:\\lib_a": {"files": {"a.mp4": {"vid": "shared_vid", "asset_state": "ready"}}},
+                "D:\\lib_b": {"files": {"copy.mp4": {"vid": "shared_vid", "asset_state": "ready"}}},
+            }
+        },
+    )
+    @patch(
+        "src.services.library_service.load_config",
+        return_value={
+            "meta_file": "source/meta.json",
+            "vector_dir": "source/vector",
+            "index_dir": "source/index",
+        },
+    )
+    def test_remove_library_keeps_shared_video_payload(
+        self,
+        _mock_load_config,
+        mock_load_meta,
+        mock_save_meta,
+        _mock_get_model_dirs,
+        _mock_clear,
+        _mock_gc,
+        _mock_gc_orphans,
+        mock_compact,
+    ):
+        deleted = []
+
+        def delete_video_data(video_id, config, **_kwargs):
+            deleted.append(video_id)
+
+        result = library_service.remove_library("D:\\lib_a", delete_video_data)
+
+        self.assertTrue(result)
+        self.assertEqual(deleted, [])
+        mock_compact.assert_not_called()
+        saved_meta = mock_save_meta.call_args.args[0]
+        libs = library_service._normalize_library_map(saved_meta.get("libraries", {}))
+        self.assertNotIn(utils.canonicalize_library_path("D:\\lib_a"), libs)
+        kept_b = libs[utils.canonicalize_library_path("D:\\lib_b")]["files"]
+        self.assertIn(
+            "shared_vid",
+            {str(info.get("vid") or "") for info in kept_b.values()},
+        )
+
     @patch("src.services.library_service.get_library_search_index_status", return_value="stale")
     @patch("src.services.library_service.load_model_metadata", return_value={"search_index_schema_version": 2, "libraries": {}})
     @patch("src.services.library_service.load_config", return_value={})

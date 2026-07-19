@@ -53,16 +53,9 @@ VISION_BASELINE_PROFILE_MANIFEST = {
         "components": [
             "vision/image_caption/qwen3-vl-remote",
         ],
-        "optional_components": [
-            "vision/object_detection/yolo11n",
-        ],
+        "optional_components": [],
     },
     "pipeline": [
-        {
-            "step": "object_detection",
-            "component": "vision/object_detection/yolo11n",
-            "enabled": True,
-        },
         {
             "step": "image_caption",
             "component": "vision/image_caption/qwen3-vl-remote",
@@ -275,7 +268,7 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
 
         self.assertTrue(status["understanding_ready"])
         self.assertEqual(status["missing_components"], [])
-        self.assertIn("vision/object_detection/yolo11n", status["optional_missing_components"])
+        self.assertNotIn("vision/object_detection/yolo11n", status["optional_missing_components"])
 
     def test_understanding_ready_true_when_profile_components_installed(self):
         self._install_component(YOLO_MANIFEST, "yolo11n.onnx")

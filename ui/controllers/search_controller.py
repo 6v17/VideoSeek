@@ -266,9 +266,18 @@ class SearchController(QObject):
             except Exception as exc:
                 logger.debug("Crop query clip-score UI hint skipped: %s", exc)
 
+        worker_config = getattr(self.worker, "config", None)
+        search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
+        highlight_query = ""
+        dialogue_match_mode = ""
+        if search_kind == "dialogue" and worker_config is not None:
+            highlight_query = str(getattr(worker_config, "query", "") or "").strip()
+            dialogue_match_mode = str(getattr(worker_config, "search_mode", "") or "").strip()
         self._result_display_context = {
             "clip_score_mode": clip_score_mode,
             "low_confidence_score": low_confidence_threshold,
+            "highlight_query": highlight_query,
+            "dialogue_match_mode": dialogue_match_mode,
         }
         self._render_current_page()
 
@@ -299,6 +308,8 @@ class SearchController(QObject):
             clip_score_mode=bool(context.get("clip_score_mode")),
             low_confidence_score=context.get("low_confidence_score"),
             rank_offset=rank_offset,
+            highlight_query=str(context.get("highlight_query") or ""),
+            dialogue_match_mode=str(context.get("dialogue_match_mode") or ""),
         )
         self._sync_results_pager()
         self._update_results_status_text(results, context)

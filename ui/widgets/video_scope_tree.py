@@ -413,7 +413,8 @@ class VideoScopeTreeWidget(QWidget):
         body.setObjectName("VideoScopeLibBody")
         block.body = body
         body_l = QVBoxLayout(body)
-        body_l.setContentsMargins(0, 0, 0, 0)
+        # Nest under header title: past collapse(24)+gap+checkbox, not just the arrow.
+        body_l.setContentsMargins(56, 0, 12, 4)
         body_l.setSpacing(0)
 
         model = ScopeVideoTableModel(body)

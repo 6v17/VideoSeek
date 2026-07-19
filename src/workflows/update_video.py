@@ -99,6 +99,8 @@ def update_videos_flow(
         if progress_callback:
             progress_callback(5, "Cleaning stale index source")
         removed_any = False
+        from src.services.library_service import count_video_id_refs
+
         for video_id in cleanup_missing_library_files(
             meta,
             config,
@@ -106,7 +108,15 @@ def update_videos_flow(
             selected_entries=cleanup_missing_entries,
         ):
             removed_any = True
-            delete_physical_video_data(video_id, config)
+            # cleanup_missing already removed the file row; only wipe payload when
+            # no other library still references this video_id.
+            if count_video_id_refs(meta, video_id) == 0:
+                delete_physical_video_data(video_id, config)
+            else:
+                logger.info(
+                    "Keeping shared index payload after missing-file cleanup for video_id=%s",
+                    video_id,
+                )
         if removed_any:
             save_model_metadata(meta, config=config)
     else:
@@ -207,7 +217,7 @@ def upgrade_search_index_flow(
     }
 
 
-def delete_physical_video_data(video_id, config):
+def delete_physical_video_data(video_id, config, *, refresh_lance_state: bool = True):
     if not video_id:
         return
 
@@ -228,7 +238,11 @@ def delete_physical_video_data(video_id, config):
     try:
         from src.storage.lance_store import delete_profile_video_vectors
 
-        delete_profile_video_vectors(video_id, config=config)
+        delete_profile_video_vectors(
+            video_id,
+            config=config,
+            refresh_state=bool(refresh_lance_state),
+        )
     except Exception as exc:
         logger.warning("Failed to remove Lance vectors for %s: %s", video_id, exc)
 

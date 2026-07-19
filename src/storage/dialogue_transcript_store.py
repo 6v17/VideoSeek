@@ -7,9 +7,11 @@ This store keeps reusable raw material in SQLite: time + text + language.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import threading
 import time
+import unicodedata
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -23,6 +25,9 @@ _SCHEMA_VERSION = 1
 _IN_CHUNK = 400
 _WRITE_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
+
+# Split like BT keyword search: whitespace + punctuation/symbols (keep CJK/letters).
+_TOKEN_SPLIT_RE = re.compile(r"[\s\W_]+", flags=re.UNICODE)
 
 
 def get_dialogue_store_dir(*, config=None) -> str:
@@ -444,134 +449,66 @@ def normalize_dialogue_query(query: str) -> str:
     return str(query or "").strip().casefold()
 
 
-def _dialogue_query_tokens(needle: str) -> list[str]:
-    text = normalize_dialogue_query(needle).replace("\u3000", " ")
-    return [part for part in text.split() if part]
+def _nfkc_casefold(text: str) -> str:
+    return unicodedata.normalize("NFKC", str(text or "")).casefold()
+
+
+def _strip_noise(text: str) -> str:
+    """Remove spaces/punct so BT-style titles still match (``a.b_c`` ↔ ``abc``)."""
+    return _TOKEN_SPLIT_RE.sub("", _nfkc_casefold(text))
 
 
 def _dialogue_query_compact(needle: str) -> str:
-    """Single blob used for CJK / no-space fuzzy scoring."""
-    tokens = _dialogue_query_tokens(needle)
-    if len(tokens) > 1:
-        return " ".join(tokens)
-    if tokens:
-        return tokens[0]
-    return normalize_dialogue_query(needle).replace(" ", "")
+    """Punctuation-free blob used to build single-char scatter keys."""
+    return _strip_noise(needle)
 
 
-def _char_ngrams(text: str, n: int = 2) -> list[str]:
-    if not text:
-        return []
-    if len(text) < n:
-        return [text]
-    return [text[i : i + n] for i in range(len(text) - n + 1)]
-
-
-def _ordered_char_coverage(needle: str, haystack: str) -> float:
-    if not needle:
-        return 0.0
-    pos = 0
-    matched = 0
-    for ch in needle:
-        found = haystack.find(ch, pos)
-        if found < 0:
+def build_dialogue_scatter_keys(query: str) -> list[str]:
+    """Unique single-char scatter points (order ignored; hit-rate ranking)."""
+    compact = _dialogue_query_compact(query)
+    keys: list[str] = []
+    seen: set[str] = set()
+    for ch in compact:
+        if not ch or ch in seen:
             continue
-        matched += 1
-        pos = found + 1
-    return matched / float(len(needle))
+        seen.add(ch)
+        keys.append(ch)
+    return keys
+
+
+def _scatter_hit_count(hay: str, hay_compact: str, keys: list[str]) -> tuple[int, int]:
+    hits = 0
+    for key in keys:
+        if key in hay or key in hay_compact:
+            hits += 1
+    return hits, len(keys)
 
 
 def fuzzy_dialogue_match_score(text: str, query: str) -> float:
-    """Score ``text`` against ``query`` in ``[0, 1]`` (1 = exact substring)."""
+    """Unordered single-char hit rate: more landings ⇒ higher rank."""
     needle = normalize_dialogue_query(query)
     if not needle:
         return 0.0
-    hay = str(text or "").casefold()
+    hay = _nfkc_casefold(text)
     if not hay:
         return 0.0
-    if needle in hay:
-        return 1.0
-
-    tokens = _dialogue_query_tokens(needle)
-    if len(tokens) > 1:
-        hits = sum(1 for token in tokens if token in hay)
-        return hits / float(len(tokens))
-
-    compact = _dialogue_query_compact(needle)
-    if not compact:
+    keys = build_dialogue_scatter_keys(needle)
+    if not keys:
         return 0.0
-    if compact in hay:
-        return 1.0
-    if len(compact) < 2:
-        return 1.0 if compact in hay else 0.0
-
-    best = 0.0
-    for index in range(len(compact)):
-        deleted = compact[:index] + compact[index + 1 :]
-        if len(deleted) >= 2 and deleted in hay:
-            best = max(best, 0.9)
-
-    grams = _char_ngrams(compact, 2)
-    gram_hits = sum(1 for gram in grams if gram in hay)
-    gram_ratio = gram_hits / float(len(grams)) if grams else 0.0
-    best = max(best, gram_ratio)
-
-    ordered = _ordered_char_coverage(compact, hay)
-    # Allow roughly one wrong/missing character for short OCR typos.
-    if len(compact) >= 3 and ordered + 1e-9 >= (len(compact) - 1) / float(len(compact)):
-        best = max(best, max(0.7, ordered * 0.9))
-    elif gram_ratio > 0:
-        best = max(best, 0.45 * gram_ratio + 0.55 * ordered)
-    return float(best)
+    hay_compact = _strip_noise(hay)
+    hits, total = _scatter_hit_count(hay, hay_compact, keys)
+    return float(hits / float(total)) if total else 0.0
 
 
 def fuzzy_dialogue_accepts(score: float, query: str) -> bool:
-    compact = _dialogue_query_compact(query)
-    tokens = _dialogue_query_tokens(query)
-    if len(tokens) > 1:
-        return score >= 0.67
-    n = len(compact)
-    if n <= 2:
-        return score >= 1.0
-    if n <= 4:
-        return score >= 0.5
-    return score >= 0.6
+    """Max freedom: any scatter landing counts."""
+    return bool(build_dialogue_scatter_keys(query)) and score > 0.0
 
 
 def _fuzzy_probe_needles(query: str) -> list[str]:
-    """Short pieces for SQL OR prefilter (refined by ``fuzzy_dialogue_match_score``)."""
-    needle = normalize_dialogue_query(query)
-    if not needle:
-        return []
-    tokens = _dialogue_query_tokens(needle)
-    if len(tokens) > 1:
-        return tokens[:16]
-
-    compact = _dialogue_query_compact(needle)
-    if not compact:
-        return []
-    if len(compact) <= 2:
-        return [compact]
-
-    probes: list[str] = []
-    for gram in _char_ngrams(compact, 2):
-        probes.append(gram)
-    if len(compact) >= 3:
-        for index in range(len(compact)):
-            deleted = compact[:index] + compact[index + 1 :]
-            if len(deleted) >= 2:
-                probes.append(deleted)
-
-    seen: set[str] = set()
-    out: list[str] = []
-    for piece in probes:
-        if not piece or piece in seen:
-            continue
-        seen.add(piece)
-        out.append(piece)
-        if len(out) >= 28:
-            break
-    return out or [compact]
+    """SQL OR prefilter = the same single-char scatter keys."""
+    keys = build_dialogue_scatter_keys(query)
+    return keys[:80]
 
 
 def iter_matching_transcript_segment_rows(
@@ -588,7 +525,7 @@ def iter_matching_transcript_segment_rows(
 
     ``match_mode``:
     - ``exact`` / ``segment`` / ``keyword``: contiguous casefolded substring (SQL INSTR)
-    - ``fuzzy``: typo-tolerant fallback via n-grams / near-substring scoring
+    - ``fuzzy``: unordered single-char scatter hit-rate ranking
     """
     needle = normalize_dialogue_query(query)
     if not needle:
@@ -687,22 +624,16 @@ def iter_matching_transcript_segment_rows(
             yield from _emit_exact(sql, [needle])
             return
 
-        # Fuzzy: broad SQL prefilter, then score / threshold / rank.
+        # Fuzzy: OR any scatter char, then rank by unordered hit rate.
         probes = _fuzzy_probe_needles(needle)
         if not probes:
             return
-        candidate_cap = 80
+        candidate_cap = 500
         if max_hits is not None:
-            candidate_cap = max(80, min(2500, max_hits * 40))
+            candidate_cap = max(500, min(8000, max_hits * 100))
 
         or_parts = [f"instr(s.text_cf, ?) > 0" for _ in probes]
         where_params: list[Any] = list(probes)
-        compact = _dialogue_query_compact(needle)
-        # First+last anchors keep single-char substitutions in the candidate set
-        # without OR-ing common unigrams alone.
-        if len(compact) >= 3 and " " not in compact:
-            or_parts.append("(instr(s.text_cf, ?) > 0 AND instr(s.text_cf, ?) > 0)")
-            where_params.extend([compact[0], compact[-1]])
         where_sql = "(" + " OR ".join(or_parts) + ")"
         scored: list[dict[str, Any]] = []
         seen_keys: set[tuple[str, float, float, str]] = set()

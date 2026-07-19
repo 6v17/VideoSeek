@@ -431,6 +431,29 @@ def lance_video_has_vectors(profile_base_dir: str, video_id: str) -> bool:
         return False
 
 
+def get_lance_video_library_path(profile_base_dir: str, video_id: str) -> str:
+    """Return one stored ``library_path`` for ``video_id``, or empty string."""
+    video_id = str(video_id or "").strip()
+    if not video_id or not lance_search_is_ready(profile_base_dir):
+        return ""
+    try:
+        db = _connect_lance(profile_base_dir)
+        if FRAMES_TABLE_NAME not in _list_table_names(db):
+            return ""
+        table = db.open_table(FRAMES_TABLE_NAME)
+        where = _build_scope_where(video_id=video_id)
+        builder = table.search().select(["library_path"])
+        if where:
+            builder = builder.where(where)
+        arrow = builder.limit(1).to_arrow()
+        if arrow.num_rows <= 0 or "library_path" not in arrow.column_names:
+            return ""
+        return canonicalize_library_path(str(arrow["library_path"][0].as_py() or ""))
+    except Exception as exc:
+        logger.debug("Failed to read Lance library_path for %s: %s", video_id, exc)
+        return ""
+
+
 def _count_video_ids_in_table(table, *, column: str = "video_id") -> dict[str, int]:
     from collections import Counter
 

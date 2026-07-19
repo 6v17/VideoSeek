@@ -16,6 +16,7 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 | **Local libraries** | Add folders, sync to extract frames and build embeddings |
 | **Text search** | Describe a scene; get time ranges in indexed videos |
 | **Image / screenshot search** | Find similar shots from a reference or cropped frame |
+| **Hard-subtitle search** | OCR on-screen subtitles, then keyword search by time; exact match or fuzzy (unordered single-char hit-rate ranking with result highlighting) |
 | **Scope & presets** | All libraries, selected libraries/videos; saved search presets |
 | **frame / chunk modes** | Per-frame hits or semantic chunk aggregation |
 | **Preview & export** | Timeline preview; export mp4 segments |
@@ -24,8 +25,8 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 
 | Feature | Description |
 |---------|-------------|
-| **Understanding evidence** | Per-chunk detection + captions + video summary (YOLO + caption service) |
-| **Localhost Agent API** | HTTP on `127.0.0.1`: search, libraries, export, evidence (see `docs/for-agents.md`) |
+| **Video understanding** | Per-chunk captions + whole-video summary via an OpenAI-compatible caption service (YOLO removed) |
+| **Localhost Agent API** | HTTP on `127.0.0.1`: search, libraries, export, video summaries (see `docs/for-agents.md`) |
 | **Remote libraries** | Import linked libraries and search them like local ones |
 
 ## Who is it for?
@@ -51,7 +52,7 @@ Prefer not to manage Python? Get the **installer** from **[lv17.top](https://www
 3. **Sync** — Select the library → **Sync**; wait for indexing.
 4. **Search** — Sidebar **Search** → text or image query.
 
-Understanding evidence and the Agent API are optional — **sync a library first**.
+Video understanding, subtitle extraction, and the Agent API are optional — **sync a library first** (subtitle search also needs OCR extraction under **Subtitles**).
 
 ## Community
 

@@ -310,7 +310,13 @@ def collect_meta_video_ids(meta) -> set[str]:
     return valid_ids
 
 
-def garbage_collect_orphan_lance_videos(meta, config=None) -> list[str]:
+def garbage_collect_orphan_lance_videos(
+    meta,
+    config=None,
+    *,
+    compact: bool = True,
+    refresh_state: bool = True,
+) -> list[str]:
     from src.storage.config_store import get_local_model_asset_dirs
     from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
 
@@ -325,8 +331,16 @@ def garbage_collect_orphan_lance_videos(meta, config=None) -> list[str]:
         return []
 
     for video_id in orphan_ids:
-        delete_profile_video_vectors(video_id, config=config)
-    compact_lance_storage(profile_base_dir)
+        delete_profile_video_vectors(
+            video_id,
+            config=config,
+            refresh_state=False,
+        )
+    if refresh_state:
+        refresh_import_state(profile_base_dir)
+        _invalidate_lance_search_caches(profile_base_dir)
+    if compact:
+        compact_lance_storage(profile_base_dir)
     return orphan_ids
 
 
@@ -910,7 +924,17 @@ def upsert_profile_video_vectors(
     return result
 
 
-def delete_profile_video_vectors(video_id: str, config=None) -> None:
+def delete_profile_video_vectors(
+    video_id: str,
+    config=None,
+    *,
+    refresh_state: bool = True,
+) -> None:
+    """Delete Lance rows for one video.
+
+    Set ``refresh_state=False`` when deleting many videos in a batch, then call
+    ``refresh_import_state`` / ``compact_lance_storage`` once at the end.
+    """
     from src.storage.config_store import get_local_model_asset_dirs
 
     video_id = str(video_id or "").strip()
@@ -925,8 +949,9 @@ def delete_profile_video_vectors(video_id: str, config=None) -> None:
     _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
     _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
     set_dialogue_index_state(profile_base_dir, video_id, DIALOGUE_INDEX_STATE_MISSING)
-    refresh_import_state(profile_base_dir)
-    _invalidate_lance_search_caches(profile_base_dir)
+    if refresh_state:
+        refresh_import_state(profile_base_dir)
+        _invalidate_lance_search_caches(profile_base_dir)
 
 
 def list_dialogue_transcript_segments(

@@ -106,6 +106,44 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 self.assertEqual(len(fuzzy_hits), 1)
                 self.assertEqual(fuzzy_hits[0].text, "赞助商提供")
 
+                # BT-style: punctuation / keyword split should still hit.
+                punct = list(
+                    iter_matching_transcript_segment_rows(
+                        "Hello_World",
+                        video_ids=["vid1"],
+                        match_mode="fuzzy",
+                    )
+                )
+                self.assertEqual(len(punct), 1)
+                self.assertEqual(punct[0]["text"], "Hello World")
+
+                multi = list(
+                    iter_matching_transcript_segment_rows(
+                        "赞助 提供",
+                        video_ids=["vid1"],
+                        match_mode="fuzzy",
+                    )
+                )
+                self.assertEqual(len(multi), 1)
+                self.assertEqual(multi[0]["text"], "赞助商提供")
+
+                from src.storage.dialogue_transcript_store import (
+                    fuzzy_dialogue_accepts,
+                    fuzzy_dialogue_match_score,
+                )
+
+                # Unordered single-char scatter: any landing counts; rank by hit rate.
+                loose = fuzzy_dialogue_match_score("我都知道了", "都杀了")
+                self.assertTrue(fuzzy_dialogue_accepts(loose, "都杀了"))
+                self.assertAlmostEqual(loose, 2.0 / 3.0, places=5)
+                tight = fuzzy_dialogue_match_score("全都杀了", "都杀了")
+                self.assertTrue(fuzzy_dialogue_accepts(tight, "都杀了"))
+                self.assertAlmostEqual(tight, 1.0, places=5)
+                self.assertGreater(tight, loose)
+                # Order does not matter.
+                scrambled = fuzzy_dialogue_match_score("了杀都在这里", "都杀了")
+                self.assertAlmostEqual(scrambled, 1.0, places=5)
+
                 self.assertTrue(delete_dialogue_transcript("vid1"))
                 self.assertIsNone(load_dialogue_transcript("vid1"))
                 self.assertFalse(has_any_dialogue_transcript())

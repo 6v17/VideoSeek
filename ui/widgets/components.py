@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFormLayout,
     QFrame,
     QGridLayout,
     QHeaderView,
@@ -548,21 +549,25 @@ class LibraryPage(QWidget):
             divider.setObjectName("ToolbarDivider")
             return divider
 
-        # Shared strip: add folder + mode switch (peers)
+        # Shared strip: add folder + mode switch (same height / radius family)
         self.shared_toolbar_card = QFrame()
         self.shared_toolbar_card.setObjectName("LibrarySharedStrip")
         shared_outer = QHBoxLayout(self.shared_toolbar_card)
-        shared_outer.setContentsMargins(4, 2, 4, 2)
-        shared_outer.setSpacing(10)
+        # 1px pad so button/segment borders are never clipped by the strip.
+        shared_outer.setContentsMargins(1, 2, 1, 2)
+        shared_outer.setSpacing(8)
+        shared_outer.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         self.btn_add_lib = QPushButton()
         self.btn_add_lib.setObjectName("UpdateButton")
+        self.btn_add_lib.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.mode_segment = QFrame()
         self.mode_segment.setObjectName("LibraryModeSegment")
         mode_row = QHBoxLayout(self.mode_segment)
-        mode_row.setContentsMargins(3, 3, 3, 3)
+        mode_row.setContentsMargins(4, 3, 4, 3)
         mode_row.setSpacing(2)
+        mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.btn_tab_visual = QPushButton()
         self.btn_tab_visual.setObjectName("LibraryModeBtn")
         self.btn_tab_visual.setCheckable(True)
@@ -583,9 +588,12 @@ class LibraryPage(QWidget):
         self.lbl_shared_library_hint = QLabel()
         self.lbl_shared_library_hint.setObjectName("CardHint")
         self.lbl_shared_library_hint.setWordWrap(True)
+        self.lbl_shared_library_hint.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
-        shared_outer.addWidget(self.btn_add_lib, 0)
-        shared_outer.addWidget(self.mode_segment, 0)
+        shared_outer.addWidget(self.btn_add_lib, 0, Qt.AlignmentFlag.AlignVCenter)
+        shared_outer.addWidget(self.mode_segment, 0, Qt.AlignmentFlag.AlignVCenter)
         shared_outer.addWidget(self.lbl_shared_library_hint, 1)
         page_body.addWidget(self.shared_toolbar_card)
 
@@ -793,27 +801,30 @@ class UnderstandingEvidencePage(QWidget):
         config_body_layout.setSpacing(10)
 
         config_form_host = QWidget()
-        config_form = QGridLayout(config_form_host)
+        config_form = QFormLayout(config_form_host)
         config_form.setContentsMargins(0, 0, 0, 0)
         config_form.setHorizontalSpacing(12)
-        config_form.setVerticalSpacing(8)
+        config_form.setVerticalSpacing(10)
+        config_form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        config_form.setFormAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        config_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        )
+        config_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
 
+        # Kept for older gui wiring; YOLO is no longer part of the UI.
         self.label_yolo = _understanding_field_label()
+        self.label_yolo.hide()
         self.btn_import_understanding_model = QPushButton()
         self.btn_import_understanding_model.setObjectName("AccentGhostButton")
-        self.btn_import_understanding_model.setMinimumHeight(34)
+        self.btn_import_understanding_model.hide()
         self.hint_yolo = QLabel()
         self.hint_yolo.setObjectName("CardHint")
         self.hint_yolo.hide()
-
-        yolo_actions = QWidget()
-        yolo_actions_layout = QHBoxLayout(yolo_actions)
-        yolo_actions_layout.setContentsMargins(0, 0, 0, 0)
-        yolo_actions_layout.setSpacing(8)
-        yolo_actions_layout.addWidget(self.btn_import_understanding_model, 0)
-        yolo_actions_layout.addStretch(1)
-        config_form.addWidget(self.label_yolo, 0, 0)
-        config_form.addWidget(yolo_actions, 0, 1)
 
         self.label_vlm_section = QLabel()
         self.label_vlm_section.setObjectName("CardHint")
@@ -824,20 +835,18 @@ class UnderstandingEvidencePage(QWidget):
         self.input_vlm_provider_mode.setObjectName("SearchModeSelect")
         self.input_vlm_provider_mode.setMinimumWidth(180)
         self.input_vlm_provider_mode.setMaximumWidth(260)
-        config_form.addWidget(self.label_vlm_provider_mode, 1, 0)
-        config_form.addWidget(self.input_vlm_provider_mode, 1, 1)
+        config_form.addRow(self.label_vlm_provider_mode, self.input_vlm_provider_mode)
 
         self.label_vlm_provider_preset = _understanding_field_label()
         self.input_vlm_provider_preset = NoWheelComboBox()
         self.input_vlm_provider_preset.setObjectName("SearchModeSelect")
         self.input_vlm_provider_preset.setMinimumWidth(220)
         self.input_vlm_provider_preset.setMaximumWidth(320)
-        config_form.addWidget(self.label_vlm_provider_preset, 2, 0)
-        config_form.addWidget(self.input_vlm_provider_preset, 2, 1)
+        config_form.addRow(self.label_vlm_provider_preset, self.input_vlm_provider_preset)
 
         self.hint_vlm_preset_summary = _understanding_value_hint()
         self.hint_vlm_preset_summary.hide()
-        config_form.addWidget(self.hint_vlm_preset_summary, 3, 1)
+        config_form.addRow(self.hint_vlm_preset_summary)
 
         self.label_remote_vlm_api_key = _understanding_field_label()
         self.input_remote_vlm_api_key = QLineEdit()
@@ -850,8 +859,7 @@ class UnderstandingEvidencePage(QWidget):
         self.hint_remote_vlm_api_key = QLabel()
         self.hint_remote_vlm_api_key.setObjectName("CardHint")
         self.hint_remote_vlm_api_key.hide()
-        config_form.addWidget(self.label_remote_vlm_api_key, 4, 0)
-        config_form.addWidget(self.input_remote_vlm_api_key, 4, 1)
+        config_form.addRow(self.label_remote_vlm_api_key, self.input_remote_vlm_api_key)
 
         self.label_remote_vlm_base_url = _understanding_field_label()
         self.input_remote_vlm_base_url = QLineEdit()
@@ -863,8 +871,7 @@ class UnderstandingEvidencePage(QWidget):
         self.hint_remote_vlm_base_url = QLabel()
         self.hint_remote_vlm_base_url.setObjectName("CardHint")
         self.hint_remote_vlm_base_url.hide()
-        config_form.addWidget(self.label_remote_vlm_base_url, 5, 0)
-        config_form.addWidget(self.input_remote_vlm_base_url, 5, 1)
+        config_form.addRow(self.label_remote_vlm_base_url, self.input_remote_vlm_base_url)
 
         self.label_remote_vlm_model = _understanding_field_label()
         self.input_remote_vlm_model = QLineEdit()
@@ -876,16 +883,14 @@ class UnderstandingEvidencePage(QWidget):
         self.hint_remote_vlm_model = QLabel()
         self.hint_remote_vlm_model.setObjectName("CardHint")
         self.hint_remote_vlm_model.hide()
-        config_form.addWidget(self.label_remote_vlm_model, 6, 0)
-        config_form.addWidget(self.input_remote_vlm_model, 6, 1)
+        config_form.addRow(self.label_remote_vlm_model, self.input_remote_vlm_model)
 
         self.label_caption_language = _understanding_field_label()
         self.input_caption_language = NoWheelComboBox()
         self.input_caption_language.setObjectName("SearchModeSelect")
         self.input_caption_language.setMinimumWidth(160)
         self.input_caption_language.setMaximumWidth(220)
-        config_form.addWidget(self.label_caption_language, 7, 0)
-        config_form.addWidget(self.input_caption_language, 7, 1)
+        config_form.addRow(self.label_caption_language, self.input_caption_language)
 
         self.label_caption_concurrency = _understanding_field_label()
         self.input_caption_concurrency = QSpinBox()
@@ -894,10 +899,8 @@ class UnderstandingEvidencePage(QWidget):
         self.input_caption_concurrency.setMaximum(4)
         self.input_caption_concurrency.setMinimumWidth(80)
         self.input_caption_concurrency.setMaximumWidth(120)
-        config_form.addWidget(self.label_caption_concurrency, 8, 0)
-        config_form.addWidget(self.input_caption_concurrency, 8, 1)
+        config_form.addRow(self.label_caption_concurrency, self.input_caption_concurrency)
 
-        config_form.setColumnStretch(1, 1)
         config_body_layout.addWidget(config_form_host)
 
         config_footer = QHBoxLayout()
@@ -1034,7 +1037,7 @@ class UnderstandingEvidencePage(QWidget):
         self.chunk_objects_label.setObjectName("StatusHint")
         self.chunk_objects_label.setWordWrap(True)
         self.chunk_objects_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        detail_grid.addWidget(self.chunk_objects_label, 3, 0)
+        self.chunk_objects_label.hide()
 
         self.video_summary_meta_label = QLabel()
         self.video_summary_meta_label.setObjectName("StatusHint")

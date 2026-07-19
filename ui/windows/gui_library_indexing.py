@@ -17,10 +17,8 @@ from src.services.library_service import (
     list_library_video_entries,
     list_local_vector_details,
     register_library_videos,
-    remove_library as remove_library_entry,
 )
 from src.storage.asset_store import load_model_metadata
-from src.workflows.update_video import delete_physical_video_data
 from src.storage.lance_store import format_byte_size
 from src.utils import open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
@@ -162,19 +160,108 @@ class LibraryIndexingGuiMixin:
             self.show_error_dialog(self.texts["library_add_failed"], exc)
 
     def remove_library_entry(self, path):
-        if not self.show_confirm_dialog(self.texts["confirm_title"], self.texts["remove_library_confirm"].format(path=path)):
+        if getattr(self, "_remove_library_running", False) or self._remove_library_worker_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             return
+        if self.indexing_controller.is_running() or self._dialogue_index_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+        if not self.show_confirm_dialog(
+            self.texts["confirm_title"],
+            self.texts["remove_library_confirm"].format(path=path),
+        ):
+            return
+
+        from ui.workers import RemoveLibraryWorker
+
+        self._remove_library_running = True
+        self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_build_dialogue_index.setEnabled(False)
+        self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_export_dialogue.setEnabled(False)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self.library_page.progress_bar.setVisible(True)
+        self.library_page.progress_bar.setValue(0)
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_removing", "Removing library...")
+        )
+
+        worker = RemoveLibraryWorker(path)
+        self.remove_library_worker = worker
+        worker.progress_signal.connect(self._update_remove_library_progress)
+        worker.error_signal.connect(self._handle_remove_library_error)
+        worker.finished_signal.connect(self._finish_remove_library)
+        worker.finished.connect(lambda w=worker: self._cleanup_remove_library_worker(w))
+        worker.start()
+
+    def _remove_library_worker_running(self) -> bool:
+        worker = getattr(self, "remove_library_worker", None)
+        return bool(worker is not None and worker.isRunning())
+
+    def _cleanup_remove_library_worker(self, worker) -> None:
+        if getattr(self, "remove_library_worker", None) is worker:
+            self.remove_library_worker = None
         try:
-            if remove_library_entry(path, delete_physical_video_data):
-                self.refresh_library_table()
-                self.refresh_dialogue_library_table()
+            worker.deleteLater()
+        except Exception:
+            pass
+
+    def _update_remove_library_progress(self, value, text):
+        self.library_page.progress_bar.setValue(int(value))
+        raw = str(text or "")
+        if raw.startswith("remove_library|"):
+            parts = raw.split("|")
+            if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "library_removing_progress",
+                        "Removing library {current}/{total}...",
+                    ).format(current=parts[1], total=parts[2])
+                )
+                return
+            stage = parts[1] if len(parts) > 1 else ""
+            if stage == "compact":
+                self.library_page.lbl_status.setText(
+                    self.texts.get("library_removing_compact", "Compacting index storage...")
+                )
+                return
+            if stage == "transcripts":
+                self.library_page.lbl_status.setText(
+                    self.texts.get("library_removing_transcripts", "Cleaning subtitle data...")
+                )
+                return
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_removing", "Removing library...")
+        )
+
+    def _handle_remove_library_error(self, message):
+        self.show_error_dialog(self.texts["library_remove_failed"], message)
+
+    def _finish_remove_library(self, success):
+        try:
+            self.library_page.btn_sync_db.setEnabled(True)
+            self.library_page.btn_build_dialogue_index.setEnabled(True)
+            self.library_page.btn_reembed_dialogue.setEnabled(True)
+            self.library_page.btn_export_dialogue.setEnabled(True)
+            self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+            self.library_page.btn_add_lib.setEnabled(True)
+            self.library_page.btn_cleanup_missing.setEnabled(True)
+            self.library_page.progress_bar.setVisible(False)
+            if success:
+                # Defer tree rebuilds so the finished signal returns quickly.
+                from PySide6.QtCore import QTimer
+
+                QTimer.singleShot(0, self.refresh_library_table)
+                QTimer.singleShot(0, self.refresh_dialogue_library_table)
                 status_text = self.texts["library_removed"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
             else:
                 self.library_page.lbl_status.setText(self.texts["library_remove_failed"])
-        except Exception as exc:
-            self.show_error_dialog(self.texts["library_remove_failed"], exc)
+        finally:
+            self._remove_library_running = False
 
     def start_update_index(
         self,
@@ -356,7 +443,11 @@ class LibraryIndexingGuiMixin:
     def _start_dialogue_index_job(self, *, mode: str = "auto"):
         if not self._ensure_startup_migration_idle("feature_indexing"):
             return
-        if self.indexing_controller.is_running() or self._dialogue_index_running():
+        if (
+            self.indexing_controller.is_running()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             return
         if not self.check_runtime_resources():
@@ -704,7 +795,11 @@ class LibraryIndexingGuiMixin:
                 self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
                 return
             self.switch_page("library")
-            if self.indexing_controller.is_running() or self._dialogue_index_running():
+            if (
+                self.indexing_controller.is_running()
+                or self._dialogue_index_running()
+                or self._remove_library_worker_running()
+            ):
                 self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
                 return
             self.library_page.btn_sync_db.setEnabled(False)

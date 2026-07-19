@@ -86,6 +86,53 @@ def _normalize_library_map(libraries):
     return normalized
 
 
+def count_video_id_refs(
+    meta,
+    video_id: str,
+    *,
+    exclude_library_path: str | None = None,
+    exclude_rel_path: str | None = None,
+) -> int:
+    """How many library file rows still point at ``video_id``.
+
+    Index payloads (Lance / shared transcripts) are global per id, so physical
+    deletes must only run when this returns 0.
+    """
+    vid = str(video_id or "").strip()
+    if not vid:
+        return 0
+    exclude_lib = (
+        canonicalize_library_path(exclude_library_path) if exclude_library_path else ""
+    )
+    exclude_rel = str(exclude_rel_path or "").replace("\\", "/").strip()
+    count = 0
+    libraries = (meta or {}).get("libraries") or {}
+    if not isinstance(libraries, dict):
+        return 0
+    for root_path, lib_data in libraries.items():
+        if not isinstance(lib_data, dict):
+            continue
+        root_key = canonicalize_library_path(root_path)
+        files = lib_data.get("files") or {}
+        if not isinstance(files, dict):
+            continue
+        for rel_path, info in files.items():
+            if not isinstance(info, dict):
+                continue
+            rel = str(rel_path or "").replace("\\", "/").strip()
+            if exclude_lib and root_key == exclude_lib:
+                # No rel → exclude the whole library (used by remove_library).
+                if not exclude_rel or rel == exclude_rel:
+                    continue
+            if str(info.get("vid", "") or "").strip() == vid:
+                count += 1
+    return count
+
+
+def video_id_is_shared(meta, video_id: str) -> bool:
+    return count_video_id_refs(meta, video_id) > 1
+
+
 def _paths_overlap(path_a, path_b):
     normalized_a = os.path.normcase(os.path.normpath(path_a))
     normalized_b = os.path.normcase(os.path.normpath(path_b))
@@ -313,7 +360,12 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
     return entries
 
 
-def remove_library(path, delete_video_data):
+def remove_library(path, delete_video_data, progress_callback=None):
+    """Remove a library entry and its exclusive index data.
+
+    ``progress_callback(percent, text)`` is optional; heavy Lance work should run
+    off the UI thread via ``RemoveLibraryWorker``.
+    """
     config = load_config()
     meta = load_model_metadata(config=config)
     meta["libraries"] = _normalize_library_map(meta.get("libraries", {}))
@@ -323,21 +375,32 @@ def remove_library(path, delete_video_data):
     if library is None:
         return False
 
-    remaining_video_ids = set()
-    for root_path, lib_data in meta["libraries"].items():
-        if root_path == normalized_path:
-            continue
-        for info in lib_data.get("files", {}).values():
-            video_id = info.get("vid")
-            if video_id:
-                remaining_video_ids.add(video_id)
+    def _progress(percent: int, text: str = "") -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(int(percent), str(text or ""))
+        except Exception:
+            pass
 
-    removable_video_ids = {
-        info.get("vid")
-        for info in library.get("files", {}).values()
-        if info.get("vid") and info.get("vid") not in remaining_video_ids
-    }
+    # Snapshot exclusive ids before mutating meta. A video_id still referenced by
+    # any other library must keep its Lance / transcript payload.
+    removable_video_ids = sorted(
+        {
+            str(info.get("vid") or "").strip()
+            for info in library.get("files", {}).values()
+            if isinstance(info, dict)
+            and str(info.get("vid") or "").strip()
+            and count_video_id_refs(
+                meta,
+                str(info.get("vid") or "").strip(),
+                exclude_library_path=normalized_path,
+            )
+            == 0
+        }
+    )
 
+    _progress(2, "remove_library|meta")
     clear_library_search_index(normalized_path, config=config)
     del meta["libraries"][normalized_path]
     try:
@@ -347,16 +410,50 @@ def remove_library(path, delete_video_data):
     save_model_metadata(meta, config=config)
 
     if removable_video_ids:
-        for video_id in removable_video_ids:
-            delete_video_data(video_id, config)
-        try:
-            from src.storage.lance_store import compact_lance_storage, garbage_collect_orphan_lance_videos
+        total = len(removable_video_ids)
+        for index, video_id in enumerate(removable_video_ids):
+            _progress(
+                int(5 + (index / max(total, 1)) * 75),
+                f"remove_library|{index + 1}|{total}|{video_id}",
+            )
+            try:
+                delete_video_data(video_id, config, refresh_lance_state=False)
+            except TypeError:
+                # Test doubles / older callables may not accept the kwarg.
+                delete_video_data(video_id, config)
 
-            garbage_collect_orphan_lance_videos(meta, config=config)
-            compact_lance_storage(get_local_model_asset_dirs(config=config)["base_dir"])
+        _progress(85, "remove_library|transcripts")
+        try:
+            from src.storage.dialogue_transcript_store import delete_dialogue_transcript
+
+            for video_id in removable_video_ids:
+                try:
+                    delete_dialogue_transcript(str(video_id or ""), config=config)
+                except Exception:
+                    pass
+        except Exception as exc:
+            get_logger("library_service").warning("Dialogue transcript cleanup failed: %s", exc)
+
+        _progress(90, "remove_library|compact")
+        try:
+            from src.storage.lance_store import (
+                compact_lance_storage,
+                garbage_collect_orphan_lance_videos,
+            )
+
+            base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+            # Batch: skip per-orphan refresh/compact; compact refreshes once at end.
+            garbage_collect_orphan_lance_videos(
+                meta,
+                config=config,
+                compact=False,
+                refresh_state=False,
+            )
+            compact_lance_storage(base_dir)
         except Exception as exc:
             get_logger("library_service").warning("Post-removal Lance cleanup failed: %s", exc)
 
+    _progress(100, "remove_library|done")
     return True
 
 

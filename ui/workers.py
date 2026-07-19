@@ -267,6 +267,41 @@ class DialogueIndexWorker(QThread):
             self.finished_signal.emit(success, stopped, dict(summary))
 
 
+class RemoveLibraryWorker(QThread):
+    """Delete a library and its exclusive Lance/index data off the UI thread."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool)
+    error_signal = Signal(str)
+
+    def __init__(self, library_path: str):
+        super().__init__()
+        self.library_path = str(library_path or "").strip()
+
+    def run(self):
+        from src.services.library_service import remove_library
+        from src.workflows.update_video import delete_physical_video_data
+
+        ok = False
+        try:
+            ok = bool(
+                remove_library(
+                    self.library_path,
+                    delete_physical_video_data,
+                    progress_callback=lambda value, text: self.progress_signal.emit(
+                        int(value),
+                        str(text or ""),
+                    ),
+                )
+            )
+        except Exception as exc:
+            logger.exception("Remove library worker failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+            ok = False
+        finally:
+            self.finished_signal.emit(ok)
+
+
 class IndexUpdateWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(bool, bool, bool, object)

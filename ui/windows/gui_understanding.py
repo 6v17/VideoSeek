@@ -991,34 +991,19 @@ class UnderstandingGuiMixin:
         remote_line = self._remote_vlm_status_line(status)
 
         if status.get("understanding_ready"):
-            yolo_line = self._understanding_yolo_status_line(status)
-            lines = [line for line in (yolo_line, remote_line) if line]
+            ready = self.texts.get(
+                "understanding_settings_ready",
+                "Description service is ready.",
+            )
+            lines = [line for line in (ready, remote_line) if line]
             hint.setText("\n".join(lines))
             return
         missing = ", ".join(status.get("missing_components") or [])
         profile_error = str(status.get("profile_error", "") or "").strip()
-        yolo_line = self._understanding_yolo_status_line(status)
         detail = profile_error or missing or self.texts.get("understanding_not_ready", "Not ready")
         base = self.texts.get("understanding_settings_not_ready", "Missing: {missing}").format(missing=detail)
-        lines = [line for line in (yolo_line, base, remote_line) if line]
+        lines = [line for line in (base, remote_line) if line]
         hint.setText("\n".join(lines))
-
-    def _understanding_yolo_status_line(self, status):
-        components = list(status.get("components") or [])
-        yolo_items = [
-            item for item in components
-            if str(item.get("task", "") or "").strip() == "object_detection"
-        ]
-        if not yolo_items:
-            return self.texts.get(
-                "understanding_yolo_status_missing",
-                "YOLO: not imported yet. Use Import Model to add the YOLO package.",
-            )
-        item = yolo_items[0]
-        name = str(item.get("display_name", "") or item.get("id", "") or "YOLO").strip()
-        if item.get("installed"):
-            return self.texts.get("understanding_yolo_status_ready", "YOLO: {name} (ready).").format(name=name)
-        return self.texts.get("understanding_yolo_status_missing_named", "YOLO: {name} (not imported).").format(name=name)
 
     def start_generate_understanding_evidence(self, target_lib=None, video_id=None):
         if not self._ensure_startup_migration_idle("feature_understanding"):
@@ -1374,7 +1359,6 @@ class UnderstandingGuiMixin:
                     item.get("library_path", ""),
                     item.get("video_rel_path", ""),
                     clip_label,
-                    item.get("yolo_model", "") or "",
                     item.get("caption_model", "") or "",
                     item.get("other_models", "") or "",
                     os.path.basename(item.get("evidence_file", "") or "") if item.get("evidence_file") else "",

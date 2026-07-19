@@ -104,6 +104,42 @@ def _format_score_cell(score, texts, *, clip_mode: bool = False, low_confidence:
     return item
 
 
+def _dialogue_video_cell(
+    base_name: str,
+    matched_text: str,
+    query: str,
+    match_mode: str,
+) -> QLabel:
+    from ui.views.dialogue_highlight import highlight_dialogue_html
+
+    snippet_html = highlight_dialogue_html(
+        matched_text,
+        query,
+        match_mode=match_mode,
+        max_len=40,
+    )
+    label = QLabel()
+    label.setObjectName("ResultDialogueVideoCell")
+    label.setTextFormat(Qt.RichText)
+    label.setAlignment(Qt.AlignCenter)
+    label.setWordWrap(True)
+    label.setText(
+        "<div style='text-align:center'>"
+        f"<div>{_escape_html(base_name)}</div>"
+        f"<div style='margin-top:2px;line-height:1.25'>{snippet_html}</div>"
+        "</div>"
+    )
+    # Let hover/tooltip hit the QTableWidgetItem underneath (styled like other columns).
+    label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    label.setStyleSheet("background: transparent;")
+    return label
+
+def _escape_html(text: str) -> str:
+    from html import escape
+
+    return escape(str(text or ""))
+
+
 def populate_result_table(
     table,
     results,
@@ -117,6 +153,8 @@ def populate_result_table(
     clip_score_mode: bool = False,
     low_confidence_score: float | None = None,
     rank_offset: int = 0,
+    highlight_query: str = "",
+    dialogue_match_mode: str = "",
 ):
     table.setRowCount(0)
     display_texts = texts
@@ -163,15 +201,35 @@ def populate_result_table(
         table.setCellWidget(row, LocalSearchCol.PREVIEW, make_thumb_label(text=texts["thumb_loading"]))
 
         base_name = os.path.basename(video_path)
-        if match_kind == "dialogue" and matched_text:
+        query = str(highlight_query or "").strip()
+        mode = str(dialogue_match_mode or "").strip().lower()
+        if match_kind == "dialogue" and matched_text and query:
+            # Empty item text: cell widget paints the label; keeping both caused ghosting.
+            name_item = QTableWidgetItem("")
+            name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
+            table.setCellWidget(
+                row,
+                LocalSearchCol.VIDEO,
+                _dialogue_video_cell(
+                    base_name,
+                    matched_text,
+                    query,
+                    mode or "fuzzy",
+                ),
+            )
+        elif match_kind == "dialogue" and matched_text:
             snippet = matched_text if len(matched_text) <= 40 else f"{matched_text[:39]}…"
             name_item = QTableWidgetItem(f"{base_name}\n{snippet}")
             name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
         else:
             name_item = QTableWidgetItem(base_name)
             name_item.setToolTip(video_path)
-        name_item.setTextAlignment(Qt.AlignCenter)
-        table.setItem(row, LocalSearchCol.VIDEO, name_item)
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
 
         time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=match_kind))
         time_item.setTextAlignment(Qt.AlignCenter)

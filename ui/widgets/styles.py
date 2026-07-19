@@ -730,7 +730,10 @@ QTextEdit#SearchInput:focus {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
-    padding: 8px 6px;
+    border-radius: 10px;
+    /* Compact padding; do not set max-height (it clips the bottom border). */
+    padding: 3px 8px;
+    min-height: 26px;
 }
 #SearchModeSelect QAbstractItemView {
     background: __PANEL__;
@@ -919,33 +922,39 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: transparent;
     border: none;
 }
+/* Same family as 添加文件夹; never set max-height (clips bottom borders). */
+#LibrarySharedStrip #UpdateButton {
+    min-height: 32px;
+    padding: 5px 14px;
+    border-radius: 10px;
+}
 #LibraryStack {
     background: transparent;
     border: none;
 }
 #LibraryModeSegment {
-    background: __BUTTON_SOFT__;
+    background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 10px;
 }
 #LibraryModeBtn {
     background: transparent;
-    border: none;
-    border-radius: 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
     color: __MUTED__;
     font-size: 13px;
     font-weight: 700;
-    min-height: 32px;
-    padding: 6px 16px;
+    min-height: 26px;
+    padding: 3px 14px;
 }
 #LibraryModeBtn:hover:!checked {
     background: __BUTTON_SOFT_HOVER__;
     color: __TEXT__;
 }
 #LibraryModeBtn:checked {
-    background: __FIELD__;
-    color: __HEADLINE__;
-    border: 1px solid __LINE_STRONG__;
+    background: __ACCENT_SOFT__;
+    color: __ACCENT__;
+    border: 1px solid __ACCENT__;
 }
 #LibraryGroupedVideoTree, #LibraryGroupedScroll {
     background: transparent;
@@ -1016,21 +1025,23 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     color: __DANGER__;
 }
 #LibraryLibBody {
-    background: __PANEL__;
+    background: transparent;
     border: none;
 }
 QTableView#LibraryGroupedLibTree {
     outline: none;
     border: none;
+    border-left: 2px solid __LINE__;
     border-top: none;
     background: __PANEL__;
     alternate-background-color: __FIELD__;
     padding: 0;
     gridline-color: __LINE__;
+    border-radius: 0;
 }
 QTableView#LibraryGroupedLibTree::item {
     min-height: 28px;
-    padding: 4px 12px 4px 34px;
+    padding: 4px 10px 4px 10px;
     border: none;
     border-bottom: 1px solid __LINE__;
     border-radius: 0;
@@ -1865,13 +1876,15 @@ ClickableLabel[detailActive="true"] {
 QTableView#VideoScopeLibTree {
     outline: none;
     border: none;
+    border-left: 2px solid __LINE__;
     padding: 0;
     background: __PANEL__;
     alternate-background-color: __FIELD__;
+    border-radius: 0;
 }
 QTableView#VideoScopeLibTree::item {
     min-height: 28px;
-    padding: 4px 12px 4px 34px;
+    padding: 4px 10px 4px 10px;
     border: none;
     border-bottom: 1px solid __LINE__;
     border-radius: 0;
@@ -1886,7 +1899,8 @@ QTableView#VideoScopeLibTree::item:selected {
     color: __TEXT__;
 }
 #VideoScopeLibBody {
-    background: __PANEL__;
+    background: transparent;
+    border: none;
 }
 QHeaderView::section {
     background: transparent;
