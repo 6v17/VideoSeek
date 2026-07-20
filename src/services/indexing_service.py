@@ -17,6 +17,7 @@ from src.storage.config_store import (
 )
 from src.utils import (
     canonicalize_library_path,
+    canonicalize_library_rel_path,
     ensure_folder_exists,
     get_legacy_video_hash,
     get_video_duration_seconds,
@@ -185,7 +186,8 @@ def _get_debug_forced_failure():
 
 
 def _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, asset_state, sync_failure_reason=""):
-    previous = dict(lib_files.get(rel_path, {}))
+    key = canonicalize_library_rel_path(rel_path)
+    previous = dict(lib_files.get(key) or lib_files.get(rel_path) or {})
     updated = dict(previous)
     updated["vid"] = video_id
     updated["mod_time"] = video_mod_time
@@ -194,9 +196,11 @@ def _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, asset_sta
         updated["sync_failure_reason"] = str(sync_failure_reason or "").strip().lower() or "processing_error"
     else:
         updated.pop("sync_failure_reason", None)
-    if updated == previous:
+    if updated == previous and key in lib_files and rel_path == key:
         return False
-    lib_files[rel_path] = updated
+    lib_files[key] = updated
+    if rel_path != key and rel_path in lib_files:
+        del lib_files[rel_path]
     return True
 
 
@@ -763,9 +767,10 @@ def reconcile_library_file_paths(root_path, lib_files, *, known_abs_paths=None):
 
     orphan_candidates = []
     source_paths = known_abs_paths if known_abs_paths is not None else discover_video_files(root_path)
+    satisfied_normalized = {canonicalize_library_rel_path(path) for path in satisfied_paths}
     for abs_path in source_paths:
-        rel_path = os.path.relpath(abs_path, root_path)
-        if rel_path in satisfied_paths:
+        rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
+        if rel_path in satisfied_normalized:
             continue
         if not _is_valid_video_source(abs_path, probe=False):
             continue
@@ -929,6 +934,7 @@ def process_single_video(
             return None, None, False, False
 
         video_mod_time = os.path.getmtime(abs_path)
+        rel_path = canonicalize_library_rel_path(rel_path)
         saved = lib_files.get(rel_path, {})
         forced_failure = _get_debug_forced_failure()
         if forced_failure is not None:
@@ -1262,6 +1268,26 @@ def scan_target_libraries(
                 plan_library_scan_paths(root_path, lib_files, valid_files, selected_video_ids)
             )
 
+        if selected_video_ids is not None and selected_video_ids and total_files == 0:
+            sample_root = scan_plan[0][0] if scan_plan else (target_lib or "")
+            logger.error(
+                "Index sync selection matched no on-disk files (%s ids, %s libraries). "
+                "This usually means path-key mismatch or missing sources.",
+                len(selected_video_ids),
+                len(scan_plan),
+            )
+            _emit_issue(
+                issue_callback,
+                sample_root or "",
+                "",
+                sample_root or "",
+                action="skipped",
+                reason="selection_matched_none",
+                detail=(
+                    f"selected={len(selected_video_ids)} planned=0 libraries={len(scan_plan)}"
+                ),
+            )
+
         global_file_index = 0
         _report_scan_progress(0, total_files)
 
@@ -1292,7 +1318,7 @@ def scan_target_libraries(
                             "Index update stopped before finishing current library",
                             search_assets_changed=search_assets_changed,
                         )
-                    rel_path = os.path.relpath(abs_path, root_path)
+                    rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
                     global_file_index += 1
                     _report_scan_progress(global_file_index, total_files, library_path=root_path)
 

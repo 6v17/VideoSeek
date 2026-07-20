@@ -4,7 +4,7 @@ from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_model_metadata, save_model_metadata
 from src.storage.config_store import get_local_model_asset_dirs
-from src.utils import canonicalize_library_path
+from src.utils import canonicalize_library_path, canonicalize_library_rel_path
 from src.services.search_index_schema import (
     clear_library_search_index,
     garbage_collect_orphan_library_indexes,
@@ -288,7 +288,7 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
         for abs_path in _iter_library_video_paths(root_path):
             if not os.path.isfile(abs_path):
                 continue
-            rel_path = os.path.relpath(abs_path, root_path)
+            rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
             try:
                 video_mod_time = os.path.getmtime(abs_path)
             except OSError:

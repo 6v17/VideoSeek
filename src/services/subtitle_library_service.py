@@ -17,7 +17,7 @@ from src.storage.subtitle_library_store import (
     mark_subtitle_registry_seeded,
     save_subtitle_library_meta,
 )
-from src.utils import canonicalize_library_path
+from src.utils import canonicalize_library_path, canonicalize_library_rel_path
 
 logger = get_logger("subtitle_library_service")
 
@@ -133,7 +133,7 @@ def register_subtitle_library_videos(*, config=None, library_path: str | None = 
         for abs_path in _iter_library_video_paths(root_path):
             if not os.path.isfile(abs_path):
                 continue
-            rel_path = os.path.relpath(abs_path, root_path)
+            rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
             try:
                 video_mod_time = os.path.getmtime(abs_path)
             except OSError:

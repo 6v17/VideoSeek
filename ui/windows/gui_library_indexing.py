@@ -1260,6 +1260,15 @@ class LibraryIndexingGuiMixin:
                 status_text = self.texts["index_updated_empty_single"] if target_lib else self.texts["index_updated_empty"]
             if issue_count:
                 status_text = f"{status_text} {self.texts['index_issue_summary'].format(count=issue_count)}"
+            if not has_search_assets and not stopped:
+                self.show_info_dialog(
+                    self.texts.get("warning_title", self.texts.get("success_title", "Warning")),
+                    self.texts.get(
+                        "index_updated_empty_dialog",
+                        status_text,
+                    ),
+                    kind="warning",
+                )
         else:
             status_text = self.texts["index_failed"]
         self.library_page.lbl_status.setText(status_text)
