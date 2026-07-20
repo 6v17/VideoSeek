@@ -25,6 +25,8 @@ python-vlc
 
 # Dialogue ASR (CUDA or CPU via CTranslate2; not DirectML)
 faster-whisper==1.2.1
+# SenseVoice ONNX frontend (fbank features)
+kaldi-native-fbank>=1.22.0
 rapidocr-onnxruntime==1.4.4
 
 # Mobile bridge (local HTTP server / phone upload) — see src/web/mobile_bridge.py
