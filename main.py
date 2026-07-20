@@ -15,6 +15,9 @@ if __name__ == "__main__":
     from ui.windows.gui import MainWindow
 
     app = QApplication(sys.argv)
+    from ui.widgets.tooltip_utils import install_wrapped_tooltips
+
+    install_wrapped_tooltips()
 
     if try_activate_existing_instance():
         logger.info("Another instance is running; activating existing window")

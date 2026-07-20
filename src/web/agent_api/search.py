@@ -21,6 +21,7 @@ from src.services.search_scope import (
     resolve_explicit_scope_library_paths,
     resolve_explicit_scope_video_paths,
     resolve_fetch_top_k,
+    resolve_hit_source_path,
     scope_request_is_explicit,
 )
 from src.services.search_service import run_chunk_search, run_dialogue_search, run_search
@@ -291,6 +292,14 @@ def _normalize_search_kind(value: Optional[str]) -> str:
     raise ValueError(f"Unsupported search_kind: {value!r}. Use visual or dialogue.")
 
 
+def _resolve_hit_video_path(hit: SearchHit, *, config=None) -> str:
+    """Always prefer an absolute on-disk path (CLIP meta or subtitle library)."""
+    raw = str(getattr(hit, "video_path", "") or "").strip()
+    video_id = str(getattr(hit, "video_id", "") or "").strip()
+    resolved = resolve_hit_source_path(raw, video_id, config=config)
+    return resolved or raw
+
+
 def _enrich_hit_payload(
     hit: SearchHit,
     *,
@@ -299,7 +308,9 @@ def _enrich_hit_payload(
     expand_frame_hits: bool,
     pad_before_sec: float,
     pad_after_sec: float,
+    config=None,
 ) -> Dict[str, Any]:
+    video_path = _resolve_hit_video_path(hit, config=config)
     window = _expand_clip_window(
         hit.start_sec,
         hit.end_sec,
@@ -307,14 +318,14 @@ def _enrich_hit_payload(
         expand_frame_hits=expand_frame_hits,
         pad_before_sec=pad_before_sec,
         pad_after_sec=pad_after_sec,
-        video_path=str(hit.video_path),
+        video_path=video_path,
     )
     start_sec = float(window["start_sec"])
     end_sec = float(window["end_sec"])
-    duration = _get_video_duration_cached(str(hit.video_path))
+    duration = _get_video_duration_cached(video_path)
     payload = {
         "rank": rank,
-        "video_path": str(hit.video_path),
+        "video_path": video_path,
         "start_sec": start_sec,
         "end_sec": end_sec,
         "score": float(hit.score),
@@ -425,12 +436,34 @@ def get_agent_search_preset(preset_id: str, config=None) -> Dict[str, Any]:
     }
 
 
+def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Optional[str], str]:
+    """Map common aliases (image_path) onto query + query_type."""
+    query = str(body.query or "").strip() or None
+    query_type = str(body.query_type or "text").strip().lower() or "text"
+    image_path = str(getattr(body, "image_path", None) or "").strip()
+    if image_path:
+        if query and query != image_path:
+            raise ValueError(
+                "Provide either query or image_path, not both. "
+                "For image search use query + query_type='image_path', or image_path alone."
+            )
+        return image_path, "image_path"
+    return query, query_type
+
+
 def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[str, Any]:
     cfg = config or load_config()
+    query, query_type = _normalize_agent_search_query_fields(body)
+    if not body.preset_id and not query:
+        raise ValueError(
+            "Provide preset_id or query. "
+            "For image search: {\"query\": \"D:/a.png\", \"query_type\": \"image_path\"} "
+            "or shorthand {\"image_path\": \"D:/a.png\"}."
+        )
     query_part = resolve_search_query_inputs(
         preset_id=body.preset_id,
-        query=body.query,
-        query_type=body.query_type,
+        query=query,
+        query_type=query_type,
         config=cfg,
     )
     mode = _normalize_mode(body.mode)
@@ -713,6 +746,7 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         query=item.query,
         preset_id=item.preset_id,
         query_type=item.query_type,
+        image_path=item.image_path,
         search_kind=item.search_kind if item.search_kind is not None else batch.search_kind,
         top_k=item.top_k if item.top_k is not None else batch.top_k,
         mode=item.mode if item.mode is not None else batch.mode,

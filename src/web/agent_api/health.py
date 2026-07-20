@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from src.app.config import load_config
-from src.services.agent_evidence_service import build_agent_understanding_health_fields
 from src.services.search_index_schema import (
     TARGET_SEARCH_INDEX_SCHEMA_VERSION,
     get_search_index_schema_version,
@@ -152,7 +151,6 @@ def _build_ffmpeg_info() -> Dict[str, Any]:
 def _build_capabilities(
     snapshot: Dict[str, Any],
     *,
-    understanding_ready: bool = False,
     dialogue_index_ready: bool = False,
 ) -> Dict[str, bool]:
     ffmpeg_info = _build_ffmpeg_info()
@@ -162,6 +160,7 @@ def _build_capabilities(
         "frame_search": bool(snapshot.get("frame_index_ready")),
         "chunk_search": bool(snapshot.get("chunk_index_ready")),
         "dialogue_search": bool(dialogue_index_ready),
+        "subtitle_library_discovery": True,
         "export_manifest": True,
         "export_clip": bool(ffmpeg_info.get("ffmpeg_available")),
         "library_discovery": True,
@@ -171,8 +170,6 @@ def _build_capabilities(
         "search_precision": True,
         "search_telemetry": True,
         "crop_locate": True,
-        "video_evidence": True,
-        "video_evidence_ready": bool(understanding_ready),
     }
 
 
@@ -183,8 +180,6 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     snapshot = _index_snapshot(mode)
     timeouts = _agent_timeout_settings(config)
     from src.services.search_telemetry import is_telemetry_enabled
-
-    understanding_fields = build_agent_understanding_health_fields(config=config, probe_remote=False)
     from src.services.indexing_runtime_status import get_index_sync_status
     from src.storage.lance_dialogue_search import get_dialogue_index_stats
 
@@ -209,7 +204,6 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "metric": spec.get("metric"),
         "capabilities": _build_capabilities(
             snapshot,
-            understanding_ready=bool(understanding_fields.get("understanding_ready")),
             dialogue_index_ready=dialogue_ready,
         ),
         "ffmpeg": _build_ffmpeg_info(),
@@ -235,5 +229,4 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "dialogue_index_ready": dialogue_ready,
         "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
         "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
-        **understanding_fields,
     }

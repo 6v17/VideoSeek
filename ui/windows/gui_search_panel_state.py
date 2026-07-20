@@ -86,6 +86,18 @@ class SearchPanelStateMixin:
             return False
         return not bool(get_search_scope_library_paths())
 
+    def _text_search_mode_from_ui(self) -> str:
+        if hasattr(self, "search_page"):
+            mode = str(self.search_page.search_mode.currentData() or "").strip().lower()
+            if mode == "chunk":
+                return "chunk"
+            if mode == "frame":
+                return "frame"
+        from src.storage.config_store import get_search_mode
+
+        resolved = str(get_search_mode() or "frame").strip().lower()
+        return "chunk" if resolved == "chunk" else "frame"
+
     def _image_search_mode_from_ui(self) -> str:
         if hasattr(self, "search_page"):
             mode = str(self.search_page.image_search_mode.currentData() or "").strip().lower()
@@ -260,17 +272,17 @@ class SearchPanelStateMixin:
 
         mode_stack = getattr(page, "search_mode_options_stack", None)
         if mode_stack is not None:
-            if active_tab == self.SEARCH_TAB_TEXT:
+            if active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
+                # Compose only needs frame/chunk granularity (same control as text).
                 mode_stack.setCurrentIndex(0)
             elif active_tab == self.SEARCH_TAB_IMAGE:
                 mode_stack.setCurrentIndex(1)
             elif active_tab == self.SEARCH_TAB_DIALOGUE:
                 mode_stack.setCurrentIndex(3)
             else:
-                # compose: no granularity controls
                 mode_stack.setCurrentIndex(2)
 
-        if active_tab == self.SEARCH_TAB_TEXT:
+        if active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
             page.search_mode_label.setText(texts.get("setting_search_mode", ""))
             self._populate_text_search_mode_combo()
             hint = texts.get("search_text_mode_hint", texts.get("search_mode_hint", ""))
@@ -352,12 +364,26 @@ class SearchPanelStateMixin:
             return
         texts = getattr(self, "texts", {}) or {}
         page = self.search_page
+        active_tab = self._search_active_tab()
         try:
             from src.app.config import load_config
             from src.services.model_profile_display import (
                 format_active_model_search_label,
                 format_text_search_model_hint,
             )
+
+            # Always keep this label visible with stable text so tab switches
+            # do not resize the search panel.
+            page.lbl_active_model.setVisible(True)
+            if active_tab == self.SEARCH_TAB_DIALOGUE:
+                page.lbl_active_model.setText(
+                    texts.get(
+                        "search_dialogue_runtime_label",
+                        "Subtitle search (global library, no CLIP required)",
+                    )
+                )
+                page.lbl_text_model_hint.setVisible(False)
+                return
 
             config = load_config()
             model_label = format_active_model_search_label(config)
@@ -366,9 +392,17 @@ class SearchPanelStateMixin:
             )
             hint = format_text_search_model_hint(texts, config=config)
             page.lbl_text_model_hint.setText(hint)
-            page.lbl_text_model_hint.setVisible(bool(hint) and self._search_active_tab() == self.SEARCH_TAB_TEXT)
+            page.lbl_text_model_hint.setVisible(bool(hint) and active_tab == self.SEARCH_TAB_TEXT)
         except Exception:
-            page.lbl_active_model.setText("")
+            page.lbl_active_model.setText(
+                texts.get(
+                    "search_dialogue_runtime_label",
+                    "Subtitle search (global library, no CLIP required)",
+                )
+                if active_tab == self.SEARCH_TAB_DIALOGUE
+                else ""
+            )
+            page.lbl_active_model.setVisible(True)
             page.lbl_text_model_hint.setVisible(False)
 
     def _refresh_search_precision_controls(self) -> None:

@@ -5,19 +5,16 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import List, Optional
+from typing import Optional
 
-from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.services.agent_clip_service import execute_agent_batch_export_clips, execute_agent_export_clip
-from src.services.agent_evidence_service import (
-    AgentEvidenceError,
-    get_agent_video_evidence,
-    list_agent_evidence_status,
-    resolve_understanding_pending_chunk_count,
-    resolve_understanding_timeout_sec,
+from src.services.agent_library_service import (
+    list_agent_libraries,
+    list_agent_subtitle_libraries,
+    list_agent_subtitle_videos,
+    list_agent_videos,
 )
-from src.services.agent_library_service import list_agent_libraries, list_agent_videos
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
 
 from ._fastapi import FastAPI, HTTPException, JSONResponse, PlainTextResponse, _IMPORT_ERROR, uvicorn
@@ -63,13 +60,13 @@ class AgentApiService:
         self.app.get("/api/v1/libraries")(self._libraries)
         self.app.get("/api/v1/libraries/videos")(self._library_videos)
         self.app.get("/api/v1/videos")(self._videos)
+        self.app.get("/api/v1/subtitle-libraries")(self._subtitle_libraries)
+        self.app.get("/api/v1/subtitle-libraries/videos")(self._subtitle_library_videos)
         self.app.get("/api/v1/search/presets")(self._search_presets)
         self.app.get("/api/v1/search/presets/{preset_id}")(self._search_preset_detail)
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
-        self.app.get("/api/v1/videos/evidence/status")(self._video_evidence_status)
-        self.app.get("/api/v1/videos/evidence")(self._video_evidence)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
         self.app.post("/api/v1/export/clip")(self._export_clip)
         self.app.post("/api/v1/export/clips/batch")(self._export_clips_batch)
@@ -198,12 +195,43 @@ class AgentApiService:
             logger.exception("Agent library list failed.")
             raise_api_error(500, "query_failed", str(exc))
 
+    async def _subtitle_libraries(self):
+        try:
+            return await asyncio.to_thread(list_agent_subtitle_libraries)
+        except Exception as exc:
+            logger.exception("Agent subtitle library list failed.")
+            raise_api_error(500, "query_failed", str(exc))
+
+    async def _subtitle_library_videos(
+        self,
+        library_path: Optional[str] = None,
+        video_id: Optional[str] = None,
+        q: Optional[str] = None,
+        ready_only: bool = True,
+        limit: int = 500,
+        offset: int = 0,
+    ):
+        try:
+            return await asyncio.to_thread(
+                list_agent_subtitle_videos,
+                library_path,
+                video_id=video_id,
+                q=q,
+                ready_only=ready_only,
+                limit=limit,
+                offset=offset,
+            )
+        except KeyError as exc:
+            raise_api_error(404, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent subtitle video list failed.")
+            raise_api_error(500, "query_failed", str(exc))
+
     async def _library_videos(
         self,
         library_path: Optional[str] = None,
         video_id: Optional[str] = None,
         q: Optional[str] = None,
-        has_evidence: Optional[bool] = None,
         ready_only: bool = True,
         limit: int = 500,
         offset: int = 0,
@@ -212,7 +240,6 @@ class AgentApiService:
             library_path=library_path,
             video_id=video_id,
             q=q,
-            has_evidence=has_evidence,
             ready_only=ready_only,
             limit=limit,
             offset=offset,
@@ -223,7 +250,6 @@ class AgentApiService:
         library_path: Optional[str] = None,
         video_id: Optional[str] = None,
         q: Optional[str] = None,
-        has_evidence: Optional[bool] = None,
         ready_only: bool = True,
         limit: int = 500,
         offset: int = 0,
@@ -234,7 +260,6 @@ class AgentApiService:
                 library_path,
                 video_id=video_id,
                 q=q,
-                has_evidence=has_evidence,
                 ready_only=ready_only,
                 limit=limit,
                 offset=offset,
@@ -265,87 +290,6 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent search telemetry failed.")
             raise_api_error(500, "query_failed", str(exc))
-
-    async def _video_evidence_status(self, video_ids: Optional[List[str]] = None):
-        ids = [str(item).strip() for item in (video_ids or []) if str(item).strip()]
-        if len(ids) == 1 and "," in ids[0]:
-            ids = [part.strip() for part in ids[0].split(",") if part.strip()]
-        try:
-            payload = await asyncio.to_thread(list_agent_evidence_status, ids)
-        except ValueError as exc:
-            raise_api_error(400, "invalid_request", str(exc))
-        except Exception as exc:
-            logger.exception("Agent evidence status failed.")
-            raise_api_error(500, "query_failed", str(exc))
-        return JSONResponse(payload)
-
-    async def _video_evidence(
-        self,
-        video_id: Optional[str] = None,
-        video_path: Optional[str] = None,
-        start_sec: Optional[float] = None,
-        end_sec: Optional[float] = None,
-        ensure: bool = False,
-    ):
-        config = load_config()
-        timeout_sec = resolve_understanding_timeout_sec(chunk_count=1, config=config)
-        try:
-            from src.services.agent_evidence_service import resolve_agent_video_id
-
-            resolved_video_id = await asyncio.to_thread(
-                resolve_agent_video_id,
-                video_id=video_id,
-                video_path=video_path,
-                config=config,
-            )
-            pending_chunks = await asyncio.to_thread(
-                resolve_understanding_pending_chunk_count,
-                video_id=resolved_video_id,
-                config=config,
-            )
-            timeout_sec = resolve_understanding_timeout_sec(
-                chunk_count=pending_chunks,
-                config=config,
-            )
-            payload = await asyncio.wait_for(
-                asyncio.to_thread(
-                    get_agent_video_evidence,
-                    video_id=video_id,
-                    video_path=video_path,
-                    start_sec=start_sec,
-                    end_sec=end_sec,
-                    ensure=ensure,
-                    config=config,
-                ),
-                timeout=timeout_sec,
-            )
-        except AgentEvidenceError as exc:
-            raise_api_error(exc.status_code, exc.code, exc.message)
-        except asyncio.TimeoutError:
-            partial = await asyncio.to_thread(
-                get_agent_video_evidence,
-                video_id=video_id,
-                video_path=video_path,
-                start_sec=start_sec,
-                end_sec=end_sec,
-                ensure=False,
-                config=config,
-            )
-            progress = (partial.get("meta") or {}) if isinstance(partial.get("meta"), dict) else {}
-            completed = int(progress.get("chunks_completed") or 0)
-            total = int(progress.get("chunk_total") or 0)
-            detail = (
-                f"Understanding evidence timed out after {int(timeout_sec)} seconds."
-                + (f" Partial progress: {completed}/{total} chunks on disk — retry ensure=true to resume." if completed else " Retry ensure=true to resume if generation was in progress.")
-            )
-            raise_api_error(503, "understanding_timeout", detail)
-        except Exception as exc:
-            logger.exception("Agent video evidence failed.")
-            raise_api_error(500, "query_failed", str(exc))
-        payload.setdefault("meta", {})
-        if isinstance(payload.get("meta"), dict):
-            payload["meta"]["understanding_timeout_sec"] = int(timeout_sec)
-        return payload
 
     async def _search(self, body: AgentSearchRequest):
         started = time.perf_counter()
@@ -434,13 +378,23 @@ class AgentApiService:
     async def _export_clip(self, body: AgentExportClipRequest):
         started = time.perf_counter()
         try:
+            from .export_ops import resolve_export_clip_output_path
+
+            output_path = resolve_export_clip_output_path(
+                output_path=body.output_path,
+                output_dir=body.output_dir,
+                video_path=body.video_path,
+                start_sec=body.start_sec,
+                end_sec=body.end_sec,
+                client_request_id=body.client_request_id,
+            )
             payload = await asyncio.wait_for(
                 asyncio.to_thread(
                     execute_agent_export_clip,
                     video_path=body.video_path,
                     start_sec=body.start_sec,
                     end_sec=body.end_sec,
-                    output_path=body.output_path,
+                    output_path=output_path,
                     client_request_id=body.client_request_id,
                     silent=body.silent,
                     encode_mode=body.encode_mode,

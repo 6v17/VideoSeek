@@ -2,6 +2,9 @@
 
 Reader thread decodes/crops while the main thread runs RapidOCR, via a bounded
 ``queue.Queue``. Disable with ``VIDEOSEEK_DISABLE_SUBTITLE_OCR_OVERLAP=1``.
+
+Optional micro-batching stacks several ROIs into one OCR call (see
+``ocr_batch_fn`` / ``batch_size``).
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ logger = get_logger("subtitle_ocr.pipeline")
 StopCallback = Callable[[], bool]
 ProgressCallback = Callable[[float, str], None]
 OcrFn = Callable[[np.ndarray], str]
+OcrBatchFn = Callable[[Sequence[np.ndarray]], Sequence[str]]
 
 
 def _use_overlap_reader() -> bool:
@@ -57,7 +61,6 @@ def _reader_loop(
             if roi_likely_blank(roi):
                 item: tuple[Any, ...] = ("skip", index, float(time_sec))
             else:
-                # Copy so producer can drop the full frame promptly.
                 item = ("frame", index, float(time_sec), np.ascontiguousarray(roi))
             while True:
                 if stop_event.is_set():
@@ -82,6 +85,8 @@ def collect_ocr_observations(
     times: Sequence[float],
     *,
     ocr_fn: OcrFn,
+    ocr_batch_fn: OcrBatchFn | None = None,
+    batch_size: int = 1,
     duration: float = 0.0,
     asr_source: str = "",
     stop_callback: StopCallback | None = None,
@@ -90,11 +95,14 @@ def collect_ocr_observations(
     progress_span: float = 0.70,
     queue_size: int = 12,
 ) -> list[dict[str, Any]]:
-    """Decode/OCR with optional overlap; return raw observations (pre-merge)."""
+    """Decode/OCR with optional overlap + ROI batching; return raw observations."""
     ordered = list(times)
     total = max(1, len(ordered))
     observations: list[dict[str, Any]] = []
     last_text = ""
+    batch_n = max(1, int(batch_size or 1))
+    use_batch = batch_n > 1 and ocr_batch_fn is not None
+    pending: list[tuple[float, np.ndarray]] = []
 
     def _stopped() -> bool:
         return bool(stop_callback and stop_callback())
@@ -127,11 +135,34 @@ def collect_ocr_observations(
             }
         )
 
+    def _flush_pending() -> None:
+        if not pending:
+            return
+        if use_batch:
+            rois = [roi for _t, roi in pending]
+            lines = list(ocr_batch_fn(rois) or [])
+            if len(lines) < len(pending):
+                lines.extend([""] * (len(pending) - len(lines)))
+            for (time_sec, _roi), text in zip(pending, lines):
+                _accept_text(time_sec, text)
+        else:
+            for time_sec, roi in pending:
+                _accept_text(time_sec, ocr_fn(roi))
+        pending.clear()
+
+    def _push_roi(time_sec: float, roi: np.ndarray) -> None:
+        pending.append((float(time_sec), roi))
+        if len(pending) >= batch_n:
+            _flush_pending()
+
     if progress_callback:
         progress_callback(progress_base, f"subtitle_ocr|0|{total}")
 
     if not ordered:
         return observations
+
+    if use_batch:
+        logger.info("Subtitle OCR ROI batch size=%d", batch_n)
 
     if not _use_overlap_reader():
         logger.info("Subtitle OCR overlap disabled (VIDEOSEEK_DISABLE_SUBTITLE_OCR_OVERLAP)")
@@ -142,10 +173,12 @@ def collect_ocr_observations(
             roi = crop_subtitle_roi(frame)
             if roi_likely_blank(roi):
                 continue
-            _accept_text(time_sec, ocr_fn(roi))
+            _push_roi(time_sec, np.ascontiguousarray(roi))
+        _flush_pending()
         return observations
 
-    frame_queue: queue.Queue = queue.Queue(maxsize=max(4, int(queue_size)))
+    effective_queue = max(4, int(queue_size), batch_n * 3 if use_batch else int(queue_size))
+    frame_queue: queue.Queue = queue.Queue(maxsize=effective_queue)
     stop_event = threading.Event()
     reader_error: list[BaseException] = []
     reader = threading.Thread(
@@ -175,7 +208,8 @@ def collect_ocr_observations(
             if kind == "skip":
                 continue
             roi = item[3]
-            _accept_text(time_sec, ocr_fn(roi))
+            _push_roi(time_sec, roi)
+        _flush_pending()
         if reader_error:
             raise reader_error[0]
     finally:

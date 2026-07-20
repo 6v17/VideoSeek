@@ -331,7 +331,9 @@ class RuntimeGuiMixin:
     def _apply_runtime_resource_status(self, status):
         model_ready = bool(status.get("model_ready", self.ui_state.model_ready))
         resources_ready = bool(status.get("resources_ready", self.ui_state.resources_ready))
-        self.search_page.btn_search.setEnabled(model_ready)
+        # Keep Search enabled: subtitle keyword search does not need CLIP.
+        # Visual tabs still gate inside start_search via check_runtime_resources.
+        self.search_page.btn_search.setEnabled(True)
         self.library_page.btn_sync_db.setEnabled(resources_ready)
         if resources_ready:
             if getattr(self, "_startup_complete", False):
@@ -341,7 +343,8 @@ class RuntimeGuiMixin:
         disabled_text = self.texts.get("model_features_disabled", "")
         if not resources_ready:
             status_text = disabled_text
-            self.search_page.lbl_status.setText(status_text)
+            # Visual download / sync still need CLIP+ffmpeg; do not freeze the
+            # search status bar (subtitle search remains usable).
             self.link_page.lbl_status.setText(status_text)
             self.library_page.lbl_status.setText(status_text)
         elif disabled_text:

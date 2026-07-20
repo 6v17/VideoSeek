@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.domain.search_hit import SearchHit
 
-_PATH_INDEX_CACHE: dict[str, tuple[float, "SearchablePathIndex"]] = {}
+_PATH_INDEX_CACHE: dict[str, tuple[Any, "SearchablePathIndex"]] = {}
+_SUBTITLE_PATH_INDEX_CACHE: dict[str, tuple[Any, "SearchablePathIndex"]] = {}
 
 
 def _canonical_file_path(path: str) -> str:
@@ -533,6 +534,95 @@ def load_searchable_path_index(config=None) -> SearchablePathIndex:
 
 def invalidate_searchable_path_index_cache() -> None:
     _PATH_INDEX_CACHE.clear()
+    _SUBTITLE_PATH_INDEX_CACHE.clear()
+
+
+def load_subtitle_searchable_path_index(config=None) -> SearchablePathIndex:
+    """Map subtitle-library video_id / path → absolute source path on disk."""
+    from src.app.config import load_config
+    from src.services.subtitle_library_service import list_subtitle_library_video_entries
+    from src.storage.profile_library_store import library_db_cache_token
+    from src.storage.subtitle_library_store import get_subtitle_library_base_dir
+
+    cfg = config or load_config()
+    base_dir = get_subtitle_library_base_dir(config=cfg)
+    cache_key, meta_mtime, revision = library_db_cache_token(base_dir)
+    cache_token = (meta_mtime, revision)
+    cached = _SUBTITLE_PATH_INDEX_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return cached[1]
+
+    by_video_id: Dict[str, str] = {}
+    by_normalized_path: Dict[str, str] = {}
+    for item in list_subtitle_library_video_entries(config=cfg, register=False):
+        video_id = str(item.get("video_id") or "").strip()
+        abs_path = str(item.get("video_path") or "").strip()
+        if not video_id or not abs_path or not _path_is_file(abs_path):
+            continue
+        canonical = _canonical_file_path(abs_path)
+        by_video_id[video_id] = canonical
+        by_normalized_path[normalize_scope_path(canonical)] = canonical
+        by_normalized_path[normalize_scope_path(abs_path)] = canonical
+    index = SearchablePathIndex(by_video_id=by_video_id, by_normalized_path=by_normalized_path)
+    _SUBTITLE_PATH_INDEX_CACHE[cache_key] = (cache_token, index)
+    return index
+
+
+def resolve_hit_source_path(
+    video_path: str = "",
+    video_id: str = "",
+    *,
+    path_index: SearchablePathIndex | None = None,
+    include_subtitle: bool = True,
+    config=None,
+) -> str | None:
+    """Resolve an absolute existing source path from path and/or video_id."""
+    index = path_index or load_searchable_path_index(config=config)
+    resolved = index.resolve_path(video_path, video_id)
+    if resolved:
+        return resolved
+    if not include_subtitle:
+        return None
+    # Explicit path_index means caller scoped resolution (tests / visual-only).
+    if path_index is not None:
+        return None
+    return load_subtitle_searchable_path_index(config=config).resolve_path(video_path, video_id)
+
+
+def enrich_hits_with_source_paths(
+    hits: List[SearchHit],
+    *,
+    path_index: SearchablePathIndex | None = None,
+    include_subtitle: bool = True,
+    config=None,
+) -> List[SearchHit]:
+    """Fill empty/stale hit.video_path from indexes; keep hits that cannot resolve."""
+    if not hits:
+        return []
+    enriched: List[SearchHit] = []
+    for hit in hits:
+        resolved = resolve_hit_source_path(
+            hit.video_path,
+            hit.video_id,
+            path_index=path_index,
+            include_subtitle=include_subtitle,
+            config=config,
+        )
+        if not resolved or resolved == hit.video_path:
+            enriched.append(hit)
+            continue
+        enriched.append(
+            SearchHit(
+                hit.start_sec,
+                hit.end_sec,
+                hit.score,
+                resolved,
+                match_kind=hit.match_kind,
+                video_id=hit.video_id,
+                matched_text=hit.matched_text,
+            )
+        )
+    return enriched
 
 
 def filter_hits_with_existing_sources(
@@ -543,10 +633,15 @@ def filter_hits_with_existing_sources(
 ) -> List[SearchHit]:
     if not hits:
         return []
-    index = path_index or load_searchable_path_index(config=config)
     filtered: List[SearchHit] = []
     for hit in hits:
-        resolved = index.resolve_path(hit.video_path, hit.video_id)
+        resolved = resolve_hit_source_path(
+            hit.video_path,
+            hit.video_id,
+            path_index=path_index,
+            include_subtitle=True,
+            config=config,
+        )
         if not resolved:
             continue
         if resolved == hit.video_path and not hit.video_id:
@@ -560,6 +655,7 @@ def filter_hits_with_existing_sources(
                 resolved,
                 match_kind=hit.match_kind,
                 video_id=hit.video_id,
+                matched_text=hit.matched_text,
             )
         )
     return filtered

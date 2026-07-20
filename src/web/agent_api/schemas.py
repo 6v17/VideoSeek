@@ -18,6 +18,8 @@ class AgentSearchRequest(BaseModel):
     query: Optional[str] = None
     preset_id: Optional[str] = None
     query_type: str = "text"
+    # Alias for image search: same as query + query_type=image_path
+    image_path: Optional[str] = None
     # visual (default) | dialogue — orthogonal to mode frame/chunk
     search_kind: Optional[str] = None
     top_k: Optional[int] = None
@@ -90,7 +92,9 @@ class AgentExportClipRequest(BaseModel):
     video_path: str
     start_sec: float
     end_sec: float
-    output_path: str
+    # Provide output_path (full file) or output_dir (auto filename), not both.
+    output_path: Optional[str] = None
+    output_dir: Optional[str] = None
     client_request_id: Optional[str] = None
     silent: Optional[bool] = None
     encode_mode: Optional[str] = "copy"

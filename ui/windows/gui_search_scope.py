@@ -127,7 +127,8 @@ class SearchScopeGuiMixin:
             return
         self._refresh_search_scope_entries(force=force_entries)
         show_scope = self._search_scope_picker_available()
-        self.search_page.search_scope_cluster.setVisible(show_scope)
+        # Keep the cluster in layout so tab switches do not jump the panel.
+        self.search_page.search_scope_cluster.setVisible(True)
 
         cache = (
             self._dialogue_search_scope_entries_cache

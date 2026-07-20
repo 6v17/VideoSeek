@@ -225,6 +225,9 @@ function currentQuery() {
     if (currentMode === "text") {
         return String($("text-query-input").value || "").trim();
     }
+    if (currentMode === "dialogue") {
+        return String($("dialogue-query-input").value || "").trim();
+    }
     if (currentMode === "compose") {
         return String($("compose-query-input").value || "").trim();
     }
@@ -238,9 +241,53 @@ function setMode(mode) {
     });
     $("panel-image").classList.toggle("active", mode === "image");
     $("panel-text").classList.toggle("active", mode === "text");
+    $("panel-dialogue").classList.toggle("active", mode === "dialogue");
     $("panel-compose").classList.toggle("active", mode === "compose");
+    $("image-mode-block").style.display = mode === "image" ? "block" : "none";
+    // Text + compose: frame / chunk only.
+    $("text-mode-block").style.display = (mode === "text" || mode === "compose") ? "block" : "none";
+    $("dialogue-mode-block").style.display = mode === "dialogue" ? "block" : "none";
     updateFusionVisibility();
     updateSubmitLabel();
+}
+
+function fillSelect(selectId, options, selectedId) {
+    const select = $(selectId);
+    if (!select) {
+        return;
+    }
+    const previous = String(select.value || selectedId || "");
+    select.innerHTML = "";
+    (options || []).forEach(item => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.label || item.id;
+        select.appendChild(option);
+    });
+    const preferred = String(selectedId || previous || "");
+    if (preferred && Array.from(select.options).some(opt => opt.value === preferred)) {
+        select.value = preferred;
+    } else if (select.options.length) {
+        select.selectedIndex = 0;
+    }
+}
+
+function imageModeLabel(modeId) {
+    const modes = (desktopConfig && desktopConfig.image_search_modes) || [];
+    const hit = modes.find(item => item.id === modeId);
+    return (hit && hit.label) || modeId || "";
+}
+
+function textModeLabel(modeId) {
+    const modes = (desktopConfig && desktopConfig.text_search_modes) || [];
+    const hit = modes.find(item => item.id === modeId);
+    return (hit && hit.label) || modeId || "";
+}
+
+function dialogueModeLabel(modeId) {
+    const modes = (desktopConfig && desktopConfig.dialogue_search_modes) || [];
+    const hit = modes.find(item => item.id === modeId);
+    return (hit && hit.label) || modeId || "";
 }
 
 function updateFusionVisibility() {
@@ -261,6 +308,7 @@ function updateSubmitLabel() {
         image: label("tab_image", "图搜"),
         text: label("tab_text", "文搜"),
         compose: label("tab_compose", "组合"),
+        dialogue: label("tab_dialogue", "字幕"),
     };
     $("submit-btn").innerText = `发送并${tabLabels[currentMode] || "搜索"}`;
 }
@@ -272,6 +320,10 @@ function validateBeforeSubmit() {
     }
     if (currentMode === "text" && !currentQuery()) {
         alert("请输入搜索描述");
+        return false;
+    }
+    if (currentMode === "dialogue" && !currentQuery()) {
+        alert("请输入字幕关键词");
         return false;
     }
     if (currentMode === "compose" && !currentQuery() && composeFiles.length === 0) {
@@ -291,7 +343,14 @@ function applyLabels() {
     document.querySelectorAll("[data-mode-tab='compose']").forEach(el => {
         el.innerText = label("tab_compose", "组合");
     });
+    document.querySelectorAll("[data-mode-tab='dialogue']").forEach(el => {
+        el.innerText = label("tab_dialogue", "字幕");
+    });
     $("text-query-input").placeholder = label("description_hint", "用文本描述你想找的画面…");
+    $("dialogue-query-input").placeholder = label(
+        "dialogue_hint",
+        "输入字幕里出现过的词或短句…"
+    );
     $("compose-query-input").placeholder = label("description_hint", "用文本补充搜索意图，可与辅助图搭配使用");
     $("btn-add-images").innerText = label("add_images", "添加图片");
     $("fusion-title").innerText = label("fusion_title", "文图权重");
@@ -299,6 +358,9 @@ function applyLabels() {
     $("fusion-text-label").innerText = label("fusion_text", "偏文本");
     $("fusion-image-label").innerText = label("fusion_image", "偏图片");
     $("image-drop-hint").innerText = label("image_drop_hint", "拖入图片到这里\n或点击选择图片");
+    $("image-mode-label").innerText = label("image_mode_label", "图搜模式");
+    $("text-mode-label").innerText = label("text_mode_label", "检索粒度");
+    $("dialogue-mode-label").innerText = label("dialogue_mode_label", "匹配方式");
     updateRemoveSelectedButton();
     updateFusionLabel();
     updateSubmitLabel();
@@ -313,14 +375,35 @@ async function loadDesktopConfig() {
         desktopConfig = await response.json();
         labels = desktopConfig.labels || {};
         applyLabels();
+        fillSelect(
+            "image-search-mode",
+            desktopConfig.image_search_modes,
+            desktopConfig.image_search_mode || "frame"
+        );
+        fillSelect(
+            "text-search-mode",
+            desktopConfig.text_search_modes,
+            desktopConfig.search_mode || "frame"
+        );
+        fillSelect(
+            "dialogue-search-mode",
+            desktopConfig.dialogue_search_modes,
+            desktopConfig.dialogue_search_mode || "exact"
+        );
 
-        const mode = desktopConfig.search_mode === "chunk" ? "片段" : "帧";
-        const scope = desktopConfig.scope_mode === "selected" ? "已选范围" : "全部库";
-        const precision = desktopConfig.search_precision_default === "precise" ? "开" : "关";
+        const imageMode = imageModeLabel(desktopConfig.image_search_mode || "frame");
+        const textMode = textModeLabel(desktopConfig.search_mode || "frame");
+        const dialogueMode = dialogueModeLabel(desktopConfig.dialogue_search_mode || "exact");
+        const scope = desktopConfig.scope_mode === "selected"
+            ? label("scope_selected", "已选范围")
+            : label("scope_all", "全部");
+        const dialogueScope = desktopConfig.dialogue_scope_mode === "selected"
+            ? label("scope_selected", "已选范围")
+            : label("scope_all", "全部");
         $("desktop-hint").innerText =
-            `电脑端：${mode}模式 · ${scope} · 图搜精搜=${precision} · 组合最多${maxComposeImages()}图`;
+            `电脑当前：图搜=${imageMode} · 文搜=${textMode} · 字幕=${dialogueMode} · 画面范围=${scope} · 字幕范围=${dialogueScope}`;
     } catch (_error) {
-        $("desktop-hint").innerText = "已连接电脑，范围/帧片段模式跟随电脑设置。";
+        $("desktop-hint").innerText = "已连接电脑；可在下方选择与电脑一致的搜索模式。";
     }
 }
 
@@ -339,6 +422,18 @@ async function submitSearch() {
     formData.append("token", uploadToken);
     formData.append("search_kind", currentMode);
     formData.append("query", currentQuery());
+    if (currentMode === "image") {
+        formData.append("image_search_mode", String($("image-search-mode").value || "frame"));
+    }
+    if (currentMode === "text" || currentMode === "compose") {
+        formData.append("search_mode", String($("text-search-mode").value || "frame"));
+    }
+    if (currentMode === "dialogue") {
+        formData.append(
+            "dialogue_search_mode",
+            String($("dialogue-search-mode").value || "exact")
+        );
+    }
     if (currentMode === "compose") {
         formData.append("text_weight", String($("fusion-slider").value || "50"));
         composeFiles.forEach(file => formData.append("files", file));
@@ -388,6 +483,7 @@ function clearForm() {
     $("image-drop").classList.remove("has-image");
 
     $("text-query-input").value = "";
+    $("dialogue-query-input").value = "";
     $("compose-query-input").value = "";
     $("compose-image-strip").innerHTML = "";
     $("compose-strip-wrap").style.display = "none";

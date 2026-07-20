@@ -37,9 +37,12 @@ class MobileSearchServiceTests(unittest.TestCase):
             query="neon city",
             image_paths=["D:/uploads/a.jpg", "D:/uploads/b.jpg"],
             fusion=fusion,
+            search_mode="chunk",
         )
         self.assertEqual(payload["search_kind"], "compose")
         self.assertEqual(len(payload["image_paths"]), 2)
+        self.assertEqual(payload["search_mode"], "chunk")
+        self.assertNotIn("image_search_mode", payload)
         self.assertAlmostEqual(payload["fusion"]["text_weight"], 0.7, places=3)
 
     def test_compose_rejects_too_many_images(self):
@@ -48,11 +51,53 @@ class MobileSearchServiceTests(unittest.TestCase):
             build_mobile_search_payload(search_kind="compose", image_paths=paths, query="x")
 
     def test_defaults_include_mode_and_scope(self):
-        defaults = get_mobile_search_defaults()
+        defaults = get_mobile_search_defaults(
+            {
+                "language": "zh",
+                "search_mode": "chunk",
+                "image_search_mode": "precise",
+                "search_scope_mode": "selected",
+            }
+        )
         self.assertTrue(defaults["ok"])
-        self.assertIn(defaults["search_mode"], {"frame", "chunk"})
-        self.assertIn(defaults["scope_mode"], {"all", "selected"})
+        self.assertEqual(defaults["search_mode"], "chunk")
+        self.assertEqual(defaults["image_search_mode"], "precise")
+        self.assertEqual(defaults["search_precision_default"], "precise")
+        self.assertEqual(defaults["scope_mode"], "selected")
+        self.assertEqual(len(defaults["image_search_modes"]), 4)
         self.assertGreaterEqual(defaults["max_compose_images"], 1)
+
+    def test_build_image_payload_includes_image_search_mode(self):
+        payload = build_mobile_search_payload(
+            search_kind="image",
+            image_path="D:/uploads/a.jpg",
+            image_search_mode="video_discovery",
+        )
+        self.assertEqual(payload["image_search_mode"], "video_discovery")
+
+    def test_build_dialogue_payload(self):
+        payload = build_mobile_search_payload(
+            search_kind="dialogue",
+            query="你好世界",
+            dialogue_search_mode="fuzzy",
+        )
+        self.assertEqual(payload["search_kind"], "dialogue")
+        self.assertEqual(payload["query"], "你好世界")
+        self.assertEqual(payload["dialogue_search_mode"], "fuzzy")
+
+    def test_dialogue_rejects_image(self):
+        with self.assertRaises(ValueError):
+            build_mobile_search_payload(
+                search_kind="dialogue",
+                query="hello",
+                image_path="D:/uploads/a.jpg",
+            )
+
+    def test_defaults_include_dialogue_modes(self):
+        defaults = get_mobile_search_defaults({"language": "zh"})
+        self.assertEqual(defaults["dialogue_search_mode"], "exact")
+        self.assertEqual(len(defaults["dialogue_search_modes"]), 2)
+        self.assertEqual(defaults["labels"]["tab_dialogue"], "字幕")
 
 
 if __name__ == "__main__":

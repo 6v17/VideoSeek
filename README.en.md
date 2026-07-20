@@ -5,7 +5,8 @@
 **Search your local video library by text or screenshot, preview hits, export clips.**  
 Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media files are not uploaded.
 
-> Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.
+> Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.  
+> **Free forever.** Don’t pay for resale or “paid install” copies — get it from [GitHub](https://github.com/6v17/VideoSeek) / [the site](https://www.lv17.top/).
 
 ## Features
 

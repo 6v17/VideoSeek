@@ -43,6 +43,9 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
 
     cmd = [
         ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-y",
         "-ss",
         f"{fast_seek:.3f}",
@@ -264,6 +267,9 @@ def build_export_original_clip_command(
 
     cmd = [
         ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-y",
         "-ss",
         f"{start_sec:.3f}",

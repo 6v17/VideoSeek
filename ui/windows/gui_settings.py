@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtCore import QEventLoop, Qt
+from PySide6.QtWidgets import QApplication, QFileDialog, QProgressDialog
 
 from src.app.config import (
     DEFAULT_CONFIG,
@@ -21,8 +22,6 @@ from src.core.clip_embedding import reset_engine
 from src.services.storage_service import (
     cleanup_old_data_root as cleanup_old_data_root_service,
     cleanup_old_model_dir as cleanup_old_model_dir_service,
-    migrate_app_data_root,
-    migrate_model_root,
 )
 from src.storage.config_store import get_effective_model_dir, resolve_provider_dir
 from src.utils import (
@@ -35,6 +34,8 @@ from src.utils import (
     validate_sampling_fps_rules_full_coverage,
 )
 from ui.dialogs import SamplingRulesDialog
+from ui.threading_utils import shutdown_thread
+from ui.workers import StorageRootMigrateWorker
 
 
 class SettingsGuiMixin:
@@ -515,7 +516,10 @@ class SettingsGuiMixin:
                 return
             config["data_root"] = requested_data_root
             if isinstance(migration_result, dict) and migration_result.get("migrated"):
-                config["pending_cleanup_data_root"] = migration_result.get("old_data_root", "")
+                if migration_result.get("old_remaining"):
+                    config["pending_cleanup_data_root"] = migration_result.get("old_data_root", "")
+                else:
+                    config.pop("pending_cleanup_data_root", None)
             save_config(config)
             self._refresh_pending_cleanup_actions(config)
             self.settings_page.input_data_root.setText(get_configured_data_root(config))
@@ -565,10 +569,16 @@ class SettingsGuiMixin:
                 save_message = f"{save_message}\n\n{self._build_data_root_migration_message(migration_result, requested_data_root)}"
             self.settings_page.lbl_status.setText(save_message)
             self.show_info_dialog(self.texts["success_title"], save_message, kind="success")
+            if isinstance(migration_result, dict) and migration_result.get("migrated"):
+                self._offer_cleanup_old_after_storage_migrate("data", migration_result)
             self._set_settings_dirty(False)
             self._apply_agent_api_settings()
         except Exception as exc:
-            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+            detail = str(exc or "").strip()
+            if "Data migration failed" in detail or "migration failed" in detail.lower():
+                self.show_error_dialog(self.texts.get("data_root_move_failed", self.texts["settings_save_failed"]), exc)
+            else:
+                self.show_error_dialog(self.texts["settings_save_failed"], exc)
 
     def _apply_agent_api_settings(self):
         if not hasattr(self, "agent_api_controller"):
@@ -707,6 +717,57 @@ class SettingsGuiMixin:
             value = DEFAULT_CONFIG["data_root"]
         return os.path.normpath(os.path.abspath(os.path.expanduser(value)))
 
+    def _run_storage_root_migration(self, kind: str, target_root: str):
+        """Run data/model migrate on a worker thread with a modal progress dialog."""
+        kind_key = str(kind or "").strip().lower()
+        if kind_key == "model":
+            title = self.texts.get("model_root_move_progress_title", self.texts.get("migrate_model_root", "模型搬家"))
+            label = self.texts.get("model_root_move_progress_label", "正在复制模型文件，请稍候…")
+        else:
+            title = self.texts.get("data_root_move_progress_title", self.texts.get("browse_data_root", "数据搬家"))
+            label = self.texts.get("data_root_move_progress_label", "正在复制数据文件，请稍候…")
+
+        dialog = QProgressDialog(label, None, 0, 100, self)
+        dialog.setWindowTitle(title)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setCancelButton(None)
+        dialog.setValue(0)
+        dialog.show()
+        QApplication.processEvents()
+
+        worker = StorageRootMigrateWorker(kind_key, target_root)
+        loop = QEventLoop()
+        box = {"result": None, "error": None}
+
+        def _on_progress(value, text):
+            dialog.setValue(max(0, min(100, int(value))))
+            message = str(text or "").strip()
+            if message:
+                dialog.setLabelText(message)
+
+        def _on_finished(payload):
+            box["result"] = dict(payload or {})
+            dialog.setValue(100)
+            loop.quit()
+
+        def _on_error(message):
+            box["error"] = str(message or "").strip() or "migration failed"
+            loop.quit()
+
+        worker.progress_signal.connect(_on_progress)
+        worker.finished_signal.connect(_on_finished)
+        worker.error_signal.connect(_on_error)
+        worker.start()
+        loop.exec()
+        shutdown_thread(worker)
+        dialog.close()
+        if box["error"]:
+            raise RuntimeError(box["error"])
+        return box["result"] or {}
+
     def _migrate_data_root_if_needed(self, current_data_root, requested_data_root):
         if os.path.normcase(requested_data_root) == os.path.normcase(current_data_root):
             return None
@@ -717,17 +778,80 @@ class SettingsGuiMixin:
         if not confirmed:
             self.settings_page.lbl_status.setText(self.texts["settings_hint"])
             return False
-        return migrate_app_data_root(requested_data_root)
+        return self._run_storage_root_migration("data", requested_data_root)
 
     def _build_data_root_migration_message(self, migration_result, fallback_new_path):
         result = dict(migration_result or {})
         old_path = str(result.get("old_data_root", "") or "").strip()
         new_path = str(result.get("new_data_root", "") or "").strip() or str(fallback_new_path or "").strip()
-        if old_path and new_path:
+        mode = str(result.get("transfer_mode", "") or "").strip().lower()
+        if mode == "move":
+            template = self.texts.get("data_root_move_success_moved_detail", "") or self.texts.get(
+                "data_root_move_success_detail", ""
+            )
+        elif mode == "copy":
+            template = self.texts.get("data_root_move_success_copied_detail", "") or self.texts.get(
+                "data_root_move_success_detail", ""
+            )
+        else:
             template = self.texts.get("data_root_move_success_detail", "")
-            if template:
-                return template.format(old_path=old_path, new_path=new_path)
+        if old_path and new_path and template:
+            return template.format(old_path=old_path, new_path=new_path)
         return self.texts["data_root_move_success"].format(path=new_path or fallback_new_path)
+
+    def _offer_cleanup_old_after_storage_migrate(self, kind: str, migration_result):
+        """After a cross-volume copy, ask once whether to delete the leftover old tree."""
+        result = dict(migration_result or {})
+        if not result.get("migrated") or not result.get("old_remaining"):
+            return
+        kind_key = str(kind or "").strip().lower()
+        config = load_config()
+        try:
+            if kind_key == "model":
+                old_path = str(result.get("old_model_dir", "") or "").strip()
+                if not old_path or not os.path.exists(old_path):
+                    return
+                prompt = self.texts.get("model_root_move_delete_old_confirm", "").format(path=old_path)
+                if not prompt or not self.show_confirm_dialog(self.texts["confirm_title"], prompt, kind="warning"):
+                    self._refresh_pending_cleanup_actions(config)
+                    return
+                active = get_effective_model_dir(config=config)
+                cleanup_result = cleanup_old_model_dir_service(old_path, active_model_dir=active)
+                config.pop("pending_cleanup_model_dir", None)
+                save_config(config)
+                self._refresh_pending_cleanup_actions(config)
+                if cleanup_result.get("cleaned"):
+                    message = self.texts["cleanup_old_model_dir_done"].format(
+                        path=cleanup_result.get("old_model_dir", old_path)
+                    )
+                    self.settings_page.lbl_status.setText(message)
+                    self.show_info_dialog(self.texts["success_title"], message, kind="success")
+                return
+
+            old_path = str(result.get("old_data_root", "") or "").strip()
+            if not old_path:
+                return
+            old_data_dir = str(result.get("old_data_dir", "") or "").strip()
+            if old_data_dir and not os.path.exists(old_data_dir):
+                return
+            prompt = self.texts.get("data_root_move_delete_old_confirm", "").format(path=old_path)
+            if not prompt or not self.show_confirm_dialog(self.texts["confirm_title"], prompt, kind="warning"):
+                self._refresh_pending_cleanup_actions(config)
+                return
+            active_root = get_configured_data_root(config)
+            cleanup_result = cleanup_old_data_root_service(old_path, active_data_root=active_root)
+            config.pop("pending_cleanup_data_root", None)
+            save_config(config)
+            self._refresh_pending_cleanup_actions(config)
+            if cleanup_result.get("cleaned"):
+                message = self.texts["cleanup_old_data_root_done"].format(
+                    path=cleanup_result.get("old_data_dir", old_path)
+                )
+                self.settings_page.lbl_status.setText(message)
+                self.show_info_dialog(self.texts["success_title"], message, kind="success")
+        except Exception as exc:
+            key = "cleanup_old_model_dir_failed" if kind_key == "model" else "cleanup_old_data_root_failed"
+            self.show_error_dialog(self.texts.get(key, key), exc)
 
     def _browse_data_root(self):
         current_path = self._normalize_requested_data_root(self.settings_page.input_data_root.text())
@@ -954,7 +1078,7 @@ class SettingsGuiMixin:
             self.settings_page.lbl_status.setText(t["settings_hint"])
             return
         try:
-            result = migrate_model_root(dest)
+            result = self._run_storage_root_migration("model", dest)
         except Exception as exc:
             self.show_error_dialog(t["model_root_move_failed"], exc)
             return
@@ -975,6 +1099,8 @@ class SettingsGuiMixin:
             msg = t["model_root_move_success"].format(path=new_path or dest)
         self.settings_page.lbl_status.setText(msg)
         self.show_info_dialog(t["success_title"], msg, kind="success")
+        self._offer_cleanup_old_after_storage_migrate("model", result)
+        self._refresh_pending_cleanup_actions()
 
     def _bind_sampling_preview_signals(self):
         if getattr(self, "_sampling_preview_bound", False):

@@ -24,7 +24,9 @@ from src.core.subtitle_ocr.rapidocr_engine import (
     OCR_COMPONENT_ID,
     is_rapidocr_available,
     ocr_frame_to_line,
+    ocr_frames_to_lines,
     resolve_rapidocr_model_dir,
+    resolve_subtitle_ocr_batch_size,
 )
 from src.media.probe import get_video_duration_seconds
 from src.storage.config_store import get_local_model_asset_dirs
@@ -89,8 +91,9 @@ def resolve_subtitle_frame_budget(
     return max(floor, min(expected, ceiling))
 
 
-def ensure_subtitle_ocr_ready(*, config=None) -> tuple[bool, str]:
-    if not is_rapidocr_available():
+def ensure_subtitle_ocr_ready(*, config=None, import_engine: bool = True) -> tuple[bool, str]:
+    """Check RapidOCR models/config. ``import_engine=False`` skips importing ORT on the UI thread."""
+    if import_engine and not is_rapidocr_available():
         return False, "rapidocr-onnxruntime is not installed (pip install rapidocr-onnxruntime)"
     if not resolve_rapidocr_model_dir(config=config):
         return (
@@ -98,6 +101,12 @@ def ensure_subtitle_ocr_ready(*, config=None) -> tuple[bool, str]:
             f"RapidOCR model not imported: {OCR_COMPONENT_ID}. "
             "Import the understanding zip (Understanding / Settings → Import Model).",
         )
+    try:
+        from src.core.subtitle_ocr.rapidocr_engine import resolve_rapidocr_config_path
+
+        resolve_rapidocr_config_path()
+    except Exception as exc:
+        return False, str(exc).strip() or "RapidOCR config.yaml is missing"
     return True, ""
 
 
@@ -145,6 +154,7 @@ def index_video_subtitles(
     keep_wav: bool = False,
     mode: SubtitleIndexMode = "auto",
     sample_interval_sec: float = 1.2,
+    ocr_batch_size: int | None = None,
     max_frames_per_segment: int = 0,
     max_total_frames: int = 0,
 ) -> dict[str, Any]:
@@ -153,6 +163,7 @@ def index_video_subtitles(
     Default sample interval is 1.2s. Per-segment frame cap is off by default
     (``max_frames_per_segment<=0``). Whole-video OCR budget is derived from
     VAD speech duration / interval; ``max_total_frames>0`` only sets an optional ceiling.
+    ``ocr_batch_size`` stacks 1–6 ROIs per RapidOCR pass (1 = off).
     ``keep_wav`` is accepted for API compatibility (default uses PCM pipe).
     """
     del keep_wav
@@ -166,6 +177,13 @@ def index_video_subtitles(
     except (TypeError, ValueError):
         sample_interval_sec = 1.2
     sample_interval_sec = max(0.1, min(6.0, sample_interval_sec))
+    if ocr_batch_size is None:
+        batch_size = resolve_subtitle_ocr_batch_size(config=config)
+    else:
+        try:
+            batch_size = max(1, min(6, int(ocr_batch_size)))
+        except (TypeError, ValueError):
+            batch_size = 1
 
     mode_value = str(mode or "auto").strip().lower()
     if mode_value not in {"auto", "ocr", "reuse"}:
@@ -321,18 +339,23 @@ def index_video_subtitles(
         def _ocr_roi(roi):
             return ocr_frame_to_line(roi, config=config)
 
+        def _ocr_rois(rois):
+            return ocr_frames_to_lines(rois, config=config)
+
         try:
             observations = collect_ocr_observations(
                 media_path,
                 times,
                 ocr_fn=_ocr_roi,
+                ocr_batch_fn=_ocr_rois,
+                batch_size=batch_size,
                 duration=duration,
                 asr_source=OCR_SOURCE_ID,
                 stop_callback=stop_callback,
                 progress_callback=progress_callback,
                 progress_base=0.20,
                 progress_span=0.70,
-                queue_size=12,
+                queue_size=max(12, batch_size * 3),
             )
         except InterruptedError:
             return {"ok": False, "error": "stopped", "segment_rows": 0}

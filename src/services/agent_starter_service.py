@@ -103,16 +103,22 @@ def _build_user_capability_bullets(
             search_bits.append("reference images / screenshot folders")
         if search_bits:
             bullets.append(f"Search: {' + '.join(search_bits)}; batch up to 64 queries.")
+        if caps.get("subtitle_library_discovery"):
+            bullets.append("Probe subtitle libraries: GET /subtitle-libraries (+ /videos).")
+        if caps.get("dialogue_search"):
+            n_dlg = health.get("dialogue_indexed_videos")
+            bullets.append(
+                "Hard-subtitle search: POST /search with search_kind=dialogue"
+                + (f" (~{n_dlg} videos)." if n_dlg is not None else ".")
+            )
         if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
             bullets.append("Export mp4 rough-cut clips (default fast copy).")
-        if caps.get("video_evidence") and health.get("understanding_ready"):
-            bullets.append("Optional: explain what happens in a found clip (captions, not dialogue/ASR).")
         if preset_total:
             bullets.append(
                 f"{preset_total} search presets — snapshot shows up to {STARTER_PRESET_SNAPSHOT_LIMIT}; "
                 "use GET /search/presets for all."
             )
-        bullets.append("Not available: dialogue/ASR, plot reasoning, auto narration videos.")
+        bullets.append("Not available: live ASR, plot reasoning, auto narration videos.")
         return bullets[:6]
 
     if not health.get("index_ready"):
@@ -132,16 +138,22 @@ def _build_user_capability_bullets(
         search_bits.append("参考图/截图文件夹")
     if search_bits:
         bullets.append(f"搜索：{' + '.join(search_bits)}；可一次批量最多 64 条。")
+    if caps.get("subtitle_library_discovery"):
+        bullets.append("探测字幕库：GET /subtitle-libraries（及 /videos）。")
+    if caps.get("dialogue_search"):
+        n_dlg = health.get("dialogue_indexed_videos")
+        bullets.append(
+            "硬字幕/台词检索：POST /search，search_kind=dialogue"
+            + (f"（约 {n_dlg} 条视频）。" if n_dlg is not None else "。")
+        )
     if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
         bullets.append("导出 mp4 粗剪片段（默认可快速 copy）。")
-    if caps.get("video_evidence") and health.get("understanding_ready"):
-        bullets.append("可选：解释某段画面在发生什么（caption，非台词/ASR）。")
     if preset_total:
         bullets.append(
             f"共 {preset_total} 个搜索预设 — 快照最多 {STARTER_PRESET_SNAPSHOT_LIMIT} 个，"
             "全量见 GET /search/presets。"
         )
-    bullets.append("不支持：台词/ASR、全库剧情推理、自动解说成片。")
+    bullets.append("不支持：实时 ASR、全库剧情推理、自动解说成片。")
     return bullets[:6]
 
 
@@ -176,14 +188,13 @@ def _format_iron_rules(*, locale: str, api_base: str) -> str:
     if str(locale).lower().startswith("en"):
         return (
             "## Three rules\n"
-            "1. **Locate** clips → POST /search or /search/batch only. "
-            "**Explain** a known hit → GET /videos/evidence after you have video_path + times; evidence is not a third search mode.\n"
+            "1. **Locate** clips → POST /search or /search/batch only (visual or dialogue).\n"
             "2. **video_path** only from API responses (hits, GET /videos, export) — never ls/find/guess paths.\n"
             f"3. Optional scenarios, retries, manifest, chunk/image modes → GET {doc_url} §5 (non-binding; does not override Policy kernel)."
         )
     return (
         "## 三条铁律\n"
-        "1. **找片** → 只用 POST /search 或 /search/batch；**解释**已有 hit → 在有 video_path + 时间段后用 GET /videos/evidence，笔录不是第三种搜索。\n"
+        "1. **找片** → 只用 POST /search 或 /search/batch（画面或台词）。\n"
         "2. **video_path** 只能来自 API 响应（hits、GET /videos、导出等）— 禁止 ls/扫盘/猜路径。\n"
         f"3. 可选场景、无命中重试、manifest、chunk/图搜等 → GET {doc_url} §5（non-binding，不覆盖 Policy kernel）。"
     )
@@ -242,14 +253,14 @@ def build_agent_starter_text(
 
     if lang == "en":
         intro = (
-            "VideoSeek — localhost CLIP visual search + export; optional understanding evidence; "
+            "VideoSeek — localhost CLIP visual search + export; "
             "optional dialogue search via search_kind=dialogue when dialogue_index_ready."
         )
         snapshot_title = "## Instance"
         not_ready = "Index not ready — ask the user to sync in VideoSeek before searching."
     else:
         intro = (
-            "VideoSeek — 本机 CLIP 画面搜索 + 导出；可选理解笔录；"
+            "VideoSeek — 本机 CLIP 画面搜索 + 导出；"
             "台词检索在 dialogue_index_ready 时用 search_kind=dialogue。"
         )
         snapshot_title = "## 当前实例"
@@ -262,7 +273,6 @@ def build_agent_starter_text(
         "video_count": health.get("video_count"),
         "search_mode_default": health.get("search_mode_default"),
         "capabilities": caps if isinstance(caps, dict) else {},
-        "understanding_ready": bool(health.get("understanding_ready")),
         "dialogue_index_ready": bool(health.get("dialogue_index_ready")),
         "dialogue_indexed_videos": health.get("dialogue_indexed_videos"),
         "search_presets": preset_summaries,

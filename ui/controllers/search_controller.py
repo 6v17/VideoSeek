@@ -111,32 +111,25 @@ class SearchController(QObject):
             preset_scope_video_paths=query_part.get("preset_scope_video_paths"),
         )
         is_text = bool(query_part["is_text"])
-        has_image = bool(query_part["has_image"])
-        search_precision_mode = self.parent_window._resolve_search_precision_mode(
-            is_text=is_text,
-            has_image=has_image,
-        )
         if hasattr(self.parent_window, "apply_search_preset_to_ui"):
             self.parent_window.apply_search_preset_to_ui(preset)
+        # Presets share compose granularity: frame/chunk from the text/compose mode control.
+        if hasattr(self.parent_window, "_text_search_mode_from_ui"):
+            compose_mode = self.parent_window._text_search_mode_from_ui()
+        else:
+            compose_mode = "frame"
         self.start_search(
             query=query_part.get("query_data"),
             is_text=is_text,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             query_vector=query_part.get("query_vector"),
-            search_mode=self.parent_window._resolve_effective_search_mode(
-                is_text=is_text,
-                has_image=has_image,
-                search_precision_mode=search_precision_mode,
-            ),
+            search_mode=compose_mode,
             top_k=query_part.get("default_top_k"),
             min_score=query_part.get("default_min_score"),
-            search_precision_mode=search_precision_mode,
+            search_precision_mode="fast",
             pixel_query_data=query_part.get("pixel_query_data"),
-            video_discovery_enabled=self.parent_window._resolve_video_discovery_enabled(
-                is_text=is_text,
-                has_image=has_image,
-            ),
+            video_discovery_enabled=False,
         )
 
     def clear_results(self):
@@ -252,28 +245,31 @@ class SearchController(QObject):
             self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["no_results"])
             return
 
-        clip_score_mode = False
-        low_confidence_threshold = None
-        image_path = str(getattr(self.parent_window, "current_img_path", "") or "").strip()
-        if image_path:
-            try:
-                from src.services.image_search_rerank import is_likely_cropped_query_image
-                from src.services.search_service import _LOCATE_CROP_MIN_CLIP_SCORE
-
-                if is_likely_cropped_query_image(image_path):
-                    clip_score_mode = True
-                    low_confidence_threshold = _LOCATE_CROP_MIN_CLIP_SCORE
-            except Exception as exc:
-                logger.debug("Crop query clip-score UI hint skipped: %s", exc)
-
         worker_config = getattr(self.worker, "config", None)
         search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
+        clip_score_mode = False
+        low_confidence_threshold = None
+        # CLIP confidence is only meaningful for visual/image searches, never subtitle search.
+        if search_kind != "dialogue":
+            image_path = str(getattr(self.parent_window, "current_img_path", "") or "").strip()
+            if image_path:
+                try:
+                    from src.services.image_search_rerank import is_likely_cropped_query_image
+                    from src.services.search_service import _LOCATE_CROP_MIN_CLIP_SCORE
+
+                    if is_likely_cropped_query_image(image_path):
+                        clip_score_mode = True
+                        low_confidence_threshold = _LOCATE_CROP_MIN_CLIP_SCORE
+                except Exception as exc:
+                    logger.debug("Crop query clip-score UI hint skipped: %s", exc)
+
         highlight_query = ""
         dialogue_match_mode = ""
         if search_kind == "dialogue" and worker_config is not None:
             highlight_query = str(getattr(worker_config, "query", "") or "").strip()
             dialogue_match_mode = str(getattr(worker_config, "search_mode", "") or "").strip()
         self._result_display_context = {
+            "search_kind": search_kind,
             "clip_score_mode": clip_score_mode,
             "low_confidence_score": low_confidence_threshold,
             "highlight_query": highlight_query,
@@ -319,8 +315,40 @@ class SearchController(QObject):
         texts = self.parent_window.texts
         duration = float(self._last_search_duration or 0.0)
         total_count = len(results or [])
-        status_text = texts["search_done"].format(duration=duration, count=total_count)
+        search_kind = str(context.get("search_kind") or "").strip().lower()
+        if not search_kind:
+            worker_config = getattr(self.worker, "config", None)
+            search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
 
+        # Keep the status chip short — one concise line per search type.
+        if search_kind == "dialogue":
+            dialogue_message = str(getattr(self.worker, "dialogue_status_message", "") or "").strip()
+            dialogue_keys = {
+                "no dialogue index for active profile (build dialogue index first)": "search_dialogue_no_index",
+                "no dialogue matches": "search_dialogue_no_matches",
+                "empty query": "search_empty_dialogue",
+            }
+            if dialogue_message and not results:
+                key = dialogue_keys.get(dialogue_message)
+                status_text = texts.get(key, dialogue_message) if key else dialogue_message
+                self.parent_window.search_page.lbl_status.setText(status_text)
+                return
+            matched_by = str(getattr(self.worker, "dialogue_matched_by", "") or "").strip()
+            if matched_by == "vector":
+                mode_key = "search_dialogue_match_semantic"
+            elif matched_by == "keyword_fuzzy":
+                mode_key = "search_dialogue_match_fuzzy"
+            else:
+                mode_key = "search_dialogue_match_exact"
+            mode_label = texts.get(mode_key, texts.get("search_tab_dialogue", "Subtitles"))
+            status_text = texts.get(
+                "search_done_dialogue",
+                "{mode} · {duration:.2f}s · {count}",
+            ).format(mode=mode_label, duration=duration, count=total_count)
+            self.parent_window.search_page.lbl_status.setText(status_text)
+            return
+
+        status_text = texts["search_done"].format(duration=duration, count=total_count)
         clip_score_mode = bool(context.get("clip_score_mode"))
         if clip_score_mode:
             try:
@@ -332,11 +360,6 @@ class SearchController(QObject):
                 )
                 from src.services.search_telemetry import record_crop_confidence
 
-                precise_mode = str(getattr(self.worker, "search_precision_mode", "") or "").strip().lower() == "precise"
-                if precise_mode:
-                    hint = texts.get("search_crop_clip_only_hint", "")
-                    if hint:
-                        status_text = f"{status_text} · {hint}"
                 top_score = float(coerce_search_hit(results[0]).score)
                 top_label = format_clip_score_percent(top_score)
                 tier_label = resolve_clip_confidence_label(top_score, texts)
@@ -347,56 +370,20 @@ class SearchController(QObject):
                     tier_key=tier_key,
                     source="crop_locate" if is_locate else "crop_search",
                 )
-                status_text = (
-                    f"{status_text} · "
-                    f"{texts.get('search_top_clip_score', 'Top1 CLIP {score}').format(score=top_label)}"
-                )
+                # Compact: "完成 0.03s · 1 条 · CLIP 100%/很高"
+                clip_bits = [f"CLIP {top_label}"]
                 if tier_label:
-                    status_text = (
-                        f"{status_text} · "
-                        f"{texts.get('search_clip_confidence_level', '置信度 {level}').format(level=tier_label)}"
-                    )
+                    clip_bits.append(str(tier_label))
+                status_text = f"{status_text} · {'/'.join(clip_bits)}"
             except Exception as exc:
                 logger.debug("Crop confidence status formatting skipped: %s", exc)
         warning_key = getattr(self.worker, "locate_warning_key", None)
         if warning_key:
-            warn_template = texts.get(warning_key, "")
-            if warn_template:
-                if warning_key == "locate_crop_low_confidence" and results:
-                    from src.domain.search_hit import coerce_search_hit
-                    from src.services.search_service import format_clip_score_percent
-
-                    top_score = float(coerce_search_hit(results[0]).score)
-                    warn = warn_template.format(score=format_clip_score_percent(top_score))
-                else:
-                    warn = warn_template
-                status_text = f"{status_text} · {warn}"
-        dialogue_message = str(getattr(self.worker, "dialogue_status_message", "") or "").strip()
-        if dialogue_message:
-            dialogue_keys = {
-                "no dialogue index for active profile (build dialogue index first)": "search_dialogue_no_index",
-                "no dialogue matches": "search_dialogue_no_matches",
-                "empty query": "search_empty_dialogue",
-            }
-            key = dialogue_keys.get(dialogue_message)
-            localized = texts.get(key, dialogue_message) if key else dialogue_message
-            if results:
-                status_text = f"{status_text} · {localized}"
-            else:
-                status_text = localized
-        matched_by = str(getattr(self.worker, "dialogue_matched_by", "") or "").strip()
-        if results and matched_by:
-            if matched_by == "vector":
-                mode_key = "search_dialogue_match_semantic"
-            elif matched_by == "keyword_fuzzy":
-                mode_key = "search_dialogue_match_fuzzy"
-            else:
-                mode_key = "search_dialogue_match_exact"
-            mode_label = texts.get(
-                mode_key,
-                texts.get("search_dialogue_match_segment", matched_by),
-            )
-            status_text = f"{status_text} · {mode_label}"
+            # Keep warnings short in the status chip; full text is available elsewhere if needed.
+            if warning_key == "locate_crop_low_confidence":
+                status_text = f"{status_text} · {texts.get('clip_confidence_low', '低')}"
+            elif warning_key == "locate_crop_low_confidence_empty":
+                status_text = f"{status_text} · {texts.get('no_results', '无结果')}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
     def _start_page_thumbnails(self, page_results) -> None:

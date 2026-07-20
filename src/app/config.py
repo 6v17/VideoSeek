@@ -134,6 +134,7 @@ DEFAULT_CONFIG = {
     "download_quality": "best",
     "auto_cleanup_missing_files": False,
     "subtitle_sample_interval_sec": 1.2,
+    "subtitle_ocr_batch_size": 1,
     "export_video_silent": False,
     "export_encode_mode": "original",
     "export_copy_extra_sec": 4,
@@ -149,6 +150,7 @@ DEFAULT_CONFIG = {
     "theme": "dark",
     "language": "zh",
     "update_notice_dismissed_version": "",
+    "free_notice_seen": False,
     "understanding": DEFAULT_UNDERSTANDING_CONFIG,
 }
 
@@ -181,6 +183,7 @@ CONFIG_BOUNDS = {
     "min_chunk_duration": (0.0, 30.0),
     "max_chunk_duration": (0.0, 600.0),
     "subtitle_sample_interval_sec": (0.1, 6.0),
+    "subtitle_ocr_batch_size": (1, 6),
 }
 
 CONFIG_INT_KEYS = {
@@ -198,6 +201,7 @@ CONFIG_INT_KEYS = {
     "thumb_height",
     "embedding_batch_size",
     "min_chunk_size",
+    "subtitle_ocr_batch_size",
 }
 
 CONFIG_ENUMS = {
@@ -532,6 +536,10 @@ def _sanitize_general_settings(config):
     sanitized["show_debug_test_buttons"] = _coerce_bool(
         sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
         DEFAULT_CONFIG["show_debug_test_buttons"],
+    )
+    sanitized["free_notice_seen"] = _coerce_bool(
+        sanitized.get("free_notice_seen", DEFAULT_CONFIG["free_notice_seen"]),
+        DEFAULT_CONFIG["free_notice_seen"],
     )
     sanitized["search_video_discovery_enabled"] = _coerce_bool(
         sanitized.get(

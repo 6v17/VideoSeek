@@ -292,6 +292,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
         self.library_page.btn_cleanup_missing.setEnabled(False)
@@ -363,6 +364,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
+            self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self.library_page.btn_cleanup_missing.setEnabled(True)
             self.library_page.progress_bar.setVisible(False)
@@ -458,6 +460,46 @@ class LibraryIndexingGuiMixin:
 
     def _on_subtitle_sample_interval_changed(self, _value=None):
         self._read_subtitle_sample_interval()
+
+    def load_subtitle_ocr_batch(self):
+        from src.app.config import DEFAULT_CONFIG, load_config
+
+        try:
+            config = load_config()
+            value = int(
+                config.get(
+                    "subtitle_ocr_batch_size",
+                    DEFAULT_CONFIG["subtitle_ocr_batch_size"],
+                )
+            )
+        except Exception:
+            value = int(DEFAULT_CONFIG["subtitle_ocr_batch_size"])
+        value = max(1, min(6, value))
+        spin = self.library_page.input_subtitle_ocr_batch
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+
+    def _read_subtitle_ocr_batch(self) -> int:
+        from src.app.config import load_config, save_config
+
+        spin = self.library_page.input_subtitle_ocr_batch
+        value = max(1, min(6, int(spin.value())))
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+        try:
+            config = load_config()
+            previous = config.get("subtitle_ocr_batch_size")
+            if previous is None or int(previous) != value:
+                config["subtitle_ocr_batch_size"] = value
+                save_config(config)
+        except Exception:
+            pass
+        return value
+
+    def _on_subtitle_ocr_batch_changed(self, _value=None):
+        self._read_subtitle_ocr_batch()
 
     def _on_library_tab_changed(self, index: int):
         self._refresh_library_action_hints()
@@ -590,11 +632,11 @@ class LibraryIndexingGuiMixin:
             return ""
         head = token.split("|", 1)[0]
         detail = ""
-        if token.startswith("dialogue_embed|"):
+        if token.startswith("dialogue_embed|") or token.startswith("subtitle_ocr|"):
             parts = token.split("|")
             if len(parts) >= 3:
                 detail = f"{parts[1]}/{parts[2]}"
-            head = "dialogue_embed"
+            head = "dialogue_embed" if token.startswith("dialogue_embed|") else "subtitle_ocr"
         mapping = {
             "dialogue_extract": "dialogue_stage_extract",
             "dialogue_asr": "dialogue_stage_asr",
@@ -608,39 +650,109 @@ class LibraryIndexingGuiMixin:
             "subtitle_extract_audio": "dialogue_stage_extract",
             "subtitle_probe": "dialogue_stage_extract",
             "subtitle_vad": "dialogue_stage_asr",
-            "subtitle_ocr": "dialogue_stage_asr",
+            "subtitle_ocr": "dialogue_stage_ocr",
             "subtitle_merge": "dialogue_stage_merge",
             "subtitle_reuse": "dialogue_stage_reuse",
             "subtitle_done": "dialogue_stage_done",
         }
-        if head.startswith("subtitle_ocr"):
-            head = "subtitle_ocr"
         key = mapping.get(head, "")
         if not key:
             return token
         template = self.texts.get(key, token)
         try:
-            return template.format(detail=detail)
+            return template.format(detail=detail or "…")
         except Exception:
             return template
 
     def _start_dialogue_index_job(self, *, mode: str = "auto"):
         if not self._ensure_startup_migration_idle("feature_indexing"):
             return
+        title_key = "build_dialogue_index"
+        mode_value = str(mode or "auto").strip().lower() or "auto"
+        reembed = mode_value == "reembed"
+        if reembed:
+            title_key = "reembed_dialogue_index"
+        elif mode_value == "ocr":
+            title_key = "build_dialogue_index"
+        title = self.texts.get(title_key, title_key)
+
         if (
             self.indexing_controller.is_running()
             or self._dialogue_index_running()
             or self._remove_library_worker_running()
         ):
-            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
-            return
-        if not self.check_runtime_resources():
-            self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
+            message = self.texts.get("index_already_running", "An indexing job is already running.")
+            self.library_page.lbl_status.setText(message)
+            self.show_info_dialog(title, message, kind="warning")
             return
 
+        # Subtitle OCR needs FFmpeg + RapidOCR, not CLIP visual models.
+        from src.utils import has_ffmpeg
+
+        if not has_ffmpeg():
+            message = self.texts.get(
+                "build_dialogue_index_missing_ffmpeg",
+                "FFmpeg is required for subtitle extraction. Configure it in Settings.",
+            )
+            self.library_page.lbl_status.setText(message)
+            self.show_info_dialog(title, message, kind="warning")
+            return
+
+        try:
+            self._run_dialogue_index_job(mode=mode_value, title=title, reembed=reembed)
+        except Exception as exc:
+            from src.app.logging_utils import get_logger
+
+            get_logger("gui").exception("Subtitle extract UI failed before worker start")
+            self.show_error_dialog(
+                self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+                str(exc).strip() or repr(exc),
+            )
+
+    def _resolve_dialogue_index_targets(self, selected_ids: set[str]) -> list[dict]:
+        """Build extract targets from the tree / registry without rescanning disks."""
+        import os
+
+        from src.services.dialogue_index_service import list_dialogue_index_targets
+
+        targets: list[dict] = []
+        seen: set[str] = set()
+        tree = self.library_page.subtitle_video_tree
+        for ent in tree.collect_checked_entries():
+            video_id = str((ent or {}).get("video_id") or "").strip()
+            if not video_id or video_id in seen:
+                continue
+            if selected_ids and video_id not in selected_ids:
+                continue
+            video_path = str((ent or {}).get("video_path") or "").strip()
+            if not video_path:
+                continue
+            if (ent or {}).get("source_exists") is False:
+                continue
+            if not os.path.isfile(video_path):
+                continue
+            seen.add(video_id)
+            targets.append(
+                {
+                    "video_id": video_id,
+                    "video_path": video_path,
+                    "library_path": str((ent or {}).get("library_path") or ""),
+                }
+            )
+
+        missing_ids = selected_ids - seen if selected_ids else set()
+        if missing_ids:
+            for item in list_dialogue_index_targets(register=False):
+                video_id = str((item or {}).get("video_id") or "").strip()
+                if video_id not in missing_ids or video_id in seen:
+                    continue
+                seen.add(video_id)
+                targets.append(dict(item))
+        return targets
+
+    def _run_dialogue_index_job(self, *, mode: str, title: str, reembed: bool):
         from src.services.dialogue_index_service import (
             ensure_dialogue_asr_ready,
-            list_dialogue_index_targets,
             list_dialogue_reembed_targets,
         )
         from src.storage.dialogue_transcript_store import (
@@ -650,9 +762,6 @@ class LibraryIndexingGuiMixin:
 
         self.library_page.set_library_mode(1)
         mode_value = str(mode or "auto").strip().lower() or "auto"
-        reembed = mode_value == "reembed"
-        title_key = "reembed_dialogue_index" if reembed else "build_dialogue_index"
-        title = self.texts.get(title_key, title_key)
 
         selected_ids = {
             str(vid).strip()
@@ -666,6 +775,10 @@ class LibraryIndexingGuiMixin:
                 kind="info",
             )
             return
+
+        self.library_page.lbl_status.setText(
+            self.texts.get("build_dialogue_index_preparing", "Preparing subtitle extraction…")
+        )
 
         if reembed:
             targets = [
@@ -692,19 +805,18 @@ class LibraryIndexingGuiMixin:
                 "Re-embedding dialogue vectors...",
             )
         else:
-            targets = [
-                item
-                for item in list_dialogue_index_targets()
-                if str((item or {}).get("video_id") or "").strip() in selected_ids
-            ]
+            targets = self._resolve_dialogue_index_targets(selected_ids)
             if not targets:
                 self.show_info_dialog(
                     title,
-                    self.texts.get("build_dialogue_index_no_targets", "No ready videos to index."),
+                    self.texts.get(
+                        "build_dialogue_index_no_targets",
+                        "No ready videos to index. Selected files may be missing on disk, "
+                        "or are not registered in the subtitle library — refresh the list and retry.",
+                    ),
                     kind="info",
                 )
                 return
-            ensure_shared_transcripts()
             existing_ids = {
                 str(row.get("video_id") or "").strip()
                 for row in list_dialogue_transcript_summaries()
@@ -712,8 +824,10 @@ class LibraryIndexingGuiMixin:
             needs_asr = any(
                 str((item or {}).get("video_id") or "").strip() not in existing_ids for item in targets
             )
-            if needs_asr:
-                asr_ready, asr_error = ensure_dialogue_asr_ready()
+            # Lightweight check only (no RapidOCR/ORT import on UI thread).
+            # mode=ocr is "re-extract" and always runs OCR.
+            if mode_value == "ocr" or needs_asr:
+                asr_ready, asr_error = ensure_dialogue_asr_ready(import_engine=False)
                 if not asr_ready:
                     self.show_info_dialog(
                         title,
@@ -731,12 +845,27 @@ class LibraryIndexingGuiMixin:
             ).format(count=len(targets))
             running = self.texts.get("build_dialogue_index_running", "Building dialogue index...")
 
-        if not self.show_confirm_dialog(self.texts["confirm_title"], confirm, kind="info"):
+        # Show confirm immediately — do not import OCR engines before the dialog.
+        if not self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            confirm,
+            kind="info",
+        ):
+            return
+
+        try:
+            ensure_shared_transcripts()
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+                str(exc).strip() or repr(exc),
+            )
             return
 
         from ui.workers import DialogueIndexWorker
 
         sample_interval_sec = self._read_subtitle_sample_interval()
+        ocr_batch_size = self._read_subtitle_ocr_batch()
 
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
@@ -744,6 +873,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
         self.library_page.btn_cleanup_missing.setEnabled(False)
@@ -758,6 +888,7 @@ class LibraryIndexingGuiMixin:
             targets=targets,
             mode=mode_value,
             sample_interval_sec=sample_interval_sec,
+            ocr_batch_size=ocr_batch_size,
         )
         self.dialogue_index_worker = worker
         worker.progress_signal.connect(self._update_dialogue_index_progress)
@@ -817,6 +948,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
+            self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self.library_page.btn_cleanup_missing.setEnabled(True)
             self.library_page.btn_stop_dialogue_index.setEnabled(False)
@@ -826,6 +958,8 @@ class LibraryIndexingGuiMixin:
             payload = dict(summary or {})
             reembed = str(payload.get("mode") or getattr(self, "_dialogue_index_ui_mode", "") or "") == "reembed"
             self._dialogue_index_ui_mode = ""
+            failed_count = int(payload.get("failed", 0) or 0)
+            errors = [str(item).strip() for item in list(payload.get("errors") or []) if str(item).strip()]
             if stopped:
                 status = self.texts.get("build_dialogue_index_stopped", "Dialogue index stopped.")
             elif success:
@@ -835,13 +969,24 @@ class LibraryIndexingGuiMixin:
                     "Dialogue index done: {ok} ok, {failed} failed, {segments} segments.",
                 ).format(
                     ok=int(payload.get("ok", 0) or 0),
-                    failed=int(payload.get("failed", 0) or 0),
+                    failed=failed_count,
                     segments=int(payload.get("segment_rows", 0) or 0),
                     reused=int(payload.get("reused", 0) or 0),
                 )
             else:
                 status = self.texts.get("build_dialogue_index_failed", "Dialogue index failed")
             self.library_page.lbl_status.setText(status)
+            # Per-video OCR failures used to finish "successfully" with only a status
+            # line — packaged installs missing RapidOCR config.yaml looked like no UI reaction.
+            if (not stopped) and failed_count > 0:
+                detail_lines = errors[:5]
+                if len(errors) > 5:
+                    detail_lines.append(f"… (+{len(errors) - 5})")
+                detail = "\n".join(detail_lines)
+                self.show_error_dialog(
+                    self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+                    status + (f"\n\n{detail}" if detail else ""),
+                )
         finally:
             # Defer tree rebuild so this slot returns before touching heavy UI/SQLite,
             # and so the worker thread can fully exit first.
@@ -1001,6 +1146,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_reembed_dialogue.setEnabled(False)
             self.library_page.btn_export_dialogue.setEnabled(False)
             self.library_page.input_subtitle_sample_interval.setEnabled(False)
+            self.library_page.input_subtitle_ocr_batch.setEnabled(False)
             self.library_page.btn_stop_index.setEnabled(True)
             self.library_page.btn_stop_index.setVisible(True)
             self.library_page.btn_add_lib.setEnabled(False)
@@ -1088,6 +1234,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_reembed_dialogue.setEnabled(True)
         self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.input_subtitle_sample_interval.setEnabled(True)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(True)
         self.library_page.btn_stop_index.setEnabled(False)
         self.library_page.btn_stop_index.setVisible(False)
         self.library_page.btn_add_lib.setEnabled(True)

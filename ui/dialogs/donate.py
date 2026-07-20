@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from src.app.i18n import get_texts
 from src.app.logging_utils import get_logger
 from src.services.remote_html_assets import download_url_to_temp_file
+from ui.dialogs.html_links import open_html_link
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
@@ -24,6 +25,7 @@ class DonateDialog(QDialog):
         texts = get_texts(language)
         donate = dict(donate or {})
         self._image_url = str(donate.get("image_url", "") or "").strip()
+        self._github_url = str(donate.get("github_url", "") or "").strip()
 
         self.setWindowTitle(texts["donate_title"])
         apply_dialog_size(
@@ -72,6 +74,12 @@ class DonateDialog(QDialog):
         inner.addWidget(hint)
         button_row = QHBoxLayout()
         button_row.addStretch()
+        if self._github_url:
+            github_button = QPushButton(texts.get("donate_github", "GitHub"))
+            github_button.setObjectName("GhostButton")
+            github_button.setFixedHeight(40)
+            github_button.clicked.connect(lambda: open_html_link(self._github_url))
+            button_row.addWidget(github_button)
         button_row.addWidget(close_button)
         inner.addLayout(button_row)
         layout.addWidget(shell)

@@ -36,7 +36,8 @@ COMPONENT_SIZES = {
     "image_drop_min_height": 280,
     "search_query_tab_chrome_height": 41,
     "search_query_tab_page_margins_v": 11,
-    "search_image_options_row_height": 32,
+    # Must fit #SearchModeSelect (1px border + padding + text); too short clips the bottom edge.
+    "search_image_options_row_height": 36,
     "preview_host_min_height": 312,
     "search_compare_baseline_height": 520,
     "search_panel_width_extra": 28,

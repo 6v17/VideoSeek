@@ -15,17 +15,20 @@ StopCallback = Callable[[], bool]
 DialogueIndexMode = Literal["auto", "asr", "reembed", "ocr", "reuse"]
 
 
-def list_dialogue_index_targets(*, config=None) -> list[dict[str, str]]:
+def list_dialogue_index_targets(*, config=None, register: bool = False) -> list[dict[str, str]]:
     """Subtitle-library videos on disk (candidates for OCR indexing).
 
     Uses the global subtitle registry (``dialogue/library.db``), not the CLIP
     visual library. Does not require visual sync — add-library on the subtitle
     tab is enough.
+
+    ``register=False`` (default) avoids a full library walk/hash on the UI
+    thread — important for Extract clicks on slow disks.
     """
     from src.services.subtitle_library_service import list_subtitle_library_video_entries
 
     targets: list[dict[str, str]] = []
-    for item in list_subtitle_library_video_entries(config=config, register=True):
+    for item in list_subtitle_library_video_entries(config=config, register=register):
         if not item.get("source_exists"):
             continue
         video_id = str(item.get("video_id") or "").strip()
@@ -69,11 +72,11 @@ def list_dialogue_reembed_targets(*, config=None) -> list[dict[str, str]]:
     return targets
 
 
-def ensure_dialogue_asr_ready(*, config=None) -> tuple[bool, str]:
+def ensure_dialogue_asr_ready(*, config=None, import_engine: bool = True) -> tuple[bool, str]:
     """Shim name kept for UI: now checks RapidOCR readiness."""
     from src.services.subtitle_index_service import ensure_subtitle_ocr_ready
 
-    return ensure_subtitle_ocr_ready(config=config)
+    return ensure_subtitle_ocr_ready(config=config, import_engine=import_engine)
 
 
 def index_video_dialogue(
@@ -88,6 +91,7 @@ def index_video_dialogue(
     keep_wav: bool = False,
     mode: DialogueIndexMode = "auto",
     sample_interval_sec: float | None = None,
+    ocr_batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Build shared subtitle cues (VAD + RapidOCR). ``language`` ignored."""
     del language
@@ -110,4 +114,6 @@ def index_video_dialogue(
     }
     if sample_interval_sec is not None:
         kwargs["sample_interval_sec"] = float(sample_interval_sec)
+    if ocr_batch_size is not None:
+        kwargs["ocr_batch_size"] = int(ocr_batch_size)
     return index_video_subtitles(video_id, video_path, **kwargs)

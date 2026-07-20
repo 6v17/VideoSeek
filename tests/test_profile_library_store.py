@@ -167,5 +167,26 @@ class ProfileLibraryStoreTests(unittest.TestCase):
             )
 
 
+    def test_schema_recreated_after_db_deleted_with_stale_cache(self):
+        from src.storage import profile_library_store as store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = os.path.join(tmp, "profile")
+            os.makedirs(profile, exist_ok=True)
+            store.save_profile_meta(profile, {"libraries": {}})
+            db_path = store.get_library_db_path(profile)
+            self.assertTrue(os.path.isfile(db_path))
+            # Simulate remove-model: delete library.db while process still holds schema-ready cache.
+            os.remove(db_path)
+            for suffix in ("-wal", "-shm"):
+                side = db_path + suffix
+                if os.path.isfile(side):
+                    os.remove(side)
+            # Must not raise "no such table: libraries".
+            loaded = store.load_profile_meta(profile)
+            self.assertIsInstance(loaded.get("libraries"), dict)
+            self.assertTrue(os.path.isfile(db_path))
+
+
 if __name__ == "__main__":
     unittest.main()

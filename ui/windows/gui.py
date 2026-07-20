@@ -308,6 +308,12 @@ class MainWindow(
         self.library_page.input_subtitle_sample_interval.editingFinished.connect(
             self._on_subtitle_sample_interval_changed
         )
+        self.library_page.input_subtitle_ocr_batch.editingFinished.connect(
+            self._on_subtitle_ocr_batch_changed
+        )
+        self.library_page.input_subtitle_ocr_batch.valueChanged.connect(
+            self._on_subtitle_ocr_batch_changed
+        )
         self.library_page.btn_stop_dialogue_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
         self.library_page.library_stack.currentChanged.connect(self._on_library_tab_changed)
@@ -395,6 +401,9 @@ class MainWindow(
         if page_name == "understanding":
             if hasattr(self, "load_understanding_settings"):
                 self.load_understanding_settings(refresh_status=False)
+            # Load timeline/scope before first paint settles so the track does not jump.
+            if hasattr(self, "_refresh_understanding_scope_options"):
+                self._refresh_understanding_scope_options()
             QTimer.singleShot(0, self._deferred_understanding_page_refresh)
         if page_name == "link":
             if hasattr(self, "video_download_controller"):
@@ -403,7 +412,7 @@ class MainWindow(
     def _update_version_info(self, version_info):
         self.version_info = version_info
         self.apply_texts()
-        self._maybe_auto_show_update_notice()
+        self._maybe_auto_show_startup_notices()
 
     def _update_notice_payload(self, notice_payload):
         self.notice_payload = notice_payload
@@ -423,6 +432,10 @@ class MainWindow(
         self.setWindowTitle(f"{t['app_name']} v{get_app_version()}")
         self.sidebar.title.setText(t["app_name"])
         self.sidebar.subtitle.setText(t["app_subtitle"])
+        github_url = str(get_donate_payload().get("github_url") or "").strip() or "https://github.com/6v17/VideoSeek"
+        tip = t.get("brand_free_tip", "永久免费 · 开源")
+        self.sidebar.free_tip.setText(f'<a href="{github_url}">{tip}</a>')
+        self.sidebar.free_tip.setToolTip(t.get("brand_free_tip_tooltip", github_url))
         self.sidebar.hero_tag.setText(t["hero_tag"])
         self.sidebar.hero_title.setText(t["hero_title"])
         self.sidebar.hero_body.setText(t["hero_body"])
@@ -555,6 +568,17 @@ class MainWindow(
         self.library_page.input_subtitle_sample_interval.setToolTip(interval_tip)
         if hasattr(self, "load_subtitle_sample_interval"):
             self.load_subtitle_sample_interval()
+        self.library_page.lbl_subtitle_ocr_batch.setText(
+            t.get("subtitle_ocr_batch", "OCR stack")
+        )
+        batch_tip = t.get(
+            "subtitle_ocr_batch_hint",
+            "Frames stacked per OCR pass (1–6). 1=per-frame; higher is usually faster, with automatic per-frame fallback if ambiguous.",
+        )
+        self.library_page.lbl_subtitle_ocr_batch.setToolTip(batch_tip)
+        self.library_page.input_subtitle_ocr_batch.setToolTip(batch_tip)
+        if hasattr(self, "load_subtitle_ocr_batch"):
+            self.load_subtitle_ocr_batch()
         self.library_page.btn_export_dialogue.setText(
             t.get("export_dialogue_library", "Export dialogue")
         )
@@ -673,6 +697,7 @@ class MainWindow(
         self._apply_agent_api_settings()
         QTimer.singleShot(0, self._bootstrap_understanding_resources)
         QTimer.singleShot(1500, self._idle_maintain_library_metadata)
+        QTimer.singleShot(700, self._maybe_auto_show_startup_notices)
 
     def _idle_maintain_library_metadata(self) -> None:
         try:
@@ -707,8 +732,34 @@ class MainWindow(
         if had_update:
             self._mark_update_notice_seen()
 
+    def _should_auto_show_free_notice(self) -> bool:
+        if not getattr(self, "_startup_complete", False):
+            return False
+        # Session lock: once claimed/shown this run, never queue again.
+        if getattr(self, "_free_notice_handled", False):
+            return False
+        try:
+            config = load_config()
+        except Exception:
+            return False
+        return not bool(config.get("free_notice_seen", False))
+
+    def _mark_free_notice_seen(self) -> None:
+        self._free_notice_handled = True
+        try:
+            config = load_config()
+            config["free_notice_seen"] = True
+            save_config(config)
+        except Exception:
+            return
+
     def _should_auto_show_update_notice(self) -> bool:
         if not getattr(self, "_startup_complete", False):
+            return False
+        # Wait until free-notice flow is finished for this session.
+        if getattr(self, "_free_notice_auto_show_pending", False):
+            return False
+        if self._should_auto_show_free_notice():
             return False
         info = self.version_info or {}
         if not info.get("has_update"):
@@ -734,6 +785,41 @@ class MainWindow(
             save_config(config)
         except Exception:
             return
+
+    def _maybe_auto_show_startup_notices(self) -> None:
+        if not getattr(self, "_startup_complete", False):
+            return
+        if getattr(self, "_startup_notices_scheduled", False):
+            return
+        self._startup_notices_scheduled = True
+        if self._should_auto_show_free_notice():
+            self._maybe_auto_show_free_notice()
+            return
+        self._maybe_auto_show_update_notice()
+
+    def _maybe_auto_show_free_notice(self) -> None:
+        if not self._should_auto_show_free_notice():
+            self._maybe_auto_show_update_notice()
+            return
+        if getattr(self, "_free_notice_auto_show_pending", False):
+            return
+        # Claim + persist before the modal opens, so overlapping startup callbacks
+        # cannot queue a second dialog while .exec() is blocking.
+        self._free_notice_auto_show_pending = True
+        self._mark_free_notice_seen()
+        QTimer.singleShot(200, self._auto_show_free_notice)
+
+    def _auto_show_free_notice(self) -> None:
+        self._free_notice_auto_show_pending = False
+        self.show_info_dialog(
+            self.texts.get("free_notice_title", "使用说明"),
+            self.texts.get(
+                "free_notice_body",
+                "VideoSeek 永久免费。\n有人收费卖给你或收代装费，那是骗子。\n官方：https://github.com/6v17/VideoSeek",
+            ),
+            kind="info",
+        )
+        self._maybe_auto_show_update_notice()
 
     def _maybe_auto_show_update_notice(self) -> None:
         if not self._should_auto_show_update_notice():
@@ -810,15 +896,9 @@ class MainWindow(
     def start_search(self):
         if not self._ensure_startup_migration_idle("feature_search"):
             return
-        if not self.check_runtime_resources():
-            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
-            return
 
         active_tab = self._search_active_tab()
-        if active_tab == self.SEARCH_TAB_COMPOSE:
-            self._start_compose_search()
-            return
-
+        # Subtitle keyword search uses the global transcript store — no CLIP model.
         if active_tab == self.SEARCH_TAB_DIALOGUE:
             dialogue_query = self.search_page.search_panel.dialogue_query()
             if not dialogue_query:
@@ -827,6 +907,14 @@ class MainWindow(
                 )
                 return
             self._run_dialogue_search(dialogue_query)
+            return
+
+        if not self.check_runtime_resources():
+            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
+
+        if active_tab == self.SEARCH_TAB_COMPOSE:
+            self._start_compose_search()
             return
 
         text_query = self.search_page.search_panel.text_query()
@@ -894,13 +982,14 @@ class MainWindow(
                 self.texts.get("search_empty_dialogue", self.texts["empty_query"])
             )
             return False
-        if not self._validate_search_scope():
-            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
-            return False
+        # Switch to the subtitle tab before scope validation so dialogue scope is used.
         if sync_ui:
             self.switch_page("search")
             self._set_search_query_tab(self.SEARCH_TAB_DIALOGUE)
             self.search_page.search_panel.set_dialogue_query(query)
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
 
         from src.services.search_scope import resolve_default_active_dialogue_search_scope
 
@@ -1022,29 +1111,23 @@ class MainWindow(
             return False
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
-        search_precision_mode = self._resolve_search_precision_mode(
-            is_text=bool(plan["is_text"]),
-            has_image=bool(plan["has_image"]),
-        )
+        # Compose keeps only frame/chunk granularity — no deep search / video discovery.
+        if hasattr(self, "_text_search_mode_from_ui"):
+            compose_mode = self._text_search_mode_from_ui()
+        else:
+            compose_mode = "frame"
         self.search_controller.start_search(
             plan["query_data"],
             plan["is_text"],
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             query_vector=plan["query_vector"],
-            search_mode=self._resolve_effective_search_mode(
-                is_text=bool(plan["is_text"]),
-                has_image=bool(plan["has_image"]),
-                search_precision_mode=search_precision_mode,
-            ),
+            search_mode=compose_mode,
             top_k=plan.get("top_k"),
             min_score=plan.get("min_score"),
-            search_precision_mode=search_precision_mode,
+            search_precision_mode="fast",
             pixel_query_data=plan.get("pixel_query_data"),
-            video_discovery_enabled=self._resolve_video_discovery_enabled(
-                is_text=bool(plan["is_text"]),
-                has_image=bool(plan["has_image"]),
-            ),
+            video_discovery_enabled=False,
         )
         return True
 
@@ -1056,11 +1139,48 @@ class MainWindow(
             return False
         return True
 
+    def _apply_mobile_search_modes(self, data: dict) -> None:
+        """Sync desktop search mode widgets from a mobile request before running search."""
+        image_mode = str(data.get("image_search_mode") or "").strip().lower()
+        if image_mode and hasattr(self, "_set_image_search_mode_ui"):
+            self._set_image_search_mode_ui(image_mode)
+            if hasattr(self, "_save_image_search_mode"):
+                self._save_image_search_mode()
+        text_mode = str(data.get("search_mode") or "").strip().lower()
+        if text_mode in {"frame", "chunk"} and hasattr(self.search_page, "search_mode"):
+            combo = self.search_page.search_mode
+            index = combo.findData(text_mode)
+            if index >= 0 and combo.currentIndex() != index:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(index)
+                combo.blockSignals(False)
+                if hasattr(self, "_save_search_mode"):
+                    self._save_search_mode()
+        dialogue_mode = str(data.get("dialogue_search_mode") or "").strip().lower()
+        if dialogue_mode in {"exact", "fuzzy", "tolerant", "approx"}:
+            combo = getattr(self.search_page, "dialogue_search_mode", None)
+            if combo is not None:
+                target = "fuzzy" if dialogue_mode in {"fuzzy", "tolerant", "approx"} else "exact"
+                index = combo.findData(target)
+                if index >= 0 and combo.currentIndex() != index:
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(index)
+                    combo.blockSignals(False)
+
     def _handle_mobile_search_requested(self, payload):
-        if not self._ensure_mobile_search_ready():
-            return
         data = dict(payload or {})
         kind = str(data.get("search_kind") or "image").strip().lower()
+        # Subtitle search uses the OCR transcript store and does not need CLIP.
+        if kind == "dialogue":
+            if not self._ensure_startup_migration_idle("feature_search"):
+                return
+            self._apply_mobile_search_modes(data)
+            self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
+            self._run_dialogue_search(str(data.get("query") or ""), sync_ui=True)
+            return
+        if not self._ensure_mobile_search_ready():
+            return
+        self._apply_mobile_search_modes(data)
         self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
         if kind == "text":
             self._run_text_search(str(data.get("query") or ""), sync_ui=True)
@@ -1290,7 +1410,11 @@ class MainWindow(
         self.search_controller.clear_results()
         self.preview_controller.stop_preview()
         self._update_expand_preview_button()
-        self._refresh_search_panel_state()
+        try:
+            self._refresh_search_panel_state()
+        except Exception:
+            # Safe after removing all CLIP models (fallback profile may have empty asset dirs).
+            pass
         self.search_page.lbl_status.setText(self.texts["ready"])
 
     def open_result_in_explorer(self, path):

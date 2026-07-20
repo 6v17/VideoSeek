@@ -101,11 +101,10 @@ class AgentLibraryServiceTests(unittest.TestCase):
             for row in payload["videos"]:
                 self.assertIn("library_path", row)
                 self.assertIn("library_display_name", row)
-                self.assertIn("has_evidence", row)
+                self.assertNotIn("has_evidence", row)
 
-    @patch("src.services.agent_library_service._indexed_evidence_video_ids", return_value={"v1"})
     @patch("src.services.library_service.list_libraries")
-    def test_list_agent_videos_filter_q_and_has_evidence(self, mock_list_libraries, _mock_evidence_ids):
+    def test_list_agent_videos_filter_q(self, mock_list_libraries):
         with tempfile.TemporaryDirectory() as lib_dir:
             ready_a = os.path.join(lib_dir, "ep01.mp4")
             ready_b = os.path.join(lib_dir, "ep03.mp4")
@@ -121,15 +120,13 @@ class AgentLibraryServiceTests(unittest.TestCase):
                     }
                 }
             }
-            payload = list_agent_videos(lib_dir, q="ep03", has_evidence=False, ready_only=True)
+            payload = list_agent_videos(lib_dir, q="ep03", ready_only=True)
             self.assertEqual(len(payload["videos"]), 1)
             self.assertEqual(payload["videos"][0]["video_id"], "v3")
-            self.assertFalse(payload["videos"][0]["has_evidence"])
 
             payload = list_agent_videos(video_id="v1", ready_only=True)
             self.assertEqual(len(payload["videos"]), 1)
             self.assertEqual(payload["videos"][0]["video_path"], ready_a)
-            self.assertTrue(payload["videos"][0]["has_evidence"])
 
     @patch("src.services.library_service.list_libraries", return_value={})
     def test_list_agent_videos_unknown_video_id(self, _mock_libraries):

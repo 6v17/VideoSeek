@@ -55,6 +55,25 @@ def library_db_cache_token(profile_base_dir: str) -> tuple[str, float, int]:
     return db_path, mtime, revision
 
 
+def invalidate_profile_library_schema_cache(profile_base_dir: str | None = None) -> None:
+    """Drop schema-ready cache after profile dirs are deleted or recreated."""
+    if profile_base_dir is None:
+        _SCHEMA_READY.clear()
+        return
+    db_path = os.path.normpath(get_library_db_path(profile_base_dir))
+    _SCHEMA_READY.discard(db_path)
+
+
+def _schema_tables_ready(conn: sqlite3.Connection) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='libraries' LIMIT 1"
+        ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
+
+
 @contextmanager
 def _db(profile_base_dir: str):
     profile_base_dir = os.path.normpath(str(profile_base_dir or "").strip())
@@ -69,7 +88,8 @@ def _db(profile_base_dir: str):
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         norm = os.path.normpath(db_path)
-        if norm not in _SCHEMA_READY:
+        # Cache can go stale after remove-model deletes library.db then recreates an empty file.
+        if norm not in _SCHEMA_READY or not _schema_tables_ready(conn):
             _ensure_schema(conn)
             _SCHEMA_READY.add(norm)
         yield conn
@@ -167,11 +187,14 @@ def _bump_revision(conn: sqlite3.Connection) -> None:
 
 
 def _profile_has_rows(conn: sqlite3.Connection) -> bool:
-    row = conn.execute("SELECT 1 FROM libraries LIMIT 1").fetchone()
-    if row is not None:
-        return True
-    row = conn.execute("SELECT 1 FROM meta_kv WHERE key = 'migrated_from_json'").fetchone()
-    return row is not None
+    try:
+        row = conn.execute("SELECT 1 FROM libraries LIMIT 1").fetchone()
+        if row is not None:
+            return True
+        row = conn.execute("SELECT 1 FROM meta_kv WHERE key = 'migrated_from_json'").fetchone()
+        return row is not None
+    except sqlite3.OperationalError:
+        return False
 
 
 def _migrate_from_json_files(profile_base_dir: str, conn: sqlite3.Connection) -> None:

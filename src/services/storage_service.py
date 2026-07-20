@@ -1,5 +1,7 @@
+import json
 import os
 import shutil
+import time
 
 from src.app.config import build_data_storage_paths, get_configured_data_root, load_config, save_config
 from src.storage.config_store import get_effective_model_dir
@@ -13,7 +15,64 @@ STAGING_DIR_NAME = ".videoseek-migrate-staging"
 MODELS_DIR_NAME = "models"
 
 
-def _copy_tree(src_dir, dst_dir):
+def _emit(progress_callback, percent, message):
+    if not callable(progress_callback):
+        return
+    try:
+        progress_callback(int(max(0, min(100, percent))), str(message or ""))
+    except Exception:
+        logger.debug("progress_callback failed", exc_info=True)
+
+
+def _count_files(path):
+    if not path or not os.path.exists(path):
+        return 0
+    if os.path.isfile(path):
+        return 1
+    total = 0
+    for _root, _dirs, files in os.walk(path):
+        total += len(files)
+    return total
+
+
+class _CopyProgress:
+    def __init__(self, progress_callback, *, total_files, percent_start=5, percent_end=90, label="正在复制文件"):
+        self.progress_callback = progress_callback
+        self.total_files = max(0, int(total_files or 0))
+        self.done = 0
+        self.percent_start = int(percent_start)
+        self.percent_end = int(percent_end)
+        self.label = str(label or "正在复制文件")
+        self._last_emit_at = 0.0
+        self._last_percent = -1
+
+    def tick(self, rel_name=""):
+        self.done += 1
+        if not callable(self.progress_callback):
+            return
+        span = max(1, self.percent_end - self.percent_start)
+        if self.total_files <= 0:
+            percent = self.percent_start
+        else:
+            ratio = min(1.0, self.done / float(self.total_files))
+            percent = self.percent_start + int(ratio * span)
+        now = time.monotonic()
+        if percent == self._last_percent and (now - self._last_emit_at) < 0.12 and self.done < self.total_files:
+            return
+        self._last_percent = percent
+        self._last_emit_at = now
+        name = str(rel_name or "").replace("\\", "/")
+        if name and len(name) > 48:
+            name = "…" + name[-47:]
+        detail = f"{self.done}/{self.total_files}" if self.total_files else str(self.done)
+        if name:
+            message = f"{self.label}（{detail}）：{name}"
+        else:
+            message = f"{self.label}（{detail}）"
+        _emit(self.progress_callback, percent, message)
+
+
+def _copy_tree(src_dir, dst_dir, *, progress=None, rel_prefix=""):
     if not os.path.exists(src_dir):
         return
     for current_root, _dirs, files in os.walk(src_dir):
@@ -24,16 +83,25 @@ def _copy_tree(src_dir, dst_dir):
             src_file = os.path.join(current_root, name)
             dst_file = os.path.join(target_root, name)
             shutil.copy2(src_file, dst_file)
+            if progress is not None:
+                if rel_root == ".":
+                    rel_name = os.path.join(rel_prefix, name) if rel_prefix else name
+                else:
+                    nested = os.path.join(rel_root, name)
+                    rel_name = os.path.join(rel_prefix, nested) if rel_prefix else nested
+                progress.tick(rel_name)
 
 
-def _copy_path(src_path, dst_path):
+def _copy_path(src_path, dst_path, *, progress=None, rel_prefix=""):
     if not src_path or not os.path.exists(src_path):
         return
     if os.path.isdir(src_path):
-        _copy_tree(src_path, dst_path)
+        _copy_tree(src_path, dst_path, progress=progress, rel_prefix=rel_prefix)
         return
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
     shutil.copy2(src_path, dst_path)
+    if progress is not None:
+        progress.tick(rel_prefix or os.path.basename(src_path))
 
 
 def _remove_tree_if_exists(path):
@@ -64,6 +132,13 @@ def _assert_not_nested_path(current_root, target_root):
 def _validate_target_metadata(target_meta_file):
     if not os.path.exists(target_meta_file):
         return
+    try:
+        with open(target_meta_file, encoding="utf-8") as handle:
+            json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Data migration failed: invalid metadata JSON ({exc})") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Data migration failed: cannot read metadata ({exc})") from exc
     load_metadata(target_meta_file)
 
 
@@ -75,6 +150,38 @@ def _resolve_expected_meta_file(config, target_root):
         return get_model_profile_storage_paths(config=target_config)["meta_file"]
     target_paths = build_data_storage_paths(target_root)
     return target_paths["meta_file"]
+
+
+def _resolve_expected_library_markers(config, target_root):
+    """Paths that prove profile data landed (meta.json and/or library.db)."""
+    meta_file = _resolve_expected_meta_file(config, target_root)
+    markers = [meta_file]
+    profile_base = os.path.dirname(meta_file)
+    if profile_base:
+        markers.append(os.path.join(profile_base, "library.db"))
+    # Legacy layout also kept a root data/meta.json.
+    target_paths = build_data_storage_paths(target_root)
+    root_meta = target_paths.get("meta_file")
+    if root_meta and root_meta not in markers:
+        markers.append(root_meta)
+    return [path for path in markers if path]
+
+
+def _assert_migrated_metadata_present(config, staging_root):
+    markers = _resolve_expected_library_markers(config, staging_root)
+    existing = [path for path in markers if os.path.exists(path)]
+    if not existing:
+        preview = ", ".join(markers[:3]) if markers else "(none)"
+        raise RuntimeError(
+            "Data migration failed: library metadata was not found after transfer "
+            f"(looked for: {preview})."
+        )
+    # Prefer validating JSON meta when present; library.db alone is enough for schema v2.
+    for path in existing:
+        if str(path).lower().endswith(".json"):
+            _validate_target_metadata(path)
+            return
+    return
 
 
 def _normalize_existing_path(value):
@@ -95,6 +202,64 @@ def _path_is_strict_descendant(ancestor, descendant):
     except ValueError:
         return False
     return os.path.normcase(common) == os.path.normcase(a)
+
+
+def _same_volume(path_a, path_b) -> bool:
+    """True when both paths are on the same drive / filesystem (rename/move is cheap)."""
+    a = _normalize_existing_path(path_a)
+    b = _normalize_existing_path(path_b)
+    if not a or not b:
+        return False
+    if os.name == "nt":
+        drive_a = os.path.splitdrive(a)[0].upper()
+        drive_b = os.path.splitdrive(b)[0].upper()
+        return bool(drive_a) and drive_a == drive_b
+
+    def _probe_dev(path: str):
+        probe = path
+        while probe and not os.path.exists(probe):
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                break
+            probe = parent
+        if not probe or not os.path.exists(probe):
+            raise OSError("no existing ancestor")
+        return os.stat(probe).st_dev
+
+    try:
+        return _probe_dev(a) == _probe_dev(b)
+    except OSError:
+        return False
+
+
+def _prepare_move_destination(dst_path: str) -> None:
+    """Ensure ``dst_path`` does not exist so ``shutil.move(src, dst)`` renames into place."""
+    if not os.path.exists(dst_path):
+        parent = os.path.dirname(dst_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return
+    if os.path.isdir(dst_path) and not os.listdir(dst_path):
+        os.rmdir(dst_path)
+        parent = os.path.dirname(dst_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return
+    raise ValueError("Target data directory already exists and is not empty")
+
+
+def _move_path(src_path: str, dst_path: str) -> None:
+    _prepare_move_destination(dst_path)
+    shutil.move(src_path, dst_path)
+
+
+def _can_same_volume_move(copy_tasks, target_root: str) -> bool:
+    for src, dst in copy_tasks:
+        if not src or not os.path.exists(src):
+            continue
+        if not _same_volume(src, dst or target_root):
+            return False
+    return True
 
 
 def _collect_storage_copy_tasks(config, current_data_root, target_root):
@@ -132,18 +297,22 @@ def _collect_storage_copy_tasks(config, current_data_root, target_root):
     return current_storage_dir, target_paths, copy_tasks
 
 
-def migrate_app_data_root(target_root):
+def migrate_app_data_root(target_root, progress_callback=None):
     normalized_target_root = os.path.normpath(os.path.abspath(os.fspath(target_root)))
     if not normalized_target_root:
         raise ValueError("Target data directory is required")
 
+    _emit(progress_callback, 1, "正在准备数据搬家")
     config = load_config()
     current_data_root = get_configured_data_root(config)
     if os.path.normcase(normalized_target_root) == os.path.normcase(current_data_root):
+        _emit(progress_callback, 100, "无需搬家")
         return {
             "migrated": False,
             "reason": "same_path",
             "data_root": current_data_root,
+            "transfer_mode": "",
+            "old_remaining": False,
         }
 
     staging_root = os.path.join(normalized_target_root, STAGING_DIR_NAME)
@@ -163,29 +332,91 @@ def migrate_app_data_root(target_root):
     os.makedirs(normalized_target_root, exist_ok=True)
     _remove_tree_if_exists(staging_root)
 
-    logger.info("Migrating application data root from %s to %s", current_data_root, normalized_target_root)
+    use_move = _can_same_volume_move(copy_tasks, normalized_target_root)
+    transfer_mode = "move" if use_move else "copy"
+    moved_pairs = []
+
+    source_meta = _normalize_existing_path(config.get("meta_file", "")) or os.path.join(
+        current_storage_dir, "meta.json"
+    )
+    if source_meta and os.path.exists(source_meta):
+        _emit(progress_callback, 2, "正在校验源数据元数据")
+        _validate_target_metadata(source_meta)
+
+    logger.info(
+        "Migrating application data root from %s to %s (%s)",
+        current_data_root,
+        normalized_target_root,
+        transfer_mode,
+    )
     try:
-        for current_path, target_path in copy_tasks:
-            _copy_path(current_path, target_path)
-        expected_meta_file = _resolve_expected_meta_file(config, staging_root)
-        if not os.path.exists(expected_meta_file):
-            raise RuntimeError("Data migration failed: metadata file was not copied successfully")
-        _validate_target_metadata(expected_meta_file)
+        if use_move:
+            _emit(progress_callback, 10, "同盘剪切：正在移动数据（几乎不占双倍空间）")
+            for current_path, target_path in copy_tasks:
+                if not current_path or not os.path.exists(current_path):
+                    continue
+                _move_path(current_path, target_path)
+                moved_pairs.append((current_path, target_path))
+            _emit(progress_callback, 70, "正在校验元数据")
+        else:
+            _emit(progress_callback, 3, "跨盘复制：正在统计待复制文件")
+            total_files = sum(_count_files(src) for src, _dst in copy_tasks)
+            progress = _CopyProgress(
+                progress_callback,
+                total_files=total_files,
+                percent_start=5,
+                percent_end=88,
+                label="正在复制数据",
+            )
+            _emit(progress_callback, 5, f"开始复制（共 {total_files} 个文件）")
+            for current_path, target_path in copy_tasks:
+                _copy_path(
+                    current_path,
+                    target_path,
+                    progress=progress,
+                    rel_prefix=os.path.basename(current_path) or "data",
+                )
+            _emit(progress_callback, 90, "正在校验元数据")
+
+        _assert_migrated_metadata_present(config, staging_root)
+        _emit(progress_callback, 94, "正在切换到新数据目录")
         if os.path.exists(staging_storage_dir):
+            _prepare_move_destination(target_storage_dir)
             shutil.move(staging_storage_dir, target_storage_dir)
+            if use_move:
+                moved_pairs = [
+                    (src, target_storage_dir if dst == staging_storage_dir else dst)
+                    for src, dst in moved_pairs
+                ]
     except Exception:
+        if use_move:
+            for src, dst in reversed(moved_pairs):
+                try:
+                    if os.path.exists(dst) and not os.path.exists(src):
+                        _move_path(dst, src)
+                except Exception:
+                    logger.exception("Failed to roll back moved path %s -> %s", dst, src)
         _remove_tree_if_exists(staging_root)
         raise
     finally:
         if os.path.isdir(staging_root) and not os.listdir(staging_root):
             _remove_tree_if_exists(staging_root)
 
+    old_remaining = (not use_move) and bool(current_storage_dir) and os.path.exists(current_storage_dir)
+    _emit(progress_callback, 97, "正在更新配置")
     updated_config = dict(config)
     updated_config["data_root"] = normalized_target_root
+    if old_remaining:
+        updated_config["pending_cleanup_data_root"] = current_data_root
+    else:
+        updated_config.pop("pending_cleanup_data_root", None)
     save_config(updated_config)
+    _emit(progress_callback, 100, "数据搬家完成" if use_move else "数据复制完成，可确认是否删除旧数据")
     return {
         "migrated": True,
         "reason": "",
+        "transfer_mode": transfer_mode,
+        "old_remaining": old_remaining,
         "old_data_root": current_data_root,
         "new_data_root": normalized_target_root,
         "old_data_dir": current_storage_dir,
@@ -193,21 +424,25 @@ def migrate_app_data_root(target_root):
     }
 
 
-def migrate_model_root(target_root):
-    """Copy the active profile's model tree to a new root and point matching profiles at it."""
+def migrate_model_root(target_root, progress_callback=None):
+    """Move or copy the active profile's model tree to a new root and retarget profiles."""
     normalized_target = _normalize_existing_path(target_root)
     if not normalized_target:
         raise ValueError("Target model directory is required")
 
+    _emit(progress_callback, 1, "正在准备模型搬家")
     config = load_config()
     source = _normalize_existing_path(get_effective_model_dir(config=config))
     if not source:
         raise ValueError("Active profile has no runtime.model_dir")
 
     if os.path.normcase(source) == os.path.normcase(normalized_target):
+        _emit(progress_callback, 100, "无需搬家")
         return {
             "migrated": False,
             "reason": "same_path",
+            "transfer_mode": "",
+            "old_remaining": False,
             "old_model_dir": source,
             "new_model_dir": normalized_target,
         }
@@ -226,9 +461,27 @@ def migrate_model_root(target_root):
         if entries:
             raise ValueError("Target model directory must be empty or not exist yet")
 
-    os.makedirs(normalized_target, exist_ok=True)
-    _copy_tree(source, normalized_target)
+    use_move = _same_volume(source, normalized_target)
+    transfer_mode = "move" if use_move else "copy"
 
+    if use_move:
+        _emit(progress_callback, 20, "同盘剪切：正在移动模型目录")
+        _move_path(source, normalized_target)
+    else:
+        os.makedirs(normalized_target, exist_ok=True)
+        _emit(progress_callback, 3, "跨盘复制：正在统计待复制文件")
+        total_files = _count_files(source)
+        progress = _CopyProgress(
+            progress_callback,
+            total_files=total_files,
+            percent_start=5,
+            percent_end=90,
+            label="正在复制模型",
+        )
+        _emit(progress_callback, 5, f"开始复制（共 {total_files} 个文件）")
+        _copy_tree(source, normalized_target, progress=progress)
+
+    _emit(progress_callback, 94, "正在更新模型路径配置")
     old_normcase = os.path.normcase(source)
     updated_config = dict(config)
     top = _normalize_existing_path(updated_config.get("model_dir", ""))
@@ -254,11 +507,18 @@ def migrate_model_root(target_root):
                 new_item["runtime"] = new_runtime
                 profiles[idx] = new_item
 
-    updated_config["pending_cleanup_model_dir"] = source
+    old_remaining = (not use_move) and os.path.exists(source)
+    if old_remaining:
+        updated_config["pending_cleanup_model_dir"] = source
+    else:
+        updated_config.pop("pending_cleanup_model_dir", None)
     save_config(updated_config)
+    _emit(progress_callback, 100, "模型搬家完成" if use_move else "模型复制完成，可确认是否删除旧目录")
     return {
         "migrated": True,
         "reason": "",
+        "transfer_mode": transfer_mode,
+        "old_remaining": old_remaining,
         "old_model_dir": source,
         "new_model_dir": normalized_target,
     }

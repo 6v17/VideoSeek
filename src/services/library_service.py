@@ -29,8 +29,12 @@ def _iter_library_video_paths(root_path: str):
 
 def needs_search_index_schema_upgrade(config=None):
     cfg = config or load_config()
-    meta = load_model_metadata(config=cfg)
-    return needs_search_index_upgrade(meta, config=cfg)
+    try:
+        meta = load_model_metadata(config=cfg)
+        return needs_search_index_upgrade(meta, config=cfg)
+    except Exception:
+        # No CLIP profile / empty asset dir after removing all models — treat as no upgrade needed.
+        return False
 
 
 def get_installed_search_index_schema_version(config=None):

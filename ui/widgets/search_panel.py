@@ -110,7 +110,9 @@ class SearchPanel(VSCard):
 
         self.lbl_active_model = QLabel()
         self.lbl_active_model.setObjectName("StatusHint")
-        self.lbl_active_model.setWordWrap(True)
+        # Single-line, reserved height — avoids panel jump when tab text changes.
+        self.lbl_active_model.setWordWrap(False)
+        self.lbl_active_model.setFixedHeight(20)
 
         self.lbl_text_model_hint = QLabel()
         self.lbl_text_model_hint.setObjectName("StatusHint")
@@ -129,8 +131,9 @@ class SearchPanel(VSCard):
         mode_combo_width = max(combo_width, int(COMPONENT_SIZES.get("search_image_mode_combo_width", 108)))
         mode_cluster_width = field_label_width + field_gap + mode_combo_width
         # Stack/cluster slightly taller than the combo so QStackedWidget does not clip borders.
-        options_row_height = int(COMPONENT_SIZES.get("search_image_options_row_height", 30))
-        options_combo_height = max(24, options_row_height - 2)
+        options_row_height = int(COMPONENT_SIZES.get("search_image_options_row_height", 36))
+        # Leave ~4px vertical slack in the row so the 1px bottom border is not clipped.
+        options_combo_height = max(28, options_row_height - 4)
 
         self.search_mode_label = QLabel()
         self.search_mode_label.setObjectName("InlineFieldLabel")
@@ -142,7 +145,7 @@ class SearchPanel(VSCard):
         self.search_mode.setSizePolicy(combo_policy)
         self.text_granularity_cluster = QWidget()
         text_granularity_row = QHBoxLayout(self.text_granularity_cluster)
-        text_granularity_row.setContentsMargins(0, 1, 0, 1)
+        text_granularity_row.setContentsMargins(0, 2, 0, 2)
         text_granularity_row.setSpacing(field_gap)
         text_granularity_row.addWidget(self.search_mode_label, 0)
         text_granularity_row.addWidget(self.search_mode, 0)
@@ -161,7 +164,7 @@ class SearchPanel(VSCard):
         self.image_search_mode.setSizePolicy(combo_policy)
         self.image_search_mode_cluster = QWidget()
         image_mode_row = QHBoxLayout(self.image_search_mode_cluster)
-        image_mode_row.setContentsMargins(0, 1, 0, 1)
+        image_mode_row.setContentsMargins(0, 2, 0, 2)
         image_mode_row.setSpacing(field_gap)
         image_mode_row.addWidget(self.image_search_mode_label, 0)
         image_mode_row.addWidget(self.image_search_mode, 0)
@@ -188,7 +191,7 @@ class SearchPanel(VSCard):
         self.dialogue_search_mode.setSizePolicy(combo_policy)
         self.dialogue_search_mode_cluster = QWidget()
         dialogue_mode_row = QHBoxLayout(self.dialogue_search_mode_cluster)
-        dialogue_mode_row.setContentsMargins(0, 1, 0, 1)
+        dialogue_mode_row.setContentsMargins(0, 2, 0, 2)
         dialogue_mode_row.setSpacing(field_gap)
         dialogue_mode_row.addWidget(self.dialogue_search_mode_label, 0)
         dialogue_mode_row.addWidget(self.dialogue_search_mode, 0)
@@ -256,12 +259,13 @@ class SearchPanel(VSCard):
         self.search_scope_select.setSizePolicy(combo_policy)
         self.search_scope_cluster = QWidget()
         scope_row = QHBoxLayout(self.search_scope_cluster)
-        scope_row.setContentsMargins(0, 0, 0, 0)
+        scope_row.setContentsMargins(0, 2, 0, 2)
         scope_row.setSpacing(field_gap)
         scope_row.addWidget(self.search_scope_label, 0)
         scope_row.addWidget(self.search_scope_select, 0)
         scope_row.addStretch(1)
         _configure_field_group(self.search_scope_cluster, width=group1_width)
+        self.search_scope_cluster.setFixedHeight(options_row_height)
 
         self.options_block = self.search_scope_cluster
         self.options_title = self.search_scope_label
@@ -274,23 +278,26 @@ class SearchPanel(VSCard):
         self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
         self.btn_mobile_toggle.setCheckable(True)
         self.btn_mobile_toggle.setFixedWidth(toggle_width)
+        self.btn_mobile_toggle.setFixedHeight(options_combo_height)
         self.btn_mobile_toggle.setSizePolicy(combo_policy)
         self.btn_mobile_qr = QPushButton()
         self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
         self.btn_mobile_qr.setFixedWidth(mobile_qr_width)
         self.btn_mobile_qr.setMinimumWidth(mobile_qr_width)
         self.btn_mobile_qr.setMaximumWidth(mobile_qr_width)
+        self.btn_mobile_qr.setFixedHeight(options_combo_height)
         self.btn_mobile_qr.setProperty("qrState", "hidden")
         self.btn_mobile_qr.setEnabled(False)
         self.btn_mobile_qr.setSizePolicy(combo_policy)
         self.mobile_group = QWidget()
         mobile_group_layout = QHBoxLayout(self.mobile_group)
-        mobile_group_layout.setContentsMargins(0, 0, 0, 0)
+        mobile_group_layout.setContentsMargins(0, 2, 0, 2)
         mobile_group_layout.setSpacing(field_gap)
         mobile_group_layout.addWidget(self.mobile_toggle_label, 0)
         mobile_group_layout.addWidget(self.btn_mobile_toggle, 0)
         mobile_group_layout.addWidget(self.btn_mobile_qr, 0)
         _configure_field_group(self.mobile_group, width=group2_width)
+        self.mobile_group.setFixedHeight(options_row_height)
 
         self.mobile_row = QWidget()
         self.mobile_row.setObjectName("SearchMobileRow")
@@ -299,6 +306,7 @@ class SearchPanel(VSCard):
         mobile_row_layout.setSpacing(group_gap)
         mobile_row_layout.addWidget(self.search_scope_cluster, 0)
         mobile_row_layout.addWidget(self.mobile_group, 0)
+        self.mobile_row.setFixedHeight(options_row_height)
         self.mobile_row.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         )
@@ -310,8 +318,8 @@ class SearchPanel(VSCard):
         self.btn_clear = QPushButton()
         self.btn_clear.setObjectName("DangerGhostButton")
         action_row = QHBoxLayout()
-        # Keep a clear gap so the mode combo bottom border is not covered by 开始搜索.
-        action_row.setContentsMargins(0, 6, 0, 0)
+        # Extra top gap so the mode combo bottom border is not covered by 开始搜索.
+        action_row.setContentsMargins(0, 8, 0, 0)
         action_row.setSpacing(8)
         action_row.addWidget(self.btn_search, 1)
         action_row.addWidget(self.btn_save_preset, 0)

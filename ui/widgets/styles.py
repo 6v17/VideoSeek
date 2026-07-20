@@ -103,6 +103,18 @@ QMenu::separator {
 #BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint {
     color: __MUTED__;
 }
+#BrandFreeTip {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 600;
+}
+#BrandFreeTip a {
+    color: __ACCENT__;
+    text-decoration: none;
+}
+#BrandFreeTip a:hover {
+    text-decoration: underline;
+}
 #CardHint {
     line-height: 1.45em;
 }
@@ -222,7 +234,9 @@ QCheckBox:disabled {
     background: __ACCENT_SOFT__;
     border: 1px solid __LINE_STRONG__;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 8px 12px;
+    line-height: 1.35em;
+    min-height: 18px;
 }
 #HeroCard {
     background: __HERO__;
@@ -791,9 +805,9 @@ QTextEdit#SearchInput:focus {
     color: __HEADLINE__;
     border: 1px solid __LINE__;
     border-radius: 10px;
-    /* Compact padding; do not set max-height (it clips the bottom border). */
-    padding: 3px 8px;
-    min-height: 26px;
+    /* Keep padding modest; fixed widget height must leave room for both border edges. */
+    padding: 2px 8px;
+    min-height: 22px;
 }
 #SearchModeSelect QAbstractItemView {
     background: __PANEL__;
@@ -982,8 +996,8 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: transparent;
     border: none;
 }
-/* Same family as 添加库; never set max-height (clips bottom borders). */
-#LibrarySharedStrip #UpdateButton,
+/* Same family as 添加库 / 删除库; never set max-height (clips bottom borders). */
+#LibrarySharedStrip #SuccessGhostButton,
 #LibrarySharedStrip #DangerGhostButton {
     min-height: 32px;
     padding: 5px 14px;
@@ -2073,7 +2087,7 @@ QToolTip, QMessageBox, QDialog {
     border: 1px solid __LINE__;
 }
 QToolTip {
-    max-width: 360px;
+    /* Width/wrapping handled by ui.widgets.tooltip_utils (QSS max-width clips CJK). */
     padding: 6px 8px;
 }
 """

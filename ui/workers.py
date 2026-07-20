@@ -83,6 +83,33 @@ class StartupMigrationWorker(QThread):
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
+class StorageRootMigrateWorker(QThread):
+    """Copy data_root or model_dir to a new location with progress updates."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, kind: str, target_root: str):
+        super().__init__()
+        self.kind = str(kind or "").strip().lower()
+        self.target_root = str(target_root or "").strip()
+
+    def run(self):
+        from src.services.storage_service import migrate_app_data_root, migrate_model_root
+
+        try:
+            callback = lambda value, text: self.progress_signal.emit(int(value), str(text))
+            if self.kind == "model":
+                result = migrate_model_root(self.target_root, progress_callback=callback)
+            else:
+                result = migrate_app_data_root(self.target_root, progress_callback=callback)
+            self.finished_signal.emit(dict(result or {}))
+        except Exception as exc:
+            logger.exception("Storage root migration failed (%s)", self.kind)
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
 class SearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
@@ -190,11 +217,18 @@ class DialogueIndexWorker(QThread):
     finished_signal = Signal(bool, bool, dict)
     error_signal = Signal(str)
 
-    def __init__(self, targets=None, mode: str = "auto", sample_interval_sec: float | None = None):
+    def __init__(
+        self,
+        targets=None,
+        mode: str = "auto",
+        sample_interval_sec: float | None = None,
+        ocr_batch_size: int | None = None,
+    ):
         super().__init__()
         self.targets = list(targets or [])
         self.mode = str(mode or "auto").strip().lower() or "auto"
         self.sample_interval_sec = None if sample_interval_sec is None else float(sample_interval_sec)
+        self.ocr_batch_size = None if ocr_batch_size is None else int(ocr_batch_size)
         self._stop_requested = False
 
     def stop(self):
@@ -242,6 +276,7 @@ class DialogueIndexWorker(QThread):
                     stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
                     mode=self.mode,
                     sample_interval_sec=self.sample_interval_sec,
+                    ocr_batch_size=self.ocr_batch_size,
                 )
                 if result.get("ok"):
                     summary["ok"] += 1

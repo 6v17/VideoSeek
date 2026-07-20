@@ -148,7 +148,6 @@ class AgentDialogueSearchTests(unittest.TestCase):
 
 class HealthDialogueFieldsTests(unittest.TestCase):
     @mock.patch("src.storage.lance_dialogue_search.get_dialogue_index_stats")
-    @mock.patch("src.web.agent_api.health.build_agent_understanding_health_fields", return_value={})
     @mock.patch("src.services.indexing_runtime_status.get_index_sync_status", return_value={})
     @mock.patch("src.web.agent_api.health._index_snapshot")
     @mock.patch("src.web.agent_api.health.get_active_embedding_spec")
@@ -159,7 +158,6 @@ class HealthDialogueFieldsTests(unittest.TestCase):
         mock_spec,
         mock_snapshot,
         _sync,
-        _understanding,
         mock_dialogue,
     ):
         from src.web.agent_api.health import build_health_payload

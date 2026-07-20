@@ -895,6 +895,10 @@ class UnderstandingGuiMixin:
         page = self.understanding_page
 
         show_notice = self._is_current_page("understanding") and not ready and not understanding_running
+        # Keep the banner widget in the layout with a stable min height so
+        # show/hide does not shove the timeline on first open.
+        page.understanding_notice.setMinimumHeight(40 if show_notice else 0)
+        page.understanding_notice.setMaximumHeight(16777215 if show_notice else 0)
         page.understanding_notice.setVisible(show_notice)
         if show_notice:
             page.understanding_notice_text.setText(

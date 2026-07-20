@@ -178,12 +178,14 @@ class GuiSettingsPathTests(unittest.TestCase):
             show_confirm_dialog=MagicMock(return_value=True),
         )
 
-        with patch("ui.windows.gui_settings.migrate_app_data_root", return_value={"migrated": True, "new_data_root": "D:/new"}) as mock_migrate:
-            result = self.Target._migrate_data_root_if_needed(dummy, "D:/old", "D:/new")
+        dummy._run_storage_root_migration = MagicMock(
+            return_value={"migrated": True, "new_data_root": "D:/new"}
+        )
+        result = self.Target._migrate_data_root_if_needed(dummy, "D:/old", "D:/new")
 
         self.assertEqual(result["new_data_root"], "D:/new")
         dummy.show_confirm_dialog.assert_called_once_with("Confirm", "Move to D:/new")
-        mock_migrate.assert_called_once_with("D:/new")
+        dummy._run_storage_root_migration.assert_called_once_with("data", "D:/new")
 
     def test_migrate_data_root_if_needed_stops_when_user_cancels(self):
         dummy = types.SimpleNamespace(
@@ -194,21 +196,23 @@ class GuiSettingsPathTests(unittest.TestCase):
             },
             settings_page=types.SimpleNamespace(lbl_status=MagicMock()),
             show_confirm_dialog=MagicMock(return_value=False),
+            _run_storage_root_migration=MagicMock(),
         )
 
-        with patch("ui.windows.gui_settings.migrate_app_data_root") as mock_migrate:
-            result = self.Target._migrate_data_root_if_needed(dummy, "D:/old", "D:/new")
+        result = self.Target._migrate_data_root_if_needed(dummy, "D:/old", "D:/new")
 
         self.assertFalse(result)
         dummy.show_confirm_dialog.assert_called_once_with("Confirm", "Move to D:/new")
         dummy.settings_page.lbl_status.setText.assert_called_once_with("Settings hint")
-        mock_migrate.assert_not_called()
+        dummy._run_storage_root_migration.assert_not_called()
 
     def test_build_data_root_migration_message_uses_old_and_new_paths(self):
         dummy = types.SimpleNamespace(
             texts={
                 "data_root_move_success": "Moved to {path}",
                 "data_root_move_success_detail": "Old: {old_path} | New: {new_path} | Manual cleanup later",
+                "data_root_move_success_moved_detail": "Moved cut: {old_path} -> {new_path}",
+                "data_root_move_success_copied_detail": "Copied: {old_path} -> {new_path}",
             }
         )
 
@@ -217,11 +221,12 @@ class GuiSettingsPathTests(unittest.TestCase):
             {
                 "old_data_root": "D:/old",
                 "new_data_root": "D:/new",
+                "transfer_mode": "copy",
             },
             "D:/fallback",
         )
 
-        self.assertEqual(message, "Old: D:/old | New: D:/new | Manual cleanup later")
+        self.assertEqual(message, "Copied: D:/old -> D:/new")
 
     def test_build_data_storage_status_text_uses_only_data_root(self):
         dummy = types.SimpleNamespace(

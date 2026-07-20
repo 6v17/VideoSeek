@@ -99,6 +99,12 @@ def _release_profile_runtime_locks(asset_dir="", _resource_dir=""):
         invalidate_lance_runtime_caches(str(asset_dir or "").strip())
     except Exception as exc:
         logger.debug("invalidate_lance_runtime_caches before profile removal failed: %s", exc)
+    try:
+        from src.storage.profile_library_store import invalidate_profile_library_schema_cache
+
+        invalidate_profile_library_schema_cache(str(asset_dir or "").strip() or None)
+    except Exception as exc:
+        logger.debug("invalidate_profile_library_schema_cache before profile removal failed: %s", exc)
     # Drop any lingering table/file refs before rmtree on Windows.
     gc.collect()
 

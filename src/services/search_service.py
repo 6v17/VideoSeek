@@ -893,6 +893,9 @@ def run_dialogue_search(
         )
         for item in dialogue_hits
     ]
+    from src.services.search_scope import enrich_hits_with_source_paths
+
+    hits = enrich_hits_with_source_paths(hits, config=cfg)
     hits = apply_search_scope(
         hits,
         video_paths=scope_video_paths,

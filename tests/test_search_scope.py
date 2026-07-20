@@ -105,12 +105,50 @@ class SearchScopeTests(unittest.TestCase):
                 }
             }
             path_index = SearchablePathIndex.from_meta(meta)
-            hits = [SearchHit(1.0, 1.0, 0.9, "D:/old/moved/clip.mp4", video_id="v1")]
+            hits = [
+                SearchHit(
+                    1.0,
+                    1.0,
+                    0.9,
+                    "D:/old/moved/clip.mp4",
+                    video_id="v1",
+                    matched_text="line",
+                )
+            ]
             filtered = filter_hits_with_existing_sources(hits, path_index=path_index)
             self.assertEqual(len(filtered), 1)
             from src.services.search_scope import normalize_scope_path
 
             self.assertEqual(normalize_scope_path(filtered[0].video_path), normalize_scope_path(existing_path))
+            self.assertEqual(filtered[0].matched_text, "line")
+        finally:
+            os.unlink(existing_path)
+
+    def test_enrich_hits_with_source_paths_via_subtitle_index(self):
+        from src.services.search_scope import enrich_hits_with_source_paths
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            existing_path = handle.name
+        try:
+            subtitle_index = SearchablePathIndex(
+                by_video_id={"sub1": existing_path},
+                by_normalized_path={},
+            )
+            with patch(
+                "src.services.search_scope.load_searchable_path_index",
+                return_value=SearchablePathIndex(by_video_id={}, by_normalized_path={}),
+            ), patch(
+                "src.services.search_scope.load_subtitle_searchable_path_index",
+                return_value=subtitle_index,
+            ):
+                hits = enrich_hits_with_source_paths(
+                    [SearchHit(1.0, 2.0, 1.0, "", video_id="sub1", matched_text="hi")]
+                )
+            self.assertEqual(len(hits), 1)
+            from src.services.search_scope import normalize_scope_path
+
+            self.assertEqual(normalize_scope_path(hits[0].video_path), normalize_scope_path(existing_path))
+            self.assertEqual(hits[0].matched_text, "hi")
         finally:
             os.unlink(existing_path)
 

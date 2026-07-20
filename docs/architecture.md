@@ -25,7 +25,7 @@
 
 **存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db`）。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
 
-**视频理解**为可选扩展，不阻塞搜索与索引；HTTP 契约见 [`docs/for-agents.md`](for-agents.md)（`/videos/evidence`）。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
+**视频理解**为可选扩展，不阻塞搜索与索引；仅桌面「视频理解」页使用，**不**暴露给 Agent API。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
 
 `ui/` 与 `src/web/agent_api.py` 负责调度；搜索逻辑在 `search_service`，FastAPI 层不复制。Agent HTTP 契约见 `docs/for-agents.md`。已移除功能见 `docs/planned_features.md` §4。
 
@@ -244,7 +244,7 @@ sequenceDiagram
 4. 推理 → `core/understanding/pipeline`（仅 OpenAI 兼容描述服务 caption/summary）
 5. 落盘 → `data/evidence/videos/<video_id>.json`（路径由 `understanding_paths` 解析）
 
-不影响 `run_search` / 索引主链路。Agent HTTP：`GET /videos/evidence` 见 `docs/for-agents.md`。
+不影响 `run_search` / 索引主链路。不经 Agent HTTP 暴露。
 
 ## 目录结构（逻辑）
 

@@ -74,6 +74,42 @@ def _normalize_export_output_dir(output_dir: str) -> str:
     return normalized
 
 
+def resolve_export_clip_output_path(
+    *,
+    output_path: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    video_path: str = "",
+    start_sec: float = 0.0,
+    end_sec: float = 0.0,
+    client_request_id: Optional[str] = None,
+) -> str:
+    """Resolve single-clip destination: full ``output_path`` or auto name under ``output_dir``."""
+    path = str(output_path or "").strip()
+    directory = str(output_dir or "").strip()
+    if path and directory:
+        raise ValueError("Provide either output_path or output_dir, not both.")
+    if path:
+        return path
+    if not directory:
+        raise ValueError("Provide output_path or output_dir.")
+    out_dir = _normalize_export_output_dir(directory)
+    stem = _sanitize_export_filename_stem(
+        client_request_id
+        or os.path.splitext(os.path.basename(str(video_path or "").strip()))[0]
+        or "clip"
+    )
+    try:
+        start_tag = int(max(0.0, float(start_sec)))
+        end_tag = int(max(0.0, float(end_sec)))
+    except (TypeError, ValueError):
+        start_tag, end_tag = 0, 0
+    filename = f"{stem}_{start_tag}s_{end_tag}s.mp4"
+    destination = os.path.join(out_dir, filename)
+    if not _output_path_allowed(destination, config=load_config()):
+        raise ValueError(f"export output path is not allowed: {destination}")
+    return destination
+
+
 def _manifest_item_rank(item: Dict[str, Any]) -> int:
     try:
         return int(item.get("rank") or 9999)

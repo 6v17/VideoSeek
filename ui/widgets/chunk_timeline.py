@@ -287,7 +287,16 @@ class ChunkTimelineWidget(QWidget):
         return max(content, self._VIEWPORT_MIN_WIDTH)
 
     def _sync_layout_width(self):
-        target = self._layout_width()
+        viewport = self._viewport_width()
+        content = self._compute_content_width()
+        # Avoid a temporary 320px width on first show when the viewport is still 0 —
+        # that causes a visible jump once the real viewport arrives.
+        if viewport <= 0:
+            if self.width() >= max(content, self._VIEWPORT_MIN_WIDTH):
+                return
+            target = max(content, self._VIEWPORT_MIN_WIDTH)
+        else:
+            target = max(content, viewport)
         if self.width() == target:
             return
         self.setFixedWidth(target)

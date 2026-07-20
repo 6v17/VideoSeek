@@ -21,10 +21,7 @@ class PreviewGuiMixin:
     """Preview playback, expand dialog, and clip export tasks; mixed into `MainWindow`."""
 
     def handle_play(self, path, sec, end_sec=None):
-        if not self.check_runtime_resources():
-            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
-            self._update_expand_preview_button()
-            return
+        # Preview uses VLC; do not require a CLIP model profile.
         if not self.preview_controller.play(path, sec, end_sec=end_sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
         self._update_expand_preview_button()
@@ -43,10 +40,6 @@ class PreviewGuiMixin:
                 on_status(message)
             else:
                 self.search_page.lbl_status.setText(message)
-
-        if not self.check_runtime_resources():
-            set_status(self.texts["model_features_disabled"])
-            return False
 
         video_path = str(video_path or "").strip()
         if not video_path:
@@ -87,10 +80,6 @@ class PreviewGuiMixin:
         return True
 
     def open_current_preview_dialog(self, _event=None):
-        if not self.check_runtime_resources():
-            self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
-            return
-
         payload = self.preview_controller.get_current_preview_context()
         if not payload:
             return

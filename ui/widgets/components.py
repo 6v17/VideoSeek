@@ -273,8 +273,14 @@ class NavigationSidebar(QWidget):
         self.subtitle = QLabel("Local video search workspace")
         self.subtitle.setObjectName("BrandSubtitle")
         self.subtitle.setWordWrap(True)
+        self.free_tip = QLabel()
+        self.free_tip.setObjectName("BrandFreeTip")
+        self.free_tip.setWordWrap(True)
+        self.free_tip.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.free_tip.setOpenExternalLinks(True)
         layout.addWidget(self.title)
         layout.addWidget(self.subtitle)
+        layout.addWidget(self.free_tip)
 
         self.hero_card = QFrame()
         self.hero_card.setObjectName("HeroCard")
@@ -399,7 +405,9 @@ class SearchPage(QWidget):
 
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("StatusLabel")
-        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setWordWrap(False)
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         compare_row = QHBoxLayout()
         compare_row.setSpacing(12)
@@ -549,7 +557,7 @@ class LibraryPage(QWidget):
             divider.setObjectName("ToolbarDivider")
             return divider
 
-        # Shared strip: add folder + mode switch (same height / radius family)
+        # Shared strip: mode tabs + add/remove library (same height / radius family)
         self.shared_toolbar_card = QFrame()
         self.shared_toolbar_card.setObjectName("LibrarySharedStrip")
         shared_outer = QHBoxLayout(self.shared_toolbar_card)
@@ -559,7 +567,7 @@ class LibraryPage(QWidget):
         shared_outer.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         self.btn_add_lib = QPushButton()
-        self.btn_add_lib.setObjectName("UpdateButton")
+        self.btn_add_lib.setObjectName("SuccessGhostButton")
         self.btn_add_lib.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_remove_lib = QPushButton()
         self.btn_remove_lib.setObjectName("DangerGhostButton")
@@ -596,9 +604,10 @@ class LibraryPage(QWidget):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
+        # Left: mode tabs → add/remove library → hint
+        shared_outer.addWidget(self.mode_segment, 0, Qt.AlignmentFlag.AlignVCenter)
         shared_outer.addWidget(self.btn_add_lib, 0, Qt.AlignmentFlag.AlignVCenter)
         shared_outer.addWidget(self.btn_remove_lib, 0, Qt.AlignmentFlag.AlignVCenter)
-        shared_outer.addWidget(self.mode_segment, 0, Qt.AlignmentFlag.AlignVCenter)
         shared_outer.addWidget(self.lbl_shared_library_hint, 1)
         page_body.addWidget(self.shared_toolbar_card)
 
@@ -696,6 +705,14 @@ class LibraryPage(QWidget):
         self.input_subtitle_sample_interval.setSuffix(" s")
         self.input_subtitle_sample_interval.setMinimumWidth(88)
         self.input_subtitle_sample_interval.setMaximumWidth(110)
+        self.lbl_subtitle_ocr_batch = QLabel()
+        self.lbl_subtitle_ocr_batch.setObjectName("CardHint")
+        self.input_subtitle_ocr_batch = NoWheelSpinBox()
+        self.input_subtitle_ocr_batch.setRange(1, 6)
+        self.input_subtitle_ocr_batch.setSingleStep(1)
+        self.input_subtitle_ocr_batch.setValue(1)
+        self.input_subtitle_ocr_batch.setMinimumWidth(64)
+        self.input_subtitle_ocr_batch.setMaximumWidth(80)
         self.btn_stop_dialogue_index = QPushButton()
         self.btn_stop_dialogue_index.setObjectName("DangerGhostButton")
         self.btn_stop_dialogue_index.setEnabled(False)
@@ -707,6 +724,9 @@ class LibraryPage(QWidget):
         dialogue_toolbar.addSpacing(8)
         dialogue_toolbar.addWidget(self.lbl_subtitle_sample_interval)
         dialogue_toolbar.addWidget(self.input_subtitle_sample_interval)
+        dialogue_toolbar.addSpacing(8)
+        dialogue_toolbar.addWidget(self.lbl_subtitle_ocr_batch)
+        dialogue_toolbar.addWidget(self.input_subtitle_ocr_batch)
         dialogue_toolbar.addStretch()
         dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
         dialogue_table_layout.addLayout(dialogue_toolbar)
@@ -973,7 +993,9 @@ class UnderstandingEvidencePage(QWidget):
         self.timeline_label.setObjectName("CardHint")
         self.timeline_hint = QLabel()
         self.timeline_hint.setObjectName("StatusHint")
-        self.timeline_hint.setWordWrap(True)
+        # Fixed single-line slot so hint text length does not shove the track.
+        self.timeline_hint.setWordWrap(False)
+        self.timeline_hint.setFixedHeight(18)
         timeline_header.addWidget(self.timeline_label, 0)
         timeline_header.addWidget(self.timeline_hint, 1)
         workspace_layout.addLayout(timeline_header)
@@ -981,11 +1003,13 @@ class UnderstandingEvidencePage(QWidget):
         self.chunk_timeline_scroll = QScrollArea()
         self.chunk_timeline_scroll.setObjectName("ChunkTimelineScroll")
         self.chunk_timeline_scroll.setWidgetResizable(False)
-        self.chunk_timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # Reserve the horizontal bar slot so first content load does not steal height.
+        self.chunk_timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.chunk_timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.chunk_timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.chunk_timeline_scroll.setMinimumHeight(50)
+        self.chunk_timeline_scroll.setFixedHeight(56)
         self.chunk_timeline = ChunkTimelineWidget()
+        self.chunk_timeline.setFixedHeight(32)
         self.chunk_timeline_scroll.setWidget(self.chunk_timeline)
         workspace_layout.addWidget(self.chunk_timeline_scroll)
 
