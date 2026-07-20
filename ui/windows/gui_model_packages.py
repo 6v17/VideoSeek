@@ -256,28 +256,48 @@ class ModelPackagesGuiMixin:
         if not self.show_confirm_dialog(self.texts["confirm_title"], confirm_text):
             return
         try:
-            result = remove_model_profile(selected_profile_id)
+            # Release ONNX handles before directory deletion (service also resets).
             reset_engine()
-            self.load_settings_values()
-            self.refresh_runtime_resource_ui(sync_dialog=False)
-            self.push_inference_status()
-            self.refresh_library_table()
-            active_profile = str(result.get("active_profile", "") or "").strip()
-            removed_resource_dir = str(result.get("removed_resource_dir", "") or "").strip()
-            removed_asset_dir = str(result.get("removed_asset_dir", "") or "").strip()
-            summary = self.texts.get(
-                "remove_model_profile_done",
-                "Model removed. Active profile: {active}.",
-            ).format(active=active_profile or "none")
-            details = []
-            if removed_resource_dir:
-                details.append(f"Resource dir: {removed_resource_dir}")
-            if removed_asset_dir:
-                details.append(f"Data dir: {removed_asset_dir}")
-            message = summary if not details else f"{summary}\n\n" + "\n".join(details)
-            self.show_info_dialog(self.texts["success_title"], message, kind="success")
+            result = remove_model_profile(selected_profile_id)
         except Exception as exc:
             self.show_error_dialog(
                 self.texts.get("remove_model_profile_failed", "Failed to remove model profile."),
                 exc,
             )
+            return
+
+        refresh_error = ""
+        try:
+            reset_engine()
+            self.load_settings_values()
+            self.refresh_runtime_resource_ui(sync_dialog=False)
+            self.push_inference_status()
+            self.refresh_library_table()
+        except Exception as exc:
+            refresh_error = str(exc)
+            try:
+                self.load_settings_values()
+            except Exception:
+                pass
+
+        active_profile = str(result.get("active_profile", "") or "").strip()
+        removed_resource_dir = str(result.get("removed_resource_dir", "") or "").strip()
+        removed_asset_dir = str(result.get("removed_asset_dir", "") or "").strip()
+        summary = self.texts.get(
+            "remove_model_profile_done",
+            "Model removed. Active profile: {active}.",
+        ).format(active=active_profile or "none")
+        details = []
+        if removed_resource_dir:
+            details.append(f"Resource dir: {removed_resource_dir}")
+        if removed_asset_dir:
+            details.append(f"Data dir: {removed_asset_dir}")
+        for warning in list(result.get("delete_warnings") or []):
+            text = str(warning or "").strip()
+            if text:
+                details.append(text)
+        if refresh_error:
+            details.append(refresh_error)
+        message = summary if not details else f"{summary}\n\n" + "\n".join(details)
+        kind = "warning" if (refresh_error or result.get("delete_warnings")) else "success"
+        self.show_info_dialog(self.texts["success_title"], message, kind=kind)

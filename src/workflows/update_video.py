@@ -75,16 +75,22 @@ def update_videos_flow(
     issue_callback=None,
     include_existing_assets=True,
     rebuild_global_assets=True,
+    video_ids=None,
 ):
     # Retained intentionally: imported dynamically inside IndexUpdateWorker.run().
     del rebuild_global_assets
     flow_start = time.perf_counter()
-    logger.info("Starting index update%s", f" for {target_lib}" if target_lib else "")
+    selected_note = ""
+    if video_ids is not None:
+        selected_note = f" video_ids={len({str(v).strip() for v in video_ids if str(v or '').strip()})}"
+    logger.info(
+        "Starting index update%s%s",
+        f" for {target_lib}" if target_lib else "",
+        selected_note,
+    )
     garbage_collect_indices()
     config = load_config()
     meta = load_model_metadata(config=config)
-    _set_library_index_state(meta, "partial", target_lib=target_lib)
-    save_model_metadata(meta, config=config)
 
     should_cleanup_missing_files = force_cleanup_missing_files or config.get("auto_cleanup_missing_files", False)
 
@@ -93,6 +99,8 @@ def update_videos_flow(
         if progress_callback:
             progress_callback(5, "Cleaning stale index source")
         removed_any = False
+        from src.services.library_service import count_video_id_refs
+
         for video_id in cleanup_missing_library_files(
             meta,
             config,
@@ -100,7 +108,15 @@ def update_videos_flow(
             selected_entries=cleanup_missing_entries,
         ):
             removed_any = True
-            delete_physical_video_data(video_id, config)
+            # cleanup_missing already removed the file row; only wipe payload when
+            # no other library still references this video_id.
+            if count_video_id_refs(meta, video_id) == 0:
+                delete_physical_video_data(video_id, config)
+            else:
+                logger.info(
+                    "Keeping shared index payload after missing-file cleanup for video_id=%s",
+                    video_id,
+                )
         if removed_any:
             save_model_metadata(meta, config=config)
     else:
@@ -117,10 +133,16 @@ def update_videos_flow(
             get_video_id,
             target_lib=target_lib,
             progress_callback=progress_callback,
-            persist_meta_callback=lambda: save_model_metadata(meta, config=config),
+            persist_meta_callback=lambda: save_model_metadata(
+                meta,
+                config=config,
+                pretty=False,
+                invalidate_path_index=False,
+            ),
             should_stop_callback=should_stop_callback,
             issue_callback=issue_callback,
             include_existing_assets=include_existing_assets,
+            video_ids=video_ids,
         )
     except IndexUpdateInterrupted as exc:
         scan_s = time.perf_counter() - t_scan
@@ -130,8 +152,7 @@ def update_videos_flow(
             scan_s,
             time.perf_counter() - flow_start,
         )
-        if getattr(exc, "search_assets_changed", False):
-            save_model_metadata(meta, config=config)
+        save_model_metadata(meta, config=config)
         raise
     scan_s = time.perf_counter() - t_scan
     failed_videos, _scan_search_assets_changed = scan_result
@@ -153,11 +174,20 @@ def update_videos_flow(
             failed_videos,
         )
 
-    if _mark_missing_source_entries(meta, target_lib=target_lib):
-        save_model_metadata(meta, config=config)
-
+    # Finalize in memory, then one pretty meta write (+ path-index invalidate).
+    _mark_missing_source_entries(meta, target_lib=target_lib)
     _finalize_library_index_state(meta, target_lib=target_lib)
     save_model_metadata(meta, config=config)
+    try:
+        # Artifact cleanup only — avoid maintain_library_metadata() reloading/rewriting meta.
+        from src.services.library_service import prune_legacy_search_index_artifacts
+        from src.storage.config_store import get_local_model_asset_dirs
+        from src.storage.lance_store import drop_lance_vector_indexes
+
+        drop_lance_vector_indexes(get_local_model_asset_dirs(config=config)["base_dir"])
+        prune_legacy_search_index_artifacts(meta, config=config)
+    except Exception as exc:
+        logger.warning("Post-index library artifact cleanup failed: %s", exc)
     has_search_assets = _has_ready_search_assets(meta)
     logger.info(
         "Index update complete: cleanup=%.2fs scan_libraries=%.2fs has_search_assets=%s total=%.2fs",
@@ -187,7 +217,7 @@ def upgrade_search_index_flow(
     }
 
 
-def delete_physical_video_data(video_id, config):
+def delete_physical_video_data(video_id, config, *, refresh_lance_state: bool = True):
     if not video_id:
         return
 
@@ -208,13 +238,22 @@ def delete_physical_video_data(video_id, config):
     try:
         from src.storage.lance_store import delete_profile_video_vectors
 
-        delete_profile_video_vectors(video_id, config=config)
+        delete_profile_video_vectors(
+            video_id,
+            config=config,
+            refresh_state=bool(refresh_lance_state),
+        )
     except Exception as exc:
         logger.warning("Failed to remove Lance vectors for %s: %s", video_id, exc)
 
 
 def garbage_collect_indices():
+    from src.storage.video_id_migration import legacy_npy_vectors_present
+
     config = load_config()
+    if not legacy_npy_vectors_present(config):
+        return
+
     meta = load_model_metadata(config=config)
 
     valid_ids = set()

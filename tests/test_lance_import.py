@@ -90,10 +90,13 @@ class LanceImportTests(unittest.TestCase):
             self.assertEqual(db.open_table(FRAMES_TABLE_NAME).count_rows(), 4)
             self.assertEqual(db.open_table(CHUNKS_TABLE_NAME).count_rows(), 2)
 
-            state_file = os.path.join(lance_dir, "import_state.json")
-            self.assertTrue(os.path.isfile(state_file))
-            with open(state_file, "r", encoding="utf-8") as handle:
-                state = json.load(handle)
+            from src.storage.profile_library_store import (
+                get_library_db_path,
+                load_import_state_dict,
+            )
+
+            self.assertTrue(os.path.isfile(get_library_db_path(profile_dir)))
+            state = load_import_state_dict(profile_dir)
             self.assertEqual(state["videos_imported"], 1)
 
 

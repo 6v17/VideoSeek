@@ -3,7 +3,7 @@
 桌面语义视频检索（PySide6 + ONNX + Lance + FFmpeg）。主流程：
 
 ```text
-建索引 → 语义检索 → 定位 / 预览 → 导出片段 →（可选）理解笔录 →（可选）本机 Agent API
+建索引 → 语义检索 / 硬字幕检索 → 定位 / 预览 → 导出片段 →（可选）视频理解 →（可选）本机 Agent API
 ```
 
 主要模块：
@@ -16,10 +16,16 @@
 | `search_preset*` | 混合搜索预设：JSON 存储、记录规范化、query 向量缓存、CRUD、搜索 plan（由 `search_preset_service` 门面 re-export） |
 | `indexing_service.py` | 索引构建与复用、库内路径对齐、写 Lance |
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
-| `understanding_service.py` | 理解笔录生成、读盘/写盘、`EvidenceBundle` 编排 |
-| `understanding_resource_service.py` | YOLO / profile 扫描、描述服务探测、`understanding_ready` |
+| `lance_dialogue_search.py` / `dialogue_transcript_store.py` | 硬字幕（OCR）关键词检索；SQLite 字幕库；精确 / 模糊（单字落点命中率） |
+| `understanding_service.py` | 视频总结生成、读盘/写盘、`EvidenceBundle` 编排 |
+| `understanding_resource_service.py` | profile 扫描、描述服务探测、`understanding_ready`（仅 caption；YOLO 已退出产品路径） |
+| `src/infra/` | 路径 / FFmpeg 等基础设施（从 `utils` 拆出；见 [`engineering.md`](engineering.md)） |
 
-**理解笔录**为可选扩展，不阻塞搜索与索引；契约与分阶段说明见 [`docs/ai/understanding_evidence.md`](ai/understanding_evidence.md)。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
+工程约定（新功能边界、legacy 禁扩、lint）：[`docs/engineering.md`](engineering.md)。
+
+**存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db`）。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
+
+**视频理解**为可选扩展，不阻塞搜索与索引；仅桌面「视频理解」页使用，**不**暴露给 Agent API。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
 
 `ui/` 与 `src/web/agent_api.py` 负责调度；搜索逻辑在 `search_service`，FastAPI 层不复制。Agent HTTP 契约见 `docs/for-agents.md`。已移除功能见 `docs/planned_features.md` §4。
 
@@ -35,7 +41,8 @@
 | 图搜精度（Agent / 共用） | `from src.services.search_request_service import normalize_search_precision_mode` |
 | 索引重建编排 | `from src.workflows.update_video import update_videos_flow` |
 | Embedding / ONNX | `from src.core.clip_embedding import get_engine` |
-| 理解笔录生成 | `from src.services.understanding_service import generate_evidence_for_video` |
+| 硬字幕搜索 | `from src.storage.lance_dialogue_search import keyword_search_dialogue` |
+| 视频总结生成 | `from src.services.understanding_service import generate_evidence_for_video` |
 | 理解资源就绪 | `from src.services.understanding_resource_service import get_understanding_resource_status` |
 | Agent HTTP | `src/web/agent_api.py` → `execute_agent_search`（直接调 `search_service`） |
 
@@ -82,16 +89,16 @@ flowchart TB
   IS --> CE["clip_embedding + extract_frames + lance_store"]
 ```
 
-**理解笔录（可选，桌面手动触发）：**
+**视频理解 / 总结（可选，桌面手动触发）：**
 
 ```mermaid
 flowchart TB
-  GU["gui_understanding — 侧栏「理解笔录」页"]
-  URS["understanding_resource_service — YOLO + 描述服务就绪"]
+  GU["gui_understanding — 侧栏「视频理解」页"]
+  URS["understanding_resource_service — 描述服务就绪"]
   UC["UnderstandingController — 仅线程接线"]
   UW["UnderstandingVideoWorker / UnderstandingWorker"]
   US["understanding_service.generate_evidence_for_video"]
-  PIPE["core/understanding/pipeline — YOLO + remote caption"]
+  PIPE["core/understanding/pipeline — remote caption only"]
   DISK[("data/evidence/<video_id>.json")]
 
   GU --> URS
@@ -99,7 +106,7 @@ flowchart TB
   US --> DISK
 ```
 
-进入理解页时，YOLO 等本地检查同步完成；**描述服务连通性**在 `UnderstandingResourceStatusWorker` 后台探测（不阻塞切页）。生成仍走 `understanding_service`，与搜索/索引解耦。
+进入理解页时本地 profile/组件检查同步完成；**描述服务连通性**在 `UnderstandingResourceStatusWorker` 后台探测（不阻塞切页）。流水线仅跑画面描述（`image_caption`）；**YOLO / object_detection 已从产品路径移除**（旧 JSON 若含检测结果仍可展示）。生成仍走 `understanding_service`，与搜索/索引解耦。
 
 ### 各层实际权重
 
@@ -111,12 +118,13 @@ flowchart TB
 | `search_request_service.py` | 精度模式、内联图校验、预设/query 解析 | GUI + Agent 共用 |
 | `search_scope.py` | 当前范围、过滤、`resolve_effective_search_scope` | GUI + Agent 共用 |
 | `agent_api.py` | HTTP、预设/scope、超时 | 独立子系统；止于 `search_service` |
-| `understanding_service.py` | 单视频/批量生成、bundle 读写、历史列表 | **理解笔录主逻辑** |
+| `understanding_service.py` | 单视频/批量生成、bundle 读写、历史列表 | **视频总结主逻辑** |
 | `understanding_resource_service.py` | manifest 扫描、profile、remote VLM 探测 | **理解资源层** |
-| `core/understanding/` | YOLO ONNX、remote caption、pipeline | **理解推理** |
+| `core/understanding/` | remote caption、pipeline（跳过 object_detection） | **理解推理** |
+| `dialogue_transcript_store.py` | 字幕 SQLite 读写与精确/模糊匹配 | **硬字幕存储** |
 | `IndexingController` / `AgentApiController` / `MobileBridgeController` / `UnderstandingController` | 启停后台服务 | 薄层 |
 | `src/domain/search_hit.py` | `SearchHit` dataclass | 边界类型 |
-| `src/domain/evidence_bundle.py` | `EvidenceBundle` schema | 理解笔录边界类型 |
+| `src/domain/evidence_bundle.py` | `EvidenceBundle` schema | 视频总结边界类型 |
 | `inference_registry.py` | 3 个 provider 工厂（约 25 行） | 小插件表 |
 
 Frame/chunk、scope over-fetch、rerank、预设与 Agent 批处理在 **services**；**core** 负责推理与向量 I/O 原语；**storage/lance_*** 负责 Lance 持久化与检索资产加载。
@@ -175,7 +183,7 @@ sequenceDiagram
 
 - **`SearchHit`**：一条本地命中（`start_sec`、`end_sec`、`score`、`video_path`）。在 `search_service` 构造；返回给 UI 与 Agent。
 - **`RemoteSearchHit`**：远程库命中行；在 `remote_search_service` 构造。
-- **`EvidenceBundle`**：单视频理解笔录（chunk 级 YOLO/caption + 可选整片 summary）。在 `understanding_service` 读写；schema 见 `evidence_bundle.py`。
+- **`EvidenceBundle`**：单视频视频总结（chunk 级 caption + 可选整片 summary；object_detection 字段保留兼容旧数据）。在 `understanding_service` 读写；schema 见 `evidence_bundle.py`。
 
 **遗留：** `coerce_search_hit()` 仍在**视图边界**（`table_views`、`ThumbLoader`）接受旧 4-tuple。新代码只传 `SearchHit`；services 不要 emit tuple。
 
@@ -221,15 +229,22 @@ sequenceDiagram
 
 远程链接页 presenter/controller → `remote_library_service` 分阶段构建；检索走 `remote_search_service`。
 
-### 理解笔录（可选）
+### 硬字幕搜索（可选）
 
-1. 侧栏 **理解笔录** → `UnderstandingGuiMixin`（`gui_understanding.py`）
-2. 就绪检查 → `understanding_resource_service.get_understanding_resource_status`（本地 YOLO 同步；描述服务后台 probe）
-3. 用户点「生成笔录」→ `UnderstandingController` → `UnderstandingVideoWorker` → `understanding_service.generate_evidence_for_video`
-4. 推理 → `core/understanding/pipeline`（本地 YOLO + OpenAI 兼容描述服务 caption/summary）
+1. 侧栏 **视频库 → 字幕库** → 勾选视频提取画面字幕（OCR）
+2. 字幕段落写入 SQLite（`dialogue_transcript_store` / `transcripts.db`）
+3. 搜索页 **字幕** 标签 → `keyword_search_dialogue`：`exact` 子串，或 `fuzzy` 单字落点命中率排序
+4. 结果列表对命中字做 UI 高亮（`ui/views/dialogue_highlight.py`，仅当前页渲染）
+
+### 视频理解 / 总结（可选）
+
+1. 侧栏 **视频理解** → `UnderstandingGuiMixin`（`gui_understanding.py`）
+2. 就绪检查 → `understanding_resource_service.get_understanding_resource_status`（描述服务后台 probe）
+3. 用户点「生成总结」→ `UnderstandingController` → `UnderstandingVideoWorker` → `understanding_service.generate_evidence_for_video`
+4. 推理 → `core/understanding/pipeline`（仅 OpenAI 兼容描述服务 caption/summary）
 5. 落盘 → `data/evidence/videos/<video_id>.json`（路径由 `understanding_paths` 解析）
 
-不影响 `run_search` / 索引主链路。Agent Phase 5（`GET /videos/evidence`）规划见 `understanding_evidence.md` §8。
+不影响 `run_search` / 索引主链路。不经 Agent HTTP 暴露。
 
 ## 目录结构（逻辑）
 
@@ -260,6 +275,7 @@ docs/
 | 日期 | 变更 |
 |------|------|
 | 2026-06-26 | 补充理解笔录模块：入口表、热路径、领域模型、`understanding_*` 服务与文档索引 |
+| 2026-07-19 | 硬字幕 SQLite + 模糊落点检索；视频理解去掉 YOLO；文案「笔录」→「总结」 |
 | 2026-06-12 | 全文改为中文；精简文首概览 |
 | 2026-06-10 | 增加文首中文概览 |
 | 2026-05-31 | Agent scope/query 收敛到 `search_scope` + `search_request_service` |

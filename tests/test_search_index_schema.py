@@ -18,6 +18,7 @@ from src.services.search_index_schema import (
     get_search_index_schema_version,
     library_index_key,
     needs_search_index_upgrade,
+    prune_legacy_search_index_artifacts,
 )
 
 
@@ -31,7 +32,7 @@ class SearchIndexSchemaTests(unittest.TestCase):
 
     def test_needs_upgrade_when_schema_missing(self):
         meta = {"libraries": {}}
-        self.assertTrue(needs_search_index_upgrade(meta))
+        self.assertFalse(needs_search_index_upgrade(meta))
 
     def test_needs_upgrade_when_library_index_missing(self):
         with tempfile.TemporaryDirectory() as lib_root:
@@ -45,7 +46,7 @@ class SearchIndexSchemaTests(unittest.TestCase):
                     }
                 },
             }
-            self.assertTrue(needs_search_index_upgrade(meta))
+            self.assertFalse(needs_search_index_upgrade(meta))
 
     def test_needs_upgrade_skips_marked_ready_libraries_without_scanning_files(self):
         with tempfile.TemporaryDirectory() as lib_root:
@@ -83,7 +84,7 @@ class SearchIndexSchemaTests(unittest.TestCase):
                 }
             },
         }
-        self.assertTrue(needs_search_index_upgrade(meta))
+        self.assertFalse(needs_search_index_upgrade(meta))
         self.assertEqual(get_search_index_schema_version(meta), SEARCH_INDEX_SCHEMA_V1)
 
     def test_library_index_paths_layout(self):
@@ -129,6 +130,33 @@ class SearchIndexSchemaTests(unittest.TestCase):
                 self.assertTrue(os.path.isdir(valid_dir))
                 self.assertFalse(os.path.exists(orphan_dir))
 
+    @patch("src.storage.video_id_migration.is_lance_migration_completed", return_value=False)
+    @patch("src.storage.lance_search_index.lance_search_is_ready", return_value=True)
+    @patch("src.storage.video_id_migration.legacy_npy_vectors_present", return_value=False)
+    def test_prune_legacy_search_index_artifacts(self, _mock_npy, _mock_lance, _mock_completed):
+        with tempfile.TemporaryDirectory() as asset_root:
+            index_dir = os.path.join(asset_root, "index")
+            global_dir = os.path.join(asset_root, "global")
+            os.makedirs(index_dir, exist_ok=True)
+            os.makedirs(global_dir, exist_ok=True)
+            faiss_file = os.path.join(index_dir, "abc_index.faiss")
+            open(faiss_file, "wb").close()
+            open(os.path.join(global_dir, "cross_video_index.faiss"), "wb").close()
+            library_root = os.path.join(global_dir, "library_indexes")
+            os.makedirs(library_root, exist_ok=True)
+            meta = {"libraries": {}}
+            with patch(
+                "src.storage.config_store.get_local_model_asset_dirs",
+                return_value={"base_dir": asset_root, "index_dir": index_dir},
+            ), patch(
+                "src.storage.config_store.get_global_model_asset_paths",
+                return_value={"global_dir": global_dir},
+            ):
+                result = prune_legacy_search_index_artifacts(meta)
+            self.assertGreaterEqual(result["removed_files"], 2)
+            self.assertFalse(os.path.exists(faiss_file))
+            self.assertFalse(os.path.isdir(library_root))
+
     def test_get_library_search_index_status(self):
         with tempfile.TemporaryDirectory() as lib_root:
             meta_v1 = {
@@ -138,7 +166,7 @@ class SearchIndexSchemaTests(unittest.TestCase):
             }
             self.assertEqual(
                 get_library_search_index_status(meta_v1, lib_root),
-                LIBRARY_SEARCH_INDEX_STATUS_NEEDS_UPGRADE,
+                LIBRARY_SEARCH_INDEX_STATUS_STALE,
             )
             meta_v2_empty = {"search_index_schema_version": SEARCH_INDEX_SCHEMA_V2, "libraries": {lib_root: {"files": {}}}}
             self.assertEqual(
@@ -152,14 +180,7 @@ class SearchIndexSchemaTests(unittest.TestCase):
                 },
             }
             self.assertEqual(get_library_search_index_status(meta_v2, lib_root), LIBRARY_SEARCH_INDEX_STATUS_STALE)
-            with patch(
-                "src.storage.config_store.get_global_model_asset_paths",
-                return_value={"global_dir": lib_root},
-            ):
-                paths = get_library_index_paths(lib_root)
-                os.makedirs(paths["library_dir"], exist_ok=True)
-                open(paths["frame_index_file"], "wb").close()
-                open(paths["frame_vector_file"], "wb").close()
+            with patch("src.services.search_index_schema.library_index_is_ready", return_value=True):
                 self.assertEqual(get_library_search_index_status(meta_v2, lib_root), LIBRARY_SEARCH_INDEX_STATUS_READY)
 
 

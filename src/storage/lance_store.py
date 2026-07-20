@@ -13,14 +13,29 @@ from src.app.logging_utils import get_logger
 from src.core.faiss_index import _normalize_vectors, load_vectors
 from src.core.semantic_chunking import unpack_chunks
 from src.storage.asset_store import load_metadata
-from src.utils import canonicalize_library_path
+from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("lance_store")
 
 LANCE_DIR_NAME = "lance"
 FRAMES_TABLE_NAME = "frames"
 CHUNKS_TABLE_NAME = "chunks"
+DIALOGUE_SEGMENTS_TABLE_NAME = "dialogue_segments"
 LANCE_STORAGE_VERSION = 1
+DIALOGUE_INDEX_STATE_READY = "ready"
+DIALOGUE_INDEX_STATE_MISSING = "missing"
+DIALOGUE_INDEX_STATE_FAILED = "failed"
+_DIALOGUE_INDEX_STATES = {
+    DIALOGUE_INDEX_STATE_READY,
+    DIALOGUE_INDEX_STATE_MISSING,
+    DIALOGUE_INDEX_STATE_FAILED,
+}
+LANCE_ANN_MIN_ROWS = 2000
+LANCE_ANN_ENABLED = False
+_INDEX_BATCH_DEPTH: dict[str, int] = {}
+_INDEX_BATCH_PROGRESS: dict[str, ProgressCallback | None] = {}
+# Compact meta flushes during scan; larger interval cuts I/O at 10k+ libraries.
+META_PERSIST_INTERVAL = 100
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -112,13 +127,170 @@ def get_lance_state_file(profile_base_dir: str) -> str:
     return os.path.join(get_lance_dir(profile_base_dir), "import_state.json")
 
 
+def begin_lance_index_batch(profile_base_dir: str, progress_callback: ProgressCallback | None = None) -> None:
+    key = os.path.normpath(str(profile_base_dir or ""))
+    if not key:
+        return
+    _INDEX_BATCH_DEPTH[key] = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) + 1
+    if progress_callback is not None:
+        _INDEX_BATCH_PROGRESS[key] = progress_callback
+
+
+def end_lance_index_batch(profile_base_dir: str) -> None:
+    key = os.path.normpath(str(profile_base_dir or ""))
+    if not key:
+        return
+    depth = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0)
+    if depth <= 1:
+        _INDEX_BATCH_DEPTH.pop(key, None)
+        progress_callback = _INDEX_BATCH_PROGRESS.pop(key, None)
+        refresh_import_state(key)
+        _invalidate_lance_search_caches(key)
+        drop_lance_vector_indexes(key)
+        if LANCE_ANN_ENABLED:
+            ensure_lance_vector_indexes(key, progress_callback=progress_callback)
+        return
+    _INDEX_BATCH_DEPTH[key] = depth - 1
+
+
+def lance_index_batch_active(profile_base_dir: str) -> bool:
+    key = os.path.normpath(str(profile_base_dir or ""))
+    return int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) > 0
+
+
+def _count_profile_ready_videos(profile_base_dir: str) -> int:
+    from src.storage.profile_library_store import get_library_db_path
+
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    meta_file = os.path.join(profile_base_dir, "meta.json")
+    db_path = get_library_db_path(profile_base_dir)
+    if not os.path.isfile(meta_file) and not os.path.isfile(db_path):
+        return 0
+    meta = load_metadata(meta_file)
+    count = 0
+    for lib_data in (meta.get("libraries") or {}).values():
+        for info in (lib_data.get("files") or {}).values():
+            if str(info.get("asset_state", "")).strip().lower() != "ready":
+                continue
+            if str(info.get("vid", "") or "").strip():
+                count += 1
+    return count
+
+
+def _finalize_lance_maintenance(profile_base_dir: str) -> None:
+    refresh_import_state(profile_base_dir)
+    _invalidate_lance_search_caches(profile_base_dir)
+
+
+def _lance_vector_index_status(table) -> tuple[bool, int]:
+    try:
+        indices = table.list_indices()
+    except Exception:
+        return False, 0
+    for index in indices or []:
+        columns = list(getattr(index, "columns", None) or [])
+        if "vector" not in columns:
+            continue
+        unindexed = int(getattr(index, "num_unindexed_rows", 0) or 0)
+        return True, unindexed
+    return False, 0
+
+
+def ensure_lance_vector_indexes(
+    profile_base_dir: str,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    min_rows: int = LANCE_ANN_MIN_ROWS,
+) -> dict:
+    """Optional IVF_PQ index for speed; disabled by default because it reduces recall accuracy."""
+    if not LANCE_ANN_ENABLED:
+        return {"built": [], "skipped": ["disabled"]}
+
+    from lancedb.index import IvfPq
+
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    if not os.path.isdir(get_lance_dir(profile_base_dir)):
+        return {"built": [], "skipped": []}
+
+    db = _connect_lance(profile_base_dir)
+    built: list[str] = []
+    skipped: list[str] = []
+    for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME):
+        if table_name not in _list_table_names(db):
+            skipped.append(table_name)
+            continue
+        table = db.open_table(table_name)
+        row_count = int(table.count_rows())
+        if row_count < max(int(min_rows or 0), 1):
+            skipped.append(table_name)
+            continue
+        has_index, unindexed_rows = _lance_vector_index_status(table)
+        if has_index and unindexed_rows <= 0:
+            skipped.append(table_name)
+            continue
+        if progress_callback:
+            progress_callback(
+                96,
+                f"index_progress|lance_index|0|0|{row_count}|{row_count}|{table_name}",
+            )
+        num_partitions = max(16, min(256, int(row_count**0.5)))
+        try:
+            table.create_index(
+                "vector",
+                config=IvfPq(
+                    distance_type="cosine",
+                    num_partitions=num_partitions,
+                    num_sub_vectors=16,
+                ),
+                replace=not has_index,
+            )
+            built.append(table_name)
+        except Exception as exc:
+            logger.warning("Failed to build Lance ANN index for %s: %s", table_name, exc)
+            skipped.append(table_name)
+    return {"built": built, "skipped": skipped}
+
+
+def drop_lance_vector_indexes(profile_base_dir: str) -> dict:
+    """Remove IVF/PQ ANN indexes so Lance falls back to exact vector search."""
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    if not os.path.isdir(get_lance_dir(profile_base_dir)):
+        return {"dropped": []}
+
+    db = _connect_lance(profile_base_dir)
+    dropped: list[str] = []
+    for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME):
+        if table_name not in _list_table_names(db):
+            continue
+        table = db.open_table(table_name)
+        try:
+            indices = table.list_indices()
+        except Exception as exc:
+            logger.debug("Failed to list Lance indices for %s: %s", table_name, exc)
+            continue
+        for index in indices or []:
+            columns = list(getattr(index, "columns", None) or [])
+            if "vector" not in columns:
+                continue
+            index_name = str(getattr(index, "name", "") or "vector_idx")
+            try:
+                table.drop_index(index_name)
+                dropped.append(f"{table_name}:{index_name}")
+            except Exception as exc:
+                logger.warning("Failed to drop Lance index %s on %s: %s", index_name, table_name, exc)
+    if dropped:
+        refresh_import_state(profile_base_dir)
+        _invalidate_lance_search_caches(profile_base_dir)
+    return {"dropped": dropped}
+
+
 def compact_lance_storage(profile_base_dir: str) -> None:
     profile_base_dir = os.path.normpath(profile_base_dir)
     if not os.path.isdir(get_lance_dir(profile_base_dir)):
         return
     try:
         db = _connect_lance(profile_base_dir)
-        for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME):
+        for table_name in (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME):
             if table_name not in _list_table_names(db):
                 continue
             db.open_table(table_name).optimize()
@@ -138,7 +310,13 @@ def collect_meta_video_ids(meta) -> set[str]:
     return valid_ids
 
 
-def garbage_collect_orphan_lance_videos(meta, config=None) -> list[str]:
+def garbage_collect_orphan_lance_videos(
+    meta,
+    config=None,
+    *,
+    compact: bool = True,
+    refresh_state: bool = True,
+) -> list[str]:
     from src.storage.config_store import get_local_model_asset_dirs
     from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
 
@@ -153,12 +331,20 @@ def garbage_collect_orphan_lance_videos(meta, config=None) -> list[str]:
         return []
 
     for video_id in orphan_ids:
-        delete_profile_video_vectors(video_id, config=config)
-    compact_lance_storage(profile_base_dir)
+        delete_profile_video_vectors(
+            video_id,
+            config=config,
+            refresh_state=False,
+        )
+    if refresh_state:
+        refresh_import_state(profile_base_dir)
+        _invalidate_lance_search_caches(profile_base_dir)
+    if compact:
+        compact_lance_storage(profile_base_dir)
     return orphan_ids
 
 
-def read_lance_profile_summary(profile_base_dir: str) -> dict:
+def read_lance_profile_summary(profile_base_dir: str, *, include_dir_size: bool = True) -> dict:
     """Read-only Lance table stats for diagnostics UI (does not rewrite import_state)."""
     from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
 
@@ -174,7 +360,8 @@ def read_lance_profile_summary(profile_base_dir: str) -> dict:
     if not os.path.isdir(get_lance_dir(profile_base_dir)):
         return summary
     try:
-        summary["lance_dir_bytes"] = directory_size_bytes(get_lance_dir(profile_base_dir))
+        if include_dir_size:
+            summary["lance_dir_bytes"] = directory_size_bytes(get_lance_dir(profile_base_dir))
         summary["ready"] = lance_search_is_ready(profile_base_dir)
         summary["indexed_video_count"] = len(get_lance_indexed_video_ids(profile_base_dir))
         db = _connect_lance(profile_base_dir)
@@ -182,7 +369,7 @@ def read_lance_profile_summary(profile_base_dir: str) -> dict:
             table = db.open_table(FRAMES_TABLE_NAME)
             summary["frame_rows"] = int(table.count_rows())
             if summary["frame_rows"] > 0:
-                sample = table.to_arrow().slice(0, 1)
+                sample = table.search().select(["vector"]).limit(1).to_arrow()
                 vector_value = sample["vector"][0].as_py()
                 summary["dimension"] = len(vector_value or [])
         if CHUNKS_TABLE_NAME in _list_table_names(db):
@@ -222,27 +409,87 @@ def chunks_table_schema(dimension: int) -> pa.Schema:
     )
 
 
+def dialogue_segments_table_schema(dimension: int) -> pa.Schema:
+    return pa.schema(
+        [
+            pa.field("video_id", pa.string()),
+            pa.field("library_path", pa.string()),
+            pa.field("video_path", pa.string()),
+            pa.field("start", pa.float32()),
+            pa.field("end", pa.float32()),
+            pa.field("text", pa.string()),
+            pa.field("language", pa.string()),
+            pa.field("asr_source", pa.string()),
+            pa.field("embedding_spec", pa.string()),
+            _vector_field_name(dimension),
+        ]
+    )
+
+
+def serialize_embedding_spec(spec: dict | None) -> str:
+    payload = dict(spec or {})
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def _read_import_state(profile_base_dir: str) -> dict:
-    state_file = get_lance_state_file(profile_base_dir)
-    if not os.path.isfile(state_file):
-        return {}
+    from src.storage.profile_library_store import load_import_state_dict
+
     try:
-        with open(state_file, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("Unreadable Lance import state %s: %s", state_file, exc)
+        return load_import_state_dict(profile_base_dir)
+    except Exception as exc:
+        logger.warning("Unreadable profile library import state %s: %s", profile_base_dir, exc)
         return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _write_import_state(profile_base_dir: str, payload: dict) -> None:
-    lance_dir = get_lance_dir(profile_base_dir)
-    os.makedirs(lance_dir, exist_ok=True)
-    state_file = get_lance_state_file(profile_base_dir)
-    temp_path = f"{state_file}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-    os.replace(temp_path, state_file)
+    from src.storage.profile_library_store import save_import_state_dict
+
+    save_import_state_dict(profile_base_dir, payload if isinstance(payload, dict) else {})
+
+
+def _merge_import_state_videos(previous: dict, payload: dict) -> dict:
+    merged = dict(payload)
+    if isinstance(previous.get("videos"), dict):
+        merged["videos"] = previous["videos"]
+    return merged
+
+
+def get_stored_chunk_config(profile_base_dir: str, video_id: str):
+    from src.storage.profile_library_store import get_stored_chunk_config as _get_chunk
+
+    return _get_chunk(profile_base_dir, video_id)
+
+
+def set_stored_chunk_config(profile_base_dir: str, video_id: str, chunk_config: dict) -> None:
+    from src.storage.profile_library_store import set_stored_chunk_config as _set_chunk
+
+    _set_chunk(profile_base_dir, video_id, chunk_config)
+
+
+def get_dialogue_index_state(profile_base_dir: str, video_id: str) -> str:
+    from src.storage.profile_library_store import get_dialogue_index_state as _get_dialogue
+
+    value = str(_get_dialogue(profile_base_dir, video_id) or "").strip().lower()
+    if value in _DIALOGUE_INDEX_STATES:
+        return value
+    return DIALOGUE_INDEX_STATE_MISSING
+
+
+def set_dialogue_index_state(
+    profile_base_dir: str,
+    video_id: str,
+    dialogue_index_state: str,
+    *,
+    extras: dict | None = None,
+) -> None:
+    from src.storage.profile_library_store import set_dialogue_index_state as _set_dialogue
+
+    _set_dialogue(
+        profile_base_dir,
+        video_id,
+        dialogue_index_state,
+        extras=extras,
+    )
 
 
 def _connect_lance(profile_base_dir: str):
@@ -407,6 +654,7 @@ def import_video_npy_to_lance(
     video_id: str,
     vector_file: str,
     video_lookup: dict[str, dict[str, str]],
+    profile_base_dir: str = "",
     dimension: int | None = None,
     replace_existing: bool = True,
 ) -> dict:
@@ -478,6 +726,9 @@ def import_video_npy_to_lance(
     if chunk_rows:
         _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
         stats["chunk_rows"] = len(chunk_rows)
+    chunk_config = data.get("chunk_config")
+    if isinstance(chunk_config, dict) and profile_base_dir:
+        set_stored_chunk_config(profile_base_dir, video_id, chunk_config)
     return stats
 
 
@@ -508,7 +759,8 @@ def import_npy_to_lance(
         summary["errors"].append(f"vector dir not found: {vector_dir}")
         return summary
 
-    meta = load_metadata(meta_file) if os.path.isfile(meta_file) else {}
+    # load_metadata reads profile library.db (and migrates legacy meta.json if present).
+    meta = load_metadata(meta_file)
     video_lookup = build_video_lookup(meta)
     npy_files = sorted(
         name
@@ -539,6 +791,7 @@ def import_npy_to_lance(
             video_id=video_id,
             vector_file=vector_file,
             video_lookup=video_lookup,
+            profile_base_dir=profile_base_dir,
             dimension=locked_dimension or None,
             replace_existing=not replace_existing,
         )
@@ -563,16 +816,19 @@ def import_npy_to_lance(
 
     _write_import_state(
         profile_base_dir,
-        {
-            "storage_version": LANCE_STORAGE_VERSION,
-            "profile_base_dir": profile_base_dir,
-            "videos_total": summary["videos_total"],
-            "videos_imported": summary["videos_imported"],
-            "videos_failed": summary["videos_failed"],
-            "frame_rows": summary["frame_rows"],
-            "chunk_rows": summary["chunk_rows"],
-            "dimension": summary["dimension"],
-        },
+        _merge_import_state_videos(
+            _read_import_state(profile_base_dir),
+            {
+                "storage_version": LANCE_STORAGE_VERSION,
+                "profile_base_dir": profile_base_dir,
+                "videos_total": summary["videos_total"],
+                "videos_imported": summary["videos_imported"],
+                "videos_failed": summary["videos_failed"],
+                "frame_rows": summary["frame_rows"],
+                "chunk_rows": summary["chunk_rows"],
+                "dimension": summary["dimension"],
+            },
+        ),
     )
     return summary
 
@@ -587,25 +843,33 @@ def refresh_import_state(profile_base_dir: str) -> dict:
         table = db.open_table(FRAMES_TABLE_NAME)
         frame_rows = int(table.count_rows())
         if frame_rows > 0:
-            sample = table.to_arrow().slice(0, 1)
+            sample = table.search().select(["vector"]).limit(1).to_arrow()
             vector_value = sample["vector"][0].as_py()
             dimension = len(vector_value or [])
     if CHUNKS_TABLE_NAME in _list_table_names(db):
         chunk_rows = int(db.open_table(CHUNKS_TABLE_NAME).count_rows())
+    dialogue_rows = 0
+    if DIALOGUE_SEGMENTS_TABLE_NAME in _list_table_names(db):
+        dialogue_rows = int(db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME).count_rows())
     vector_dir = os.path.join(profile_base_dir, "vector")
-    videos_total = 0
+    videos_total = _count_profile_ready_videos(profile_base_dir)
     if os.path.isdir(vector_dir):
-        videos_total = sum(1 for name in os.listdir(vector_dir) if name.lower().endswith("_vectors.npy"))
-    payload = {
-        "storage_version": LANCE_STORAGE_VERSION,
-        "profile_base_dir": profile_base_dir,
-        "videos_total": videos_total,
-        "videos_imported": videos_total,
-        "videos_failed": 0,
-        "frame_rows": frame_rows,
-        "chunk_rows": chunk_rows,
-        "dimension": dimension,
-    }
+        npy_total = sum(1 for name in os.listdir(vector_dir) if name.lower().endswith("_vectors.npy"))
+        videos_total = max(videos_total, npy_total)
+    payload = _merge_import_state_videos(
+        _read_import_state(profile_base_dir),
+        {
+            "storage_version": LANCE_STORAGE_VERSION,
+            "profile_base_dir": profile_base_dir,
+            "videos_total": videos_total,
+            "videos_imported": videos_total,
+            "videos_failed": 0,
+            "frame_rows": frame_rows,
+            "chunk_rows": chunk_rows,
+            "dialogue_rows": dialogue_rows,
+            "dimension": dimension,
+        },
+    )
     _write_import_state(profile_base_dir, payload)
     return payload
 
@@ -617,6 +881,15 @@ def upsert_profile_video_vectors(
     library_path: str = "",
     video_path: str = "",
 ) -> dict:
+    """Import one video from legacy ``*_vectors.npy`` into Lance.
+
+    Hot-path indexing must use ``upsert_profile_video_vectors_from_arrays``.
+    This helper remains for migration tooling and tests only.
+    """
+    logger.warning(
+        "upsert_profile_video_vectors reads legacy npy for %s; prefer array upsert or startup migration",
+        video_id,
+    )
     from src.storage.config_store import get_local_model_asset_dirs
 
     video_id = str(video_id or "").strip()
@@ -643,6 +916,7 @@ def upsert_profile_video_vectors(
         video_id=video_id,
         vector_file=vector_file,
         video_lookup=video_lookup,
+        profile_base_dir=profile_base_dir,
         replace_existing=True,
     )
     refresh_import_state(profile_base_dir)
@@ -650,7 +924,17 @@ def upsert_profile_video_vectors(
     return result
 
 
-def delete_profile_video_vectors(video_id: str, config=None) -> None:
+def delete_profile_video_vectors(
+    video_id: str,
+    config=None,
+    *,
+    refresh_state: bool = True,
+) -> None:
+    """Delete Lance rows for one video.
+
+    Set ``refresh_state=False`` when deleting many videos in a batch, then call
+    ``refresh_import_state`` / ``compact_lance_storage`` once at the end.
+    """
     from src.storage.config_store import get_local_model_asset_dirs
 
     video_id = str(video_id or "").strip()
@@ -663,8 +947,159 @@ def delete_profile_video_vectors(video_id: str, config=None) -> None:
     db = _connect_lance(profile_base_dir)
     _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
     _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
-    refresh_import_state(profile_base_dir)
-    _invalidate_lance_search_caches(profile_base_dir)
+    _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
+    set_dialogue_index_state(profile_base_dir, video_id, DIALOGUE_INDEX_STATE_MISSING)
+    if refresh_state:
+        refresh_import_state(profile_base_dir)
+        _invalidate_lance_search_caches(profile_base_dir)
+
+
+def list_dialogue_transcript_segments(
+    video_id: str = "",
+    *,
+    config=None,
+    profile_base_dir: str = "",
+) -> list[dict]:
+    """Return deduped ASR transcript rows (text/time), ignoring embedding_spec.
+
+    Dialogue text is managed independently of the active CLIP profile; vectors are
+    regenerated separately when the search model changes.
+    """
+    from src.storage.config_store import get_local_model_asset_dirs
+
+    if profile_base_dir:
+        base_dir = os.path.normpath(profile_base_dir)
+    else:
+        base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    if not os.path.isdir(get_lance_dir(base_dir)):
+        return []
+    db = _connect_lance(base_dir)
+    if DIALOGUE_SEGMENTS_TABLE_NAME not in _list_table_names(db):
+        return []
+    table = db.open_table(DIALOGUE_SEGMENTS_TABLE_NAME)
+    builder = table.search().select(
+        ["video_id", "video_path", "library_path", "start", "end", "text", "language", "asr_source"]
+    )
+    vid = str(video_id or "").strip()
+    if vid:
+        builder = builder.where(f"video_id = '{vid.replace(chr(39), chr(39)+chr(39))}'")
+    try:
+        arrow = builder.limit(200_000).to_arrow()
+    except Exception as exc:
+        logger.error("List dialogue transcripts failed: %s", exc)
+        return []
+
+    rows: list[dict] = []
+    seen: set[tuple[str, float, float, str]] = set()
+    for index in range(arrow.num_rows):
+        text = str(arrow["text"][index].as_py() or "").strip()
+        if not text:
+            continue
+        video_key = str(arrow["video_id"][index].as_py() or "")
+        start = float(arrow["start"][index].as_py() or 0.0)
+        end = float(arrow["end"][index].as_py() or 0.0)
+        key = (video_key, round(start, 3), round(end, 3), text)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "video_id": video_key,
+                "video_path": str(arrow["video_path"][index].as_py() or ""),
+                "library_path": str(arrow["library_path"][index].as_py() or ""),
+                "start": start,
+                "end": end,
+                "text": text,
+                "language": str(arrow["language"][index].as_py() or "").strip(),
+                "asr_source": str(arrow["asr_source"][index].as_py() or "").strip(),
+            }
+        )
+    rows.sort(key=lambda item: (item["video_id"], item["start"], item["end"]))
+    return rows
+
+
+def upsert_profile_dialogue_segments(
+    video_id: str,
+    segments: list[dict],
+    *,
+    library_path: str = "",
+    video_path: str = "",
+    embedding_spec: dict | None = None,
+    config=None,
+    profile_base_dir: str = "",
+) -> dict:
+    """Replace all dialogue_segments rows for one video.
+
+    Each segment dict needs: start, end, text, language, asr_source, vector (1d float array).
+    """
+    from src.storage.config_store import get_local_model_asset_dirs
+
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return {"error": "missing video_id", "segment_rows": 0}
+
+    if profile_base_dir:
+        base_dir = os.path.normpath(profile_base_dir)
+    else:
+        base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+
+    spec = dict(embedding_spec or {})
+    try:
+        dimension = int(spec.get("dimension") or 0)
+    except (TypeError, ValueError):
+        dimension = 0
+    if dimension <= 0 and segments:
+        sample = np.asarray((segments[0] or {}).get("vector"), dtype=np.float32).reshape(-1)
+        dimension = int(sample.shape[0])
+    if dimension <= 0:
+        return {"error": "missing embedding dimension", "segment_rows": 0}
+
+    spec_json = serialize_embedding_spec(spec)
+    lib_path = canonicalize_library_path(library_path) if library_path else ""
+    media_path = os.path.normpath(str(video_path or ""))
+    rows: list[dict] = []
+    for item in segments or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "") or "").strip()
+        if not text:
+            continue
+        embedding = np.asarray(item.get("vector"), dtype=np.float32).reshape(-1)
+        if embedding.size != dimension:
+            raise ValueError(
+                f"Dialogue vector dimension mismatch for {video_id}: "
+                f"expected {dimension}, got {embedding.shape[0]}"
+            )
+        norm = float(np.linalg.norm(embedding))
+        if norm > 0:
+            embedding = embedding / norm
+        rows.append(
+            {
+                "video_id": video_id,
+                "library_path": lib_path,
+                "video_path": media_path,
+                "start": float(item.get("start", 0.0) or 0.0),
+                "end": float(item.get("end", 0.0) or 0.0),
+                "text": text,
+                "language": str(item.get("language", "") or "").strip(),
+                "asr_source": str(item.get("asr_source", "") or "").strip(),
+                "embedding_spec": spec_json,
+                "vector": embedding.astype(np.float32).tolist(),
+            }
+        )
+
+    db = _connect_lance(base_dir)
+    _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
+    if rows:
+        _append_rows_to_table(
+            db,
+            DIALOGUE_SEGMENTS_TABLE_NAME,
+            dialogue_segments_table_schema(dimension),
+            rows,
+        )
+    refresh_import_state(base_dir)
+    _invalidate_lance_search_caches(base_dir)
+    return {"video_id": video_id, "segment_rows": len(rows), "dimension": dimension}
 
 
 def resolve_vector_search_backend(config=None) -> str:
@@ -715,6 +1150,7 @@ def upsert_profile_video_vectors_from_arrays(
     library_path: str = "",
     video_path: str = "",
     chunks=None,
+    chunk_config=None,
 ) -> dict:
     from src.storage.config_store import get_local_model_asset_dirs
 
@@ -756,15 +1192,27 @@ def upsert_profile_video_vectors_from_arrays(
         return {"error": str(exc)}
 
     db = _connect_lance(profile_base_dir)
-    _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
-    _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
-    if frame_rows:
-        _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
-    if chunk_rows:
-        _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
+    try:
+        _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
+        _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
+        if frame_rows:
+            _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
+        if chunk_rows:
+            _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
+    except Exception as exc:
+        logger.error(
+            "Lance delete/append failed for %s after validated row build; "
+            "table may be missing this video until the next successful sync: %s",
+            video_id,
+            exc,
+            exc_info=True,
+        )
+        return {"error": str(exc), "video_id": video_id, "frame_rows": 0, "chunk_rows": 0}
 
-    refresh_import_state(profile_base_dir)
-    _invalidate_lance_search_caches(profile_base_dir)
+    if isinstance(chunk_config, dict):
+        set_stored_chunk_config(profile_base_dir, video_id, chunk_config)
+    if not lance_index_batch_active(profile_base_dir):
+        _finalize_lance_maintenance(profile_base_dir)
     return {
         "video_id": video_id,
         "frame_rows": len(frame_rows),

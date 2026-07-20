@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_TOKENS_DIR = _PROJECT_ROOT / "resources"
 
 
 def _figma_key_to_token(key: str) -> str:
@@ -49,8 +47,10 @@ def merge_theme_colors(base: dict[str, str], figma_override: dict[str, str]) -> 
 
 
 def theme_colors_path(is_dark: bool) -> Path:
+    from src.infra.paths import get_resource_path
+
     name = "tokens_dark.json" if is_dark else "tokens_light.json"
-    return _TOKENS_DIR / name
+    return Path(get_resource_path(os.path.join("resources", name)))
 
 
 def load_merged_theme_colors(is_dark: bool, base: dict[str, str]) -> dict[str, str]:

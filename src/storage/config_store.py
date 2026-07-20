@@ -4,7 +4,7 @@ from typing import List
 
 from src.app.config import CONFIG_BOUNDS, CONFIG_ENUMS, DEFAULT_CONFIG, get_data_storage_paths, load_config, save_config
 from src.core.semantic_chunking import chunk_config_payload
-from src.utils import canonicalize_library_path
+from src.storage.video_identity import canonicalize_library_path
 
 _PROVIDER_DEFAULT_DIMENSION = {
     "clip_onnx": 512,
@@ -354,12 +354,34 @@ def get_min_chunk_duration(config=None) -> float:
     return max(minimum, min(maximum, value))
 
 
+def get_chunk_edge_threshold(config=None) -> float:
+    cfg = _app_cfg(config)
+    minimum, maximum = CONFIG_BOUNDS.get("chunk_edge_threshold", (0.1, 1.0))
+    try:
+        value = float(cfg.get("chunk_edge_threshold", DEFAULT_CONFIG["chunk_edge_threshold"]))
+    except (TypeError, ValueError):
+        value = float(DEFAULT_CONFIG["chunk_edge_threshold"])
+    return max(minimum, min(maximum, value))
+
+
+def get_max_chunk_duration(config=None) -> float:
+    cfg = _app_cfg(config)
+    minimum, maximum = CONFIG_BOUNDS.get("max_chunk_duration", (0.0, 600.0))
+    try:
+        value = float(cfg.get("max_chunk_duration", DEFAULT_CONFIG["max_chunk_duration"]))
+    except (TypeError, ValueError):
+        value = float(DEFAULT_CONFIG["max_chunk_duration"])
+    return max(minimum, min(maximum, value))
+
+
 def build_chunk_config(config=None) -> dict:
     cfg = _app_cfg(config)
     return chunk_config_payload(
         similarity_threshold=get_similarity_threshold(cfg),
+        chunk_edge_threshold=get_chunk_edge_threshold(cfg),
         min_chunk_size=get_min_chunk_size(cfg),
         min_chunk_duration=get_min_chunk_duration(cfg),
+        max_chunk_duration=get_max_chunk_duration(cfg),
     )
 
 
@@ -420,5 +442,76 @@ def save_search_scope(mode, library_paths=None, config=None, *, video_paths=None
         cfg["search_scope_video_paths"] = normalized_video_paths
         if normalized_video_paths:
             cfg["search_scope_library_paths"] = []
+    save_config(cfg)
+    return cfg
+
+
+def get_dialogue_search_scope_mode(config=None) -> str:
+    cfg = _app_cfg(config)
+    mode = str(
+        cfg.get("dialogue_search_scope_mode", DEFAULT_CONFIG["dialogue_search_scope_mode"]) or ""
+    ).strip().lower()
+    allowed = CONFIG_ENUMS["dialogue_search_scope_mode"]
+    return mode if mode in allowed else str(DEFAULT_CONFIG["dialogue_search_scope_mode"])
+
+
+def get_dialogue_search_scope_library_paths(config=None) -> List[str]:
+    cfg = _app_cfg(config)
+    raw_paths = cfg.get(
+        "dialogue_search_scope_library_paths",
+        DEFAULT_CONFIG["dialogue_search_scope_library_paths"],
+    )
+    if not isinstance(raw_paths, list):
+        return []
+    paths = []
+    for item in raw_paths:
+        text = str(item or "").strip()
+        if text:
+            paths.append(canonicalize_library_path(text))
+    return paths
+
+
+def get_dialogue_search_scope_video_paths(config=None) -> List[str]:
+    from src.services.search_scope import normalize_scope_path
+
+    cfg = _app_cfg(config)
+    raw_paths = cfg.get(
+        "dialogue_search_scope_video_paths",
+        DEFAULT_CONFIG.get("dialogue_search_scope_video_paths", []),
+    )
+    if not isinstance(raw_paths, list):
+        return []
+    paths = []
+    for item in raw_paths:
+        text = str(item or "").strip()
+        if text:
+            paths.append(normalize_scope_path(text))
+    return paths
+
+
+def save_dialogue_search_scope(mode, library_paths=None, config=None, *, video_paths=None) -> dict:
+    cfg = dict(config or load_config())
+    normalized_mode = str(mode or "").strip().lower()
+    cfg["dialogue_search_scope_mode"] = (
+        normalized_mode if normalized_mode in CONFIG_ENUMS["dialogue_search_scope_mode"] else "all"
+    )
+    if library_paths is not None:
+        normalized_library_paths = []
+        for item in library_paths or []:
+            text = str(item or "").strip()
+            if text:
+                normalized_library_paths.append(canonicalize_library_path(text))
+        cfg["dialogue_search_scope_library_paths"] = normalized_library_paths
+    if video_paths is not None:
+        from src.services.search_scope import normalize_scope_path
+
+        normalized_video_paths = []
+        for item in video_paths or []:
+            text = str(item or "").strip()
+            if text:
+                normalized_video_paths.append(normalize_scope_path(text))
+        cfg["dialogue_search_scope_video_paths"] = normalized_video_paths
+        if normalized_video_paths:
+            cfg["dialogue_search_scope_library_paths"] = []
     save_config(cfg)
     return cfg

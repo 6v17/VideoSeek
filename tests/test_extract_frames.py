@@ -408,8 +408,8 @@ class ExtractFramesTests(unittest.TestCase):
 
 
 class VideoProbeTests(unittest.TestCase):
-    @patch("src.utils.get_ffprobe_path", return_value="ffprobe")
-    @patch("src.utils.subprocess.run")
+    @patch("src.media.probe.get_ffprobe_path", return_value="ffprobe")
+    @patch("src.media.probe.subprocess.run")
     def test_get_video_stream_info_reads_ffprobe_json(self, mock_run, _mock_ffprobe):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -422,23 +422,23 @@ class VideoProbeTests(unittest.TestCase):
         self.assertEqual(info["height"], 1080)
         self.assertEqual(info["duration"], 12.5)
 
-    @patch("src.utils._probe_video_duration_with_opencv", return_value=8.0)
-    @patch("src.utils.get_video_stream_info", return_value={"width": None, "height": None, "duration": None})
+    @patch("src.media.probe._probe_video_duration_with_opencv", return_value=8.0)
+    @patch("src.media.probe.get_video_stream_info", return_value={"width": None, "height": None, "duration": None})
     def test_get_video_duration_seconds_falls_back_when_ffprobe_unavailable(self, _mock_info, mock_fallback):
         duration = get_video_duration_seconds("D:/video.mp4")
 
         self.assertEqual(duration, 8.0)
         mock_fallback.assert_called_once_with("D:/video.mp4")
 
-    @patch("src.utils.get_video_stream_info", return_value={"width": 1920, "height": 1080, "duration": None})
+    @patch("src.media.probe.get_video_stream_info", return_value={"width": 1920, "height": 1080, "duration": None})
     def test_has_readable_video_stream_prefers_ffprobe_dimensions(self, _mock_info):
         self.assertTrue(has_readable_video_stream("D:/video.mp4"))
 
     @patch(
-        "src.utils._probe_video_stream_with_opencv",
+        "src.media.probe._probe_video_stream_with_opencv",
         return_value={"width": 1280, "height": 720, "duration": 5.0},
     )
-    @patch("src.utils.get_video_stream_info", return_value={"width": None, "height": None, "duration": None})
+    @patch("src.media.probe.get_video_stream_info", return_value={"width": None, "height": None, "duration": None})
     def test_has_readable_video_stream_falls_back_to_opencv_dimensions(self, _mock_info, _mock_probe):
         self.assertTrue(has_readable_video_stream("D:/video.mp4"))
 

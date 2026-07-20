@@ -9,6 +9,7 @@ import numpy as np
 from src.app.config import DEFAULT_CONFIG
 from src.domain.search_hit import SearchHit
 from src.storage.config_store import get_frame_neighbor_rerank_enabled, get_frame_neighbor_rerank_top_n
+from src.storage.lance_search_index import LanceTableSearchIndex
 
 from src.services.search_hit_utils import _clamp_time_near_seed
 
@@ -139,6 +140,157 @@ def _neighbor_candidate_score(
     return score
 
 
+def _score_lance_neighbor_rows(query: np.ndarray, rows) -> list[tuple[float, float]]:
+    scored: List[tuple[float, float]] = []
+    for row in rows or []:
+        vector = getattr(row, "vector", None)
+        if vector is None:
+            continue
+        score = float(np.dot(query, np.asarray(vector, dtype=np.float32).reshape(-1)))
+        scored.append((score, float(row.timestamp or 0.0)))
+    return scored
+
+
+def _apply_bounded_neighbor_refine_lance(
+    results,
+    query_vector,
+    lance_index: LanceTableSearchIndex,
+    *,
+    max_top_n: int | None = None,
+    max_shift_sec: float = _PRECISE_SEED_MAX_SHIFT_SEC,
+    window_sec: float = _PRECISE_NEIGHBOR_WINDOW_SEC,
+    neighbor_blend: float = _PRECISE_NEIGHBOR_BLEND,
+):
+    if not results:
+        return list(results or [])
+    try:
+        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
+    except Exception:
+        return list(results or [])
+
+    configured_top_n = int(get_frame_neighbor_rerank_top_n({}) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
+    max_index = min(len(results), int(max_top_n or configured_top_n))
+    if max_index <= 0:
+        return list(results or [])
+
+    reranked = list(results)
+    blend = max(0.0, min(float(neighbor_blend), 1.0))
+    for rank in range(max_index):
+        hit = reranked[rank]
+        seed_time = float(hit.start_sec)
+        base_score = float(hit.score)
+        best_timestamp = seed_time
+        best_neighbor_score = base_score
+        neighbor_rows = lance_index.fetch_neighbor_rows(
+            video_path=str(hit.video_path or ""),
+            center_sec=seed_time,
+            window_sec=window_sec,
+        )
+        for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
+            if abs(candidate_ts - seed_time) > max_shift_sec:
+                continue
+            if score > best_neighbor_score:
+                best_neighbor_score = float(score)
+                best_timestamp = candidate_ts
+        if best_neighbor_score > base_score:
+            adjusted_time = _clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
+            blended_score = ((1.0 - blend) * base_score) + (blend * best_neighbor_score)
+            reranked[rank] = SearchHit(adjusted_time, adjusted_time, blended_score, str(hit.video_path))
+    return reranked
+
+
+def _apply_frame_neighbor_rerank_lance(
+    results,
+    query_vector,
+    lance_index: LanceTableSearchIndex,
+    config,
+    is_text: bool = False,
+    precise_image: bool = False,
+):
+    if not results:
+        return results
+    if not _neighbor_rerank_enabled(config, is_text=is_text, precise_image=precise_image):
+        return results
+
+    max_top_n = int(get_frame_neighbor_rerank_top_n(config) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
+    window_sec = _neighbor_rerank_window_sec(config, is_text=is_text, precise_image=precise_image)
+    if max_top_n <= 0 or window_sec <= 0:
+        return results
+
+    try:
+        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
+    except Exception:
+        return results
+
+    reranked = list(results)
+    max_index = min(len(results), max_top_n)
+    for rank in range(max_index):
+        hit = reranked[rank]
+        best_score = float(hit.score)
+        best_timestamp = float(hit.start_sec)
+        neighbor_rows = lance_index.fetch_neighbor_rows(
+            video_path=str(hit.video_path or ""),
+            center_sec=best_timestamp,
+            window_sec=window_sec,
+        )
+        for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
+            if score > best_score:
+                best_score = score
+                best_timestamp = candidate_ts
+        reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(hit.video_path))
+    return reranked
+
+
+def _expand_neighbor_rerank_candidates_lance(
+    results,
+    query_vector,
+    lance_index: LanceTableSearchIndex,
+    config,
+    is_text: bool = False,
+    precise_image: bool = False,
+    *,
+    seed_top_n: int | None = None,
+) -> List[SearchHit]:
+    if not results:
+        return list(results or [])
+    if not _neighbor_rerank_enabled(config, is_text=is_text, precise_image=precise_image):
+        return list(results or [])
+
+    configured_top_n = int(get_frame_neighbor_rerank_top_n(config) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
+    max_top_n = int(seed_top_n) if seed_top_n is not None else configured_top_n
+    max_top_n = max(1, min(max_top_n, len(results)))
+    window_sec = _neighbor_rerank_window_sec(config, is_text=is_text, precise_image=precise_image)
+    if window_sec <= 0:
+        return list(results or [])
+
+    try:
+        query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
+    except Exception:
+        return list(results or [])
+
+    candidates: dict[tuple[str, int], SearchHit] = {}
+    for rank in range(max_top_n):
+        hit = results[rank]
+        neighbor_rows = lance_index.fetch_neighbor_rows(
+            video_path=str(hit.video_path or ""),
+            center_sec=float(hit.start_sec),
+            window_sec=window_sec,
+        )
+        for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
+            base_path = str(hit.video_path or "")
+            key = (base_path, int(round(candidate_ts * 1000)))
+            candidate = SearchHit(candidate_ts, candidate_ts, score, base_path)
+            if key not in candidates or score > float(candidates[key].score):
+                candidates[key] = candidate
+
+    for hit in results:
+        key = (str(hit.video_path), int(round(float(hit.start_sec) * 1000)))
+        if key not in candidates or float(hit.score) > float(candidates[key].score):
+            candidates[key] = hit
+
+    return sorted(candidates.values(), key=lambda item: float(item.score), reverse=True)
+
+
 def _apply_bounded_neighbor_refine(
     results,
     frame_ids,
@@ -152,6 +304,16 @@ def _apply_bounded_neighbor_refine(
     window_sec: float = _PRECISE_NEIGHBOR_WINDOW_SEC,
     neighbor_blend: float = _PRECISE_NEIGHBOR_BLEND,
 ):
+    if isinstance(search_index, LanceTableSearchIndex):
+        return _apply_bounded_neighbor_refine_lance(
+            results,
+            query_vector,
+            search_index,
+            max_top_n=max_top_n,
+            max_shift_sec=max_shift_sec,
+            window_sec=window_sec,
+            neighbor_blend=neighbor_blend,
+        )
     if not results or not frame_ids:
         return list(results or [])
     try:
@@ -217,6 +379,15 @@ def _apply_frame_neighbor_rerank(
     from src.app.logging_utils import get_logger
 
     logger = get_logger("search_neighbor_rerank")
+    if isinstance(search_index, LanceTableSearchIndex):
+        return _apply_frame_neighbor_rerank_lance(
+            results,
+            query_vector,
+            search_index,
+            config,
+            is_text=is_text,
+            precise_image=precise_image,
+        )
     if not results or not frame_ids:
         return results
     if not _neighbor_rerank_enabled(config, is_text=is_text, precise_image=precise_image):
@@ -287,6 +458,16 @@ def _expand_neighbor_rerank_candidates(
     from src.app.logging_utils import get_logger
 
     logger = get_logger("search_neighbor_rerank")
+    if isinstance(search_index, LanceTableSearchIndex):
+        return _expand_neighbor_rerank_candidates_lance(
+            results,
+            query_vector,
+            search_index,
+            config,
+            is_text=is_text,
+            precise_image=precise_image,
+            seed_top_n=seed_top_n,
+        )
     if not results or not frame_ids:
         return list(results or [])
     if not _neighbor_rerank_enabled(config, is_text=is_text, precise_image=precise_image):

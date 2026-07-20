@@ -6,6 +6,7 @@ import os
 from typing import Any, Mapping
 
 from src.app.config import load_config, save_config
+from src.app.logging_utils import get_logger
 from src.core.understanding.types import (
     UnderstandingInputKind,
     UnderstandingModality,
@@ -28,6 +29,8 @@ from src.services.understanding_paths import (
     get_understanding_root,
 )
 from src.utils import get_configured_model_dir
+
+logger = get_logger("understanding_resource_service")
 
 UNDERSTANDING_COMPONENT_KIND = "understanding_component"
 UNDERSTANDING_PROFILE_KIND = "understanding_profile"
@@ -894,10 +897,16 @@ def _missing_components_for_ids(
     model_dir: str | None = None,
     remote_probe: Mapping[str, Any] | None = None,
     check_remote: bool = True,
+    scanned_components: list[dict[str, Any]] | None = None,
 ) -> list[str]:
+    components = (
+        scanned_components
+        if scanned_components is not None
+        else scan_understanding_components(model_dir=model_dir)
+    )
     installed = {
         str(item.get("id", "") or "").strip()
-        for item in scan_understanding_components(model_dir=model_dir)
+        for item in components
         if item.get("installed")
     }
     missing = [component_id for component_id in component_ids if component_id not in installed]
@@ -932,6 +941,7 @@ def get_missing_components_for_profile(
     model_dir: str | None = None,
     remote_probe: Mapping[str, Any] | None = None,
     check_remote: bool = True,
+    scanned_components: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     profile_manifest = load_profile_manifest(profile_id, model_dir=model_dir)
     required_ids = get_required_component_ids(profile_manifest)
@@ -941,6 +951,7 @@ def get_missing_components_for_profile(
         model_dir=model_dir,
         remote_probe=remote_probe,
         check_remote=check_remote,
+        scanned_components=scanned_components,
     )
 
 
@@ -951,6 +962,7 @@ def get_missing_optional_components_for_profile(
     model_dir: str | None = None,
     remote_probe: Mapping[str, Any] | None = None,
     check_remote: bool = False,
+    scanned_components: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     profile_manifest = load_profile_manifest(profile_id, model_dir=model_dir)
     optional_ids = get_optional_component_ids(profile_manifest)
@@ -962,6 +974,7 @@ def get_missing_optional_components_for_profile(
         model_dir=model_dir,
         remote_probe=remote_probe,
         check_remote=check_remote,
+        scanned_components=scanned_components,
     )
 
 
@@ -989,12 +1002,15 @@ def get_understanding_resource_status(
         if install_bootstrap:
             ensure_understanding_profiles_installed(model_dir=resolved_model_dir or None)
             ensure_understanding_components_installed(model_dir=resolved_model_dir or None)
+        # Scan once; missing-required / missing-optional / status payload all reuse it.
+        components = scan_understanding_components(model_dir=resolved_model_dir or None)
         missing_components = get_missing_components_for_profile(
             active_profile_id,
             config=normalized_config,
             model_dir=resolved_model_dir or None,
             remote_probe=remote_vlm if probe_remote else None,
             check_remote=probe_remote,
+            scanned_components=components,
         )
         optional_missing_components = get_missing_optional_components_for_profile(
             active_profile_id,
@@ -1002,13 +1018,14 @@ def get_understanding_resource_status(
             model_dir=resolved_model_dir or None,
             remote_probe=remote_vlm if probe_remote else None,
             check_remote=False,
+            scanned_components=components,
         )
     except Exception as exc:
         profile_error = str(exc)
         missing_components = []
         optional_missing_components = []
+        components = scan_understanding_components(model_dir=resolved_model_dir or None)
 
-    components = scan_understanding_components(model_dir=resolved_model_dir or None)
     installed_components = [item["id"] for item in components if item.get("installed")]
     understanding_ready = not profile_error and not missing_components
     return {

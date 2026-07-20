@@ -103,6 +103,18 @@ QMenu::separator {
 #BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint {
     color: __MUTED__;
 }
+#BrandFreeTip {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 600;
+}
+#BrandFreeTip a {
+    color: __ACCENT__;
+    text-decoration: none;
+}
+#BrandFreeTip a:hover {
+    text-decoration: underline;
+}
 #CardHint {
     line-height: 1.45em;
 }
@@ -140,6 +152,66 @@ QRadioButton::indicator:disabled {
     border-color: __LINE__;
     background: __FIELD__;
 }
+QCheckBox {
+    color: __HEADLINE__;
+    spacing: 8px;
+    background: transparent;
+}
+QCheckBox::indicator,
+QTableView::indicator,
+QTreeView::indicator,
+QListView::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid __LINE_STRONG__;
+    background: __FIELD__;
+}
+QCheckBox::indicator:unchecked:hover,
+QTableView::indicator:unchecked:hover,
+QTreeView::indicator:unchecked:hover,
+QListView::indicator:unchecked:hover {
+    border-color: __ACCENT__;
+    background: __TRACK__;
+}
+QCheckBox::indicator:checked,
+QTableView::indicator:checked,
+QTreeView::indicator:checked,
+QListView::indicator:checked {
+    border: 1px solid __ACCENT_HOVER__;
+    background: __ACCENT__;
+    image: url("__CHECK_ICON__");
+}
+QCheckBox::indicator:checked:hover,
+QTableView::indicator:checked:hover,
+QTreeView::indicator:checked:hover,
+QListView::indicator:checked:hover {
+    border-color: __ACCENT__;
+    background: __ACCENT_HOVER__;
+}
+QCheckBox::indicator:indeterminate,
+QTableView::indicator:indeterminate,
+QTreeView::indicator:indeterminate,
+QListView::indicator:indeterminate {
+    border: 1px solid __ACCENT_HOVER__;
+    background: __ACCENT__;
+    image: url("__CHECK_PARTIAL_ICON__");
+}
+QCheckBox::indicator:disabled,
+QTableView::indicator:disabled,
+QTreeView::indicator:disabled,
+QListView::indicator:disabled {
+    border-color: __LINE__;
+    background: __BUTTON_SOFT__;
+    image: none;
+}
+QCheckBox:disabled {
+    color: __MUTED__;
+}
+#LibraryLibCheck::indicator {
+    width: 16px;
+    height: 16px;
+}
 #StatusHint {
     color: __MUTED__;
     font-size: 12px;
@@ -162,7 +234,9 @@ QRadioButton::indicator:disabled {
     background: __ACCENT_SOFT__;
     border: 1px solid __LINE_STRONG__;
     border-radius: 10px;
-    padding: 8px 10px;
+    padding: 8px 12px;
+    line-height: 1.35em;
+    min-height: 18px;
 }
 #HeroCard {
     background: __HERO__;
@@ -471,6 +545,47 @@ QPushButton:disabled {
 #SearchResultsActions {
     background: transparent;
 }
+#SearchResultsPager {
+    background: transparent;
+}
+QPushButton#SearchResultsPagerButton {
+    background-color: transparent;
+    border: 1px solid __ACCENT__;
+    border-radius: 6px;
+    color: __ACCENT__;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 0 8px;
+    min-height: 22px;
+    max-height: 24px;
+}
+QPushButton#SearchResultsPagerButton:hover:enabled {
+    background-color: __ACCENT_SOFT__;
+    border-color: __ACCENT_HOVER__;
+    color: __ACCENT_HOVER__;
+}
+QPushButton#SearchResultsPagerButton:pressed:enabled {
+    background-color: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    padding-top: 1px;
+}
+QPushButton#SearchResultsPagerButton:disabled {
+    background-color: transparent;
+    border-color: __ACCENT__;
+    color: __MUTED__;
+    font-weight: 600;
+}
+#SearchResultsPagerInfo {
+    background-color: transparent;
+    border: 1px solid __ACCENT__;
+    border-radius: 6px;
+    padding: 0 10px;
+    min-height: 22px;
+    max-height: 24px;
+    color: __HEADLINE__;
+    font-weight: 600;
+    font-size: 11px;
+}
 #PresetImageThumb {
     background: __FIELD__;
     border: 1px solid __LINE__;
@@ -689,7 +804,10 @@ QTextEdit#SearchInput:focus {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
-    padding: 8px 6px;
+    border-radius: 10px;
+    /* Keep padding modest; fixed widget height must leave room for both border edges. */
+    padding: 2px 8px;
+    min-height: 22px;
 }
 #SearchModeSelect QAbstractItemView {
     background: __PANEL__;
@@ -698,6 +816,33 @@ QTextEdit#SearchInput:focus {
     selection-background-color: __ACCENT_SOFT__;
     selection-color: __HEADLINE__;
     outline: 0;
+}
+#SearchableIdComboPopup {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#SearchableIdComboFilter {
+    background: __FIELD__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 6px 8px;
+}
+#SearchableIdComboView {
+    background: __PANEL__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    outline: 0;
+}
+#SearchableIdComboView::item {
+    padding: 6px 8px;
+    min-height: 28px;
+}
+#SearchableIdComboView::item:selected {
+    background: __ACCENT_SOFT__;
+    color: __HEADLINE__;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid __ACCENT__;
@@ -818,6 +963,204 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 }
 #SearchQueryTabs QTabBar::tab:hover {
     background: __BUTTON_SOFT_HOVER__;
+}
+#LibraryTabs::pane {
+    border: none;
+    background: transparent;
+    top: 0;
+    padding-top: 8px;
+}
+#LibraryTabs QTabBar::tab {
+    background: __BUTTON_SOFT__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+    min-width: 112px;
+    min-height: 36px;
+    padding: 10px 28px;
+    margin-right: 8px;
+    color: __MUTED__;
+    font-size: 14px;
+    font-weight: 700;
+}
+#LibraryTabs QTabBar::tab:selected {
+    background: __ACCENT_SOFT__;
+    border: 1px solid __ACCENT__;
+    color: __ACCENT__;
+}
+#LibraryTabs QTabBar::tab:hover:!selected {
+    background: __BUTTON_SOFT_HOVER__;
+    color: __TEXT__;
+    border-color: __LINE_STRONG__;
+}
+#LibrarySharedStrip {
+    background: transparent;
+    border: none;
+}
+/* Same family as 添加库 / 删除库; never set max-height (clips bottom borders). */
+#LibrarySharedStrip #SuccessGhostButton,
+#LibrarySharedStrip #DangerGhostButton {
+    min-height: 32px;
+    padding: 5px 14px;
+    border-radius: 10px;
+}
+#LibraryStack {
+    background: transparent;
+    border: none;
+}
+#LibraryModeSegment {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#LibraryModeBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: __MUTED__;
+    font-size: 13px;
+    font-weight: 700;
+    min-height: 26px;
+    padding: 3px 14px;
+}
+#LibraryModeBtn:hover:!checked {
+    background: __BUTTON_SOFT_HOVER__;
+    color: __TEXT__;
+}
+#LibraryModeBtn:checked {
+    background: __ACCENT_SOFT__;
+    color: __ACCENT__;
+    border: 1px solid __ACCENT__;
+}
+#LibraryGroupedVideoTree, #LibraryGroupedScroll {
+    background: transparent;
+    border: none;
+}
+#LibraryGroupedList {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+}
+#LibraryLibCard {
+    background: __PANEL__;
+    border: none;
+    border-bottom: 1px solid __LINE__;
+    border-radius: 0;
+}
+#LibraryLibCard[rowStripe="odd"] {
+    background: __FIELD__;
+}
+#LibraryLibCard[rowStripe="even"] {
+    background: __PANEL__;
+}
+#LibraryLibHeader {
+    background: transparent;
+    min-height: 36px;
+    max-height: 36px;
+}
+#LibraryLibCard[expanded="true"] #LibraryLibHeader {
+    border-bottom: 1px solid __LINE__;
+    background: __BUTTON_SOFT__;
+}
+#LibraryLibTitle {
+    color: __HEADLINE__;
+    font-size: 13px;
+    font-weight: 600;
+}
+#LibraryLibCount {
+    color: __MUTED__;
+    background: transparent;
+    border: 1px solid __LINE__;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    min-height: 20px;
+}
+#LibraryLibCollapseBtn {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+#LibraryLibAction {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+    min-height: 22px;
+    border-radius: 4px;
+}
+#LibraryLibAction:hover {
+    background: __BUTTON_SOFT__;
+    color: __TEXT__;
+}
+#LibraryLibSyncStatus {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+    min-height: 22px;
+}
+#LibraryLibBody {
+    background: transparent;
+    border: none;
+}
+#LibraryTreeColumnHeader {
+    background: __FIELD__;
+    border: none;
+    border-bottom: 1px solid __LINE__;
+    min-height: 32px;
+    max-height: 34px;
+}
+#LibraryTreeHeaderLabel,
+#LibraryTreeHeaderCount,
+#LibraryTreeHeaderStatus,
+#LibraryTreeHeaderAction {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 2px;
+}
+#LibraryTreeHeaderCount {
+    min-width: 36px;
+}
+#LibraryTreeHeaderStatus {
+    min-width: 88px;
+}
+#LibraryTreeHeaderAction {
+    min-width: 40px;
+}
+QTableView#LibraryGroupedLibTree {
+    outline: none;
+    border: none;
+    border-left: 2px solid __LINE__;
+    border-top: none;
+    background: __PANEL__;
+    alternate-background-color: __FIELD__;
+    padding: 0;
+    gridline-color: __LINE__;
+    border-radius: 0;
+}
+QTableView#LibraryGroupedLibTree::item {
+    min-height: 28px;
+    padding: 4px 10px 4px 10px;
+    border: none;
+    border-bottom: 1px solid __LINE__;
+    border-radius: 0;
+    font-size: 13px;
+    color: __TEXT__;
+}
+QTableView#LibraryGroupedLibTree::item:hover {
+    background: __ACCENT_SOFT__;
+}
+QTableView#LibraryGroupedLibTree::item:selected {
+    background: transparent;
+    color: __TEXT__;
 }
 #SearchMobileRow {
     background: transparent;
@@ -1341,6 +1684,57 @@ QListWidget#ModelFileList::item:selected {
     color: __HEADLINE__;
     border-color: __ACCENT__;
 }
+QListWidget#DialogueLibraryList {
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    outline: 0;
+}
+QListWidget#DialogueLibraryList::item {
+    padding: 0;
+    margin: 0 0 8px 0;
+    border: none;
+    background: transparent;
+}
+QListWidget#DialogueLibraryList::item:selected {
+    background: transparent;
+}
+#DialogueLibraryRow {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 14px;
+}
+#DialogueLibraryRow[selected="true"] {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
+#DialogueLibraryRow:hover {
+    border-color: __LINE_STRONG__;
+}
+#DialogueLibraryRowTitle {
+    color: __HEADLINE__;
+    font-size: 14px;
+    font-weight: 700;
+}
+#DialogueLibraryRowMeta {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+}
+#DialogueLibraryRowBadge {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+}
+#DialogueLibraryRowBadge[ready="true"] {
+    color: __ACCENT__;
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+}
 #SolidDangerButton {
     background: __DANGER__;
     border: 1px solid __DANGER__;
@@ -1400,6 +1794,10 @@ QDialog QCheckBox {
     color: __MUTED__;
     spacing: 6px;
     background: transparent;
+}
+QDialog QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
 }
 ClickableLabel[detailActive="true"] {
     color: __ACCENT__;
@@ -1551,62 +1949,69 @@ ClickableLabel[detailActive="true"] {
     border: none;
 }
 #VideoScopeList {
-    background: transparent;
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
 }
 #VideoScopeLibCard {
+    background: __PANEL__;
+    border: none;
+    border-bottom: 1px solid __LINE__;
+    border-radius: 0;
+}
+#VideoScopeLibCard[rowStripe="odd"] {
     background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 14px;
+}
+#VideoScopeLibCard[rowStripe="even"] {
+    background: __PANEL__;
+}
+#VideoScopeLibHeader {
+    background: transparent;
+    min-height: 36px;
+    max-height: 36px;
+}
+#VideoScopeLibCard[expanded="true"] #VideoScopeLibHeader {
+    border-bottom: 1px solid __LINE__;
+    background: __BUTTON_SOFT__;
 }
 #VideoScopeLibTitle {
     color: __HEADLINE__;
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
 }
 #VideoScopeCollapseBtn {
     background: transparent;
     border: none;
-    padding: 4px;
+    padding: 0;
 }
-#VideoScopeLibTree {
+QTableView#VideoScopeLibTree {
     outline: none;
-    border: 1px solid __LINE__;
-    border-radius: 12px;
-    padding: 4px 2px 8px 2px;
-    background: __PANEL__;
-}
-#VideoScopeLibTree QHeaderView::section {
-    background: __PANEL__;
     border: none;
-    border-bottom: 2px solid __LINE_STRONG__;
-    padding: 8px 10px;
-    color: __MUTED__;
-    font-weight: 700;
-    font-size: 12px;
+    border-left: 2px solid __LINE__;
+    padding: 0;
+    background: __PANEL__;
+    alternate-background-color: __FIELD__;
+    border-radius: 0;
 }
-#VideoScopeLibTree::item {
-    min-height: 30px;
-    padding: 8px 10px;
+QTableView#VideoScopeLibTree::item {
+    min-height: 28px;
+    padding: 4px 10px 4px 10px;
     border: none;
     border-bottom: 1px solid __LINE__;
     border-radius: 0;
-    margin: 0 2px;
     font-size: 13px;
+    color: __TEXT__;
 }
-#VideoScopeLibTree::item:hover {
+QTableView#VideoScopeLibTree::item:hover {
     background: __ACCENT_SOFT__;
 }
-#VideoScopeLibTree::item:selected {
-    background: __TRACK__;
-    color: __HEADLINE__;
-    border-bottom: 1px solid __LINE__;
-}
-#VideoScopeLibTree::item:selected:active {
-    background: __ACCENT_SOFT__;
-    border-bottom: 1px solid __LINE__;
+QTableView#VideoScopeLibTree::item:selected {
+    background: transparent;
+    color: __TEXT__;
 }
 #VideoScopeLibBody {
     background: transparent;
+    border: none;
 }
 QHeaderView::section {
     background: transparent;
@@ -1682,16 +2087,30 @@ QToolTip, QMessageBox, QDialog {
     border: 1px solid __LINE__;
 }
 QToolTip {
-    max-width: 360px;
+    /* Width/wrapping handled by ui.widgets.tooltip_utils (QSS max-width clips CJK). */
     padding: 6px 8px;
 }
 """
 
 
+def _qss_url(path: str) -> str:
+    """Qt stylesheet url() path: forward slashes, escaped for Windows."""
+    import os
+
+    text = os.path.normpath(str(path or "")).replace("\\", "/")
+    return text.replace("'", "\\'")
+
+
 def build_style(colors):
+    from src.infra.paths import get_resource_path
+
     style = STYLE_TEMPLATE
     for key, value in colors.items():
         style = style.replace(f"__{key}__", value)
+    check_icon = _qss_url(get_resource_path("resources/icons/check.png"))
+    partial_icon = _qss_url(get_resource_path("resources/icons/check_partial.png"))
+    style = style.replace("__CHECK_ICON__", check_icon)
+    style = style.replace("__CHECK_PARTIAL_ICON__", partial_icon)
     return style
 
 

@@ -92,6 +92,9 @@ class ResultView(QWidget):
         *,
         clip_score_mode: bool = False,
         low_confidence_score: float | None = None,
+        rank_offset: int = 0,
+        highlight_query: str = "",
+        dialogue_match_mode: str = "",
     ) -> None:
         populate_result_table(
             self.table,
@@ -104,6 +107,9 @@ class ResultView(QWidget):
             on_add_to_shot_list,
             clip_score_mode=clip_score_mode,
             low_confidence_score=low_confidence_score,
+            rank_offset=rank_offset,
+            highlight_query=highlight_query,
+            dialogue_match_mode=dialogue_match_mode,
         )
         self._sync_empty_overlay()
 

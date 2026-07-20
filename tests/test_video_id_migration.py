@@ -249,6 +249,43 @@ class VideoIdMigrationTests(unittest.TestCase):
                 self.assertFalse(legacy_video_ids_pending(config))
                 mock_hash.assert_not_called()
 
+    def test_lance_only_without_npy_skips_video_hash_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            base_dir = os.path.join(data_dir, "model_assets", "openai-clip", "vit-base-patch32")
+            library_root = os.path.join(tmp, "library")
+            os.makedirs(base_dir, exist_ok=True)
+            os.makedirs(library_root, exist_ok=True)
+            video_path = os.path.join(library_root, "clip.mp4")
+            with open(video_path, "wb") as handle:
+                handle.write(b"x" * 2048)
+
+            meta = {
+                "schema_version": 2,
+                "libraries": {
+                    library_root: {
+                        "files": {
+                            "clip.mp4": {
+                                "vid": get_video_hash(video_path),
+                                "mod_time": os.path.getmtime(video_path),
+                                "asset_state": "ready",
+                            }
+                        }
+                    }
+                },
+            }
+            meta_file = os.path.join(base_dir, "meta.json")
+            with open(meta_file, "w", encoding="utf-8") as handle:
+                json.dump(meta, handle)
+
+            config = {"data_root": tmp, "schema_version": 2}
+            with patch("src.storage.video_id_migration.get_video_hash") as mock_hash:
+                mock_hash.side_effect = AssertionError("Lance-only startup should not hash videos")
+                result = migrate_legacy_video_ids(config=config)
+                self.assertFalse(result.get("migrated"))
+                self.assertFalse(legacy_video_ids_pending(config))
+                self.assertTrue(video_id_migration_completed(config))
+
     def _write_dummy_model_files(self, model_root):
         model_dir = os.path.join(model_root, "openai-clip", "vit-base-patch32")
         os.makedirs(model_dir, exist_ok=True)

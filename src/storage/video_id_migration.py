@@ -8,7 +8,7 @@ import os
 from src.app.config import get_configured_data_root, get_data_storage_paths, load_config
 from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_metadata, load_vector_payload, save_metadata
-from src.utils import get_legacy_video_hash, get_video_hash
+from src.storage.video_identity import get_legacy_video_hash, get_video_hash
 
 logger = get_logger("video_id_migration")
 
@@ -92,6 +92,45 @@ def _vector_ids_on_disk(vector_dir):
     return ids
 
 
+def is_lance_migration_completed(config=None) -> bool:
+    """True when startup already finished Lance import/cleanup and recorded the flag."""
+    state = _read_migration_state(config or load_config())
+    payload = state.get("lance_migration")
+    return isinstance(payload, dict) and bool(payload.get("completed"))
+
+
+def legacy_npy_vectors_present(config=None) -> bool:
+    """True when any model profile still has per-video ``*_vectors.npy`` payloads.
+
+    Always scans disk. Startup gates should prefer ``is_lance_migration_completed``
+    so leftover post-migration sidecars do not force a vector-dir listdir every launch.
+    """
+    for storage_root in iter_model_asset_storage_roots(config):
+        vector_dir = str(storage_root.get("vector_dir", "") or "").strip()
+        if not vector_dir or not os.path.isdir(vector_dir):
+            continue
+        if any(name.lower().endswith("_vectors.npy") for name in os.listdir(vector_dir)):
+            return True
+    return False
+
+
+def _skip_legacy_video_id_checks(config=None) -> bool:
+    """Skip per-video hash verification once Lance migration completed, or when no npy remains."""
+    if is_lance_migration_completed(config):
+        return True
+    return not legacy_npy_vectors_present(config)
+
+
+def _mark_lance_video_id_checks_passed(config) -> None:
+    _write_migration_state_patch(
+        config,
+        {
+            "video_id_format": VIDEO_ID_FORMAT_VERSION,
+            "video_id_pending_check": VIDEO_ID_PENDING_CHECK_PASSED,
+        },
+    )
+
+
 def _entry_has_legacy_video_ids(root_path, rel_path, info, vector_dir):
     """Check one meta entry; may read up to 20 MiB from the video file."""
     abs_path = os.path.join(root_path, rel_path)
@@ -140,6 +179,8 @@ def _mark_video_id_pending_check_passed(config):
 
 def _legacy_video_ids_pending_fast_for_root(meta, vector_dir, *, verify_saved_ids=False):
     """Disk/meta check; hashes only missing-vector entries, or saved ids when verify_saved_ids."""
+    if not _vector_ids_on_disk(vector_dir):
+        return False
     valid_ids = _collect_valid_video_ids(meta)
     disk_ids = _vector_ids_on_disk(vector_dir)
     for disk_id in disk_ids:
@@ -196,6 +237,8 @@ def _legacy_video_ids_pending_full(config):
 def legacy_video_ids_pending(config=None):
     """True while on-disk vectors still use pre-v2 ids that meta/hash no longer match."""
     runtime_config = config or load_config()
+    if _skip_legacy_video_id_checks(runtime_config):
+        return False
     trusted = _trust_fast_video_id_check(runtime_config)
     verify_saved_ids = not trusted
     if trusted or _read_video_id_format(runtime_config) >= VIDEO_ID_FORMAT_VERSION:
@@ -305,6 +348,8 @@ def _legacy_vector_file(vector_dir, video_id):
 
 def _root_has_legacy_video_ids(entries, vector_dir):
     """True if on-disk vectors still use pre-v2 ids (including meta already updated)."""
+    if not _vector_ids_on_disk(vector_dir):
+        return False
     for root_path, rel_path, info in entries:
         if _entry_has_legacy_video_ids(root_path, rel_path, info, vector_dir):
             return True
@@ -463,6 +508,14 @@ def migrate_model_storage_root(storage_root, *, progress_callback=None, progress
 def migrate_legacy_video_ids(config=None, progress_callback=None):
     """Migrate all model libraries from legacy video ids to the current format."""
     runtime_config = dict(config or load_config())
+    if _skip_legacy_video_id_checks(runtime_config):
+        _mark_lance_video_id_checks_passed(runtime_config)
+        logger.info("Video id migration skipped: Lance storage active with no legacy npy vectors")
+        return {
+            "migrated": False,
+            "video_id_format": VIDEO_ID_FORMAT_VERSION,
+            "pending_legacy": False,
+        }
     video_id_format = _read_video_id_format(runtime_config)
     trusted_fast = _trust_fast_video_id_check(runtime_config)
     if trusted_fast:

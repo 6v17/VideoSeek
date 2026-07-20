@@ -51,19 +51,27 @@ class StorageServiceTests(unittest.TestCase):
                 "meta_file": str(current_data / "meta.json"),
             }
             saved_configs = []
+            progress_events = []
 
             with (
                 patch("src.services.storage_service.load_config", return_value=config),
                 patch("src.services.storage_service.save_config", side_effect=saved_configs.append),
             ):
-                result = storage_service.migrate_app_data_root(str(target_root))
+                result = storage_service.migrate_app_data_root(
+                    str(target_root),
+                    progress_callback=lambda pct, msg: progress_events.append((pct, msg)),
+                )
 
             self.assertTrue(result["migrated"])
+            self.assertEqual(result.get("transfer_mode"), "move")
+            self.assertFalse(result.get("old_remaining"))
             self.assertTrue((target_root / "data" / "meta.json").exists())
             self.assertTrue((target_root / "data" / "vector" / "sample.npy").exists())
             self.assertEqual(saved_configs[0]["data_root"], str(target_root))
-            self.assertTrue((current_root / "data" / "meta.json").exists())
-            self.assertTrue((current_root / "data" / "vector" / "sample.npy").exists())
+            self.assertFalse((current_root / "data").exists())
+            self.assertTrue(progress_events)
+            self.assertEqual(progress_events[-1][0], 100)
+            self.assertTrue(any(0 < pct < 100 for pct, _msg in progress_events))
 
     def test_migrate_app_data_root_rejects_nested_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -256,10 +264,13 @@ class StorageServiceTests(unittest.TestCase):
                 result = storage_service.migrate_model_root(str(dst))
 
             self.assertTrue(result["migrated"])
+            self.assertEqual(result.get("transfer_mode"), "move")
+            self.assertFalse(result.get("old_remaining"))
             self.assertTrue((dst / "openai-clip" / "vit-base-patch32" / "clip_visual.onnx").exists())
+            self.assertFalse(src.exists())
             self.assertEqual(saved[0]["model_dir"], str(dst))
             self.assertEqual(saved[0]["models"]["profiles"][0]["runtime"]["model_dir"], str(dst))
-            self.assertEqual(saved[0]["pending_cleanup_model_dir"], str(src))
+            self.assertNotIn("pending_cleanup_model_dir", saved[0])
 
     def test_cleanup_old_model_dir_removes_tree_when_safe(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -320,7 +331,7 @@ class StorageServiceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     storage_service.cleanup_old_model_dir(str(pending))
 
-    def test_migrate_app_data_root_keeps_old_root_and_copies_data_only(self):
+    def test_migrate_app_data_root_same_volume_moves_data_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             current_root = root / "current"
@@ -349,13 +360,117 @@ class StorageServiceTests(unittest.TestCase):
                 result = storage_service.migrate_app_data_root(str(target_root))
 
             self.assertTrue(result["migrated"])
-            self.assertTrue((current_root / "data" / "meta.json").exists())
+            self.assertEqual(result.get("transfer_mode"), "move")
+            self.assertFalse(result.get("old_remaining"))
+            self.assertFalse((current_root / "data").exists())
+            self.assertTrue((target_root / "data" / "meta.json").exists())
             self.assertTrue((current_root / "logs" / "app.log").exists())
             self.assertTrue((current_root / "models" / "clip.onnx").exists())
             self.assertTrue((current_root / "ffmpeg.exe").exists())
             self.assertFalse((target_root / "logs" / "app.log").exists())
             self.assertFalse((target_root / "models").exists())
             self.assertFalse((target_root / "ffmpeg.exe").exists())
+
+    def test_migrate_app_data_root_cross_volume_copy_keeps_old_data(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            current_root = root / "current"
+            current_data = current_root / "data"
+            (current_data / "vector").mkdir(parents=True)
+            (current_data / "meta.json").write_text('{"libraries": {}}', encoding="utf-8")
+            (current_data / "vector" / "sample.npy").write_bytes(b"vector-data")
+            target_root = root / "target"
+            config = {
+                "data_root": str(current_root),
+                "meta_file": str(current_data / "meta.json"),
+            }
+            saved = []
+
+            with (
+                patch("src.services.storage_service.load_config", return_value=config),
+                patch("src.services.storage_service.save_config", side_effect=saved.append),
+                patch("src.services.storage_service._same_volume", return_value=False),
+            ):
+                result = storage_service.migrate_app_data_root(str(target_root))
+
+            self.assertTrue(result["migrated"])
+            self.assertEqual(result.get("transfer_mode"), "copy")
+            self.assertTrue(result.get("old_remaining"))
+            self.assertTrue((current_root / "data" / "meta.json").exists())
+            self.assertTrue((target_root / "data" / "meta.json").exists())
+            self.assertEqual(saved[0].get("pending_cleanup_data_root"), str(current_root))
+
+    def test_migrate_app_data_root_accepts_library_db_without_meta_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            current_root = root / "current"
+            profile_base = (
+                current_root
+                / "data"
+                / "model_assets"
+                / "openai-clip"
+                / "vit-base-patch32"
+            )
+            profile_base.mkdir(parents=True)
+            (profile_base / "library.db").write_bytes(b"sqlite")
+            target_root = root / "target"
+            config = {
+                "schema_version": 2,
+                "data_root": str(current_root),
+                "meta_file": str(current_root / "data" / "meta.json"),
+                "models": {
+                    "active_profile": "p1",
+                    "profiles": [
+                        {
+                            "id": "p1",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "model_dir": str(root / "models"),
+                                "model_variant": "vit-base-patch32",
+                                "prefer_gpu": False,
+                            },
+                        }
+                    ],
+                },
+            }
+
+            with (
+                patch("src.services.storage_service.load_config", return_value=config),
+                patch("src.services.storage_service.save_config"),
+                patch(
+                    "src.services.storage_service.get_model_profile_storage_paths",
+                    side_effect=lambda config=None: {
+                        "meta_file": str(
+                            Path(config["data_root"])
+                            / "data"
+                            / "model_assets"
+                            / "openai-clip"
+                            / "vit-base-patch32"
+                            / "meta.json"
+                        ),
+                        "base_dir": str(
+                            Path(config["data_root"])
+                            / "data"
+                            / "model_assets"
+                            / "openai-clip"
+                            / "vit-base-patch32"
+                        ),
+                    },
+                ),
+            ):
+                result = storage_service.migrate_app_data_root(str(target_root))
+
+            self.assertTrue(result["migrated"])
+            self.assertTrue(
+                (
+                    target_root
+                    / "data"
+                    / "model_assets"
+                    / "openai-clip"
+                    / "vit-base-patch32"
+                    / "library.db"
+                ).exists()
+            )
 
     def test_migrate_app_data_root_rejects_non_empty_target_data_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:

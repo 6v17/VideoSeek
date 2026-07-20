@@ -76,7 +76,12 @@ def _collect_frame_candidates_for_chunk_search(
             else _resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
         )
     else:
-        fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped)
+        if is_text:
+            from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
+
+            fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped)
+        else:
+            fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped)
     neighbor_seed_n = _resolve_neighbor_seed_top_n(config, fetch_k, top_k, precise_image=precise_image)
     candidates: List[SearchHit] = []
 

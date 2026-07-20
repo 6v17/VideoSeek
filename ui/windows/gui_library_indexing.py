@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtWidgets import QApplication, QFileDialog, QGraphicsOpacityEffect, QAbstractItemView
@@ -13,35 +14,163 @@ from src.services.indexing_service import filter_index_problem_issues, list_miss
 from src.services.library_service import (
     add_library,
     list_libraries,
+    list_library_video_entries,
     list_local_vector_details,
-    remove_library as remove_library_entry,
+    register_library_videos,
+)
+from src.services.subtitle_library_service import (
+    add_subtitle_library,
+    list_subtitle_libraries,
+    list_subtitle_library_video_entries,
+    register_subtitle_library_videos,
 )
 from src.storage.asset_store import load_model_metadata
-from src.workflows.update_video import delete_physical_video_data
 from src.storage.lance_store import format_byte_size
 from src.utils import open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
-from ui.views.table_views import populate_library_table
 from ui.workers import LocalVectorDetailsWorker
 
 
 class LibraryIndexingGuiMixin:
     """Library paths, index runs, progress, and index-issue dialogs; mixed into `MainWindow`."""
 
+    def _ensure_library_tree_hooks(self):
+        if getattr(self, "_library_tree_hooks_ready", False):
+            return
+        visual = self.library_page.visual_video_tree
+        subtitle = self.library_page.subtitle_video_tree
+        visual.open_library_requested.connect(self.open_library_folder)
+        subtitle.open_library_requested.connect(self.open_library_folder)
+        visual.selection_changed.connect(self._refresh_remove_library_button)
+        subtitle.selection_changed.connect(self._refresh_remove_library_button)
+        self._library_tree_hooks_ready = True
+
+    def _asset_state_label(self, asset_state: str) -> str:
+        state = str(asset_state or "").strip().lower() or "missing_asset"
+        key = f"library_asset_state_{state}"
+        return self.texts.get(key, state)
+
+    def _build_visual_tree_entries(self, *, register: bool = False) -> tuple[list[dict], list[str]]:
+        libraries = list_libraries()
+        # Avoid hashing/walking the whole tree on every UI refresh (10k+ videos).
+        entries = list_library_video_entries(register=register)
+        rows = []
+        for item in entries:
+            state = str(item.get("asset_state") or "").strip().lower()
+            ready = state == "ready"
+            rows.append(
+                {
+                    **item,
+                    "status_text": self._asset_state_label(state),
+                    "status_tone": "ready" if ready else "pending",
+                }
+            )
+        return rows, list(libraries.keys())
+
+    def _build_subtitle_tree_entries(self, *, register: bool = False) -> tuple[list[dict], list[str]]:
+        from src.storage.dialogue_transcript_store import list_dialogue_transcript_summaries
+
+        # Global subtitle registry — independent of the active CLIP profile.
+        libraries = list_subtitle_libraries()
+        entries = list_subtitle_library_video_entries(register=register)
+        transcript_by_id = {
+            str(row.get("video_id") or "").strip(): row
+            for row in list_dialogue_transcript_summaries()
+            if str(row.get("video_id") or "").strip()
+        }
+        rows = []
+        for item in entries:
+            video_id = str(item.get("video_id") or "").strip()
+            record = transcript_by_id.get(video_id) or {}
+            segment_count = int(record.get("segment_count") or 0)
+            has_transcript = bool(record)
+            if has_transcript:
+                status = self.texts.get(
+                    "dialogue_library_row_meta",
+                    "{segments} cues",
+                ).format(segments=segment_count)
+            else:
+                status = self.texts.get("subtitle_library_status_missing", "Not extracted")
+            rows.append(
+                {
+                    **item,
+                    "has_transcript": has_transcript,
+                    "segment_count": segment_count,
+                    "status_text": status,
+                    "status_tone": "ready" if has_transcript else "pending",
+                }
+            )
+        return rows, list(libraries.keys())
+
+    def _is_subtitle_library_mode(self) -> bool:
+        return int(self.library_page.library_mode()) == 1
+
+    def _refresh_library_action_hints(self):
+        btn = getattr(self.library_page, "btn_remove_lib", None)
+        if btn is None:
+            return
+        if self._is_subtitle_library_mode():
+            btn.setToolTip(
+                self.texts.get(
+                    "remove_subtitle_library_hint",
+                    self.texts.get("remove_library_hint", ""),
+                )
+            )
+        else:
+            btn.setToolTip(
+                self.texts.get(
+                    "remove_visual_library_hint",
+                    self.texts.get("remove_library_hint", ""),
+                )
+            )
+
+    def _active_library_tree(self):
+        page = self.library_page
+        if int(page.library_mode()) == 1:
+            return page.subtitle_video_tree
+        return page.visual_video_tree
+
+    def _refresh_remove_library_button(self):
+        btn = getattr(self.library_page, "btn_remove_lib", None)
+        if btn is None:
+            return
+        if (
+            getattr(self, "_remove_library_running", False)
+            or self._remove_library_worker_running()
+            or self.indexing_controller.is_running()
+            or self._dialogue_index_running()
+        ):
+            btn.setEnabled(False)
+            return
+        tree = self._active_library_tree()
+        btn.setEnabled(bool(tree.collect_checked_library_paths()))
+
     def refresh_library_table(self):
         try:
-            is_indexing = self.indexing_controller.is_running()
-            populate_library_table(
-                self.library_page.library_list,
-                list_libraries(),
-                is_indexing,
-                self.sync_library,
-                self.remove_library_entry,
-                self.open_library_folder,
-                self.texts,
+            self._ensure_library_tree_hooks()
+            open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
+            empty_text = self.texts.get("library_list_empty", "No library folders yet.")
+            status_template = self.texts.get("library_sync_status", "{ready}/{total} synced")
+            tree = self.library_page.visual_video_tree
+            tree.set_action_texts(
+                open_text=open_text,
+                empty_text=empty_text,
+                status_template=status_template,
+                header_video=self.texts.get(
+                    "library_col_video", self.texts.get("search_scope_video_col", "Video")
+                ),
+                header_count=self.texts.get("library_col_count", "Count"),
+                header_status=self.texts.get("library_col_status", "Status"),
+                header_action=self.texts.get("library_col_action", "Action"),
             )
+            entries, library_paths = self._build_visual_tree_entries(register=False)
+            tree.refresh_from_entries(entries, library_paths=library_paths)
+            self._refresh_library_action_hints()
+            self._refresh_remove_library_button()
+            if hasattr(self, "invalidate_search_scope_entries_cache"):
+                self.invalidate_search_scope_entries_cache()
             if hasattr(self, "_refresh_search_scope_ui"):
-                self._refresh_search_scope_ui()
+                self._refresh_search_scope_ui(force_entries=True)
             if hasattr(self, "_refresh_understanding_scope_options"):
                 self._refresh_understanding_scope_options()
         except Exception as exc:
@@ -49,7 +178,21 @@ class LibraryIndexingGuiMixin:
             return
 
     def sync_library(self, path):
-        self.start_update_index(target_lib=path, rebuild_global_assets=False)
+        # Sync every registered video under one library folder.
+        entries, _ = self._build_visual_tree_entries()
+        video_ids = [
+            str(item.get("video_id") or "").strip()
+            for item in entries
+            if str(item.get("library_path") or "").strip()
+            and os.path.normcase(os.path.normpath(item["library_path"]))
+            == os.path.normcase(os.path.normpath(path))
+        ]
+        video_ids = [vid for vid in video_ids if vid]
+        self.start_update_index(
+            target_lib=path,
+            rebuild_global_assets=False,
+            video_ids=video_ids or None,
+        )
 
     def open_library_folder(self, path):
         open_folder_in_explorer(path)
@@ -58,10 +201,26 @@ class LibraryIndexingGuiMixin:
         path = QFileDialog.getExistingDirectory(self, self.texts["select_folder"])
         if not path:
             return
+        subtitle_mode = self._is_subtitle_library_mode()
         try:
-            result = add_library(path)
+            if subtitle_mode:
+                result = add_subtitle_library(path)
+            else:
+                result = add_library(path)
             if result.get("added"):
-                self.refresh_library_table()
+                try:
+                    if subtitle_mode:
+                        register_subtitle_library_videos(
+                            library_path=result.get("path") or path
+                        )
+                    else:
+                        register_library_videos(library_path=result.get("path") or path)
+                except Exception:
+                    pass
+                if subtitle_mode:
+                    self.refresh_dialogue_library_table()
+                else:
+                    self.refresh_library_table()
                 status_text = self.texts["library_added"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
@@ -75,28 +234,780 @@ class LibraryIndexingGuiMixin:
         except Exception as exc:
             self.show_error_dialog(self.texts["library_add_failed"], exc)
 
-    def remove_library_entry(self, path):
-        if not self.show_confirm_dialog(self.texts["confirm_title"], self.texts["remove_library_confirm"].format(path=path)):
+    def remove_selected_libraries(self):
+        tree = self._active_library_tree()
+        paths = tree.collect_checked_library_paths()
+        if not paths:
+            self._refresh_remove_library_button()
             return
+        self.remove_library_entry(paths)
+
+    def remove_library_entry(self, path):
+        if getattr(self, "_remove_library_running", False) or self._remove_library_worker_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+        if self.indexing_controller.is_running() or self._dialogue_index_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+        if isinstance(path, (list, tuple, set)):
+            paths = [str(p or "").strip() for p in path if str(p or "").strip()]
+        else:
+            paths = [str(path or "").strip()] if str(path or "").strip() else []
+        if not paths:
+            return
+        subtitle_mode = self._is_subtitle_library_mode()
+        if subtitle_mode:
+            single_key = "remove_subtitle_library_confirm"
+            multi_key = "remove_subtitle_libraries_confirm"
+            single_default = "Remove this subtitle library and its OCR data?\n{path}"
+            multi_default = (
+                "Remove {count} selected subtitle libraries and their OCR data?\n\n{paths}"
+            )
+        else:
+            single_key = "remove_visual_library_confirm"
+            multi_key = "remove_visual_libraries_confirm"
+            single_default = (
+                "Remove this visual library and its CLIP index from the current model?\n{path}"
+            )
+            multi_default = (
+                "Remove {count} selected visual libraries and their CLIP indexes "
+                "from the current model?\n\n{paths}"
+            )
+        if len(paths) == 1:
+            confirm = self.texts.get(single_key, single_default).format(path=paths[0])
+        else:
+            confirm = self.texts.get(multi_key, multi_default).format(
+                count=len(paths), paths="\n".join(paths)
+            )
+        if not self.show_confirm_dialog(self.texts["confirm_title"], confirm):
+            return
+
+        from ui.workers import RemoveLibraryWorker
+
+        self._remove_library_running = True
+        self._remove_library_mode = "subtitle" if subtitle_mode else "visual"
+        self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_build_dialogue_index.setEnabled(False)
+        self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_export_dialogue.setEnabled(False)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(False)
+        self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_remove_lib.setEnabled(False)
+        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self.library_page.progress_bar.setVisible(True)
+        self.library_page.progress_bar.setValue(0)
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_removing", "Removing library...")
+        )
+
+        worker = RemoveLibraryWorker(
+            paths,
+            mode="subtitle" if subtitle_mode else "visual",
+        )
+        self.remove_library_worker = worker
+        worker.progress_signal.connect(self._update_remove_library_progress)
+        worker.error_signal.connect(self._handle_remove_library_error)
+        worker.finished_signal.connect(self._finish_remove_library)
+        worker.finished.connect(lambda w=worker: self._cleanup_remove_library_worker(w))
+        worker.start()
+
+    def _remove_library_worker_running(self) -> bool:
+        worker = getattr(self, "remove_library_worker", None)
+        return bool(worker is not None and worker.isRunning())
+
+    def _cleanup_remove_library_worker(self, worker) -> None:
+        if getattr(self, "remove_library_worker", None) is worker:
+            self.remove_library_worker = None
         try:
-            if remove_library_entry(path, delete_physical_video_data):
-                self.refresh_library_table()
+            worker.deleteLater()
+        except Exception:
+            pass
+
+    def _update_remove_library_progress(self, value, text):
+        self.library_page.progress_bar.setValue(int(value))
+        raw = str(text or "")
+        if raw.startswith("remove_library|"):
+            parts = raw.split("|")
+            if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "library_removing_progress",
+                        "Removing library {current}/{total}...",
+                    ).format(current=parts[1], total=parts[2])
+                )
+                return
+            stage = parts[1] if len(parts) > 1 else ""
+            if stage == "compact":
+                self.library_page.lbl_status.setText(
+                    self.texts.get("library_removing_compact", "Compacting index storage...")
+                )
+                return
+            if stage == "transcripts":
+                self.library_page.lbl_status.setText(
+                    self.texts.get("library_removing_transcripts", "Cleaning subtitle data...")
+                )
+                return
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_removing", "Removing library...")
+        )
+
+    def _handle_remove_library_error(self, message):
+        self.show_error_dialog(self.texts["library_remove_failed"], message)
+
+    def _finish_remove_library(self, success):
+        try:
+            self.library_page.btn_sync_db.setEnabled(True)
+            self.library_page.btn_build_dialogue_index.setEnabled(True)
+            self.library_page.btn_reembed_dialogue.setEnabled(True)
+            self.library_page.btn_export_dialogue.setEnabled(True)
+            self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+            self.library_page.input_subtitle_sample_interval.setEnabled(True)
+            self.library_page.input_subtitle_ocr_batch.setEnabled(True)
+            self.library_page.btn_add_lib.setEnabled(True)
+            self.library_page.btn_cleanup_missing.setEnabled(True)
+            self.library_page.progress_bar.setVisible(False)
+            if success:
+                # Defer tree rebuilds so the finished signal returns quickly.
+                from PySide6.QtCore import QTimer
+
+                mode = str(getattr(self, "_remove_library_mode", "visual") or "visual")
+                if mode == "subtitle":
+                    QTimer.singleShot(0, self.refresh_dialogue_library_table)
+                else:
+                    QTimer.singleShot(0, self.refresh_library_table)
                 status_text = self.texts["library_removed"]
                 self.library_page.lbl_status.setText(status_text)
                 self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
             else:
                 self.library_page.lbl_status.setText(self.texts["library_remove_failed"])
-        except Exception as exc:
-            self.show_error_dialog(self.texts["library_remove_failed"], exc)
+        finally:
+            self._remove_library_running = False
+            self._remove_library_mode = ""
+            self._refresh_remove_library_button()
 
-    def start_update_index(self, target_lib=None, rebuild_global_assets=True):
+    def start_update_index(
+        self,
+        target_lib=None,
+        rebuild_global_assets=True,
+        video_ids=None,
+        *,
+        checked_only: bool = False,
+    ):
         if not self._ensure_startup_migration_idle("feature_indexing"):
             return
+        selected_ids = video_ids
+        if checked_only:
+            selected_ids = self.library_page.visual_video_tree.collect_checked_video_ids()
+            if not selected_ids:
+                self.show_info_dialog(
+                    self.texts.get("sync_selected_videos", self.texts.get("update_index", "Sync")),
+                    self.texts.get("library_select_videos_first", "Select one or more videos first."),
+                    kind="info",
+                )
+                return
         self._start_index_update(
             target_lib=target_lib,
             force_cleanup_missing_files=False,
             rebuild_global_assets=rebuild_global_assets,
+            video_ids=selected_ids,
         )
+
+    def start_dialogue_index(self):
+        self._start_dialogue_index_job(mode="auto")
+
+    def start_dialogue_reembed(self):
+        # Force OCR rebuild (button label: re-extract subtitles).
+        self._start_dialogue_index_job(mode="ocr")
+
+    def load_subtitle_sample_interval(self):
+        from src.app.config import DEFAULT_CONFIG, load_config
+
+        try:
+            config = load_config()
+            value = float(
+                config.get(
+                    "subtitle_sample_interval_sec",
+                    DEFAULT_CONFIG["subtitle_sample_interval_sec"],
+                )
+            )
+        except Exception:
+            value = float(DEFAULT_CONFIG["subtitle_sample_interval_sec"])
+        value = max(0.1, min(6.0, value))
+        spin = self.library_page.input_subtitle_sample_interval
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+
+    def _read_subtitle_sample_interval(self) -> float:
+        from src.app.config import load_config, save_config
+
+        spin = self.library_page.input_subtitle_sample_interval
+        value = max(0.1, min(6.0, float(spin.value())))
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+        try:
+            config = load_config()
+            previous = config.get("subtitle_sample_interval_sec")
+            if previous is None or abs(float(previous) - value) > 1e-6:
+                config["subtitle_sample_interval_sec"] = value
+                save_config(config)
+        except Exception:
+            pass
+        return value
+
+    def _on_subtitle_sample_interval_changed(self, _value=None):
+        self._read_subtitle_sample_interval()
+
+    def load_subtitle_ocr_batch(self):
+        from src.app.config import DEFAULT_CONFIG, load_config
+
+        try:
+            config = load_config()
+            value = int(
+                config.get(
+                    "subtitle_ocr_batch_size",
+                    DEFAULT_CONFIG["subtitle_ocr_batch_size"],
+                )
+            )
+        except Exception:
+            value = int(DEFAULT_CONFIG["subtitle_ocr_batch_size"])
+        value = max(1, min(6, value))
+        spin = self.library_page.input_subtitle_ocr_batch
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+
+    def _read_subtitle_ocr_batch(self) -> int:
+        from src.app.config import load_config, save_config
+
+        spin = self.library_page.input_subtitle_ocr_batch
+        value = max(1, min(6, int(spin.value())))
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
+        try:
+            config = load_config()
+            previous = config.get("subtitle_ocr_batch_size")
+            if previous is None or int(previous) != value:
+                config["subtitle_ocr_batch_size"] = value
+                save_config(config)
+        except Exception:
+            pass
+        return value
+
+    def _on_subtitle_ocr_batch_changed(self, _value=None):
+        self._read_subtitle_ocr_batch()
+
+    def _on_library_tab_changed(self, index: int):
+        self._refresh_library_action_hints()
+        if int(index) == 1:
+            self.refresh_dialogue_library_table()
+        else:
+            self._refresh_remove_library_button()
+
+    def refresh_dialogue_library_table(self):
+        try:
+            self._ensure_library_tree_hooks()
+            open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
+            empty_text = self.texts.get(
+                "dialogue_library_empty",
+                "No subtitles yet. Add a video library, then Extract subtitles.",
+            )
+            status_template = self.texts.get("library_extract_status", "{ready}/{total} extracted")
+            tree = self.library_page.subtitle_video_tree
+            tree.set_action_texts(
+                open_text=open_text,
+                empty_text=empty_text,
+                status_template=status_template,
+                header_video=self.texts.get(
+                    "library_col_video", self.texts.get("search_scope_video_col", "Video")
+                ),
+                header_count=self.texts.get("library_col_count", "Count"),
+                header_status=self.texts.get("library_col_status", "Status"),
+                header_action=self.texts.get("library_col_action", "Action"),
+            )
+            entries, library_paths = self._build_subtitle_tree_entries(register=False)
+            tree.refresh_from_entries(entries, library_paths=library_paths)
+            self._refresh_remove_library_button()
+            if hasattr(self, "invalidate_dialogue_search_scope_entries_cache"):
+                self.invalidate_dialogue_search_scope_entries_cache()
+            if hasattr(self, "_refresh_search_scope_ui") and hasattr(self, "_search_scope_is_dialogue"):
+                try:
+                    if self._search_scope_is_dialogue():
+                        self._refresh_search_scope_ui(force_entries=True)
+                except Exception:
+                    pass
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
+
+    def export_dialogue_library(self):
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+        from src.services.dialogue_export_service import export_dialogue_transcripts
+        from src.storage.dialogue_transcript_store import list_dialogue_transcript_summaries
+
+        title = self.texts.get("export_dialogue_library_title", "Export dialogue")
+        selected_ids = [
+            str(vid).strip()
+            for vid in self.library_page.subtitle_video_tree.collect_checked_video_ids()
+            if str(vid).strip()
+        ]
+        if not selected_ids:
+            self.show_info_dialog(
+                title,
+                self.texts.get("library_select_videos_first", "Select one or more videos first."),
+                kind="info",
+            )
+            return
+
+        # Metadata only — do not parse full segment payloads for the empty check.
+        if not list_dialogue_transcript_summaries(video_ids=selected_ids):
+            self.show_info_dialog(
+                title,
+                self.texts.get("export_dialogue_library_empty", "No shared dialogue to export."),
+                kind="info",
+            )
+            return
+
+        format_labels = [
+            self.texts.get("export_dialogue_format_srt", "SRT (.srt)"),
+            self.texts.get("export_dialogue_format_txt", "TXT (.txt)"),
+            self.texts.get("export_dialogue_format_json", "JSON (.json)"),
+        ]
+        format_keys = ["srt", "txt", "json"]
+        chosen, ok = QInputDialog.getItem(
+            self,
+            title,
+            self.texts.get("export_dialogue_library_pick_format", "Choose export format"),
+            format_labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        try:
+            fmt = format_keys[format_labels.index(chosen)]
+        except ValueError:
+            fmt = "srt"
+
+        out_dir = QFileDialog.getExistingDirectory(
+            self,
+            self.texts.get("export_dialogue_library_pick_dir", "Choose export folder"),
+        )
+        if not out_dir:
+            return
+
+        result = export_dialogue_transcripts(
+            out_dir,
+            format=fmt,
+            video_ids=selected_ids,
+        )
+        if not result.get("ok") and int(result.get("exported") or 0) <= 0:
+            self.show_error_dialog(
+                self.texts.get("export_dialogue_library_failed", "Dialogue export failed"),
+                str(result.get("error") or "export failed"),
+            )
+            return
+        self.show_info_dialog(
+            self.texts.get("success_title", "Success"),
+            self.texts.get(
+                "export_dialogue_library_done",
+                "Exported {count} file(s) to:\n{path}",
+            ).format(count=int(result.get("exported") or 0), path=result.get("output_dir") or out_dir),
+            kind="success",
+        )
+        self.library_page.lbl_status.setText(
+            self.texts.get(
+                "export_dialogue_library_done",
+                "Exported {count} file(s).",
+            ).format(count=int(result.get("exported") or 0), path=result.get("output_dir") or out_dir)
+        )
+
+    def _format_dialogue_stage(self, stage_token: str) -> str:
+        token = str(stage_token or "").strip()
+        if not token:
+            return ""
+        head = token.split("|", 1)[0]
+        detail = ""
+        if token.startswith("dialogue_embed|") or token.startswith("subtitle_ocr|"):
+            parts = token.split("|")
+            if len(parts) >= 3:
+                detail = f"{parts[1]}/{parts[2]}"
+            head = "dialogue_embed" if token.startswith("dialogue_embed|") else "subtitle_ocr"
+        mapping = {
+            "dialogue_extract": "dialogue_stage_extract",
+            "dialogue_asr": "dialogue_stage_asr",
+            "dialogue_merge": "dialogue_stage_merge",
+            "dialogue_save_transcript": "dialogue_stage_save_transcript",
+            "dialogue_reuse_transcripts": "dialogue_stage_reuse",
+            "dialogue_embed": "dialogue_stage_embed",
+            "dialogue_upsert": "dialogue_stage_upsert",
+            "dialogue_done": "dialogue_stage_done",
+            "dialogue_index_done": "dialogue_stage_done",
+            "subtitle_extract_audio": "dialogue_stage_extract",
+            "subtitle_probe": "dialogue_stage_extract",
+            "subtitle_vad": "dialogue_stage_asr",
+            "subtitle_ocr": "dialogue_stage_ocr",
+            "subtitle_merge": "dialogue_stage_merge",
+            "subtitle_reuse": "dialogue_stage_reuse",
+            "subtitle_done": "dialogue_stage_done",
+        }
+        key = mapping.get(head, "")
+        if not key:
+            return token
+        template = self.texts.get(key, token)
+        try:
+            return template.format(detail=detail or "…")
+        except Exception:
+            return template
+
+    def _start_dialogue_index_job(self, *, mode: str = "auto"):
+        if not self._ensure_startup_migration_idle("feature_indexing"):
+            return
+        title_key = "build_dialogue_index"
+        mode_value = str(mode or "auto").strip().lower() or "auto"
+        reembed = mode_value == "reembed"
+        if reembed:
+            title_key = "reembed_dialogue_index"
+        elif mode_value == "ocr":
+            title_key = "build_dialogue_index"
+        title = self.texts.get(title_key, title_key)
+
+        if (
+            self.indexing_controller.is_running()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
+            message = self.texts.get("index_already_running", "An indexing job is already running.")
+            self.library_page.lbl_status.setText(message)
+            self.show_info_dialog(title, message, kind="warning")
+            return
+
+        # Subtitle OCR needs FFmpeg + RapidOCR, not CLIP visual models.
+        from src.utils import has_ffmpeg
+
+        if not has_ffmpeg():
+            message = self.texts.get(
+                "build_dialogue_index_missing_ffmpeg",
+                "FFmpeg is required for subtitle extraction. Configure it in Settings.",
+            )
+            self.library_page.lbl_status.setText(message)
+            self.show_info_dialog(title, message, kind="warning")
+            return
+
+        try:
+            self._run_dialogue_index_job(mode=mode_value, title=title, reembed=reembed)
+        except Exception as exc:
+            from src.app.logging_utils import get_logger
+
+            get_logger("gui").exception("Subtitle extract UI failed before worker start")
+            self.show_error_dialog(
+                self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+                str(exc).strip() or repr(exc),
+            )
+
+    def _resolve_dialogue_index_targets(self, selected_ids: set[str]) -> list[dict]:
+        """Build extract targets from the tree / registry without rescanning disks."""
+        import os
+
+        from src.services.dialogue_index_service import list_dialogue_index_targets
+
+        targets: list[dict] = []
+        seen: set[str] = set()
+        tree = self.library_page.subtitle_video_tree
+        for ent in tree.collect_checked_entries():
+            video_id = str((ent or {}).get("video_id") or "").strip()
+            if not video_id or video_id in seen:
+                continue
+            if selected_ids and video_id not in selected_ids:
+                continue
+            video_path = str((ent or {}).get("video_path") or "").strip()
+            if not video_path:
+                continue
+            if (ent or {}).get("source_exists") is False:
+                continue
+            if not os.path.isfile(video_path):
+                continue
+            seen.add(video_id)
+            targets.append(
+                {
+                    "video_id": video_id,
+                    "video_path": video_path,
+                    "library_path": str((ent or {}).get("library_path") or ""),
+                }
+            )
+
+        missing_ids = selected_ids - seen if selected_ids else set()
+        if missing_ids:
+            for item in list_dialogue_index_targets(register=False):
+                video_id = str((item or {}).get("video_id") or "").strip()
+                if video_id not in missing_ids or video_id in seen:
+                    continue
+                seen.add(video_id)
+                targets.append(dict(item))
+        return targets
+
+    def _run_dialogue_index_job(self, *, mode: str, title: str, reembed: bool):
+        from src.services.dialogue_index_service import (
+            ensure_dialogue_asr_ready,
+            list_dialogue_reembed_targets,
+        )
+        from src.storage.dialogue_transcript_store import (
+            ensure_shared_transcripts,
+            list_dialogue_transcript_summaries,
+        )
+
+        self.library_page.set_library_mode(1)
+        mode_value = str(mode or "auto").strip().lower() or "auto"
+
+        selected_ids = {
+            str(vid).strip()
+            for vid in self.library_page.subtitle_video_tree.collect_checked_video_ids()
+            if str(vid).strip()
+        }
+        if not selected_ids:
+            self.show_info_dialog(
+                title,
+                self.texts.get("library_select_videos_first", "Select one or more videos first."),
+                kind="info",
+            )
+            return
+
+        self.library_page.lbl_status.setText(
+            self.texts.get("build_dialogue_index_preparing", "Preparing subtitle extraction…")
+        )
+
+        if reembed:
+            targets = [
+                item
+                for item in list_dialogue_reembed_targets()
+                if str((item or {}).get("video_id") or "").strip() in selected_ids
+            ]
+            if not targets:
+                self.show_info_dialog(
+                    title,
+                    self.texts.get(
+                        "reembed_dialogue_index_no_targets",
+                        "No dialogue transcripts to re-embed.",
+                    ),
+                    kind="info",
+                )
+                return
+            confirm = self.texts.get(
+                "reembed_dialogue_index_confirm",
+                "Re-embed dialogue vectors for {count} videos?",
+            ).format(count=len(targets))
+            running = self.texts.get(
+                "reembed_dialogue_index_running",
+                "Re-embedding dialogue vectors...",
+            )
+        else:
+            targets = self._resolve_dialogue_index_targets(selected_ids)
+            if not targets:
+                self.show_info_dialog(
+                    title,
+                    self.texts.get(
+                        "build_dialogue_index_no_targets",
+                        "No ready videos to index. Selected files may be missing on disk, "
+                        "or are not registered in the subtitle library — refresh the list and retry.",
+                    ),
+                    kind="info",
+                )
+                return
+            existing_ids = {
+                str(row.get("video_id") or "").strip()
+                for row in list_dialogue_transcript_summaries()
+            }
+            needs_asr = any(
+                str((item or {}).get("video_id") or "").strip() not in existing_ids for item in targets
+            )
+            # Lightweight check only (no RapidOCR/ORT import on UI thread).
+            # mode=ocr is "re-extract" and always runs OCR.
+            if mode_value == "ocr" or needs_asr:
+                asr_ready, asr_error = ensure_dialogue_asr_ready(import_engine=False)
+                if not asr_ready:
+                    self.show_info_dialog(
+                        title,
+                        self.texts.get(
+                            "build_dialogue_index_missing_asr",
+                            "Import RapidOCR first (Understanding / Settings → Import Model).",
+                        )
+                        + (f"\n\n{asr_error}" if asr_error else ""),
+                        kind="warning",
+                    )
+                    return
+            confirm = self.texts.get(
+                "build_dialogue_index_confirm",
+                "Build dialogue index for {count} videos?",
+            ).format(count=len(targets))
+            running = self.texts.get("build_dialogue_index_running", "Building dialogue index...")
+
+        # Show confirm immediately — do not import OCR engines before the dialog.
+        if not self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            confirm,
+            kind="info",
+        ):
+            return
+
+        try:
+            ensure_shared_transcripts()
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+                str(exc).strip() or repr(exc),
+            )
+            return
+
+        from ui.workers import DialogueIndexWorker
+
+        sample_interval_sec = self._read_subtitle_sample_interval()
+        ocr_batch_size = self._read_subtitle_ocr_batch()
+
+        self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_build_dialogue_index.setEnabled(False)
+        self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_export_dialogue.setEnabled(False)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(False)
+        self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_remove_lib.setEnabled(False)
+        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self.library_page.btn_stop_dialogue_index.setEnabled(True)
+        self.library_page.btn_stop_dialogue_index.setVisible(True)
+        self.library_page.progress_bar.setVisible(True)
+        self.library_page.progress_bar.setValue(0)
+        self.library_page.lbl_status.setText(running)
+        self._dialogue_index_ui_mode = mode_value
+
+        worker = DialogueIndexWorker(
+            targets=targets,
+            mode=mode_value,
+            sample_interval_sec=sample_interval_sec,
+            ocr_batch_size=ocr_batch_size,
+        )
+        self.dialogue_index_worker = worker
+        worker.progress_signal.connect(self._update_dialogue_index_progress)
+        worker.error_signal.connect(self._handle_dialogue_index_error)
+        worker.finished_signal.connect(self._finish_dialogue_index)
+        # Keep the QThread alive until Qt reports it has fully stopped; clearing the
+        # Python ref from finished_signal (emitted inside run()) can native-crash.
+        worker.finished.connect(lambda w=worker: self._cleanup_dialogue_index_worker(w))
+        worker.start()
+
+    def _dialogue_index_running(self) -> bool:
+        worker = getattr(self, "dialogue_index_worker", None)
+        return bool(worker is not None and worker.isRunning())
+
+    def _cleanup_dialogue_index_worker(self, worker) -> None:
+        if getattr(self, "dialogue_index_worker", None) is worker:
+            self.dialogue_index_worker = None
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+
+    def _update_dialogue_index_progress(self, value, text):
+        self.library_page.progress_bar.setValue(int(value))
+        raw = str(text or "")
+        reembed = str(getattr(self, "_dialogue_index_ui_mode", "") or "") == "reembed"
+        if raw.startswith("dialogue_index|"):
+            parts = raw.split("|")
+            if len(parts) >= 3:
+                stage_token = "|".join(parts[3:]) if len(parts) > 3 else ""
+                stage = self._format_dialogue_stage(stage_token) or stage_token or "…"
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "build_dialogue_index_progress",
+                        "Dialogue {current}/{total}: {stage}",
+                    ).format(current=parts[1], total=parts[2], stage=stage)
+                )
+                return
+        self.library_page.lbl_status.setText(
+            self.texts.get(
+                "reembed_dialogue_index_running" if reembed else "build_dialogue_index_running",
+                "Building dialogue index...",
+            )
+        )
+
+    def _handle_dialogue_index_error(self, message):
+        self.show_error_dialog(
+            self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+            message,
+        )
+
+    def _finish_dialogue_index(self, success, stopped, summary):
+        try:
+            self.library_page.btn_sync_db.setEnabled(True)
+            self.library_page.btn_build_dialogue_index.setEnabled(True)
+            self.library_page.btn_reembed_dialogue.setEnabled(True)
+            self.library_page.btn_export_dialogue.setEnabled(True)
+            self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+            self.library_page.input_subtitle_sample_interval.setEnabled(True)
+            self.library_page.input_subtitle_ocr_batch.setEnabled(True)
+            self.library_page.btn_add_lib.setEnabled(True)
+            self.library_page.btn_cleanup_missing.setEnabled(True)
+            self.library_page.btn_stop_dialogue_index.setEnabled(False)
+            self.library_page.btn_stop_dialogue_index.setVisible(False)
+            self.library_page.progress_bar.setVisible(False)
+            self._refresh_remove_library_button()
+            payload = dict(summary or {})
+            reembed = str(payload.get("mode") or getattr(self, "_dialogue_index_ui_mode", "") or "") == "reembed"
+            self._dialogue_index_ui_mode = ""
+            failed_count = int(payload.get("failed", 0) or 0)
+            errors = [str(item).strip() for item in list(payload.get("errors") or []) if str(item).strip()]
+            if stopped:
+                status = self.texts.get("build_dialogue_index_stopped", "Dialogue index stopped.")
+            elif success:
+                done_key = "reembed_dialogue_index_done" if reembed else "build_dialogue_index_done"
+                status = self.texts.get(
+                    done_key,
+                    "Dialogue index done: {ok} ok, {failed} failed, {segments} segments.",
+                ).format(
+                    ok=int(payload.get("ok", 0) or 0),
+                    failed=failed_count,
+                    segments=int(payload.get("segment_rows", 0) or 0),
+                    reused=int(payload.get("reused", 0) or 0),
+                )
+            else:
+                status = self.texts.get("build_dialogue_index_failed", "Dialogue index failed")
+            self.library_page.lbl_status.setText(status)
+            # Per-video OCR failures used to finish "successfully" with only a status
+            # line — packaged installs missing RapidOCR config.yaml looked like no UI reaction.
+            if (not stopped) and failed_count > 0:
+                detail_lines = errors[:5]
+                if len(errors) > 5:
+                    detail_lines.append(f"… (+{len(errors) - 5})")
+                detail = "\n".join(detail_lines)
+                self.show_error_dialog(
+                    self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
+                    status + (f"\n\n{detail}" if detail else ""),
+                )
+        finally:
+            # Defer tree rebuild so this slot returns before touching heavy UI/SQLite,
+            # and so the worker thread can fully exit first.
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, self._refresh_after_dialogue_index)
+
+    def _refresh_after_dialogue_index(self) -> None:
+        try:
+            self.refresh_library_table()
+        except Exception:
+            pass
+        try:
+            self.refresh_dialogue_library_table()
+        except Exception:
+            pass
+        if hasattr(self, "_sync_tray_stop_action"):
+            try:
+                self._sync_tray_stop_action()
+            except Exception:
+                pass
 
     def start_debug_gpu_oom(self):
         self._start_index_update(debug_failure="gpu_oom")
@@ -216,18 +1127,30 @@ class LibraryIndexingGuiMixin:
         rebuild_global_assets=True,
         debug_failure="",
         index_from_vectors_only=False,
+        video_ids=None,
     ):
         try:
             if not self.check_runtime_resources():
                 self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
                 return
             self.switch_page("library")
-            if self.indexing_controller.is_running():
+            if (
+                self.indexing_controller.is_running()
+                or self._dialogue_index_running()
+                or self._remove_library_worker_running()
+            ):
+                self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
                 return
             self.library_page.btn_sync_db.setEnabled(False)
+            self.library_page.btn_build_dialogue_index.setEnabled(False)
+            self.library_page.btn_reembed_dialogue.setEnabled(False)
+            self.library_page.btn_export_dialogue.setEnabled(False)
+            self.library_page.input_subtitle_sample_interval.setEnabled(False)
+            self.library_page.input_subtitle_ocr_batch.setEnabled(False)
             self.library_page.btn_stop_index.setEnabled(True)
             self.library_page.btn_stop_index.setVisible(True)
             self.library_page.btn_add_lib.setEnabled(False)
+            self.library_page.btn_remove_lib.setEnabled(False)
             self._apply_index_issue_button_state(False)
             self.library_page.btn_cleanup_missing.setEnabled(False)
             if getattr(self, "_debug_tools_enabled", False):
@@ -236,13 +1159,17 @@ class LibraryIndexingGuiMixin:
             self.library_page.progress_bar.setVisible(True)
             self._last_index_issues = []
             self._last_index_issue_target = target_lib
-            self.refresh_library_table()
+            self._indexing_progress_file_index = 0
+            self._indexing_progress_ui_at = 0.0
+            self._indexing_tree_refresh_at = 0.0
+            # Do not rebuild the video tree here — expensive for huge libraries.
             start_kwargs = {
                 "target_lib": target_lib,
                 "force_cleanup_missing_files": force_cleanup_missing_files,
                 "cleanup_missing_entries": cleanup_missing_entries,
                 "rebuild_global_assets": rebuild_global_assets,
                 "index_from_vectors_only": index_from_vectors_only,
+                "video_ids": video_ids,
             }
             if debug_failure:
                 start_kwargs["debug_failure"] = debug_failure
@@ -257,6 +1184,13 @@ class LibraryIndexingGuiMixin:
             self.show_error_dialog(self.texts["index_start_failed"], exc)
 
     def stop_update_index(self):
+        if self._dialogue_index_running():
+            worker = getattr(self, "dialogue_index_worker", None)
+            if worker is not None and hasattr(worker, "stop"):
+                worker.stop()
+                self.library_page.lbl_status.setText(self.texts["index_stop_requested"])
+                self.library_page.btn_stop_index.setEnabled(False)
+            return
         if not self.indexing_controller.is_running():
             return
         if self.indexing_controller.request_stop():
@@ -264,14 +1198,43 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_stop_index.setEnabled(False)
 
     def _update_indexing_progress(self, value, text):
-        if hasattr(self, "_sync_tray_stop_action"):
-            self._sync_tray_stop_action()
-        self.library_page.progress_bar.setValue(value)
-        self.library_page.lbl_status.setText(format_progress_text(text, self.texts))
+        from src.app.indexing_progress import parse_progress_token
+
+        now = time.monotonic()
+        raw = str(text or "")
+        payload = parse_progress_token(raw) or {}
+        file_index = int(payload.get("file_index") or 0)
+        stage = str(payload.get("stage") or "").strip().lower()
+        last_file = int(getattr(self, "_indexing_progress_file_index", 0) or 0)
+        file_changed = bool(file_index and file_index != last_file)
+        if file_changed:
+            self._indexing_progress_file_index = file_index
+
+        # Tree rebuild is O(libraries) header work + meta load; never do it per file
+        # when users have 10k+ videos. Refresh at most every few seconds, or on finish.
+        if file_changed or stage == "file":
+            last_tree = float(getattr(self, "_indexing_tree_refresh_at", 0.0) or 0.0)
+            if now - last_tree >= 4.0:
+                self._indexing_tree_refresh_at = now
+                self.refresh_library_table()
+            if hasattr(self, "_sync_tray_stop_action"):
+                self._sync_tray_stop_action()
+
+        last_ui = float(getattr(self, "_indexing_progress_ui_at", 0.0) or 0.0)
+        if not file_changed and now - last_ui < 0.2:
+            return
+        self._indexing_progress_ui_at = now
+        self.library_page.progress_bar.setValue(int(value))
+        self.library_page.lbl_status.setText(format_progress_text(raw, self.texts))
 
     def _finish_indexing(self, success, target_lib, stopped=False, has_search_assets=False, issues=None, rebuild_global_assets=True):
         self.ui_state.set_indexing_running(False)
         self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_build_dialogue_index.setEnabled(True)
+        self.library_page.btn_reembed_dialogue.setEnabled(True)
+        self.library_page.btn_export_dialogue.setEnabled(True)
+        self.library_page.input_subtitle_sample_interval.setEnabled(True)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(True)
         self.library_page.btn_stop_index.setEnabled(False)
         self.library_page.btn_stop_index.setVisible(False)
         self.library_page.btn_add_lib.setEnabled(True)
@@ -282,6 +1245,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.progress_bar.setVisible(False)
         self.push_inference_status()
         self.refresh_library_table()
+        self._refresh_remove_library_button()
         issue_list = filter_index_problem_issues(issues)
         issue_count = len(issue_list)
         self._last_index_issues = issue_list
@@ -704,7 +1668,8 @@ class LibraryIndexingGuiMixin:
                 open_in_explorer(legacy_npy_file)
             else:
                 open_folder_in_explorer(os.path.dirname(legacy_npy_file))
-            dialog.status_hint.setText(legacy_npy_file)
+            hint = self.texts.get("library_vectors_legacy_npy_hint", "").format(path=legacy_npy_file)
+            dialog.status_hint.setText(hint or legacy_npy_file)
 
     def _open_selected_vector_detail_path(self, dialog):
         selected = dialog.get_selected_payloads()
@@ -721,8 +1686,8 @@ class LibraryIndexingGuiMixin:
         payload = selected[0]
         target_path = (
             payload.get("video_id")
-            or payload.get("legacy_npy_file")
             or payload.get("lance_dir")
+            or payload.get("legacy_npy_file")
             or payload.get("vector_file")
             or ""
         )

@@ -934,7 +934,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             _fallback_text(texts, "settings_section_model_gpu", "模型与 GPU", "Model & GPU")
         )
         self.section_paths_title.setText(
-            _fallback_text(texts, "settings_section_paths", "路径与 FFmpeg", "Paths & FFmpeg")
+            _fallback_text(texts, "settings_section_paths", "路径管理", "Path Management")
         )
         self.runtime_status_title.setText(_fallback_text(texts, "settings_runtime_status", "当前运行状态", "Current Runtime"))
         self.search_telemetry_title.setText(

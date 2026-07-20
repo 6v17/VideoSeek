@@ -5,9 +5,11 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFormLayout,
     QFrame,
     QGridLayout,
     QHeaderView,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,  # retained for other pages
     QTextEdit,
     QTableWidget,
     QTableWidgetItem,
@@ -34,6 +37,7 @@ from ui.widgets.chunk_timeline import ChunkTimelineWidget
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import ResultTable
+from ui.widgets.search_results_pager import SearchResultsPager
 from ui.widgets.result_view import ResultView
 from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
@@ -45,6 +49,8 @@ from ui.widgets.scaffold import (
 )
 from ui.widgets.search_panel import SearchPanel
 from ui.widgets.styles import repolish_widget
+from ui.widgets.library_video_tree import LibraryGroupedVideoTree
+from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.video_download_page import VideoDownloadPage
 
 LinkSearchPage = VideoDownloadPage
@@ -267,8 +273,14 @@ class NavigationSidebar(QWidget):
         self.subtitle = QLabel("Local video search workspace")
         self.subtitle.setObjectName("BrandSubtitle")
         self.subtitle.setWordWrap(True)
+        self.free_tip = QLabel()
+        self.free_tip.setObjectName("BrandFreeTip")
+        self.free_tip.setWordWrap(True)
+        self.free_tip.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.free_tip.setOpenExternalLinks(True)
         layout.addWidget(self.title)
         layout.addWidget(self.subtitle)
+        layout.addWidget(self.free_tip)
 
         self.hero_card = QFrame()
         self.hero_card.setObjectName("HeroCard")
@@ -393,7 +405,9 @@ class SearchPage(QWidget):
 
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("StatusLabel")
-        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setWordWrap(False)
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         compare_row = QHBoxLayout()
         compare_row.setSpacing(12)
@@ -402,16 +416,22 @@ class SearchPage(QWidget):
         self.query_card = self.search_panel
         self.lbl_active_model = self.search_panel.lbl_active_model
         self.lbl_text_model_hint = self.search_panel.lbl_text_model_hint
+        self.lbl_dialogue_hint = self.search_panel.lbl_dialogue_hint
         self.search_query_tabs = self.search_panel.search_query_tabs
         self.img_label = self.search_panel.img_label
         self.text_search = self.search_panel.text_search
+        self.dialogue_search = self.search_panel.dialogue_search
         self.search_mode = self.search_panel.search_mode
         self.search_mode_label = self.search_panel.search_mode_label
         self.image_search_mode = self.search_panel.image_search_mode
         self.image_search_mode_label = self.search_panel.image_search_mode_label
         self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
+        self.dialogue_search_mode = self.search_panel.dialogue_search_mode
+        self.dialogue_search_mode_label = self.search_panel.dialogue_search_mode_label
+        self.dialogue_search_mode_cluster = self.search_panel.dialogue_search_mode_cluster
         self.text_granularity_cluster = self.search_panel.text_granularity_cluster
         self.search_granularity_cluster = self.search_panel.text_granularity_cluster
+        self.search_mode_options_stack = self.search_panel.search_mode_options_stack
         self.mobile_toggle_label = self.search_panel.mobile_toggle_label
         self.btn_mobile_toggle = self.search_panel.btn_mobile_toggle
         self.btn_mobile_qr = self.search_panel.btn_mobile_qr
@@ -423,7 +443,6 @@ class SearchPage(QWidget):
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row
-        self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
 
@@ -467,16 +486,56 @@ class SearchPage(QWidget):
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
-        results_toolbar.addWidget(self.lbl_status, 2)
-        results_toolbar.addWidget(self.search_presets_bar, 3)
+        results_toolbar.addWidget(self.lbl_status, 1)
+        results_toolbar.addWidget(self.search_presets_bar, 2)
         results_toolbar.addWidget(self.results_actions, 0)
 
+        self.results_pager = SearchResultsPager()
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
         self.result_table = self.result_view.table
         results_layout.addWidget(self.results_title)
         results_layout.addLayout(results_toolbar)
+        results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
+        results_layout.setSpacing(8)
         results_layout.addWidget(self.result_view)
         page_body.addWidget(self.results_card, 4)
+
+
+class DialogueLibraryRow(QFrame):
+    """Compact card row for the shared dialogue library list."""
+
+    def __init__(self, title: str, meta: str, badge: str, *, ready: bool = False, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DialogueLibraryRow")
+        self.setProperty("selected", False)
+        self.setMinimumHeight(64)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(4)
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("DialogueLibraryRowTitle")
+        self.title_label.setWordWrap(False)
+        self.meta_label = QLabel(meta)
+        self.meta_label.setObjectName("DialogueLibraryRowMeta")
+        self.meta_label.setWordWrap(False)
+        text_col.addWidget(self.title_label)
+        text_col.addWidget(self.meta_label)
+
+        self.badge_label = QLabel(badge)
+        self.badge_label.setObjectName("DialogueLibraryRowBadge")
+        self.badge_label.setProperty("ready", bool(ready))
+        self.badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addLayout(text_col, 1)
+        layout.addWidget(self.badge_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def set_selected(self, selected: bool):
+        self.setProperty("selected", bool(selected))
+        repolish_widget(self)
 
 
 class LibraryPage(QWidget):
@@ -491,9 +550,6 @@ class LibraryPage(QWidget):
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
-        self.toolbar_card = VSCard(margins=(18, 16, 18, 16), spacing=10)
-        toolbar_card_layout = self.toolbar_card.content_layout
-
         def _toolbar_divider():
             divider = QFrame()
             divider.setFrameShape(QFrame.VLine)
@@ -501,10 +557,81 @@ class LibraryPage(QWidget):
             divider.setObjectName("ToolbarDivider")
             return divider
 
+        # Shared strip: mode tabs + add/remove library (same height / radius family)
+        self.shared_toolbar_card = QFrame()
+        self.shared_toolbar_card.setObjectName("LibrarySharedStrip")
+        shared_outer = QHBoxLayout(self.shared_toolbar_card)
+        # 1px pad so button/segment borders are never clipped by the strip.
+        shared_outer.setContentsMargins(1, 2, 1, 2)
+        shared_outer.setSpacing(8)
+        shared_outer.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self.btn_add_lib = QPushButton()
+        self.btn_add_lib.setObjectName("SuccessGhostButton")
+        self.btn_add_lib.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_remove_lib = QPushButton()
+        self.btn_remove_lib.setObjectName("DangerGhostButton")
+        self.btn_remove_lib.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_remove_lib.setEnabled(False)
+
+        self.mode_segment = QFrame()
+        self.mode_segment.setObjectName("LibraryModeSegment")
+        mode_row = QHBoxLayout(self.mode_segment)
+        mode_row.setContentsMargins(4, 3, 4, 3)
+        mode_row.setSpacing(2)
+        mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.btn_tab_visual = QPushButton()
+        self.btn_tab_visual.setObjectName("LibraryModeBtn")
+        self.btn_tab_visual.setCheckable(True)
+        self.btn_tab_visual.setChecked(True)
+        self.btn_tab_visual.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_tab_dialogue = QPushButton()
+        self.btn_tab_dialogue.setObjectName("LibraryModeBtn")
+        self.btn_tab_dialogue.setCheckable(True)
+        self.btn_tab_dialogue.setCursor(Qt.CursorShape.PointingHandCursor)
+        mode_row.addWidget(self.btn_tab_visual)
+        mode_row.addWidget(self.btn_tab_dialogue)
+        self._library_mode_group = QButtonGroup(self)
+        self._library_mode_group.setExclusive(True)
+        self._library_mode_group.addButton(self.btn_tab_visual, 0)
+        self._library_mode_group.addButton(self.btn_tab_dialogue, 1)
+        self._library_mode_group.idClicked.connect(self.set_library_mode)
+
+        self.lbl_shared_library_hint = QLabel()
+        self.lbl_shared_library_hint.setObjectName("CardHint")
+        self.lbl_shared_library_hint.setWordWrap(True)
+        self.lbl_shared_library_hint.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        # Left: mode tabs → add/remove library → hint
+        shared_outer.addWidget(self.mode_segment, 0, Qt.AlignmentFlag.AlignVCenter)
+        shared_outer.addWidget(self.btn_add_lib, 0, Qt.AlignmentFlag.AlignVCenter)
+        shared_outer.addWidget(self.btn_remove_lib, 0, Qt.AlignmentFlag.AlignVCenter)
+        shared_outer.addWidget(self.lbl_shared_library_hint, 1)
+        page_body.addWidget(self.shared_toolbar_card)
+
+        self.library_stack = QStackedWidget()
+        self.library_stack.setObjectName("LibraryStack")
+        # Compatibility alias: older code used QTabWidget APIs.
+        self.library_tabs = self.library_stack
+
+        # --- Panel: visual video library (one card: actions + tree) ---
+        self.visual_tab = QWidget()
+        visual_layout = QVBoxLayout(self.visual_tab)
+        visual_layout.setContentsMargins(0, 8, 0, 0)
+        visual_layout.setSpacing(0)
+
+        self.table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
+        self.toolbar_card = self.table_card
+        table_layout = self.table_card.content_layout
+
+        self.table_title = QLabel()
+        self.table_title.setObjectName("CardTitle")
+        self.table_title.setVisible(False)
+
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
-        self.btn_add_lib = QPushButton()
-        self.btn_add_lib.setObjectName("UpdateButton")
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
         self.btn_stop_index = QPushButton()
@@ -524,71 +651,113 @@ class LibraryPage(QWidget):
         self.btn_debug_system_oom = QPushButton()
         self.btn_debug_system_oom.setObjectName("GhostButton")
         self.btn_debug_system_oom.setVisible(False)
-        toolbar.addWidget(self.btn_add_lib)
         toolbar.addWidget(self.btn_sync_db)
         toolbar.addSpacing(4)
         toolbar.addWidget(_toolbar_divider())
         toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_index_issues)
-        toolbar.addSpacing(4)
-        toolbar.addWidget(_toolbar_divider())
-        toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_cleanup_missing)
         toolbar.addWidget(self.btn_vector_details)
         toolbar.addWidget(self.btn_debug_gpu_oom)
         toolbar.addWidget(self.btn_debug_system_oom)
         toolbar.addStretch()
         toolbar.addWidget(self.btn_stop_index)
+        table_layout.addLayout(toolbar)
 
+        self.visual_video_tree = LibraryGroupedVideoTree()
+        self.visual_video_tree.setMinimumHeight(280)
+        self.library_list = self.visual_video_tree
+        self.library_column_header_labels = []
+        table_layout.addWidget(self.visual_video_tree, 1)
+        visual_layout.addWidget(self.table_card, 1)
+
+        # --- Panel: subtitle library (one card) ---
+        self.dialogue_tab = QWidget()
+        dialogue_layout = QVBoxLayout(self.dialogue_tab)
+        dialogue_layout.setContentsMargins(0, 8, 0, 0)
+        dialogue_layout.setSpacing(0)
+
+        self.dialogue_table_card = VSCard(margins=(16, 14, 16, 14), spacing=12)
+        self.dialogue_toolbar_card = self.dialogue_table_card
+        dialogue_table_layout = self.dialogue_table_card.content_layout
+
+        self.dialogue_table_title = QLabel()
+        self.dialogue_table_title.setObjectName("CardTitle")
+        self.dialogue_table_title.setVisible(False)
+
+        dialogue_toolbar = QHBoxLayout()
+        dialogue_toolbar.setSpacing(8)
+        self.btn_build_dialogue_index = QPushButton()
+        self.btn_build_dialogue_index.setObjectName("PrimaryButton")
+        self.btn_reembed_dialogue = QPushButton()
+        self.btn_reembed_dialogue.setObjectName("AccentGhostButton")
+        self.btn_export_dialogue = QPushButton()
+        self.btn_export_dialogue.setObjectName("GhostButton")
+        self.btn_refresh_dialogue_library = QPushButton()
+        self.btn_refresh_dialogue_library.setObjectName("GhostButton")
+        self.lbl_subtitle_sample_interval = QLabel()
+        self.lbl_subtitle_sample_interval.setObjectName("CardHint")
+        self.input_subtitle_sample_interval = NoWheelDoubleSpinBox()
+        self.input_subtitle_sample_interval.setRange(0.1, 6.0)
+        self.input_subtitle_sample_interval.setSingleStep(0.1)
+        self.input_subtitle_sample_interval.setDecimals(1)
+        self.input_subtitle_sample_interval.setValue(1.2)
+        self.input_subtitle_sample_interval.setSuffix(" s")
+        self.input_subtitle_sample_interval.setMinimumWidth(88)
+        self.input_subtitle_sample_interval.setMaximumWidth(110)
+        self.lbl_subtitle_ocr_batch = QLabel()
+        self.lbl_subtitle_ocr_batch.setObjectName("CardHint")
+        self.input_subtitle_ocr_batch = NoWheelSpinBox()
+        self.input_subtitle_ocr_batch.setRange(1, 6)
+        self.input_subtitle_ocr_batch.setSingleStep(1)
+        self.input_subtitle_ocr_batch.setValue(1)
+        self.input_subtitle_ocr_batch.setMinimumWidth(64)
+        self.input_subtitle_ocr_batch.setMaximumWidth(80)
+        self.btn_stop_dialogue_index = QPushButton()
+        self.btn_stop_dialogue_index.setObjectName("DangerGhostButton")
+        self.btn_stop_dialogue_index.setEnabled(False)
+        self.btn_stop_dialogue_index.setVisible(False)
+        dialogue_toolbar.addWidget(self.btn_build_dialogue_index)
+        dialogue_toolbar.addWidget(self.btn_reembed_dialogue)
+        dialogue_toolbar.addWidget(self.btn_export_dialogue)
+        dialogue_toolbar.addWidget(self.btn_refresh_dialogue_library)
+        dialogue_toolbar.addSpacing(8)
+        dialogue_toolbar.addWidget(self.lbl_subtitle_sample_interval)
+        dialogue_toolbar.addWidget(self.input_subtitle_sample_interval)
+        dialogue_toolbar.addSpacing(8)
+        dialogue_toolbar.addWidget(self.lbl_subtitle_ocr_batch)
+        dialogue_toolbar.addWidget(self.input_subtitle_ocr_batch)
+        dialogue_toolbar.addStretch()
+        dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
+        dialogue_table_layout.addLayout(dialogue_toolbar)
+
+        self.subtitle_video_tree = LibraryGroupedVideoTree()
+        self.subtitle_video_tree.setMinimumHeight(280)
+        self.dialogue_list = self.subtitle_video_tree
+        dialogue_table_layout.addWidget(self.subtitle_video_tree, 1)
+        dialogue_layout.addWidget(self.dialogue_table_card, 1)
+
+        self.library_stack.addWidget(self.visual_tab)
+        self.library_stack.addWidget(self.dialogue_tab)
+        page_body.addWidget(self.library_stack, 1)
+
+        # Shared progress row (visual indexing + dialogue jobs)
         self.progress_status = VSProgressStatusRow()
         self.progress_bar = self.progress_status.progress_bar
         self.lbl_status = self.progress_status.status_label
+        page_body.addWidget(self.progress_status)
 
-        toolbar_card_layout.addLayout(toolbar)
-        toolbar_card_layout.addWidget(self.progress_status)
-        page_body.addWidget(self.toolbar_card)
+        self.set_library_mode(0)
 
-        self.table_card = VSCard()
-        table_layout = self.table_card.content_layout
-        self.table_title = QLabel()
-        self.table_title.setObjectName("CardTitle")
-        self.library_column_header = QFrame()
-        self.library_column_header.setObjectName("LibraryListColumnHeader")
-        header_row = QHBoxLayout(self.library_column_header)
-        header_row.setContentsMargins(16, 0, 16, 8)
-        header_row.setSpacing(14)
-        self.library_column_header_labels = []
-        for spec in (
-            ("index", 40, 0),
-            ("path", 0, 1),
-            ("state", 100, 0),
-            ("actions", 200, 0),
-        ):
-            _, min_w, stretch = spec
-            cell = QLabel("")
-            cell.setObjectName("LibraryListHeaderCell")
-            cell.setAlignment(Qt.AlignCenter)
-            if min_w:
-                cell.setMinimumWidth(min_w)
-            self.library_column_header_labels.append(cell)
-            header_row.addWidget(cell, stretch)
-        self.library_scroll = QScrollArea()
-        self.library_scroll.setObjectName("LibraryListScroll")
-        self.library_scroll.setWidgetResizable(True)
-        self.library_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.library_scroll.setFrameShape(QFrame.NoFrame)
-        self.library_scroll.setMinimumHeight(300)
-        self.library_list = QWidget()
-        self.library_list.setObjectName("LibraryListHost")
-        _list_layout = QVBoxLayout(self.library_list)
-        _list_layout.setContentsMargins(0, 0, 0, 0)
-        _list_layout.setSpacing(10)
-        self.library_list._column_headers = self.library_column_header_labels
-        self.library_scroll.setWidget(self.library_list)
-        table_layout.addWidget(self.table_title)
-        table_layout.addWidget(self.library_column_header)
-        table_layout.addWidget(self.library_scroll, 1)
-        page_body.addWidget(self.table_card, 1)
+    def set_library_mode(self, index: int) -> None:
+        idx = 0 if int(index) <= 0 else 1
+        if self.library_stack.currentIndex() != idx:
+            self.library_stack.setCurrentIndex(idx)
+        self.btn_tab_visual.setChecked(idx == 0)
+        self.btn_tab_dialogue.setChecked(idx == 1)
+
+    def library_mode(self) -> int:
+        return int(self.library_stack.currentIndex())
 
 
 def _understanding_field_label(text=""):
@@ -665,27 +834,30 @@ class UnderstandingEvidencePage(QWidget):
         config_body_layout.setSpacing(10)
 
         config_form_host = QWidget()
-        config_form = QGridLayout(config_form_host)
+        config_form = QFormLayout(config_form_host)
         config_form.setContentsMargins(0, 0, 0, 0)
         config_form.setHorizontalSpacing(12)
-        config_form.setVerticalSpacing(8)
+        config_form.setVerticalSpacing(10)
+        config_form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        config_form.setFormAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        config_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+        )
+        config_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
 
+        # Kept for older gui wiring; YOLO is no longer part of the UI.
         self.label_yolo = _understanding_field_label()
+        self.label_yolo.hide()
         self.btn_import_understanding_model = QPushButton()
         self.btn_import_understanding_model.setObjectName("AccentGhostButton")
-        self.btn_import_understanding_model.setMinimumHeight(34)
+        self.btn_import_understanding_model.hide()
         self.hint_yolo = QLabel()
         self.hint_yolo.setObjectName("CardHint")
         self.hint_yolo.hide()
-
-        yolo_actions = QWidget()
-        yolo_actions_layout = QHBoxLayout(yolo_actions)
-        yolo_actions_layout.setContentsMargins(0, 0, 0, 0)
-        yolo_actions_layout.setSpacing(8)
-        yolo_actions_layout.addWidget(self.btn_import_understanding_model, 0)
-        yolo_actions_layout.addStretch(1)
-        config_form.addWidget(self.label_yolo, 0, 0)
-        config_form.addWidget(yolo_actions, 0, 1)
 
         self.label_vlm_section = QLabel()
         self.label_vlm_section.setObjectName("CardHint")
@@ -696,20 +868,18 @@ class UnderstandingEvidencePage(QWidget):
         self.input_vlm_provider_mode.setObjectName("SearchModeSelect")
         self.input_vlm_provider_mode.setMinimumWidth(180)
         self.input_vlm_provider_mode.setMaximumWidth(260)
-        config_form.addWidget(self.label_vlm_provider_mode, 1, 0)
-        config_form.addWidget(self.input_vlm_provider_mode, 1, 1)
+        config_form.addRow(self.label_vlm_provider_mode, self.input_vlm_provider_mode)
 
         self.label_vlm_provider_preset = _understanding_field_label()
         self.input_vlm_provider_preset = NoWheelComboBox()
         self.input_vlm_provider_preset.setObjectName("SearchModeSelect")
         self.input_vlm_provider_preset.setMinimumWidth(220)
         self.input_vlm_provider_preset.setMaximumWidth(320)
-        config_form.addWidget(self.label_vlm_provider_preset, 2, 0)
-        config_form.addWidget(self.input_vlm_provider_preset, 2, 1)
+        config_form.addRow(self.label_vlm_provider_preset, self.input_vlm_provider_preset)
 
         self.hint_vlm_preset_summary = _understanding_value_hint()
         self.hint_vlm_preset_summary.hide()
-        config_form.addWidget(self.hint_vlm_preset_summary, 3, 1)
+        config_form.addRow(self.hint_vlm_preset_summary)
 
         self.label_remote_vlm_api_key = _understanding_field_label()
         self.input_remote_vlm_api_key = QLineEdit()
@@ -722,8 +892,7 @@ class UnderstandingEvidencePage(QWidget):
         self.hint_remote_vlm_api_key = QLabel()
         self.hint_remote_vlm_api_key.setObjectName("CardHint")
         self.hint_remote_vlm_api_key.hide()
-        config_form.addWidget(self.label_remote_vlm_api_key, 4, 0)
-        config_form.addWidget(self.input_remote_vlm_api_key, 4, 1)
+        config_form.addRow(self.label_remote_vlm_api_key, self.input_remote_vlm_api_key)
 
         self.label_remote_vlm_base_url = _understanding_field_label()
         self.input_remote_vlm_base_url = QLineEdit()
@@ -735,8 +904,7 @@ class UnderstandingEvidencePage(QWidget):
         self.hint_remote_vlm_base_url = QLabel()
         self.hint_remote_vlm_base_url.setObjectName("CardHint")
         self.hint_remote_vlm_base_url.hide()
-        config_form.addWidget(self.label_remote_vlm_base_url, 5, 0)
-        config_form.addWidget(self.input_remote_vlm_base_url, 5, 1)
+        config_form.addRow(self.label_remote_vlm_base_url, self.input_remote_vlm_base_url)
 
         self.label_remote_vlm_model = _understanding_field_label()
         self.input_remote_vlm_model = QLineEdit()
@@ -748,16 +916,14 @@ class UnderstandingEvidencePage(QWidget):
         self.hint_remote_vlm_model = QLabel()
         self.hint_remote_vlm_model.setObjectName("CardHint")
         self.hint_remote_vlm_model.hide()
-        config_form.addWidget(self.label_remote_vlm_model, 6, 0)
-        config_form.addWidget(self.input_remote_vlm_model, 6, 1)
+        config_form.addRow(self.label_remote_vlm_model, self.input_remote_vlm_model)
 
         self.label_caption_language = _understanding_field_label()
         self.input_caption_language = NoWheelComboBox()
         self.input_caption_language.setObjectName("SearchModeSelect")
         self.input_caption_language.setMinimumWidth(160)
         self.input_caption_language.setMaximumWidth(220)
-        config_form.addWidget(self.label_caption_language, 7, 0)
-        config_form.addWidget(self.input_caption_language, 7, 1)
+        config_form.addRow(self.label_caption_language, self.input_caption_language)
 
         self.label_caption_concurrency = _understanding_field_label()
         self.input_caption_concurrency = QSpinBox()
@@ -766,10 +932,8 @@ class UnderstandingEvidencePage(QWidget):
         self.input_caption_concurrency.setMaximum(4)
         self.input_caption_concurrency.setMinimumWidth(80)
         self.input_caption_concurrency.setMaximumWidth(120)
-        config_form.addWidget(self.label_caption_concurrency, 8, 0)
-        config_form.addWidget(self.input_caption_concurrency, 8, 1)
+        config_form.addRow(self.label_caption_concurrency, self.input_caption_concurrency)
 
-        config_form.setColumnStretch(1, 1)
         config_body_layout.addWidget(config_form_host)
 
         config_footer = QHBoxLayout()
@@ -810,7 +974,7 @@ class UnderstandingEvidencePage(QWidget):
         self.scope_combo.setMaximumWidth(280)
         self.scope_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.video_label = _understanding_picker_label()
-        self.video_combo = QComboBox()
+        self.video_combo = SearchableIdCombo()
         self.video_combo.setObjectName("SearchModeSelect")
         self.video_combo.setMinimumWidth(240)
         self.video_combo.setMaximumWidth(520)
@@ -829,7 +993,9 @@ class UnderstandingEvidencePage(QWidget):
         self.timeline_label.setObjectName("CardHint")
         self.timeline_hint = QLabel()
         self.timeline_hint.setObjectName("StatusHint")
-        self.timeline_hint.setWordWrap(True)
+        # Fixed single-line slot so hint text length does not shove the track.
+        self.timeline_hint.setWordWrap(False)
+        self.timeline_hint.setFixedHeight(18)
         timeline_header.addWidget(self.timeline_label, 0)
         timeline_header.addWidget(self.timeline_hint, 1)
         workspace_layout.addLayout(timeline_header)
@@ -837,11 +1003,13 @@ class UnderstandingEvidencePage(QWidget):
         self.chunk_timeline_scroll = QScrollArea()
         self.chunk_timeline_scroll.setObjectName("ChunkTimelineScroll")
         self.chunk_timeline_scroll.setWidgetResizable(False)
-        self.chunk_timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # Reserve the horizontal bar slot so first content load does not steal height.
+        self.chunk_timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.chunk_timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.chunk_timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.chunk_timeline_scroll.setMinimumHeight(50)
+        self.chunk_timeline_scroll.setFixedHeight(56)
         self.chunk_timeline = ChunkTimelineWidget()
+        self.chunk_timeline.setFixedHeight(32)
         self.chunk_timeline_scroll.setWidget(self.chunk_timeline)
         workspace_layout.addWidget(self.chunk_timeline_scroll)
 
@@ -906,7 +1074,7 @@ class UnderstandingEvidencePage(QWidget):
         self.chunk_objects_label.setObjectName("StatusHint")
         self.chunk_objects_label.setWordWrap(True)
         self.chunk_objects_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        detail_grid.addWidget(self.chunk_objects_label, 3, 0)
+        self.chunk_objects_label.hide()
 
         self.video_summary_meta_label = QLabel()
         self.video_summary_meta_label.setObjectName("StatusHint")

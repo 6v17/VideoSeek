@@ -23,5 +23,8 @@ jobs:
           auto-update-conda: true
           python-version: "3.10"
 
+      - name: Ruff
+        run: python -m ruff check src ui tests main.py
+
       - name: Run tests
         run: python -m pytest tests/ -q --tb=line

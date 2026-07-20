@@ -32,6 +32,67 @@ def effective_timeline_duration(
     return max(timeline_duration, chunk_end, sum(spans))
 
 
+def layout_segments_sequential(
+    segments: list[ChunkTimelineSegment],
+    *,
+    duration_sec: float = 0.0,
+    min_segment_width: int = 14,
+    segment_gap: int = 2,
+    pixels_per_second: float = 6.0,
+    target_inner_width: int | None = None,
+) -> tuple[list[tuple[int, int]], int]:
+    """Pack segments left-to-right with uniform gaps; width follows duration.
+
+    When ``target_inner_width`` is set (typically the visible track width), segments
+    expand proportionally to fill that space instead of leaving empty track.
+    """
+    count = len(segments)
+    if count <= 0:
+        return [], 0
+
+    duration = max(float(duration_sec or 0.0), effective_timeline_duration(segments, duration_sec))
+    if duration <= 0:
+        return [], 0
+
+    min_each = max(int(min_segment_width), 1)
+    gap = max(int(segment_gap), 0)
+    proportional = int(round(duration * float(pixels_per_second)))
+    gap_total = gap * max(count - 1, 0)
+    min_total = count * min_each + gap_total
+    content_width = max(proportional, min_total, 1)
+    inner_width = max(content_width, int(target_inner_width or 0))
+
+    widths = distribute_segment_widths(
+        segments,
+        inner_width - gap_total,
+        duration_sec=duration,
+        min_segment_width=min_each,
+    )
+
+    order = sorted(
+        range(count),
+        key=lambda index: (
+            float(segments[index].start_sec),
+            float(segments[index].end_sec),
+        ),
+    )
+    placements: list[tuple[int, int] | None] = [None] * count
+    cursor = 0
+    for rank, index in enumerate(order):
+        width = widths[index]
+        if rank > 0:
+            cursor += gap
+        placements[index] = (cursor, width)
+        cursor += width
+
+    total_width = max(cursor, inner_width)
+    resolved: list[tuple[int, int]] = []
+    for item in placements:
+        left, width = item or (0, min_each)
+        resolved.append((left, width))
+    return resolved, total_width
+
+
 def distribute_segment_widths(
     segments: list[ChunkTimelineSegment],
     usable_width: int,
@@ -83,11 +144,11 @@ class ChunkTimelineWidget(QWidget):
     _COLOR_SELECTED = QColor("#FFFFFF")
     _COLOR_ACTIVE = QColor("#FFE08A")
 
-    _SEGMENT_GAP = 3
+    _SEGMENT_GAP = 2
     _OUTER_RADIUS = 6
     _INNER_RADIUS = 3
-    _MIN_SEGMENT_WIDTH = 12
-    _PIXELS_PER_SECOND = 5.0
+    _MIN_SEGMENT_WIDTH = 14
+    _PIXELS_PER_SECOND = 6.0
     _VIEWPORT_MIN_WIDTH = 320
     _TRACK_VERTICAL_INSET = 2
     _TRACK_INNER_PADDING = 2
@@ -120,9 +181,11 @@ class ChunkTimelineWidget(QWidget):
         self.update()
 
     def set_selected_index(self, index: int):
-        self._selected_index = int(index)
+        index = int(index)
+        if index == self._selected_index:
+            return
+        self._selected_index = index
         self.update()
-        self._ensure_index_visible(self._selected_index)
 
     def selected_index(self) -> int:
         return self._selected_index
@@ -130,7 +193,7 @@ class ChunkTimelineWidget(QWidget):
     def set_generating_index(self, index: int):
         self._generating_index = int(index)
         self.update()
-        self._ensure_index_visible(self._generating_index)
+        self._scroll_index_into_view_if_needed(self._generating_index)
 
     def set_segment_state(self, index: int, state: str):
         if index < 0 or index >= len(self._segments):
@@ -199,11 +262,13 @@ class ChunkTimelineWidget(QWidget):
         if count <= 0 or self._effective_duration() <= 0:
             return self._VIEWPORT_MIN_WIDTH
 
-        duration = self._effective_duration()
-        gap_total = self._SEGMENT_GAP * max(count - 1, 0)
-        proportional = int(round(duration * self._PIXELS_PER_SECOND))
-        min_total = count * self._MIN_SEGMENT_WIDTH + gap_total
-        inner_width = max(proportional, min_total, 1)
+        _placements, inner_width = layout_segments_sequential(
+            self._segments,
+            duration_sec=self._duration_sec,
+            min_segment_width=self._MIN_SEGMENT_WIDTH,
+            segment_gap=self._SEGMENT_GAP,
+            pixels_per_second=self._PIXELS_PER_SECOND,
+        )
         return inner_width + horizontal_pad + self._TRACK_END_PADDING
 
     def _distribute_segment_widths(self, usable_width: int) -> list[int]:
@@ -222,9 +287,20 @@ class ChunkTimelineWidget(QWidget):
         return max(content, self._VIEWPORT_MIN_WIDTH)
 
     def _sync_layout_width(self):
-        target = self._layout_width()
-        if self.width() != target or self.minimumWidth() != target:
-            self.setFixedWidth(target)
+        viewport = self._viewport_width()
+        content = self._compute_content_width()
+        # Avoid a temporary 320px width on first show when the viewport is still 0 —
+        # that causes a visible jump once the real viewport arrives.
+        if viewport <= 0:
+            if self.width() >= max(content, self._VIEWPORT_MIN_WIDTH):
+                return
+            target = max(content, self._VIEWPORT_MIN_WIDTH)
+        else:
+            target = max(content, viewport)
+        if self.width() == target:
+            return
+        self.setFixedWidth(target)
+        self._segment_rects = []
         self.updateGeometry()
 
     def _track_rect(self):
@@ -238,20 +314,44 @@ class ChunkTimelineWidget(QWidget):
 
         pad = self._TRACK_INNER_PADDING
         inner = track_rect.adjusted(pad, pad, -pad, -pad)
-        gap_total = self._SEGMENT_GAP * max(count - 1, 0)
-        usable_width = max(inner.width() - gap_total, count * self._MIN_SEGMENT_WIDTH)
-        widths = self._distribute_segment_widths(usable_width)
+        placements, _total_width = layout_segments_sequential(
+            self._segments,
+            duration_sec=self._duration_sec,
+            min_segment_width=self._MIN_SEGMENT_WIDTH,
+            segment_gap=self._SEGMENT_GAP,
+            pixels_per_second=self._PIXELS_PER_SECOND,
+            target_inner_width=max(int(inner.width()), 1),
+        )
 
         rects: list[tuple[int, int, int, int]] = []
-        x = inner.left()
         height = inner.height()
         top = inner.top()
-        for index, width in enumerate(widths):
-            rects.append((x, top, width, height))
-            x += width
-            if index < count - 1:
-                x += self._SEGMENT_GAP
+        for left, width in placements:
+            rects.append((inner.left() + left, top, width, height))
         return rects
+
+    def _is_index_visible(self, index: int, margin: int = 8) -> bool:
+        if index < 0:
+            return True
+        scroll_area = self._scroll_area()
+        if scroll_area is None:
+            return True
+        if not self._segment_rects:
+            self._segment_rects = self._compute_segment_rects(self._track_rect())
+        if index >= len(self._segment_rects):
+            return False
+        x, _y, width, _height = self._segment_rects[index]
+        bar = scroll_area.horizontalScrollBar()
+        if bar is None:
+            return True
+        visible_left = int(bar.value()) + margin
+        visible_right = visible_left + scroll_area.viewport().width() - margin * 2
+        return x >= visible_left and (x + width) <= visible_right
+
+    def _scroll_index_into_view_if_needed(self, index: int):
+        if index < 0 or self._is_index_visible(index):
+            return
+        self._ensure_index_visible(index)
 
     def _ensure_index_visible(self, index: int):
         if index < 0:
@@ -300,16 +400,6 @@ class ChunkTimelineWidget(QWidget):
             painter.setBrush(color)
             painter.drawRoundedRect(segment_rect, self._INNER_RADIUS, self._INNER_RADIUS)
 
-            if index < len(self._segments) - 1:
-                separator_x = x + width
-                painter.fillRect(
-                    separator_x,
-                    y + 1,
-                    self._SEGMENT_GAP,
-                    max(height - 2, 1),
-                    self._COLOR_SEPARATOR,
-                )
-
             if index == self._generating_index and segment.state != "ready":
                 painter.setPen(QPen(self._COLOR_ACTIVE, 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -338,8 +428,9 @@ class ChunkTimelineWidget(QWidget):
         if selected < 0:
             super().mousePressEvent(event)
             return
-        self._selected_index = selected
-        self.update()
+        if selected != self._selected_index:
+            self._selected_index = selected
+            self.update()
         self.chunk_clicked.emit(selected)
         event.accept()
 
@@ -351,8 +442,9 @@ class ChunkTimelineWidget(QWidget):
         if selected < 0:
             super().mouseDoubleClickEvent(event)
             return
-        self._selected_index = selected
-        self.update()
+        if selected != self._selected_index:
+            self._selected_index = selected
+            self.update()
         self.chunk_clicked.emit(selected)
         self.chunk_double_clicked.emit(selected)
         event.accept()

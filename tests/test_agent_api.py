@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -49,6 +50,52 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(payload[0]["video_path"], "D:/a.mp4")
         self.assertIn("score", payload[0])
 
+    @patch("src.web.agent_api.search.resolve_hit_source_path", return_value="D:/resolved/clip.mp4")
+    def test_hits_to_payload_fills_empty_video_path(self, _mock_resolve):
+        payload = _hits_to_payload(
+            [
+                SearchHit(
+                    12.0,
+                    15.0,
+                    1.0,
+                    "",
+                    match_kind="dialogue",
+                    video_id="vid1",
+                    matched_text="hello",
+                )
+            ],
+            mode="dialogue",
+            expand_frame_hits=False,
+            pad_before_sec=0.0,
+            pad_after_sec=0.0,
+        )
+        self.assertEqual(payload[0]["video_path"], "D:/resolved/clip.mp4")
+        self.assertEqual(payload[0]["video_id"], "vid1")
+        self.assertEqual(payload[0]["matched_text"], "hello")
+
+    def test_normalize_agent_search_query_fields_image_path_alias(self):
+        from src.web.agent_api.search import _normalize_agent_search_query_fields
+
+        query, query_type = _normalize_agent_search_query_fields(
+            AgentSearchRequest(image_path="D:/shot.png")
+        )
+        self.assertEqual(query, "D:/shot.png")
+        self.assertEqual(query_type, "image_path")
+
+    def test_resolve_export_clip_output_path_from_dir(self):
+        from src.web.agent_api.export_ops import resolve_export_clip_output_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.web.agent_api.export_ops._output_path_allowed", return_value=True):
+                out = resolve_export_clip_output_path(
+                    output_dir=tmp,
+                    video_path="D:/lib/ep01.mp4",
+                    start_sec=12.5,
+                    end_sec=20.0,
+                )
+            self.assertTrue(out.startswith(tmp))
+            self.assertTrue(out.endswith("ep01_12s_20s.mp4"))
+
     def test_filter_hits_min_score(self):
         hits = [
             SearchHit(0.0, 1.0, 0.2, "a.mp4"),
@@ -59,7 +106,7 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(filtered[0].video_path, "b.mp4")
 
     def test_clamp_top_k(self):
-        with patch("src.web.agent_api.get_search_top_k", return_value=20):
+        with patch("src.web.agent_api.search.get_search_top_k", return_value=20):
             self.assertEqual(_clamp_top_k(None), 20)
             self.assertEqual(_clamp_top_k(3), 3)
             self.assertEqual(_clamp_top_k(999), 200)
@@ -81,7 +128,7 @@ class AgentApiHelperTests(unittest.TestCase):
         resolved = resolve_explicit_scope_library_paths(scope)
         self.assertEqual(resolved, ["D:/explicit"])
 
-    @patch("src.web.agent_api.load_config")
+    @patch("src.web.agent_api.health.load_config")
     def test_agent_timeout_settings_from_config(self, mock_load_config):
         mock_load_config.return_value = {
             "agent_api_search_timeout_fast_sec": 75,
@@ -98,8 +145,8 @@ class AgentApiHelperTests(unittest.TestCase):
         mock_load_config.return_value = {"agent_api_default_image_precision": "precise"}
         self.assertEqual(default_agent_image_precision_mode(), "precise")
 
-    @patch("src.web.agent_api.load_config")
-    @patch("src.web.agent_api.os.path.isfile", return_value=True)
+    @patch("src.web.agent_api.search.load_config")
+    @patch("src.web.agent_api.search.os.path.isfile", return_value=True)
     def test_resolve_search_timeout_precise(self, _mock_isfile, mock_load_config):
         mock_load_config.return_value = {
             "agent_api_search_timeout_fast_sec": 90,
@@ -112,7 +159,7 @@ class AgentApiHelperTests(unittest.TestCase):
         )
         self.assertEqual(_resolve_search_timeout_sec(body), 200.0)
 
-    @patch("src.web.agent_api.load_config")
+    @patch("src.web.agent_api.search.load_config")
     def test_resolve_batch_timeout_scales_with_query_count(self, mock_load_config):
         mock_load_config.return_value = {
             "agent_api_search_timeout_fast_sec": 90,
@@ -129,8 +176,8 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertGreaterEqual(timeout, 1200.0)
         self.assertFalse(_batch_requests_precise_mode(body))
 
-    @patch("src.web.agent_api.load_config")
-    @patch("src.web.agent_api.os.path.isfile", return_value=True)
+    @patch("src.web.agent_api.search.load_config")
+    @patch("src.web.agent_api.search.os.path.isfile", return_value=True)
     def test_batch_precise_mode_detected(self, _mock_isfile, mock_load_config):
         mock_load_config.return_value = {
             "agent_api_search_timeout_fast_sec": 90,
@@ -150,7 +197,7 @@ class AgentApiHelperTests(unittest.TestCase):
         timeout = _resolve_batch_timeout_sec(body)
         self.assertGreaterEqual(timeout, 180.0)
 
-    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.health._index_snapshot")
     def test_build_health_payload_includes_timeout_fields(self, mock_snapshot):
         mock_snapshot.return_value = {
             "index_ready": True,
@@ -174,7 +221,7 @@ class AgentApiHelperTests(unittest.TestCase):
 
 
 class AgentStarterApiTests(unittest.TestCase):
-    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.health._index_snapshot")
     def test_build_agent_starter_payload(self, mock_snapshot):
         mock_snapshot.return_value = {
             "index_ready": True,
@@ -213,7 +260,7 @@ class AgentDocApiTests(unittest.TestCase):
             "meta": {"line_count": 2, "byte_size": 12, "doc_on_disk": True},
         }
 
-    @patch("src.web.agent_api.build_agent_doc_payload")
+    @patch("src.web.agent_api.service.build_agent_doc_payload")
     def test_agent_doc_json(self, mock_build):
         mock_build.return_value = self._sample_doc_payload()
         from fastapi.testclient import TestClient
@@ -226,7 +273,7 @@ class AgentDocApiTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("# Agent doc", payload["content"])
 
-    @patch("src.web.agent_api.build_agent_doc_payload")
+    @patch("src.web.agent_api.service.build_agent_doc_payload")
     def test_agent_doc_text(self, mock_build):
         mock_build.return_value = self._sample_doc_payload()
         from fastapi.testclient import TestClient
@@ -242,7 +289,7 @@ class AgentDocApiTests(unittest.TestCase):
             response.headers.get("X-VideoSeek-Doc-Path", ""),
         )
 
-    @patch("src.web.agent_api.build_agent_doc_payload")
+    @patch("src.web.agent_api.service.build_agent_doc_payload")
     def test_agent_doc_not_found(self, mock_build):
         mock_build.side_effect = FileNotFoundError("docs/for-agents.md")
         from fastapi.testclient import TestClient
@@ -255,8 +302,8 @@ class AgentDocApiTests(unittest.TestCase):
 
 
 class AgentApiSearchTests(unittest.TestCase):
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_execute_agent_search_text_frame(self, mock_run_search, mock_snapshot):
         mock_snapshot.return_value = {
             "index_ready": True,
@@ -278,8 +325,8 @@ class AgentApiSearchTests(unittest.TestCase):
         self.assertEqual(len(payload["hits"]), 1)
         mock_run_search.assert_called_once()
 
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_chunk_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_chunk_search")
     def test_execute_agent_search_chunk_mode(self, mock_chunk_search, mock_snapshot):
         mock_snapshot.return_value = {
             "index_ready": True,
@@ -294,12 +341,12 @@ class AgentApiSearchTests(unittest.TestCase):
 
 
 class AgentApiHealthTests(unittest.TestCase):
-    @patch("src.web.agent_api.get_search_scope_mode", return_value="all")
-    @patch("src.web.agent_api._build_ffmpeg_info")
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.get_active_embedding_spec")
+    @patch("src.web.agent_api.health.get_search_scope_mode", return_value="all")
+    @patch("src.web.agent_api.health._build_ffmpeg_info")
+    @patch("src.web.agent_api.health._index_snapshot")
+    @patch("src.web.agent_api.health.get_active_embedding_spec")
     @patch("src.services.library_service.list_libraries")
-    @patch("src.web.agent_api.get_search_mode")
+    @patch("src.web.agent_api.health.get_search_mode")
     def test_build_health_payload(self, mock_mode, mock_libraries, mock_spec, mock_snapshot, mock_ffmpeg, _mock_scope_mode):
         mock_mode.return_value = "frame"
         mock_libraries.return_value = {"D:/lib": {"files": {"a": {}, "b": {}}}}
@@ -341,99 +388,27 @@ class AgentApiHealthTests(unittest.TestCase):
         self.assertTrue(payload["capabilities"]["chunk_search"])
         self.assertTrue(payload["capabilities"]["search_presets"])
         self.assertTrue(payload["capabilities"]["local_ffmpeg_clip"])
-        self.assertTrue(payload["capabilities"]["video_evidence"])
-        self.assertIn("video_evidence_ready", payload["capabilities"])
+        self.assertNotIn("video_evidence", payload["capabilities"])
+        self.assertNotIn("video_evidence_ready", payload["capabilities"])
+        self.assertNotIn("understanding_ready", payload)
         self.assertEqual(payload["ffmpeg"]["ffmpeg_path"], "D:/VideoSeek/bin/ffmpeg.exe")
         self.assertEqual(payload["search_index_schema_version"], 2)
         self.assertEqual(payload["library_indexes_ready"], 2)
 
-    @patch(
-        "src.web.agent_api.build_agent_understanding_health_fields",
-        return_value={
-            "understanding_ready": False,
-            "active_understanding_profile": "vision_baseline_v1",
-            "understanding_missing_components": ["vision/object_detection/yolo11n"],
-        },
-    )
-    @patch("src.web.agent_api.get_search_scope_mode", return_value="all")
-    @patch("src.web.agent_api._build_ffmpeg_info")
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.get_active_embedding_spec")
-    @patch("src.services.library_service.list_libraries")
-    @patch("src.web.agent_api.get_search_mode")
-    def test_build_health_payload_includes_understanding_fields(
-        self,
-        mock_mode,
-        mock_libraries,
-        mock_spec,
-        mock_snapshot,
-        mock_ffmpeg,
-        _mock_scope_mode,
-        _mock_understanding,
-    ):
-        mock_mode.return_value = "frame"
-        mock_libraries.return_value = {}
-        mock_spec.return_value = {
-            "model_id": "clip_onnx_default",
-            "provider": "clip_onnx",
-            "embedding_space": "clip_onnx_default",
-            "dimension": 512,
-            "metric": "ip",
-        }
-        mock_snapshot.return_value = {
-            "index_ready": True,
-            "index_stale": False,
-            "global_index_state": "fresh",
-            "vector_count": 0,
-            "indexed_video_paths": 0,
-            "frame_vector_count": 0,
-            "chunk_vector_count": 0,
-            "search_index_schema_version": 1,
-            "library_indexes_upgrade_needed": False,
-            "library_index_count": 0,
-            "library_indexes_ready": 0,
-            "library_indexes_stale": 0,
-        }
-        mock_ffmpeg.return_value = {"ffmpeg_available": True, "ffmpeg_path": "", "ffmpeg_source": "managed"}
-        payload = build_health_payload()
-        self.assertFalse(payload["understanding_ready"])
-        self.assertFalse(payload["capabilities"]["video_evidence_ready"])
-        self.assertEqual(payload["active_understanding_profile"], "vision_baseline_v1")
-
 
 class AgentApiEvidenceRouteTests(unittest.TestCase):
-    @patch("src.web.agent_api.get_agent_video_evidence")
-    @patch("src.services.indexing_service.load_video_chunks_by_id")
-    @patch("src.services.agent_evidence_service.resolve_agent_video_id", return_value="vid123")
-    def test_video_evidence_route(self, _mock_resolve, mock_chunks, mock_get):
+    def test_video_evidence_routes_removed(self):
         from fastapi.testclient import TestClient
         from src.web.agent_api import AgentApiService
 
-        mock_chunks.return_value = [{"start": 0.0, "end": 4.0}]
-        mock_get.return_value = {
-            "api_version": "1",
-            "ok": True,
-            "evidence_available": True,
-            "video_id": "vid123",
-            "video": {"video_id": "vid123", "video_path": "D:/Videos/demo.mp4"},
-            "chunks": [],
-            "meta": {},
-        }
         client = TestClient(AgentApiService(host="127.0.0.1", port=8765).app)
-        response = client.get(
-            "/api/v1/videos/evidence",
-            params={"video_id": "vid123", "start_sec": 0.0, "end_sec": 4.0},
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertTrue(payload["evidence_available"])
-        self.assertEqual(payload["video_id"], "vid123")
-        mock_get.assert_called_once()
+        self.assertEqual(client.get("/api/v1/videos/evidence").status_code, 404)
+        self.assertEqual(client.get("/api/v1/videos/evidence/status").status_code, 404)
 
 
 class AgentApiBatchTests(unittest.TestCase):
-    @patch("src.web.agent_api.execute_agent_search")
-    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.search.execute_agent_search")
+    @patch("src.web.agent_api.search._index_snapshot")
     def test_execute_agent_batch_search_mixed(self, mock_snapshot, mock_search):
         mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
         mock_search.side_effect = [
@@ -500,8 +475,8 @@ class AgentApiPresetTests(unittest.TestCase):
             get_agent_search_preset("missing")
 
     @patch("src.services.search_scope.resolve_default_active_search_scope", return_value=(None, ["D:/saved_lib"]))
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_execute_agent_search_uses_active_scope_by_default(
         self,
         mock_run_search,
@@ -519,8 +494,8 @@ class AgentApiPresetTests(unittest.TestCase):
         self.assertIsNone(kwargs.get("scope_video_paths"))
 
     @patch("src.services.search_scope.resolve_default_active_search_scope", return_value=(["D:/scoped.mp4"], None))
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_execute_agent_search_uses_active_video_scope(
         self,
         mock_run_search,
@@ -535,12 +510,12 @@ class AgentApiPresetTests(unittest.TestCase):
         self.assertEqual(kwargs.get("scope_video_paths"), ["D:/scoped.mp4"])
         self.assertIsNone(kwargs.get("scope_library_paths"))
 
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_execute_agent_search_passes_search_precision_mode(self, mock_run_search, mock_snapshot):
         mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
         mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/clip.mp4")]
-        with patch("src.web.agent_api.os.path.isfile", return_value=True):
+        with patch("src.web.agent_api.search.os.path.isfile", return_value=True):
             body = AgentSearchRequest(
                 query="D:/ref.png",
                 query_type="image_path",
@@ -554,8 +529,8 @@ class AgentApiPresetTests(unittest.TestCase):
 
     @patch("src.services.search_scope.resolve_default_active_search_scope", return_value=(None, ["D:/lib"]))
     @patch("src.services.search_preset_service.build_preset_search_plan")
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_execute_agent_search_by_preset_id(
         self,
         mock_run_search,
@@ -590,8 +565,8 @@ class AgentApiPresetTests(unittest.TestCase):
         self.assertEqual(kwargs.get("scope_library_paths"), ["D:/lib"])
 
     @patch("src.services.search_preset_service.build_preset_search_plan")
-    @patch("src.web.agent_api._index_snapshot")
-    @patch("src.web.agent_api.run_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
     def test_execute_agent_search_preset_uses_video_scope_and_pixel_query(
         self,
         mock_run_search,
@@ -635,7 +610,7 @@ class AgentApiPresetTests(unittest.TestCase):
             preview_anchor_sec=64.0,
             scope=AgentSearchScope(video_paths=["D:/a.mp4", "D:/b.mp4"]),
         )
-        with patch("src.web.agent_api._resolve_agent_search_inputs") as mock_resolve:
+        with patch("src.web.agent_api.search._resolve_agent_search_inputs") as mock_resolve:
             mock_resolve.return_value = {
                 "has_image": True,
                 "scope_video_paths": ["D:/a.mp4", "D:/b.mp4"],
@@ -656,10 +631,10 @@ class AgentApiPresetTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 execute_agent_search(body)
 
-    @patch("src.web.agent_api.run_search")
-    @patch("src.web.agent_api._resolve_agent_search_inputs")
-    @patch("src.web.agent_api._search_index_ready_for_request", return_value=True)
-    @patch("src.web.agent_api._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    @patch("src.web.agent_api.search._resolve_agent_search_inputs")
+    @patch("src.web.agent_api.search._search_index_ready_for_request", return_value=True)
+    @patch("src.web.agent_api.search._index_snapshot")
     def test_preview_anchor_sec_forces_precise_locate(
         self,
         mock_snapshot,

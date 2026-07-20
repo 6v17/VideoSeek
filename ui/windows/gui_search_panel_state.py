@@ -9,6 +9,7 @@ class SearchPanelStateMixin:
     SEARCH_TAB_IMAGE = "image"
     SEARCH_TAB_TEXT = "text"
     SEARCH_TAB_COMPOSE = "compose"
+    SEARCH_TAB_DIALOGUE = "dialogue"
 
     IMAGE_SEARCH_MODES = ("chunk", "frame", "video_discovery", "precise")
 
@@ -19,6 +20,11 @@ class SearchPanelStateMixin:
         if not hasattr(self, "search_page"):
             return False
         return bool(self.search_page.search_panel.text_query())
+
+    def _search_has_dialogue_query(self) -> bool:
+        if not hasattr(self, "search_page"):
+            return False
+        return bool(self.search_page.search_panel.dialogue_query())
 
     def _search_has_compose_query(self) -> bool:
         if not hasattr(self, "search_page"):
@@ -39,6 +45,8 @@ class SearchPanelStateMixin:
             return self.SEARCH_TAB_TEXT
         if index == 2:
             return self.SEARCH_TAB_COMPOSE
+        if index == 3:
+            return self.SEARCH_TAB_DIALOGUE
         return self.SEARCH_TAB_IMAGE
 
     def _set_search_query_tab(self, tab: str) -> None:
@@ -52,6 +60,8 @@ class SearchPanelStateMixin:
             target = 1
         elif normalized == self.SEARCH_TAB_COMPOSE:
             target = 2
+        elif normalized == self.SEARCH_TAB_DIALOGUE:
+            target = 3
         else:
             target = 0
         if tabs.currentIndex() != target:
@@ -63,6 +73,8 @@ class SearchPanelStateMixin:
             return "text" if self._search_has_text_query() else "empty"
         if tab == self.SEARCH_TAB_COMPOSE:
             return "compose" if self._search_has_compose_query() else "empty"
+        if tab == self.SEARCH_TAB_DIALOGUE:
+            return "dialogue" if self._search_has_dialogue_query() else "empty"
         return "image" if self._search_has_image_query() else "empty"
 
     def _search_scope_is_global(self) -> bool:
@@ -73,6 +85,18 @@ class SearchPanelStateMixin:
         if getattr(self, "_search_scope_video_paths", None):
             return False
         return not bool(get_search_scope_library_paths())
+
+    def _text_search_mode_from_ui(self) -> str:
+        if hasattr(self, "search_page"):
+            mode = str(self.search_page.search_mode.currentData() or "").strip().lower()
+            if mode == "chunk":
+                return "chunk"
+            if mode == "frame":
+                return "frame"
+        from src.storage.config_store import get_search_mode
+
+        resolved = str(get_search_mode() or "frame").strip().lower()
+        return "chunk" if resolved == "chunk" else "frame"
 
     def _image_search_mode_from_ui(self) -> str:
         if hasattr(self, "search_page"):
@@ -177,11 +201,54 @@ class SearchPanelStateMixin:
             page.image_search_mode.setCurrentIndex(target_index)
         page.image_search_mode.blockSignals(False)
 
-    def _refresh_search_panel_state(self) -> None:
+    def _populate_dialogue_search_mode_combo(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        page = self.search_page
+        combo = getattr(page, "dialogue_search_mode", None)
+        if combo is None:
+            return
+        texts = getattr(self, "texts", {}) or {}
+        current_mode = str(combo.currentData() or "").strip().lower()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(texts.get("search_dialogue_match_exact", "Exact"), "exact")
+        combo.addItem(texts.get("search_dialogue_match_fuzzy", "Fuzzy"), "fuzzy")
+        # Prefer preserved selection; migrate legacy "segment" → exact.
+        if current_mode in {"fuzzy", "tolerant", "approx"}:
+            target = "fuzzy"
+        else:
+            target = "exact"
+        target_index = combo.findData(target)
+        if target_index >= 0:
+            combo.setCurrentIndex(target_index)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+        cluster = getattr(page, "dialogue_search_mode_cluster", None)
+        if cluster is not None:
+            cluster.setVisible(True)
+        label = getattr(page, "dialogue_search_mode_label", None)
+        if label is not None:
+            label.setText(texts.get("search_dialogue_match_label", "Match mode"))
+
+    def _dialogue_match_mode_from_ui(self) -> str:
+        if not hasattr(self, "search_page"):
+            return "exact"
+        combo = getattr(self.search_page, "dialogue_search_mode", None)
+        if combo is None:
+            return "exact"
+        mode = str(combo.currentData() or "exact").strip().lower()
+        if mode in {"fuzzy", "tolerant", "approx"}:
+            return "fuzzy"
+        return "exact"
+
+    def _refresh_search_panel_state(self, *, refresh_scope: bool = True) -> None:
         if not hasattr(self, "search_page"):
             return
 
-        self._refresh_search_scope_ui()
+        if refresh_scope:
+            self._refresh_search_scope_ui()
 
         page = self.search_page
         texts = getattr(self, "texts", {}) or {}
@@ -191,6 +258,8 @@ class SearchPanelStateMixin:
             tabs.setTabText(0, texts.get("search_tab_image", "Image"))
             tabs.setTabText(1, texts.get("search_tab_text", "Text"))
             tabs.setTabText(2, texts.get("search_tab_compose", "Compose"))
+            if tabs.count() > 3:
+                tabs.setTabText(3, texts.get("search_tab_dialogue", "Dialogue"))
 
         compose_form = getattr(page.search_panel, "compose_form", None)
         if compose_form is not None:
@@ -201,10 +270,19 @@ class SearchPanelStateMixin:
             btn_save_preset.setText(texts.get("search_compose_save_preset", "Save as preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
 
-        page.text_granularity_cluster.setVisible(active_tab == self.SEARCH_TAB_TEXT)
-        page.image_search_mode_cluster.setVisible(active_tab == self.SEARCH_TAB_IMAGE)
+        mode_stack = getattr(page, "search_mode_options_stack", None)
+        if mode_stack is not None:
+            if active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
+                # Compose only needs frame/chunk granularity (same control as text).
+                mode_stack.setCurrentIndex(0)
+            elif active_tab == self.SEARCH_TAB_IMAGE:
+                mode_stack.setCurrentIndex(1)
+            elif active_tab == self.SEARCH_TAB_DIALOGUE:
+                mode_stack.setCurrentIndex(3)
+            else:
+                mode_stack.setCurrentIndex(2)
 
-        if active_tab == self.SEARCH_TAB_TEXT:
+        if active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
             page.search_mode_label.setText(texts.get("setting_search_mode", ""))
             self._populate_text_search_mode_combo()
             hint = texts.get("search_text_mode_hint", texts.get("search_mode_hint", ""))
@@ -218,19 +296,94 @@ class SearchPanelStateMixin:
             page.image_search_mode_label.setToolTip(hint)
             page.image_search_mode.setToolTip(hint)
 
+        if active_tab == self.SEARCH_TAB_DIALOGUE:
+            self._populate_dialogue_search_mode_combo()
+            dialogue_mode = getattr(page, "dialogue_search_mode", None)
+            mode = self._dialogue_match_mode_from_ui()
+            hint_key = (
+                "search_dialogue_match_fuzzy_hint"
+                if mode == "fuzzy"
+                else "search_dialogue_match_exact_hint"
+            )
+            tip = texts.get(
+                hint_key,
+                texts.get("search_dialogue_match_segment_hint", ""),
+            )
+            if dialogue_mode is not None:
+                dialogue_mode.setToolTip(tip)
+            label = getattr(page, "dialogue_search_mode_label", None)
+            if label is not None:
+                label.setToolTip(tip)
+
+        dialogue_hint = getattr(page, "lbl_dialogue_hint", None)
+        if dialogue_hint is not None:
+            dialogue_hint.setText(self._dialogue_search_hint_text(texts))
+            dialogue_hint.setVisible(active_tab == self.SEARCH_TAB_DIALOGUE)
+
         self._refresh_search_model_display()
+
+    def _dialogue_search_hint_text(self, texts) -> str:
+        mode = self._dialogue_match_mode_from_ui()
+        if mode == "fuzzy":
+            fallback = texts.get(
+                "search_dialogue_match_fuzzy_hint",
+                "Fuzzy match tolerates short OCR typos in subtitle text.",
+            )
+            ready_key = "search_dialogue_match_fuzzy_hint_ready"
+        else:
+            fallback = texts.get(
+                "search_dialogue_match_exact_hint",
+                texts.get(
+                    "search_dialogue_match_segment_hint",
+                    "Exact substring match on OCR subtitle text.",
+                ),
+            )
+            ready_key = "search_dialogue_match_exact_hint_ready"
+        try:
+            import time
+
+            from src.storage.lance_dialogue_search import get_dialogue_index_stats
+
+            # Typing/tab switches must not re-walk all transcript files.
+            now = time.monotonic()
+            cached = getattr(self, "_dialogue_stats_cache", None)
+            if cached and (now - float(cached.get("at", 0.0))) < 30.0:
+                indexed = int(cached.get("indexed") or 0)
+            else:
+                stats = get_dialogue_index_stats()
+                indexed = int(stats.get("dialogue_indexed_videos") or 0)
+                self._dialogue_stats_cache = {"at": now, "indexed": indexed}
+            if indexed > 0:
+                return texts.get(ready_key, fallback).format(count=indexed)
+        except Exception:
+            pass
+        return fallback
 
     def _refresh_search_model_display(self) -> None:
         if not hasattr(self, "search_page"):
             return
         texts = getattr(self, "texts", {}) or {}
         page = self.search_page
+        active_tab = self._search_active_tab()
         try:
             from src.app.config import load_config
             from src.services.model_profile_display import (
                 format_active_model_search_label,
                 format_text_search_model_hint,
             )
+
+            # Always keep this label visible with stable text so tab switches
+            # do not resize the search panel.
+            page.lbl_active_model.setVisible(True)
+            if active_tab == self.SEARCH_TAB_DIALOGUE:
+                page.lbl_active_model.setText(
+                    texts.get(
+                        "search_dialogue_runtime_label",
+                        "Subtitle search (global library, no CLIP required)",
+                    )
+                )
+                page.lbl_text_model_hint.setVisible(False)
+                return
 
             config = load_config()
             model_label = format_active_model_search_label(config)
@@ -239,9 +392,17 @@ class SearchPanelStateMixin:
             )
             hint = format_text_search_model_hint(texts, config=config)
             page.lbl_text_model_hint.setText(hint)
-            page.lbl_text_model_hint.setVisible(bool(hint) and self._search_active_tab() == self.SEARCH_TAB_TEXT)
+            page.lbl_text_model_hint.setVisible(bool(hint) and active_tab == self.SEARCH_TAB_TEXT)
         except Exception:
-            page.lbl_active_model.setText("")
+            page.lbl_active_model.setText(
+                texts.get(
+                    "search_dialogue_runtime_label",
+                    "Subtitle search (global library, no CLIP required)",
+                )
+                if active_tab == self.SEARCH_TAB_DIALOGUE
+                else ""
+            )
+            page.lbl_active_model.setVisible(True)
             page.lbl_text_model_hint.setVisible(False)
 
     def _refresh_search_precision_controls(self) -> None:
@@ -249,6 +410,8 @@ class SearchPanelStateMixin:
 
     def _on_search_query_tab_changed(self, _index: int = 0) -> None:
         self._refresh_search_panel_state()
+        if hasattr(self, "_refresh_search_scope_ui"):
+            self._refresh_search_scope_ui(force_entries=True)
 
     def _on_search_mode_changed(self) -> None:
         self._save_search_mode()
@@ -256,6 +419,9 @@ class SearchPanelStateMixin:
 
     def _on_image_search_mode_changed(self) -> None:
         self._save_image_search_mode()
+        self._refresh_search_panel_state()
+
+    def _on_dialogue_search_mode_changed(self) -> None:
         self._refresh_search_panel_state()
 
     def open_compose_search_tab(self) -> None:

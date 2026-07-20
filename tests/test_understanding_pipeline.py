@@ -37,6 +37,12 @@ PROFILE_MANIFEST = {
 
 
 class UnderstandingPipelineStopTests(unittest.TestCase):
+    def test_enabled_steps_skips_object_detection(self):
+        pipeline = UnderstandingPipeline(PROFILE_MANIFEST)
+        steps = [str(item.get("step") or "") for item in pipeline.enabled_steps()]
+        self.assertNotIn("object_detection", steps)
+        self.assertIn("image_caption", steps)
+
     def test_run_video_chunks_honors_stop_between_chunks(self):
         frame = np.zeros((120, 160, 3), dtype=np.uint8)
         pipeline = UnderstandingPipeline(PROFILE_MANIFEST)

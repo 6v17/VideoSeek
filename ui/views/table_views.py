@@ -104,6 +104,42 @@ def _format_score_cell(score, texts, *, clip_mode: bool = False, low_confidence:
     return item
 
 
+def _dialogue_video_cell(
+    base_name: str,
+    matched_text: str,
+    query: str,
+    match_mode: str,
+) -> QLabel:
+    from ui.views.dialogue_highlight import highlight_dialogue_html
+
+    snippet_html = highlight_dialogue_html(
+        matched_text,
+        query,
+        match_mode=match_mode,
+        max_len=40,
+    )
+    label = QLabel()
+    label.setObjectName("ResultDialogueVideoCell")
+    label.setTextFormat(Qt.RichText)
+    label.setAlignment(Qt.AlignCenter)
+    label.setWordWrap(True)
+    label.setText(
+        "<div style='text-align:center'>"
+        f"<div>{_escape_html(base_name)}</div>"
+        f"<div style='margin-top:2px;line-height:1.25'>{snippet_html}</div>"
+        "</div>"
+    )
+    # Let hover/tooltip hit the QTableWidgetItem underneath (styled like other columns).
+    label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    label.setStyleSheet("background: transparent;")
+    return label
+
+def _escape_html(text: str) -> str:
+    from html import escape
+
+    return escape(str(text or ""))
+
+
 def populate_result_table(
     table,
     results,
@@ -116,6 +152,9 @@ def populate_result_table(
     *,
     clip_score_mode: bool = False,
     low_confidence_score: float | None = None,
+    rank_offset: int = 0,
+    highlight_query: str = "",
+    dialogue_match_mode: str = "",
 ):
     table.setRowCount(0)
     display_texts = texts
@@ -141,7 +180,10 @@ def populate_result_table(
         )
         table.insertRow(row)
 
-        order_item = QTableWidgetItem(str(row + 1))
+        match_kind = str(getattr(hit, "match_kind", "frame") or "frame")
+        matched_text = str(getattr(hit, "matched_text", "") or "").strip()
+
+        order_item = QTableWidgetItem(str(rank_offset + row + 1))
         order_item.setTextAlignment(Qt.AlignCenter)
         order_item.setData(
             Qt.UserRole,
@@ -150,29 +192,60 @@ def populate_result_table(
                 "start_sec": float(start_sec),
                 "end_sec": float(end_sec),
                 "score": float(score),
-                "match_kind": str(getattr(hit, "match_kind", "frame") or "frame"),
+                "match_kind": match_kind,
+                "matched_text": matched_text,
             },
         )
         table.setItem(row, LocalSearchCol.ORDER, order_item)
 
         table.setCellWidget(row, LocalSearchCol.PREVIEW, make_thumb_label(text=texts["thumb_loading"]))
 
-        name_item = QTableWidgetItem(os.path.basename(video_path))
-        name_item.setTextAlignment(Qt.AlignCenter)
-        name_item.setToolTip(video_path)
-        table.setItem(row, LocalSearchCol.VIDEO, name_item)
+        base_name = os.path.basename(video_path)
+        query = str(highlight_query or "").strip()
+        mode = str(dialogue_match_mode or "").strip().lower()
+        if match_kind == "dialogue" and matched_text and query:
+            # Empty item text: cell widget paints the label; keeping both caused ghosting.
+            name_item = QTableWidgetItem("")
+            name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
+            table.setCellWidget(
+                row,
+                LocalSearchCol.VIDEO,
+                _dialogue_video_cell(
+                    base_name,
+                    matched_text,
+                    query,
+                    mode or "fuzzy",
+                ),
+            )
+        elif match_kind == "dialogue" and matched_text:
+            snippet = matched_text if len(matched_text) <= 40 else f"{matched_text[:39]}…"
+            name_item = QTableWidgetItem(f"{base_name}\n{snippet}")
+            name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
+        else:
+            name_item = QTableWidgetItem(base_name)
+            name_item.setToolTip(video_path)
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
 
-        time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=getattr(hit, "match_kind", "frame")))
+        time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=match_kind))
         time_item.setTextAlignment(Qt.AlignCenter)
+        if match_kind == "dialogue" and matched_text:
+            time_item.setToolTip(matched_text)
         table.setItem(row, LocalSearchCol.RANGE, time_item)
 
-        mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts, match_kind=getattr(hit, "match_kind", "frame")))
+        mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts, match_kind=match_kind))
         mode_item.setTextAlignment(Qt.AlignCenter)
+        if match_kind == "dialogue" and matched_text:
+            mode_item.setToolTip(matched_text)
         table.setItem(row, LocalSearchCol.MODE, mode_item)
 
         low_confidence = (
             low_confidence_score is not None
-            and row == 0
+            and rank_offset + row == 0
             and float(score) < float(low_confidence_score)
         )
         score_item = _format_score_cell(
@@ -194,7 +267,7 @@ def populate_result_table(
                 on_locate,
                 on_export,
                 texts,
-                match_kind=getattr(hit, "match_kind", "frame"),
+                match_kind=match_kind,
                 on_deep_locate=on_deep_locate,
                 on_add_to_shot_list=on_add_to_shot_list,
                 anchor_score=float(score),
@@ -294,8 +367,8 @@ def _build_library_row_card(
     repolish_widget(status)
     status.setAlignment(Qt.AlignCenter)
     status.setWordWrap(True)
-    status.setMinimumWidth(88)
-    status.setMaximumWidth(118)
+    status.setMinimumWidth(96)
+    status.setMaximumWidth(148)
 
     actions = _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts)
     actions.setMinimumWidth(196)
@@ -430,6 +503,8 @@ def _format_time_range(start_sec, end_sec, texts=None, match_kind="frame"):
 def _result_mode_label(start_sec, end_sec, texts, match_kind="frame"):
     if str(match_kind or "") == "video":
         return texts.get("result_mode_video", texts["result_mode_frame"])
+    if str(match_kind or "") == "dialogue":
+        return texts.get("result_mode_dialogue", texts.get("search_tab_dialogue", "Dialogue"))
     if abs(float(end_sec) - float(start_sec)) < 1e-3:
         return texts["result_mode_frame"]
     return texts["result_mode_chunk"]

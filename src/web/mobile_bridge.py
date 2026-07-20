@@ -367,6 +367,9 @@ class MobileBridgeService:
         search_kind: str = Form("image"),
         query: str = Form(""),
         text_weight: str = Form(""),
+        image_search_mode: str = Form(""),
+        search_mode: str = Form(""),
+        dialogue_search_mode: str = Form(""),
         file: UploadFile = File(None),
         files: list[UploadFile] = File(None),
     ):
@@ -414,6 +417,9 @@ class MobileBridgeService:
                 image_paths=saved_paths,
                 fusion=fusion,
                 source=request.client.host if request.client else "",
+                image_search_mode=image_search_mode,
+                search_mode=search_mode,
+                dialogue_search_mode=dialogue_search_mode,
             )
         except ValueError as exc:
             for path in saved_paths:
@@ -430,7 +436,12 @@ class MobileBridgeService:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         logger.info("Accepted mobile search request: kind=%s", kind)
-        labels = {"image": "图搜", "text": "文搜", "compose": "组合搜索"}
+        labels = {
+            "image": "图搜",
+            "text": "文搜",
+            "compose": "组合搜索",
+            "dialogue": "字幕搜索",
+        }
         return JSONResponse(
             {
                 "ok": True,

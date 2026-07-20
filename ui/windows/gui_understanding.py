@@ -491,26 +491,45 @@ class UnderstandingGuiMixin:
         combo = page.video_combo
         current = combo.currentData(Qt.ItemDataRole.UserRole)
         target_lib = self._selected_understanding_target_lib()
+        empty_text = self.texts.get("understanding_video_none", "No indexed videos")
+        filter_text = self.texts.get("understanding_video_filter", "Filter videos…")
+        if hasattr(combo, "set_placeholders"):
+            combo.set_placeholders(empty=empty_text, filter_text=filter_text)
+
         combo.blockSignals(True)
-        combo.clear()
-        entries = list_ready_video_entries(library_path=target_lib, config=load_config())
-        for entry in entries:
-            video_id = str(entry.get("video_id", "") or "").strip()
-            if not video_id:
-                continue
-            rel_path = str(entry.get("video_rel_path", "") or video_id).strip()
-            library_path = str(entry.get("library_path", "") or "").strip()
-            label = rel_path if not target_lib else f"{library_path} / {rel_path}" if library_path else rel_path
-            combo.addItem(label, video_id)
-        if combo.count() == 0:
-            combo.addItem(self.texts.get("understanding_video_none", "No indexed videos"), "")
-        restore_index = 0
-        if current:
-            found = combo.findData(current, Qt.ItemDataRole.UserRole)
-            if found >= 0:
-                restore_index = found
-        combo.setCurrentIndex(restore_index)
-        combo.blockSignals(False)
+        try:
+            entries = list_ready_video_entries(library_path=target_lib, config=load_config())
+            items: list[tuple[str, str]] = []
+            # When browsing all libraries, prefix with folder name to disambiguate.
+            show_lib_prefix = not bool(target_lib)
+            for entry in entries:
+                video_id = str(entry.get("video_id", "") or "").strip()
+                if not video_id:
+                    continue
+                rel_path = str(entry.get("video_rel_path", "") or video_id).strip()
+                library_path = str(entry.get("library_path", "") or "").strip()
+                if show_lib_prefix and library_path:
+                    lib_name = os.path.basename(os.path.normpath(library_path)) or library_path
+                    label = f"{lib_name} / {rel_path}"
+                else:
+                    label = rel_path
+                items.append((label, video_id))
+            if hasattr(combo, "set_items"):
+                combo.set_items(items, current_data=current)
+            else:
+                combo.clear()
+                for label, video_id in items:
+                    combo.addItem(label, video_id)
+                if combo.count() == 0:
+                    combo.addItem(empty_text, "")
+                restore_index = 0
+                if current:
+                    found = combo.findData(current, Qt.ItemDataRole.UserRole)
+                    if found >= 0:
+                        restore_index = found
+                combo.setCurrentIndex(restore_index)
+        finally:
+            combo.blockSignals(False)
         self._load_understanding_video_timeline()
 
     def _selected_understanding_video_id(self):
@@ -702,7 +721,9 @@ class UnderstandingGuiMixin:
                     state=state,
                 )
             )
-        duration_sec = max((float(segment.end_sec) for segment in segments), default=0.0)
+        duration_sec = float(self._understanding_video_context.get("duration_sec") or 0.0)
+        if duration_sec <= 0:
+            duration_sec = max((float(segment.end_sec) for segment in segments), default=0.0)
         page.chunk_timeline.set_segments(segments, duration_sec=duration_sec)
         self._refresh_understanding_video_summary(evidence)
         if segments:
@@ -846,7 +867,8 @@ class UnderstandingGuiMixin:
             return
         if hasattr(self, "_refresh_understanding_scope_options"):
             self._refresh_understanding_scope_options()
-        self._refresh_understanding_page_fast(install_bootstrap=True)
+        # Bootstrap copies run once after startup; avoid redoing them on every page visit.
+        self._refresh_understanding_page_fast(install_bootstrap=False)
 
     def _refresh_understanding_page_fast(self, *, install_bootstrap: bool = False):
         status = self._fetch_understanding_resource_status(
@@ -873,6 +895,10 @@ class UnderstandingGuiMixin:
         page = self.understanding_page
 
         show_notice = self._is_current_page("understanding") and not ready and not understanding_running
+        # Keep the banner widget in the layout with a stable min height so
+        # show/hide does not shove the timeline on first open.
+        page.understanding_notice.setMinimumHeight(40 if show_notice else 0)
+        page.understanding_notice.setMaximumHeight(16777215 if show_notice else 0)
         page.understanding_notice.setVisible(show_notice)
         if show_notice:
             page.understanding_notice_text.setText(
@@ -969,34 +995,19 @@ class UnderstandingGuiMixin:
         remote_line = self._remote_vlm_status_line(status)
 
         if status.get("understanding_ready"):
-            yolo_line = self._understanding_yolo_status_line(status)
-            lines = [line for line in (yolo_line, remote_line) if line]
+            ready = self.texts.get(
+                "understanding_settings_ready",
+                "Description service is ready.",
+            )
+            lines = [line for line in (ready, remote_line) if line]
             hint.setText("\n".join(lines))
             return
         missing = ", ".join(status.get("missing_components") or [])
         profile_error = str(status.get("profile_error", "") or "").strip()
-        yolo_line = self._understanding_yolo_status_line(status)
         detail = profile_error or missing or self.texts.get("understanding_not_ready", "Not ready")
         base = self.texts.get("understanding_settings_not_ready", "Missing: {missing}").format(missing=detail)
-        lines = [line for line in (yolo_line, base, remote_line) if line]
+        lines = [line for line in (base, remote_line) if line]
         hint.setText("\n".join(lines))
-
-    def _understanding_yolo_status_line(self, status):
-        components = list(status.get("components") or [])
-        yolo_items = [
-            item for item in components
-            if str(item.get("task", "") or "").strip() == "object_detection"
-        ]
-        if not yolo_items:
-            return self.texts.get(
-                "understanding_yolo_status_missing",
-                "YOLO: not imported yet. Use Import Model to add the YOLO package.",
-            )
-        item = yolo_items[0]
-        name = str(item.get("display_name", "") or item.get("id", "") or "YOLO").strip()
-        if item.get("installed"):
-            return self.texts.get("understanding_yolo_status_ready", "YOLO: {name} (ready).").format(name=name)
-        return self.texts.get("understanding_yolo_status_missing_named", "YOLO: {name} (not imported).").format(name=name)
 
     def start_generate_understanding_evidence(self, target_lib=None, video_id=None):
         if not self._ensure_startup_migration_idle("feature_understanding"):
@@ -1352,7 +1363,6 @@ class UnderstandingGuiMixin:
                     item.get("library_path", ""),
                     item.get("video_rel_path", ""),
                     clip_label,
-                    item.get("yolo_model", "") or "",
                     item.get("caption_model", "") or "",
                     item.get("other_models", "") or "",
                     os.path.basename(item.get("evidence_file", "") or "") if item.get("evidence_file") else "",

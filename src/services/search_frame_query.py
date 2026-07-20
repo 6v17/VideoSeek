@@ -7,6 +7,7 @@ from typing import List
 import numpy as np
 
 from src.domain.search_hit import SearchHit
+from src.storage.lance_search_index import LanceTableSearchIndex
 
 from src.services.search_neighbor_rerank import _neighbor_candidate_score
 
@@ -14,7 +15,47 @@ _ANCHOR_BRUTEFORCE_MAX_FRAMES = 48
 _ANCHOR_BRUTEFORCE_PREFILTER_MULTIPLIER = 2
 
 
+def _search_lance_frame_results_with_ids(index: LanceTableSearchIndex, query_vector, top_k):
+    rows = index.search_rows(query_vector, top_k)
+    matched_results: List[SearchHit] = []
+    matched_ids: List[int] = []
+    for row_index, row in enumerate(rows):
+        timestamp = float(row.timestamp or 0.0)
+        matched_results.append(
+            SearchHit(
+                timestamp,
+                timestamp,
+                float(row.score),
+                str(row.video_path or ""),
+                video_id=str(row.video_id or ""),
+            )
+        )
+        matched_ids.append(int(row_index))
+    return matched_results, matched_ids
+
+
+def _search_lance_chunk_results(index: LanceTableSearchIndex, query_vector, top_k) -> List[SearchHit]:
+    rows = index.search_rows(query_vector, top_k)
+    matched_results: List[SearchHit] = []
+    for row in rows:
+        start_time = float(row.start or 0.0)
+        end_time = float(row.end or start_time)
+        matched_results.append(
+            SearchHit(
+                start_time,
+                end_time,
+                float(row.score),
+                str(row.video_path or ""),
+                video_id=str(row.video_id or ""),
+            )
+        )
+    return matched_results
+
+
 def _search_frame_results_with_ids(query_vector, index, timestamps, video_paths, top_k):
+    if isinstance(index, LanceTableSearchIndex):
+        return _search_lance_frame_results_with_ids(index, query_vector, top_k)
+
     actual_k = min(top_k, index.ntotal)
     if actual_k <= 0:
         return [], []
@@ -35,10 +76,41 @@ def _search_frame_results_with_ids(query_vector, index, timestamps, video_paths,
         if index_value == -1 or index_value >= len(video_paths):
             continue
         timestamp = float(timestamps[index_value])
-        video_path = video_paths[index_value]
+        video_path = str(video_paths[index_value] or "")
         matched_results.append(SearchHit(timestamp, timestamp, float(distances[0][rank]), video_path))
         matched_ids.append(int(index_value))
     return matched_results, matched_ids
+
+
+def _search_chunk_results(query_vector, index, ranges, video_paths, top_k) -> List[SearchHit]:
+    if isinstance(index, LanceTableSearchIndex):
+        return _search_lance_chunk_results(index, query_vector, top_k)
+
+    actual_k = min(top_k, index.ntotal)
+    if actual_k <= 0:
+        return []
+    if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
+        raise RuntimeError("Invalid query vector. Please retry the search.")
+    query_dim = int(query_vector.shape[1])
+    index_dim = int(getattr(index, "d", 0))
+    if index_dim > 0 and query_dim != index_dim:
+        raise RuntimeError(
+            f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
+            "Current model uses a different embedding space. Please rebuild the index for the active model."
+        )
+
+    distances, indices = index.search(query_vector, actual_k)
+    matched_results = []
+    for rank, index_value in enumerate(indices[0]):
+        if index_value == -1 or index_value >= len(video_paths):
+            continue
+        time_range = ranges[index_value]
+        start_time = float(time_range[0])
+        end_time = float(time_range[1])
+        matched_results.append(
+            SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
+        )
+    return matched_results
 
 
 def _search_frame_results_in_time_window(

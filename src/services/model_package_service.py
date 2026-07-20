@@ -1,13 +1,18 @@
+import gc
 import json
 import os
 import re
 import hashlib
 import shutil
 import tempfile
+import time
 import zipfile
 
 from src.app.config import load_config, save_config
-from src.storage.config_store import get_config_schema_version, get_data_paths
+from src.app.logging_utils import get_logger
+from src.storage.config_store import get_config_schema_version, get_data_paths, resolve_model_resource_dir
+
+logger = get_logger("model_package_service")
 
 REQUIRED_MODEL_FILES = [
     "clip_visual.onnx",
@@ -71,7 +76,58 @@ def _resolve_profile_resource_dir(profile):
     variant = _resolve_model_variant(profile)
     if not model_root or not provider:
         return ""
-    return os.path.join(model_root, _provider_dir(provider), variant)
+    return resolve_model_resource_dir(model_root, provider, variant)
+
+
+def _release_profile_runtime_locks(asset_dir="", _resource_dir=""):
+    """Drop ONNX / Lance handles so Windows can delete profile directories."""
+    try:
+        from src.core.clip_embedding import reset_engine
+
+        reset_engine()
+    except Exception as exc:
+        logger.debug("reset_engine before profile removal failed: %s", exc)
+    try:
+        from src.services.search_assets import invalidate_search_asset_caches
+
+        invalidate_search_asset_caches()
+    except Exception as exc:
+        logger.debug("invalidate_search_asset_caches before profile removal failed: %s", exc)
+    try:
+        from src.storage.lance_search_index import invalidate_lance_runtime_caches
+
+        invalidate_lance_runtime_caches(str(asset_dir or "").strip())
+    except Exception as exc:
+        logger.debug("invalidate_lance_runtime_caches before profile removal failed: %s", exc)
+    try:
+        from src.storage.profile_library_store import invalidate_profile_library_schema_cache
+
+        invalidate_profile_library_schema_cache(str(asset_dir or "").strip() or None)
+    except Exception as exc:
+        logger.debug("invalidate_profile_library_schema_cache before profile removal failed: %s", exc)
+    # Drop any lingering table/file refs before rmtree on Windows.
+    gc.collect()
+
+
+def _rmtree_with_retry(path, *, attempts=5, delay_sec=0.15):
+    path = str(path or "").strip()
+    if not path or not os.path.exists(path):
+        return True, ""
+    last_error = ""
+    for attempt in range(max(1, int(attempts))):
+        try:
+            shutil.rmtree(path)
+            return True, ""
+        except Exception as exc:
+            last_error = str(exc)
+            gc.collect()
+            if attempt + 1 < attempts:
+                time.sleep(delay_sec * (attempt + 1))
+    # Last chance: ignore remaining locked files rather than failing the whole removal.
+    shutil.rmtree(path, ignore_errors=True)
+    if os.path.exists(path):
+        return False, last_error or f"Failed to remove directory: {path}"
+    return True, ""
 
 
 def _profile_required_files(profile):
@@ -460,9 +516,15 @@ def import_model_packages(model_root, manifest_files=None):
 
 def remove_model_profile(profile_id):
     config = load_config()
-    if get_config_schema_version(config=config) < 2:
-        raise RuntimeError("Model profile removal requires config schema v2")
+    schema_version = get_config_schema_version(config=config)
     models = config.get("models")
+    if schema_version < 2:
+        # Profiles already present means the install is operable; stamp v2 instead of hard-failing.
+        if isinstance(models, dict) and isinstance(models.get("profiles"), list):
+            config["schema_version"] = 2
+            schema_version = 2
+        else:
+            raise RuntimeError("Model profile removal requires config schema v2")
     if not isinstance(models, dict):
         raise RuntimeError("Missing models section in config")
     profiles = models.get("profiles")
@@ -486,6 +548,8 @@ def remove_model_profile(profile_id):
 
     removed_resource_dir = _resolve_profile_resource_dir(target_profile)
     removed_asset_dir = _resolve_profile_asset_base_dir(config, target_profile)
+    # Release file locks before mutating config / deleting directories.
+    _release_profile_runtime_locks(removed_asset_dir, removed_resource_dir)
     removed_profile = profiles.pop(target_index)
 
     active_profile_id = str(models.get("active_profile", "") or "").strip()
@@ -499,18 +563,25 @@ def remove_model_profile(profile_id):
     removed_resource = False
     removed_asset = False
     removed_empty_parents = []
+    delete_warnings = []
     if removed_resource_dir and os.path.exists(removed_resource_dir):
-        shutil.rmtree(removed_resource_dir, ignore_errors=True)
-        removed_resource = True
-        resource_parent = os.path.dirname(removed_resource_dir)
-        if _remove_empty_dir_if_possible(resource_parent):
-            removed_empty_parents.append(resource_parent)
+        ok, error = _rmtree_with_retry(removed_resource_dir)
+        removed_resource = ok or not os.path.exists(removed_resource_dir)
+        if not removed_resource and error:
+            delete_warnings.append(error)
+        elif removed_resource:
+            resource_parent = os.path.dirname(removed_resource_dir)
+            if _remove_empty_dir_if_possible(resource_parent):
+                removed_empty_parents.append(resource_parent)
     if removed_asset_dir and os.path.exists(removed_asset_dir):
-        shutil.rmtree(removed_asset_dir, ignore_errors=True)
-        removed_asset = True
-        asset_parent = os.path.dirname(removed_asset_dir)
-        if _remove_empty_dir_if_possible(asset_parent):
-            removed_empty_parents.append(asset_parent)
+        ok, error = _rmtree_with_retry(removed_asset_dir)
+        removed_asset = ok or not os.path.exists(removed_asset_dir)
+        if not removed_asset and error:
+            delete_warnings.append(error)
+        elif removed_asset:
+            asset_parent = os.path.dirname(removed_asset_dir)
+            if _remove_empty_dir_if_possible(asset_parent):
+                removed_empty_parents.append(asset_parent)
 
     return {
         "removed_profile_id": profile_id,
@@ -521,6 +592,7 @@ def remove_model_profile(profile_id):
         "removed_resource": removed_resource,
         "removed_asset": removed_asset,
         "removed_empty_parent_dirs": removed_empty_parents,
+        "delete_warnings": delete_warnings,
     }
 
 

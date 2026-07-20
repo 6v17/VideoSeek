@@ -94,8 +94,10 @@ def cleanup_legacy_vector_files_for_profile(profile_base_dir: str) -> int:
 
 
 def _mark_profile_search_index_ready(profile_base_dir: str) -> None:
+    from src.storage.profile_library_store import get_library_db_path
+
     meta_file = os.path.join(profile_base_dir, "meta.json")
-    if not os.path.isfile(meta_file):
+    if not os.path.isfile(meta_file) and not os.path.isfile(get_library_db_path(profile_base_dir)):
         return
     meta = load_metadata(meta_file)
     if not isinstance(meta, dict):
@@ -104,10 +106,33 @@ def _mark_profile_search_index_ready(profile_base_dir: str) -> None:
     save_metadata(meta, meta_file)
 
 
+def _legacy_cleanup_paths(paths: list[str]) -> list[str]:
+    pending = []
+    for path in paths:
+        lower = str(path or "").lower()
+        if lower.endswith("_vectors.npy"):
+            continue
+        if lower.endswith("_chunk_cache.npz"):
+            continue
+        pending.append(path)
+    return pending
+
+
+def is_lance_migration_completed(config=None) -> bool:
+    from src.app.config import load_config
+
+    return bool(_read_lance_migration_state(config or load_config()).get("completed"))
+
+
 def needs_lance_startup_migration(config=None) -> bool:
     from src.app.config import load_config
 
     runtime_config = config or load_config()
+    # Once recorded complete, do not re-listdir vector/index dirs every startup.
+    # Sidecar ``*_vectors.npy`` may remain by design after import.
+    if is_lance_migration_completed(runtime_config):
+        return False
+
     profiles = list(iter_model_asset_storage_roots(config=runtime_config))
     if not profiles:
         return False
@@ -118,8 +143,10 @@ def needs_lance_startup_migration(config=None) -> bool:
         base_dir = root["base_dir"]
         if profile_has_npy_vectors(base_dir) and not lance_search_is_ready(base_dir):
             pending_import = True
-        if lance_search_is_ready(base_dir) and collect_legacy_vector_paths(base_dir):
-            pending_cleanup = True
+        if lance_search_is_ready(base_dir):
+            legacy_paths = collect_legacy_vector_paths(base_dir)
+            if legacy_paths:
+                pending_cleanup = True
 
     return pending_import or pending_cleanup
 
@@ -155,10 +182,10 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
         percent = 90 + int((index - 1) * 8 / max(total, 1))
         _emit(progress_callback, percent, f"正在迁移 Lance 向量：{label}")
 
-        if profile_has_npy_vectors(base_dir):
+        if profile_has_npy_vectors(base_dir) and not lance_search_is_ready(base_dir):
             summary = import_npy_to_lance(
                 base_dir,
-                replace_existing=not lance_search_is_ready(base_dir),
+                replace_existing=True,
             )
             if summary.get("videos_imported"):
                 profiles_migrated += 1
@@ -170,7 +197,10 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
                     logger.warning("Lance import issue (%s): %s", label, error)
 
         if lance_search_is_ready(base_dir):
-            removed = cleanup_legacy_vector_files_for_profile(base_dir)
+            legacy_paths = collect_legacy_vector_paths(base_dir)
+            if bool(_read_lance_migration_state(runtime_config).get("completed")):
+                legacy_paths = _legacy_cleanup_paths(legacy_paths)
+            removed = cleanup_legacy_vector_paths(legacy_paths)
             if removed:
                 legacy_removed += removed
                 upgraded = True

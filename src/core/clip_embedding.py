@@ -38,9 +38,12 @@ from src.core.onnx_vision_engine import (
     format_exception_detail as _format_exception_detail,
     truncate_log_text as _truncate_log_text,
 )
-from src.core.semantic_chunking import SemanticChunkStreamBuilder, build_semantic_chunks
+from src.core.semantic_chunking import (
+    SemanticChunkStreamBuilder,
+    build_semantic_chunks,
+    chunk_builder_kwargs,
+)
 from src.core.tokenizer import tokenize
-from src.storage.asset_store import save_vector_payload
 from src.storage.config_store import (
     build_chunk_config,
     get_active_embedding_spec,
@@ -1158,7 +1161,7 @@ def generate_vectors_and_index_for_video(
     runtime_config = load_config()
     estimated_frame_total = _estimate_index_frame_total(video_path, config=runtime_config)
     chunk_config = build_chunk_config(runtime_config)
-    chunk_builder = SemanticChunkStreamBuilder(**chunk_config)
+    chunk_builder = SemanticChunkStreamBuilder(**chunk_builder_kwargs(chunk_config))
     progress_reporter = (
         IndexingProgressReporter(
             progress_callback,
@@ -1336,7 +1339,7 @@ def generate_vectors_and_index_for_video(
         vectors = gpu_to_numpy(vstack_gpu(vector_parts))
         del vector_parts
         stack_s = time.perf_counter() - t_stack
-        chunks = build_semantic_chunks(vectors, timestamps, **chunk_config)
+        chunks = build_semantic_chunks(vectors, timestamps, **chunk_builder_kwargs(chunk_config))
         chunks_s = time.perf_counter() - t_chunks
     else:
         chunks = chunk_builder.finish()
@@ -1347,12 +1350,7 @@ def generate_vectors_and_index_for_video(
         stack_s = time.perf_counter() - t_stack
     free_memory()
 
-    vector_file = os.path.normpath(os.path.join(vector_dir, f"{video_id}_vectors.npy"))
-    index_file = os.path.normpath(os.path.join(index_dir, f"{video_id}_index.faiss"))
-
     save_s = 0.0
-    faiss_s = 0.0
-    index = None
     if progress_reporter is not None:
         progress_reporter.emit("save", force=True)
     t_save = time.perf_counter()
@@ -1367,7 +1365,7 @@ def generate_vectors_and_index_for_video(
         stack_s + chunks_s + save_s,
         time.perf_counter() - wall_start,
     )
-    return vectors, timestamps, index, chunks
+    return vectors, timestamps, None, chunks
 
 
 def _register_default_inference_engines():

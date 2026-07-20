@@ -9,9 +9,18 @@ from src.domain.search_hit import SearchHit
 from src.services.search_scope import resolve_fetch_top_k
 
 _GLOBAL_STAGE1_FETCH_CAP = 400
+_SOURCE_FILTER_FETCH_CAP = 500
 _PRECISE_FETCH_CAP = 200
 _PRECISE_PIXEL_LOCALIZE_TOP_N = 3
 _IN_VIDEO_PIXEL_LOCALIZE_CAP = 15
+
+
+def resolve_source_filtered_fetch_top_k(top_k: int, scoped: bool) -> int:
+    """Expand recall before dropping hits whose source file no longer exists."""
+    normalized = max(1, int(top_k))
+    base = resolve_fetch_top_k(normalized, scoped)
+    expanded = max(base * 5, normalized + 50)
+    return min(_SOURCE_FILTER_FETCH_CAP, expanded)
 
 
 def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
@@ -49,7 +58,7 @@ def _resolve_frame_fetch_top_k(
     precise_image: bool = False,
 ) -> int:
     if is_text or not precise_image:
-        return resolve_fetch_top_k(top_k, scoped)
+        return resolve_source_filtered_fetch_top_k(top_k, scoped)
     fetch_k = resolve_fetch_top_k(top_k, scoped or True)
     try:
         multiplier = int(config.get("image_search_fetch_multiplier", DEFAULT_CONFIG["image_search_fetch_multiplier"]))

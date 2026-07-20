@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.domain.search_hit import SearchHit
 
+_PATH_INDEX_CACHE: dict[str, tuple[Any, "SearchablePathIndex"]] = {}
+_SUBTITLE_PATH_INDEX_CACHE: dict[str, tuple[Any, "SearchablePathIndex"]] = {}
+
+
+def _canonical_file_path(path: str) -> str:
+    return os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip())))
+
+
+def _path_is_file(path: str) -> bool:
+    text = str(path or "").strip()
+    if not text:
+        return False
+    try:
+        return os.path.isfile(text)
+    except OSError:
+        return False
+
 
 def normalize_scope_path(path: str) -> str:
-    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip()))))
+    return os.path.normcase(_canonical_file_path(path))
 
 
 def iter_indexed_video_entries(meta) -> Iterable[Tuple[str, str, dict]]:
@@ -56,6 +74,8 @@ def list_ready_video_paths_for_libraries(library_paths: Optional[Sequence[str]],
             continue
         if not any(video_path_under_library_root(abs_path, root) for root in roots):
             continue
+        if not video_source_exists(abs_path):
+            continue
         if abs_path in seen:
             continue
         seen.add(abs_path)
@@ -67,7 +87,7 @@ def count_indexed_ready_videos(config=None) -> int:
     from src.services.library_service import list_local_vector_details
 
     try:
-        detail = list_local_vector_details(validate_contents=False)
+        detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
     except Exception:
         return 0
     count = 0
@@ -131,6 +151,115 @@ def resolve_default_active_search_scope(
     scope_video_paths = resolve_active_search_video_scope(config=config)
     scope_library_paths = None if scope_video_paths else resolve_active_search_library_scope(config=config)
     return scope_video_paths, scope_library_paths
+
+
+def resolve_active_dialogue_search_library_scope(config=None) -> list[str] | None:
+    """Selected global subtitle-library roots, or None for all subtitle libraries."""
+    from src.services.subtitle_library_service import list_subtitle_search_scope_library_options
+    from src.storage.config_store import (
+        get_dialogue_search_scope_library_paths,
+        get_dialogue_search_scope_mode,
+        get_dialogue_search_scope_video_paths,
+    )
+
+    if get_dialogue_search_scope_mode(config) != "selected":
+        return None
+    if get_dialogue_search_scope_video_paths(config):
+        return None
+    if len(list_subtitle_search_scope_library_options(config=config)) < 2:
+        return None
+    paths = get_dialogue_search_scope_library_paths(config)
+    if not paths:
+        return None
+    return list(paths)
+
+
+def resolve_active_dialogue_search_video_scope(config=None) -> list[str] | None:
+    """Selected subtitle-library video paths, or None to search all subtitle videos."""
+    from src.storage.config_store import (
+        get_dialogue_search_scope_library_paths,
+        get_dialogue_search_scope_mode,
+        get_dialogue_search_scope_video_paths,
+    )
+
+    if get_dialogue_search_scope_mode(config) != "selected":
+        return None
+    video_paths = get_dialogue_search_scope_video_paths(config)
+    if video_paths:
+        return list(video_paths)
+    library_paths = get_dialogue_search_scope_library_paths(config)
+    if library_paths:
+        from src.services.subtitle_library_service import list_subtitle_search_scope_entries
+
+        roots = _normalized_library_roots(library_paths)
+        expanded: list[str] = []
+        seen: set[str] = set()
+        for item in list_subtitle_search_scope_entries(config=config):
+            if str(item.get("asset_state") or "").strip().lower() != "ready":
+                continue
+            abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+            if not abs_path or abs_path in seen:
+                continue
+            if not any(video_path_under_library_root(abs_path, root) for root in roots):
+                continue
+            seen.add(abs_path)
+            expanded.append(abs_path)
+        return expanded or None
+    return None
+
+
+def resolve_default_active_dialogue_search_scope(
+    config=None,
+) -> tuple[list[str] | None, list[str] | None]:
+    """Subtitle-tab scope: selected videos, else selected subtitle libraries, else all."""
+    scope_video_paths = resolve_active_dialogue_search_video_scope(config=config)
+    scope_library_paths = (
+        None if scope_video_paths else resolve_active_dialogue_search_library_scope(config=config)
+    )
+    return scope_video_paths, scope_library_paths
+
+
+def resolve_subtitle_scope_video_ids(
+    *,
+    video_paths: Optional[Sequence[str]] = None,
+    library_paths: Optional[Sequence[str]] = None,
+    config=None,
+) -> Optional[List[str]]:
+    """Map dialogue search scope to video ids using the global subtitle registry."""
+    if not is_search_scoped(video_paths=video_paths, library_paths=library_paths):
+        return None
+
+    from src.services.subtitle_library_service import list_subtitle_library_video_entries
+
+    entries = list_subtitle_library_video_entries(config=config, register=False)
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    path_set = _normalized_video_path_set(video_paths)
+    if path_set is not None:
+        for item in entries:
+            abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+            video_id = str(item.get("video_id") or "").strip()
+            if not abs_path or not video_id or abs_path not in path_set:
+                continue
+            if video_id not in seen:
+                seen.add(video_id)
+                ordered.append(video_id)
+        return ordered
+
+    roots = _normalized_library_roots(library_paths)
+    if not roots:
+        return []
+    for item in entries:
+        abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+        video_id = str(item.get("video_id") or "").strip()
+        if not abs_path or not video_id or video_id in seen:
+            continue
+        if not any(video_path_under_library_root(abs_path, root) for root in roots):
+            continue
+        seen.add(video_id)
+        ordered.append(video_id)
+    return ordered
 
 
 def _read_scope_fields(scope) -> tuple[Optional[List[str]], Optional[List[str]], bool]:
@@ -263,6 +392,51 @@ def is_search_scoped(
     return False
 
 
+def resolve_scope_video_ids(
+    *,
+    video_paths: Optional[Sequence[str]] = None,
+    library_paths: Optional[Sequence[str]] = None,
+    config=None,
+) -> Optional[List[str]]:
+    """Map active search scope to video ids for store-level filtering.
+
+    Returns ``None`` when the search is unscoped (caller should scan all).
+    Returns an empty list when scoped but no matching indexed videos exist.
+    """
+    if not is_search_scoped(video_paths=video_paths, library_paths=library_paths):
+        return None
+
+    from src.app.config import load_config
+    from src.storage.asset_store import load_model_metadata
+
+    meta = load_model_metadata(config=config or load_config())
+    lookup = build_indexed_video_lookup(meta)
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    path_set = _normalized_video_path_set(video_paths)
+    if path_set is not None:
+        for abs_path, video_id in lookup.items():
+            if abs_path not in path_set:
+                continue
+            if video_id and video_id not in seen:
+                seen.add(video_id)
+                ordered.append(video_id)
+        return ordered
+
+    roots = _normalized_library_roots(library_paths)
+    if not roots:
+        return []
+    for abs_path, video_id, _info in iter_indexed_video_entries(meta):
+        if not video_id or video_id in seen:
+            continue
+        if not any(video_path_under_library_root(abs_path, root) for root in roots):
+            continue
+        seen.add(video_id)
+        ordered.append(video_id)
+    return ordered
+
+
 def _normalized_video_path_set(video_paths: Optional[Sequence[str]]) -> Optional[set[str]]:
     if not video_paths:
         return None
@@ -287,6 +461,204 @@ def video_path_under_library_root(video_path: str, library_root: str) -> bool:
     if normalized_video == normalized_root:
         return True
     return normalized_video.startswith(normalized_root + os.sep)
+
+
+def video_source_exists(video_path: str) -> bool:
+    text = str(video_path or "").strip()
+    if not text:
+        return False
+    if _path_is_file(text):
+        return True
+    canonical = _canonical_file_path(text)
+    return _path_is_file(canonical)
+
+
+@dataclass(frozen=True)
+class SearchablePathIndex:
+    by_video_id: Dict[str, str]
+    by_normalized_path: Dict[str, str]
+
+    @classmethod
+    def from_meta(cls, meta) -> "SearchablePathIndex":
+        by_video_id: Dict[str, str] = {}
+        by_normalized_path: Dict[str, str] = {}
+        for abs_path, video_id, info in iter_indexed_video_entries(meta):
+            asset_state = str(info.get("asset_state", "")).strip().lower()
+            if asset_state == "missing_source":
+                continue
+            if not _path_is_file(abs_path):
+                continue
+            canonical = _canonical_file_path(abs_path)
+            by_video_id[video_id] = canonical
+            by_normalized_path[normalize_scope_path(canonical)] = canonical
+            by_normalized_path[normalize_scope_path(abs_path)] = canonical
+        return cls(by_video_id=by_video_id, by_normalized_path=by_normalized_path)
+
+    def resolve_path(self, video_path: str = "", video_id: str = "") -> str | None:
+        vid = str(video_id or "").strip()
+        if vid:
+            canonical = self.by_video_id.get(vid)
+            if canonical and _path_is_file(canonical):
+                return canonical
+        raw = str(video_path or "").strip()
+        if not raw:
+            return None
+        normalized = normalize_scope_path(raw)
+        canonical = self.by_normalized_path.get(normalized)
+        if canonical and _path_is_file(canonical):
+            return canonical
+        if _path_is_file(raw):
+            return _canonical_file_path(raw)
+        if _path_is_file(normalized):
+            return normalized
+        return None
+
+
+def load_searchable_path_index(config=None) -> SearchablePathIndex:
+    from src.app.config import load_config
+    from src.storage.asset_store import load_model_metadata
+    from src.storage.config_store import get_local_model_asset_dirs
+    from src.storage.profile_library_store import library_db_cache_token
+
+    cfg = config or load_config()
+    base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+    cache_key, meta_mtime, revision = library_db_cache_token(base_dir)
+    cache_token = (meta_mtime, revision)
+    cached = _PATH_INDEX_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return cached[1]
+    index = SearchablePathIndex.from_meta(load_model_metadata(config=cfg))
+    _PATH_INDEX_CACHE[cache_key] = (cache_token, index)
+    return index
+
+
+def invalidate_searchable_path_index_cache() -> None:
+    _PATH_INDEX_CACHE.clear()
+    _SUBTITLE_PATH_INDEX_CACHE.clear()
+
+
+def load_subtitle_searchable_path_index(config=None) -> SearchablePathIndex:
+    """Map subtitle-library video_id / path → absolute source path on disk."""
+    from src.app.config import load_config
+    from src.services.subtitle_library_service import list_subtitle_library_video_entries
+    from src.storage.profile_library_store import library_db_cache_token
+    from src.storage.subtitle_library_store import get_subtitle_library_base_dir
+
+    cfg = config or load_config()
+    base_dir = get_subtitle_library_base_dir(config=cfg)
+    cache_key, meta_mtime, revision = library_db_cache_token(base_dir)
+    cache_token = (meta_mtime, revision)
+    cached = _SUBTITLE_PATH_INDEX_CACHE.get(cache_key)
+    if cached is not None and cached[0] == cache_token:
+        return cached[1]
+
+    by_video_id: Dict[str, str] = {}
+    by_normalized_path: Dict[str, str] = {}
+    for item in list_subtitle_library_video_entries(config=cfg, register=False):
+        video_id = str(item.get("video_id") or "").strip()
+        abs_path = str(item.get("video_path") or "").strip()
+        if not video_id or not abs_path or not _path_is_file(abs_path):
+            continue
+        canonical = _canonical_file_path(abs_path)
+        by_video_id[video_id] = canonical
+        by_normalized_path[normalize_scope_path(canonical)] = canonical
+        by_normalized_path[normalize_scope_path(abs_path)] = canonical
+    index = SearchablePathIndex(by_video_id=by_video_id, by_normalized_path=by_normalized_path)
+    _SUBTITLE_PATH_INDEX_CACHE[cache_key] = (cache_token, index)
+    return index
+
+
+def resolve_hit_source_path(
+    video_path: str = "",
+    video_id: str = "",
+    *,
+    path_index: SearchablePathIndex | None = None,
+    include_subtitle: bool = True,
+    config=None,
+) -> str | None:
+    """Resolve an absolute existing source path from path and/or video_id."""
+    index = path_index or load_searchable_path_index(config=config)
+    resolved = index.resolve_path(video_path, video_id)
+    if resolved:
+        return resolved
+    if not include_subtitle:
+        return None
+    # Explicit path_index means caller scoped resolution (tests / visual-only).
+    if path_index is not None:
+        return None
+    return load_subtitle_searchable_path_index(config=config).resolve_path(video_path, video_id)
+
+
+def enrich_hits_with_source_paths(
+    hits: List[SearchHit],
+    *,
+    path_index: SearchablePathIndex | None = None,
+    include_subtitle: bool = True,
+    config=None,
+) -> List[SearchHit]:
+    """Fill empty/stale hit.video_path from indexes; keep hits that cannot resolve."""
+    if not hits:
+        return []
+    enriched: List[SearchHit] = []
+    for hit in hits:
+        resolved = resolve_hit_source_path(
+            hit.video_path,
+            hit.video_id,
+            path_index=path_index,
+            include_subtitle=include_subtitle,
+            config=config,
+        )
+        if not resolved or resolved == hit.video_path:
+            enriched.append(hit)
+            continue
+        enriched.append(
+            SearchHit(
+                hit.start_sec,
+                hit.end_sec,
+                hit.score,
+                resolved,
+                match_kind=hit.match_kind,
+                video_id=hit.video_id,
+                matched_text=hit.matched_text,
+            )
+        )
+    return enriched
+
+
+def filter_hits_with_existing_sources(
+    hits: List[SearchHit],
+    *,
+    path_index: SearchablePathIndex | None = None,
+    config=None,
+) -> List[SearchHit]:
+    if not hits:
+        return []
+    filtered: List[SearchHit] = []
+    for hit in hits:
+        resolved = resolve_hit_source_path(
+            hit.video_path,
+            hit.video_id,
+            path_index=path_index,
+            include_subtitle=True,
+            config=config,
+        )
+        if not resolved:
+            continue
+        if resolved == hit.video_path and not hit.video_id:
+            filtered.append(hit)
+            continue
+        filtered.append(
+            SearchHit(
+                hit.start_sec,
+                hit.end_sec,
+                hit.score,
+                resolved,
+                match_kind=hit.match_kind,
+                video_id=hit.video_id,
+                matched_text=hit.matched_text,
+            )
+        )
+    return filtered
 
 
 def filter_hits_by_video_paths(hits: List[SearchHit], video_paths: Optional[Sequence[str]]) -> List[SearchHit]:

@@ -3,13 +3,8 @@ import os
 
 from src.app.app_meta import get_app_meta
 from src.app.logging_utils import get_logger
-from src.utils import (
-    get_app_data_dir,
-    get_default_model_dir,
-    get_resource_path,
-    normalize_sampling_fps_mode,
-    normalize_sampling_fps_rules_text,
-)
+from src.infra.paths import get_app_data_dir, get_default_model_dir, get_resource_path
+from src.media.sampling_fps import normalize_sampling_fps_mode, normalize_sampling_fps_rules_text
 
 logger = get_logger("config")
 _LAST_MIGRATION_NOTICE = None
@@ -80,7 +75,7 @@ DEFAULT_CONFIG = {
     "fps": 1,
     "sampling_fps_mode": "dynamic",
     "sampling_fps_rules": "0-10m=2; 10m-=1",
-    "search_top_k": 20,
+    "search_top_k": 100,
     "frame_neighbor_rerank_enabled": False,
     "frame_neighbor_rerank_top_n": 10,
     "frame_neighbor_rerank_window": 2,
@@ -110,9 +105,11 @@ DEFAULT_CONFIG = {
     "embedding_batch_size": 16,
     "close_window_action": "exit",
     "chunk_policy": "balanced",
-    "similarity_threshold": 0.85,
+    "similarity_threshold": 0.87,
+    "chunk_edge_threshold": 0.85,
     "min_chunk_size": 2,
     "min_chunk_duration": 0.0,
+    "max_chunk_duration": 90.0,
     "search_mode": "frame",
     "image_search_mode": "frame",
     "search_precision_mode": "fast",
@@ -120,6 +117,9 @@ DEFAULT_CONFIG = {
     "search_scope_mode": "all",
     "search_scope_library_paths": [],
     "search_scope_video_paths": [],
+    "dialogue_search_scope_mode": "all",
+    "dialogue_search_scope_library_paths": [],
+    "dialogue_search_scope_video_paths": [],
     "ffmpeg_path": "",
     "model_dir": get_default_model_dir(),
     "data_root": APP_DATA_DIR,
@@ -133,6 +133,8 @@ DEFAULT_CONFIG = {
     "download_auto_index": False,
     "download_quality": "best",
     "auto_cleanup_missing_files": False,
+    "subtitle_sample_interval_sec": 1.2,
+    "subtitle_ocr_batch_size": 1,
     "export_video_silent": False,
     "export_encode_mode": "original",
     "export_copy_extra_sec": 4,
@@ -148,6 +150,7 @@ DEFAULT_CONFIG = {
     "theme": "dark",
     "language": "zh",
     "update_notice_dismissed_version": "",
+    "free_notice_seen": False,
     "understanding": DEFAULT_UNDERSTANDING_CONFIG,
 }
 
@@ -175,8 +178,12 @@ CONFIG_BOUNDS = {
     "thumb_height": (45, 320),
     "embedding_batch_size": (1, 64),
     "similarity_threshold": (0.1, 1.0),
+    "chunk_edge_threshold": (0.1, 1.0),
     "min_chunk_size": (1, 50),
     "min_chunk_duration": (0.0, 30.0),
+    "max_chunk_duration": (0.0, 600.0),
+    "subtitle_sample_interval_sec": (0.1, 6.0),
+    "subtitle_ocr_batch_size": (1, 6),
 }
 
 CONFIG_INT_KEYS = {
@@ -194,6 +201,7 @@ CONFIG_INT_KEYS = {
     "thumb_height",
     "embedding_batch_size",
     "min_chunk_size",
+    "subtitle_ocr_batch_size",
 }
 
 CONFIG_ENUMS = {
@@ -205,6 +213,7 @@ CONFIG_ENUMS = {
     "agent_api_default_image_precision": {"fast", "precise"},
     "export_encode_mode": {"copy", "original"},
     "search_scope_mode": {"all", "selected"},
+    "dialogue_search_scope_mode": {"all", "selected"},
     "theme": {"dark", "light"},
     "language": {"zh", "en"},
     "download_mode": {"default_dir", "library"},
@@ -236,7 +245,6 @@ DERIVED_DATA_PATH_KEYS = {
 }
 
 OBSOLETE_CHUNK_CONFIG_KEYS = (
-    "max_chunk_duration",
     "chunk_split_confirm_frames",
     "chunk_similarity_mode",
     "chunk_segmentation_strategy",
@@ -484,6 +492,10 @@ def _sanitize_general_settings(config):
             as_int=key in CONFIG_INT_KEYS,
         )
 
+    # Legacy default (20) cannot fill multiple 20-item pages; bump once for pagination UX.
+    if int(sanitized.get("search_top_k", DEFAULT_CONFIG["search_top_k"])) == 20:
+        sanitized["search_top_k"] = DEFAULT_CONFIG["search_top_k"]
+
     for key, allowed_values in CONFIG_ENUMS.items():
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()
         sanitized[key] = value if value in allowed_values else DEFAULT_CONFIG[key]
@@ -524,6 +536,10 @@ def _sanitize_general_settings(config):
     sanitized["show_debug_test_buttons"] = _coerce_bool(
         sanitized.get("show_debug_test_buttons", DEFAULT_CONFIG["show_debug_test_buttons"]),
         DEFAULT_CONFIG["show_debug_test_buttons"],
+    )
+    sanitized["free_notice_seen"] = _coerce_bool(
+        sanitized.get("free_notice_seen", DEFAULT_CONFIG["free_notice_seen"]),
+        DEFAULT_CONFIG["free_notice_seen"],
     )
     sanitized["search_video_discovery_enabled"] = _coerce_bool(
         sanitized.get(

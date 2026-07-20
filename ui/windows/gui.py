@@ -1,7 +1,7 @@
 from collections import deque
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QPixmap, QWheelEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -60,6 +60,7 @@ from ui.widgets.sidebar_icons import (
 from ui.controllers.indexing_controller import IndexingController
 from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
+from ui.widgets.preview_panel import _scroll_ancestor_vertically
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
 from ui.controllers.video_download_controller import VideoDownloadController
@@ -150,6 +151,7 @@ class MainWindow(
         self.indexing_controller.runtime_status_changed.connect(self.push_inference_status)
         self.indexing_controller.error_occurred.connect(self._handle_indexing_error)
         self.indexing_controller.finished.connect(self._finish_indexing)
+        self.dialogue_index_worker = None
         self.understanding_controller = UnderstandingController(self)
         self.understanding_controller.status_changed.connect(self._update_understanding_progress)
         self.understanding_controller.error_occurred.connect(self._handle_understanding_error)
@@ -157,6 +159,7 @@ class MainWindow(
         self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
+        self.search_page.results_pager.page_changed.connect(self.search_controller.go_to_results_page)
         self.video_download_controller = VideoDownloadController(self)
         self.video_download_controller.refresh_default_dir_label()
         self.video_download_controller.load_settings_from_config()
@@ -241,7 +244,9 @@ class MainWindow(
         if dont_native_ancestors is not None:
             self.video_widget.setAttribute(dont_native_ancestors, True)
         self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.video_widget.installEventFilter(self)
         self.search_page.preview_host.mouseDoubleClickEvent = self.open_current_preview_dialog
+        self.search_page.btn_manage_presets.installEventFilter(self)
         self.search_page.preview_host_layout.addWidget(self.video_widget, 1)
 
         self.result_table = self.search_page.result_table
@@ -270,7 +275,14 @@ class MainWindow(
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
         self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
-        self.search_page.text_search.textChanged.connect(self._refresh_search_panel_state)
+        if hasattr(self.search_page, "dialogue_search_mode"):
+            self.search_page.dialogue_search_mode.currentIndexChanged.connect(
+                self._on_dialogue_search_mode_changed
+            )
+        # Do not rebuild scope/library details on every keystroke.
+        self.search_page.text_search.textChanged.connect(
+            lambda *_: self._refresh_search_panel_state(refresh_scope=False)
+        )
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self._init_search_scope_state()
@@ -285,8 +297,26 @@ class MainWindow(
         self.link_page.btn_clear_legacy.clicked.connect(self.clear_legacy_network_data)
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
-        self.library_page.btn_sync_db.clicked.connect(self.start_update_index)
+        self.library_page.btn_remove_lib.clicked.connect(self.remove_selected_libraries)
+        self.library_page.btn_sync_db.clicked.connect(
+            lambda: self.start_update_index(checked_only=True)
+        )
+        self.library_page.btn_build_dialogue_index.clicked.connect(self.start_dialogue_index)
+        self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
+        self.library_page.btn_refresh_dialogue_library.clicked.connect(self.refresh_dialogue_library_table)
+        self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
+        self.library_page.input_subtitle_sample_interval.editingFinished.connect(
+            self._on_subtitle_sample_interval_changed
+        )
+        self.library_page.input_subtitle_ocr_batch.editingFinished.connect(
+            self._on_subtitle_ocr_batch_changed
+        )
+        self.library_page.input_subtitle_ocr_batch.valueChanged.connect(
+            self._on_subtitle_ocr_batch_changed
+        )
+        self.library_page.btn_stop_dialogue_index.clicked.connect(self.stop_update_index)
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
+        self.library_page.library_stack.currentChanged.connect(self._on_library_tab_changed)
         self.library_page.btn_index_issues.clicked.connect(self.show_last_index_issue_details)
         self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
         self.library_page.btn_vector_details.clicked.connect(self.show_local_vector_details)
@@ -339,6 +369,18 @@ class MainWindow(
         scroll.setWidget(page_widget)
         return scroll
 
+    def eventFilter(self, watched, event):  # noqa: N802
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            if watched is getattr(self, "video_widget", None) or watched is getattr(
+                getattr(self, "search_page", None), "btn_manage_presets", None
+            ):
+                # Native video surface / focused buttons would otherwise swallow page scrolling.
+                if _scroll_ancestor_vertically(watched, event):
+                    return True
+                event.ignore()
+                return False
+        return super().eventFilter(watched, event)
+
     def _nav_page_index(self, page_name: str) -> int:
         return self._NAV_PAGE_ORDER.index(page_name)
 
@@ -359,6 +401,9 @@ class MainWindow(
         if page_name == "understanding":
             if hasattr(self, "load_understanding_settings"):
                 self.load_understanding_settings(refresh_status=False)
+            # Load timeline/scope before first paint settles so the track does not jump.
+            if hasattr(self, "_refresh_understanding_scope_options"):
+                self._refresh_understanding_scope_options()
             QTimer.singleShot(0, self._deferred_understanding_page_refresh)
         if page_name == "link":
             if hasattr(self, "video_download_controller"):
@@ -367,7 +412,7 @@ class MainWindow(
     def _update_version_info(self, version_info):
         self.version_info = version_info
         self.apply_texts()
-        self._maybe_auto_show_update_notice()
+        self._maybe_auto_show_startup_notices()
 
     def _update_notice_payload(self, notice_payload):
         self.notice_payload = notice_payload
@@ -387,6 +432,10 @@ class MainWindow(
         self.setWindowTitle(f"{t['app_name']} v{get_app_version()}")
         self.sidebar.title.setText(t["app_name"])
         self.sidebar.subtitle.setText(t["app_subtitle"])
+        github_url = str(get_donate_payload().get("github_url") or "").strip() or "https://github.com/6v17/VideoSeek"
+        tip = t.get("brand_free_tip", "永久免费 · 开源")
+        self.sidebar.free_tip.setText(f'<a href="{github_url}">{tip}</a>')
+        self.sidebar.free_tip.setToolTip(t.get("brand_free_tip_tooltip", github_url))
         self.sidebar.hero_tag.setText(t["hero_tag"])
         self.sidebar.hero_title.setText(t["hero_title"])
         self.sidebar.hero_body.setText(t["hero_body"])
@@ -437,6 +486,8 @@ class MainWindow(
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
         self.result_table.apply_header_labels(t)
         self.search_page.result_view.set_empty_message(t["no_results"])
+        self.search_page.results_pager.set_texts(t)
+        self.search_controller._sync_results_pager()
 
         self.link_page.header.title.setText(t["link_page_title"])
         self.link_page.header.subtitle.setText(t["link_page_desc"])
@@ -457,10 +508,88 @@ class MainWindow(
 
         self.library_page.header.title.setText(t["library_page_title"])
         self.library_page.header.subtitle.setText(t["library_page_desc"])
+        self.library_page.btn_tab_visual.setText(t.get("library_tab_visual", "Videos"))
+        self.library_page.btn_tab_dialogue.setText(t.get("library_tab_dialogue", "Dialogue"))
         self.library_page.table_title.setText(t["library_table_title"])
+        self.library_page.dialogue_table_title.setText(
+            t.get("dialogue_library_table_title", "Extracted dialogue")
+        )
+        self.library_page.lbl_shared_library_hint.setText(
+            t.get(
+                "library_shared_add_hint",
+                "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
+            )
+        )
         self.library_page.btn_add_lib.setText(t["add_folder"])
-        self.library_page.btn_sync_db.setText(t["update_index"])
+        self.library_page.btn_remove_lib.setText(t.get("remove_library", "Remove Library"))
+        if hasattr(self, "_refresh_library_action_hints"):
+            self._refresh_library_action_hints()
+        else:
+            self.library_page.btn_remove_lib.setToolTip(t.get("remove_library_hint", ""))
+        self.library_page.btn_sync_db.setText(
+            t.get("sync_selected_videos", t.get("update_index", "Sync selected"))
+        )
+        self.library_page.visual_video_tree.set_action_texts(
+            open_text=t.get("open_folder", "Open"),
+            empty_text=t.get("library_list_empty", ""),
+            status_template=t.get("library_sync_status", "{ready}/{total} synced"),
+            header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
+            header_count=t.get("library_col_count", "Count"),
+            header_status=t.get("library_col_status", "Status"),
+            header_action=t.get("library_col_action", "Action"),
+        )
+        self.library_page.subtitle_video_tree.set_action_texts(
+            open_text=t.get("open_folder", "Open"),
+            empty_text=t.get("dialogue_library_empty", ""),
+            status_template=t.get("library_extract_status", "{ready}/{total} extracted"),
+            header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
+            header_count=t.get("library_col_count", "Count"),
+            header_status=t.get("library_col_status", "Status"),
+            header_action=t.get("library_col_action", "Action"),
+        )
+        self.library_page.btn_build_dialogue_index.setText(t.get("build_dialogue_index", "Build dialogue index"))
+        self.library_page.btn_build_dialogue_index.setToolTip(
+            t.get("build_dialogue_index_hint", "")
+        )
+        self.library_page.btn_reembed_dialogue.setText(
+            t.get("reembed_dialogue_index", "Re-embed dialogue vectors")
+        )
+        self.library_page.btn_reembed_dialogue.setToolTip(
+            t.get("reembed_dialogue_index_hint", "")
+        )
+        self.library_page.lbl_subtitle_sample_interval.setText(
+            t.get("subtitle_sample_interval", "Frame interval")
+        )
+        interval_tip = t.get(
+            "subtitle_sample_interval_hint",
+            "OCR frame sample interval inside speech segments (0.1–6.0s).",
+        )
+        self.library_page.lbl_subtitle_sample_interval.setToolTip(interval_tip)
+        self.library_page.input_subtitle_sample_interval.setToolTip(interval_tip)
+        if hasattr(self, "load_subtitle_sample_interval"):
+            self.load_subtitle_sample_interval()
+        self.library_page.lbl_subtitle_ocr_batch.setText(
+            t.get("subtitle_ocr_batch", "OCR stack")
+        )
+        batch_tip = t.get(
+            "subtitle_ocr_batch_hint",
+            "Frames stacked per OCR pass (1–6). 1=per-frame; higher is usually faster, with automatic per-frame fallback if ambiguous.",
+        )
+        self.library_page.lbl_subtitle_ocr_batch.setToolTip(batch_tip)
+        self.library_page.input_subtitle_ocr_batch.setToolTip(batch_tip)
+        if hasattr(self, "load_subtitle_ocr_batch"):
+            self.load_subtitle_ocr_batch()
+        self.library_page.btn_export_dialogue.setText(
+            t.get("export_dialogue_library", "Export dialogue")
+        )
+        self.library_page.btn_export_dialogue.setToolTip(
+            t.get("export_dialogue_library_hint", "")
+        )
+        self.library_page.btn_refresh_dialogue_library.setText(
+            t.get("refresh_dialogue_library", "Refresh")
+        )
         self.library_page.btn_stop_index.setText(t["stop"])
+        self.library_page.btn_stop_dialogue_index.setText(t["stop"])
         self.library_page.btn_index_issues.setText(t["index_issues_button"])
         self.library_page.btn_cleanup_missing.setText(t["cleanup_missing_vectors"])
         self.library_page.btn_vector_details.setText(t["library_vectors_detail"])
@@ -560,11 +689,36 @@ class MainWindow(
         if getattr(self, "_defer_runtime_warmup", False):
             self._defer_runtime_warmup = False
             self._start_runtime_warmup()
+        # Show UI first; heavy orphan/index cleanup can wait until the event loop is idle.
         self.refresh_library_table()
         self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
         self._apply_agent_api_settings()
+        QTimer.singleShot(0, self._bootstrap_understanding_resources)
+        QTimer.singleShot(1500, self._idle_maintain_library_metadata)
+        QTimer.singleShot(700, self._maybe_auto_show_startup_notices)
+
+    def _idle_maintain_library_metadata(self) -> None:
+        try:
+            from src.services.library_service import maintain_library_metadata
+
+            maintain_library_metadata()
+        except Exception:
+            pass
+
+    def _bootstrap_understanding_resources(self):
+        """Copy built-in understanding profiles/components once after startup (off the page-click path)."""
+        try:
+            from src.services.understanding_resource_service import (
+                ensure_understanding_components_installed,
+                ensure_understanding_profiles_installed,
+            )
+
+            ensure_understanding_profiles_installed()
+            ensure_understanding_components_installed()
+        except Exception:
+            pass
 
     def show_notice(self):
         had_update = bool(self.version_info and self.version_info.get("has_update"))
@@ -578,8 +732,34 @@ class MainWindow(
         if had_update:
             self._mark_update_notice_seen()
 
+    def _should_auto_show_free_notice(self) -> bool:
+        if not getattr(self, "_startup_complete", False):
+            return False
+        # Session lock: once claimed/shown this run, never queue again.
+        if getattr(self, "_free_notice_handled", False):
+            return False
+        try:
+            config = load_config()
+        except Exception:
+            return False
+        return not bool(config.get("free_notice_seen", False))
+
+    def _mark_free_notice_seen(self) -> None:
+        self._free_notice_handled = True
+        try:
+            config = load_config()
+            config["free_notice_seen"] = True
+            save_config(config)
+        except Exception:
+            return
+
     def _should_auto_show_update_notice(self) -> bool:
         if not getattr(self, "_startup_complete", False):
+            return False
+        # Wait until free-notice flow is finished for this session.
+        if getattr(self, "_free_notice_auto_show_pending", False):
+            return False
+        if self._should_auto_show_free_notice():
             return False
         info = self.version_info or {}
         if not info.get("has_update"):
@@ -605,6 +785,41 @@ class MainWindow(
             save_config(config)
         except Exception:
             return
+
+    def _maybe_auto_show_startup_notices(self) -> None:
+        if not getattr(self, "_startup_complete", False):
+            return
+        if getattr(self, "_startup_notices_scheduled", False):
+            return
+        self._startup_notices_scheduled = True
+        if self._should_auto_show_free_notice():
+            self._maybe_auto_show_free_notice()
+            return
+        self._maybe_auto_show_update_notice()
+
+    def _maybe_auto_show_free_notice(self) -> None:
+        if not self._should_auto_show_free_notice():
+            self._maybe_auto_show_update_notice()
+            return
+        if getattr(self, "_free_notice_auto_show_pending", False):
+            return
+        # Claim + persist before the modal opens, so overlapping startup callbacks
+        # cannot queue a second dialog while .exec() is blocking.
+        self._free_notice_auto_show_pending = True
+        self._mark_free_notice_seen()
+        QTimer.singleShot(200, self._auto_show_free_notice)
+
+    def _auto_show_free_notice(self) -> None:
+        self._free_notice_auto_show_pending = False
+        self.show_info_dialog(
+            self.texts.get("free_notice_title", "使用说明"),
+            self.texts.get(
+                "free_notice_body",
+                "VideoSeek 永久免费。\n有人收费卖给你或收代装费，那是骗子。\n官方：https://github.com/6v17/VideoSeek",
+            ),
+            kind="info",
+        )
+        self._maybe_auto_show_update_notice()
 
     def _maybe_auto_show_update_notice(self) -> None:
         if not self._should_auto_show_update_notice():
@@ -681,11 +896,23 @@ class MainWindow(
     def start_search(self):
         if not self._ensure_startup_migration_idle("feature_search"):
             return
+
+        active_tab = self._search_active_tab()
+        # Subtitle keyword search uses the global transcript store — no CLIP model.
+        if active_tab == self.SEARCH_TAB_DIALOGUE:
+            dialogue_query = self.search_page.search_panel.dialogue_query()
+            if not dialogue_query:
+                self.search_page.lbl_status.setText(
+                    self.texts.get("search_empty_dialogue", self.texts["empty_query"])
+                )
+                return
+            self._run_dialogue_search(dialogue_query)
+            return
+
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
             return
 
-        active_tab = self._search_active_tab()
         if active_tab == self.SEARCH_TAB_COMPOSE:
             self._start_compose_search()
             return
@@ -745,6 +972,38 @@ class MainWindow(
                 search_precision_mode=search_precision_mode,
             ),
             search_precision_mode=search_precision_mode,
+        )
+        return True
+
+    def _run_dialogue_search(self, raw_query, *, sync_ui=True):
+        query = str(raw_query or "").strip()
+        if not query:
+            self.search_page.lbl_status.setText(
+                self.texts.get("search_empty_dialogue", self.texts["empty_query"])
+            )
+            return False
+        # Switch to the subtitle tab before scope validation so dialogue scope is used.
+        if sync_ui:
+            self.switch_page("search")
+            self._set_search_query_tab(self.SEARCH_TAB_DIALOGUE)
+            self.search_page.search_panel.set_dialogue_query(query)
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+
+        from src.services.search_scope import resolve_default_active_dialogue_search_scope
+
+        scope_video_paths, scope_library_paths = resolve_default_active_dialogue_search_scope()
+        match_mode = "exact"
+        if hasattr(self, "_dialogue_match_mode_from_ui"):
+            match_mode = self._dialogue_match_mode_from_ui()
+        self.search_controller.start_search(
+            query,
+            True,
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            search_kind="dialogue",
+            search_mode=match_mode,
         )
         return True
 
@@ -852,29 +1111,23 @@ class MainWindow(
             return False
 
         scope_video_paths, scope_library_paths = resolve_default_active_search_scope()
-        search_precision_mode = self._resolve_search_precision_mode(
-            is_text=bool(plan["is_text"]),
-            has_image=bool(plan["has_image"]),
-        )
+        # Compose keeps only frame/chunk granularity — no deep search / video discovery.
+        if hasattr(self, "_text_search_mode_from_ui"):
+            compose_mode = self._text_search_mode_from_ui()
+        else:
+            compose_mode = "frame"
         self.search_controller.start_search(
             plan["query_data"],
             plan["is_text"],
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             query_vector=plan["query_vector"],
-            search_mode=self._resolve_effective_search_mode(
-                is_text=bool(plan["is_text"]),
-                has_image=bool(plan["has_image"]),
-                search_precision_mode=search_precision_mode,
-            ),
+            search_mode=compose_mode,
             top_k=plan.get("top_k"),
             min_score=plan.get("min_score"),
-            search_precision_mode=search_precision_mode,
+            search_precision_mode="fast",
             pixel_query_data=plan.get("pixel_query_data"),
-            video_discovery_enabled=self._resolve_video_discovery_enabled(
-                is_text=bool(plan["is_text"]),
-                has_image=bool(plan["has_image"]),
-            ),
+            video_discovery_enabled=False,
         )
         return True
 
@@ -886,11 +1139,48 @@ class MainWindow(
             return False
         return True
 
+    def _apply_mobile_search_modes(self, data: dict) -> None:
+        """Sync desktop search mode widgets from a mobile request before running search."""
+        image_mode = str(data.get("image_search_mode") or "").strip().lower()
+        if image_mode and hasattr(self, "_set_image_search_mode_ui"):
+            self._set_image_search_mode_ui(image_mode)
+            if hasattr(self, "_save_image_search_mode"):
+                self._save_image_search_mode()
+        text_mode = str(data.get("search_mode") or "").strip().lower()
+        if text_mode in {"frame", "chunk"} and hasattr(self.search_page, "search_mode"):
+            combo = self.search_page.search_mode
+            index = combo.findData(text_mode)
+            if index >= 0 and combo.currentIndex() != index:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(index)
+                combo.blockSignals(False)
+                if hasattr(self, "_save_search_mode"):
+                    self._save_search_mode()
+        dialogue_mode = str(data.get("dialogue_search_mode") or "").strip().lower()
+        if dialogue_mode in {"exact", "fuzzy", "tolerant", "approx"}:
+            combo = getattr(self.search_page, "dialogue_search_mode", None)
+            if combo is not None:
+                target = "fuzzy" if dialogue_mode in {"fuzzy", "tolerant", "approx"} else "exact"
+                index = combo.findData(target)
+                if index >= 0 and combo.currentIndex() != index:
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(index)
+                    combo.blockSignals(False)
+
     def _handle_mobile_search_requested(self, payload):
-        if not self._ensure_mobile_search_ready():
-            return
         data = dict(payload or {})
         kind = str(data.get("search_kind") or "image").strip().lower()
+        # Subtitle search uses the OCR transcript store and does not need CLIP.
+        if kind == "dialogue":
+            if not self._ensure_startup_migration_idle("feature_search"):
+                return
+            self._apply_mobile_search_modes(data)
+            self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
+            self._run_dialogue_search(str(data.get("query") or ""), sync_ui=True)
+            return
+        if not self._ensure_mobile_search_ready():
+            return
+        self._apply_mobile_search_modes(data)
         self.search_page.lbl_status.setText(self.texts["mobile_bridge_received"])
         if kind == "text":
             self._run_text_search(str(data.get("query") or ""), sync_ui=True)
@@ -1113,13 +1403,18 @@ class MainWindow(
     def clear_all_content(self):
         self.current_img_path = None
         self.search_page.search_panel.clear_text_query()
+        self.search_page.search_panel.clear_dialogue_query()
         self.search_page.search_panel.compose_form.clear()
         self.search_page.img_label.clear()
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
         self.search_controller.clear_results()
         self.preview_controller.stop_preview()
         self._update_expand_preview_button()
-        self._refresh_search_panel_state()
+        try:
+            self._refresh_search_panel_state()
+        except Exception:
+            # Safe after removing all CLIP models (fallback profile may have empty asset dirs).
+            pass
         self.search_page.lbl_status.setText(self.texts["ready"])
 
     def open_result_in_explorer(self, path):

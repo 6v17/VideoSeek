@@ -8,21 +8,15 @@ from unittest.mock import MagicMock, patch
 if "faiss" not in sys.modules:
     sys.modules["faiss"] = MagicMock()
 
+import src.services  # noqa: F401
+import src.storage  # noqa: F401
+
 if "src.services.library_service" not in sys.modules:
     _fake_library_service = types.ModuleType("src.services.library_service")
     _fake_library_service.list_libraries = MagicMock(return_value={})
     sys.modules["src.services.library_service"] = _fake_library_service
-
-if "src.storage" not in sys.modules:
-    sys.modules["src.storage"] = types.ModuleType("src.storage")
-if "src.storage.config_store" not in sys.modules:
-    _fake_config_store = types.ModuleType("src.storage.config_store")
-    _fake_config_store.get_search_scope_mode = MagicMock(return_value="all")
-    sys.modules["src.storage.config_store"] = _fake_config_store
-if "src.storage.asset_store" not in sys.modules:
-    _fake_asset_store = types.ModuleType("src.storage.asset_store")
-    _fake_asset_store.load_model_metadata = MagicMock(return_value={})
-    sys.modules["src.storage.asset_store"] = _fake_asset_store
+# Make ``src.services.library_service`` attribute-importable for unittest.mock.patch.
+src.services.library_service = sys.modules["src.services.library_service"]
 
 from types import SimpleNamespace
 
@@ -107,11 +101,10 @@ class AgentLibraryServiceTests(unittest.TestCase):
             for row in payload["videos"]:
                 self.assertIn("library_path", row)
                 self.assertIn("library_display_name", row)
-                self.assertIn("has_evidence", row)
+                self.assertNotIn("has_evidence", row)
 
-    @patch("src.services.agent_library_service._indexed_evidence_video_ids", return_value={"v1"})
     @patch("src.services.library_service.list_libraries")
-    def test_list_agent_videos_filter_q_and_has_evidence(self, mock_list_libraries, _mock_evidence_ids):
+    def test_list_agent_videos_filter_q(self, mock_list_libraries):
         with tempfile.TemporaryDirectory() as lib_dir:
             ready_a = os.path.join(lib_dir, "ep01.mp4")
             ready_b = os.path.join(lib_dir, "ep03.mp4")
@@ -127,20 +120,34 @@ class AgentLibraryServiceTests(unittest.TestCase):
                     }
                 }
             }
-            payload = list_agent_videos(lib_dir, q="ep03", has_evidence=False, ready_only=True)
+            payload = list_agent_videos(lib_dir, q="ep03", ready_only=True)
             self.assertEqual(len(payload["videos"]), 1)
             self.assertEqual(payload["videos"][0]["video_id"], "v3")
-            self.assertFalse(payload["videos"][0]["has_evidence"])
 
             payload = list_agent_videos(video_id="v1", ready_only=True)
             self.assertEqual(len(payload["videos"]), 1)
             self.assertEqual(payload["videos"][0]["video_path"], ready_a)
-            self.assertTrue(payload["videos"][0]["has_evidence"])
 
     @patch("src.services.library_service.list_libraries", return_value={})
     def test_list_agent_videos_unknown_video_id(self, _mock_libraries):
         with self.assertRaises(KeyError):
             list_agent_videos(video_id="missing")
+
+    @patch("src.services.library_service.list_libraries")
+    def test_list_agent_videos_pages_without_materializing_all(self, mock_list_libraries):
+        with tempfile.TemporaryDirectory() as lib_dir:
+            files = {}
+            for index in range(5):
+                name = f"v{index}.mp4"
+                path = os.path.join(lib_dir, name)
+                with open(path, "wb") as handle:
+                    handle.write(b"0")
+                files[name] = {"vid": f"id{index}", "asset_state": "ready"}
+            mock_list_libraries.return_value = {lib_dir: {"files": files}}
+            page = list_agent_videos(ready_only=True, limit=2, offset=2)
+            self.assertEqual(page["meta"]["total_listed"], 5)
+            self.assertEqual(page["meta"]["returned"], 2)
+            self.assertEqual([row["video_id"] for row in page["videos"]], ["id2", "id3"])
 
 
 class AgentClipServiceTests(unittest.TestCase):

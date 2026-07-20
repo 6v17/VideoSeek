@@ -433,7 +433,7 @@ def refine_hit_time_with_pixel(
 
 def apply_image_pixel_rerank(
     query_data,
-    hits: List[SearchHit],
+    hits: list[SearchHit],
     *,
     config=None,
     top_k: int | None = None,
@@ -442,7 +442,7 @@ def apply_image_pixel_rerank(
     seed_times: Iterable[float] | None = None,
     max_time_shift_sec: float | None = None,
     preserve_order: bool = False,
-) -> List[SearchHit]:
+) -> list[SearchHit]:
     if not hits or not _image_pixel_rerank_enabled(config):
         return list(hits or [])
 
@@ -465,7 +465,7 @@ def apply_image_pixel_rerank(
     min_similarity = _image_pixel_min_similarity(config)
     head = list(hits[:top_n])
     seed_values = list(seed_times or [])
-    reranked: List[tuple[int, SearchHit]] = []
+    reranked: list[tuple[int, SearchHit]] = []
     thumbnail_cache: dict[tuple[str, int], object | None] = {}
     probe_hash_cache: dict[tuple[str, int], int] = {}
     decode_session = VideoThumbnailSession()

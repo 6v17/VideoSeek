@@ -69,8 +69,38 @@ class LanceMigrationRunnerTests(unittest.TestCase):
                     "lance_search_is_ready",
                     return_value=True,
                 ),
+                patch.object(
+                    lance_migration_module,
+                    "_read_lance_migration_state",
+                    return_value={},
+                ),
             ):
                 self.assertTrue(lance_migration_module.needs_lance_startup_migration(config))
+
+    def test_needs_lance_startup_migration_skips_npy_after_completed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_dir = os.path.join(tmp, "openai-clip", "vit-base-patch32")
+            self._write_npy_vector(profile_dir, "vid001")
+            config = {"data_root": tmp, "vector_search_backend": "auto"}
+            roots = [{"label": "clip", "base_dir": profile_dir}]
+            with (
+                patch.object(
+                    lance_migration_module,
+                    "iter_model_asset_storage_roots",
+                    return_value=roots,
+                ),
+                patch.object(
+                    lance_migration_module,
+                    "lance_search_is_ready",
+                    return_value=True,
+                ),
+                patch.object(
+                    lance_migration_module,
+                    "_read_lance_migration_state",
+                    return_value={"completed": True},
+                ),
+            ):
+                self.assertFalse(lance_migration_module.needs_lance_startup_migration(config))
 
     def test_collect_and_cleanup_legacy_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -81,6 +111,45 @@ class LanceMigrationRunnerTests(unittest.TestCase):
             removed = lance_migration_module.cleanup_legacy_vector_paths(paths)
             self.assertEqual(removed, 1)
             self.assertFalse(os.path.exists(paths[0]))
+
+    def test_run_lance_startup_migration_skips_npy_when_lance_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_dir = os.path.join(tmp, "openai-clip", "vit-base-patch32")
+            self._write_npy_vector(profile_dir, "vid001")
+            config = {"data_root": tmp, "vector_search_backend": "auto"}
+            roots = [{"label": "clip", "base_dir": profile_dir}]
+            with (
+                patch.object(
+                    lance_migration_module,
+                    "iter_model_asset_storage_roots",
+                    return_value=roots,
+                ),
+                patch.object(
+                    lance_migration_module,
+                    "lance_search_is_ready",
+                    return_value=True,
+                ),
+                patch.object(
+                    lance_migration_module,
+                    "import_npy_to_lance",
+                ) as import_mock,
+                patch.object(
+                    lance_migration_module,
+                    "cleanup_legacy_vector_paths",
+                    return_value=0,
+                ),
+                patch.object(
+                    lance_migration_module,
+                    "_mark_profile_search_index_ready",
+                ),
+                patch.object(
+                    lance_migration_module,
+                    "_write_lance_migration_state",
+                ),
+            ):
+                result = lance_migration_module.run_lance_startup_migration(config)
+            import_mock.assert_not_called()
+            self.assertFalse(result.get("upgraded"))
 
     def test_run_lance_startup_migration_writes_state(self):
         with tempfile.TemporaryDirectory() as tmp:

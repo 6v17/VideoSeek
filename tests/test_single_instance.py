@@ -33,6 +33,14 @@ class SingleInstanceTests(unittest.TestCase):
         with patch("src.app.single_instance.QTimer.singleShot", side_effect=lambda _ms, fn: fn()):
             server._dispatch_activate()
         self.assertEqual(activated, [True])
+        server.close()
+
+    def test_close_releases_server_name(self):
+        name = f"{single_instance_server_name()}_test_close"
+        server = SingleInstanceServer(server_name=name)
+        self.assertTrue(try_activate_existing_instance(server_name=name))
+        server.close()
+        self.assertFalse(try_activate_existing_instance(server_name=name))
 
 
 if __name__ == "__main__":

@@ -37,12 +37,7 @@ class AgentStarterServiceTests(unittest.TestCase):
                 "export_clip": True,
                 "library_discovery": True,
                 "batch_search": True,
-                "video_evidence": True,
-                "video_evidence_ready": False,
             },
-            "understanding_ready": False,
-            "active_understanding_profile": "vision_baseline_v1",
-            "understanding_missing_components": ["vision/object_detection/yolo11n"],
             "ffmpeg": {
                 "ffmpeg_available": True,
                 "ffmpeg_path": "C:/ffmpeg/ffmpeg.exe",
@@ -92,11 +87,11 @@ class AgentStarterServiceTests(unittest.TestCase):
         self.assertIn("image_folder", text)
         self.assertIn("export.output_dir", text)
         self.assertIn("/agent-doc?format=text", text)
-        self.assertIn("videos/evidence", text)
-        self.assertIn("understanding_ready", text)
+        self.assertNotIn("videos/evidence", text)
+        self.assertNotIn("understanding_ready", text)
+        self.assertNotIn("笔录", text)
         self.assertIn("三条铁律", text)
         self.assertIn("读完请先告诉用户", text)
-        self.assertIn("不是第三种搜索", text)
         self.assertIn("禁止 ls", text)
         self.assertIn('"capabilities"', text)
         self.assertNotIn("能力路由", text)

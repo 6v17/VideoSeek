@@ -64,6 +64,10 @@ class UnderstandingPipeline:
                 continue
             step = str(item.get("step", "") or "").strip()
             component_id = str(item.get("component", "") or "").strip()
+            # Object detection (YOLO) removed from the product path; skip even if an
+            # older installed profile still lists the step.
+            if step == "object_detection":
+                continue
             if step and component_id:
                 steps.append(dict(item))
         return steps

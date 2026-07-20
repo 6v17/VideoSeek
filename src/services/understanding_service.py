@@ -605,28 +605,48 @@ def resolve_video_context(video_id: str, config=None) -> dict[str, Any]:
 
 
 def list_ready_video_entries(*, library_path: str | None = None, config=None) -> list[dict[str, Any]]:
-    from src.services.library_service import list_local_vector_details
+    """List indexed-ready videos for pickers — meta + Lance id set only (no storage stats)."""
+    from src.services.library_service import list_libraries
+    from src.storage.config_store import get_local_model_asset_dirs
+    from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
 
     cfg = dict(config or load_config())
-    details = list_local_vector_details(validate_contents=False)
-    entries = list(details.get("entries") or [])
     target_library = canonicalize_library_path(library_path) if library_path else ""
+    profile_base_dir = os.path.normpath(get_local_model_asset_dirs(config=cfg)["base_dir"])
+    lance_ready = lance_search_is_ready(profile_base_dir)
+    lance_ids = get_lance_indexed_video_ids(profile_base_dir) if lance_ready else frozenset()
+
     ready_entries: list[dict[str, Any]] = []
-    for entry in entries:
-        if str(entry.get("asset_state", "") or "").strip().lower() != "ready":
+    for library_path_key, library_data in list_libraries().items():
+        entry_library = canonicalize_library_path(str(library_path_key or ""))
+        if not entry_library:
             continue
-        if not bool(entry.get("source_exists", False)):
-            continue
-        entry_library = canonicalize_library_path(str(entry.get("library_path", "") or ""))
         if target_library and entry_library != target_library:
             continue
-        video_path = os.path.normpath(os.path.join(entry_library, str(entry.get("video_rel_path", "") or "")))
-        ready_entries.append(
-            {
-                **dict(entry),
-                "video_path": video_path,
-            }
-        )
+        files = library_data.get("files", {}) if isinstance(library_data, dict) else {}
+        for rel_path, info in files.items():
+            if not isinstance(info, dict):
+                continue
+            video_id = str(info.get("vid", "") or "").strip()
+            if not video_id or video_id not in lance_ids:
+                continue
+            rel = str(rel_path or "").strip()
+            if not rel:
+                continue
+            video_path = os.path.normpath(os.path.join(entry_library, rel))
+            if not os.path.exists(video_path):
+                continue
+            ready_entries.append(
+                {
+                    "library_path": entry_library,
+                    "video_rel_path": rel,
+                    "video_id": video_id,
+                    "source_exists": True,
+                    "asset_state": "ready",
+                    "video_path": video_path,
+                }
+            )
+    ready_entries.sort(key=lambda item: (item["library_path"], item["video_rel_path"]))
     return ready_entries
 
 

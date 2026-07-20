@@ -21,25 +21,33 @@ DEFAULT_CHUNK_POLICY = CHUNK_POLICY_BALANCED
 # Fields owned by a chunk policy preset (expanded into config.json on save).
 CHUNK_POLICY_CONFIG_KEYS = (
     "similarity_threshold",
+    "chunk_edge_threshold",
     "min_chunk_duration",
     "min_chunk_size",
+    "max_chunk_duration",
 )
 
 CHUNK_POLICY_PRESETS: dict[str, dict[str, Any]] = {
     CHUNK_POLICY_BALANCED: {
-        "similarity_threshold": 0.85,
+        "similarity_threshold": 0.87,
+        "chunk_edge_threshold": 0.85,
         "min_chunk_duration": 0.0,
         "min_chunk_size": 2,
+        "max_chunk_duration": 90.0,
     },
     CHUNK_POLICY_SENSITIVE: {
-        "similarity_threshold": 0.88,
+        "similarity_threshold": 0.90,
+        "chunk_edge_threshold": 0.88,
         "min_chunk_duration": 0.0,
         "min_chunk_size": 2,
+        "max_chunk_duration": 60.0,
     },
     CHUNK_POLICY_STABLE: {
-        "similarity_threshold": 0.80,
+        "similarity_threshold": 0.84,
+        "chunk_edge_threshold": 0.82,
         "min_chunk_duration": 0.0,
         "min_chunk_size": 2,
+        "max_chunk_duration": 120.0,
     },
 }
 

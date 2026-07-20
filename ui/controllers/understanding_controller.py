@@ -49,7 +49,7 @@ class UnderstandingController(QObject):
         return True
 
     def shutdown(self):
-        shutdown_thread(self.worker, stop_first=True, allow_terminate=False)
+        shutdown_thread(self.worker, stop_first=True, allow_terminate=True, wait_ms=3000)
 
     def request_stop(self):
         if self.is_running() and hasattr(self.worker, "stop"):

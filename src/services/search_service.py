@@ -18,6 +18,8 @@ from src.services.search_scope import (
     is_search_scoped,
     resolve_fetch_top_k,
     resolve_per_video_fetch_top_k,
+    resolve_scope_video_ids,
+    resolve_subtitle_scope_video_ids,
 )
 from src.services.image_search_rerank import apply_image_pixel_rerank, is_likely_cropped_query_image
 from src.services.search_profiling import (
@@ -71,6 +73,7 @@ from src.services.search_fetch_policy import (
     _resolve_stage1_global_fetch_k,
 )
 from src.services.search_frame_query import (
+    _search_chunk_results,
     _search_frame_results_in_time_window,
     _search_frame_results_with_ids,
 )
@@ -412,7 +415,7 @@ def run_search(
     _reset_search_index_steps()
     set_search_progress_callback(progress_callback)
     try:
-        return _run_search_impl(
+        results = _run_search_impl(
             query_data=query_data,
             is_text=is_text,
             top_k=top_k,
@@ -431,6 +434,10 @@ def run_search(
             locate_score_margin=locate_score_margin,
             video_discovery_enabled=video_discovery_enabled,
         )
+        from src.services.search_scope import filter_hits_with_existing_sources, load_searchable_path_index
+
+        path_index = load_searchable_path_index(config=config)
+        return filter_hits_with_existing_sources(results, path_index=path_index, config=config)
     finally:
         clear_search_progress_callback()
 
@@ -756,28 +763,23 @@ def run_chunk_search(
                     search_index, ranges, video_paths = load_library_chunk_search_assets(library_path, config)
                 if search_index is None:
                     continue
-                actual_k = min(top_k, search_index.ntotal)
-                if actual_k <= 0:
-                    continue
                 with profile_phase("faiss_search"):
-                    distances, indices = search_index.search(query_vector, actual_k)
-                for rank, index_value in enumerate(indices[0]):
-                    if index_value == -1 or index_value >= len(video_paths):
-                        continue
-                    time_range = ranges[index_value]
-                    merged_hits.append(
-                        SearchHit(
-                            float(time_range[0]),
-                            float(time_range[1]),
-                            float(distances[0][rank]),
-                            video_paths[index_value],
+                    merged_hits.extend(
+                        _search_chunk_results(
+                            query_vector,
+                            search_index,
+                            ranges,
+                            video_paths,
+                            top_k=top_k,
                         )
                     )
             results = _merge_search_hits(merged_hits, top_k)
             record_search_profile_result_count(len(results))
             return results
 
-        fetch_k = resolve_fetch_top_k(top_k, scoped)
+        from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
+
+        fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped)
         with profile_phase("load_assets"):
             search_index, ranges, video_paths = load_chunk_search_assets(config)
         if search_index is None:
@@ -789,27 +791,13 @@ def run_chunk_search(
         if actual_k <= 0:
             record_search_profile_result_count(0)
             return []
-        if getattr(query_vector, "ndim", 0) != 2 or query_vector.shape[0] <= 0:
-            raise RuntimeError("Invalid query vector. Please retry the search.")
-        query_dim = int(query_vector.shape[1])
-        index_dim = int(getattr(search_index, "d", 0))
-        if index_dim > 0 and query_dim != index_dim:
-            raise RuntimeError(
-                f"Search index dimension mismatch (query={query_dim}, index={index_dim}). "
-                "Current model uses a different embedding space. Please rebuild the index for the active model."
-            )
-
         with profile_phase("faiss_search"):
-            distances, indices = search_index.search(query_vector, actual_k)
-        matched_results = []
-        for rank, index_value in enumerate(indices[0]):
-            if index_value == -1 or index_value >= len(video_paths):
-                continue
-            time_range = ranges[index_value]
-            start_time = float(time_range[0])
-            end_time = float(time_range[1])
-            matched_results.append(
-                SearchHit(start_time, end_time, float(distances[0][rank]), video_paths[index_value])
+            matched_results = _search_chunk_results(
+                query_vector,
+                search_index,
+                ranges,
+                video_paths,
+                top_k=actual_k,
             )
         with profile_phase("scope_filter"):
             results = apply_search_scope(
@@ -823,10 +811,104 @@ def run_chunk_search(
 
 
 def warmup_search_runtime():
-    config = load_config()
     get_engine()
-    load_search_assets(config)
-    load_chunk_search_assets(config)
+
+
+def run_dialogue_search(
+    query: str,
+    *,
+    top_k=None,
+    scope_video_paths=None,
+    scope_library_paths=None,
+    min_score=None,
+    config=None,
+    query_vector=None,
+    match_mode: str = "exact",
+) -> tuple[List[SearchHit], str, str]:
+    """Dialogue search over Lance ``dialogue_segments``.
+
+    ``match_mode``: ``exact``/``segment`` (substring), ``fuzzy`` (typo-tolerant),
+    ``semantic`` (CLIP text), or ``auto`` (exact then semantic).
+
+    Returns ``(hits, message, matched_by)`` where ``matched_by`` is
+    ``keyword`` / ``keyword_fuzzy`` / ``vector`` / ``""``.
+    """
+    from src.storage.config_store import get_local_model_asset_dirs, get_search_top_k
+    from src.storage.lance_dialogue_search import get_dialogue_index_stats, search_dialogue
+
+    cfg = dict(config or load_config())
+    text = str(query or "").strip()
+    if not text:
+        return [], "empty query", ""
+
+    try:
+        resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
+    except (TypeError, ValueError):
+        resolved_top_k = get_search_top_k(cfg)
+    resolved_top_k = max(1, min(200, resolved_top_k))
+
+    # Over-fetch when scoped so post-filter still has candidates.
+    fetch_k = resolve_fetch_top_k(
+        resolved_top_k,
+        is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths),
+    )
+
+    profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+    stats = get_dialogue_index_stats(config=cfg, profile_base_dir=profile_base_dir)
+    if not stats.get("dialogue_index_ready"):
+        return [], "no dialogue index for active profile (build dialogue index first)", ""
+
+    scoped_video_ids = resolve_subtitle_scope_video_ids(
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        config=cfg,
+    )
+    if scoped_video_ids is not None and not scoped_video_ids:
+        return [], "no dialogue matches", ""
+
+    # When scoped to concrete videos, fetch_k need not be inflated — the loader
+    # already only opens those transcript files.
+    search_top_k = resolved_top_k if scoped_video_ids is not None else fetch_k
+
+    routed = search_dialogue(
+        text,
+        config=cfg,
+        profile_base_dir=profile_base_dir,
+        top_k=search_top_k,
+        query_vector=query_vector,
+        match_mode=match_mode,
+        video_ids=scoped_video_ids,
+    )
+    dialogue_hits = list(routed.get("hits") or [])
+    matched_by = str(routed.get("matched_by") or "").strip()
+    hits = [
+        SearchHit(
+            start_sec=float(item.start_sec),
+            end_sec=float(item.end_sec),
+            score=float(item.score),
+            video_path=str(item.video_path),
+            match_kind="dialogue",
+            video_id=str(item.video_id or ""),
+            matched_text=str(item.text or ""),
+        )
+        for item in dialogue_hits
+    ]
+    from src.services.search_scope import enrich_hits_with_source_paths
+
+    hits = enrich_hits_with_source_paths(hits, config=cfg)
+    hits = apply_search_scope(
+        hits,
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        top_k=resolved_top_k,
+    )
+    if min_score is not None:
+        hits = filter_hits_by_min_score(hits, min_score)
+
+    if not hits:
+        message = str(routed.get("message") or "").strip() or "no dialogue matches"
+        return [], message, matched_by
+    return hits, "", matched_by
 
 
 __all__ = [
@@ -840,6 +922,7 @@ __all__ = [
     "locate_crop_confidence_warning_key",
     "resolve_clip_confidence_tier_key",
     "run_chunk_search",
+    "run_dialogue_search",
     "run_search",
     "warmup_search_runtime",
 ]

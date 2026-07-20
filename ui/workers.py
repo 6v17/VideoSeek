@@ -34,6 +34,7 @@ class SearchConfig:
     scope_video_paths: List[str] = field(default_factory=list)
     query_vector: Any = None
     search_mode: Optional[str] = None
+    search_kind: Optional[str] = None
     top_k: Optional[int] = None
     min_score: Optional[float] = None
     search_precision_mode: Optional[str] = None
@@ -82,6 +83,33 @@ class StartupMigrationWorker(QThread):
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
+class StorageRootMigrateWorker(QThread):
+    """Copy data_root or model_dir to a new location with progress updates."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, kind: str, target_root: str):
+        super().__init__()
+        self.kind = str(kind or "").strip().lower()
+        self.target_root = str(target_root or "").strip()
+
+    def run(self):
+        from src.services.storage_service import migrate_app_data_root, migrate_model_root
+
+        try:
+            callback = lambda value, text: self.progress_signal.emit(int(value), str(text))
+            if self.kind == "model":
+                result = migrate_model_root(self.target_root, progress_callback=callback)
+            else:
+                result = migrate_app_data_root(self.target_root, progress_callback=callback)
+            self.finished_signal.emit(dict(result or {}))
+        except Exception as exc:
+            logger.exception("Storage root migration failed (%s)", self.kind)
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
 class SearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
@@ -92,6 +120,8 @@ class SearchWorker(QThread):
         super().__init__()
         self.config = config
         self.locate_warning_key = None
+        self.dialogue_status_message = ""
+        self.dialogue_matched_by = ""
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
         key = str(message or phase or "").strip()
@@ -101,7 +131,24 @@ class SearchWorker(QThread):
     def run(self):
         config = self.config
         try:
-            from src.services.search_service import filter_hits_by_min_score, run_search
+            from src.services.search_service import filter_hits_by_min_score, run_dialogue_search, run_search
+
+            kind = str(config.search_kind or "").strip().lower()
+            if kind == "dialogue":
+                match_mode = str(config.search_mode or "exact").strip().lower() or "exact"
+                results, message, matched_by = run_dialogue_search(
+                    str(config.query or ""),
+                    top_k=config.top_k,
+                    scope_video_paths=config.scope_video_paths or None,
+                    scope_library_paths=config.scope_library_paths or None,
+                    min_score=config.min_score,
+                    query_vector=config.query_vector,
+                    match_mode=match_mode,
+                )
+                self.dialogue_status_message = str(message or "").strip()
+                self.dialogue_matched_by = str(matched_by or "").strip()
+                self.result_ready.emit(results)
+                return
 
             mode = str(config.search_mode or "").strip().lower()
             base_kwargs = {
@@ -165,6 +212,177 @@ class PreviewWarmupWorker(QThread):
             self.finished.emit()
 
 
+class DialogueIndexWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, dict)
+    error_signal = Signal(str)
+
+    def __init__(
+        self,
+        targets=None,
+        mode: str = "auto",
+        sample_interval_sec: float | None = None,
+        ocr_batch_size: int | None = None,
+    ):
+        super().__init__()
+        self.targets = list(targets or [])
+        self.mode = str(mode or "auto").strip().lower() or "auto"
+        self.sample_interval_sec = None if sample_interval_sec is None else float(sample_interval_sec)
+        self.ocr_batch_size = None if ocr_batch_size is None else int(ocr_batch_size)
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        from src.services.dialogue_index_service import index_video_dialogue
+
+        summary = {
+            "ok": 0,
+            "failed": 0,
+            "segment_rows": 0,
+            "errors": [],
+            "mode": self.mode,
+            "reused": 0,
+        }
+        total = max(1, len(self.targets))
+        stopped = False
+        success = False
+        try:
+            for index, item in enumerate(self.targets):
+                if self._stop_requested or self.isInterruptionRequested():
+                    stopped = True
+                    break
+                video_id = str((item or {}).get("video_id", "") or "").strip()
+                video_path = str((item or {}).get("video_path", "") or "").strip()
+                library_path = str((item or {}).get("library_path", "") or "").strip()
+                self.progress_signal.emit(
+                    int((index / total) * 100),
+                    f"dialogue_index|{index + 1}|{total}|{video_id}",
+                )
+
+                def _progress(fraction, stage):
+                    base = index / total
+                    span = 1.0 / total
+                    value = int(min(99, (base + max(0.0, min(1.0, float(fraction))) * span) * 100))
+                    self.progress_signal.emit(value, f"dialogue_index|{index + 1}|{total}|{stage}")
+
+                result = index_video_dialogue(
+                    video_id,
+                    video_path,
+                    library_path=library_path,
+                    progress_callback=_progress,
+                    stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                    mode=self.mode,
+                    sample_interval_sec=self.sample_interval_sec,
+                    ocr_batch_size=self.ocr_batch_size,
+                )
+                if result.get("ok"):
+                    summary["ok"] += 1
+                    summary["segment_rows"] += int(result.get("segment_rows", 0) or 0)
+                    if result.get("reused_transcripts"):
+                        summary["reused"] += 1
+                else:
+                    summary["failed"] += 1
+                    err = str(result.get("error", "") or "failed")
+                    summary["errors"].append(f"{video_id}: {err}")
+            if not stopped:
+                self.progress_signal.emit(
+                    100,
+                    f"dialogue_index|{total}|{total}|dialogue_index_done",
+                )
+                success = True
+        except Exception as exc:
+            logger.exception("Dialogue index worker failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+            success = False
+        finally:
+            # Always release the UI (buttons stay disabled until this fires).
+            # Copy summary: queued signal delivery must not share a mutable dict
+            # with this thread while run() is unwinding.
+            self.finished_signal.emit(success, stopped, dict(summary))
+
+
+class RemoveLibraryWorker(QThread):
+    """Delete one or more libraries off the UI thread.
+
+    ``mode="visual"``: CLIP profile library + exclusive Lance data (keeps OCR).
+    ``mode="subtitle"``: global subtitle registry + OCR transcripts (keeps Lance).
+    """
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool)
+    error_signal = Signal(str)
+
+    def __init__(self, library_paths, *, mode: str = "visual"):
+        super().__init__()
+        if isinstance(library_paths, (list, tuple, set)):
+            paths = [str(p or "").strip() for p in library_paths if str(p or "").strip()]
+        else:
+            text = str(library_paths or "").strip()
+            paths = [text] if text else []
+        self.library_paths = paths
+        self.mode = "subtitle" if str(mode or "").strip().lower() == "subtitle" else "visual"
+
+    def run(self):
+        ok = False
+        try:
+            paths = list(self.library_paths)
+            if not paths:
+                ok = False
+            else:
+                total = len(paths)
+                ok = True
+                for index, path in enumerate(paths):
+                    base = int((index / max(total, 1)) * 100)
+                    span = max(1, int(100 / max(total, 1)))
+
+                    def _progress(value, text, *, _base=base, _span=span, _i=index, _t=total):
+                        mapped = min(99, _base + int(max(0, min(100, int(value))) * _span / 100))
+                        raw = str(text or "")
+                        if raw.startswith("remove_library|"):
+                            self.progress_signal.emit(mapped, raw)
+                        else:
+                            self.progress_signal.emit(
+                                mapped,
+                                f"remove_library|{_i + 1}|{_t}|{path}",
+                            )
+
+                    self.progress_signal.emit(
+                        base,
+                        f"remove_library|{index + 1}|{total}|{path}",
+                    )
+                    if self.mode == "subtitle":
+                        from src.services.subtitle_library_service import remove_subtitle_library
+
+                        removed = bool(
+                            remove_subtitle_library(path, progress_callback=_progress)
+                        )
+                    else:
+                        from src.services.library_service import remove_library
+                        from src.workflows.update_video import delete_physical_video_data
+
+                        removed = bool(
+                            remove_library(
+                                path,
+                                delete_physical_video_data,
+                                progress_callback=_progress,
+                            )
+                        )
+                    if not removed:
+                        ok = False
+                        break
+                if ok:
+                    self.progress_signal.emit(100, f"remove_library|{total}|{total}|done")
+        except Exception as exc:
+            logger.exception("Remove library worker failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+            ok = False
+        finally:
+            self.finished_signal.emit(ok)
+
+
 class IndexUpdateWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(bool, bool, bool, object)
@@ -179,6 +397,7 @@ class IndexUpdateWorker(QThread):
         rebuild_global_assets=True,
         debug_failure="",
         index_from_vectors_only=False,
+        video_ids=None,
     ):
         super().__init__()
         self.target_lib = target_lib
@@ -187,6 +406,7 @@ class IndexUpdateWorker(QThread):
         self.rebuild_global_assets = bool(rebuild_global_assets)
         self.index_from_vectors_only = bool(index_from_vectors_only)
         self.debug_failure = str(debug_failure or "").strip().lower()
+        self.video_ids = list(video_ids) if video_ids is not None else None
         self._stop_requested = False
 
     def stop(self):
@@ -237,6 +457,7 @@ class IndexUpdateWorker(QThread):
                 cleanup_missing_entries=self.cleanup_missing_entries,
                 issue_callback=issues.append,
                 rebuild_global_assets=self.rebuild_global_assets,
+                video_ids=self.video_ids,
             )
             self.finished_signal.emit(True, False, result[0] is not None, issues)
         except InterruptedError:
@@ -405,7 +626,7 @@ class ThumbLoader(QThread):
 
             hit = coerce_search_hit(raw)
             video_path = str(hit.video_path or "").strip()
-            if not video_path:
+            if not video_path or not os.path.isfile(video_path):
                 self.thumb_ready.emit(table_row, None)
                 continue
 

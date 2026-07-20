@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import getpass
-import sys
 
 from PySide6.QtCore import QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -12,8 +11,10 @@ _ACTIVATE_MESSAGE = b"activate"
 
 
 def single_instance_server_name() -> str:
+    from src.infra.paths import _is_standalone_app
+
     user = getpass.getuser() or "default"
-    suffix = "dev" if not getattr(sys, "frozen", False) else "app"
+    suffix = "app" if _is_standalone_app() else "dev"
     return f"VideoSeek_{suffix}_{user}"
 
 
@@ -43,6 +44,10 @@ class SingleInstanceServer:
 
     def set_activate_handler(self, handler) -> None:
         self._on_activate = handler
+
+    def close(self) -> None:
+        self._server.close()
+        QLocalServer.removeServer(self._server_name)
 
     def _listen(self) -> None:
         QLocalServer.removeServer(self._server_name)

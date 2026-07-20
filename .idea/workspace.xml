@@ -4,17 +4,61 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="更新说明">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="加回图搜chunk">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/debug_chunk_split.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/debug_chunk_split.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/indexing_progress.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/indexing_progress.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/chunk_policy.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/chunk_policy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/semantic_chunking.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/domain/search_hit.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/domain/search_hit.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_runtime_status.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_runtime_status.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_chunk_pipeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_chunk_pipeline.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_fetch_policy.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_fetch_policy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_frame_query.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_frame_query.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_index_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_index_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_neighbor_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_neighbor_rerank.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_scope.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/asset_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/asset_store.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/lance_migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/lance_migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/lance_search_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/lance_search_index.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/lance_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/lance_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/storage/video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/video_id_migration.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_chunk_policy.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_chunk_policy.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_chunk_timeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_chunk_timeline.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_lance_migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_lance_migration_runner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_lance_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_lance_search.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_search_index_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_index_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_scope.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_semantic_chunking.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_video_id_migration.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/chunk_timeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/chunk_timeline.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/layout.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/preview_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/preview_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/result_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/result_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_settings.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,7 +72,7 @@
     </option>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="338" />
+    <option name="cachedIndexableFilesCount" value="353" />
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -83,23 +127,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0121019546710024" />
-      <entry key="MS500" value="1.6682938532851228" />
-      <entry key="S2" value="3.52686317012069" />
-      <entry key="S5" value="5.88985821689247" />
-      <entry key="S10" value="7.516918907471562" />
-      <entry key="S30" value="9.829916308488352" />
-      <entry key="S60" value="14.596575687907603" />
-      <entry key="M2" value="24.0430168165147" />
-      <entry key="M5" value="39.68806458534536" />
-      <entry key="M10" value="51.04979532902636" />
-      <entry key="M15" value="60.535671310451946" />
-      <entry key="M30" value="89.72059588573255" />
-      <entry key="H1" value="148.8662843750686" />
-      <entry key="H2" value="304.79620597813783" />
-      <entry key="H4" value="672.3209087145748" />
-      <entry key="D1" value="2154.368911977107" />
-      <entry key="W1" value="2959.146012747072" />
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0" />
+      <entry key="S2" value="1.0" />
+      <entry key="S5" value="1.0000000000000002" />
+      <entry key="S10" value="1.000000042677392" />
+      <entry key="S30" value="1.0221180701108148" />
+      <entry key="S60" value="1.659284156254236" />
+      <entry key="M2" value="5.343277940104561" />
+      <entry key="M5" value="17.63653503676269" />
+      <entry key="M10" value="29.531480885471165" />
+      <entry key="M15" value="36.36428723524041" />
+      <entry key="M30" value="51.99056328114547" />
+      <entry key="H1" value="100.855653738022" />
+      <entry key="H2" value="252.88444855295367" />
+      <entry key="H4" value="606.9470789588272" />
+      <entry key="D1" value="2561.7598275433625" />
+      <entry key="W1" value="3852.965442641028" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -121,23 +165,23 @@
       <entry key="W1" value="0.0" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9709603981439708" />
-      <entry key="MS500" value="1.6557476185447422" />
-      <entry key="S2" value="3.5207203041299593" />
-      <entry key="S5" value="5.885790783912489" />
-      <entry key="S10" value="7.51432120058274" />
-      <entry key="S30" value="9.82877761418382" />
-      <entry key="S60" value="14.595716476431356" />
-      <entry key="M2" value="24.04228599312866" />
-      <entry key="M5" value="39.68755878271764" />
-      <entry key="M10" value="51.04946046593942" />
-      <entry key="M15" value="60.53539987921629" />
-      <entry key="M30" value="89.72038442788377" />
-      <entry key="H1" value="148.8661043257141" />
-      <entry key="H2" value="304.7960211965774" />
-      <entry key="H4" value="672.3207052630751" />
-      <entry key="D1" value="2154.3688026086184" />
-      <entry key="W1" value="2959.1459912177097" />
+      <entry key="MS100" value="0.9526379980439373" />
+      <entry key="MS500" value="0.9903428719330246" />
+      <entry key="S2" value="0.9975769252644544" />
+      <entry key="S5" value="0.9990300646389036" />
+      <entry key="S10" value="0.999514957324765" />
+      <entry key="S30" value="1.021953262203611" />
+      <entry key="S60" value="1.6591582672381573" />
+      <entry key="M2" value="5.343094776897343" />
+      <entry key="M5" value="17.636309367626357" />
+      <entry key="M10" value="29.531296488598322" />
+      <entry key="M15" value="36.36413725422274" />
+      <entry key="M30" value="51.990457626674974" />
+      <entry key="H1" value="100.85555248747575" />
+      <entry key="H2" value="252.88432008126975" />
+      <entry key="H4" value="606.9469183258386" />
+      <entry key="D1" value="2561.7597049732894" />
+      <entry key="W1" value="3852.96541583287" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -488,6 +532,7 @@
       <workItem from="1783346886797" duration="34000" />
       <workItem from="1783398947232" duration="1396000" />
       <workItem from="1783485187992" duration="3024000" />
+      <workItem from="1783571604499" duration="713000" />
     </task>
     <task id="LOCAL-00105" summary="更新说明文件">
       <option name="closed" value="true" />

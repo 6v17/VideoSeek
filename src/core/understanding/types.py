@@ -13,17 +13,20 @@ class UnderstandingTask(str, Enum):
     OBJECT_DETECTION = "object_detection"
     IMAGE_CAPTION = "image_caption"
     SPEECH_TO_TEXT = "speech_to_text"
+    OCR = "ocr"
 
 
 class UnderstandingInputKind(str, Enum):
     CHUNK_KEYFRAME = "chunk_keyframe"
     CHUNK_AUDIO = "chunk_audio"
+    FRAME_BGR = "frame_bgr"
 
 
 class UnderstandingOutputKind(str, Enum):
     OBJECTS = "objects"
     CAPTION = "caption"
     TRANSCRIPT = "transcript"
+    TEXT_LINES = "text_lines"
 
 
 def normalize_enum_value(enum_cls: type[Enum], raw_value: object, field_name: str) -> str:

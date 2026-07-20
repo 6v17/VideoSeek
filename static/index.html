@@ -61,8 +61,8 @@
 
         .mode-tabs {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 6px;
             margin-top: 16px;
             padding: 4px;
             border-radius: 14px;
@@ -75,8 +75,8 @@
             background: transparent;
             color: var(--muted);
             border-radius: 10px;
-            padding: 10px 8px;
-            font-size: 14px;
+            padding: 10px 4px;
+            font-size: 13px;
             font-weight: 700;
         }
 
@@ -290,13 +290,27 @@
     <div class="badge">VideoSeek 局域网搜索</div>
     <div class="card">
         <h1 id="page-title">手机端搜索</h1>
-        <p class="subtitle" id="page-subtitle">图搜 / 文搜 / 组合搜，布局与电脑端一致；范围与帧·片段模式跟随电脑。</p>
+        <p class="subtitle" id="page-subtitle">图搜 / 文搜 / 组合 / 字幕，模式与电脑端对齐；搜索范围跟随电脑当前设置。</p>
         <p class="desktop-hint" id="desktop-hint">正在读取电脑端设置…</p>
 
         <div class="mode-tabs">
             <button type="button" class="mode-tab active" data-mode-tab="image">图搜</button>
             <button type="button" class="mode-tab" data-mode-tab="text">文搜</button>
             <button type="button" class="mode-tab" data-mode-tab="compose">组合</button>
+            <button type="button" class="mode-tab" data-mode-tab="dialogue">字幕</button>
+        </div>
+
+        <div class="search-options" id="image-mode-block" style="margin-top:12px;">
+            <label class="fusion-title" id="image-mode-label" for="image-search-mode">图搜模式</label>
+            <select id="image-search-mode" class="search-input" style="min-height:44px;padding:10px 12px;margin-top:6px;"></select>
+        </div>
+        <div class="search-options" id="text-mode-block" style="margin-top:12px;display:none;">
+            <label class="fusion-title" id="text-mode-label" for="text-search-mode">检索粒度</label>
+            <select id="text-search-mode" class="search-input" style="min-height:44px;padding:10px 12px;margin-top:6px;"></select>
+        </div>
+        <div class="search-options" id="dialogue-mode-block" style="margin-top:12px;display:none;">
+            <label class="fusion-title" id="dialogue-mode-label" for="dialogue-search-mode">匹配方式</label>
+            <select id="dialogue-search-mode" class="search-input" style="min-height:44px;padding:10px 12px;margin-top:6px;"></select>
         </div>
 
         <div id="panel-image" class="mode-panel active">
@@ -313,6 +327,10 @@
 
         <div id="panel-text" class="mode-panel">
             <textarea id="text-query-input" class="search-input" placeholder="用文本描述你想找的画面…"></textarea>
+        </div>
+
+        <div id="panel-dialogue" class="mode-panel">
+            <textarea id="dialogue-query-input" class="search-input" placeholder="输入字幕里出现过的词或短句…"></textarea>
         </div>
 
         <div id="panel-compose" class="mode-panel">
