@@ -33,6 +33,14 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 
 **从旧版升级（≥ 1.0.82）** — 首次启动自动迁移：配置 schema v2、视频 ID（免重算）、legacy npy → **Lance** 向量库。多模型 profile 各自独立迁移。仍提示未完成则再启动一次。详见 `docs/migration_forced_upgrade_checklist.md` §4–§5。
 
+### 版本号（正式 / QQ 群测）
+
+- **唯一真相源：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。
+- **群测：** `1.0.88-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.88-beta.1.zip`；**不要**写入公开 `version.json`。
+- **正式：** `1.0.88`；打 tag `v1.0.88`；再更新 OSS `version.json`。
+- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.88-beta.1` < `1.0.88`）。
+- 打包：本地 `build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选，Inno Setup 二次打包可不加）。
+
 ---
 
 ## 附录 A：手动摆模型（一般不用）

@@ -116,8 +116,21 @@ class VersionServiceTests(unittest.TestCase):
         self.assertEqual(version_service._compare_versions("1.0.0", "1.0"), 0)
         self.assertEqual(version_service._compare_versions("1.2", "1.2.1"), -1)
 
-    def test_parse_version_ignores_prefix_and_suffix_noise(self):
-        self.assertEqual(version_service._parse_version("v1.2.3-beta1"), [1, 2, 31])
+    def test_compare_versions_prerelease_sorts_before_release(self):
+        self.assertEqual(version_service._compare_versions("1.0.88-beta.1", "1.0.88"), -1)
+        self.assertEqual(version_service._compare_versions("1.0.88", "1.0.88-beta.1"), 1)
+        self.assertEqual(version_service._compare_versions("1.0.88-beta.2", "1.0.88-beta.1"), 1)
+        self.assertEqual(version_service._compare_versions("1.0.88-beta.1", "1.0.87"), 1)
+        self.assertTrue(version_service.is_prerelease("1.0.88-beta.1"))
+        self.assertFalse(version_service.is_prerelease("1.0.88"))
+
+    def test_parse_version_handles_beta_suffix(self):
+        parsed = version_service._parse_version("v1.2.3-beta1")
+        self.assertEqual(parsed.release, (1, 2, 3))
+        self.assertEqual(parsed.prerelease, ("beta", 1))
+        dotted = version_service._parse_version("1.0.88-beta.1")
+        self.assertEqual(dotted.release, (1, 0, 88))
+        self.assertEqual(dotted.prerelease, ("beta", 1))
 
     @patch("src.services.version_service.fetch_remote_version")
     @patch("src.services.version_service.get_app_version")

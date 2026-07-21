@@ -1,9 +1,28 @@
 import json
+import re
+from dataclasses import dataclass
 
 from src.app.app_meta import get_app_meta
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
 from src.services.remote_fetch_cache import DEFAULT_REMOTE_USER_AGENT, fetch_cached_text
+
+# 1.0.88 | 1.0.88-beta.1 | v1.0.88-beta2
+_VERSION_RE = re.compile(
+    r"^v?(?P<release>\d+(?:\.\d+)*)"
+    r"(?:-(?P<pre_label>[a-zA-Z]+)"
+    r"(?:[.\-]?(?P<pre_num>\d+))?)?"
+    r"$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class ParsedVersion:
+    """Product version key. Same release: final (prerelease=None) > any prerelease."""
+
+    release: tuple[int, ...]
+    prerelease: tuple[str, int] | None  # e.g. ("beta", 1)
 
 
 def get_local_version_status(language):
@@ -63,23 +82,57 @@ def fetch_remote_version():
     return data
 
 
+def is_prerelease(version_text: str) -> bool:
+    return _parse_version(version_text).prerelease is not None
+
+
 def _compare_versions(left, right):
-    left_parts = _parse_version(left)
-    right_parts = _parse_version(right)
-    max_len = max(len(left_parts), len(right_parts))
-    left_parts += [0] * (max_len - len(left_parts))
-    right_parts += [0] * (max_len - len(right_parts))
-    if left_parts > right_parts:
+    left_parsed = _parse_version(left)
+    right_parsed = _parse_version(right)
+    left_release = _pad_release(left_parsed.release, right_parsed.release)
+    right_release = _pad_release(right_parsed.release, left_parsed.release)
+    if left_release > right_release:
         return 1
-    if left_parts < right_parts:
+    if left_release < right_release:
+        return -1
+
+    left_pre = left_parsed.prerelease
+    right_pre = right_parsed.prerelease
+    if left_pre is None and right_pre is None:
+        return 0
+    # Final release sorts after any prerelease of the same base.
+    if left_pre is None:
+        return 1
+    if right_pre is None:
+        return -1
+    if left_pre > right_pre:
+        return 1
+    if left_pre < right_pre:
         return -1
     return 0
 
 
-def _parse_version(version_text):
-    core = str(version_text).strip().lstrip("vV")
-    parts = []
+def _pad_release(parts: tuple[int, ...], other: tuple[int, ...]) -> tuple[int, ...]:
+    width = max(len(parts), len(other), 1)
+    return tuple(list(parts) + [0] * (width - len(parts)))
+
+
+def _parse_version(version_text) -> ParsedVersion:
+    raw = str(version_text or "").strip()
+    match = _VERSION_RE.match(raw)
+    if match:
+        release = tuple(int(piece) for piece in match.group("release").split("."))
+        label = match.group("pre_label")
+        if label:
+            pre_num = int(match.group("pre_num") or 0)
+            return ParsedVersion(release=release or (0,), prerelease=(label.lower(), pre_num))
+        return ParsedVersion(release=release or (0,), prerelease=None)
+
+    # Fallback: digit runs only (legacy noisy strings).
+    core = raw.lstrip("vV")
+    parts: list[int] = []
     for piece in core.split("."):
         number = "".join(char for char in piece if char.isdigit())
-        parts.append(int(number or 0))
-    return parts or [0]
+        if number:
+            parts.append(int(number))
+    return ParsedVersion(release=tuple(parts) or (0,), prerelease=None)
