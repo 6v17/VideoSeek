@@ -7,13 +7,12 @@ import numpy as np
 
 
 class DialogueLanceStoreTests(unittest.TestCase):
-    def test_upsert_and_keyword_search(self):
+    def test_upsert_dialogue_segments_legacy(self):
         try:
             import lancedb  # noqa: F401
         except ImportError:
             self.skipTest("lancedb not installed")
 
-        from src.storage.lance_dialogue_search import keyword_search_dialogue, search_dialogue
         from src.storage.lance_store import (
             DIALOGUE_INDEX_STATE_READY,
             DIALOGUE_SEGMENTS_TABLE_NAME,
@@ -24,6 +23,7 @@ class DialogueLanceStoreTests(unittest.TestCase):
             set_dialogue_index_state,
             upsert_profile_dialogue_segments,
         )
+        from src.storage.lance_dialogue_search import vector_search_dialogue
 
         dim = 8
         spec = {
@@ -49,7 +49,7 @@ class DialogueLanceStoreTests(unittest.TestCase):
                         "end": 2.5,
                         "text": "スポンサーの提供でお送りしました",
                         "language": "ja",
-                        "asr_source": "audio/speech_to_text/sensevoice-small",
+                        "asr_source": "vision/ocr/rapidocr",
                         "vector": vector_a,
                     },
                     {
@@ -57,7 +57,7 @@ class DialogueLanceStoreTests(unittest.TestCase):
                         "end": 4.0,
                         "text": "hello world",
                         "language": "en",
-                        "asr_source": "audio/speech_to_text/sensevoice-small",
+                        "asr_source": "vision/ocr/rapidocr",
                         "vector": vector_b,
                     },
                 ],
@@ -72,9 +72,30 @@ class DialogueLanceStoreTests(unittest.TestCase):
 
             db = _connect_lance(profile)
             self.assertIn(DIALOGUE_SEGMENTS_TABLE_NAME, _list_table_names(db))
+            self.assertIn("embedding_space", serialize_embedding_spec(spec))
 
-            from src.storage.dialogue_transcript_store import save_dialogue_transcript
+            # Direct vector probe still works for legacy/tests; product search_dialogue does not.
+            with mock.patch(
+                "src.storage.lance_dialogue_search.get_active_embedding_spec",
+                return_value=spec,
+            ):
+                query = np.zeros(dim, dtype=np.float32)
+                query[0] = 1.0
+                hits = vector_search_dialogue(
+                    query,
+                    profile_base_dir=profile,
+                    top_k=3,
+                )
+                self.assertGreaterEqual(len(hits), 1)
+                self.assertEqual(hits[0].text, "スポンサーの提供でお送りしました")
 
+    def test_keyword_search_via_sqlite(self):
+        from src.storage.dialogue_transcript_store import save_dialogue_transcript
+        from src.storage.lance_dialogue_search import keyword_search_dialogue, search_dialogue
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = os.path.join(tmp, "profile")
+            os.makedirs(profile, exist_ok=True)
             with mock.patch(
                 "src.storage.dialogue_transcript_store.get_data_storage_paths",
                 return_value={"data_dir": tmp},
@@ -100,9 +121,6 @@ class DialogueLanceStoreTests(unittest.TestCase):
                 )
 
             with mock.patch(
-                "src.storage.lance_dialogue_search.get_active_embedding_spec",
-                return_value=spec,
-            ), mock.patch(
                 "src.storage.dialogue_transcript_store.get_data_storage_paths",
                 return_value={"data_dir": tmp},
             ), mock.patch(
@@ -118,58 +136,77 @@ class DialogueLanceStoreTests(unittest.TestCase):
                 self.assertEqual(hits[0].matched_by, "keyword")
                 self.assertIn("スポンサー", hits[0].text)
 
-                # Keyword search reads shared transcripts — not bound to CLIP.
-                wrong_spec = dict(spec)
-                wrong_spec["embedding_space"] = "other_space"
-                with mock.patch(
-                    "src.storage.lance_dialogue_search.get_active_embedding_spec",
-                    return_value=wrong_spec,
-                ):
-                    unbound = keyword_search_dialogue(
-                        "スポンサー",
-                        profile_base_dir=profile,
-                        top_k=5,
-                    )
-                    self.assertEqual(len(unbound), 1)
-                    self.assertIn("スポンサー", unbound[0].text)
-
-                query = np.zeros(dim, dtype=np.float32)
-                query[0] = 1.0
                 routed = search_dialogue(
                     "no-substring-match-xyz",
                     profile_base_dir=profile,
                     top_k=3,
-                    query_vector=query,
                     match_mode="semantic",
                 )
-                self.assertEqual(routed["matched_by"], "vector")
-                self.assertGreaterEqual(len(routed["hits"]), 1)
-                self.assertEqual(routed["hits"][0].text, "スポンサーの提供でお送りしました")
+                self.assertEqual(routed["matched_by"], "")
+                self.assertEqual(routed["hits"], [])
+                self.assertIn("deferred", routed["message"])
 
-                # Weak nearest neighbors must not surface as false-positive dialogue hits.
-                weak_query = np.ones(dim, dtype=np.float32)
-                weak = search_dialogue(
+                auto_only = search_dialogue(
                     "no-substring-match-xyz",
                     profile_base_dir=profile,
                     top_k=3,
-                    query_vector=weak_query,
-                    match_mode="semantic",
+                    match_mode="auto",
                 )
-                self.assertEqual(weak["matched_by"], "vector")
-                self.assertEqual(weak["hits"], [])
-                self.assertEqual(weak["message"], "no dialogue matches")
+                self.assertEqual(auto_only["hits"], [])
+                self.assertEqual(auto_only["matched_by"], "")
 
                 segment_only = search_dialogue(
                     "no-substring-match-xyz",
                     profile_base_dir=profile,
                     top_k=3,
-                    query_vector=query,
                     match_mode="segment",
                 )
                 self.assertEqual(segment_only["matched_by"], "keyword")
                 self.assertEqual(segment_only["hits"], [])
 
-            self.assertIn("embedding_space", serialize_embedding_spec(spec))
+                found = search_dialogue(
+                    "hello",
+                    profile_base_dir=profile,
+                    top_k=3,
+                    match_mode="auto",
+                )
+                self.assertEqual(found["matched_by"], "keyword")
+                self.assertEqual(len(found["hits"]), 1)
+
+    def test_dialogue_index_ready_requires_shared_transcripts(self):
+        from src.storage.lance_dialogue_search import get_dialogue_index_stats
+        from src.storage.dialogue_transcript_store import save_dialogue_transcript
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = os.path.join(tmp, "profile")
+            os.makedirs(profile, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": tmp},
+            ), mock.patch(
+                "src.storage.dialogue_transcript_store.ensure_shared_transcripts",
+                return_value=0,
+            ), mock.patch(
+                "src.storage.lance_dialogue_search.dialogue_table_row_count",
+                return_value=99,
+            ), mock.patch(
+                "src.storage.lance_dialogue_search.get_local_model_asset_dirs",
+                return_value={"base_dir": profile},
+            ):
+                empty = get_dialogue_index_stats(profile_base_dir=profile)
+                self.assertFalse(empty["dialogue_index_ready"])
+                self.assertEqual(empty["dialogue_vector_rows"], 99)
+
+                save_dialogue_transcript(
+                    "vid_ready",
+                    [{"start": 0.0, "end": 1.0, "text": "ready", "language": "en"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "a.mp4"),
+                )
+                ready = get_dialogue_index_stats(profile_base_dir=profile)
+                self.assertTrue(ready["dialogue_index_ready"])
+                self.assertEqual(ready["dialogue_indexed_videos"], 1)
+                self.assertEqual(ready["dialogue_vector_rows"], 99)
 
 
 class DialogueIndexServiceTests(unittest.TestCase):
@@ -274,7 +311,7 @@ class SharedDialogueTranscriptStoreTests(unittest.TestCase):
                     [{"start": 1.0, "end": 2.0, "text": "公用台词", "language": "zh"}],
                     library_path=tmp,
                     video_path=os.path.join(tmp, "a.mp4"),
-                    asr_source="audio/speech_to_text/faster-whisper-medium",
+                    asr_source="vision/ocr/rapidocr",
                 )
                 self.assertTrue(saved["ok"])
                 payload = load_dialogue_transcript("vid_shared")

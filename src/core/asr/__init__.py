@@ -1,7 +1,6 @@
-"""ASR core helpers (audio extract, VAD, SenseVoice).
+"""ASR core helpers used by subtitle OCR (audio extract + Silero VAD).
 
-Heavy engines are imported lazily so optional deps (e.g. PyYAML) are not required
-just to use VAD / extract helpers.
+Heavy optional engines were removed; dialogue/subtitle product path is RapidOCR.
 """
 
 from __future__ import annotations
@@ -9,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
-    "SenseVoiceOnnxEngine",
     "SpeechSegment",
     "extract_audio_wav",
     "get_silero_vad_engine",
@@ -34,8 +32,4 @@ def __getattr__(name: str) -> Any:
         from src.core.asr import vad_segment
 
         return getattr(vad_segment, name)
-    if name == "SenseVoiceOnnxEngine":
-        from src.core.asr.sensevoice_engine import SenseVoiceOnnxEngine
-
-        return SenseVoiceOnnxEngine
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    raise AttributeError(f"module {__name__!r} has no attribute {name}")

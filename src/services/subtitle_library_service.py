@@ -269,8 +269,121 @@ def list_subtitle_search_scope_library_options(*, config=None) -> list[dict]:
     return [by_lib[key] for key in sorted(by_lib.keys(), key=lambda p: p.lower())]
 
 
+def _clear_dialogue_side_effects(video_ids: list[str], *, config=None) -> None:
+    """Clear per-profile dialogue state + legacy Lance dialogue rows for video_ids."""
+    from src.storage.lance_store import delete_profile_dialogue_segments
+    from src.storage.video_id_migration import iter_model_asset_storage_roots
+
+    ids = sorted({str(v or "").strip() for v in video_ids if str(v or "").strip()})
+    if not ids:
+        return
+    cfg = config or load_config()
+    for root in iter_model_asset_storage_roots(cfg):
+        base_dir = str(root.get("base_dir") or "").strip()
+        if not base_dir:
+            continue
+        for video_id in ids:
+            try:
+                delete_profile_dialogue_segments(video_id, profile_base_dir=base_dir)
+            except Exception:
+                logger.warning(
+                    "Failed clearing dialogue side-effects for %s in %s",
+                    video_id,
+                    base_dir,
+                    exc_info=True,
+                )
+
+
+def clear_subtitle_transcripts(video_ids, *, config=None) -> dict:
+    """Delete shared OCR transcripts for the given videos; keep library membership.
+
+    Also clears per-profile dialogue_index_state and any legacy Lance dialogue rows.
+    """
+    cfg = config or load_config()
+    ids = sorted({str(v or "").strip() for v in (video_ids or []) if str(v or "").strip()})
+    cleared: list[str] = []
+    missing: list[str] = []
+    for video_id in ids:
+        try:
+            deleted = delete_dialogue_transcript(video_id, config=cfg)
+        except Exception:
+            logger.warning("Failed deleting transcript %s", video_id, exc_info=True)
+            deleted = False
+        if deleted:
+            cleared.append(video_id)
+        else:
+            missing.append(video_id)
+    # Always reset side state for requested ids (even if transcript already gone).
+    _clear_dialogue_side_effects(ids, config=cfg)
+    return {
+        "cleared": cleared,
+        "missing": missing,
+        "cleared_count": len(cleared),
+        "requested_count": len(ids),
+    }
+
+
+def prune_missing_subtitle_sources(*, config=None, clear_orphan_transcripts: bool = True) -> dict:
+    """Drop registry file rows whose source media is gone; optionally clear their OCR."""
+    from src.services.library_service import count_video_id_refs
+
+    cfg = config or load_config()
+    ensure_subtitle_library_seeded(config=cfg)
+    meta = load_subtitle_library_meta(config=cfg)
+    meta["libraries"] = _normalize_library_map(meta.get("libraries", {}))
+
+    removed_files = 0
+    orphan_ids: list[str] = []
+    changed = False
+
+    for root_path, lib_data in list(meta.get("libraries", {}).items()):
+        if not isinstance(lib_data, dict):
+            continue
+        files = lib_data.get("files")
+        if not isinstance(files, dict):
+            continue
+        keep: dict = {}
+        for rel_path, info in files.items():
+            if not isinstance(info, dict):
+                continue
+            abs_path = os.path.normpath(os.path.join(root_path, str(rel_path or "")))
+            if os.path.isfile(abs_path):
+                keep[rel_path] = info
+                continue
+            removed_files += 1
+            changed = True
+            video_id = str(info.get("vid") or "").strip()
+            if video_id:
+                orphan_ids.append(video_id)
+        if keep != files:
+            lib_data["files"] = keep
+
+    if changed:
+        save_subtitle_library_meta(meta, config=cfg)
+
+    cleared_transcripts = 0
+    if clear_orphan_transcripts and orphan_ids:
+        exclusive = sorted(
+            {
+                video_id
+                for video_id in orphan_ids
+                if count_video_id_refs(meta, video_id) == 0
+            }
+        )
+        if exclusive:
+            result = clear_subtitle_transcripts(exclusive, config=cfg)
+            cleared_transcripts = int(result.get("cleared_count") or 0)
+
+    return {
+        "removed_files": removed_files,
+        "orphan_video_ids": sorted(set(orphan_ids)),
+        "cleared_transcripts": cleared_transcripts,
+        "changed": changed or cleared_transcripts > 0,
+    }
+
+
 def remove_subtitle_library(path, *, config=None, progress_callback=None) -> bool:
-    """Remove a global subtitle library and its OCR transcripts. Does not touch Lance."""
+    """Remove a global subtitle library and its OCR transcripts. Does not touch Lance visual vectors."""
     cfg = config or load_config()
     ensure_subtitle_library_seeded(config=cfg)
     meta = load_subtitle_library_meta(config=cfg)
@@ -314,13 +427,15 @@ def remove_subtitle_library(path, *, config=None, progress_callback=None) -> boo
         _progress(20, "remove_library|transcripts")
         for index, video_id in enumerate(removable_video_ids):
             _progress(
-                int(20 + (index / max(total, 1)) * 75),
+                int(20 + (index / max(total, 1)) * 60),
                 f"remove_library|{index + 1}|{total}|{video_id}",
             )
             try:
                 delete_dialogue_transcript(str(video_id or ""), config=cfg)
             except Exception:
                 pass
+        _progress(85, "remove_library|side_state")
+        _clear_dialogue_side_effects(removable_video_ids, config=cfg)
 
     _progress(100, "remove_library|done")
     return True

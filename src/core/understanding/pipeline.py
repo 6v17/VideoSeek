@@ -5,8 +5,6 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-import numpy as np
-
 from src.app.logging_utils import get_logger
 from src.core.understanding.base import UnderstandingStoppedError
 from src.core.understanding.registry import build_understanding_component
@@ -17,7 +15,6 @@ from src.utils import get_single_thumbnail
 logger = get_logger("understanding.pipeline")
 
 TASK_TO_VISION_KEY = {
-    "object_detection": "object_detection",
     "image_caption": "image_caption",
 }
 
@@ -64,8 +61,7 @@ class UnderstandingPipeline:
                 continue
             step = str(item.get("step", "") or "").strip()
             component_id = str(item.get("component", "") or "").strip()
-            # Object detection (YOLO) removed from the product path; skip even if an
-            # older installed profile still lists the step.
+            # Legacy profiles may still list object_detection; product path is caption-only.
             if step == "object_detection":
                 continue
             if step and component_id:
@@ -192,23 +188,6 @@ class UnderstandingPipeline:
         return self._component_cache[cache_key]
 
     def _wrap_step_result(self, component_id: str, step_name: str, infer_result: Mapping[str, Any]) -> dict[str, Any]:
-        if step_name == "object_detection":
-            objects = infer_result.get("objects", [])
-            normalized = []
-            for item in objects:
-                if not isinstance(item, dict):
-                    continue
-                bbox = item.get("bbox", [])
-                if isinstance(bbox, np.ndarray):
-                    bbox = bbox.tolist()
-                normalized.append(
-                    {
-                        "label": str(item.get("label", "") or ""),
-                        "confidence": float(item.get("confidence", 0.0)),
-                        "bbox": [float(value) for value in bbox],
-                    }
-                )
-            return {"source": component_id, "objects": normalized}
         if step_name == "image_caption":
             return {
                 "source": component_id,

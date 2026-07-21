@@ -26,7 +26,7 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 
 | Feature | Description |
 |---------|-------------|
-| **Video understanding** | Per-chunk captions + whole-video summary via an OpenAI-compatible caption service (YOLO removed) |
+| **Video understanding** | Per-chunk captions + whole-video summary via an OpenAI-compatible caption service |
 | **Localhost Agent API** | HTTP on `127.0.0.1`: search, libraries, export, video summaries (see `docs/for-agents.md`) |
 | **Remote libraries** | Import linked libraries and search them like local ones |
 

@@ -188,7 +188,7 @@ class AgentEvidenceServiceTests(unittest.TestCase):
 
     @patch(
         "src.services.agent_evidence_service.get_understanding_resource_status",
-        return_value={"understanding_ready": False, "missing_components": ["vision/object_detection/yolo11n"]},
+        return_value={"understanding_ready": False, "missing_components": ["vision/image_caption/qwen3-vl-remote"]},
     )
     @patch("src.services.agent_evidence_service.load_evidence_bundle", return_value=None)
     @patch("src.services.agent_evidence_service.resolve_video_context")

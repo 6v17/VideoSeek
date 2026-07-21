@@ -229,6 +229,140 @@ class SubtitleLibraryServiceTests(unittest.TestCase):
                 again = subtitle_library_service.ensure_subtitle_library_seeded(config=config)
                 self.assertFalse(again["seeded"])
 
+    def test_clear_subtitle_transcripts_keeps_library_membership(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            dialogue_dir = os.path.join(data_dir, "dialogue")
+            os.makedirs(dialogue_dir, exist_ok=True)
+            video_root = os.path.join(tmp, "videos")
+            os.makedirs(video_root, exist_ok=True)
+            video_path = os.path.join(video_root, "a.mp4")
+            with open(video_path, "wb") as handle:
+                handle.write(b"fake")
+
+            config = {"data_root": tmp}
+            lib_path = canonicalize_library_path(video_root)
+            profile_base = os.path.join(data_dir, "model_assets", "clip", "vit")
+            os.makedirs(profile_base, exist_ok=True)
+            with open(os.path.join(profile_base, "meta.json"), "w", encoding="utf-8") as handle:
+                handle.write("{}")
+
+            with (
+                patch.object(subtitle_library_service, "load_config", return_value=config),
+                patch(
+                    "src.app.config.get_data_storage_paths",
+                    return_value={"data_dir": data_dir},
+                ),
+                patch.object(
+                    subtitle_library_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+                patch.object(
+                    dialogue_transcript_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+            ):
+                from src.storage.profile_library_store import (
+                    get_dialogue_index_state,
+                    set_dialogue_index_state,
+                )
+
+                subtitle_library_store.mark_subtitle_registry_seeded(config=config)
+                subtitle_library_service.add_subtitle_library(video_root, config=config)
+                subtitle_library_service.register_subtitle_library_videos(
+                    config=config, library_path=video_root
+                )
+                entries = subtitle_library_service.list_subtitle_library_video_entries(
+                    config=config, register=False
+                )
+                video_id = entries[0]["video_id"]
+                dialogue_transcript_store.save_dialogue_transcript(
+                    video_id,
+                    segments=[{"start": 0.0, "end": 1.0, "text": "hello"}],
+                    library_path=lib_path,
+                    video_path=video_path,
+                    config=config,
+                )
+                set_dialogue_index_state(profile_base, video_id, "ready")
+
+                result = subtitle_library_service.clear_subtitle_transcripts(
+                    [video_id], config=config
+                )
+                self.assertEqual(result["cleared_count"], 1)
+                self.assertIsNone(
+                    dialogue_transcript_store.load_dialogue_transcript(video_id, config=config)
+                )
+                self.assertEqual(get_dialogue_index_state(profile_base, video_id), "missing")
+                libs = subtitle_library_service.list_subtitle_libraries(config=config, seed=False)
+                self.assertIn(lib_path, libs)
+                still = subtitle_library_service.list_subtitle_library_video_entries(
+                    config=config, register=False
+                )
+                self.assertEqual(len(still), 1)
+                self.assertEqual(still[0]["video_id"], video_id)
+
+    def test_prune_missing_subtitle_sources_removes_gone_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            dialogue_dir = os.path.join(data_dir, "dialogue")
+            os.makedirs(dialogue_dir, exist_ok=True)
+            video_root = os.path.join(tmp, "videos")
+            os.makedirs(video_root, exist_ok=True)
+            video_path = os.path.join(video_root, "a.mp4")
+            with open(video_path, "wb") as handle:
+                handle.write(b"fake")
+
+            config = {"data_root": tmp}
+            lib_path = canonicalize_library_path(video_root)
+
+            with (
+                patch.object(subtitle_library_service, "load_config", return_value=config),
+                patch(
+                    "src.app.config.get_data_storage_paths",
+                    return_value={"data_dir": data_dir},
+                ),
+                patch.object(
+                    subtitle_library_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+                patch.object(
+                    dialogue_transcript_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+            ):
+                subtitle_library_store.mark_subtitle_registry_seeded(config=config)
+                subtitle_library_service.add_subtitle_library(video_root, config=config)
+                subtitle_library_service.register_subtitle_library_videos(
+                    config=config, library_path=video_root
+                )
+                entries = subtitle_library_service.list_subtitle_library_video_entries(
+                    config=config, register=False
+                )
+                video_id = entries[0]["video_id"]
+                dialogue_transcript_store.save_dialogue_transcript(
+                    video_id,
+                    segments=[{"start": 0.0, "end": 1.0, "text": "gone"}],
+                    library_path=lib_path,
+                    video_path=video_path,
+                    config=config,
+                )
+                os.remove(video_path)
+
+                pruned = subtitle_library_service.prune_missing_subtitle_sources(config=config)
+                self.assertEqual(pruned["removed_files"], 1)
+                self.assertEqual(pruned["cleared_transcripts"], 1)
+                still = subtitle_library_service.list_subtitle_library_video_entries(
+                    config=config, register=False
+                )
+                self.assertEqual(still, [])
+                self.assertIsNone(
+                    dialogue_transcript_store.load_dialogue_transcript(video_id, config=config)
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

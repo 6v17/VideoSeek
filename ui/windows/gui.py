@@ -303,6 +303,7 @@ class MainWindow(
         )
         self.library_page.btn_build_dialogue_index.clicked.connect(self.start_dialogue_index)
         self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
+        self.library_page.btn_clear_dialogue.clicked.connect(self.clear_selected_dialogue_transcripts)
         self.library_page.btn_refresh_dialogue_library.clicked.connect(self.refresh_dialogue_library_table)
         self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
         self.library_page.input_subtitle_sample_interval.editingFinished.connect(
@@ -330,7 +331,6 @@ class MainWindow(
         self.understanding_page.btn_stop.clicked.connect(self.stop_understanding_generation)
         self.understanding_page.btn_save_config.clicked.connect(self.save_understanding_settings)
         self.understanding_page.btn_test_vlm_connection.clicked.connect(self.test_understanding_vlm_connection)
-        self.understanding_page.btn_import_understanding_model.clicked.connect(self.open_runtime_resource_dialog)
         self.understanding_page.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
         self.understanding_page.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
         self.understanding_page.scope_combo.currentIndexChanged.connect(self._on_understanding_scope_changed)
@@ -557,6 +557,12 @@ class MainWindow(
         self.library_page.btn_reembed_dialogue.setToolTip(
             t.get("reembed_dialogue_index_hint", "")
         )
+        self.library_page.btn_clear_dialogue.setText(
+            t.get("clear_dialogue_index", "Clear selected subtitles")
+        )
+        self.library_page.btn_clear_dialogue.setToolTip(
+            t.get("clear_dialogue_index_hint", "")
+        )
         self.library_page.lbl_subtitle_sample_interval.setText(
             t.get("subtitle_sample_interval", "Frame interval")
         )
@@ -588,6 +594,9 @@ class MainWindow(
         self.library_page.btn_refresh_dialogue_library.setText(
             t.get("refresh_dialogue_library", "Refresh")
         )
+        self.library_page.btn_refresh_dialogue_library.setToolTip(
+            t.get("refresh_dialogue_library_hint", "")
+        )
         self.library_page.btn_stop_index.setText(t["stop"])
         self.library_page.btn_stop_dialogue_index.setText(t["stop"])
         self.library_page.btn_index_issues.setText(t["index_issues_button"])
@@ -603,8 +612,6 @@ class MainWindow(
         self.understanding_page.header.subtitle.setText(t["understanding_page_desc"])
         self.understanding_page.config_title.setText(t["understanding_config_title"])
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
-        self.understanding_page.label_yolo.setText(t["understanding_yolo_label"])
-        self.understanding_page.btn_import_understanding_model.setToolTip(t["understanding_yolo_hint"])
         self.understanding_page.label_vlm_provider_mode.setText(t["understanding_vlm_provider_mode_label"])
         self.understanding_page.input_vlm_provider_mode.setToolTip(t["understanding_vlm_provider_mode_hint"])
         current_vlm_mode = self.understanding_page.input_vlm_provider_mode.currentData()
@@ -626,7 +633,6 @@ class MainWindow(
         self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
         self.understanding_page.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
         self.understanding_page.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
-        self.understanding_page.btn_import_understanding_model.setText(t["understanding_import_yolo_model"])
         self.understanding_page.btn_save_config.setText(t["understanding_save_config"])
         self.understanding_page.btn_test_vlm_connection.setText(t["understanding_test_vlm_connection"])
         self.understanding_page.btn_test_vlm_connection.setToolTip(t["understanding_test_vlm_connection_hint"])

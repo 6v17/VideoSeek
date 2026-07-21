@@ -16,14 +16,12 @@ PROFILE_MANIFEST = {
         "components": [
             "vision/image_caption/qwen3-vl-remote",
         ],
-        "optional_components": [
-            "vision/object_detection/yolo11n",
-        ],
+        "optional_components": [],
     },
     "pipeline": [
         {
             "step": "object_detection",
-            "component": "vision/object_detection/yolo11n",
+            "component": "vision/object_detection/legacy-detector",
             "enabled": True,
         },
         {

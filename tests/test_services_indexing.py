@@ -496,7 +496,7 @@ class IndexingServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(reconciled, 1)
-        self.assertIn("new\\clip.mp4", lib_files)
+        self.assertIn("new/clip.mp4", lib_files)
         mock_discover.assert_not_called()
 
     @patch("src.storage.lance_store.end_lance_index_batch")
@@ -846,7 +846,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
         mock_sync_lance.assert_called_once()
 
-    @patch("src.services.indexing_service._delete_lance_video_vectors")
+    @patch("src.services.indexing_service._safe_delete_unreferenced_video_data")
     @patch("src.services.indexing_service._ensure_video_chunks", return_value=([{"start": 0}], True, {"algo": 1}))
     @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=True)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
@@ -861,7 +861,7 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_model_dirs,
         mock_sync_lance,
         mock_chunks,
-        mock_delete_old,
+        mock_safe_delete,
     ):
         vectors = np.array([[1.0, 0.0]], dtype=np.float32)
         timestamps = np.array([0.0], dtype=np.float32)
@@ -890,7 +890,8 @@ class IndexingServiceTests(unittest.TestCase):
         mock_sync_lance.assert_called_once()
         self.assertEqual(mock_sync_lance.call_args.args[0], "vid_new")
         self.assertIsNotNone(mock_sync_lance.call_args.kwargs.get("chunks"))
-        mock_delete_old.assert_called_once_with("vid_old", {"index_dir": "index", "vector_dir": "vector"})
+        mock_safe_delete.assert_called_once()
+        self.assertEqual(mock_safe_delete.call_args.args[1], "vid_old")
 
     @patch("src.services.indexing_service._sync_video_vectors_to_lance")
     @patch("src.services.indexing_service._try_reuse_lance_indexed_video", return_value={"canonical_vid": "vid_a"})
@@ -1148,8 +1149,9 @@ class IndexingServiceTests(unittest.TestCase):
 
         self.assertEqual(reconciled, 1)
         self.assertNotIn("old\\clip.mp4", lib_files)
-        self.assertIn("new\\clip.mp4", lib_files)
-        self.assertEqual(lib_files["new\\clip.mp4"]["vid"], "vid_a")
+        self.assertNotIn("old/clip.mp4", lib_files)
+        self.assertIn("new/clip.mp4", lib_files)
+        self.assertEqual(lib_files["new/clip.mp4"]["vid"], "vid_a")
 
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
@@ -1246,7 +1248,8 @@ class IndexingServiceTests(unittest.TestCase):
 
         lib_files = meta["libraries"][root_path]["files"]
         self.assertNotIn("old\\clip.mp4", lib_files)
-        self.assertIn("new\\clip.mp4", lib_files)
+        self.assertNotIn("old/clip.mp4", lib_files)
+        self.assertIn("new/clip.mp4", lib_files)
         self.assertEqual(persist_calls, ["saved"])
 
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])

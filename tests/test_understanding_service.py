@@ -27,16 +27,10 @@ PROFILE_MANIFEST = {
     "install_relpath": "profiles/vision_baseline_v1",
     "requires": {
         "components": [
-            "vision/object_detection/yolo11n",
             "vision/image_caption/qwen3-vl-remote",
         ]
     },
     "pipeline": [
-        {
-            "step": "object_detection",
-            "component": "vision/object_detection/yolo11n",
-            "enabled": True,
-        },
         {
             "step": "image_caption",
             "component": "vision/image_caption/qwen3-vl-remote",
@@ -50,17 +44,14 @@ PROFILE_MANIFEST = {
 class UnderstandingPipelineTests(unittest.TestCase):
     def test_run_chunk_uses_shared_keyframe_for_all_steps(self):
         frame = np.zeros((120, 160, 3), dtype=np.uint8)
-        fake_detection = MagicMock()
-        fake_detection.infer.return_value = {
-            "objects": [{"label": "person", "confidence": 0.9, "bbox": [0.1, 0.2, 0.3, 0.4]}],
-        }
         fake_caption = MagicMock()
         fake_caption.infer.return_value = {"text": "a person standing"}
 
         pipeline = UnderstandingPipeline(PROFILE_MANIFEST)
         with (
             patch("src.core.understanding.pipeline.get_single_thumbnail", return_value=frame) as mock_thumb,
-            patch.object(pipeline, "_get_component", side_effect=[fake_detection, fake_caption]),
+            patch("src.core.understanding.pipeline.is_component_installed", return_value=True),
+            patch.object(pipeline, "_get_component", return_value=fake_caption),
         ):
             result = pipeline.run_chunk(
                 video_path="D:/Videos/demo.mp4",
@@ -71,9 +62,8 @@ class UnderstandingPipelineTests(unittest.TestCase):
         mock_thumb.assert_called_once_with("D:/Videos/demo.mp4", 2.0)
         self.assertAlmostEqual(result["sample"]["timestamp_sec"], 2.0)
         self.assertEqual(result["sample"]["strategy"], "midpoint")
-        self.assertEqual(result["evidence"]["vision"]["object_detection"]["source"], "vision/object_detection/yolo11n")
+        self.assertNotIn("object_detection", result["evidence"]["vision"])
         self.assertEqual(result["evidence"]["vision"]["image_caption"]["text"], "a person standing")
-        fake_detection.infer.assert_called_once()
         fake_caption.infer.assert_called_once()
 
 
@@ -148,7 +138,6 @@ class UnderstandingServiceTests(unittest.TestCase):
             }
         ]
         fake_pipeline.component_map.return_value = {
-            "object_detection": "vision/object_detection/yolo11n",
             "image_caption": "vision/image_caption/qwen3-vl-remote",
         }
         fake_pipeline.keyframe_strategy = "midpoint"
@@ -228,7 +217,6 @@ class UnderstandingServiceTests(unittest.TestCase):
             "provenance": {
                 "understanding_profile_id": "vision_baseline_v1",
                 "components": {
-                    "object_detection": "vision/object_detection/yolo11n",
                     "image_caption": "vision/image_caption/qwen3-vl-remote",
                 },
                 "chunk_source": {
@@ -274,8 +262,8 @@ class UnderstandingServiceTests(unittest.TestCase):
         self.assertEqual(detail["total_entries"], 1)
         self.assertEqual(detail["evidence_count"], 1)
         entry = detail["entries"][0]
-        self.assertEqual(entry["yolo_model"], "yolo11n")
         self.assertEqual(entry["caption_model"], "qwen3-vl-remote")
+        self.assertEqual(entry["other_models"], "")
         self.assertEqual(entry["clip_model"], "vit-base-patch32")
         self.assertEqual(entry["chunk_count"], 1)
         self.assertEqual(entry["evidence_state"], "ready")
@@ -347,7 +335,6 @@ class UnderstandingServiceTests(unittest.TestCase):
         fake_pipeline = MagicMock()
         fake_pipeline.run_chunk.return_value = generated_chunk
         fake_pipeline.component_map.return_value = {
-            "object_detection": "vision/object_detection/yolo11n",
             "image_caption": "vision/image_caption/qwen3-vl-remote",
         }
         fake_pipeline.keyframe_strategy = "midpoint"

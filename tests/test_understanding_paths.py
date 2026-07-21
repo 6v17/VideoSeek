@@ -34,21 +34,21 @@ class UnderstandingPathsTests(unittest.TestCase):
         self.config = {"data_root": os.path.normpath("D:/VideoSeek")}
 
     def test_parse_and_build_component_id(self):
-        component_id = "vision/object_detection/yolov8n"
+        component_id = "vision/image_caption/qwen3-vl-remote"
         parsed = parse_component_id(component_id)
-        self.assertEqual(parsed, ("vision", "object_detection", "yolov8n"))
+        self.assertEqual(parsed, ("vision", "image_caption", "qwen3-vl-remote"))
         self.assertEqual(
-            build_component_id("vision", "object_detection", "yolov8n"),
+            build_component_id("vision", "image_caption", "qwen3-vl-remote"),
             component_id,
         )
         self.assertEqual(
-            build_component_install_relpath("vision", "object_detection", "yolov8n"),
-            os.path.join("components", "vision", "object_detection", "yolov8n"),
+            build_component_install_relpath("vision", "image_caption", "qwen3-vl-remote"),
+            os.path.join("components", "vision", "image_caption", "qwen3-vl-remote"),
         )
 
     def test_parse_component_id_rejects_invalid_format(self):
         with self.assertRaises(ValueError):
-            parse_component_id("vision/object_detection")
+            parse_component_id("vision/image_caption")
 
     def test_understanding_model_paths(self):
         self.assertEqual(
@@ -64,25 +64,25 @@ class UnderstandingPathsTests(unittest.TestCase):
             os.path.join(self.model_dir, "understanding", "profiles"),
         )
         self.assertEqual(
-            get_component_dir("vision/object_detection/yolov8n", model_dir=self.model_dir),
+            get_component_dir("vision/image_caption/qwen3-vl-remote", model_dir=self.model_dir),
             os.path.join(
                 self.model_dir,
                 "understanding",
                 "components",
                 "vision",
-                "object_detection",
-                "yolov8n",
+                "image_caption",
+                "qwen3-vl-remote",
             ),
         )
         self.assertEqual(
-            get_component_manifest_path("vision/object_detection/yolov8n", model_dir=self.model_dir),
+            get_component_manifest_path("vision/image_caption/qwen3-vl-remote", model_dir=self.model_dir),
             os.path.join(
                 self.model_dir,
                 "understanding",
                 "components",
                 "vision",
-                "object_detection",
-                "yolov8n",
+                "image_caption",
+                "qwen3-vl-remote",
                 "understanding_manifest.json",
             ),
         )
@@ -142,6 +142,11 @@ class UnderstandingPathsTests(unittest.TestCase):
     def test_understanding_enums(self):
         self.assertEqual(normalize_enum_value(UnderstandingModality, "vision", "modality"), "vision")
         self.assertEqual(
+            normalize_enum_value(UnderstandingTask, "image_caption", "task"),
+            "image_caption",
+        )
+        # Legacy task still accepted for old manifests / evidence validation.
+        self.assertEqual(
             normalize_enum_value(UnderstandingTask, "object_detection", "task"),
             "object_detection",
         )
@@ -150,8 +155,8 @@ class UnderstandingPathsTests(unittest.TestCase):
             "chunk_keyframe",
         )
         self.assertEqual(
-            normalize_enum_value(UnderstandingOutputKind, "objects", "output_kind"),
-            "objects",
+            normalize_enum_value(UnderstandingOutputKind, "caption", "output_kind"),
+            "caption",
         )
 
 

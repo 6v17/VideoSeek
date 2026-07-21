@@ -17,7 +17,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 
 | 资源 | 做法 |
 |------|------|
-| **模型 + FFmpeg** | **方式一**：下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入）。**方式二**：从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载所需文件（如 `openai-clip.zip`、`siglip2.zip`、`chinese-clip.zip`、`vision-object-detection-yolo11n.zip`、`ffmpeg.exe`），同样在应用内 **导入并解析** |
+| **模型 + FFmpeg** | **方式一**：下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入）。**方式二**：从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载所需文件（如 `openai-clip.zip`、`siglip2.zip`、`chinese-clip.zip`、`ffmpeg.exe`），同样在应用内 **导入并解析** |
 | **VLC（Windows 源码）** | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到与 `main.py` 同级的 `vlc_lib/` |
 | **安装包用户** | 一般已全部内置 |
 

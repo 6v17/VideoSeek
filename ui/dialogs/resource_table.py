@@ -79,6 +79,7 @@ class ResourceTableDialog(QDialog):
         subtitle_label = QLabel(subtitle)
         subtitle_label.setObjectName("Hint")
         subtitle_label.setWordWrap(True)
+        self.subtitle_label = subtitle_label
 
         toolbar_card = VSCard(object_name="ToolbarCard", margins=(14, 12, 14, 12), spacing=10)
         toolbar_layout = toolbar_card.content_layout
@@ -212,6 +213,9 @@ class ResourceTableDialog(QDialog):
         self.row_payloads = list(row_payloads or self.rows)
         self._refresh_rows()
         self._apply_column_layout()
+
+    def set_subtitle(self, text):
+        self.subtitle_label.setText(str(text or ""))
 
     def set_summary_text(self, text):
         self.summary_text = str(text or "")

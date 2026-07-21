@@ -289,6 +289,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_clear_dialogue.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
@@ -361,6 +362,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_sync_db.setEnabled(True)
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
+            self.library_page.btn_clear_dialogue.setEnabled(True)
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
@@ -420,6 +422,67 @@ class LibraryIndexingGuiMixin:
     def start_dialogue_reembed(self):
         # Force OCR rebuild (button label: re-extract subtitles).
         self._start_dialogue_index_job(mode="ocr")
+
+    def clear_selected_dialogue_transcripts(self):
+        from src.services.subtitle_library_service import clear_subtitle_transcripts
+        from src.storage.dialogue_transcript_store import list_dialogue_transcript_summaries
+
+        title = self.texts.get("clear_dialogue_index", "Clear selected subtitles")
+        if self._dialogue_index_running() or self._remove_library_worker_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+
+        selected_ids = [
+            str(vid).strip()
+            for vid in self.library_page.subtitle_video_tree.collect_checked_video_ids()
+            if str(vid).strip()
+        ]
+        if not selected_ids:
+            self.show_info_dialog(
+                title,
+                self.texts.get("library_select_videos_first", "Select one or more videos first."),
+                kind="info",
+            )
+            return
+
+        existing = list_dialogue_transcript_summaries(video_ids=selected_ids)
+        if not existing:
+            self.show_info_dialog(
+                title,
+                self.texts.get(
+                    "clear_dialogue_index_no_targets",
+                    "None of the checked videos have subtitles to clear.",
+                ),
+                kind="info",
+            )
+            return
+
+        confirm = self.texts.get(
+            "clear_dialogue_index_confirm",
+            "Clear OCR subtitle data for {count} checked videos?",
+        ).format(count=len(existing))
+        if not self.show_confirm_dialog(self.texts.get("confirm_title", "Confirm"), confirm):
+            return
+
+        try:
+            result = clear_subtitle_transcripts([row["video_id"] for row in existing])
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("clear_dialogue_index_failed", "Failed to clear subtitles"),
+                str(exc).strip() or repr(exc),
+            )
+            return
+
+        self.refresh_dialogue_library_table()
+        self.library_page.lbl_status.setText(
+            self.texts.get(
+                "clear_dialogue_index_done",
+                "Cleared subtitles for {cleared} video(s) (requested {requested}).",
+            ).format(
+                cleared=int(result.get("cleared_count") or 0),
+                requested=int(result.get("requested_count") or 0),
+            )
+        )
 
     def load_subtitle_sample_interval(self):
         from src.app.config import DEFAULT_CONFIG, load_config
@@ -510,6 +573,12 @@ class LibraryIndexingGuiMixin:
 
     def refresh_dialogue_library_table(self):
         try:
+            from src.services.subtitle_library_service import prune_missing_subtitle_sources
+
+            try:
+                prune_missing_subtitle_sources()
+            except Exception:
+                pass
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
             empty_text = self.texts.get(
@@ -870,6 +939,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_clear_dialogue.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
@@ -945,6 +1015,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_sync_db.setEnabled(True)
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
+            self.library_page.btn_clear_dialogue.setEnabled(True)
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
@@ -1144,6 +1215,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_sync_db.setEnabled(False)
             self.library_page.btn_build_dialogue_index.setEnabled(False)
             self.library_page.btn_reembed_dialogue.setEnabled(False)
+            self.library_page.btn_clear_dialogue.setEnabled(False)
             self.library_page.btn_export_dialogue.setEnabled(False)
             self.library_page.input_subtitle_sample_interval.setEnabled(False)
             self.library_page.input_subtitle_ocr_batch.setEnabled(False)
@@ -1232,6 +1304,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_sync_db.setEnabled(True)
         self.library_page.btn_build_dialogue_index.setEnabled(True)
         self.library_page.btn_reembed_dialogue.setEnabled(True)
+        self.library_page.btn_clear_dialogue.setEnabled(True)
         self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.input_subtitle_sample_interval.setEnabled(True)
         self.library_page.input_subtitle_ocr_batch.setEnabled(True)
@@ -1482,19 +1555,7 @@ class LibraryIndexingGuiMixin:
             headers = self.texts["library_vectors_headers"]
             ready_state_text = self._local_vector_asset_state_text("ready")
             rows, payloads = self._build_local_vector_detail_rows(detail)
-            storage_summary = detail.get("storage_summary") or {}
-            subtitle = self.texts["library_vectors_subtitle"].format(
-                total=detail["total_entries"],
-                lance_dir=detail.get("lance_dir", ""),
-                frame_rows=int((detail.get("lance_summary") or {}).get("frame_rows", 0) or 0),
-                chunk_rows=int((detail.get("lance_summary") or {}).get("chunk_rows", 0) or 0),
-                video_count=int((detail.get("lance_summary") or {}).get("indexed_video_count", 0) or 0),
-                total_storage=format_byte_size(storage_summary.get("total_storage_bytes", 0)),
-                lance_storage=format_byte_size(
-                    storage_summary.get("lance_active_bytes", storage_summary.get("lance_dir_bytes", 0))
-                ),
-                legacy_storage=format_byte_size(storage_summary.get("legacy_vector_dir_bytes", 0)),
-            )
+            subtitle = self._format_local_vector_subtitle(detail)
             dialog = ResourceTableDialog(
                 parent=self,
                 is_dark=self.is_dark_mode,
@@ -1532,6 +1593,11 @@ class LibraryIndexingGuiMixin:
                         "object_name": "Ghost",
                         "handler": self._copy_selected_vector_detail_path,
                     },
+                    {
+                        "label": self.texts["library_vectors_legacy_cleanup"],
+                        "object_name": "Ghost",
+                        "handler": self._cleanup_legacy_vector_sidecars,
+                    },
                 ],
                 row_double_click_handler=self._open_vector_detail_payload,
             )
@@ -1540,6 +1606,63 @@ class LibraryIndexingGuiMixin:
             dialog.exec()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
+
+    def _format_local_vector_subtitle(self, detail):
+        storage_summary = detail.get("storage_summary") or {}
+        return self.texts["library_vectors_subtitle"].format(
+            total=detail["total_entries"],
+            lance_dir=detail.get("lance_dir", ""),
+            frame_rows=int((detail.get("lance_summary") or {}).get("frame_rows", 0) or 0),
+            chunk_rows=int((detail.get("lance_summary") or {}).get("chunk_rows", 0) or 0),
+            video_count=int((detail.get("lance_summary") or {}).get("indexed_video_count", 0) or 0),
+            total_storage=format_byte_size(storage_summary.get("total_storage_bytes", 0)),
+            lance_storage=format_byte_size(
+                storage_summary.get("lance_active_bytes", storage_summary.get("lance_dir_bytes", 0))
+            ),
+            legacy_storage=format_byte_size(storage_summary.get("legacy_vector_dir_bytes", 0)),
+        )
+
+    def _cleanup_legacy_vector_sidecars(self, dialog):
+        if not self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            self.texts.get(
+                "library_vectors_legacy_cleanup_confirm",
+                "When Lance is ready, migration leftover npy/faiss files can be deleted safely. "
+                "Search no longer reads them. Free disk space?",
+            ),
+            kind="warning",
+        ):
+            return
+        try:
+            from src.storage.lance_migration_runner import cleanup_safe_legacy_vector_sidecars
+
+            result = cleanup_safe_legacy_vector_sidecars()
+        except Exception as exc:
+            self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
+            return
+
+        message_key = str(result.get("message_key") or "library_vectors_legacy_cleanup_done")
+        message = self.texts.get(message_key, message_key)
+        if "{removed}" in message or "{bytes}" in message:
+            message = message.format(
+                removed=int(result.get("removed", 0) or 0),
+                bytes=format_byte_size(int(result.get("bytes_freed_estimate", 0) or 0)),
+            )
+        if dialog is not None and dialog.isVisible():
+            dialog.status_hint.setText(message)
+            try:
+                detail = list_local_vector_details(validate_contents=False)
+                rows, payloads = self._build_local_vector_detail_rows(detail)
+                dialog.set_rows(rows, payloads)
+                dialog.set_subtitle(self._format_local_vector_subtitle(detail))
+            except Exception:
+                pass
+        else:
+            self.show_info_dialog(
+                self.texts.get("library_vectors_legacy_cleanup", "Cleanup legacy npy/faiss"),
+                message,
+                kind="info",
+            )
 
     def _build_local_vector_detail_rows(self, detail):
         rows = []

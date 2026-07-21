@@ -691,6 +691,8 @@ class LibraryPage(QWidget):
         self.btn_build_dialogue_index.setObjectName("PrimaryButton")
         self.btn_reembed_dialogue = QPushButton()
         self.btn_reembed_dialogue.setObjectName("AccentGhostButton")
+        self.btn_clear_dialogue = QPushButton()
+        self.btn_clear_dialogue.setObjectName("GhostButton")
         self.btn_export_dialogue = QPushButton()
         self.btn_export_dialogue.setObjectName("GhostButton")
         self.btn_refresh_dialogue_library = QPushButton()
@@ -719,6 +721,7 @@ class LibraryPage(QWidget):
         self.btn_stop_dialogue_index.setVisible(False)
         dialogue_toolbar.addWidget(self.btn_build_dialogue_index)
         dialogue_toolbar.addWidget(self.btn_reembed_dialogue)
+        dialogue_toolbar.addWidget(self.btn_clear_dialogue)
         dialogue_toolbar.addWidget(self.btn_export_dialogue)
         dialogue_toolbar.addWidget(self.btn_refresh_dialogue_library)
         dialogue_toolbar.addSpacing(8)
@@ -848,16 +851,6 @@ class UnderstandingEvidencePage(QWidget):
             QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
         )
         config_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
-
-        # Kept for older gui wiring; YOLO is no longer part of the UI.
-        self.label_yolo = _understanding_field_label()
-        self.label_yolo.hide()
-        self.btn_import_understanding_model = QPushButton()
-        self.btn_import_understanding_model.setObjectName("AccentGhostButton")
-        self.btn_import_understanding_model.hide()
-        self.hint_yolo = QLabel()
-        self.hint_yolo.setObjectName("CardHint")
-        self.hint_yolo.hide()
 
         self.label_vlm_section = QLabel()
         self.label_vlm_section.setObjectName("CardHint")
@@ -1069,12 +1062,6 @@ class UnderstandingEvidencePage(QWidget):
         self.video_summary_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         detail_grid.addWidget(self.video_summary_text, 2, 1)
         detail_grid.setRowStretch(2, 1)
-
-        self.chunk_objects_label = QLabel()
-        self.chunk_objects_label.setObjectName("StatusHint")
-        self.chunk_objects_label.setWordWrap(True)
-        self.chunk_objects_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        self.chunk_objects_label.hide()
 
         self.video_summary_meta_label = QLabel()
         self.video_summary_meta_label.setObjectName("StatusHint")
