@@ -49,14 +49,17 @@ Prefer not to manage Python? Get the **installer** from **[lv17.top](https://www
 ## Minimal workflow
 
 1. **Runtime assets** — First-launch prompts, or **Settings** → import models and FFmpeg.
-2. **Add a library** — Sidebar **Local Library** → add a folder.
-3. **Sync** — Select the library → **Sync**; wait for indexing.
+2. **Add a library** — Sidebar **Local Library** → **Videos** tab → add a folder.
+3. **Sync selected** — Check videos → **Sync selected**; wait for indexing.
 4. **Search** — Sidebar **Search** → text or image query.
 
-Video understanding, subtitle extraction, and the Agent API are optional — **sync a library first** (subtitle search also needs OCR extraction under **Subtitles**).
+Video understanding, subtitle extraction, and the Agent API are optional — **sync a library first** (subtitle search also needs the OCR pack and extraction under the **Subtitles** tab).
+
+Illustrated walkthrough (Chinese): **[User guide (Feishu)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)**.
 
 ## Community
 
+- **User guide (ZH)**: [Feishu doc](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)
 - **QQ group**: 1033551438
 - **GitHub Issues** — especially for source builds and the Agent API
 
@@ -84,7 +87,8 @@ See **`docs/quickstart.md`** for troubleshooting and tests.
 
 | Doc | Topic |
 |-----|--------|
-| `docs/quickstart.md` | Setup, troubleshooting, tests |
+| [User guide (Feishu, ZH)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) | Illustrated setup for installer users |
+| `docs/quickstart.md` | From-source setup, troubleshooting, tests |
 | `docs/for-agents.md` | Localhost Agent API |
 | `docs/architecture.md` | Architecture (developers) |
 
