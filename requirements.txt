@@ -3,7 +3,6 @@
 # Conda:  conda env create -f environment.yml
 #
 # ONNX Runtime: Windows uses the DirectML build (GPU via DirectML); other platforms use the standard CPU wheel.
-# Keep these AFTER any package that pulls plain `onnxruntime` (e.g. faster-whisper), or reinstall DirectML last on Windows.
 onnxruntime-directml==1.23.0; sys_platform == "win32"
 onnxruntime==1.23.0; sys_platform != "win32"
 
@@ -23,10 +22,7 @@ yt-dlp
 rookiepy
 python-vlc
 
-# Dialogue ASR (CUDA or CPU via CTranslate2; not DirectML)
-faster-whisper==1.2.1
-# SenseVoice ONNX frontend (fbank features)
-kaldi-native-fbank>=1.22.0
+# Hard-subtitle OCR (ONNX); VAD uses bundled Silero under resources/asr/
 rapidocr-onnxruntime==1.4.4
 
 # Mobile bridge (local HTTP server / phone upload) — see src/web/mobile_bridge.py
@@ -40,6 +36,3 @@ qrcode[pil]
 # Dev / CI
 pytest>=9.0
 ruff>=0.11
-
-# Windows: re-assert DirectML ORT last so faster-whisper's plain onnxruntime dep does not win.
-onnxruntime-directml==1.23.0; sys_platform == "win32"

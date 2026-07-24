@@ -924,6 +924,49 @@ def upsert_profile_video_vectors(
     return result
 
 
+def delete_profile_dialogue_segments(
+    video_id: str,
+    *,
+    profile_base_dir: str,
+    refresh_state: bool = False,
+) -> None:
+    """Delete Lance ``dialogue_segments`` rows and mark dialogue state missing.
+
+    Does not touch frames/chunks (visual CLIP index).
+    """
+    video_id = str(video_id or "").strip()
+    base = os.path.normpath(str(profile_base_dir or "").strip())
+    if not video_id or not base:
+        return
+    if os.path.isdir(get_lance_dir(base)):
+        try:
+            db = _connect_lance(base)
+            _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete Lance dialogue_segments for %s under %s",
+                video_id,
+                base,
+                exc_info=True,
+            )
+    set_dialogue_index_state(
+        base,
+        video_id,
+        DIALOGUE_INDEX_STATE_MISSING,
+        extras={
+            "dialogue_segment_rows": 0,
+            "dialogue_asr_source": "",
+            "dialogue_error": "",
+        },
+    )
+    if refresh_state:
+        try:
+            refresh_import_state(base)
+            _invalidate_lance_search_caches(base)
+        except Exception:
+            pass
+
+
 def delete_profile_video_vectors(
     video_id: str,
     config=None,
@@ -1028,9 +1071,15 @@ def upsert_profile_dialogue_segments(
     config=None,
     profile_base_dir: str = "",
 ) -> dict:
-    """Replace all dialogue_segments rows for one video.
+    """Replace all Lance ``dialogue_segments`` rows for one video.
 
-    Each segment dict needs: start, end, text, language, asr_source, vector (1d float array).
+    Product OCR / hard-subtitle indexing does **not** write here — transcripts
+    go to SQLite via ``dialogue_transcript_store``. Kept for legacy installs,
+    migration cleanup companions, and unit tests. Prefer
+    ``delete_profile_dialogue_segments`` when clearing old Lance dialogue rows.
+
+    Each segment dict needs: start, end, text, language, asr_source, vector
+    (1d float array).
     """
     from src.storage.config_store import get_local_model_asset_dirs
 

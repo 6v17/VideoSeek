@@ -386,8 +386,7 @@ def chunk_payload_has_evidence(payload: Mapping[str, Any] | None) -> bool:
     evidence = dict(payload.get("evidence") or {})
     vision = dict(evidence.get("vision") or {})
     caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
-    objects = list(dict(vision.get("object_detection") or {}).get("objects") or [])
-    return bool(caption or objects)
+    return bool(caption)
 
 
 def _index_chunk_payloads(chunks: list[Any] | None) -> dict[int, dict[str, Any]]:
@@ -1070,12 +1069,11 @@ def _read_evidence_file_summary(evidence_path: str) -> dict[str, Any]:
     chunk_source = dict(provenance.get("chunk_source") or {})
     components = dict(provenance.get("components") or {})
     video = dict(payload.get("video") or {})
-    yolo_id = str(components.get("object_detection", "") or "").strip()
     caption_id = str(components.get("image_caption", "") or "").strip()
     other_ids = [
         str(value).strip()
         for key, value in components.items()
-        if key not in {"object_detection", "image_caption"} and str(value or "").strip()
+        if key != "image_caption" and str(value or "").strip()
     ]
     clip_model = str(chunk_source.get("search_variant", "") or "").strip()
     if not clip_model:
@@ -1094,7 +1092,6 @@ def _read_evidence_file_summary(evidence_path: str) -> dict[str, Any]:
         "source_exists": bool(source_exists),
         "clip_model": clip_model,
         "search_provider": str(chunk_source.get("search_provider", "") or "").strip(),
-        "yolo_model": _component_short_name(yolo_id),
         "caption_model": _component_short_name(caption_id),
         "other_models": ", ".join(_component_short_name(item) or item for item in other_ids),
         "understanding_profile_id": str(provenance.get("understanding_profile_id", "") or "").strip(),
@@ -1157,7 +1154,6 @@ def list_local_evidence_details(*, config=None) -> dict[str, Any]:
                     "evidence_state": evidence_state,
                     "clip_model": str(summary.get("clip_model", "") or ""),
                     "search_provider": str(summary.get("search_provider", "") or ""),
-                    "yolo_model": str(summary.get("yolo_model", "") or ""),
                     "caption_model": str(summary.get("caption_model", "") or ""),
                     "other_models": str(summary.get("other_models", "") or ""),
                     "understanding_profile_id": str(summary.get("understanding_profile_id", "") or ""),

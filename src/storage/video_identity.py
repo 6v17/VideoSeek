@@ -10,6 +10,15 @@ def canonicalize_library_path(path):
     return os.path.normcase(os.path.normpath(os.path.abspath(path)))
 
 
+def canonicalize_library_rel_path(rel_path) -> str:
+    """Normalize in-library relative paths to forward slashes.
+
+    Meta / SQLite store ``files`` keys with ``/`` (see profile_library_store).
+    ``os.path.relpath`` on Windows yields ``\\``, which must not be used for dict lookup.
+    """
+    return str(rel_path or "").replace("\\", "/").strip()
+
+
 def get_legacy_video_hash(video_path):
     """Pre-v2 video id: SHA256 of the first 10 MiB only (size/mtime not included)."""
     digest = hashlib.sha256()

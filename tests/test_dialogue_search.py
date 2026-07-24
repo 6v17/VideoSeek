@@ -24,11 +24,12 @@ class RunDialogueSearchTests(unittest.TestCase):
         self.assertEqual(matched_by, "")
         mock_search.assert_not_called()
 
+    @mock.patch("src.services.search_scope.enrich_hits_with_source_paths", side_effect=lambda hits, **kwargs: hits)
     @mock.patch("src.services.search_service.apply_search_scope", side_effect=lambda hits, **kwargs: hits)
     @mock.patch("src.storage.lance_dialogue_search.get_dialogue_index_stats")
     @mock.patch("src.storage.lance_dialogue_search.search_dialogue")
     @mock.patch("src.storage.config_store.get_local_model_asset_dirs")
-    def test_keyword_hits_map_to_search_hit(self, mock_dirs, mock_search, mock_stats, _scope):
+    def test_keyword_hits_map_to_search_hit(self, mock_dirs, mock_search, mock_stats, _scope, _enrich):
         from src.services.search_service import run_dialogue_search
         from src.storage.lance_dialogue_search import DialogueSearchHit
 

@@ -825,13 +825,13 @@ def run_dialogue_search(
     query_vector=None,
     match_mode: str = "exact",
 ) -> tuple[List[SearchHit], str, str]:
-    """Dialogue search over Lance ``dialogue_segments``.
+    """Dialogue search over shared SQLite transcripts (keyword / fuzzy).
 
     ``match_mode``: ``exact``/``segment`` (substring), ``fuzzy`` (typo-tolerant),
-    ``semantic`` (CLIP text), or ``auto`` (exact then semantic).
+    ``semantic`` (deferred — empty), or ``auto`` (exact keyword only).
 
     Returns ``(hits, message, matched_by)`` where ``matched_by`` is
-    ``keyword`` / ``keyword_fuzzy`` / ``vector`` / ``""``.
+    ``keyword`` / ``keyword_fuzzy`` / ``""``.
     """
     from src.storage.config_store import get_local_model_asset_dirs, get_search_top_k
     from src.storage.lance_dialogue_search import get_dialogue_index_stats, search_dialogue

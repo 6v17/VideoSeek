@@ -93,6 +93,65 @@ def cleanup_legacy_vector_files_for_profile(profile_base_dir: str) -> int:
     return cleanup_legacy_vector_paths(collect_legacy_vector_paths(profile_base_dir))
 
 
+def _estimate_path_bytes(path: str) -> int:
+    try:
+        if os.path.isfile(path):
+            return int(os.path.getsize(path))
+        if os.path.isdir(path):
+            total = 0
+            for root, _dirs, files in os.walk(path):
+                for name in files:
+                    file_path = os.path.join(root, name)
+                    try:
+                        total += int(os.path.getsize(file_path))
+                    except OSError:
+                        continue
+            return total
+    except OSError:
+        return 0
+    return 0
+
+
+def cleanup_safe_legacy_vector_sidecars(*, config=None) -> dict:
+    """User-facing cleanup of legacy npy/faiss after Lance search is ready.
+
+    Uses the active model profile. Safe only when ``lance_search_is_ready``;
+    search no longer reads these sidecars.
+    """
+    from src.app.config import load_config
+    from src.storage.config_store import get_local_model_asset_dirs
+
+    runtime_config = config or load_config()
+    base_dir = get_local_model_asset_dirs(config=runtime_config)["base_dir"]
+    if not lance_search_is_ready(base_dir):
+        return {
+            "ready": False,
+            "removed": 0,
+            "bytes_freed_estimate": 0,
+            "message_key": "library_vectors_legacy_cleanup_not_ready",
+            "profile_base_dir": base_dir,
+        }
+
+    pending = collect_legacy_vector_paths(base_dir)
+    if not pending:
+        return {
+            "ready": True,
+            "removed": 0,
+            "bytes_freed_estimate": 0,
+            "message_key": "library_vectors_legacy_cleanup_empty",
+            "profile_base_dir": base_dir,
+        }
+
+    bytes_estimate = sum(_estimate_path_bytes(path) for path in pending)
+    removed = cleanup_legacy_vector_files_for_profile(base_dir)
+    return {
+        "ready": True,
+        "removed": int(removed),
+        "bytes_freed_estimate": int(bytes_estimate),
+        "message_key": "library_vectors_legacy_cleanup_done",
+        "profile_base_dir": base_dir,
+    }
+
 def _mark_profile_search_index_ready(profile_base_dir: str) -> None:
     from src.storage.profile_library_store import get_library_db_path
 
@@ -121,17 +180,27 @@ def _legacy_cleanup_paths(paths: list[str]) -> list[str]:
 def is_lance_migration_completed(config=None) -> bool:
     from src.app.config import load_config
 
-    return bool(_read_lance_migration_state(config or load_config()).get("completed"))
+    state = _read_lance_migration_state(config or load_config())
+    if not bool(state.get("completed")):
+        return False
+    # Partial imports must retry on the next startup.
+    return int(state.get("videos_failed", 0) or 0) == 0
 
 
 def needs_lance_startup_migration(config=None) -> bool:
     from src.app.config import load_config
 
     runtime_config = config or load_config()
-    # Once recorded complete, do not re-listdir vector/index dirs every startup.
-    # Sidecar ``*_vectors.npy`` may remain by design after import.
+    state = _read_lance_migration_state(runtime_config)
+    # Once recorded complete with zero failures, do not re-listdir vector/index dirs
+    # every startup. Sidecar ``*_vectors.npy`` may remain by design after import.
     if is_lance_migration_completed(runtime_config):
         return False
+
+    # Previous run imported some videos but failed others — retry even if Lance
+    # already looks "ready" from the partial table.
+    if int(state.get("videos_failed", 0) or 0) > 0:
+        return True
 
     profiles = list(iter_model_asset_storage_roots(config=runtime_config))
     if not profiles:
@@ -155,6 +224,8 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
     from src.app.config import load_config
 
     runtime_config = config or load_config()
+    previous_state = _read_lance_migration_state(runtime_config)
+    previous_failed = int(previous_state.get("videos_failed", 0) or 0)
     profiles = list(iter_model_asset_storage_roots(config=runtime_config))
     if not profiles:
         return {
@@ -175,6 +246,7 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
     videos_failed = 0
     legacy_removed = 0
     upgraded = False
+    previously_complete = is_lance_migration_completed(runtime_config)
 
     for index, root in enumerate(profiles, start=1):
         base_dir = root["base_dir"]
@@ -182,7 +254,11 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
         percent = 90 + int((index - 1) * 8 / max(total, 1))
         _emit(progress_callback, percent, f"正在迁移 Lance 向量：{label}")
 
-        if profile_has_npy_vectors(base_dir) and not lance_search_is_ready(base_dir):
+        profile_failed = 0
+        needs_import = profile_has_npy_vectors(base_dir) and (
+            not lance_search_is_ready(base_dir) or previous_failed > 0
+        )
+        if needs_import:
             summary = import_npy_to_lance(
                 base_dir,
                 replace_existing=True,
@@ -191,14 +267,18 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
                 profiles_migrated += 1
                 upgraded = True
             videos_imported += int(summary.get("videos_imported", 0) or 0)
-            videos_failed += int(summary.get("videos_failed", 0) or 0)
+            profile_failed = int(summary.get("videos_failed", 0) or 0)
+            videos_failed += profile_failed
             if summary.get("errors"):
                 for error in summary["errors"][:3]:
                     logger.warning("Lance import issue (%s): %s", label, error)
 
         if lance_search_is_ready(base_dir):
             legacy_paths = collect_legacy_vector_paths(base_dir)
-            if bool(_read_lance_migration_state(runtime_config).get("completed")):
+            # Keep ``*_vectors.npy`` when:
+            # - migration was already fully complete (sidecars by design), or
+            # - this profile still has import failures (needed for retry).
+            if previously_complete or profile_failed > 0:
                 legacy_paths = _legacy_cleanup_paths(legacy_paths)
             removed = cleanup_legacy_vector_paths(legacy_paths)
             if removed:
@@ -206,10 +286,11 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
                 upgraded = True
             _mark_profile_search_index_ready(base_dir)
 
+    completed = videos_failed == 0
     _write_lance_migration_state(
         runtime_config,
         {
-            "completed": True,
+            "completed": completed,
             "profiles_total": total,
             "profiles_migrated": profiles_migrated,
             "videos_imported": videos_imported,
@@ -217,7 +298,19 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
             "legacy_paths_removed": legacy_removed,
         },
     )
-    _emit(progress_callback, 99, "Lance 向量迁移完成")
+    if completed:
+        _emit(progress_callback, 99, "Lance 向量迁移完成")
+    else:
+        _emit(
+            progress_callback,
+            99,
+            f"Lance 向量迁移部分完成（失败 {videos_failed} 个视频，下次启动将重试）",
+        )
+        logger.warning(
+            "Lance migration incomplete: videos_failed=%s imported=%s",
+            videos_failed,
+            videos_imported,
+        )
     return {
         "upgraded": upgraded,
         "libraries_built": profiles_migrated,

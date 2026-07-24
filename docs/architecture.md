@@ -18,12 +18,12 @@
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
 | `lance_dialogue_search.py` / `dialogue_transcript_store.py` | 硬字幕（OCR）关键词检索；SQLite 字幕库；精确 / 模糊（单字落点命中率） |
 | `understanding_service.py` | 视频总结生成、读盘/写盘、`EvidenceBundle` 编排 |
-| `understanding_resource_service.py` | profile 扫描、描述服务探测、`understanding_ready`（仅 caption；YOLO 已退出产品路径） |
+| `understanding_resource_service.py` | profile 扫描、描述服务探测、`understanding_ready`（caption-only） |
 | `src/infra/` | 路径 / FFmpeg 等基础设施（从 `utils` 拆出；见 [`engineering.md`](engineering.md)） |
 
 工程约定（新功能边界、legacy 禁扩、lint）：[`docs/engineering.md`](engineering.md)。
 
-**存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db`）。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
+**存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db` / `dialogue_transcript_store`），关键词 / 模糊检索**只**走该库。Lance `dialogue_segments` 无产品读写（Whisper 台词未发布；语义字幕暂缓），删除字幕时仅作防御性清理。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
 
 **视频理解**为可选扩展，不阻塞搜索与索引；仅桌面「视频理解」页使用，**不**暴露给 Agent API。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
 
@@ -106,7 +106,7 @@ flowchart TB
   US --> DISK
 ```
 
-进入理解页时本地 profile/组件检查同步完成；**描述服务连通性**在 `UnderstandingResourceStatusWorker` 后台探测（不阻塞切页）。流水线仅跑画面描述（`image_caption`）；**YOLO / object_detection 已从产品路径移除**（旧 JSON 若含检测结果仍可展示）。生成仍走 `understanding_service`，与搜索/索引解耦。
+进入理解页时本地 profile/组件检查同步完成；**描述服务连通性**在 `UnderstandingResourceStatusWorker` 后台探测（不阻塞切页）。流水线仅跑画面描述（`image_caption` / OpenAI 兼容描述服务）；不再内置目标检测引擎。旧 evidence JSON 若含 `object_detection` 仍可展示。生成仍走 `understanding_service`，与搜索/索引解耦。
 
 ### 各层实际权重
 
@@ -120,7 +120,7 @@ flowchart TB
 | `agent_api.py` | HTTP、预设/scope、超时 | 独立子系统；止于 `search_service` |
 | `understanding_service.py` | 单视频/批量生成、bundle 读写、历史列表 | **视频总结主逻辑** |
 | `understanding_resource_service.py` | manifest 扫描、profile、remote VLM 探测 | **理解资源层** |
-| `core/understanding/` | remote caption、pipeline（跳过 object_detection） | **理解推理** |
+| `core/understanding/` | remote caption、pipeline（caption-only） | **理解推理** |
 | `dialogue_transcript_store.py` | 字幕 SQLite 读写与精确/模糊匹配 | **硬字幕存储** |
 | `IndexingController` / `AgentApiController` / `MobileBridgeController` / `UnderstandingController` | 启停后台服务 | 薄层 |
 | `src/domain/search_hit.py` | `SearchHit` dataclass | 边界类型 |
@@ -183,7 +183,7 @@ sequenceDiagram
 
 - **`SearchHit`**：一条本地命中（`start_sec`、`end_sec`、`score`、`video_path`）。在 `search_service` 构造；返回给 UI 与 Agent。
 - **`RemoteSearchHit`**：远程库命中行；在 `remote_search_service` 构造。
-- **`EvidenceBundle`**：单视频视频总结（chunk 级 caption + 可选整片 summary；object_detection 字段保留兼容旧数据）。在 `understanding_service` 读写；schema 见 `evidence_bundle.py`。
+- **`EvidenceBundle`**：单视频视频总结（chunk 级 caption + 可选整片 summary；schema 仍可解析旧数据中的 `object_detection`）。在 `understanding_service` 读写；schema 见 `evidence_bundle.py`。
 
 **遗留：** `coerce_search_hit()` 仍在**视图边界**（`table_views`、`ThumbLoader`）接受旧 4-tuple。新代码只传 `SearchHit`；services 不要 emit tuple。
 
@@ -233,7 +233,7 @@ sequenceDiagram
 
 1. 侧栏 **视频库 → 字幕库** → 勾选视频提取画面字幕（OCR）
 2. 字幕段落写入 SQLite（`dialogue_transcript_store` / `transcripts.db`）
-3. 搜索页 **字幕** 标签 → `keyword_search_dialogue`：`exact` 子串，或 `fuzzy` 单字落点命中率排序
+3. 搜索页 **字幕** 标签 → `keyword_search_dialogue`：`exact` 子串，或 `fuzzy` 单字落点命中率排序（仅 SQLite；不读 Lance）
 4. 结果列表对命中字做 UI 高亮（`ui/views/dialogue_highlight.py`，仅当前页渲染）
 
 ### 视频理解 / 总结（可选）
@@ -275,7 +275,8 @@ docs/
 | 日期 | 变更 |
 |------|------|
 | 2026-06-26 | 补充理解笔录模块：入口表、热路径、领域模型、`understanding_*` 服务与文档索引 |
-| 2026-07-19 | 硬字幕 SQLite + 模糊落点检索；视频理解去掉 YOLO；文案「笔录」→「总结」 |
+| 2026-07-21 | 硬字幕仅 SQLite：去掉 Lance 文本兜底与空库导入；`dialogue_segments` 无产品读写；Lance 就绪后可手动清理遗留 npy/faiss |
+| 2026-07-19 | 硬字幕 SQLite + 模糊落点检索；视频理解改为 caption-only；文案「笔录」→「总结」 |
 | 2026-06-12 | 全文改为中文；精简文首概览 |
 | 2026-06-10 | 增加文首中文概览 |
 | 2026-05-31 | Agent scope/query 收敛到 `search_scope` + `search_request_service` |

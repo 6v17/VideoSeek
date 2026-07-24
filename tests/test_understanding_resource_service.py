@@ -10,20 +10,20 @@ from src.app.config import DEFAULT_UNDERSTANDING_CONFIG
 from src.services import understanding_import_service, understanding_resource_service
 
 
-YOLO_MANIFEST = {
+LOCAL_COMPONENT_MANIFEST = {
     "kind": "understanding_component",
     "manifest_version": 1,
-    "id": "vision/object_detection/yolo11n",
+    "id": "vision/image_caption/local-dummy",
     "modality": "vision",
-    "task": "object_detection",
-    "model_id": "yolo11n",
-    "display_name": "YOLO11n Object Detection (ONNX)",
-    "install_relpath": "components/vision/object_detection/yolo11n",
+    "task": "image_caption",
+    "model_id": "local-dummy",
+    "display_name": "Local Dummy Caption (ONNX)",
+    "install_relpath": "components/vision/image_caption/local-dummy",
     "input_kind": "chunk_keyframe",
-    "output_kind": "objects",
-    "engine": {"registry_key": "vision.object_detection.yolo11n"},
-    "required_files": ["yolo11n.onnx"],
-    "files": {"model": "yolo11n.onnx"},
+    "output_kind": "caption",
+    "engine": {"registry_key": "vision.image_caption.qwen3_vl_remote"},
+    "required_files": ["weights.onnx"],
+    "files": {"model": "weights.onnx"},
 }
 
 CAPTION_MANIFEST = {
@@ -84,36 +84,36 @@ class UnderstandingImportServiceTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_import_single_component_zip(self):
-        zip_path = self.model_root / "vision-object-detection-yolo11n.zip"
-        _write_component_zip(zip_path, YOLO_MANIFEST, "yolo11n.onnx")
+        zip_path = self.model_root / "vision-image-caption-local-dummy.zip"
+        _write_component_zip(zip_path, LOCAL_COMPONENT_MANIFEST, "weights.onnx")
 
         result = understanding_import_service.import_understanding_component_zip(str(self.model_root), str(zip_path))
 
-        self.assertEqual(result["component_id"], "vision/object_detection/yolo11n")
+        self.assertEqual(result["component_id"], "vision/image_caption/local-dummy")
         install_dir = Path(result["install_dir"])
         self.assertTrue((install_dir / "understanding_manifest.json").is_file())
-        self.assertTrue((install_dir / "yolo11n.onnx").is_file())
+        self.assertTrue((install_dir / "weights.onnx").is_file())
         self.assertTrue(result["imported"])
         self.assertFalse(result["updated"])
 
     def test_import_two_component_zips(self):
-        yolo_zip = self.model_root / "vision-object-detection-yolo11n.zip"
-        _write_component_zip(yolo_zip, YOLO_MANIFEST, "yolo11n.onnx")
+        local_zip = self.model_root / "vision-image-caption-local-dummy.zip"
+        _write_component_zip(local_zip, LOCAL_COMPONENT_MANIFEST, "weights.onnx")
 
         result = understanding_import_service.import_understanding_component_zips(
             str(self.model_root),
-            [str(yolo_zip)],
+            [str(local_zip)],
         )
 
-        self.assertEqual(result["imported"], ["vision/object_detection/yolo11n"])
+        self.assertEqual(result["imported"], ["vision/image_caption/local-dummy"])
         self.assertEqual(result["errors"], [])
         self.assertEqual(len(result["components"]), 1)
 
     def test_import_rejects_invalid_kind(self):
         zip_path = self.model_root / "invalid.zip"
-        invalid_manifest = dict(YOLO_MANIFEST)
+        invalid_manifest = dict(LOCAL_COMPONENT_MANIFEST)
         invalid_manifest["kind"] = "model_profile"
-        _write_component_zip(zip_path, invalid_manifest, "yolo11n.onnx")
+        _write_component_zip(zip_path, invalid_manifest, "weights.onnx")
 
         with self.assertRaises(RuntimeError):
             understanding_import_service.import_understanding_component_zip(str(self.model_root), str(zip_path))
@@ -121,9 +121,9 @@ class UnderstandingImportServiceTests(unittest.TestCase):
     def test_import_rejects_nested_manifest(self):
         zip_path = self.model_root / "nested.zip"
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("understanding_manifest.json", json.dumps(YOLO_MANIFEST))
-            archive.writestr("nested/understanding_manifest.json", json.dumps(YOLO_MANIFEST))
-            archive.writestr("yolo11n.onnx", b"dummy-model")
+            archive.writestr("understanding_manifest.json", json.dumps(LOCAL_COMPONENT_MANIFEST))
+            archive.writestr("nested/understanding_manifest.json", json.dumps(LOCAL_COMPONENT_MANIFEST))
+            archive.writestr("weights.onnx", b"dummy-model")
 
         with self.assertRaises(RuntimeError):
             understanding_import_service.import_understanding_component_zip(str(self.model_root), str(zip_path))
@@ -131,8 +131,8 @@ class UnderstandingImportServiceTests(unittest.TestCase):
     def test_import_continue_on_error(self):
         good_zip = self.model_root / "good.zip"
         bad_zip = self.model_root / "bad.zip"
-        _write_component_zip(good_zip, YOLO_MANIFEST, "yolo11n.onnx")
-        _write_component_zip(bad_zip, {"kind": "understanding_component"}, "yolo11n.onnx")
+        _write_component_zip(good_zip, LOCAL_COMPONENT_MANIFEST, "weights.onnx")
+        _write_component_zip(bad_zip, {"kind": "understanding_component"}, "weights.onnx")
 
         result = understanding_import_service.import_understanding_component_zips(
             str(self.model_root),
@@ -140,14 +140,14 @@ class UnderstandingImportServiceTests(unittest.TestCase):
             continue_on_error=True,
         )
 
-        self.assertEqual(result["imported"], ["vision/object_detection/yolo11n"])
+        self.assertEqual(result["imported"], ["vision/image_caption/local-dummy"])
         self.assertEqual(len(result["errors"]), 1)
 
     def test_import_verifies_checksum(self):
-        zip_path = self.model_root / "vision-object-detection-yolo11n.zip"
-        _write_component_zip(zip_path, YOLO_MANIFEST, "yolo11n.onnx")
+        zip_path = self.model_root / "vision-image-caption-local-dummy.zip"
+        _write_component_zip(zip_path, LOCAL_COMPONENT_MANIFEST, "weights.onnx")
         digest = understanding_import_service._sha256_file(str(zip_path))
-        sha_path = self.model_root / "vision-object-detection-yolo11n.zip.sha256"
+        sha_path = self.model_root / "vision-image-caption-local-dummy.zip.sha256"
         sha_path.write_text(f"{digest}  {zip_path.name}\n", encoding="utf-8")
 
         result = understanding_import_service.import_understanding_component_zip(
@@ -160,9 +160,9 @@ class UnderstandingImportServiceTests(unittest.TestCase):
 
 
     def test_classify_package_zip(self):
-        yolo_zip = self.model_root / "yolo11.zip"
-        _write_component_zip(yolo_zip, YOLO_MANIFEST, "yolo11n.onnx")
-        self.assertEqual(understanding_import_service.classify_package_zip(str(yolo_zip)), "understanding")
+        local_zip = self.model_root / "local-dummy.zip"
+        _write_component_zip(local_zip, LOCAL_COMPONENT_MANIFEST, "weights.onnx")
+        self.assertEqual(understanding_import_service.classify_package_zip(str(local_zip)), "understanding")
 
         search_zip = self.model_root / "clip.zip"
         with zipfile.ZipFile(search_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -207,11 +207,11 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertEqual(len(normalized["understanding"]["profiles"]), 1)
 
     def test_scan_understanding_components_reports_missing_files(self):
-        install_relpath = YOLO_MANIFEST["install_relpath"].replace("/", os.sep)
+        install_relpath = LOCAL_COMPONENT_MANIFEST["install_relpath"].replace("/", os.sep)
         target_dir = self.model_root / "understanding" / install_relpath
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / "understanding_manifest.json").write_text(
-            json.dumps(YOLO_MANIFEST, ensure_ascii=False, indent=2),
+            json.dumps(LOCAL_COMPONENT_MANIFEST, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -246,7 +246,7 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
         self.assertEqual(status["active_understanding_profile"], "vision_baseline_v1")
         self.assertGreaterEqual(len(status["missing_components"]), 1)
 
-    def test_understanding_ready_true_without_yolo_when_caption_ready(self):
+    def test_understanding_ready_true_when_caption_ready(self):
         self._install_component(CAPTION_MANIFEST)
         config = {"understanding": DEFAULT_UNDERSTANDING_CONFIG}
 
@@ -268,10 +268,9 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
 
         self.assertTrue(status["understanding_ready"])
         self.assertEqual(status["missing_components"], [])
-        self.assertNotIn("vision/object_detection/yolo11n", status["optional_missing_components"])
+        self.assertEqual(status["optional_missing_components"], [])
 
     def test_understanding_ready_true_when_profile_components_installed(self):
-        self._install_component(YOLO_MANIFEST, "yolo11n.onnx")
         self._install_component(CAPTION_MANIFEST)
         config = {"understanding": DEFAULT_UNDERSTANDING_CONFIG}
 
@@ -293,7 +292,7 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
 
         self.assertTrue(status["understanding_ready"])
         self.assertEqual(status["missing_components"], [])
-        self.assertEqual(len(status["installed_components"]), 2)
+        self.assertEqual(len(status["installed_components"]), 1)
 
     def test_understanding_ready_true_without_remote_probe_when_caption_installed(self):
         self._install_component(CAPTION_MANIFEST)

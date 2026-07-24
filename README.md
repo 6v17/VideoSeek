@@ -26,7 +26,7 @@
 
 | 功能 | 说明 |
 |------|------|
-| **视频理解** | 对已同步视频按语义 chunk 生成画面描述与整片总结（仅需 OpenAI 兼容描述服务；不再使用 YOLO） |
+| **视频理解** | 对已同步视频按语义 chunk 生成画面描述与整片总结（OpenAI 兼容描述服务） |
 | **本机 Agent API** | `127.0.0.1` HTTP 接口：搜索、读库列表、导出、读/生成视频总结（见 `docs/for-agents.md`） |
 | **网络库** | 从链接导入远程库并检索（与本地库流程类似） |
 
@@ -49,14 +49,17 @@
 ## 最小使用步骤
 
 1. **配置运行资源** — 首次启动按提示操作，或在 **设置** 中下载并 **导入** 模型、FFmpeg 等。
-2. **添加视频库** — 侧边栏 **视频库** → 添加本地文件夹。
-3. **同步视频库** — 选中库后点 **同步**，等待抽帧与向量化完成。
+2. **添加视频库** — 侧边栏 **视频库** → **视频库** Tab → 添加本地文件夹。
+3. **同步选中视频** — 勾选要处理的视频 → **同步选中视频**，等待抽帧与向量化完成。
 4. **搜索** — 侧边栏 **搜索** → 文字或图片检索。
 
-视频理解、硬字幕提取、Agent API 等为可选功能，**需先完成视频库同步**（字幕搜索还需在「字幕库」中提取字幕）。
+视频理解、硬字幕提取、Agent API 等为可选功能，**需先完成视频库同步**（字幕搜索还需导入 OCR，并在「字幕库」Tab 中提取字幕）。
+
+图文步骤见 **[使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)**。
 
 ## 交流
 
+- **使用教程**：[飞书文档](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)（导入资源、建库同步、文搜/图搜/字幕）
 - **QQ 群**：1033551438（安装、使用问题与反馈）
 - **GitHub Issues**：也欢迎在此提问（尤其源码 / Agent API）
 
@@ -84,7 +87,8 @@ python main.py
 
 | 文档 | 内容 |
 |------|------|
-| `docs/quickstart.md` | 安装细节、排障、测试 |
+| [使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) | 安装包用户图文上手（资源导入、视频库、字幕库、搜索） |
+| `docs/quickstart.md` | 源码安装细节、排障、测试 |
 | `docs/for-agents.md` | 本机 Agent API 字段与示例 |
 | `docs/architecture.md` | 模块与数据流（开发者向） |
 | `docs/cuda-experiment.md` | 实验性 NVIDIA CUDA 建索（conda 实验室环境，非默认 Release 路径） |

@@ -7,8 +7,6 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from src.core.understanding.base import UnderstandingComponent
-from src.core.understanding.coco_labels import resolve_class_names
-from src.core.understanding.ort_runtime import run_with_cpu_fallback
 from src.services.understanding_paths import get_component_dir
 
 _REGISTRY: dict[str, Callable[..., UnderstandingComponent]] = {}
@@ -71,20 +69,9 @@ def infer_installed_component(
 
 
 def _register_builtin_components() -> None:
-    from src.core.understanding.components.faster_whisper_medium import (
-        FasterWhisperMediumSpeechToTextComponent,
-    )
     from src.core.understanding.components.remote_vl_caption import RemoteVlCaptionComponent
-    from src.core.understanding.components.sensevoice_small import SenseVoiceSmallSpeechToTextComponent
-    from src.core.understanding.components.yolo11n import Yolo11nObjectDetectionComponent
 
-    register_understanding_component("vision.object_detection.yolo11n", Yolo11nObjectDetectionComponent)
     register_understanding_component("vision.image_caption.qwen3_vl_remote", RemoteVlCaptionComponent)
-    register_understanding_component("audio.speech_to_text.sensevoice_small", SenseVoiceSmallSpeechToTextComponent)
-    register_understanding_component(
-        "audio.speech_to_text.faster_whisper_medium",
-        FasterWhisperMediumSpeechToTextComponent,
-    )
 
 
 _register_builtin_components()

@@ -65,6 +65,7 @@ from src.media.thumbnail import get_single_thumbnail
 from src.storage.meta_io import load_meta, save_meta
 from src.storage.video_identity import (
     canonicalize_library_path,
+    canonicalize_library_rel_path,
     get_legacy_video_hash,
     get_video_hash,
 )

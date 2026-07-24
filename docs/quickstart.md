@@ -17,7 +17,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 
 | 资源 | 做法 |
 |------|------|
-| **模型 + FFmpeg** | **方式一**：下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入）。**方式二**：从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载所需文件（如 `openai-clip.zip`、`siglip2.zip`、`chinese-clip.zip`、`vision-object-detection-yolo11n.zip`、`ffmpeg.exe`），同样在应用内 **导入并解析** |
+| **模型 + FFmpeg** | **方式一**：下载 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，在应用内 **导入并解析**（可把 `ffmpeg.exe` 和 zip 一起加入）。**方式二**：从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载所需文件（如 `openai-clip.zip`、`siglip2.zip`、`chinese-clip.zip`、`ffmpeg.exe`），同样在应用内 **导入并解析** |
 | **VLC（Windows 源码）** | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到与 `main.py` 同级的 `vlc_lib/` |
 | **安装包用户** | 一般已全部内置 |
 
@@ -32,6 +32,14 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 **构建完成但新增向量为 0** — 链接被预检拦截、重复，或源视频解析失败；看 UI 构建摘要。
 
 **从旧版升级（≥ 1.0.82）** — 首次启动自动迁移：配置 schema v2、视频 ID（免重算）、legacy npy → **Lance** 向量库。多模型 profile 各自独立迁移。仍提示未完成则再启动一次。详见 `docs/migration_forced_upgrade_checklist.md` §4–§5。
+
+### 版本号（正式 / QQ 群测）
+
+- **唯一真相源：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。
+- **群测：** `1.0.88-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.88-beta.1.zip`；**不要**写入公开 `version.json`。
+- **正式：** `1.0.88`；打 tag `v1.0.88`；再更新 OSS `version.json`。
+- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.88-beta.1` < `1.0.88`）。
+- 打包：本地 `build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选，Inno Setup 二次打包可不加）。
 
 ---
 

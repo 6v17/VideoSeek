@@ -12,8 +12,6 @@ PACKAGES = [
     "faiss",
     "lancedb",
     "pyarrow",
-    "faster_whisper",
-    "ctranslate2",
     "yt_dlp",
     "fastapi",
     "uvicorn",
@@ -158,7 +156,7 @@ def main() -> None:
     except Exception as exc:
         print("certifi probe failed:", exc)
 
-    for name in ("ctranslate2", "faster_whisper", "pyarrow", "lancedb", "cv2", "faiss"):
+    for name in ("pyarrow", "lancedb", "cv2", "faiss"):
         try:
             mod = importlib.import_module(name)
             root = _package_root(mod)

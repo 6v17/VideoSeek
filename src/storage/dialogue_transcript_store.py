@@ -1,7 +1,8 @@
 """Shared dialogue transcripts — OCR/ASR text, independent of CLIP profiles.
 
-Vectors for semantic search stay in per-profile Lance ``dialogue_segments``.
-This store keeps reusable raw material in SQLite: time + text + language.
+Product hard-subtitle search reads this SQLite store. Per-profile Lance
+``dialogue_segments`` is legacy / deferred semantic only and is not written
+by the OCR indexing path.
 """
 
 from __future__ import annotations
@@ -764,83 +765,9 @@ def list_shared_transcript_segments(
     return rows
 
 
-def import_transcripts_from_profile_lance(*, config=None) -> int:
-    """Import text from any profile Lance dialogue table into the shared SQLite store.
-
-    Skips videos that already have a shared transcript. Returns imported video count.
-    """
-    from src.storage.lance_store import (
-        DIALOGUE_SEGMENTS_TABLE_NAME,
-        _connect_lance,
-        _list_table_names,
-        get_lance_dir,
-        list_dialogue_transcript_segments,
-    )
-
-    data_dir = get_data_storage_paths(config=config)["data_dir"]
-    assets_root = os.path.join(data_dir, "model_assets")
-    if not os.path.isdir(assets_root):
-        return 0
-
-    existing = {
-        str(item.get("video_id") or "").strip()
-        for item in list_dialogue_transcript_summaries(config=config)
-        if str(item.get("video_id") or "").strip()
-    }
-    imported = 0
-    for provider in os.listdir(assets_root):
-        provider_dir = os.path.join(assets_root, provider)
-        if not os.path.isdir(provider_dir):
-            continue
-        for variant in os.listdir(provider_dir):
-            profile_base = os.path.join(provider_dir, variant)
-            if not os.path.isdir(get_lance_dir(profile_base)):
-                continue
-            try:
-                db = _connect_lance(profile_base)
-                if DIALOGUE_SEGMENTS_TABLE_NAME not in _list_table_names(db):
-                    continue
-            except Exception:
-                continue
-            rows = list_dialogue_transcript_segments(
-                profile_base_dir=profile_base,
-                config=config,
-            )
-            by_video: dict[str, list[dict[str, Any]]] = {}
-            meta: dict[str, dict[str, str]] = {}
-            for row in rows:
-                vid = str(row.get("video_id") or "").strip()
-                if not vid or vid in existing:
-                    continue
-                by_video.setdefault(vid, []).append(row)
-                meta[vid] = {
-                    "library_path": str(row.get("library_path") or ""),
-                    "video_path": str(row.get("video_path") or ""),
-                    "asr_source": str(row.get("asr_source") or ""),
-                }
-            for vid, segs in by_video.items():
-                info = meta.get(vid) or {}
-                result = save_dialogue_transcript(
-                    vid,
-                    segs,
-                    library_path=info.get("library_path", ""),
-                    video_path=info.get("video_path", ""),
-                    asr_source=info.get("asr_source", ""),
-                    config=config,
-                )
-                if result.get("ok"):
-                    existing.add(vid)
-                    imported += 1
-    if imported:
-        logger.info("Imported %s dialogue transcripts into shared store", imported)
-    return imported
-
-
 def ensure_shared_transcripts(*, config=None) -> int:
-    """Ensure shared SQLite store exists; import from legacy profile Lance if empty."""
+    """Ensure the shared SQLite transcript store exists (no Lance import)."""
     os.makedirs(get_dialogue_store_dir(config=config), exist_ok=True)
     with _db(config=config):
         pass
-    if has_any_dialogue_transcript(config=config):
-        return 0
-    return import_transcripts_from_profile_lance(config=config)
+    return 0

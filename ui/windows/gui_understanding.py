@@ -455,7 +455,6 @@ class UnderstandingGuiMixin:
         page.input_caption_language.setEnabled(enabled)
         page.input_caption_concurrency.setEnabled(enabled)
         page.btn_test_vlm_connection.setEnabled(enabled)
-        page.btn_import_understanding_model.setEnabled(enabled)
         page.btn_save_config.setEnabled(enabled)
 
     def _is_current_page(self, page_name: str) -> bool:
@@ -673,8 +672,7 @@ class UnderstandingGuiMixin:
         evidence = dict(payload.get("evidence") or {})
         vision = dict(evidence.get("vision") or {})
         caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
-        objects = list(dict(vision.get("object_detection") or {}).get("objects") or [])
-        return bool(caption or objects)
+        return bool(caption)
 
     def _load_understanding_video_timeline(self):
         if not hasattr(self, "understanding_page"):
@@ -689,7 +687,6 @@ class UnderstandingGuiMixin:
                 page.chunk_caption_text,
                 self.texts.get("understanding_video_select_hint", "Select an indexed video."),
             )
-            page.chunk_objects_label.setText("")
             self._understanding_video_context = {}
             self._refresh_understanding_video_summary(None)
             self._refresh_understanding_video_meta(None)
@@ -735,7 +732,6 @@ class UnderstandingGuiMixin:
                 page.chunk_caption_text,
                 self.texts.get("understanding_video_no_chunks", "No semantic chunks for this video."),
             )
-            page.chunk_objects_label.setText("")
             self._refresh_understanding_video_summary(evidence)
 
     def _show_understanding_chunk_detail(self, index: int, payload=None):
@@ -759,7 +755,6 @@ class UnderstandingGuiMixin:
                     page.chunk_caption_text,
                     self.texts.get("understanding_chunk_pending", "Not generated yet."),
                 )
-                page.chunk_objects_label.setText("")
                 return
         if not payload:
             return
@@ -777,18 +772,6 @@ class UnderstandingGuiMixin:
             page.chunk_caption_text,
             caption or self.texts.get("understanding_chunk_no_caption", "No caption."),
         )
-        objects = list(dict(vision.get("object_detection") or {}).get("objects") or [])
-        if not objects:
-            page.chunk_objects_label.setText(self.texts.get("understanding_chunk_no_objects", "Detection: none"))
-        else:
-            parts = []
-            for obj in objects[:16]:
-                label = str(obj.get("label", "") or "?")
-                confidence = float(obj.get("confidence", 0.0) or 0.0)
-                parts.append(f"{label} ({confidence:.0%})")
-            page.chunk_objects_label.setText(
-                self.texts.get("understanding_chunk_objects", "Detection: {items}").format(items=", ".join(parts))
-            )
 
     def _handle_understanding_chunk_completed(self, index, total, payload):
         if not hasattr(self, "understanding_page"):
@@ -929,7 +912,7 @@ class UnderstandingGuiMixin:
             page.lbl_understanding_hint.setText(
                 self.texts.get(
                     "understanding_library_not_ready_hint",
-                    "Import YOLO and configure the description service below.",
+                    "Configure the description service below, then use Test connection.",
                 )
             )
         if not ready:
