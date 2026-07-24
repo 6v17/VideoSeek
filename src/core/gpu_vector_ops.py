@@ -1,13 +1,9 @@
-"""GPU vector utilities for full-GPU CUDA indexing (CuPy + FAISS-GPU)."""
+"""GPU vector utilities for full-GPU CUDA indexing (CuPy)."""
 from __future__ import annotations
 
 from typing import Any, Sequence
 
 import numpy as np
-
-from src.app.logging_utils import get_logger
-
-logger = get_logger("gpu_vector_ops")
 
 _FULL_GPU_ENV = "VIDEOSEEK_FULL_GPU_INDEX"
 
@@ -21,7 +17,7 @@ def is_cupy_array(value: Any) -> bool:
 
 
 def full_gpu_indexing_enabled(config=None) -> bool:
-    """True when embeddings should stay on GPU until final save/FAISS."""
+    """True when embeddings should stay on GPU until final host save (Lance D2H)."""
     import os
 
     force = os.environ.get(_FULL_GPU_ENV, "").strip().lower()
@@ -71,20 +67,3 @@ def gpu_to_numpy(batch_gpu) -> np.ndarray:
     if isinstance(batch_gpu, cp.ndarray):
         return cp.asnumpy(batch_gpu).astype(np.float32, copy=False)
     return np.asarray(batch_gpu, dtype=np.float32)
-
-
-def faiss_gpu_available(*, force_refresh: bool = False) -> bool:
-    cache_key = "_FAISS_GPU_PROBE"
-    cached = getattr(faiss_gpu_available, cache_key, None)
-    if not force_refresh and cached is not None:
-        return cached
-    available = False
-    try:
-        import faiss
-
-        available = hasattr(faiss, "StandardGpuResources") and hasattr(faiss, "GpuIndexFlatIP")
-    except Exception as exc:
-        logger.info("FAISS-GPU is unavailable: %s", exc)
-        available = False
-    setattr(faiss_gpu_available, cache_key, available)
-    return available

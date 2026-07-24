@@ -134,7 +134,7 @@ DEFAULT_CONFIG = {
     "download_quality": "best",
     "auto_cleanup_missing_files": False,
     "subtitle_sample_interval_sec": 1.2,
-    "subtitle_ocr_batch_size": 1,
+    "subtitle_ocr_batch_size": 4,
     "export_video_silent": False,
     "export_encode_mode": "original",
     "export_copy_extra_sec": 4,

@@ -1,4 +1,4 @@
-name: VideoSeek
+name: VideoSeek-CUDA
 channels:
   - conda-forge
   - defaults
@@ -8,3 +8,5 @@ dependencies:
   - pytest>=9.0
   - pip:
       - -r requirements.txt
+# After create: pip uninstall -y onnxruntime
+# (rapidocr may pull CPU ORT; keep onnxruntime-gpu only)

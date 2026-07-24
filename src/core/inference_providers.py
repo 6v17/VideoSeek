@@ -46,7 +46,7 @@ def is_cuda_inference_mode() -> bool:
         if mode == "cuda":
             logger.warning(
                 "CUDA inference mode is configured but CUDAExecutionProvider is unavailable; "
-                "GPU decode/indexing will fall back to DirectML or CPU where possible."
+                "GPU decode/indexing will fall back to CPU where possible."
             )
         return False
     return True
@@ -137,20 +137,27 @@ def ensure_cuda_runtime_dll_paths() -> list[str]:
 
 
 def preferred_gpu_provider_name() -> str:
-    return "CUDAExecutionProvider" if is_cuda_inference_mode() else "DmlExecutionProvider"
+    mode = get_inference_ep_mode()
+    if mode in {"dml", "directml"}:
+        return "DmlExecutionProvider"
+    return "CUDAExecutionProvider"
 
 
 def resolve_ort_providers(*, prefer_gpu: bool) -> list[str]:
     if not prefer_gpu:
         return ["CPUExecutionProvider"]
-    if is_cuda_inference_mode():
-        ensure_cuda_runtime_dll_paths()
-        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    mode = get_inference_ep_mode()
+    # Explicit Release-style opt-in only; CUDA experiment branch never auto-picks DML.
+    if mode in {"dml", "directml"}:
+        available = _get_available_ort_providers()
+        if "DmlExecutionProvider" in available:
+            return ["DmlExecutionProvider", "CPUExecutionProvider"]
+        return ["CPUExecutionProvider"]
+    if mode == "cpu":
+        return ["CPUExecutionProvider"]
+    ensure_cuda_runtime_dll_paths()
     available = _get_available_ort_providers()
-    if "DmlExecutionProvider" in available:
-        return ["DmlExecutionProvider", "CPUExecutionProvider"]
     if "CUDAExecutionProvider" in available:
-        ensure_cuda_runtime_dll_paths()
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]
 
@@ -160,11 +167,12 @@ def is_gpu_provider_active(providers: list[str]) -> bool:
 
 
 def gpu_runtime_fallback_hint() -> str:
-    if is_cuda_inference_mode():
+    mode = get_inference_ep_mode()
+    if mode in {"dml", "directml"}:
         return (
-            "Verify that onnxruntime-gpu[cuda,cudnn] is installed and that CUDA 12 / cuDNN 9 "
-            "runtime DLLs are available."
+            "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
         )
     return (
-        "Verify that onnxruntime-directml is installed and that DirectML / DirectX 12 is available."
+        "Verify that onnxruntime-gpu[cuda,cudnn] is installed and that CUDA 12 / cuDNN 9 "
+        "runtime DLLs are available."
     )

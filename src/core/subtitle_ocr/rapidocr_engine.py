@@ -1,8 +1,8 @@
 """RapidOCR (ONNX) wrapper for hard-subtitle recognition.
 
 Models are loaded from an imported understanding component directory
-(``vision/ocr/rapidocr-zh``). Inference uses onnxruntime; on Windows this can
-include DirectML when the RapidOCR backend / ORT build supports it.
+(``vision/ocr/rapidocr-zh``). On this CUDA experiment branch, inference uses
+``CUDAExecutionProvider`` when available; otherwise CPU (no DirectML path).
 
 Optional multi-ROI stack batch: several subtitle ROIs are padded/stacked into
 one image for a single RapidOCR pass, then split by Y bands. Ambiguous band
@@ -27,7 +27,7 @@ OCR_COMPONENT_ID = "vision/ocr/rapidocr-zh"
 _ENGINE_LOCK = threading.RLock()
 _ENGINE_CACHE: dict[str, Any] = {}
 _FORCE_CPU = False
-_DEFAULT_BATCH_SIZE = 1
+_DEFAULT_BATCH_SIZE = 4
 _MAX_BATCH_SIZE = 6
 _STACK_GAP_PX = 48
 _STACK_GAP_VALUE = 114
@@ -117,24 +117,22 @@ def resolve_subtitle_ocr_batch_size(*, config=None) -> int:
             return max(1, min(_MAX_BATCH_SIZE, int(raw)))
         except ValueError:
             pass
-    if config is not None:
-        try:
-            return max(1, min(_MAX_BATCH_SIZE, int(config.get("subtitle_ocr_batch_size", _DEFAULT_BATCH_SIZE))))
-        except (TypeError, ValueError):
-            return _DEFAULT_BATCH_SIZE
     try:
-        from src.app.config import DEFAULT_CONFIG, load_config
+        if config is not None:
+            value = int(config.get("subtitle_ocr_batch_size", _DEFAULT_BATCH_SIZE))
+        else:
+            from src.app.config import DEFAULT_CONFIG, load_config
 
-        cfg = load_config()
-        return max(
-            1,
-            min(
-                _MAX_BATCH_SIZE,
-                int(cfg.get("subtitle_ocr_batch_size", DEFAULT_CONFIG.get("subtitle_ocr_batch_size", _DEFAULT_BATCH_SIZE))),
-            ),
-        )
-    except Exception:
-        return _DEFAULT_BATCH_SIZE
+            cfg = load_config()
+            value = int(
+                cfg.get(
+                    "subtitle_ocr_batch_size",
+                    DEFAULT_CONFIG.get("subtitle_ocr_batch_size", _DEFAULT_BATCH_SIZE),
+                )
+            )
+    except (TypeError, ValueError, Exception):
+        value = _DEFAULT_BATCH_SIZE
+    return max(1, min(_MAX_BATCH_SIZE, int(value)))
 
 
 def is_rapidocr_available() -> bool:
@@ -307,27 +305,44 @@ def _build_engine(paths: dict[str, str], *, prefer_gpu: bool):
         kwargs["use_cls"] = False
         kwargs["max_side_len"] = 960
         kwargs["det_limit_side_len"] = 640
-        # Smaller rec batches are safer on weak / DirectML devices during long jobs.
+        # Smaller rec batches are safer on GPU devices during long jobs.
         kwargs["rec_batch_num"] = 2 if prefer_gpu else 4
+        # CUDA-only experiment branch: never enable DirectML for OCR.
+        kwargs["det_use_dml"] = False
+        kwargs["cls_use_dml"] = False
+        kwargs["rec_use_dml"] = False
+        want_cuda = False
         try:
             import onnxruntime as ort
 
+            from src.core.inference_providers import ensure_cuda_runtime_dll_paths
+
+            ensure_cuda_runtime_dll_paths()
             available = set(ort.get_available_providers())
             if prefer_gpu and "CUDAExecutionProvider" in available:
                 kwargs["det_use_cuda"] = True
                 kwargs["cls_use_cuda"] = True
                 kwargs["rec_use_cuda"] = True
-            if prefer_gpu and "DmlExecutionProvider" in available:
-                kwargs["det_use_dml"] = True
-                kwargs["cls_use_dml"] = True
-                kwargs["rec_use_dml"] = True
-                logger.info("RapidOCR DirectML enabled (providers=%s)", sorted(available))
+                want_cuda = True
+                logger.info("RapidOCR CUDA enabled (providers=%s)", sorted(available))
             elif not prefer_gpu:
                 logger.info("RapidOCR using CPU ExecutionProvider")
+            else:
+                raise RuntimeError(
+                    "RapidOCR requires CUDAExecutionProvider on this branch, but ORT providers are "
+                    f"{sorted(available)}. CPU onnxruntime likely shadowed onnxruntime-gpu. Fix with: "
+                    "pip uninstall -y onnxruntime ; "
+                    "pip install --force-reinstall --no-deps onnxruntime-gpu"
+                )
+        except RuntimeError:
+            raise
         except Exception as exc:
             logger.warning("RapidOCR provider probe failed: %s", exc)
         config_path = resolve_rapidocr_config_path()
-        return RapidOCR(config_path=config_path, **kwargs)
+        engine = RapidOCR(config_path=config_path, **kwargs)
+        if want_cuda:
+            _assert_rapidocr_sessions_use_cuda(engine)
+        return engine
     except ImportError:
         from rapidocr import RapidOCR
 
@@ -342,6 +357,33 @@ def _build_engine(paths: dict[str, str], *, prefer_gpu: bool):
                 ),
             }
         )
+
+
+def _assert_rapidocr_sessions_use_cuda(engine: Any) -> None:
+    """Fail fast if RapidOCR silently fell back to CPU sessions."""
+    checked = 0
+    for owner_name, attr_name in (
+        ("text_det", "infer"),
+        ("text_cls", "infer"),
+        ("text_rec", "session"),
+    ):
+        owner = getattr(engine, owner_name, None)
+        if owner is None:
+            continue
+        wrapper = getattr(owner, attr_name, None)
+        session = getattr(wrapper, "session", wrapper)
+        if session is None or not hasattr(session, "get_providers"):
+            continue
+        providers = list(session.get_providers() or [])
+        checked += 1
+        logger.info("RapidOCR %s providers=%s", owner_name, providers)
+        if not providers or providers[0] != "CUDAExecutionProvider":
+            raise RuntimeError(
+                f"RapidOCR {owner_name} did not activate CUDAExecutionProvider "
+                f"(got {providers}). Check onnxruntime-gpu install / CUDA DLLs."
+            )
+    if checked == 0:
+        logger.warning("RapidOCR CUDA requested but session providers could not be inspected")
 
 
 def clear_rapidocr_engine_cache() -> None:
@@ -366,7 +408,7 @@ def _mark_force_cpu(reason: str) -> None:
     with _ENGINE_LOCK:
         if not _FORCE_CPU:
             logger.warning(
-                "RapidOCR GPU/DirectML failed mid-run; sticking to CPU for this session. detail=%s",
+                "RapidOCR CUDA failed mid-run; sticking to CPU for this session. detail=%s",
                 str(reason or "").strip()[:500],
             )
         _FORCE_CPU = True
@@ -609,7 +651,7 @@ def ocr_frames_to_lines(
     try:
         rows = ocr_image_bgr(stacked, config=config, prefer_gpu=prefer_gpu)
     except Exception as exc:
-        # Tall stacked image is more likely to OOM on weak DirectML devices.
+        # Tall stacked image is more likely to OOM on GPU; fall back per-frame.
         if _is_ort_runtime_fail(exc):
             if _effective_prefer_gpu(prefer_gpu):
                 _mark_force_cpu(exc)

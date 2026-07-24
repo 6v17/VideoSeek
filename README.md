@@ -65,14 +65,14 @@
 
 ## 源码运行
 
-推荐 **Windows 10/11**。Linux / macOS 需自行调整 ONNX 运行时（见 `docs/quickstart.md`）。
+本分支为 **CUDA 实验路径**（NVIDIA GPU）。推荐 **Windows 10/11** + conda 环境 `VideoSeek-CUDA`。详见 `docs/cuda-experiment.md`。
 
 ```bash
-pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File scripts/install_cuda_deps.ps1
 python main.py
 ```
 
-也可用 Conda：`conda env create -f environment.yml` → `conda activate VideoSeek`。
+也可用 Conda：`conda env create -f environment.yml` → `conda activate VideoSeek-CUDA` → 运行 `scripts/install_cuda_deps.ps1`。
 
 首次启动会提示缺运行资源（安装包与源码用户均需在应用内导入）：
 
@@ -91,7 +91,7 @@ python main.py
 | `docs/quickstart.md` | 源码安装细节、排障、测试 |
 | `docs/for-agents.md` | 本机 Agent API 字段与示例 |
 | `docs/architecture.md` | 模块与数据流（开发者向） |
-| `docs/cuda-experiment.md` | 实验性 NVIDIA CUDA 建索（conda 实验室环境，非默认 Release 路径） |
+| `docs/cuda-experiment.md` | 本分支 CUDA 全链路环境与验证 |
 
 ## 许可证
 

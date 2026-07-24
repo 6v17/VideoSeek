@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 PREFIX = "index_progress"
@@ -134,7 +135,7 @@ def compute_overall_percent(file_index, file_total, stage_done, stage_total, *, 
 
 
 class IndexingProgressReporter:
-    """Throttle per-video progress emissions."""
+    """Throttle per-video progress emissions (safe to call from reader + encode threads)."""
 
     def __init__(
         self,
@@ -143,15 +144,16 @@ class IndexingProgressReporter:
         video_name: str,
         file_index: int = 1,
         file_total: int = 1,
-        min_interval_sec: float = 0.4,
+        min_interval_sec: float = 0.25,
     ):
         self._callback = callback
         self._video_name = video_name
         self._file_index = max(1, int(file_index or 1))
         self._file_total = max(1, int(file_total or 1))
-        self._min_interval = max(0.1, float(min_interval_sec))
+        self._min_interval = max(0.05, float(min_interval_sec))
         self._last_emit = 0.0
         self._last_stage = ""
+        self._lock = threading.Lock()
 
     def emit(
         self,
@@ -167,30 +169,31 @@ class IndexingProgressReporter:
         stage = str(stage or "").strip().lower()
         done = max(0, int(done))
         total = max(0, int(total))
-        now = time.monotonic()
-        if (
-            not force
-            and stage == self._last_stage
-            and now - self._last_emit < self._min_interval
-            and done < total
-            and done > 1
-        ):
-            return
-        self._last_emit = now
-        self._last_stage = stage
-        token = build_progress_token(
-            stage=stage,
-            video_name=self._video_name,
-            file_index=self._file_index,
-            file_total=self._file_total,
-            done=done,
-            total=total,
-        )
-        percent = compute_overall_percent(
-            self._file_index,
-            self._file_total,
-            done,
-            total,
-            cap=percent_cap,
-        )
+        with self._lock:
+            now = time.monotonic()
+            if (
+                not force
+                and stage == self._last_stage
+                and now - self._last_emit < self._min_interval
+                and done < total
+                and done > 1
+            ):
+                return
+            self._last_emit = now
+            self._last_stage = stage
+            token = build_progress_token(
+                stage=stage,
+                video_name=self._video_name,
+                file_index=self._file_index,
+                file_total=self._file_total,
+                done=done,
+                total=total,
+            )
+            percent = compute_overall_percent(
+                self._file_index,
+                self._file_total,
+                done,
+                total,
+                cap=percent_cap,
+            )
         self._callback(percent, token)

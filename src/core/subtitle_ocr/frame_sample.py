@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
 
-from src.media.thumbnail import get_single_thumbnail
+from src.core.subtitle_ocr.frame_decode import grab_frames_at_times, iter_frames_at_times
 
 
 def sample_times_in_segment(
@@ -83,70 +83,6 @@ def roi_likely_blank(roi: np.ndarray, *, min_std: float = 12.0, min_edge: float 
     return False
 
 
-def grab_frames_at_times(
-    video_path: str,
-    times_sec: Sequence[float],
-) -> list[tuple[float, np.ndarray]]:
-    """Return all ``(time_sec, frame)`` pairs (one shared decoder)."""
-    return list(iter_frames_at_times(video_path, times_sec))
-
-
-def iter_frames_at_times(
-    video_path: str,
-    times_sec: Sequence[float],
-) -> Iterator[tuple[float, np.ndarray]]:
-    """Yield frames with one VideoCapture; prefer forward ``grab`` for nearby stamps."""
-    ordered = sorted(max(0.0, float(t)) for t in times_sec)
-    if not ordered:
-        return
-
-    path = str(video_path or "").strip()
-    if not path:
-        return
-
-    capture = cv2.VideoCapture(path)
-    try:
-        opened = bool(capture.isOpened())
-        last_msec = -1e9
-        for t in ordered:
-            target_msec = t * 1000.0
-            frame = None
-            if opened:
-                try:
-                    gap = target_msec - last_msec
-                    if 0.0 <= gap <= 3500.0:
-                        # Step forward instead of keyframe-seek thrash.
-                        while True:
-                            pos = float(capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
-                            if pos >= target_msec - 45.0:
-                                break
-                            if not capture.grab():
-                                break
-                            new_pos = float(capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
-                            if new_pos - pos < 0.5:
-                                break
-                        ok, grabbed = capture.retrieve()
-                        if ok and grabbed is not None and getattr(grabbed, "size", 0) > 0:
-                            frame = grabbed
-                    if frame is None:
-                        capture.set(cv2.CAP_PROP_POS_MSEC, target_msec)
-                        ok, grabbed = capture.read()
-                        if ok and grabbed is not None and getattr(grabbed, "size", 0) > 0:
-                            frame = grabbed
-                    if frame is not None:
-                        last_msec = float(capture.get(cv2.CAP_PROP_POS_MSEC) or target_msec)
-                except Exception:
-                    frame = None
-            if frame is None:
-                frame = get_single_thumbnail(path, t)
-                if frame is not None:
-                    last_msec = target_msec
-            if frame is not None and isinstance(frame, np.ndarray) and frame.size > 0:
-                yield (t, frame)
-    finally:
-        capture.release()
-
-
 def crop_subtitle_roi(
     frame: np.ndarray,
     *,
@@ -169,3 +105,14 @@ def crop_subtitle_roi(
         new_h = max(1, int(round(roi.shape[0] * scale)))
         roi = cv2.resize(roi, (limit, new_h), interpolation=cv2.INTER_AREA)
     return roi
+
+
+# Keep type checkers aware of re-exported iterators.
+__all__ = [
+    "sample_times_in_segment",
+    "sample_times_across_timeline",
+    "roi_likely_blank",
+    "crop_subtitle_roi",
+    "iter_frames_at_times",
+    "grab_frames_at_times",
+]

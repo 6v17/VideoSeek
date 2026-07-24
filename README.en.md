@@ -65,14 +65,14 @@ Illustrated walkthrough (Chinese): **[User guide (Feishu)](https://ycnwd8tcjgtu.
 
 ## From source
 
-**Windows 10/11 recommended.** Linux / macOS: adjust ONNX runtime (see `docs/quickstart.md`).
+This branch is the **CUDA experiment path** (NVIDIA GPU). Prefer **Windows 10/11** + conda env `VideoSeek-CUDA`. See `docs/cuda-experiment.md`.
 
 ```bash
-pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File scripts/install_cuda_deps.ps1
 python main.py
 ```
 
-Or Conda: `conda env create -f environment.yml` → `conda activate VideoSeek`.
+Or Conda: `conda env create -f environment.yml` → `conda activate VideoSeek-CUDA` → run `scripts/install_cuda_deps.ps1`.
 
 Missing runtime assets (import in-app for both installer and source):
 
@@ -91,7 +91,7 @@ See **`docs/quickstart.md`** for troubleshooting and tests.
 | `docs/quickstart.md` | From-source setup, troubleshooting, tests |
 | `docs/for-agents.md` | Localhost Agent API |
 | `docs/architecture.md` | Architecture (developers) |
-| `docs/cuda-experiment.md` | Experimental NVIDIA CUDA indexing (conda lab env; not the default release path) |
+| `docs/cuda-experiment.md` | This branch: CUDA full pipeline setup and smoke tests |
 
 ## License
 

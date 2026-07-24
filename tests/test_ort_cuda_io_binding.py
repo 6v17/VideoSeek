@@ -73,19 +73,35 @@ class _VisionEngineStub(OnnxVisionBatchMixin):
         return outputs[0].astype(np.float32)
 
 
-def test_cuda_io_binding_disabled_for_dml_default(monkeypatch):
-    monkeypatch.delenv("VIDEOSEEK_INFERENCE_EP", raising=False)
+def _force_cuda_ep_available(monkeypatch):
+    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
     monkeypatch.delenv("VIDEOSEEK_CUDA_IO_BINDING", raising=False)
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
+    # Clear cached provider probe if a previous test populated it.
+    monkeypatch.setattr("src.core.inference_providers._AVAILABLE_ORT_PROVIDERS", None)
+
+
+def test_cuda_io_binding_disabled_for_explicit_dml(monkeypatch):
+    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "dml")
+    monkeypatch.delenv("VIDEOSEEK_CUDA_IO_BINDING", raising=False)
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["DmlExecutionProvider", "CPUExecutionProvider"],
+    )
+    monkeypatch.setattr("src.core.inference_providers._AVAILABLE_ORT_PROVIDERS", None)
     assert not binding.is_cuda_io_binding_enabled()
 
 
 def test_cuda_io_binding_enabled_in_cuda_mode(monkeypatch):
-    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    _force_cuda_ep_available(monkeypatch)
     assert binding.is_cuda_io_binding_enabled()
 
 
 def test_io_binding_runner_defers_output_binding(monkeypatch):
-    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    _force_cuda_ep_available(monkeypatch)
     session = _FakeCudaSession()
     runner = binding.create_cuda_visual_io_binding_runner(session, input_name="pixel_values")
 
@@ -103,7 +119,7 @@ def test_io_binding_runner_defers_output_binding(monkeypatch):
 
 
 def test_io_binding_runner_accepts_gpu_input(monkeypatch):
-    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    _force_cuda_ep_available(monkeypatch)
     session = _FakeCudaSession()
     runner = binding.create_cuda_visual_io_binding_runner(session, input_name="pixel_values")
     outputs = runner.run_gpu_input(123456789, (8, 3, 224, 224))
@@ -119,7 +135,7 @@ def test_resolve_output_shape_uses_runtime_batch():
 
 
 def test_visual_batch_uses_io_binding_on_cuda(monkeypatch):
-    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    _force_cuda_ep_available(monkeypatch)
     engine = _VisionEngineStub()
     session = _FakeCudaSession()
     engine.init_vision_batch_state(
@@ -141,7 +157,7 @@ def test_visual_batch_uses_io_binding_on_cuda(monkeypatch):
 
 
 def test_visual_batch_falls_back_when_io_binding_batch_mismatch(monkeypatch):
-    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    _force_cuda_ep_available(monkeypatch)
 
     class _PinnedBatchOneSession(_FakeCudaSession):
         def run_with_iobinding(self, io_binding):
@@ -168,7 +184,7 @@ def test_visual_batch_falls_back_when_io_binding_batch_mismatch(monkeypatch):
 
 
 def test_visual_batch_falls_back_to_session_run(monkeypatch):
-    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    _force_cuda_ep_available(monkeypatch)
 
     class _BrokenBindingSession(_FakeCudaSession):
         def run_with_iobinding(self, _io_binding):

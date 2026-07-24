@@ -4,12 +4,15 @@
 
 ## 1) 依赖与启动
 
+本分支（`feat/cuda-experiment`）依赖是 **CUDA 全链路**，不是 Release/DirectML。
+
 ```bash
-pip install -r requirements.txt
+conda activate VideoSeek-CUDA   # 或自建等价环境
+powershell -ExecutionPolicy Bypass -File scripts/install_cuda_deps.ps1
 python main.py
 ```
 
-Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 `onnxruntime-directml` 换成 `onnxruntime`。
+细节与验证见 [`docs/cuda-experiment.md`](cuda-experiment.md)。
 
 ## 2) 运行资源
 

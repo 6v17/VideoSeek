@@ -1,7 +1,7 @@
 """Build shared subtitle library via VAD + frame OCR (RapidOCR ONNX).
 
-Pipeline: FFmpeg PCM pipe → Silero VAD → sample frames inside speech segments
-→ decode thread + bounded queue → RapidOCR on main thread (CLIP-style overlap)
+Pipeline: FFmpeg PCM pipe → Silero VAD (CPU) → sample frames inside speech segments
+→ FFmpeg CUDA / OpenCV decode + ROI → RapidOCR (CUDA EP on experiment branch)
 → shared transcript JSON.
 Keyword search reads the shared store; CLIP semantic search is deferred.
 """

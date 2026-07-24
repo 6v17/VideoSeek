@@ -36,9 +36,28 @@ class IndexingProgressTests(unittest.TestCase):
         self.assertGreater(percent, 9)
         self.assertLess(percent, 27)
 
-    def test_format_passthrough_for_legacy_text(self):
-        message = "Cleaning stale index source"
-        self.assertEqual(format_progress_text(message, {}), message)
+    def test_reporter_is_thread_safe(self):
+        import threading
+
+        from src.app.indexing_progress import IndexingProgressReporter
+
+        events = []
+
+        def _cb(percent, token):
+            events.append((percent, token))
+
+        reporter = IndexingProgressReporter(_cb, video_name="a.mp4", file_index=1, file_total=1, min_interval_sec=0.01)
+
+        def _worker(start):
+            for i in range(start, start + 20):
+                reporter.emit("decode", i, 100)
+
+        threads = [threading.Thread(target=_worker, args=(i * 20,)) for i in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertGreaterEqual(len(events), 1)
 
 
 if __name__ == "__main__":

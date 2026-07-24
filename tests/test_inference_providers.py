@@ -54,12 +54,27 @@ def test_auto_cuda_when_directml_missing(monkeypatch):
 
 def test_cuda_mode_uses_cuda_ep(monkeypatch):
     monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
     assert is_cuda_inference_mode()
     assert preferred_gpu_provider_name() == "CUDAExecutionProvider"
     assert resolve_ort_providers(prefer_gpu=True) == [
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
     ]
+
+
+def test_cuda_mode_does_not_auto_pick_directml(monkeypatch):
+    monkeypatch.setenv("VIDEOSEEK_INFERENCE_EP", "cuda")
+    monkeypatch.setattr(
+        "src.core.inference_providers._get_available_ort_providers",
+        lambda: ["DmlExecutionProvider", "CPUExecutionProvider"],
+    )
+    assert not is_cuda_inference_mode()
+    assert preferred_gpu_provider_name() == "CUDAExecutionProvider"
+    assert resolve_ort_providers(prefer_gpu=True) == ["CPUExecutionProvider"]
 
 
 def test_ensure_cuda_runtime_dll_paths_is_idempotent(monkeypatch):

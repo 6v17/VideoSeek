@@ -1,10 +1,18 @@
-# VideoSeek — Python dependencies
-# Install: pip install -r requirements.txt
-# Conda:  conda env create -f environment.yml
+# VideoSeek — CUDA experiment branch dependencies
+# Preferred install:
+#   pip install -r requirements.txt
+#   pip install rapidocr-onnxruntime==1.4.4 --no-deps
 #
-# ONNX Runtime: Windows uses the DirectML build (GPU via DirectML); other platforms use the standard CPU wheel.
-onnxruntime-directml==1.23.0; sys_platform == "win32"
-onnxruntime==1.23.0; sys_platform != "win32"
+# Do NOT install onnxruntime / onnxruntime-directml on this branch.
+# If `python -c "import onnxruntime as ort; print(ort.get_available_providers())"`
+# lacks CUDAExecutionProvider, run:
+#   pip uninstall -y onnxruntime
+#   pip install --force-reinstall --no-deps onnxruntime-gpu
+
+onnxruntime-gpu
+PyNvVideoCodec
+nvidia-cuda-runtime-cu12
+cupy-cuda12x
 
 opencv-python==4.13.0.92
 scenedetect>=0.6.4,<0.8
@@ -22,8 +30,13 @@ yt-dlp
 rookiepy
 python-vlc
 
-# Hard-subtitle OCR (ONNX); VAD uses bundled Silero under resources/asr/
-rapidocr-onnxruntime==1.4.4
+# RapidOCR deps listed explicitly; install the package itself with --no-deps (see header).
+pyclipper>=1.2.0
+Shapely!=2.0.4,>=1.7.1
+PyYAML
+six
+tqdm
+# rapidocr-onnxruntime==1.4.4  # install via: pip install rapidocr-onnxruntime==1.4.4 --no-deps
 
 # Mobile bridge (local HTTP server / phone upload) — see src/web/mobile_bridge.py
 fastapi==0.136.0

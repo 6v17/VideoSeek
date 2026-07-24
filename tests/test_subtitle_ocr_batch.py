@@ -20,7 +20,11 @@ class SubtitleOcrBatchTests(unittest.TestCase):
         self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 6}), 6)
         self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 0}), 1)
         self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 99}), 6)
-        self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": "bad"}), 1)
+        self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": "bad"}), 4)
+
+    def test_resolve_batch_size_env_override(self):
+        with mock.patch.dict(__import__("os").environ, {"VIDEOSEEK_SUBTITLE_OCR_BATCH": "2"}, clear=False):
+            self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 1}), 2)
 
     def test_resolve_rapidocr_config_path_materializes_when_missing(self):
         import tempfile
@@ -122,6 +126,132 @@ class SubtitleOcrBatchTests(unittest.TestCase):
             lines = ocr_frames_to_lines(frames)
         self.assertEqual(lines, ["一", "二"])
         self.assertEqual(per_frame.call_count, 2)
+
+    def test_build_engine_prefers_cuda_without_dml(self):
+        import sys
+        import types
+
+        from src.core.subtitle_ocr import rapidocr_engine as engine
+
+        captured = {}
+
+        class FakeSession:
+            def get_providers(self):
+                return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+        class FakeInfer:
+            def __init__(self):
+                self.session = FakeSession()
+
+        class FakeRapidOCR:
+            def __init__(self, config_path=None, **kwargs):
+                captured.update(kwargs)
+                self.text_det = types.SimpleNamespace(infer=FakeInfer())
+                self.text_cls = types.SimpleNamespace(infer=FakeInfer())
+                self.text_rec = types.SimpleNamespace(session=FakeInfer())
+
+        fake_rapid = types.ModuleType("rapidocr_onnxruntime")
+        fake_rapid.RapidOCR = FakeRapidOCR
+        fake_ort = types.ModuleType("onnxruntime")
+        fake_ort.get_available_providers = lambda: [
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+
+        with mock.patch.dict(
+            sys.modules,
+            {"rapidocr_onnxruntime": fake_rapid, "onnxruntime": fake_ort},
+        ), mock.patch(
+            "src.core.subtitle_ocr.rapidocr_engine.resolve_rapidocr_config_path",
+            return_value="config.yaml",
+        ), mock.patch(
+            "src.core.inference_providers.ensure_cuda_runtime_dll_paths",
+            return_value=[],
+        ):
+            engine._build_engine(
+                {
+                    "det_model_path": "det.onnx",
+                    "rec_model_path": "rec.onnx",
+                    "cls_model_path": "cls.onnx",
+                },
+                prefer_gpu=True,
+            )
+
+        self.assertTrue(captured.get("det_use_cuda"))
+        self.assertTrue(captured.get("rec_use_cuda"))
+        self.assertFalse(captured.get("det_use_dml"))
+        self.assertFalse(captured.get("rec_use_dml"))
+
+    def test_build_engine_raises_when_cuda_ep_missing(self):
+        import sys
+        import types
+
+        from src.core.subtitle_ocr import rapidocr_engine as engine
+
+        fake_rapid = types.ModuleType("rapidocr_onnxruntime")
+        fake_rapid.RapidOCR = mock.Mock()
+        fake_ort = types.ModuleType("onnxruntime")
+        fake_ort.get_available_providers = lambda: ["CPUExecutionProvider", "AzureExecutionProvider"]
+
+        with mock.patch.dict(
+            sys.modules,
+            {"rapidocr_onnxruntime": fake_rapid, "onnxruntime": fake_ort},
+        ), mock.patch(
+            "src.core.subtitle_ocr.rapidocr_engine.resolve_rapidocr_config_path",
+            return_value="config.yaml",
+        ), mock.patch(
+            "src.core.inference_providers.ensure_cuda_runtime_dll_paths",
+            return_value=[],
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                engine._build_engine(
+                    {
+                        "det_model_path": "det.onnx",
+                        "rec_model_path": "rec.onnx",
+                        "cls_model_path": "cls.onnx",
+                    },
+                    prefer_gpu=True,
+                )
+        self.assertIn("CUDAExecutionProvider", str(ctx.exception))
+
+    def test_cuda_ocr_decode_falls_back_when_disabled(self):
+        from src.core.subtitle_ocr import frame_decode
+
+        frames = [(1.0, np.zeros((8, 8, 3), dtype=np.uint8))]
+
+        with mock.patch.dict(
+            __import__("os").environ, {"VIDEOSEEK_OCR_CUDA_DECODE": "0"}, clear=False
+        ), mock.patch.object(
+            frame_decode,
+            "_iter_frames_opencv",
+            return_value=iter(frames),
+        ) as opencv_iter, mock.patch.object(
+            frame_decode,
+            "_iter_frames_cuda",
+        ) as cuda_iter:
+            out = list(frame_decode.iter_frames_at_times("dummy.mp4", [1.0]))
+        self.assertEqual(len(out), 1)
+        opencv_iter.assert_called_once()
+        cuda_iter.assert_not_called()
+        self.assertEqual(frame_decode.get_last_ocr_frame_decode_backend(), "opencv")
+
+    def test_default_ocr_decode_uses_opencv(self):
+        from src.core.subtitle_ocr import frame_decode
+
+        frames = [(1.0, np.zeros((8, 8, 3), dtype=np.uint8))]
+        env = {k: v for k, v in __import__("os").environ.items() if k != "VIDEOSEEK_OCR_CUDA_DECODE"}
+        with mock.patch.dict(__import__("os").environ, env, clear=True), mock.patch.object(
+            frame_decode,
+            "_iter_frames_opencv",
+            return_value=iter(frames),
+        ) as opencv_iter, mock.patch.object(
+            frame_decode,
+            "_iter_frames_cuda",
+        ) as cuda_iter:
+            out = list(frame_decode.iter_frames_at_times("dummy.mp4", [1.0]))
+        self.assertEqual(len(out), 1)
+        opencv_iter.assert_called_once()
+        cuda_iter.assert_not_called()
 
     def test_pipeline_batches_rois(self):
         frames = [

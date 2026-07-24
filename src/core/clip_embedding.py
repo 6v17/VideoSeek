@@ -300,7 +300,7 @@ def prepare_inference_runtime(prefer_gpu=None, provider=None):
             resolved_provider = "clip_onnx"
     logger.info("Preparing inference runtime: configured_prefer_gpu=%s", configured_prefer_gpu)
     if is_cuda_inference_mode():
-        logger.info("Inference runtime preparation skipped DirectML probe (CUDA experiment mode)")
+        logger.info("Inference runtime preparation skipped legacy GPU probe (CUDA experiment mode)")
         return {
             "configured_prefer_gpu": configured_prefer_gpu,
             "effective_prefer_gpu": configured_prefer_gpu,
@@ -337,7 +337,7 @@ def prepare_inference_runtime(prefer_gpu=None, provider=None):
 
     probe = _run_gpu_runtime_probe_once()
     if probe["ok"]:
-        logger.info("GPU runtime probe succeeded; DirectML remains enabled for this run")
+        logger.info("GPU runtime probe succeeded; GPU remains enabled for this run")
         return {
             "configured_prefer_gpu": configured_prefer_gpu,
             "effective_prefer_gpu": True,
@@ -349,7 +349,7 @@ def prepare_inference_runtime(prefer_gpu=None, provider=None):
     if not _should_disable_gpu_for_probe_issue(probe, config=runtime_config):
         warning = _build_gpu_probe_soft_warning(probe["detail"])
         logger.warning(
-            "GPU runtime probe was inconclusive; keeping DirectML enabled for this run. issue=%s detail=%s",
+            "GPU runtime probe was inconclusive; keeping GPU enabled for this run. issue=%s detail=%s",
             probe["issue"],
             probe["detail"],
         )
@@ -584,7 +584,7 @@ def _run_isolated_gpu_probe():
             diagnostics["failure_kind"] = "visual_probe_failed"
             diagnostics["probe_exception_type"] = exc.__class__.__name__
             diagnostics["probe_exception_message"] = str(exc)
-            logger.exception("GPU probe child failed during visual DirectML validation")
+            logger.exception("GPU probe child failed during visual provider validation")
             return {
                 "ok": False,
                 "issue": "visual_probe_failed",
@@ -599,7 +599,7 @@ def _run_isolated_gpu_probe():
             diagnostics["failure_kind"] = "text_probe_failed"
             diagnostics["probe_exception_type"] = exc.__class__.__name__
             diagnostics["probe_exception_message"] = str(exc)
-            logger.exception("GPU probe child failed during text DirectML validation")
+            logger.exception("GPU probe child failed during text provider validation")
             return {
                 "ok": False,
                 "issue": "text_probe_failed",
@@ -646,7 +646,7 @@ def _build_gpu_runtime_warning(detail):
 
 def _build_gpu_probe_soft_warning(detail):
     base = (
-        "GPU runtime probe was inconclusive. VideoSeek will still try DirectML for this run and fall back to CPU only if actual inference fails."
+        "GPU runtime probe was inconclusive. VideoSeek will still try GPU for this run and fall back to CPU only if actual inference fails."
     )
     detail_text = str(detail or "").strip()
     if not detail_text:
@@ -846,8 +846,13 @@ def _run_indexing_frame_reader(
     stop_event,
     reader_error,
     stream_kwargs,
+    *,
+    progress_reporter=None,
+    estimated_frame_total=0,
 ):
     """Background thread: FFmpeg pipe decode runs here while the main thread runs GPU batches."""
+    produced = 0
+    estimated_total = max(0, int(estimated_frame_total or 0))
     try:
         for frame, timestamp in stream_frames_with_ffmpeg(video_path, **stream_kwargs):
             if stop_event.is_set():
@@ -860,12 +865,17 @@ def _run_indexing_frame_reader(
                     break
                 except queue.Full:
                     continue
+            produced += 1
+            if progress_reporter is not None:
+                progress_reporter.emit("decode", produced, estimated_total)
     except InterruptedError:
         logger.info("Indexing frame reader stopped for %s", os.path.basename(video_path))
     except Exception as exc:
         logger.exception("Indexing frame reader failed for %s", video_path)
         reader_error.append(exc)
     finally:
+        if progress_reporter is not None and produced > 0:
+            progress_reporter.emit("decode", produced, estimated_total, force=True)
         try:
             frame_queue.put(None, timeout=30.0)
         except queue.Full:
@@ -879,12 +889,17 @@ def _run_indexing_nvdec_frame_reader(
     stop_event,
     reader_error,
     stream_kwargs,
+    *,
+    progress_reporter=None,
+    estimated_frame_total=0,
 ):
     """Background thread: PyNvVideoCodec NVDEC decode yields GPU RGB frames."""
     from src.core.nvdec_cuda_decoder import stream_frames_nvdec_cuda_with_fallback
 
     fps = float(stream_kwargs.get("fps_override") or stream_kwargs.get("fps") or 1.0)
     should_stop = stream_kwargs.get("should_stop")
+    produced = 0
+    estimated_total = max(0, int(estimated_frame_total or 0))
     try:
         for frame, timestamp in stream_frames_nvdec_cuda_with_fallback(
             video_path,
@@ -901,12 +916,17 @@ def _run_indexing_nvdec_frame_reader(
                     break
                 except queue.Full:
                     continue
+            produced += 1
+            if progress_reporter is not None:
+                progress_reporter.emit("decode", produced, estimated_total)
     except InterruptedError:
         logger.info("NVDEC indexing frame reader stopped for %s", os.path.basename(video_path))
     except Exception as exc:
         logger.exception("NVDEC indexing frame reader failed for %s", video_path)
         reader_error.append(exc)
     finally:
+        if progress_reporter is not None and produced > 0:
+            progress_reporter.emit("decode", produced, estimated_total, force=True)
         try:
             frame_queue.put(None, timeout=30.0)
         except queue.Full:
@@ -1214,12 +1234,17 @@ def generate_vectors_and_index_for_video(
 
     with pipeline_profile_run():
         if _indexing_use_overlap_frame_reader():
-            frame_queue = queue.Queue(maxsize=max(32, frame_batch_size * 4))
+            # Keep enough prefetch so NVDEC/FFmpeg can continue while a GPU batch encodes.
+            frame_queue = queue.Queue(maxsize=max(128, frame_batch_size * 12))
             reader_error = []
             reader_target = _run_indexing_nvdec_frame_reader if use_zero_copy else _run_indexing_frame_reader
             reader_thread = threading.Thread(
                 target=reader_target,
                 args=(video_path, frame_queue, stop_event, reader_error, stream_kwargs),
+                kwargs={
+                    "progress_reporter": progress_reporter,
+                    "estimated_frame_total": estimated_frame_total,
+                },
                 name="VSIndexFrameReader",
                 daemon=True,
             )
@@ -1237,7 +1262,6 @@ def generate_vectors_and_index_for_video(
                         break
                     frame, timestamp = item
                     frames_decoded += 1
-                    _report_decode()
                     frame_batch.append(frame)
                     timestamp_batch.append(timestamp)
                     if len(frame_batch) < frame_batch_size:
