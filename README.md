@@ -97,3 +97,16 @@ python main.py
 Copyright (c) 2026 [6v17](https://github.com/6v17)
 
 采用 [AGPL-3.0](LICENSE)（GNU Affero General Public License v3.0）。
+
+## 感谢捐赠
+
+真心感谢每一位打赏支持 VideoSeek 的朋友😊，你们的鼓励是我继续把工具做好的动力🤗。名单按时间记录，**不公开金额**。
+
+想换成自己的头像，发邮件到 **2627538472@qq.com**，附上昵称和头像图就行💖💖💖。
+
+| | 昵称 / 留言 | 日期 |
+|:---:|:---|:---:|
+| <img src="https://ui-avatars.com/api/?name=%E7%83%AD%E5%BF%83%E7%94%A8%E6%88%B7&background=6b7280&color=fff&size=80" width="40" height="40" alt="" /> | 很好用！感谢！😋 | 2026-07-13 |
+| <img src="https://ui-avatars.com/api/?name=%E5%B2%81%E5%B2%81%E5%B9%B3%E5%AE%89&background=0d9488&color=fff&size=80" width="40" height="40" alt="" /> | **岁岁平安** — 软件很牛逼，你也很牛逼 | 2026-07-17 |
+| <img src="https://ui-avatars.com/api/?name=%E6%A6%A8%E4%B8%80%E6%9D%AF%E6%A9%99%E6%B1%81&background=d97706&color=fff&size=80" width="40" height="40" alt="" /> | **榨一杯橙汁** — 默默支持！ | 2026-07-29 |
+| <img src="https://ui-avatars.com/api/?name=%F0%9F%98%8A&background=6366f1&color=fff&size=80" width="40" height="40" alt="" /> | **😊** — 默默支持！ | 2026-07-29 |
