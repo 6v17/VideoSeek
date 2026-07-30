@@ -39,8 +39,6 @@
 ## 界面预览
 
 ![搜索界面](docs/assets/图搜视频.png)
-![搜索界面](docs/assets/文搜视频.png)
-![搜索界面](docs/assets/视频理解.png)
 
 ## 下载
 
