@@ -226,7 +226,7 @@ class MainWindow(
         self.library_page = LibraryPage()
         self.understanding_page = UnderstandingEvidencePage()
         self.settings_page = SettingsPage()
-        self.pages.addWidget(self._build_scroll_page(self.search_page))
+        self.pages.addWidget(self.search_page)
         self.pages.addWidget(self._build_scroll_page(self.library_page))
         self.pages.addWidget(self._build_scroll_page(self.understanding_page))
         self.pages.addWidget(self._build_scroll_page(self.link_page))
@@ -235,21 +235,37 @@ class MainWindow(
         main_layout.addWidget(self.content, 1)
 
         self.search_page.preview_placeholder.hide()
-        self.video_widget = QVideoWidget()
-        self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.video_widget.setAttribute(Qt.WA_NativeWindow, True)
-        # QVideoWidget is nested under QScrollArea / #PanelCard; without this, Qt may
-        # promote ancestors to QWidgetWindow and log: "must be a top level window."
+        self.preview_surface_stack = QStackedWidget()
+        self.preview_surface_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self.vlc_video_host = QWidget()
+        self.vlc_video_host.setObjectName("VlcVideoHost")
+        self.vlc_video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.vlc_video_host.setAttribute(Qt.WA_NativeWindow, True)
         dont_native_ancestors = getattr(
             Qt.WidgetAttribute, "WA_DontCreateNativeAncestors", None
         )
         if dont_native_ancestors is not None:
+            self.vlc_video_host.setAttribute(dont_native_ancestors, True)
+        self.vlc_video_host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.vlc_video_host.installEventFilter(self)
+
+        self.video_widget = QVideoWidget()
+        self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.video_widget.setAttribute(Qt.WA_NativeWindow, True)
+        # QVideoWidget is nested under page cards; without this, Qt may
+        # promote ancestors to QWidgetWindow and log: "must be a top level window."
+        if dont_native_ancestors is not None:
             self.video_widget.setAttribute(dont_native_ancestors, True)
         self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.video_widget.installEventFilter(self)
+
+        self.preview_surface_stack.addWidget(self.vlc_video_host)
+        self.preview_surface_stack.addWidget(self.video_widget)
+        self.preview_surface_stack.setCurrentWidget(self.vlc_video_host)
         self.search_page.preview_host.mouseDoubleClickEvent = self.open_current_preview_dialog
         self.search_page.btn_manage_presets.installEventFilter(self)
-        self.search_page.preview_host_layout.addWidget(self.video_widget, 1)
+        self.search_page.preview_host_layout.addWidget(self.preview_surface_stack, 1)
 
         self.result_table = self.search_page.result_table
 
@@ -358,7 +374,7 @@ class MainWindow(
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
-        self.settings_page.btn_team_apply.clicked.connect(self._on_team_apply_clicked)
+        self.settings_page.btn_team_copy_share.clicked.connect(self.copy_team_share_info)
 
         self.setAcceptDrops(True)
         for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
@@ -375,6 +391,8 @@ class MainWindow(
     def eventFilter(self, watched, event):  # noqa: N802
         if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
             if watched is getattr(self, "video_widget", None) or watched is getattr(
+                self, "vlc_video_host", None
+            ) or watched is getattr(
                 getattr(self, "search_page", None), "btn_manage_presets", None
             ):
                 # Native video surface / focused buttons would otherwise swallow page scrolling.
@@ -476,6 +494,7 @@ class MainWindow(
         self.search_page.preview_title.setText(t["preview_panel"])
         self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
         self.search_page.results_title.setText(t["results_panel"])
+        self.search_page.apply_results_float_texts(t)
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_shot_list_button()
         self._update_expand_preview_button()

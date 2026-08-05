@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QLabel, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
 
 from ui.views.table_views import populate_result_table
 from ui.widgets.result_table import ResultTable
@@ -33,12 +33,14 @@ class ResultView(QWidget):
         layout.setSpacing(0)
 
         self.stack = QStackedWidget()
+        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         if min_table_height is not None:
             self.stack.setMinimumHeight(min_table_height)
 
         self.table = table if table is not None else ResultTable()
         if min_table_height is not None:
             self.table.setMinimumHeight(min_table_height)
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.empty_panel = QWidget()
         empty_layout = QVBoxLayout(self.empty_panel)
@@ -53,7 +55,7 @@ class ResultView(QWidget):
 
         self.stack.addWidget(self.table)
         self.stack.addWidget(self.empty_panel)
-        layout.addWidget(self.stack)
+        layout.addWidget(self.stack, 1)
         self._sync_empty_overlay()
 
     @property

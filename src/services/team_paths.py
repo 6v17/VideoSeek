@@ -67,9 +67,22 @@ def normalize_team_mode(raw) -> str:
 
 
 def normalize_http_base(url: str, *, default_port: Optional[int] = None) -> str:
-    text = str(url or "").strip().rstrip("/")
+    text = str(url or "").strip().strip('"').strip("'").rstrip("/")
     if not text:
         return ""
+    # If the user pasted a whole status line, keep the first http(s) URL.
+    lower = text.lower()
+    if "http://" in lower or "https://" in lower:
+        for marker in ("http://", "https://"):
+            idx = lower.find(marker)
+            if idx >= 0:
+                text = text[idx:]
+                break
+        # cut trailing junk after host:port[/...]
+        for sep in (" ", "\t", "|", "·", "，", ","):
+            if sep in text:
+                text = text.split(sep, 1)[0].rstrip("/")
+                break
     if "://" not in text:
         text = f"http://{text}"
     if default_port is not None and text.count(":") == 1 and text.startswith("http"):
@@ -77,4 +90,13 @@ def normalize_http_base(url: str, *, default_port: Optional[int] = None) -> str:
         scheme, rest = text.split("://", 1)
         if "/" not in rest and rest.count(":") == 0:
             text = f"{scheme}://{rest}:{int(default_port)}"
+    parsed_host = ""
+    try:
+        from urllib.parse import urlparse
+
+        parsed_host = str(urlparse(text).hostname or "").strip()
+    except Exception:
+        parsed_host = ""
+    if not parsed_host:
+        return ""
     return text.rstrip("/")

@@ -37,7 +37,11 @@ def _prepare_vlc_runtime():
             os.add_dll_directory(vlc_dir)
         except OSError as exc:
             _log_vlc_debug("add_dll_directory", exc)
-    os.environ["PYTHON_VLC_LIB_PATH"] = os.path.join(vlc_dir, "libvlc.dll")
+    if sys.platform == "win32":
+        os.environ["PYTHON_VLC_LIB_PATH"] = os.path.join(vlc_dir, "libvlc.dll")
+    else:
+        # Bundled Windows DLLs must not override host libvlc discovery.
+        os.environ.pop("PYTHON_VLC_LIB_PATH", None)
 
     try:
         import vlc
@@ -107,6 +111,7 @@ class VlcPreviewPlayer:
         self._owns_instance = shared_instance is None
         self._instance = None
         self._player = None
+        self._current_media = None
         self._released = False
         self._current_video_path = ""
         self._pending_seek_ms = None
@@ -137,8 +142,8 @@ class VlcPreviewPlayer:
             return False
         try:
             media = self._instance.media_new(os.fspath(video_path), f":start-time={start_sec:.3f}")
-            self._player.set_media(media)
-            self._bind_output_window()
+            self._set_media(media)
+            self.rebind_output_window()
         except Exception as exc:
             _log_vlc_warning("prepare media playback", exc)
             return False
@@ -172,10 +177,7 @@ class VlcPreviewPlayer:
                 self._player.stop()
             except Exception as exc:
                 _log_vlc_debug("stop player", exc)
-            try:
-                self._player.set_media(None)
-            except Exception as exc:
-                _log_vlc_debug("clear player media", exc)
+            self._clear_media()
 
     def shutdown(self, fast=False):
         """Stop playback and release libvlc resources.
@@ -202,10 +204,7 @@ class VlcPreviewPlayer:
                 self._player.stop()
             except Exception as exc:
                 _log_vlc_debug("stop before shutdown", exc)
-            try:
-                self._player.set_media(None)
-            except Exception as exc:
-                _log_vlc_debug("clear media before shutdown", exc)
+            self._clear_media()
             try:
                 self._player.audio_set_mute(True)
             except Exception as exc:
@@ -302,20 +301,29 @@ class VlcPreviewPlayer:
     def has_locked_window(self):
         return not self._released and self._locked_stop_at_ms > 0 and not self._user_unlocked
 
+    def rebind_output_window(self):
+        """Re-attach libvlc output after host resize / fullscreen toggles."""
+        self._bind_output_window()
+
     def _bind_output_window(self):
         if self._player is None or self._released:
             return
         try:
+            # Force native window creation before reading winId.
+            self.host_widget.setAttribute(Qt.WA_NativeWindow, True)
             window_id = int(self.host_widget.winId())
         except Exception as exc:
             _log_vlc_debug("read host window id", exc)
             return
-        if sys.platform == "win32":
-            self._player.set_hwnd(window_id)
-        elif sys.platform == "darwin":
-            self._player.set_nsobject(window_id)
-        else:
-            self._player.set_xwindow(window_id)
+        try:
+            if sys.platform == "win32":
+                self._player.set_hwnd(window_id)
+            elif sys.platform == "darwin":
+                self._player.set_nsobject(window_id)
+            else:
+                self._player.set_xwindow(window_id)
+        except Exception as exc:
+            _log_vlc_debug("bind output window", exc)
 
     def _detach_output_window(self):
         if self._player is None:
@@ -329,6 +337,35 @@ class VlcPreviewPlayer:
                 self._player.set_xwindow(0)
         except Exception as exc:
             _log_vlc_debug("detach output window", exc)
+
+    def _release_media_object(self, media) -> None:
+        if media is None:
+            return
+        try:
+            media.release()
+        except Exception as exc:
+            _log_vlc_debug("release media", exc)
+
+    def _clear_media(self) -> None:
+        if self._player is not None:
+            try:
+                self._player.set_media(None)
+            except Exception as exc:
+                _log_vlc_debug("clear player media", exc)
+        old = self._current_media
+        self._current_media = None
+        self._release_media_object(old)
+
+    def _set_media(self, media) -> None:
+        old = self._current_media
+        self._current_media = media
+        try:
+            self._player.set_media(media)
+        except Exception:
+            self._current_media = old
+            self._release_media_object(media)
+            raise
+        self._release_media_object(old)
 
     def _handle_timeout(self):
         if self._player is None or self._released or self._stop_at_ms <= 0:
@@ -350,10 +387,7 @@ class VlcPreviewPlayer:
             self._player.pause()
         except Exception as exc:
             _log_vlc_debug("pause before replay", exc)
-        try:
-            self._player.set_media(None)
-        except Exception as exc:
-            _log_vlc_debug("clear media before replay", exc)
+        self._clear_media()
 
     def _pause_at_stop_time(self):
         stop_at_ms = self._stop_at_ms
@@ -386,8 +420,8 @@ class VlcPreviewPlayer:
         start_sec = max(0.0, float(target_ms) / 1000.0)
         try:
             media = self._instance.media_new(self._current_video_path, f":start-time={start_sec:.3f}")
-            self._player.set_media(media)
-            self._bind_output_window()
+            self._set_media(media)
+            self.rebind_output_window()
             result = self._player.play()
         except Exception as exc:
             _log_vlc_warning("prepare media playback", exc)

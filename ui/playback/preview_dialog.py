@@ -23,6 +23,28 @@ from ui.playback.vlc_player import VlcPreviewPlayer
 logger = get_logger("preview_dialog")
 
 
+class _PreviewVideoHost(QWidget):
+    """Native embed host that rebinds VLC after resize / fullscreen."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._player = None
+        self.setObjectName("VideoContainer")
+        self.setAttribute(Qt.WA_NativeWindow, True)
+        dont_native_ancestors = getattr(Qt.WidgetAttribute, "WA_DontCreateNativeAncestors", None)
+        if dont_native_ancestors is not None:
+            self.setAttribute(dont_native_ancestors, True)
+
+    def set_player(self, player):
+        self._player = player
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        player = self._player
+        if player is not None and getattr(player, "is_available", lambda: False)():
+            QTimer.singleShot(0, player.rebind_output_window)
+
+
 class ExportCancelledError(Exception):
     pass
 
@@ -128,8 +150,7 @@ class PreviewDialog(QDialog):
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
 
-        self.video_host = QWidget()
-        self.video_host.setObjectName("VideoContainer")
+        self.video_host = _PreviewVideoHost()
         self.video_host.setMinimumHeight(480)
         layout.addWidget(self.video_host, 1)
 
@@ -252,10 +273,12 @@ class PreviewDialog(QDialog):
         self._detail_notice = None
         self._segment_line_override = None
         self.update_timer.stop()
+        # Full teardown between loads avoids dirty libvlc state after rapid reopen/seek.
+        self._dispose_player()
         self._ensure_player()
-        self.player.stop()
         if self.isFullScreen():
             self.showNormal()
+            self._schedule_rebind()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
         self.video_path = str(video_path)
         self.start_sec = float(start_sec)
@@ -347,6 +370,8 @@ class PreviewDialog(QDialog):
     def _ensure_player(self):
         if self.player is None:
             self.player = VlcPreviewPlayer(self.video_host)
+            if hasattr(self.video_host, "set_player"):
+                self.video_host.set_player(self.player)
         return self.player
 
     def _dispose_player(self, fast=False):
@@ -357,6 +382,15 @@ class PreviewDialog(QDialog):
         finally:
             self.player.shutdown(fast=fast)
             self.player = None
+            if hasattr(self.video_host, "set_player"):
+                self.video_host.set_player(None)
+
+    def _schedule_rebind(self):
+        player = self.player
+        if player is None or not player.is_available():
+            return
+        QTimer.singleShot(0, player.rebind_output_window)
+        QTimer.singleShot(50, player.rebind_output_window)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Space:
@@ -499,9 +533,11 @@ class PreviewDialog(QDialog):
         if self.isFullScreen():
             self.showNormal()
             self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
+            self._schedule_rebind()
             return
         self.showFullScreen()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_exit_fullscreen", "Exit Fullscreen"))
+        self._schedule_rebind()
 
     def _lock_status_line(self):
         if not self._playback_ready or self._closing:
