@@ -58,14 +58,24 @@ class SearchScopeGuiMixin:
         )
 
     def _search_scope_picker_available(self) -> bool:
+        from src.services.team_mode_service import is_team_client_mode
+
         if self._search_scope_is_dialogue():
+            if is_team_client_mode():
+                return False
             return self._search_scope_ready_count() >= 2
-        if needs_search_index_schema_upgrade():
+        if not is_team_client_mode() and needs_search_index_schema_upgrade():
             return False
         return self._search_scope_ready_count() >= 2
 
     def _refresh_search_scope_entries(self, *, force: bool = False) -> None:
+        from src.services.team_mode_service import is_team_client_mode
+
         if self._search_scope_is_dialogue():
+            if is_team_client_mode():
+                self._dialogue_search_scope_entries_cache = []
+                self._dialogue_search_scope_entries_dirty = False
+                return
             if (
                 not force
                 and not getattr(self, "_dialogue_search_scope_entries_dirty", True)
@@ -83,8 +93,18 @@ class SearchScopeGuiMixin:
         if not force and not getattr(self, "_search_scope_entries_dirty", True) and self._search_scope_entries_cache:
             return
         try:
-            detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
-            self._search_scope_entries_cache = list(detail.get("entries", []))
+            if is_team_client_mode():
+                from src.app.config import load_config
+                from src.services.team_client_search import list_team_client_scope_entries
+
+                cfg = load_config()
+                self._search_scope_entries_cache = list_team_client_scope_entries(
+                    str(cfg.get("team_server_url") or ""),
+                    api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+                )
+            else:
+                detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
+                self._search_scope_entries_cache = list(detail.get("entries", []))
             self._search_scope_entries_dirty = False
         except Exception:
             self._search_scope_entries_cache = []

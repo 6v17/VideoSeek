@@ -198,6 +198,10 @@ class SettingsGuiMixin:
         )
         agent_api_enabled = bool(config.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"]))
         self.settings_page.input_agent_api_enabled.setCurrentIndex(1 if agent_api_enabled else 0)
+        team_mode = str(config.get("team_mode", DEFAULT_CONFIG.get("team_mode", "off")) or "off")
+        team_idx = self.settings_page.input_team_mode.findData(team_mode)
+        self.settings_page.input_team_mode.setCurrentIndex(0 if team_idx < 0 else team_idx)
+        self.settings_page.input_team_server_url.setText(str(config.get("team_server_url", "") or ""))
         self.settings_page.input_data_root.setText(get_configured_data_root(config))
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
@@ -208,10 +212,54 @@ class SettingsGuiMixin:
         self._settings_loading = False
         self._set_settings_dirty(False)
         self._refresh_agent_api_status()
+        self._refresh_team_mode_status()
         if hasattr(self, "_refresh_search_precision_controls"):
             self._refresh_search_precision_controls()
         if hasattr(self, "load_understanding_settings"):
             self.load_understanding_settings()
+
+    def _on_team_apply_clicked(self):
+        """Persist team fields and start/stop server or switch to client."""
+        try:
+            config = load_config()
+            config["team_mode"] = str(self.settings_page.input_team_mode.currentData() or "off")
+            config["team_server_url"] = str(self.settings_page.input_team_server_url.text() or "").strip()
+            save_config(config)
+            mode = str(config["team_mode"] or "off")
+            if mode == "client":
+                url = str(config.get("team_server_url") or "").strip()
+                if not url:
+                    self.show_info_dialog(
+                        self.texts.get("error_title", "Error"),
+                        self.texts.get(
+                            "setting_team_status_client",
+                            "员工机 · 连接 {url}",
+                        ).format(url="（未填写）"),
+                        kind="warning",
+                    )
+                    self._apply_team_mode_settings()
+                    self._apply_agent_api_settings()
+                    return
+                try:
+                    from src.services.team_client_search import probe_team_server
+
+                    probe_team_server(
+                        url,
+                        api_port_default=int(config.get("team_api_port", 8765) or 8765),
+                    )
+                except Exception as exc:
+                    self.show_info_dialog(
+                        self.texts.get("error_title", "Error"),
+                        f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=url)}\n{exc}",
+                        kind="warning",
+                    )
+            self._apply_team_mode_settings()
+            self._apply_agent_api_settings()
+            self._set_settings_dirty(False)
+            if hasattr(self, "refresh_library_table"):
+                self.refresh_library_table()
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("settings_save_failed", "Save failed"), exc)
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -243,6 +291,8 @@ class SettingsGuiMixin:
             self.settings_page.input_auto_cleanup_missing_files,
             self.settings_page.input_close_window_action,
             self.settings_page.input_agent_api_enabled,
+            self.settings_page.input_team_mode,
+            self.settings_page.input_team_server_url,
             self.settings_page.input_active_model_profile,
             self.settings_page.input_data_root,
             self.settings_page.input_ffmpeg_path,
@@ -475,6 +525,8 @@ class SettingsGuiMixin:
                 self.settings_page.input_close_window_action.currentData() or "exit"
             )
             config["agent_api_enabled"] = bool(self.settings_page.input_agent_api_enabled.currentData())
+            config["team_mode"] = str(self.settings_page.input_team_mode.currentData() or "off")
+            config["team_server_url"] = str(self.settings_page.input_team_server_url.text() or "").strip()
             selected_profile_id = str(self.settings_page.input_active_model_profile.currentData() or "").strip()
             models = config.get("models")
             if not isinstance(models, dict):
@@ -573,6 +625,7 @@ class SettingsGuiMixin:
                 self._offer_cleanup_old_after_storage_migrate("data", migration_result)
             self._set_settings_dirty(False)
             self._apply_agent_api_settings()
+            self._apply_team_mode_settings()
         except Exception as exc:
             detail = str(exc or "").strip()
             if "Data migration failed" in detail or "migration failed" in detail.lower():
@@ -584,7 +637,12 @@ class SettingsGuiMixin:
         if not hasattr(self, "agent_api_controller"):
             return
         from src.web.agent_api import is_agent_api_enabled
+        from src.services.team_mode_service import get_team_mode
 
+        if get_team_mode() == "server":
+            self.agent_api_controller.stop()
+            self._refresh_agent_api_status()
+            return
         if is_agent_api_enabled():
             url = self.agent_api_controller.start()
             if not url:
@@ -597,8 +655,62 @@ class SettingsGuiMixin:
             self.agent_api_controller.stop()
         self._refresh_agent_api_status()
 
+    def _apply_team_mode_settings(self):
+        if not hasattr(self, "team_mode_controller"):
+            return
+        status = self.team_mode_controller.apply_from_config()
+        self._refresh_team_mode_status(status)
+
+    def _refresh_team_mode_status(self, status=None):
+        if not hasattr(self, "settings_page"):
+            return
+        page = self.settings_page
+        if status is None and hasattr(self, "team_mode_controller"):
+            status = self.team_mode_controller.refresh_status()
+        status = status or {}
+        mode = str(status.get("mode") or "off")
+        if mode == "server":
+            api = status.get("api_base_url") or ""
+            media = status.get("media_base_url") or ""
+            err = str(status.get("error") or "").strip()
+            mounts = int(len(status.get("mounts") or []))
+            text = self.texts.get(
+                "setting_team_status_server",
+                "服务机 · API {api} · 视频 {media} · 挂载库 {n}",
+            ).format(api=api, media=media, n=mounts)
+            if err:
+                text = f"{text}\n{err}"
+            page.input_team_server_url.setEnabled(False)
+        elif mode == "client":
+            url = str(status.get("server_url") or page.input_team_server_url.text() or "").strip()
+            text = self.texts.get(
+                "setting_team_status_client",
+                "员工机 · 连接 {url}",
+            ).format(url=url or "（未填写）")
+            page.input_team_server_url.setEnabled(True)
+        else:
+            text = self.texts.get("setting_team_status_off", "团队模式关闭（本机独立使用）")
+            page.input_team_server_url.setEnabled(True)
+        page.lbl_team_status.setText(text)
+
     def _refresh_agent_api_status(self):
         if not hasattr(self, "settings_page"):
+            return
+        from src.services.team_mode_service import get_team_mode
+
+        if get_team_mode() == "server" and hasattr(self, "team_mode_controller"):
+            status = self.team_mode_controller.refresh_status()
+            running = bool(status.get("api_running"))
+            url = status.get("api_base_url") or ""
+            if running and url:
+                text = self.texts.get("setting_agent_api_status_running", "Running: {url}").format(url=url)
+                self.settings_page.btn_copy_agent_api_url.setEnabled(True)
+                self.settings_page.btn_copy_agent_starter.setEnabled(False)
+            else:
+                text = self.texts.get("setting_agent_api_status_stopped", "Stopped")
+                self.settings_page.btn_copy_agent_api_url.setEnabled(False)
+                self.settings_page.btn_copy_agent_starter.setEnabled(False)
+            self.settings_page.lbl_agent_api_status.setText(text)
             return
         running = hasattr(self, "agent_api_controller") and self.agent_api_controller.is_running()
         if running:

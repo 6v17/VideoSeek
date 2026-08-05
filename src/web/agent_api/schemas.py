@@ -20,10 +20,14 @@ class AgentSearchRequest(BaseModel):
     query_type: str = "text"
     # Alias for image search: same as query + query_type=image_path
     image_path: Optional[str] = None
+    # Team client upload: decode to a temp file on the server
+    image_base64: Optional[str] = None
+    image_mime: Optional[str] = None
     # visual (default) | dialogue — orthogonal to mode frame/chunk
     search_kind: Optional[str] = None
     top_k: Optional[int] = None
     mode: Optional[str] = None
+    search_mode: Optional[str] = None  # alias of mode for team clients
     min_score: Optional[float] = None
     search_precision_mode: Optional[str] = None
     client_request_id: Optional[str] = None
@@ -32,6 +36,7 @@ class AgentSearchRequest(BaseModel):
     pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
     pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
     preview_anchor_sec: Optional[float] = None
+    team_play_urls: bool = False
 
 
 class AgentBatchSearchExportOptions(BaseModel):

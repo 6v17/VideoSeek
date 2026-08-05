@@ -51,6 +51,29 @@ class LibraryIndexingGuiMixin:
         return self.texts.get(key, state)
 
     def _build_visual_tree_entries(self, *, register: bool = False) -> tuple[list[dict], list[str]]:
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            from src.app.config import load_config
+            from src.services.team_client_search import list_team_client_library_tree
+
+            cfg = load_config()
+            entries, library_paths = list_team_client_library_tree(
+                str(cfg.get("team_server_url") or ""),
+                api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+            )
+            rows = []
+            for item in entries:
+                state = str(item.get("asset_state") or "ready").strip().lower() or "ready"
+                rows.append(
+                    {
+                        **item,
+                        "status_text": self._asset_state_label(state),
+                        "status_tone": "ready" if state == "ready" else "pending",
+                    }
+                )
+            return rows, library_paths
+
         libraries = list_libraries()
         # Avoid hashing/walking the whole tree on every UI refresh (10k+ videos).
         entries = list_library_video_entries(register=register)
@@ -166,6 +189,7 @@ class LibraryIndexingGuiMixin:
             entries, library_paths = self._build_visual_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
             self._refresh_library_action_hints()
+            self._refresh_team_client_library_chrome()
             self._refresh_remove_library_button()
             if hasattr(self, "invalidate_search_scope_entries_cache"):
                 self.invalidate_search_scope_entries_cache()
@@ -177,7 +201,57 @@ class LibraryIndexingGuiMixin:
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
 
+    def _refresh_team_client_library_chrome(self) -> None:
+        """Hide local indexing / mutate actions when browsing a shared team library."""
+        from src.services.team_mode_service import is_team_client_mode
+
+        client = is_team_client_mode()
+        page = self.library_page
+        for name in (
+            "btn_add_lib",
+            "btn_remove_lib",
+            "btn_sync_db",
+            "btn_stop_index",
+            "btn_index_issues",
+            "btn_cleanup_missing",
+            "btn_vector_details",
+            "btn_debug_gpu_oom",
+            "btn_debug_system_oom",
+            "btn_build_dialogue_index",
+            "btn_reembed_dialogue",
+            "btn_clear_dialogue",
+            "btn_export_dialogue",
+            "btn_refresh_dialogue_library",
+            "btn_stop_dialogue_index",
+        ):
+            widget = getattr(page, name, None)
+            if widget is not None:
+                widget.setVisible(not client)
+        # Dialogue tab is local-only for now
+        if getattr(page, "btn_tab_dialogue", None) is not None:
+            page.btn_tab_dialogue.setEnabled(not client)
+            if client and hasattr(page, "set_library_mode"):
+                try:
+                    page.set_library_mode(0)
+                except Exception:
+                    pass
+        hint = getattr(page, "lbl_shared_library_hint", None)
+        if hint is not None and client:
+            hint.setText(
+                self.texts.get(
+                    "library_team_shared_hint",
+                    "员工机：显示服务机共享库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
+                )
+            )
+        elif hint is not None and hasattr(self, "_refresh_library_action_hints"):
+            # restore normal hint via existing helper when leaving client
+            pass
+
     def sync_library(self, path):
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            return
         # Sync every registered video under one library folder.
         entries, _ = self._build_visual_tree_entries()
         video_ids = [
@@ -195,9 +269,33 @@ class LibraryIndexingGuiMixin:
         )
 
     def open_library_folder(self, path):
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_open_remote_hint",
+                    "共享库文件在服务机上，员工机无法直接打开本地文件夹。请用搜索结果预览播放。",
+                ),
+                kind="info",
+            )
+            return
         open_folder_in_explorer(path)
 
     def select_video_folder(self):
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_readonly",
+                    "员工机不能添加本地库。请在服务机添加并索引。",
+                ),
+                kind="warning",
+            )
+            return
         path = QFileDialog.getExistingDirectory(self, self.texts["select_folder"])
         if not path:
             return
@@ -397,6 +495,18 @@ class LibraryIndexingGuiMixin:
         *,
         checked_only: bool = False,
     ):
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_readonly",
+                    "员工机不能添加本地库。请在服务机添加并索引。",
+                ),
+                kind="warning",
+            )
+            return
         if not self._ensure_startup_migration_idle("feature_indexing"):
             return
         selected_ids = video_ids

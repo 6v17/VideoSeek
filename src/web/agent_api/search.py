@@ -309,6 +309,7 @@ def _enrich_hit_payload(
     pad_before_sec: float,
     pad_after_sec: float,
     config=None,
+    team_play_urls: bool = False,
 ) -> Dict[str, Any]:
     video_path = _resolve_hit_video_path(hit, config=config)
     window = _expand_clip_window(
@@ -349,6 +350,20 @@ def _enrich_hit_payload(
         payload["video_id"] = video_id
     if duration is not None:
         payload["video_duration_sec"] = duration
+    if team_play_urls:
+        try:
+            from src.services.team_media_map import absolute_path_to_play_url
+            from src.services.team_mode_service import get_active_media_base_url, get_active_media_mounts
+
+            play_url = absolute_path_to_play_url(
+                video_path,
+                get_active_media_mounts(),
+                media_base_url=get_active_media_base_url(),
+            )
+            if play_url:
+                payload["play_url"] = play_url
+        except Exception:
+            logger.exception("Failed to build team play_url for %s", video_path)
     return payload
 
 
@@ -359,6 +374,7 @@ def _hits_to_payload(
     expand_frame_hits: bool,
     pad_before_sec: float,
     pad_after_sec: float,
+    team_play_urls: bool = False,
 ) -> List[Dict[str, Any]]:
     return [
         _enrich_hit_payload(
@@ -368,6 +384,7 @@ def _hits_to_payload(
             expand_frame_hits=expand_frame_hits,
             pad_before_sec=pad_before_sec,
             pad_after_sec=pad_after_sec,
+            team_play_urls=team_play_urls,
         )
         for rank, hit in enumerate(hits, start=1)
     ]
@@ -437,10 +454,34 @@ def get_agent_search_preset(preset_id: str, config=None) -> Dict[str, Any]:
 
 
 def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Optional[str], str]:
-    """Map common aliases (image_path) onto query + query_type."""
+    """Map common aliases (image_path / image_base64) onto query + query_type."""
     query = str(body.query or "").strip() or None
     query_type = str(body.query_type or "text").strip().lower() or "text"
     image_path = str(getattr(body, "image_path", None) or "").strip()
+    image_b64 = str(getattr(body, "image_base64", None) or "").strip()
+    if image_b64:
+        import base64
+        import tempfile
+
+        from src.app.config import get_data_storage_paths
+
+        raw = base64.b64decode(image_b64, validate=False)
+        mime = str(getattr(body, "image_mime", None) or "").strip().lower()
+        ext = ".png"
+        if "jpeg" in mime or "jpg" in mime:
+            ext = ".jpg"
+        elif "webp" in mime:
+            ext = ".webp"
+        elif "bmp" in mime:
+            ext = ".bmp"
+        paths = get_data_storage_paths()
+        cache_dir = str(paths.get("mobile_upload_dir") or paths.get("preview_cache_dir") or tempfile.gettempdir())
+        os.makedirs(cache_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(prefix="team_query_", suffix=ext, dir=cache_dir)
+        os.close(fd)
+        with open(tmp_path, "wb") as handle:
+            handle.write(raw)
+        return tmp_path, "image_path"
     if image_path:
         if query and query != image_path:
             raise ValueError(
@@ -466,7 +507,7 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         query_type=query_type,
         config=cfg,
     )
-    mode = _normalize_mode(body.mode)
+    mode = _normalize_mode(body.mode) or _normalize_mode(getattr(body, "search_mode", None))
     top_k = _clamp_top_k(body.top_k if body.top_k is not None else query_part.get("default_top_k"))
     min_score = body.min_score if body.min_score is not None else query_part.get("default_min_score")
     search_precision_mode = normalize_search_precision_mode(
@@ -482,6 +523,16 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         config=cfg,
     )
 
+    team_play_urls = bool(getattr(body, "team_play_urls", False))
+    if not team_play_urls:
+        try:
+            from src.services.team_paths import normalize_team_mode
+
+            if normalize_team_mode(cfg.get("team_mode", "off")) == "server":
+                team_play_urls = True
+        except Exception:
+            pass
+
     return {
         "preset": query_part.get("preset"),
         "preset_id": query_part.get("preset_id"),
@@ -496,6 +547,7 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         "top_k": top_k,
         "min_score": min_score,
         "search_precision_mode": search_precision_mode,
+        "team_play_urls": team_play_urls,
         "scope_library_paths": scope_library_paths,
         "scope_video_paths": scope_video_paths,
     }
@@ -651,6 +703,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             expand_frame_hits=bool(body.expand_frame_hits),
             pad_before_sec=float(body.pad_before_sec),
             pad_after_sec=float(body.pad_after_sec),
+            team_play_urls=bool(getattr(body, "team_play_urls", False) or resolved.get("team_play_urls")),
         ),
         "meta": {
             "returned": len(hits),

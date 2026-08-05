@@ -1,0 +1,28 @@
+# Example team video share — copy/rename to videos.conf or let the app write it.
+# Windows paths: use forward slashes, e.g. D:/Media/Videos/
+
+server {
+    # Prefer non-80 to avoid admin rights on Windows
+    listen       18080;
+    server_name  localhost;
+
+    # Health / placeholder
+    location = /health {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Video library root. App will replace alias and optionally listen port.
+    location /videos/ {
+        alias   html/;   # TODO: app sets e.g. alias D:/NAS/Videos/;
+        autoindex off;
+
+        # Enable seeking in VLC / players
+        add_header Accept-Ranges bytes;
+
+        # Optional: only allow LAN (uncomment and edit)
+        # allow 192.168.0.0/16;
+        # allow 10.0.0.0/8;
+        # deny  all;
+    }
+}

@@ -103,14 +103,19 @@ def count_indexed_ready_videos(config=None) -> int:
 def resolve_active_search_library_scope(config=None) -> list[str] | None:
     """Return selected library roots for the current search, or None for all libraries."""
     from src.services.library_service import list_search_scope_library_options, needs_search_index_schema_upgrade
+    from src.services.team_mode_service import is_team_client_mode
     from src.storage.config_store import get_search_scope_library_paths, get_search_scope_mode, get_search_scope_video_paths
 
-    if needs_search_index_schema_upgrade(config):
+    if not is_team_client_mode(config) and needs_search_index_schema_upgrade(config):
         return None
     if get_search_scope_mode(config) != "selected":
         return None
     if get_search_scope_video_paths(config):
         return None
+    # Team client: trust saved library paths (server roots); skip local option count.
+    if is_team_client_mode(config):
+        paths = get_search_scope_library_paths(config)
+        return list(paths) if paths else None
     if len(list_search_scope_library_options()) < 2:
         return None
     paths = get_search_scope_library_paths(config)
@@ -122,13 +127,14 @@ def resolve_active_search_library_scope(config=None) -> list[str] | None:
 def resolve_active_search_video_scope(config=None) -> list[str] | None:
     """Return selected indexed video paths, or None to search all indexed videos."""
     from src.services.library_service import needs_search_index_schema_upgrade
+    from src.services.team_mode_service import is_team_client_mode
     from src.storage.config_store import (
         get_search_scope_library_paths,
         get_search_scope_mode,
         get_search_scope_video_paths,
     )
 
-    if needs_search_index_schema_upgrade(config):
+    if not is_team_client_mode(config) and needs_search_index_schema_upgrade(config):
         return None
     if get_search_scope_mode(config) != "selected":
         return None
@@ -137,6 +143,9 @@ def resolve_active_search_video_scope(config=None) -> list[str] | None:
         return list(video_paths)
     library_paths = get_search_scope_library_paths(config)
     if library_paths:
+        if is_team_client_mode(config):
+            # Prefer library-level scope on the server (per-library indexes live there).
+            return None
         if per_library_indexes_ready(library_paths, config=config):
             return None
         expanded = list_ready_video_paths_for_libraries(library_paths, config=config)

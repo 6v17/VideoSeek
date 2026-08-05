@@ -196,6 +196,8 @@ class TrayGuiMixin:
         shutdown_thread(getattr(self, "remove_library_worker", None), stop_first=True, wait_ms=2000)
         shutdown_thread(getattr(self, "_local_vector_detail_worker", None), wait_ms=1500)
         self.mobile_bridge_controller.shutdown()
+        if hasattr(self, "team_mode_controller"):
+            self.team_mode_controller.shutdown()
         if hasattr(self, "agent_api_controller"):
             self.agent_api_controller.shutdown()
         self.indexing_controller.shutdown()

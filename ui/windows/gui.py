@@ -62,6 +62,7 @@ from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
 from ui.widgets.preview_panel import _scroll_ancestor_vertically
 from ui.controllers.agent_api_controller import AgentApiController
+from ui.controllers.team_mode_controller import TeamModeController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController
 from ui.controllers.video_download_controller import VideoDownloadController
 from ui.controllers.preview_controller import PreviewController
@@ -169,6 +170,7 @@ class MainWindow(
         self.mobile_bridge_controller.search_requested.connect(self._handle_mobile_search_requested)
         self.mobile_bridge_controller.status_changed.connect(self._handle_mobile_bridge_status_changed)
         self.agent_api_controller = AgentApiController(self)
+        self.team_mode_controller = TeamModeController(self)
         self.runtime_resource_controller = RuntimeResourceController(self)
         self.runtime_resource_controller.startup_cancelled.connect(self._handle_runtime_resource_exit)
         self.runtime_resource_controller.resources_ready.connect(self._finish_runtime_resource_download)
@@ -356,6 +358,7 @@ class MainWindow(
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
+        self.settings_page.btn_team_apply.clicked.connect(self._on_team_apply_clicked)
 
         self.setAcceptDrops(True)
         for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
@@ -520,6 +523,8 @@ class MainWindow(
                 "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
             )
         )
+        if hasattr(self, "_refresh_team_client_library_chrome"):
+            self._refresh_team_client_library_chrome()
         self.library_page.btn_add_lib.setText(t["add_folder"])
         self.library_page.btn_remove_lib.setText(t.get("remove_library", "Remove Library"))
         if hasattr(self, "_refresh_library_action_hints"):
@@ -700,6 +705,7 @@ class MainWindow(
         self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
+        self._apply_team_mode_settings()
         self._apply_agent_api_settings()
         QTimer.singleShot(0, self._bootstrap_understanding_resources)
         QTimer.singleShot(1500, self._idle_maintain_library_metadata)

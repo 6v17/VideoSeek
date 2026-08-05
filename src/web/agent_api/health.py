@@ -229,4 +229,24 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "dialogue_index_ready": dialogue_ready,
         "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
         "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
+        "team": _build_team_health(config),
     }
+
+
+def _build_team_health(config) -> Dict[str, Any]:
+    try:
+        from src.services.team_mode_service import build_team_server_status, get_active_media_mounts
+        from src.services.team_paths import normalize_team_mode
+
+        status = build_team_server_status(config)
+        return {
+            "mode": normalize_team_mode(config.get("team_mode", "off")),
+            "media_base_url": status.get("media_base_url") or "",
+            "api_base_url": status.get("api_base_url") or "",
+            "nginx_running": bool(status.get("nginx_running")),
+            "mount_count": len(get_active_media_mounts() or status.get("mounts") or []),
+            "mounts": status.get("mounts") or [],
+        }
+    except Exception:
+        return {"mode": "off"}
+

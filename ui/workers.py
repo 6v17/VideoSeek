@@ -131,7 +131,31 @@ class SearchWorker(QThread):
     def run(self):
         config = self.config
         try:
+            from src.app.config import load_config
+            from src.services.team_paths import normalize_team_mode
             from src.services.search_service import filter_hits_by_min_score, run_dialogue_search, run_search
+
+            app_cfg = load_config()
+            if normalize_team_mode(app_cfg.get("team_mode", "off")) == "client":
+                from src.services.team_client_search import run_team_client_search
+
+                kind = str(config.search_kind or "").strip().lower()
+                if kind == "dialogue":
+                    raise RuntimeError("Team client mode does not support dialogue search yet.")
+                results = run_team_client_search(
+                    server_url=str(app_cfg.get("team_server_url") or ""),
+                    query_data=config.query,
+                    is_text=bool(config.is_text),
+                    search_mode=config.search_mode,
+                    search_precision_mode=config.search_precision_mode,
+                    top_k=config.top_k,
+                    scope_video_paths=config.scope_video_paths or None,
+                    scope_library_paths=config.scope_library_paths or None,
+                    api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
+                )
+                results = filter_hits_by_min_score(results, config.min_score)
+                self.result_ready.emit(list(results) if results is not None else [])
+                return
 
             kind = str(config.search_kind or "").strip().lower()
             if kind == "dialogue":

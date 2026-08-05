@@ -144,6 +144,10 @@ DEFAULT_CONFIG = {
     "agent_api_search_timeout_precise_sec": 180,
     "agent_api_batch_timeout_sec": 1200,
     "agent_api_default_image_precision": "fast",
+    "team_mode": "off",
+    "team_api_port": 8765,
+    "team_nginx_port": 18080,
+    "team_server_url": "",
     "search_telemetry_enabled": True,
     "locate_clip_bias_auto_tune_enabled": False,
     "show_debug_test_buttons": False,
@@ -169,6 +173,8 @@ CONFIG_BOUNDS = {
     "agent_api_search_timeout_fast_sec": (30, 600),
     "agent_api_search_timeout_precise_sec": (30, 900),
     "agent_api_batch_timeout_sec": (60, 7200),
+    "team_api_port": (1024, 65535),
+    "team_nginx_port": (1024, 65535),
     "preview_seconds": (2, 20),
     "preview_width": (160, 1920),
     "preview_height": (90, 1080),
@@ -202,6 +208,8 @@ CONFIG_INT_KEYS = {
     "embedding_batch_size",
     "min_chunk_size",
     "subtitle_ocr_batch_size",
+    "team_api_port",
+    "team_nginx_port",
 }
 
 CONFIG_ENUMS = {
@@ -211,6 +219,7 @@ CONFIG_ENUMS = {
     "search_precision_mode": {"fast", "precise"},
     "image_pixel_rerank_probe_mode": {"index", "fixed"},
     "agent_api_default_image_precision": {"fast", "precise"},
+    "team_mode": {"off", "server", "client"},
     "export_encode_mode": {"copy", "original"},
     "search_scope_mode": {"all", "selected"},
     "dialogue_search_scope_mode": {"all", "selected"},
@@ -541,6 +550,7 @@ def _sanitize_general_settings(config):
         sanitized.get("free_notice_seen", DEFAULT_CONFIG["free_notice_seen"]),
         DEFAULT_CONFIG["free_notice_seen"],
     )
+    sanitized["team_server_url"] = str(sanitized.get("team_server_url", "") or "").strip()
     sanitized["search_video_discovery_enabled"] = _coerce_bool(
         sanitized.get(
             "search_video_discovery_enabled",

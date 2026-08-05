@@ -59,3 +59,8 @@ docs/video_download_page_design.md
 docs/remote_links.example.txt
 .ai/
 article.md
+
+# Team mode: generated nginx site config (app writes videos.conf at runtime)
+server/nginx/conf/conf.d/videos.conf
+server/nginx/logs/
+server/nginx/temp/

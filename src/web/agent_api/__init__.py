@@ -116,7 +116,7 @@ __all__ = [
 
 
 def is_agent_api_enabled(config=None) -> bool:
-    """Whether the localhost Agent API should run (config + env override)."""
+    """Whether the Agent API should run (config + env override + team server mode)."""
     forced = str(os.environ.get("VIDEOSEEK_AGENT_API", "")).strip().lower()
     if forced in {"0", "false", "no", "off"}:
         return False
@@ -124,6 +124,10 @@ def is_agent_api_enabled(config=None) -> bool:
         return True
     if config is None:
         config = load_config()
+    from src.services.team_paths import normalize_team_mode
+
+    if normalize_team_mode(config.get("team_mode", "off")) == "server":
+        return True
     return bool(config.get("agent_api_enabled", False))
 
 

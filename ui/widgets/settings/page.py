@@ -198,6 +198,28 @@ class SettingsPage(QWidget, SettingsFormMixin):
         agent_api_buttons_layout.addWidget(self.btn_copy_agent_api_url, 0)
         agent_api_buttons_layout.addWidget(self.btn_copy_agent_starter, 0)
         agent_api_bundle_layout.addWidget(agent_api_buttons, 0)
+        self.input_team_mode = NoWheelComboBox()
+        self.input_team_server_url = QLineEdit()
+        self.input_team_server_url.setPlaceholderText("http://192.168.1.10:8765")
+        self.lbl_team_status = QLabel()
+        self.lbl_team_status.setObjectName("StatusHint")
+        self.lbl_team_status.setWordWrap(True)
+        self.btn_team_apply = QPushButton()
+        self.btn_team_apply.setObjectName("AccentGhostButton")
+        self.btn_team_apply.setMinimumHeight(34)
+        self.input_team_bundle = QWidget()
+        team_bundle_layout = QVBoxLayout(self.input_team_bundle)
+        team_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        team_bundle_layout.setSpacing(6)
+        team_row = QWidget()
+        team_row_layout = QHBoxLayout(team_row)
+        team_row_layout.setContentsMargins(0, 0, 0, 0)
+        team_row_layout.setSpacing(8)
+        team_row_layout.addWidget(self.input_team_mode, 0)
+        team_row_layout.addWidget(self.input_team_server_url, 1)
+        team_row_layout.addWidget(self.btn_team_apply, 0)
+        team_bundle_layout.addWidget(team_row)
+        team_bundle_layout.addWidget(self.lbl_team_status)
         self.input_export_video_silent = NoWheelComboBox()
         self.input_active_model_profile = NoWheelComboBox()
         self.btn_download_runtime_resources = QPushButton()
@@ -243,6 +265,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_auto_cleanup_missing_files = ClickableLabel()
         self.label_close_window_action = ClickableLabel()
         self.label_agent_api_enabled = ClickableLabel()
+        self.label_team_mode = ClickableLabel()
         self.label_active_model_profile = ClickableLabel()
         self.label_data_root = ClickableLabel()
         self.label_ffmpeg_path = ClickableLabel()
@@ -286,6 +309,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_auto_cleanup_missing_files = QLabel()
         self.hint_close_window_action = QLabel()
         self.hint_agent_api_enabled = QLabel()
+        self.hint_team_mode = QLabel()
         self.hint_active_model_profile = QLabel()
         self.hint_data_root = QLabel()
         self.hint_ffmpeg_path = QLabel()
@@ -352,6 +376,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_close_window_action, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_agent_api_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_team_mode, width=COMPONENT_SIZES["settings_input_width"] + 72)
         self._configure_setting_input(self.input_export_video_silent, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_active_model_profile, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
@@ -607,6 +632,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_agent_api_enabled,
             self.input_agent_api_bundle,
             self.hint_agent_api_enabled,
+        )
+        self._add_setting_row(
+            self.section_general_form,
+            3,
+            self.label_team_mode,
+            self.input_team_bundle,
+            self.hint_team_mode,
         )
         self._add_setting_row(
             self.section_model_gpu_form,
@@ -985,6 +1017,27 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files"])
         self.label_close_window_action.setText(texts["setting_close_window_action"])
         self.label_agent_api_enabled.setText(texts["setting_agent_api_enabled"])
+        self.label_team_mode.setText(
+            texts.get("setting_team_mode", _fallback_text(texts, "setting_team_mode", "团队模式", "Team mode"))
+        )
+        self.btn_team_apply.setText(
+            texts.get("setting_team_apply", _fallback_text(texts, "setting_team_apply", "应用团队模式", "Apply team mode"))
+        )
+        current_team_mode = self.input_team_mode.currentData()
+        self.input_team_mode.blockSignals(True)
+        self.input_team_mode.clear()
+        self.input_team_mode.addItem(
+            texts.get("setting_team_mode_off", "关闭（本机）"), "off"
+        )
+        self.input_team_mode.addItem(
+            texts.get("setting_team_mode_server", "本机作为服务机"), "server"
+        )
+        self.input_team_mode.addItem(
+            texts.get("setting_team_mode_client", "本机作为员工机"), "client"
+        )
+        restore_team = self.input_team_mode.findData(current_team_mode)
+        self.input_team_mode.setCurrentIndex(0 if restore_team < 0 else restore_team)
+        self.input_team_mode.blockSignals(False)
         self.btn_copy_agent_api_url.setText(texts["setting_agent_api_copy_url"])
         self.btn_copy_agent_starter.setText(texts["setting_agent_api_copy_starter"])
         current_agent_api_enabled = self.input_agent_api_enabled.currentData()
@@ -1115,6 +1168,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files_hint"])
         self.hint_close_window_action.setText(texts["setting_close_window_action_hint"])
         self.hint_agent_api_enabled.setText(texts["setting_agent_api_enabled_hint"])
+        self.hint_team_mode.setText(
+            texts.get(
+                "setting_team_mode_hint",
+                "服务机：启动局域网搜索 + nginx 视频分享。员工机：填写服务机地址后，搜索走服务器，预览用 HTTP URL。",
+            )
+        )
         self.hint_active_model_profile.setText(
             _fallback_text(
                 texts,
