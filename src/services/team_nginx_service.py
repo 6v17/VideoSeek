@@ -22,7 +22,16 @@ logger = get_logger("team_nginx")
 _process: Optional[subprocess.Popen] = None
 
 
+def ensure_nginx_runtime_dirs() -> None:
+    """Fresh clones omit gitignored logs/temp; nginx needs them before any -t/-s/start."""
+    root = get_nginx_root()
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(root, "temp"), exist_ok=True)
+    os.makedirs(get_nginx_conf_d_dir(), exist_ok=True)
+
+
 def _run_nginx(args: List[str], *, timeout: float = 8.0) -> subprocess.CompletedProcess:
+    ensure_nginx_runtime_dirs()
     exe = get_nginx_exe()
     root = get_nginx_root()
     conf = os.path.join(root, "conf", "nginx.conf")
@@ -110,6 +119,7 @@ def start_nginx(*, library_paths: List[str], listen_port: int) -> List[Dict[str,
     global _process
     if not nginx_bundle_ready():
         raise RuntimeError("Embedded nginx not found. Expected server/nginx/nginx.exe")
+    ensure_nginx_runtime_dirs()
     mounts = write_videos_conf(library_paths=library_paths, listen_port=listen_port)
     ok, detail = test_config()
     if not ok:
@@ -123,9 +133,6 @@ def start_nginx(*, library_paths: List[str], listen_port: int) -> List[Dict[str,
     exe = get_nginx_exe()
     root = get_nginx_root()
     conf = os.path.join(root, "conf", "nginx.conf")
-    # Ensure nginx can write pid/logs (fresh bundles may lack logs/).
-    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
-    os.makedirs(os.path.join(root, "temp"), exist_ok=True)
     creationflags = 0
     if os.name == "nt":
         # CREATE_NO_WINDOW only — DETACHED_PROCESS can prevent a reliable master process.
