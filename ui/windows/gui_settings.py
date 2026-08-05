@@ -218,48 +218,41 @@ class SettingsGuiMixin:
         if hasattr(self, "load_understanding_settings"):
             self.load_understanding_settings()
 
-    def _on_team_apply_clicked(self):
-        """Persist team fields and start/stop server or switch to client."""
-        try:
-            config = load_config()
-            config["team_mode"] = str(self.settings_page.input_team_mode.currentData() or "off")
-            config["team_server_url"] = str(self.settings_page.input_team_server_url.text() or "").strip()
-            save_config(config)
-            mode = str(config["team_mode"] or "off")
-            if mode == "client":
-                url = str(config.get("team_server_url") or "").strip()
-                if not url:
-                    self.show_info_dialog(
-                        self.texts.get("error_title", "Error"),
-                        self.texts.get(
-                            "setting_team_status_client",
-                            "员工机 · 连接 {url}",
-                        ).format(url="（未填写）"),
-                        kind="warning",
-                    )
-                    self._apply_team_mode_settings()
-                    self._apply_agent_api_settings()
-                    return
-                try:
-                    from src.services.team_client_search import probe_team_server
+    def copy_team_share_info(self):
+        """Copy LAN search/media URLs for coworkers (server mode)."""
+        from src.services.team_mode_service import get_team_mode
+        from src.services.team_paths import detect_lan_ip
 
-                    probe_team_server(
-                        url,
-                        api_port_default=int(config.get("team_api_port", 8765) or 8765),
-                    )
-                except Exception as exc:
-                    self.show_info_dialog(
-                        self.texts.get("error_title", "Error"),
-                        f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=url)}\n{exc}",
-                        kind="warning",
-                    )
-            self._apply_team_mode_settings()
-            self._apply_agent_api_settings()
-            self._set_settings_dirty(False)
-            if hasattr(self, "refresh_library_table"):
-                self.refresh_library_table()
-        except Exception as exc:
-            self.show_error_dialog(self.texts.get("settings_save_failed", "Save failed"), exc)
+        if get_team_mode() != "server":
+            self.show_info_dialog(
+                self.texts.get("error_title", "Error"),
+                self.texts.get(
+                    "setting_team_copy_share_need_server",
+                    "请先切换到「本机作为服务机」并保存设置，再复制分享。",
+                ),
+                kind="warning",
+            )
+            return
+        status = {}
+        if hasattr(self, "team_mode_controller"):
+            status = self.team_mode_controller.refresh_status() or {}
+        api = str(status.get("api_base_url") or "").strip()
+        media = str(status.get("media_base_url") or "").strip()
+        if not api or not media:
+            lan = detect_lan_ip()
+            cfg = load_config()
+            api = api or f"http://{lan}:{int(cfg.get('team_api_port', 8765) or 8765)}"
+            media = media or f"http://{lan}:{int(cfg.get('team_nginx_port', 18080) or 18080)}"
+        text = self.texts.get(
+            "setting_team_copy_share_text",
+            "VideoSeek 团队服务\n搜索地址：{api}\n视频地址：{media}\n\n员工机：设置 → 团队模式选「本机作为员工机」，填入搜索地址后点保存设置。",
+        ).format(api=api, media=media)
+        QApplication.clipboard().setText(text)
+        self.show_info_dialog(
+            self.texts.get("success_title", "OK"),
+            self.texts.get("setting_team_copy_share_done", "已复制分享信息，可发给员工机同事。"),
+            kind="success",
+        )
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -626,6 +619,8 @@ class SettingsGuiMixin:
             self._set_settings_dirty(False)
             self._apply_agent_api_settings()
             self._apply_team_mode_settings()
+            if hasattr(self, "refresh_library_table"):
+                self.refresh_library_table()
         except Exception as exc:
             detail = str(exc or "").strip()
             if "Data migration failed" in detail or "migration failed" in detail.lower():
@@ -658,8 +653,26 @@ class SettingsGuiMixin:
     def _apply_team_mode_settings(self):
         if not hasattr(self, "team_mode_controller"):
             return
+        from src.services.team_mode_service import get_team_mode
+        from src.services.team_client_search import probe_team_server
+
         status = self.team_mode_controller.apply_from_config()
         self._refresh_team_mode_status(status)
+        if get_team_mode() == "client":
+            cfg = load_config()
+            url = str(cfg.get("team_server_url") or "").strip()
+            if url:
+                try:
+                    probe_team_server(
+                        url,
+                        api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+                    )
+                except Exception as exc:
+                    self.show_info_dialog(
+                        self.texts.get("error_title", "Error"),
+                        f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=url)}\n{exc}",
+                        kind="warning",
+                    )
 
     def _refresh_team_mode_status(self, status=None):
         if not hasattr(self, "settings_page"):

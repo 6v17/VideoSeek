@@ -27,8 +27,11 @@ def _post_json(url: str, payload: dict, *, timeout: float = 120.0) -> dict:
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(_team_connect_error(url, exc)) from exc
     data = json.loads(raw or "{}")
     if not isinstance(data, dict):
         raise RuntimeError("invalid team search response")
@@ -37,12 +40,30 @@ def _post_json(url: str, payload: dict, *, timeout: float = 120.0) -> dict:
 
 def _get_json(url: str, *, timeout: float = 15.0) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(_team_connect_error(url, exc)) from exc
     data = json.loads(raw or "{}")
     if not isinstance(data, dict):
         raise RuntimeError("invalid team API response")
     return data
+
+
+def _team_connect_error(url: str, exc: BaseException) -> str:
+    detail = str(getattr(exc, "reason", None) or exc)
+    lower = detail.lower()
+    if "getaddrinfo" in lower or "11001" in lower or "name or service not known" in lower:
+        return (
+            f"无法解析服务机地址。请填写局域网 IP，例如 http://192.168.1.10:8765（不要用电脑名除非同一网段可解析）。"
+            f" 当前请求: {url}"
+        )
+    if "timed out" in lower or "timeout" in lower:
+        return f"连接服务机超时（检查服务机是否已开启团队模式、防火墙是否放行 8765）。当前请求: {url}"
+    if "10061" in lower or "refused" in lower:
+        return f"服务机拒绝连接（确认服务机团队模式已应用且 API 在运行）。当前请求: {url}"
+    return f"无法连接服务机。当前请求: {url}；错误: {detail}"
 
 
 def _team_base(server_url: str, *, api_port_default: int = 8765) -> str:

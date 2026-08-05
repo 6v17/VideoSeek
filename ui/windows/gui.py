@@ -358,7 +358,7 @@ class MainWindow(
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
-        self.settings_page.btn_team_apply.clicked.connect(self._on_team_apply_clicked)
+        self.settings_page.btn_team_copy_share.clicked.connect(self.copy_team_share_info)
 
         self.setAcceptDrops(True)
         for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
