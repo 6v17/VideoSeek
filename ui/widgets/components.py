@@ -556,6 +556,7 @@ class SearchPage(QWidget):
         }
         self.btn_detach_results.clicked.connect(self.toggle_results_float)
         self.btn_dock_results.clicked.connect(self.dock_results)
+        self._sync_detach_button_label()
 
     def is_results_floating(self) -> bool:
         window = self._results_float_window
