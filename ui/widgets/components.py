@@ -512,20 +512,26 @@ class SearchPage(QWidget):
         results_layout.setSpacing(8)
         results_layout.addWidget(self.result_view)
 
-        # Compact stand-in while results are floated (does not reshape the page).
-        self.results_float_placeholder = QFrame()
-        self.results_float_placeholder.setObjectName("RuntimeBanner")
-        placeholder_layout = QHBoxLayout(self.results_float_placeholder)
-        placeholder_layout.setContentsMargins(12, 8, 12, 8)
-        placeholder_layout.setSpacing(10)
+        # Slim stand-in while results are floated — keep it card-sized, not a full-page banner.
+        self.results_float_placeholder = VSCard(margins=(14, 10, 14, 10), spacing=8)
+        self.results_float_placeholder.setObjectName("PanelCard")
+        self.results_float_placeholder.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.results_float_placeholder.setFixedHeight(52)
+        placeholder_layout = self.results_float_placeholder.content_layout
+        placeholder_row = QHBoxLayout()
+        placeholder_row.setContentsMargins(0, 0, 0, 0)
+        placeholder_row.setSpacing(10)
         self.results_float_hint = QLabel()
-        self.results_float_hint.setObjectName("RuntimeBannerText")
-        self.results_float_hint.setWordWrap(True)
+        self.results_float_hint.setObjectName("Hint")
+        self.results_float_hint.setWordWrap(False)
         self.btn_dock_results = QPushButton()
-        self.btn_dock_results.setObjectName("AccentGhostButton")
+        self.btn_dock_results.setObjectName("GhostButton")
         self.btn_dock_results.setMinimumHeight(30)
-        placeholder_layout.addWidget(self.results_float_hint, 1)
-        placeholder_layout.addWidget(self.btn_dock_results, 0)
+        placeholder_row.addWidget(self.results_float_hint, 1)
+        placeholder_row.addWidget(self.btn_dock_results, 0)
+        placeholder_layout.addLayout(placeholder_row)
         self.results_float_placeholder.hide()
 
         self.results_slot_layout.addWidget(self.results_card)
@@ -588,7 +594,8 @@ class SearchPage(QWidget):
         window = self._ensure_results_float_window()
         self.results_slot_layout.removeWidget(self.results_card)
         window.take_card(self.results_card)
-        self.results_slot_layout.addWidget(self.results_float_placeholder)
+        self.results_slot_layout.addWidget(self.results_float_placeholder, 0)
+        self.results_slot_layout.addStretch(1)
         self.results_float_placeholder.show()
         window.setWindowTitle(self._results_float_texts["title"])
         window.show()
@@ -604,9 +611,12 @@ class SearchPage(QWidget):
             return
         card = window.release_card()
         window.hide()
-        if self.results_float_placeholder.parent() is self.results_slot:
-            self.results_slot_layout.removeWidget(self.results_float_placeholder)
-        self.results_float_placeholder.hide()
+        while self.results_slot_layout.count():
+            item = self.results_slot_layout.takeAt(0)
+            widget = item.widget()
+            if widget is self.results_float_placeholder:
+                self.results_float_placeholder.hide()
+                self.results_float_placeholder.setParent(self)
         if card is not None:
             self.results_slot_layout.addWidget(card)
             card.show()
