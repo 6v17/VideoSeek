@@ -55,7 +55,6 @@ class PreviewController:
             logger.debug("Playback telemetry session start skipped: %s", exc)
 
         vlc_player = self._ensure_vlc_player()
-        self._show_vlc_surface()
 
         if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
             return True
@@ -64,7 +63,6 @@ class PreviewController:
         result = create_preview_clip(video_path, clip_start, cache_path, duration_sec=clip_duration)
         if result.returncode == 0:
             self.current_preview_path = cache_path
-            self._show_qt_surface()
             media_player.setSource(QUrl.fromLocalFile(cache_path))
             media_player.play()
             return True
@@ -86,24 +84,9 @@ class PreviewController:
         except Exception as exc:
             logger.warning("Preview warmup failed: %s", exc)
 
-    def _vlc_host_widget(self):
-        return getattr(self.parent_window, "vlc_video_host", None) or self.parent_window.video_widget
-
-    def _show_vlc_surface(self):
-        stack = getattr(self.parent_window, "preview_surface_stack", None)
-        host = getattr(self.parent_window, "vlc_video_host", None)
-        if stack is not None and host is not None:
-            stack.setCurrentWidget(host)
-
-    def _show_qt_surface(self):
-        stack = getattr(self.parent_window, "preview_surface_stack", None)
-        widget = getattr(self.parent_window, "video_widget", None)
-        if stack is not None and widget is not None:
-            stack.setCurrentWidget(widget)
-
     def _ensure_vlc_player(self):
         if self.vlc_player is None:
-            self.vlc_player = VlcPreviewPlayer(self._vlc_host_widget())
+            self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
         return self.vlc_player
 
     def stop_preview(self, *, skip_telemetry: bool = False):
@@ -122,7 +105,6 @@ class PreviewController:
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
         self.current_preview_context = None
-        self._show_vlc_surface()
 
     def record_playback_telemetry(self, *, source: str = "inline") -> None:
         self._record_playback_telemetry(source=source)

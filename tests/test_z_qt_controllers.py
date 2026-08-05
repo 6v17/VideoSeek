@@ -434,9 +434,6 @@ def _make_parent_window():
     parent.media_player = MagicMock()
     parent.video_widget = MagicMock()
     parent.video_widget.winId.return_value = 123
-    parent.vlc_video_host = MagicMock()
-    parent.vlc_video_host.winId.return_value = 456
-    parent.preview_surface_stack = MagicMock()
     parent.search_page = MagicMock()
     parent.search_page.btn_search = MagicMock()
     parent.search_page.lbl_status = MagicMock()
@@ -710,10 +707,9 @@ class PreviewControllerTests(unittest.TestCase):
         result = controller.play("D:/videos/clip.mp4", 30.0)
 
         self.assertTrue(result)
-        mock_vlc_cls.assert_called_once_with(parent.vlc_video_host)
+        mock_vlc_cls.assert_called_once_with(parent.video_widget)
         vlc_player.play.assert_called_once_with("D:/videos/clip.mp4", 27.0, stop_sec=33.0)
         parent.media_player.setSource.assert_called_once()
-        parent.preview_surface_stack.setCurrentWidget.assert_called_with(parent.vlc_video_host)
 
     @patch("ui.controllers.preview_controller.create_preview_clip")
     @patch("ui.controllers.preview_controller.build_preview_cache_path", return_value="D:/cache/preview.mp4")

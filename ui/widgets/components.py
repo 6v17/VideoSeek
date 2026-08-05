@@ -398,7 +398,7 @@ class SearchPage(QWidget):
         root.setSpacing(0)
 
         self.scaffold = PageScaffold()
-        root.addWidget(self.scaffold, 1)
+        root.addWidget(self.scaffold)
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
@@ -458,33 +458,19 @@ class SearchPage(QWidget):
 
         compare_row.addWidget(self.search_panel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         compare_row.addWidget(self.preview_panel, 1, Qt.AlignmentFlag.AlignTop)
-        # Keep query+preview fixed; only the results area below should consume leftover height.
-        page_body.addLayout(compare_row, 0)
+        page_body.addLayout(compare_row, 3)
 
-        # Slot stays in the page; results_card can be reparented into a floating window.
+        # Slot stays in the page layout; results_card can reparent into a float window.
         self.results_slot = QWidget()
         self.results_slot.setObjectName("SearchResultsSlot")
-        self.results_slot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.results_slot_layout = QVBoxLayout(self.results_slot)
         self.results_slot_layout.setContentsMargins(0, 0, 0, 0)
         self.results_slot_layout.setSpacing(0)
 
         self.results_card = VSCard()
-        self.results_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.results_card.setMinimumHeight(280)
         results_layout = self.results_card.content_layout
         self.results_title = QLabel()
         self.results_title.setObjectName("CardTitle")
-
-        results_header = QHBoxLayout()
-        results_header.setContentsMargins(0, 0, 0, 0)
-        results_header.setSpacing(10)
-        self.btn_detach_results = QPushButton("弹出窗口")
-        self.btn_detach_results.setObjectName("AccentGhostButton")
-        self.btn_detach_results.setMinimumHeight(30)
-        self.btn_detach_results.setCursor(Qt.CursorShape.PointingHandCursor)
-        results_header.addWidget(self.results_title, 1)
-        results_header.addWidget(self.btn_detach_results, 0, Qt.AlignmentFlag.AlignVCenter)
 
         results_toolbar = QHBoxLayout()
         results_toolbar.setContentsMargins(0, 0, 0, 0)
@@ -495,6 +481,8 @@ class SearchPage(QWidget):
         self.btn_manage_presets.setObjectName("PresetManageButton")
         self.btn_expand_preview = QPushButton()
         self.btn_expand_preview.setObjectName("GhostButton")
+        self.btn_detach_results = QPushButton("弹出窗口")
+        self.btn_detach_results.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
         self.btn_shot_list = QPushButton()
@@ -507,6 +495,7 @@ class SearchPage(QWidget):
         actions_layout.setSpacing(6)
         actions_layout.addWidget(self.btn_manage_presets)
         actions_layout.addWidget(self.btn_expand_preview)
+        actions_layout.addWidget(self.btn_detach_results)
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
@@ -517,35 +506,30 @@ class SearchPage(QWidget):
         self.results_pager = SearchResultsPager()
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
         self.result_table = self.result_view.table
-        self.result_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        results_layout.addLayout(results_header)
+        results_layout.addWidget(self.results_title)
         results_layout.addLayout(results_toolbar)
         results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
         results_layout.setSpacing(8)
-        results_layout.addWidget(self.result_view, 1)
+        results_layout.addWidget(self.result_view)
 
-        self.results_float_placeholder = VSCard()
-        self.results_float_placeholder.setObjectName("ResultsFloatPlaceholder")
-        self.results_float_placeholder.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self.results_float_placeholder.setMinimumHeight(120)
-        placeholder_layout = self.results_float_placeholder.content_layout
+        # Compact stand-in while results are floated (does not reshape the page).
+        self.results_float_placeholder = QFrame()
+        self.results_float_placeholder.setObjectName("RuntimeBanner")
+        placeholder_layout = QHBoxLayout(self.results_float_placeholder)
+        placeholder_layout.setContentsMargins(12, 8, 12, 8)
+        placeholder_layout.setSpacing(10)
         self.results_float_hint = QLabel()
-        self.results_float_hint.setObjectName("Hint")
+        self.results_float_hint.setObjectName("RuntimeBannerText")
         self.results_float_hint.setWordWrap(True)
-        self.results_float_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.btn_dock_results = QPushButton()
-        self.btn_dock_results.setObjectName("PrimaryButton")
-        self.btn_dock_results.setFixedHeight(34)
-        placeholder_layout.addStretch(1)
-        placeholder_layout.addWidget(self.results_float_hint)
-        placeholder_layout.addWidget(self.btn_dock_results, 0, Qt.AlignmentFlag.AlignHCenter)
-        placeholder_layout.addStretch(1)
+        self.btn_dock_results.setObjectName("AccentGhostButton")
+        self.btn_dock_results.setMinimumHeight(30)
+        placeholder_layout.addWidget(self.results_float_hint, 1)
+        placeholder_layout.addWidget(self.btn_dock_results, 0)
         self.results_float_placeholder.hide()
 
-        self.results_slot_layout.addWidget(self.results_card, 1)
-        page_body.addWidget(self.results_slot, 1)
+        self.results_slot_layout.addWidget(self.results_card)
+        page_body.addWidget(self.results_slot, 4)
 
         self._results_float_window = None
         self._results_float_texts = {
@@ -604,7 +588,7 @@ class SearchPage(QWidget):
         window = self._ensure_results_float_window()
         self.results_slot_layout.removeWidget(self.results_card)
         window.take_card(self.results_card)
-        self.results_slot_layout.addWidget(self.results_float_placeholder, 1)
+        self.results_slot_layout.addWidget(self.results_float_placeholder)
         self.results_float_placeholder.show()
         window.setWindowTitle(self._results_float_texts["title"])
         window.show()
@@ -624,14 +608,13 @@ class SearchPage(QWidget):
             self.results_slot_layout.removeWidget(self.results_float_placeholder)
         self.results_float_placeholder.hide()
         if card is not None:
-            self.results_slot_layout.addWidget(card, 1)
+            self.results_slot_layout.addWidget(card)
             card.show()
         self._sync_detach_button_label()
         self.results_float_changed.emit(False)
 
     def _ensure_results_float_window(self) -> ResultsFloatWindow:
         if self._results_float_window is None:
-            # Parent to the top-level window so the float survives page switches.
             top = self.window() if self.window() is not self else None
             self._results_float_window = ResultsFloatWindow(top)
             self._results_float_window.dock_requested.connect(self.dock_results)
