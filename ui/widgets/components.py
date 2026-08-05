@@ -476,6 +476,16 @@ class SearchPage(QWidget):
         self.results_title = QLabel()
         self.results_title.setObjectName("CardTitle")
 
+        results_header = QHBoxLayout()
+        results_header.setContentsMargins(0, 0, 0, 0)
+        results_header.setSpacing(10)
+        self.btn_detach_results = QPushButton("弹出窗口")
+        self.btn_detach_results.setObjectName("AccentGhostButton")
+        self.btn_detach_results.setMinimumHeight(30)
+        self.btn_detach_results.setCursor(Qt.CursorShape.PointingHandCursor)
+        results_header.addWidget(self.results_title, 1)
+        results_header.addWidget(self.btn_detach_results, 0, Qt.AlignmentFlag.AlignVCenter)
+
         results_toolbar = QHBoxLayout()
         results_toolbar.setContentsMargins(0, 0, 0, 0)
         results_toolbar.setSpacing(10)
@@ -485,8 +495,6 @@ class SearchPage(QWidget):
         self.btn_manage_presets.setObjectName("PresetManageButton")
         self.btn_expand_preview = QPushButton()
         self.btn_expand_preview.setObjectName("GhostButton")
-        self.btn_detach_results = QPushButton()
-        self.btn_detach_results.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
         self.btn_shot_list = QPushButton()
@@ -499,7 +507,6 @@ class SearchPage(QWidget):
         actions_layout.setSpacing(6)
         actions_layout.addWidget(self.btn_manage_presets)
         actions_layout.addWidget(self.btn_expand_preview)
-        actions_layout.addWidget(self.btn_detach_results)
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
@@ -511,7 +518,7 @@ class SearchPage(QWidget):
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
         self.result_table = self.result_view.table
         self.result_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        results_layout.addWidget(self.results_title)
+        results_layout.addLayout(results_header)
         results_layout.addLayout(results_toolbar)
         results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
         results_layout.setSpacing(8)
