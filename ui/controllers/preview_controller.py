@@ -1,6 +1,6 @@
 import os
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
@@ -12,9 +12,7 @@ from src.media.export_clip import (
     resolve_export_clip_window,
     start_export_original_clip_process,
 )
-from ui.threading_utils import shutdown_thread
-from ui.playback.vlc_player import VlcPreviewPlayer
-from ui.workers import PreviewWarmupWorker
+from ui.playback.vlc_player import VlcPreviewPlayer, warmup_vlc_runtime
 
 logger = get_logger("preview_controller")
 
@@ -26,7 +24,6 @@ class PreviewController:
         self.current_preview_context = None
         self.vlc_player = None
         self._warmup_started = False
-        self.warmup_worker = None
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         return _resolve_base_clip_window(video_path, start_sec, end_sec=end_sec, config=load_config())
@@ -58,6 +55,7 @@ class PreviewController:
             logger.debug("Playback telemetry session start skipped: %s", exc)
 
         vlc_player = self._ensure_vlc_player()
+        self._show_vlc_surface()
 
         if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
             return True
@@ -66,6 +64,7 @@ class PreviewController:
         result = create_preview_clip(video_path, clip_start, cache_path, duration_sec=clip_duration)
         if result.returncode == 0:
             self.current_preview_path = cache_path
+            self._show_qt_surface()
             media_player.setSource(QUrl.fromLocalFile(cache_path))
             media_player.play()
             return True
@@ -75,20 +74,37 @@ class PreviewController:
         return False
 
     def start_warmup(self):
+        """Warm libvlc on the UI thread (libvlc is not thread-safe for Instance create)."""
         if self._warmup_started:
             return
         self._warmup_started = True
-        self.warmup_worker = PreviewWarmupWorker()
-        self.warmup_worker.finished.connect(self._finish_warmup)
-        self.warmup_worker.start()
+        QTimer.singleShot(0, self._run_main_thread_warmup)
+
+    def _run_main_thread_warmup(self):
+        try:
+            warmup_vlc_runtime()
+        except Exception as exc:
+            logger.warning("Preview warmup failed: %s", exc)
+
+    def _vlc_host_widget(self):
+        return getattr(self.parent_window, "vlc_video_host", None) or self.parent_window.video_widget
+
+    def _show_vlc_surface(self):
+        stack = getattr(self.parent_window, "preview_surface_stack", None)
+        host = getattr(self.parent_window, "vlc_video_host", None)
+        if stack is not None and host is not None:
+            stack.setCurrentWidget(host)
+
+    def _show_qt_surface(self):
+        stack = getattr(self.parent_window, "preview_surface_stack", None)
+        widget = getattr(self.parent_window, "video_widget", None)
+        if stack is not None and widget is not None:
+            stack.setCurrentWidget(widget)
 
     def _ensure_vlc_player(self):
         if self.vlc_player is None:
-            self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+            self.vlc_player = VlcPreviewPlayer(self._vlc_host_widget())
         return self.vlc_player
-
-    def _finish_warmup(self):
-        self.warmup_worker = None
 
     def stop_preview(self, *, skip_telemetry: bool = False):
         if skip_telemetry:
@@ -106,6 +122,7 @@ class PreviewController:
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
         self.current_preview_context = None
+        self._show_vlc_surface()
 
     def record_playback_telemetry(self, *, source: str = "inline") -> None:
         self._record_playback_telemetry(source=source)
@@ -177,7 +194,6 @@ class PreviewController:
         self.current_preview_path = None
 
     def shutdown(self):
-        shutdown_thread(self.warmup_worker)
         if self.vlc_player is not None:
             self.vlc_player.shutdown(fast=True)
             self.vlc_player = None

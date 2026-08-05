@@ -395,7 +395,7 @@ class SearchPage(QWidget):
         root.setSpacing(0)
 
         self.scaffold = PageScaffold()
-        root.addWidget(self.scaffold)
+        root.addWidget(self.scaffold, 1)
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
@@ -455,9 +455,13 @@ class SearchPage(QWidget):
 
         compare_row.addWidget(self.search_panel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         compare_row.addWidget(self.preview_panel, 1, Qt.AlignmentFlag.AlignTop)
-        page_body.addLayout(compare_row, 3)
+        # Keep query+preview fixed; only the results area below should consume leftover height.
+        page_body.addLayout(compare_row, 0)
 
         self.results_card = VSCard()
+        # Results own the leftover height; table scrolls inside ResultView.
+        self.results_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.results_card.setMinimumHeight(280)
         results_layout = self.results_card.content_layout
         self.results_title = QLabel()
         self.results_title.setObjectName("CardTitle")
@@ -493,12 +497,13 @@ class SearchPage(QWidget):
         self.results_pager = SearchResultsPager()
         self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
         self.result_table = self.result_view.table
+        self.result_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         results_layout.addWidget(self.results_title)
         results_layout.addLayout(results_toolbar)
         results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
         results_layout.setSpacing(8)
-        results_layout.addWidget(self.result_view)
-        page_body.addWidget(self.results_card, 4)
+        results_layout.addWidget(self.result_view, 1)
+        page_body.addWidget(self.results_card, 1)
 
 
 class DialogueLibraryRow(QFrame):
