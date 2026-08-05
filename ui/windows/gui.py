@@ -494,6 +494,7 @@ class MainWindow(
         self.search_page.preview_title.setText(t["preview_panel"])
         self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
         self.search_page.results_title.setText(t["results_panel"])
+        self.search_page.apply_results_float_texts(t)
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_shot_list_button()
         self._update_expand_preview_button()
