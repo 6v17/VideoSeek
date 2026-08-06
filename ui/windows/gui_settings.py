@@ -256,8 +256,6 @@ class SettingsGuiMixin:
             self._apply_team_mode_settings()
             self._apply_agent_api_settings()
             self._set_settings_dirty(False)
-            if hasattr(self, "refresh_library_table"):
-                self.refresh_library_table()
         except Exception as exc:
             self.show_error_dialog(self.texts.get("settings_save_failed", "Save failed"), exc)
 
@@ -660,6 +658,10 @@ class SettingsGuiMixin:
             return
         status = self.team_mode_controller.apply_from_config()
         self._refresh_team_mode_status(status)
+        # Library data source follows team_mode; refresh immediately so 员工机
+        # shows the shared tree without requiring an app restart.
+        if hasattr(self, "refresh_library_table"):
+            self.refresh_library_table()
 
     def _refresh_team_mode_status(self, status=None):
         if not hasattr(self, "settings_page"):

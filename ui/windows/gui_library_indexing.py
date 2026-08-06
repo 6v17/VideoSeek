@@ -169,6 +169,9 @@ class LibraryIndexingGuiMixin:
         btn.setEnabled(bool(tree.collect_checked_library_paths()))
 
     def refresh_library_table(self):
+        from src.services.team_mode_service import is_team_client_mode
+
+        tree = None
         try:
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
@@ -186,6 +189,9 @@ class LibraryIndexingGuiMixin:
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
             )
+            # Drop stale local rows before remote fetch when switching to 员工机.
+            if is_team_client_mode():
+                tree.refresh_from_entries([], library_paths=[])
             entries, library_paths = self._build_visual_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
             self._refresh_library_action_hints()
@@ -198,6 +204,13 @@ class LibraryIndexingGuiMixin:
             if hasattr(self, "_refresh_understanding_scope_options"):
                 self._refresh_understanding_scope_options()
         except Exception as exc:
+            # Never keep the previous local tree visible under client mode.
+            if tree is not None and is_team_client_mode():
+                try:
+                    tree.refresh_from_entries([], library_paths=[])
+                    self._refresh_team_client_library_chrome()
+                except Exception:
+                    pass
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
 
@@ -236,16 +249,22 @@ class LibraryIndexingGuiMixin:
                 except Exception:
                     pass
         hint = getattr(page, "lbl_shared_library_hint", None)
-        if hint is not None and client:
+        if hint is None:
+            return
+        if client:
             hint.setText(
                 self.texts.get(
                     "library_team_shared_hint",
                     "员工机：显示服务机共享库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
                 )
             )
-        elif hint is not None and hasattr(self, "_refresh_library_action_hints"):
-            # restore normal hint via existing helper when leaving client
-            pass
+        else:
+            hint.setText(
+                self.texts.get(
+                    "library_shared_add_hint",
+                    "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
+                )
+            )
 
     def sync_library(self, path):
         from src.services.team_mode_service import is_team_client_mode

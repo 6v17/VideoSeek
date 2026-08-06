@@ -14,7 +14,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.layout import COMPONENT_SIZES, compute_search_panel_width, compute_search_query_tabs_height
+from ui.widgets.layout import (
+    COMPONENT_SIZES,
+    compare_row_card_height,
+    compute_search_panel_width,
+    compute_search_query_tabs_height,
+)
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
 
@@ -331,7 +336,7 @@ class SearchPanel(VSCard):
         layout.addWidget(self.search_mode_options_stack, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addLayout(action_row, 0)
 
-        self.setFixedHeight(int(COMPONENT_SIZES["search_compare_baseline_height"]) + 22)
+        self.setFixedHeight(compare_row_card_height())
         self.setFixedWidth(compute_search_panel_width())
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.logging_utils import get_logger
-from src.utils import format_timecode_seconds, get_video_duration_seconds
+from src.utils import format_timecode_seconds
 from ui.playback.vlc_player import VlcPreviewPlayer
 
 logger = get_logger("preview_dialog")
@@ -142,6 +142,8 @@ class PreviewDialog(QDialog):
         self._detail_error = None
         self._detail_notice = None
         self._segment_line_override = None
+        self._play_token = 0
+        self._duration_cache = {}
 
         self.setWindowTitle(self.texts.get("preview_dialog_title", "Large Preview"))
         self.resize(1000, 660)
@@ -266,12 +268,17 @@ class PreviewDialog(QDialog):
         self._detail_notice = None
         self._segment_line_override = None
         self.update_timer.stop()
+        self._play_token += 1
+        play_token = self._play_token
         # Soft reload: reuse the same player. Full dispose/recreate calls libvlc stop/release
         # on the UI thread and can freeze the whole app ("Python 未响应").
         player = self._ensure_player()
         if not player.is_available():
             self._dispose_player(fast=True)
             player = self._ensure_player()
+        # Pause immediately so stacked enlarge clicks don't pile up play() calls.
+        if player.is_available():
+            player.suspend()
         if self.isFullScreen():
             self.showNormal()
             self._schedule_rebind()
@@ -280,7 +287,8 @@ class PreviewDialog(QDialog):
         self.start_sec = float(start_sec)
         self.end_sec = float(end_sec)
         self.suggested_sec = float(suggested_sec if suggested_sec is not None else start_sec)
-        self._known_total_ms = self._resolve_known_total_ms(video_path)
+        # Avoid ffprobe/OpenCV on the UI thread (can block for seconds → "Python 未响应").
+        self._known_total_ms = int(self._duration_cache.get(self.video_path, 0) or 0)
         self._pending_ui_seek_ms = None
         self._slider_dragging = False
         self.segment_start_sec = None
@@ -304,7 +312,8 @@ class PreviewDialog(QDialog):
             )
         except Exception as exc:
             logger.debug("Preview dialog playback telemetry start skipped: %s", exc)
-        self._start_playback()
+        # Defer libvlc play() so the dialog can show/hide without freezing.
+        QTimer.singleShot(50, lambda token=play_token: self._start_playback_if(token))
 
     def shutdown_player(self, fast=False):
         self._begin_close()
@@ -337,6 +346,7 @@ class PreviewDialog(QDialog):
     def _begin_close(self):
         self._closing = True
         self._close_requested = True
+        self._play_token += 1  # cancel any deferred play()
         self.update_timer.stop()
         self.play_button.setEnabled(False)
         self.slider.setEnabled(False)
@@ -356,13 +366,15 @@ class PreviewDialog(QDialog):
             finish_playback_session(actual_sec=self._current_time_seconds(), source="dialog")
         except Exception as exc:
             logger.debug("Preview dialog playback telemetry finish skipped: %s", exc)
-        # Hide before native teardown so a stuck VLC call cannot trap the dialog on screen.
+        # Hide first; keep the embedded player alive (pause+mute only).
+        # Disposing/detaching hwnd here is what triggers the second-open D3D popup.
         if self.isFullScreen():
             self.showNormal()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
         self._detail_notice = None
         self.hide()
-        self._dispose_player(fast=True)
+        if self.player is not None:
+            self.player.suspend()
 
     def _ensure_player(self):
         if self.player is None:
@@ -394,7 +406,14 @@ class PreviewDialog(QDialog):
             return
         super().keyPressEvent(event)
 
+    def _start_playback_if(self, token):
+        if token != self._play_token or self._closing or self._close_requested:
+            return
+        self._start_playback()
+
     def _start_playback(self):
+        if self._closing or self._close_requested:
+            return
         self.update_timer.stop()
         player = self._ensure_player()
         if not player.play(self.video_path, self.start_sec, stop_sec=self.end_sec):
@@ -494,20 +513,12 @@ class PreviewDialog(QDialog):
         else:
             self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
 
-    def _resolve_known_total_ms(self, video_path):
-        try:
-            duration_sec = get_video_duration_seconds(video_path)
-        except Exception as exc:
-            logger.debug("Could not read video duration for %s: %s", video_path, exc)
-            return 0
-        if duration_sec is None:
-            return 0
-        return max(0, int(float(duration_sec) * 1000))
-
     def _effective_total_ms(self, player):
         total_ms = max(0, player.get_length())
         if total_ms > 0:
             self._known_total_ms = total_ms
+            if self.video_path:
+                self._duration_cache[self.video_path] = total_ms
             return total_ms
         return self._known_total_ms
 

@@ -755,8 +755,8 @@ class PreviewControllerTests(unittest.TestCase):
 
         controller.stop_preview()
 
-        controller.vlc_player.stop.assert_called_once()
-        parent.media_player.stop.assert_called_once()
+        controller.vlc_player.suspend.assert_called_once()
+        parent.media_player.pause.assert_called_once()
         parent.media_player.setSource.assert_called_once()
         controller.cleanup_previous_preview.assert_called_once()
         self.assertIsNone(controller.current_preview_context)
@@ -819,20 +819,27 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         self.assertIsNone(player._instance)
         self.assertTrue(player._released)
 
-    def test_stop_clears_bound_media(self):
-        host = MagicMock()
-        host.winId.return_value = 123
-        player = VlcPreviewPlayer(host)
+    def test_stop_soft_pauses_without_clearing_media(self):
+        # Avoid QTimer(host) construction; stub/real PySide6 mix breaks MagicMock parents.
+        player = VlcPreviewPlayer.__new__(VlcPreviewPlayer)
+        player._released = False
+        player._timer = MagicMock()
         player._player = MagicMock()
+        player._stop_at_ms = 1000
+        player._locked_stop_at_ms = 1000
+        player._pending_seek_ms = 0
         old_media = MagicMock()
         player._current_media = old_media
 
         player.stop()
 
-        player._player.stop.assert_called_once()
-        player._player.set_media.assert_called_once_with(None)
-        old_media.release.assert_called_once()
-        self.assertIsNone(player._current_media)
+        # Soft stop avoids native stop()/set_media(None) which hang/spawn D3D windows.
+        player._player.stop.assert_not_called()
+        player._player.set_media.assert_not_called()
+        player._player.pause.assert_called_once()
+        player._player.audio_set_mute.assert_called_once_with(True)
+        old_media.release.assert_not_called()
+        self.assertIs(player._current_media, old_media)
 
     def test_set_media_releases_previous_media(self):
         host = MagicMock()
@@ -927,32 +934,52 @@ class VlcPreviewPlayerTests(unittest.TestCase):
 
 
 class PreviewDialogTests(unittest.TestCase):
-    @patch("ui.playback.preview_dialog.get_video_duration_seconds", return_value=120.0)
+    def test_expanded_chrome_slider_release_uses_known_duration(self):
+        from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
+
+        chrome = ExpandedPreviewChrome()
+        chrome.apply_texts({"preview_dialog_pause": "Pause", "preview_dialog_play": "Play"})
+        player = MagicMock()
+        player.get_length.return_value = -1
+        player.get_time.return_value = 0
+        player.is_playing.return_value = False
+        player.is_available.return_value = True
+        chrome.bind_player(player)
+        chrome.attach_clip("D:/videos/clip.mp4", 10.0, 16.0, suggested_sec=12.0)
+        chrome._known_total_ms = 120000
+        chrome.slider.setValue(500)
+        chrome._on_slider_released()
+        player.set_time.assert_called_once_with(60000, unlock=True)
+
+    @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
-    def test_slider_release_uses_known_duration_when_vlc_length_is_unavailable(self, mock_vlc_cls, _mock_duration):
+    def test_slider_release_uses_known_duration_when_vlc_length_is_unavailable(self, mock_vlc_cls, _mock_timer):
         parent = MagicMock()
         player = MagicMock()
         player.play.return_value = True
         player.get_length.return_value = -1
         player.get_time.return_value = 0
         player.is_playing.return_value = False
+        player.is_available.return_value = True
         mock_vlc_cls.return_value = player
 
         dialog = PreviewDialog(parent, "D:/videos/clip.mp4", 10.0, 16.0, {"preview_dialog_pause": "Pause"})
+        dialog._known_total_ms = 120000
         dialog.slider.setValue(500)
         dialog._on_slider_released()
 
         player.set_time.assert_called_once_with(60000, unlock=True)
 
-    @patch("ui.playback.preview_dialog.get_video_duration_seconds", return_value=120.0)
+    @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
-    def test_sync_ui_holds_pending_seek_position_during_zero_time_flash(self, mock_vlc_cls, _mock_duration):
+    def test_sync_ui_holds_pending_seek_position_during_zero_time_flash(self, mock_vlc_cls, _mock_timer):
         parent = MagicMock()
         player = MagicMock()
         player.play.return_value = True
         player.get_length.return_value = 120000
         player.get_time.return_value = 0
         player.is_playing.return_value = True
+        player.is_available.return_value = True
         mock_vlc_cls.return_value = player
 
         dialog = PreviewDialog(parent, "D:/videos/clip.mp4", 10.0, 16.0, {"preview_dialog_pause": "Pause"})
@@ -962,9 +989,9 @@ class PreviewDialogTests(unittest.TestCase):
 
         self.assertEqual(dialog.slider.value(), int((8000 / 120000) * 1000))
 
-    @patch("ui.playback.preview_dialog.get_video_duration_seconds", return_value=120.0)
+    @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
-    def test_load_preview_reuses_player_without_full_teardown(self, mock_vlc_cls, _mock_duration):
+    def test_load_preview_reuses_player_without_full_teardown(self, mock_vlc_cls, _mock_timer):
         parent = MagicMock()
         player = MagicMock()
         player.play.return_value = True
@@ -984,6 +1011,7 @@ class PreviewDialogTests(unittest.TestCase):
         self.assertEqual(player.play.call_count, 2)
         player.play.assert_called_with("D:/videos/other.mp4", 20.0, stop_sec=26.0)
         self.assertEqual(mock_vlc_cls.call_count, 1)
+        player.suspend.assert_called()
 
     def test_shutdown_fast_skips_blocking_stop_and_release(self):
         host = MagicMock()

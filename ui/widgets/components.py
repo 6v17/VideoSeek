@@ -455,10 +455,14 @@ class SearchPage(QWidget):
         self.preview_host = self.preview_panel.preview_host
         self.preview_host_layout = self.preview_panel.preview_host_layout
         self.preview_placeholder = self.preview_panel.preview_placeholder
+        self.expanded_chrome = self.preview_panel.expanded_chrome
 
         compare_row.addWidget(self.search_panel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         compare_row.addWidget(self.preview_panel, 1, Qt.AlignmentFlag.AlignTop)
-        page_body.addLayout(compare_row, 3)
+        page_body.addLayout(compare_row, 2)
+        self._compare_row = compare_row
+        self._page_body = page_body
+        self._preview_layout_maximized = False
 
         # Slot stays in the page layout; results_card can reparent into a float window.
         self.results_slot = QWidget()
@@ -479,8 +483,6 @@ class SearchPage(QWidget):
         self.search_presets_bar = SearchPresetsBar()
         self.btn_manage_presets = QPushButton()
         self.btn_manage_presets.setObjectName("PresetManageButton")
-        self.btn_expand_preview = QPushButton()
-        self.btn_expand_preview.setObjectName("GhostButton")
         self.btn_detach_results = QPushButton("弹出窗口")
         self.btn_detach_results.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
@@ -494,7 +496,6 @@ class SearchPage(QWidget):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(6)
         actions_layout.addWidget(self.btn_manage_presets)
-        actions_layout.addWidget(self.btn_expand_preview)
         actions_layout.addWidget(self.btn_detach_results)
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
@@ -539,7 +540,7 @@ class SearchPage(QWidget):
         self.results_float_placeholder.hide()
 
         self.results_slot_layout.addWidget(self.results_card)
-        page_body.addWidget(self.results_slot, 4)
+        page_body.addWidget(self.results_slot, 5)
 
         self._results_float_window = None
         self._results_float_texts = {
@@ -557,6 +558,30 @@ class SearchPage(QWidget):
     def is_results_floating(self) -> bool:
         window = self._results_float_window
         return window is not None and window.isVisible() and window.is_hosting()
+
+    def set_preview_maximized(self, maximized: bool) -> None:
+        """Hide search/results so the shared preview fills the page."""
+        maximized = bool(maximized)
+        self._preview_layout_maximized = maximized
+        self.search_panel.setVisible(not maximized)
+        if not self.is_results_floating():
+            self.results_slot.setVisible(not maximized)
+        self.preview_panel.set_maximized(maximized)
+        body = getattr(self, "_page_body", None)
+        if body is not None:
+            for i in range(body.count()):
+                item = body.itemAt(i)
+                if item is None:
+                    continue
+                widget = item.widget()
+                layout = item.layout()
+                if widget is self.results_slot:
+                    body.setStretch(i, 0 if maximized else 5)
+                elif layout is getattr(self, "_compare_row", None):
+                    body.setStretch(i, 1 if maximized else 2)
+
+    def is_preview_maximized(self) -> bool:
+        return bool(self.preview_panel.is_maximized())
 
     def apply_results_float_texts(self, texts: dict) -> None:
         title = str(texts.get("results_panel", self._results_float_texts["title"]) or "检索结果")

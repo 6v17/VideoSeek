@@ -38,12 +38,12 @@ COMPONENT_SIZES = {
     "search_query_tab_page_margins_v": 11,
     # Must fit #SearchModeSelect (1px border + padding + text); too short clips the bottom edge.
     "search_image_options_row_height": 36,
-    "preview_host_min_height": 312,
-    "search_compare_baseline_height": 520,
+    "preview_host_min_height": 320,
+    "search_compare_baseline_height": 540,
     "search_panel_width_extra": 28,
     "compose_image_strip_height": 86,
     "link_query_preview_min_height": 210,
-    "result_table_min_height": 520,
+    "result_table_min_height": 420,
     "video_scope_tree_min_height": 200,
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
@@ -66,6 +66,14 @@ def compute_search_query_tabs_height(config=None) -> int:
     body = int(sizes["image_drop_min_height"]) + int(sizes.get("search_query_tab_page_margins_v", 12))
     chrome = int(sizes.get("search_query_tab_chrome_height", 41))
     return body + chrome
+
+
+def compare_row_card_height(config=None) -> int:
+    """Shared fixed height for the search panel and preview panel cards."""
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    return int(sizes["search_compare_baseline_height"]) + 22
 
 
 def compute_search_panel_width(config=None) -> int:

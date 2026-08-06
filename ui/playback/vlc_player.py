@@ -115,6 +115,8 @@ class VlcPreviewPlayer:
         self._released = False
         self._current_video_path = ""
         self._pending_seek_ms = None
+        self._play_busy = False
+        self._session_active = False
         if shared_instance is not None:
             self._instance = shared_instance
             try:
@@ -129,6 +131,17 @@ class VlcPreviewPlayer:
         return self._player is not None and not self._released
 
     def play(self, video_path, start_sec, stop_sec=None):
+        if not self.is_available():
+            return False
+        if getattr(self, "_play_busy", False):
+            return False
+        self._play_busy = True
+        try:
+            return self._play_impl(video_path, start_sec, stop_sec=stop_sec)
+        finally:
+            self._play_busy = False
+
+    def _play_impl(self, video_path, start_sec, stop_sec=None):
         if not self.is_available():
             return False
 
@@ -164,35 +177,49 @@ class VlcPreviewPlayer:
             self._stop_at_ms = -1
             self._locked_stop_at_ms = -1
             return False
-        # Windows often needs hwnd rebound after play() or VLC opens its own D3D window.
+        try:
+            self._player.audio_set_mute(False)
+        except Exception as exc:
+            _log_vlc_debug("unmute on play", exc)
+        # One immediate + one delayed rebind is enough; stacking many timers under
+        # rapid enlarge-preview clicks made the UI feel frozen.
         self.rebind_output_window()
-        QTimer.singleShot(0, self.rebind_output_window)
         QTimer.singleShot(80, self.rebind_output_window)
-        QTimer.singleShot(250, self.rebind_output_window)
         if self._stop_at_ms > 0:
             self._timer.start()
+        self._session_active = True
         return True
 
     def stop(self):
-        if self._released:
+        """Hard stop. Prefer ``suspend()`` / ``clear_session()`` from UI paths to avoid hangs."""
+        self.clear_session()
+
+    def suspend(self):
+        """Pause and mute without detaching the embed hwnd."""
+        if self._released or self._player is None:
             return
         self._timer.stop()
         self._stop_at_ms = -1
         self._locked_stop_at_ms = -1
         self._pending_seek_ms = None
-        if self._player is not None:
-            try:
-                self._player.stop()
-            except Exception as exc:
-                _log_vlc_debug("stop player", exc)
-            self._clear_media()
+        try:
+            self._player.audio_set_mute(True)
+        except Exception as exc:
+            _log_vlc_debug("mute on suspend", exc)
+        self._set_paused(True)
+
+    def clear_session(self):
+        """End the current clip so UI cannot resume it; avoids native stop()/set_media(None)."""
+        self.suspend()
+        self._current_video_path = ""
+        self._session_active = False
+        self._user_unlocked = False
 
     def shutdown(self, fast=False):
         """Stop playback and release libvlc resources.
 
         ``fast=True`` skips native ``stop()`` / ``release()`` which can block the UI
-        thread on Windows. Never detach the hwnd while video is still bound — that
-        makes libvlc spawn a standalone ``VLC (Direct3D11 output)`` window.
+        thread on Windows. Prefer ``suspend()`` when merely hiding a dialog.
         """
         if self._released:
             return
@@ -208,12 +235,9 @@ class VlcPreviewPlayer:
                 self._player.audio_set_mute(True)
             except Exception as exc:
                 _log_vlc_debug("mute before shutdown", exc)
-            try:
-                self._player.pause()
-            except Exception as exc:
-                _log_vlc_debug("pause before shutdown", exc)
+            self._set_paused(True)
             if fast:
-                # Clear media first so video stops rendering, then detach hwnd.
+                # Keep hwnd attached; only drop media. Detaching while alive spawns D3D popup.
                 try:
                     self._player.set_media(None)
                 except Exception as exc:
@@ -221,7 +245,6 @@ class VlcPreviewPlayer:
                 old = self._current_media
                 self._current_media = None
                 self._release_media_object(old)
-                self._detach_output_window()
                 self._player = None
                 self._instance = None
                 return
@@ -269,20 +292,36 @@ class VlcPreviewPlayer:
         return int(self._player.get_length())
 
     def is_playing(self):
-        if self._player is None or self._released:
+        if self._player is None or self._released or not self._session_active:
             return False
         return bool(self._player.is_playing())
 
     def pause(self):
         if self._player is None or self._released:
             return
+        self._set_paused(True)
+
+    def _set_paused(self, paused: bool) -> None:
+        """Force pause/resume. Prefer this over ``pause()``, which toggles in libvlc."""
+        if self._player is None or self._released:
+            return
         try:
-            self._player.pause()
+            self._player.set_pause(1 if paused else 0)
+            return
         except Exception as exc:
-            _log_vlc_debug("pause", exc)
+            _log_vlc_debug("set_pause", exc)
+        # Fallback: only toggle when needed.
+        try:
+            playing = bool(self._player.is_playing())
+            if paused and playing:
+                self._player.pause()
+            elif (not paused) and (not playing):
+                self._player.pause()
+        except Exception as exc:
+            _log_vlc_debug("pause toggle fallback", exc)
 
     def resume(self):
-        if self._player is None or self._released:
+        if self._player is None or self._released or not self._session_active:
             return False
         if self._pending_seek_ms is not None and self._restart_from_ms(self._pending_seek_ms):
             return True
@@ -295,6 +334,10 @@ class VlcPreviewPlayer:
         result = self._player.play()
         if result == -1:
             return False
+        try:
+            self._player.audio_set_mute(False)
+        except Exception as exc:
+            _log_vlc_debug("unmute on resume", exc)
         self._pending_seek_ms = None
         if self._stop_at_ms > 0:
             self._timer.start()
@@ -403,10 +446,7 @@ class VlcPreviewPlayer:
         self._pending_seek_ms = None
         if self._player is None:
             return
-        try:
-            self._player.pause()
-        except Exception as exc:
-            _log_vlc_debug("pause before replay", exc)
+        self._set_paused(True)
         # Intentionally do not set_media(None) here. On Windows that often tears down
         # the embedded Direct3D11 vout and opens a separate "VLC (Direct3D11 output)"
         # window on the next play(). The following _set_media() replaces media in place.
@@ -422,10 +462,7 @@ class VlcPreviewPlayer:
                 self._player.set_time(stop_at_ms)
         except Exception as exc:
             _log_vlc_debug("seek to stop time", exc)
-        try:
-            self._player.pause()
-        except Exception as exc:
-            _log_vlc_debug("pause at stop time", exc)
+        self._set_paused(True)
 
     def _should_restart_media(self):
         if not self._current_video_path:
@@ -437,7 +474,13 @@ class VlcPreviewPlayer:
         return length_ms > 0 and current_ms >= max(0, length_ms - 250)
 
     def _restart_from_ms(self, target_ms):
-        if self._player is None or self._released or self._instance is None or not self._current_video_path:
+        if (
+            self._player is None
+            or self._released
+            or not self._session_active
+            or self._instance is None
+            or not self._current_video_path
+        ):
             return False
         start_sec = max(0.0, float(target_ms) / 1000.0)
         try:

@@ -1,4 +1,4 @@
-"""Preview panel, export queue, and preview dialog — extracted from MainWindow to shrink gui.py."""
+"""Preview panel, export queue, and in-panel preview chrome — extracted from MainWindow."""
 
 from __future__ import annotations
 
@@ -12,19 +12,28 @@ from src.app.logging_utils import get_logger
 from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_explorer
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
-from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
+from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker
 
 logger = get_logger("gui_preview")
 
 
 class PreviewGuiMixin:
-    """Preview playback, expand dialog, and clip export tasks; mixed into `MainWindow`."""
+    """Preview playback and clip export tasks; mixed into `MainWindow`."""
 
     def handle_play(self, path, sec, end_sec=None):
         # Preview uses VLC; do not require a CLIP model profile.
         if not self.preview_controller.play(path, sec, end_sec=end_sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
-        self._update_expand_preview_button()
+            self._update_preview_action_button_styles()
+            return
+        ctx = self.preview_controller.get_current_preview_context() or {}
+        self._sync_preview_chrome(
+            str(ctx.get("video_path", path)),
+            float(ctx.get("start_sec", sec)),
+            float(ctx.get("end_sec", end_sec if end_sec is not None else sec)),
+            float(ctx.get("suggested_sec", sec)),
+        )
+        self._update_preview_action_button_styles()
 
     def open_segment_preview_dialog(
         self,
@@ -35,6 +44,7 @@ class PreviewGuiMixin:
         suggested_sec=None,
         on_status=None,
     ) -> bool:
+        """Play a segment in the main preview panel (single VLC). Name kept for call sites."""
         def set_status(message: str) -> None:
             if callable(on_status):
                 on_status(message)
@@ -56,64 +66,88 @@ class PreviewGuiMixin:
             end_sec = start_sec + 0.1
         suggested = float(suggested_sec if suggested_sec is not None else (start_sec + end_sec) / 2.0)
 
-        self.preview_controller.stop_preview(skip_telemetry=True)
-        self._update_expand_preview_button()
-        self._preview_dialog_opening = True
-        self._preview_dialog_cooldown_until = now + 0.8
+        if getattr(self, "pages", None) is not None:
+            try:
+                search_idx = self._nav_page_index("search")
+                if self.pages.currentIndex() != search_idx:
+                    self.switch_page("search")
+            except Exception as exc:
+                logger.debug("Switch to search for preview skipped: %s", exc)
 
+        self._preview_dialog_opening = True
+        self._preview_dialog_cooldown_until = now + 0.35
         try:
-            if not hasattr(self, "_preview_dialog") or self._preview_dialog is None:
-                self._preview_dialog = PreviewDialog(
-                    self, video_path, start_sec, end_sec, self.texts, suggested_sec=suggested
-                )
-                self._preview_dialog.export_requested.connect(self._queue_preview_export)
-                self._preview_dialog.export_status_changed.connect(self._handle_preview_export_status)
-            else:
-                self._preview_dialog.load_preview(
-                    video_path, start_sec, end_sec, suggested_sec=suggested
-                )
-            self._preview_dialog.show()
-            self._preview_dialog.raise_()
-            self._preview_dialog.activateWindow()
+            ctx = self.preview_controller.get_current_preview_context()
+            same_clip = (
+                ctx is not None
+                and str(ctx.get("video_path", "")).strip() == video_path
+                and abs(float(ctx.get("start_sec", -1.0)) - start_sec) < 0.05
+                and abs(float(ctx.get("end_sec", -1.0)) - end_sec) < 0.05
+            )
+            player = getattr(self.preview_controller, "vlc_player", None)
+            playing_ok = player is not None and player.is_available()
+            if not (same_clip and playing_ok):
+                if not self.preview_controller.play(video_path, suggested, end_sec=end_sec):
+                    set_status(self.texts.get("preview_failed", "Preview failed"))
+                    return False
+                ctx = self.preview_controller.get_current_preview_context() or {}
+                start_sec = float(ctx.get("start_sec", start_sec))
+                end_sec = float(ctx.get("end_sec", end_sec))
+                suggested = float(ctx.get("suggested_sec", suggested))
+
+            self._sync_preview_chrome(video_path, start_sec, end_sec, suggested)
+            self._update_preview_action_button_styles()
         finally:
-            QTimer.singleShot(800, self._release_preview_dialog_gate)
+            QTimer.singleShot(350, self._release_preview_dialog_gate)
         return True
 
-    def open_current_preview_dialog(self, _event=None):
-        payload = self.preview_controller.get_current_preview_context()
-        if not payload:
+    def _ensure_preview_chrome(self):
+        chrome = self.search_page.expanded_chrome
+        if getattr(self, "_expanded_chrome_wired", False):
+            chrome.apply_texts(self.texts)
             return
-        video_path = str(payload.get("video_path", "")).strip()
-        if not video_path:
-            return
+        chrome.apply_texts(self.texts)
+        chrome.export_requested.connect(self._queue_preview_export)
+        chrome.export_status_changed.connect(self._handle_preview_export_status)
+        chrome.maximize_toggled.connect(self._on_preview_maximize_toggled)
+        self._expanded_chrome_wired = True
 
-        start_sec = float(payload.get("start_sec", 0.0))
-        end_sec = float(payload.get("end_sec", start_sec))
-        suggested_sec = float(payload.get("suggested_sec", start_sec))
-        self.open_segment_preview_dialog(
-            video_path,
-            start_sec,
-            end_sec,
-            suggested_sec=suggested_sec,
-        )
+    def _sync_preview_chrome(self, video_path, start_sec, end_sec, suggested_sec):
+        self._ensure_preview_chrome()
+        chrome = self.search_page.expanded_chrome
+        player = self.preview_controller._ensure_vlc_player()
+        chrome.bind_player(player)
+        chrome.attach_clip(video_path, start_sec, end_sec, suggested_sec=suggested_sec)
+        chrome.show_chrome()
+        if player is not None and player.is_available():
+            QTimer.singleShot(0, player.rebind_output_window)
+            QTimer.singleShot(80, player.rebind_output_window)
+
+    def _reset_preview_chrome(self):
+        chrome = getattr(self.search_page, "expanded_chrome", None)
+        if chrome is None:
+            return
+        chrome.reset()
+
+    def _on_preview_maximize_toggled(self, maximized: bool):
+        self.search_page.set_preview_maximized(bool(maximized))
+        player = getattr(self.preview_controller, "vlc_player", None)
+        if player is not None and player.is_available():
+            QTimer.singleShot(0, player.rebind_output_window)
+            QTimer.singleShot(80, player.rebind_output_window)
+
+    def _collapse_preview_maximize(self):
+        if self.search_page.is_preview_maximized():
+            self.search_page.set_preview_maximized(False)
+            player = getattr(self.preview_controller, "vlc_player", None)
+            if player is not None and player.is_available():
+                QTimer.singleShot(0, player.rebind_output_window)
 
     def _release_preview_dialog_gate(self):
         self._preview_dialog_opening = False
 
-    def _update_expand_preview_button(self):
-        controller = getattr(self, "preview_controller", None)
-        has_preview = controller is not None and controller.get_current_preview_context() is not None
-        self.search_page.btn_expand_preview.setEnabled(has_preview)
-        self._update_preview_action_button_styles()
-
     def _update_preview_action_button_styles(self):
-        controller = getattr(self, "preview_controller", None)
-        has_preview = controller is not None and controller.get_current_preview_context() is not None
         has_export_tasks = bool(self._preview_export_tasks)
-        self._set_button_object_name(
-            self.search_page.btn_expand_preview,
-            "PrimaryButton" if has_preview else "GhostButton",
-        )
         for btn in (self.search_page.btn_export_tasks,):
             self._set_button_object_name(
                 btn,

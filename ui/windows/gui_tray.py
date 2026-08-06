@@ -184,8 +184,18 @@ class TrayGuiMixin:
         return True
 
     def _shutdown_application(self, event):
+        if hasattr(self, "_collapse_preview_maximize"):
+            self._collapse_preview_maximize()
+        if hasattr(self, "preview_controller") and self.preview_controller is not None:
+            try:
+                self.preview_controller.shutdown()
+            except Exception:
+                pass
         if hasattr(self, "_preview_dialog") and self._preview_dialog is not None:
-            self._preview_dialog.shutdown_player(fast=True)
+            try:
+                self._preview_dialog.shutdown_player(fast=True)
+            except Exception:
+                pass
         if hasattr(self, "search_page") and self.search_page is not None:
             self.search_page.shutdown_results_float()
         self.search_controller.shutdown()

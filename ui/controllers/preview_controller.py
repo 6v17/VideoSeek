@@ -89,6 +89,29 @@ class PreviewController:
             self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
         return self.vlc_player
 
+    def suspend_for_dialog(self, *, skip_telemetry: bool = True):
+        """Pause inline preview without libvlc stop()/set_media(None).
+
+        Opening the large-preview dialog used to call ``stop_preview()`` on every
+        click; repeated ``stop()`` on the UI thread freezes the app on Windows.
+        Keep ``current_preview_context`` so 放大预览 can reopen the same clip.
+        """
+        if skip_telemetry:
+            try:
+                from src.services.search_telemetry import cancel_playback_session
+
+                cancel_playback_session()
+            except Exception as exc:
+                logger.debug("Playback telemetry cancel skipped: %s", exc)
+        else:
+            self._record_playback_telemetry(source="inline")
+        if self.vlc_player is not None:
+            self.vlc_player.suspend()
+        try:
+            self.parent_window.media_player.pause()
+        except Exception as exc:
+            logger.debug("QMediaPlayer pause for dialog skipped: %s", exc)
+
     def stop_preview(self, *, skip_telemetry: bool = False):
         if skip_telemetry:
             try:
@@ -100,8 +123,12 @@ class PreviewController:
         else:
             self._record_playback_telemetry(source="inline")
         if self.vlc_player is not None:
-            self.vlc_player.stop()
-        self.parent_window.media_player.stop()
+            # End the clip session so Play cannot resume after 清空.
+            self.vlc_player.clear_session()
+        try:
+            self.parent_window.media_player.pause()
+        except Exception as exc:
+            logger.debug("QMediaPlayer pause on stop_preview skipped: %s", exc)
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
         self.current_preview_context = None

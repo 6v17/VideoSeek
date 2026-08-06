@@ -181,7 +181,7 @@ class MainWindow(
         self.audio_output.setVolume(1.0)
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
-        self._update_expand_preview_button()
+        self._update_preview_action_button_styles()
         self._init_system_tray()
         self.apply_texts()
         self._bind_settings_dirty_tracking()
@@ -247,7 +247,6 @@ class MainWindow(
             self.video_widget.setAttribute(dont_native_ancestors, True)
         self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.video_widget.installEventFilter(self)
-        self.search_page.preview_host.mouseDoubleClickEvent = self.open_current_preview_dialog
         self.search_page.btn_manage_presets.installEventFilter(self)
         self.search_page.preview_host_layout.addWidget(self.video_widget, 1)
 
@@ -273,7 +272,6 @@ class MainWindow(
         self.search_page.search_scope_select.editor_requested.connect(self.open_search_scope_editor)
         self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
         self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
-        self.search_page.btn_expand_preview.clicked.connect(self.open_current_preview_dialog)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
         self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
@@ -394,10 +392,17 @@ class MainWindow(
         self.pages.setCurrentIndex(next_idx)
         self.sidebar.set_current_page(page_name)
         if prev_idx == mapping["search"] and next_idx != mapping["search"]:
+            if hasattr(self, "_collapse_preview_maximize"):
+                self._collapse_preview_maximize()
             self.preview_controller.stop_preview()
+            if hasattr(self, "_reset_preview_chrome"):
+                self._reset_preview_chrome()
             dlg = getattr(self, "_preview_dialog", None)
             if dlg is not None:
-                dlg.dismiss_for_page_switch()
+                try:
+                    dlg.dismiss_for_page_switch()
+                except Exception:
+                    pass
         if page_name == "settings":
             self._refresh_agent_api_status()
             self.refresh_search_telemetry_panel()
@@ -474,12 +479,14 @@ class MainWindow(
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
-        self.search_page.btn_expand_preview.setText(t.get("preview_expand", "放大预览"))
+        if hasattr(self.search_page, "expanded_chrome"):
+            self._ensure_preview_chrome()
+            self.search_page.expanded_chrome.apply_texts(t)
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.apply_results_float_texts(t)
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_shot_list_button()
-        self._update_expand_preview_button()
+        self._update_preview_action_button_styles()
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
         self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))
         self.search_page.btn_mobile_qr.setText(t["mobile_bridge_qr"])
@@ -1422,7 +1429,9 @@ class MainWindow(
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
         self.search_controller.clear_results()
         self.preview_controller.stop_preview()
-        self._update_expand_preview_button()
+        if hasattr(self, "_reset_preview_chrome"):
+            self._reset_preview_chrome()
+        self._update_preview_action_button_styles()
         try:
             self._refresh_search_panel_state()
         except Exception:
