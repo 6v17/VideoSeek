@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -352,7 +353,10 @@ class SubtitleLibraryServiceTests(unittest.TestCase):
                 )
                 os.remove(video_path)
 
-                pruned = subtitle_library_service.prune_missing_subtitle_sources(config=config)
+                pruned = subtitle_library_service.prune_missing_subtitle_sources(
+                    config=config,
+                    clear_orphan_transcripts=True,
+                )
                 self.assertEqual(pruned["removed_files"], 1)
                 self.assertEqual(pruned["cleared_transcripts"], 1)
                 still = subtitle_library_service.list_subtitle_library_video_entries(
@@ -360,6 +364,79 @@ class SubtitleLibraryServiceTests(unittest.TestCase):
                 )
                 self.assertEqual(still, [])
                 self.assertIsNone(
+                    dialogue_transcript_store.load_dialogue_transcript(video_id, config=config)
+                )
+
+    def test_prune_skips_offline_library_root_and_keeps_transcripts_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            dialogue_dir = os.path.join(data_dir, "dialogue")
+            os.makedirs(dialogue_dir, exist_ok=True)
+            video_root = os.path.join(tmp, "videos")
+            os.makedirs(video_root, exist_ok=True)
+            video_path = os.path.join(video_root, "a.mp4")
+            with open(video_path, "wb") as handle:
+                handle.write(b"fake")
+
+            config = {"data_root": tmp}
+            lib_path = canonicalize_library_path(video_root)
+
+            with (
+                patch.object(subtitle_library_service, "load_config", return_value=config),
+                patch(
+                    "src.app.config.get_data_storage_paths",
+                    return_value={"data_dir": data_dir},
+                ),
+                patch.object(
+                    subtitle_library_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+                patch.object(
+                    dialogue_transcript_store,
+                    "get_dialogue_store_dir",
+                    return_value=dialogue_dir,
+                ),
+            ):
+                subtitle_library_store.mark_subtitle_registry_seeded(config=config)
+                subtitle_library_service.add_subtitle_library(video_root, config=config)
+                subtitle_library_service.register_subtitle_library_videos(
+                    config=config, library_path=video_root
+                )
+                entries = subtitle_library_service.list_subtitle_library_video_entries(
+                    config=config, register=False
+                )
+                video_id = entries[0]["video_id"]
+                dialogue_transcript_store.save_dialogue_transcript(
+                    video_id,
+                    segments=[{"start": 0.0, "end": 1.0, "text": "keep"}],
+                    library_path=lib_path,
+                    video_path=video_path,
+                    config=config,
+                )
+
+                # Simulate unplugged drive: root gone, but prune must not wipe OCR.
+                shutil.rmtree(video_root)
+                pruned = subtitle_library_service.prune_missing_subtitle_sources(config=config)
+                self.assertEqual(pruned["removed_files"], 0)
+                self.assertEqual(pruned["cleared_transcripts"], 0)
+                self.assertGreaterEqual(int(pruned.get("skipped_offline_roots") or 0), 1)
+                self.assertIsNotNone(
+                    dialogue_transcript_store.load_dialogue_transcript(video_id, config=config)
+                )
+
+                # Single missing file with root still present: drop membership only.
+                os.makedirs(video_root, exist_ok=True)
+                with open(video_path, "wb") as handle:
+                    handle.write(b"fake")
+                subtitle_library_service.register_subtitle_library_videos(
+                    config=config, library_path=video_root
+                )
+                os.remove(video_path)
+                pruned2 = subtitle_library_service.prune_missing_subtitle_sources(config=config)
+                self.assertEqual(pruned2["removed_files"], 1)
+                self.assertEqual(pruned2["cleared_transcripts"], 0)
+                self.assertIsNotNone(
                     dialogue_transcript_store.load_dialogue_transcript(video_id, config=config)
                 )
 

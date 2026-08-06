@@ -14,7 +14,7 @@ from src.services.team_mode_service import (
     start_team_server_media,
     stop_team_server_media,
 )
-from src.services.team_paths import detect_lan_ip, normalize_team_mode
+from src.services.team_paths import detect_lan_ip
 from src.web.agent_api import DEFAULT_PORT, AgentApiService, is_agent_api_enabled
 
 logger = get_logger("team_mode_controller")
@@ -35,9 +35,8 @@ class TeamModeController(QObject):
         return status
 
     def apply_from_config(self) -> dict:
-        """Start/stop team server pieces according to saved team_mode."""
-        cfg = load_config()
-        mode = get_team_mode(cfg)
+        """Start/stop team server pieces according to session team_mode."""
+        mode = get_team_mode()
         if mode == "server":
             return self.start_server()
         self.stop_server()
@@ -99,8 +98,12 @@ class TeamModeController(QObject):
         self.refresh_status()
 
     def shutdown(self) -> None:
+        from src.services.team_mode_service import clear_session_team_mode
+
         if get_team_mode() == "server":
             self.stop_server()
         elif self._api_service is not None:
             self._api_service.stop()
             self._api_service = None
+        clear_session_team_mode()
+        self.refresh_status()

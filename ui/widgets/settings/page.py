@@ -204,9 +204,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.lbl_team_status = QLabel()
         self.lbl_team_status.setObjectName("StatusHint")
         self.lbl_team_status.setWordWrap(True)
-        self.btn_team_apply = QPushButton()
-        self.btn_team_apply.setObjectName("AccentGhostButton")
-        self.btn_team_apply.setMinimumHeight(34)
         self.input_team_bundle = QWidget()
         team_bundle_layout = QVBoxLayout(self.input_team_bundle)
         team_bundle_layout.setContentsMargins(0, 0, 0, 0)
@@ -217,7 +214,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         team_row_layout.setSpacing(8)
         team_row_layout.addWidget(self.input_team_mode, 0)
         team_row_layout.addWidget(self.input_team_server_url, 1)
-        team_row_layout.addWidget(self.btn_team_apply, 0)
         team_bundle_layout.addWidget(team_row)
         team_bundle_layout.addWidget(self.lbl_team_status)
         self.input_export_video_silent = NoWheelComboBox()
@@ -1019,9 +1015,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_agent_api_enabled.setText(texts["setting_agent_api_enabled"])
         self.label_team_mode.setText(
             texts.get("setting_team_mode", _fallback_text(texts, "setting_team_mode", "团队模式", "Team mode"))
-        )
-        self.btn_team_apply.setText(
-            texts.get("setting_team_apply", _fallback_text(texts, "setting_team_apply", "应用团队模式", "Apply team mode"))
         )
         current_team_mode = self.input_team_mode.currentData()
         self.input_team_mode.blockSignals(True)

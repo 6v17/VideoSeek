@@ -526,9 +526,9 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
     team_play_urls = bool(getattr(body, "team_play_urls", False))
     if not team_play_urls:
         try:
-            from src.services.team_paths import normalize_team_mode
+            from src.services.team_mode_service import is_team_server_mode
 
-            if normalize_team_mode(cfg.get("team_mode", "off")) == "server":
+            if is_team_server_mode(cfg):
                 team_play_urls = True
         except Exception:
             pass

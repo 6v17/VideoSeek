@@ -126,9 +126,9 @@ def is_agent_api_enabled(config=None) -> bool:
         return True
     if config is None:
         config = load_config()
-    from src.services.team_paths import normalize_team_mode
+    from src.services.team_mode_service import is_team_server_mode
 
-    if normalize_team_mode(config.get("team_mode", "off")) == "server":
+    if is_team_server_mode(config):
         return True
     return bool(config.get("agent_api_enabled", False))
 

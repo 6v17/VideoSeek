@@ -323,8 +323,16 @@ def clear_subtitle_transcripts(video_ids, *, config=None) -> dict:
     }
 
 
-def prune_missing_subtitle_sources(*, config=None, clear_orphan_transcripts: bool = True) -> dict:
-    """Drop registry file rows whose source media is gone; optionally clear their OCR."""
+def prune_missing_subtitle_sources(*, config=None, clear_orphan_transcripts: bool = False) -> dict:
+    """Drop registry file rows whose source media is gone.
+
+    Safety rules (aligned with visual-library cleanup):
+    - If the whole library root is offline/missing, skip it. Removable/network
+      drives must not wipe OCR just because they were briefly unplugged.
+    - By default do **not** delete transcripts. Re-scanning the same files later
+      keeps the same video_id and can reuse existing OCR. Explicit remove-library
+      / clear-selected still delete transcripts on purpose.
+    """
     from src.services.library_service import count_video_id_refs
 
     cfg = config or load_config()
@@ -334,10 +342,19 @@ def prune_missing_subtitle_sources(*, config=None, clear_orphan_transcripts: boo
 
     removed_files = 0
     orphan_ids: list[str] = []
+    skipped_offline_roots = 0
     changed = False
 
     for root_path, lib_data in list(meta.get("libraries", {}).items()):
         if not isinstance(lib_data, dict):
+            continue
+        # Same offline-root guard as visual cleanup_missing_library_files.
+        if not os.path.exists(root_path):
+            skipped_offline_roots += 1
+            logger.info(
+                "Skipping subtitle prune for offline library root: %s",
+                root_path,
+            )
             continue
         files = lib_data.get("files")
         if not isinstance(files, dict):
@@ -360,6 +377,11 @@ def prune_missing_subtitle_sources(*, config=None, clear_orphan_transcripts: boo
 
     if changed:
         save_subtitle_library_meta(meta, config=cfg)
+        logger.warning(
+            "Subtitle prune removed %d missing file row(s); clear_orphan_transcripts=%s",
+            removed_files,
+            bool(clear_orphan_transcripts),
+        )
 
     cleared_transcripts = 0
     if clear_orphan_transcripts and orphan_ids:
@@ -378,6 +400,7 @@ def prune_missing_subtitle_sources(*, config=None, clear_orphan_transcripts: boo
         "removed_files": removed_files,
         "orphan_video_ids": sorted(set(orphan_ids)),
         "cleared_transcripts": cleared_transcripts,
+        "skipped_offline_roots": skipped_offline_roots,
         "changed": changed or cleared_transcripts > 0,
     }
 

@@ -176,6 +176,172 @@ def list_team_client_library_tree(
     return entries, library_paths
 
 
+def list_team_client_subtitle_libraries(
+    server_url: str,
+    *,
+    api_port_default: int = 8765,
+    timeout: float = 30.0,
+) -> List[dict]:
+    base = _team_base(server_url, api_port_default=api_port_default)
+    data = _get_json(f"{base}/api/v1/subtitle-libraries", timeout=timeout)
+    if data.get("ok") is False:
+        err = data.get("error") or {}
+        raise RuntimeError(str(err.get("message") or "team subtitle libraries failed"))
+    rows = data.get("libraries") or []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def list_team_client_subtitle_videos(
+    server_url: str,
+    *,
+    library_path: Optional[str] = None,
+    ready_only: bool = True,
+    api_port_default: int = 8765,
+    timeout: float = 60.0,
+    page_limit: int = _VIDEO_PAGE_LIMIT,
+) -> List[dict]:
+    base = _team_base(server_url, api_port_default=api_port_default)
+    out: List[dict] = []
+    offset = 0
+    safe_limit = max(1, min(int(page_limit or _VIDEO_PAGE_LIMIT), _VIDEO_PAGE_LIMIT))
+    while True:
+        params: dict[str, str] = {
+            "ready_only": "true" if ready_only else "false",
+            "limit": str(safe_limit),
+            "offset": str(offset),
+        }
+        if library_path:
+            params["library_path"] = str(library_path)
+        query = urllib.parse.urlencode(params)
+        data = _get_json(f"{base}/api/v1/subtitle-libraries/videos?{query}", timeout=timeout)
+        if data.get("ok") is False:
+            err = data.get("error") or {}
+            raise RuntimeError(str(err.get("message") or "team subtitle videos failed"))
+        page = data.get("videos") or []
+        if not isinstance(page, list) or not page:
+            break
+        for row in page:
+            if isinstance(row, dict):
+                out.append(row)
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        total = int(meta.get("total_listed") or 0)
+        offset += len(page)
+        if offset >= total or len(page) < safe_limit:
+            break
+    return out
+
+
+def list_team_client_subtitle_scope_entries(
+    server_url: str,
+    *,
+    api_port_default: int = 8765,
+) -> List[dict]:
+    """Subtitle/dialogue scope entries from the team server."""
+    # Prefer one unscoped listing — avoids Windows path key mismatches per library.
+    try:
+        videos = list_team_client_subtitle_videos(
+            server_url,
+            library_path=None,
+            ready_only=False,
+            api_port_default=api_port_default,
+        )
+    except Exception:
+        logger.exception("Failed listing all team subtitle videos; falling back per library")
+        videos = []
+        libraries = list_team_client_subtitle_libraries(
+            server_url, api_port_default=api_port_default
+        )
+        for lib in libraries:
+            lib_path = str(lib.get("library_path") or "").strip()
+            if not lib_path:
+                continue
+            try:
+                videos.extend(
+                    list_team_client_subtitle_videos(
+                        server_url,
+                        library_path=lib_path,
+                        ready_only=False,
+                        api_port_default=api_port_default,
+                    )
+                )
+            except Exception:
+                logger.exception("Failed listing team subtitle videos for %s", lib_path)
+
+    entries: List[dict] = []
+    seen_ids: set[str] = set()
+    for row in videos:
+        if not isinstance(row, dict):
+            continue
+        video_path = str(row.get("video_path") or "").strip()
+        video_id = str(row.get("video_id") or "").strip()
+        if not video_path or not video_id or video_id in seen_ids:
+            continue
+        seen_ids.add(video_id)
+        has_transcript = bool(row.get("has_transcript"))
+        asset_state = str(row.get("asset_state") or "").strip().lower()
+        if not asset_state:
+            asset_state = "ready" if has_transcript else "pending"
+        entries.append(
+            {
+                "library_path": str(row.get("library_path") or "").strip(),
+                "video_path": video_path,
+                "video_rel_path": str(row.get("video_rel_path") or "").strip(),
+                "video_id": video_id,
+                "abs_path": video_path,
+                # Shared remote view: never hide rows because the client cannot
+                # see the server's local filesystem.
+                "source_exists": True,
+                "has_transcript": has_transcript,
+                "asset_state": asset_state,
+                "team_shared": True,
+            }
+        )
+    return entries
+
+
+def list_team_client_subtitle_library_tree(
+    server_url: str,
+    *,
+    api_port_default: int = 8765,
+) -> tuple[List[dict], List[str]]:
+    libraries = list_team_client_subtitle_libraries(server_url, api_port_default=api_port_default)
+    library_paths = [str(lib.get("library_path") or "").strip() for lib in libraries]
+    library_paths = [p for p in library_paths if p]
+    entries = list_team_client_subtitle_scope_entries(
+        server_url, api_port_default=api_port_default
+    )
+    for item in entries:
+        has_transcript = bool(item.get("has_transcript"))
+        item.setdefault("status_text", "ready" if has_transcript else "pending")
+        item.setdefault("status_tone", "ready" if has_transcript else "pending")
+    return entries, library_paths
+
+
+def prepare_team_client_session(
+    server_url: str,
+    *,
+    api_port_default: int = 8765,
+) -> dict:
+    """Probe + preload visual/subtitle trees for a smooth first connect."""
+    probe_team_server(server_url, api_port_default=api_port_default)
+    visual_entries, visual_paths = list_team_client_library_tree(
+        server_url, api_port_default=api_port_default
+    )
+    try:
+        subtitle_entries, subtitle_paths = list_team_client_subtitle_library_tree(
+            server_url, api_port_default=api_port_default
+        )
+    except Exception:
+        logger.exception("Team subtitle library preload failed")
+        subtitle_entries, subtitle_paths = [], []
+    return {
+        "visual_entries": visual_entries,
+        "visual_library_paths": visual_paths,
+        "subtitle_entries": subtitle_entries,
+        "subtitle_library_paths": subtitle_paths,
+    }
+
+
 def _encode_image_query(query_data) -> Optional[dict]:
     """Build Agent API image query payload from path / bytes / ndarray-ish."""
     if query_data is None:
@@ -227,6 +393,7 @@ def run_team_client_search(
     is_text: bool,
     search_mode: Optional[str] = None,
     search_precision_mode: Optional[str] = None,
+    search_kind: Optional[str] = None,
     top_k: Optional[int] = None,
     scope_video_paths: Optional[Sequence[str]] = None,
     scope_library_paths: Optional[Sequence[str]] = None,
@@ -239,10 +406,14 @@ def run_team_client_search(
         "expand_frame_hits": True,
         "team_play_urls": True,
     }
+    kind = str(search_kind or "").strip().lower()
+    if kind == "dialogue":
+        payload["search_kind"] = "dialogue"
+        payload["expand_frame_hits"] = False
     if top_k is not None:
         payload["top_k"] = int(top_k)
     mode = str(search_mode or "").strip().lower()
-    if mode in {"frame", "chunk"}:
+    if kind != "dialogue" and mode in {"frame", "chunk"}:
         payload["search_mode"] = mode
     precision = str(search_precision_mode or "").strip().lower()
     if precision:
@@ -262,6 +433,8 @@ def run_team_client_search(
         payload["query_type"] = "text"
         payload["query"] = str(query_data or "")
     else:
+        if kind == "dialogue":
+            raise RuntimeError("dialogue search only supports text queries")
         payload.update(_encode_image_query(query_data) or {})
 
     data = _post_json(f"{base}/api/v1/search", payload, timeout=timeout)
@@ -286,7 +459,7 @@ def run_team_client_search(
                 end_sec=float(row.get("end_sec") or 0.0),
                 score=float(row.get("score") or 0.0),
                 video_path=path,
-                match_kind=str(row.get("match_kind") or "frame"),
+                match_kind=str(row.get("match_kind") or ("dialogue" if kind == "dialogue" else "frame")),
                 video_id=str(row.get("video_id") or ""),
                 matched_text=str(row.get("matched_text") or ""),
             )

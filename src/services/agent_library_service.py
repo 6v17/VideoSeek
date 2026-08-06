@@ -318,12 +318,19 @@ def list_agent_subtitle_libraries(config=None) -> Dict[str, Any]:
     from src.services.subtitle_library_service import (
         list_subtitle_libraries,
         list_subtitle_search_scope_entries,
+        register_subtitle_library_videos,
     )
     from src.storage.config_store import get_dialogue_search_scope_mode
     from src.storage.lance_dialogue_search import get_dialogue_index_stats
 
     cfg = config or load_config()
     libraries = list_subtitle_libraries(config=cfg, seed=True)
+    # Keep file membership fresh so team clients / UI do not see empty shells.
+    try:
+        register_subtitle_library_videos(config=cfg)
+        libraries = list_subtitle_libraries(config=cfg, seed=False)
+    except Exception:
+        pass
     by_lib: Dict[str, Dict[str, int]] = {}
     for item in list_subtitle_search_scope_entries(config=cfg):
         lib = normalize_scope_path(str(item.get("library_path") or ""))
@@ -411,9 +418,14 @@ def list_agent_subtitle_videos(
     from src.services.subtitle_library_service import (
         list_subtitle_libraries,
         list_subtitle_search_scope_entries,
+        register_subtitle_library_videos,
     )
 
     cfg = config or load_config()
+    try:
+        register_subtitle_library_videos(config=cfg)
+    except Exception:
+        pass
     libraries = list_subtitle_libraries(config=cfg, seed=True)
     video_id_text = str(video_id or "").strip()
     safe_limit = max(1, min(int(limit or _DEFAULT_VIDEO_PAGE_LIMIT), _MAX_VIDEO_PAGE_LIMIT))
@@ -456,12 +468,13 @@ def list_agent_subtitle_videos(
             matched_any_for_video_id = True
         if q and not _video_matches_query(row, q):
             continue
-        if ready_only and str(row.get("asset_state") or "").strip().lower() != "ready":
+        # ready_only = has OCR text (do not also require source_exists via asset_state).
+        if ready_only and not bool(row.get("has_transcript")):
             continue
 
         index = total_listed
         total_listed += 1
-        if str(row.get("asset_state") or "").strip().lower() == "ready":
+        if bool(row.get("has_transcript")):
             total_ready += 1
         if index < safe_offset or len(page) >= safe_limit:
             continue

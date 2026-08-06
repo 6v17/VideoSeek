@@ -61,8 +61,6 @@ class SearchScopeGuiMixin:
         from src.services.team_mode_service import is_team_client_mode
 
         if self._search_scope_is_dialogue():
-            if is_team_client_mode():
-                return False
             return self._search_scope_ready_count() >= 2
         if not is_team_client_mode() and needs_search_index_schema_upgrade():
             return False
@@ -73,8 +71,19 @@ class SearchScopeGuiMixin:
 
         if self._search_scope_is_dialogue():
             if is_team_client_mode():
-                self._dialogue_search_scope_entries_cache = []
-                self._dialogue_search_scope_entries_dirty = False
+                try:
+                    from src.app.config import load_config
+                    from src.services.team_client_search import list_team_client_subtitle_scope_entries
+
+                    cfg = load_config()
+                    self._dialogue_search_scope_entries_cache = list_team_client_subtitle_scope_entries(
+                        str(cfg.get("team_server_url") or ""),
+                        api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+                    )
+                    self._dialogue_search_scope_entries_dirty = False
+                except Exception:
+                    self._dialogue_search_scope_entries_cache = []
+                    self._dialogue_search_scope_entries_dirty = True
                 return
             if (
                 not force

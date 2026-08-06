@@ -356,7 +356,8 @@ class MainWindow(
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
-        self.settings_page.btn_team_apply.clicked.connect(self._on_team_apply_clicked)
+        self.settings_page.input_team_mode.currentIndexChanged.connect(self._on_team_mode_ui_changed)
+        self.settings_page.input_team_server_url.editingFinished.connect(self._on_team_server_url_editing_finished)
 
         self.setAcceptDrops(True)
         for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):

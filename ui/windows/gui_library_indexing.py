@@ -91,11 +91,51 @@ class LibraryIndexingGuiMixin:
         return rows, list(libraries.keys())
 
     def _build_subtitle_tree_entries(self, *, register: bool = False) -> tuple[list[dict], list[str]]:
+        from src.services.team_mode_service import is_team_client_mode
         from src.storage.dialogue_transcript_store import list_dialogue_transcript_summaries
+
+        if is_team_client_mode():
+            from src.app.config import load_config
+            from src.services.team_client_search import list_team_client_subtitle_library_tree
+
+            cfg = load_config()
+            entries, library_paths = list_team_client_subtitle_library_tree(
+                str(cfg.get("team_server_url") or ""),
+                api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+            )
+            rows = []
+            for item in entries:
+                has_transcript = bool(item.get("has_transcript"))
+                segment_count = int(item.get("segment_count") or 0)
+                if has_transcript:
+                    status = self.texts.get(
+                        "dialogue_library_row_meta",
+                        "{segments} cues",
+                    ).format(segments=segment_count if segment_count else "✓")
+                else:
+                    status = self.texts.get("subtitle_library_status_missing", "Not extracted")
+                rows.append(
+                    {
+                        **item,
+                        "has_transcript": has_transcript,
+                        "segment_count": segment_count,
+                        "status_text": status,
+                        "status_tone": "ready" if has_transcript else "pending",
+                    }
+                )
+            return rows, library_paths
 
         # Global subtitle registry — independent of the active CLIP profile.
         libraries = list_subtitle_libraries()
         entries = list_subtitle_library_video_entries(register=register)
+        # Recover empty shells (library folder exists but file rows were never scanned).
+        if not entries and libraries and not register:
+            try:
+                register_subtitle_library_videos()
+            except Exception:
+                pass
+            entries = list_subtitle_library_video_entries(register=False)
+            libraries = list_subtitle_libraries()
         transcript_by_id = {
             str(row.get("video_id") or "").strip(): row
             for row in list_dialogue_transcript_summaries()
@@ -124,6 +164,105 @@ class LibraryIndexingGuiMixin:
                 }
             )
         return rows, list(libraries.keys())
+
+    def apply_team_client_library_payload(self, payload=None) -> None:
+        """Apply prefetched shared visual/subtitle trees after a team-client connect."""
+        from src.services.team_mode_service import is_team_client_mode
+
+        payload = payload or {}
+        if not is_team_client_mode():
+            self.refresh_library_table()
+            self.refresh_dialogue_library_table()
+            return
+        try:
+            self._ensure_library_tree_hooks()
+            open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
+            empty_text = self.texts.get("library_list_empty", "No library folders yet.")
+            status_template = self.texts.get("library_sync_status", "{ready}/{total} synced")
+            tree = self.library_page.visual_video_tree
+            tree.set_action_texts(
+                open_text=open_text,
+                empty_text=empty_text,
+                status_template=status_template,
+                header_video=self.texts.get(
+                    "library_col_video", self.texts.get("search_scope_video_col", "Video")
+                ),
+                header_count=self.texts.get("library_col_count", "Count"),
+                header_status=self.texts.get("library_col_status", "Status"),
+                header_action=self.texts.get("library_col_action", "Action"),
+            )
+            visual_entries = list(payload.get("visual_entries") or [])
+            visual_paths = list(payload.get("visual_library_paths") or [])
+            rows = []
+            for item in visual_entries:
+                state = str(item.get("asset_state") or "ready").strip().lower() or "ready"
+                rows.append(
+                    {
+                        **item,
+                        "status_text": self._asset_state_label(state),
+                        "status_tone": "ready" if state == "ready" else "pending",
+                    }
+                )
+            tree.refresh_from_entries(rows, library_paths=visual_paths)
+            self._refresh_library_action_hints()
+            self._refresh_team_client_library_chrome()
+            self._refresh_remove_library_button()
+            if hasattr(self, "invalidate_search_scope_entries_cache"):
+                self.invalidate_search_scope_entries_cache()
+            if hasattr(self, "_refresh_search_scope_ui"):
+                self._refresh_search_scope_ui(force_entries=True)
+
+            subtitle_entries = list(payload.get("subtitle_entries") or [])
+            subtitle_paths = list(payload.get("subtitle_library_paths") or [])
+            empty_sub = self.texts.get(
+                "dialogue_library_empty",
+                "No subtitles yet. Add a video library, then Extract subtitles.",
+            )
+            status_sub = self.texts.get("library_extract_status", "{ready}/{total} extracted")
+            sub_tree = self.library_page.subtitle_video_tree
+            sub_tree.set_action_texts(
+                open_text=open_text,
+                empty_text=empty_sub,
+                status_template=status_sub,
+                header_video=self.texts.get(
+                    "library_col_video", self.texts.get("search_scope_video_col", "Video")
+                ),
+                header_count=self.texts.get("library_col_count", "Count"),
+                header_status=self.texts.get("library_col_status", "Status"),
+                header_action=self.texts.get("library_col_action", "Action"),
+            )
+            sub_rows = []
+            for item in subtitle_entries:
+                has_transcript = bool(item.get("has_transcript"))
+                segment_count = int(item.get("segment_count") or 0)
+                if has_transcript:
+                    status = self.texts.get(
+                        "dialogue_library_row_meta",
+                        "{segments} cues",
+                    ).format(segments=segment_count if segment_count else "✓")
+                else:
+                    status = self.texts.get("subtitle_library_status_missing", "Not extracted")
+                sub_rows.append(
+                    {
+                        **item,
+                        "source_exists": True,
+                        "has_transcript": has_transcript,
+                        "segment_count": segment_count,
+                        "status_text": status,
+                        "status_tone": "ready" if has_transcript else "pending",
+                    }
+                )
+            sub_tree.refresh_from_entries(sub_rows, library_paths=subtitle_paths)
+            if hasattr(self, "invalidate_dialogue_search_scope_entries_cache"):
+                self.invalidate_dialogue_search_scope_entries_cache()
+            if hasattr(self, "_refresh_search_scope_ui") and hasattr(self, "_search_scope_is_dialogue"):
+                try:
+                    if self._search_scope_is_dialogue():
+                        self._refresh_search_scope_ui(force_entries=True)
+                except Exception:
+                    pass
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
 
     def _is_subtitle_library_mode(self) -> bool:
         return int(self.library_page.library_mode()) == 1
@@ -236,18 +375,17 @@ class LibraryIndexingGuiMixin:
             "btn_export_dialogue",
             "btn_refresh_dialogue_library",
             "btn_stop_dialogue_index",
+            "input_subtitle_sample_interval",
+            "input_subtitle_ocr_batch",
+            "lbl_subtitle_sample_interval",
+            "lbl_subtitle_ocr_batch",
         ):
             widget = getattr(page, name, None)
             if widget is not None:
                 widget.setVisible(not client)
-        # Dialogue tab is local-only for now
+        # Subtitle tab stays available on 员工机 (read-only shared view).
         if getattr(page, "btn_tab_dialogue", None) is not None:
-            page.btn_tab_dialogue.setEnabled(not client)
-            if client and hasattr(page, "set_library_mode"):
-                try:
-                    page.set_library_mode(0)
-                except Exception:
-                    pass
+            page.btn_tab_dialogue.setEnabled(True)
         hint = getattr(page, "lbl_shared_library_hint", None)
         if hint is None:
             return
@@ -255,7 +393,7 @@ class LibraryIndexingGuiMixin:
             hint.setText(
                 self.texts.get(
                     "library_team_shared_hint",
-                    "员工机：显示服务机共享库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
+                    "员工机：显示服务机共享库与字幕库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
                 )
             )
         else:
@@ -701,13 +839,17 @@ class LibraryIndexingGuiMixin:
             self._refresh_remove_library_button()
 
     def refresh_dialogue_library_table(self):
-        try:
-            from src.services.subtitle_library_service import prune_missing_subtitle_sources
+        from src.services.team_mode_service import is_team_client_mode
 
-            try:
-                prune_missing_subtitle_sources()
-            except Exception:
-                pass
+        try:
+            if not is_team_client_mode():
+                from src.services.subtitle_library_service import prune_missing_subtitle_sources
+
+                try:
+                    # Never auto-delete OCR here. Offline/removable drives must not wipe transcripts.
+                    prune_missing_subtitle_sources(clear_orphan_transcripts=False)
+                except Exception:
+                    pass
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
             empty_text = self.texts.get(
@@ -727,8 +869,11 @@ class LibraryIndexingGuiMixin:
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
             )
+            if is_team_client_mode():
+                tree.refresh_from_entries([], library_paths=[])
             entries, library_paths = self._build_subtitle_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
+            self._refresh_team_client_library_chrome()
             self._refresh_remove_library_button()
             if hasattr(self, "invalidate_dialogue_search_scope_entries_cache"):
                 self.invalidate_dialogue_search_scope_entries_cache()
@@ -739,6 +884,12 @@ class LibraryIndexingGuiMixin:
                 except Exception:
                     pass
         except Exception as exc:
+            if is_team_client_mode():
+                try:
+                    self.library_page.subtitle_video_tree.refresh_from_entries([], library_paths=[])
+                    self._refresh_team_client_library_chrome()
+                except Exception:
+                    pass
             self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
 
     def export_dialogue_library(self):

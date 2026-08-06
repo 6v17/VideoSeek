@@ -110,6 +110,38 @@ class StorageRootMigrateWorker(QThread):
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
+class TeamConnectWorker(QThread):
+    """Probe team server and preload shared visual/subtitle libraries off the UI thread."""
+
+    progress_signal = Signal(str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, mode: str, server_url: str, *, api_port: int = 8765):
+        super().__init__()
+        self.mode = str(mode or "off").strip().lower() or "off"
+        self.server_url = str(server_url or "").strip()
+        self.api_port = int(api_port or 8765)
+
+    def run(self):
+        try:
+            if self.mode == "client":
+                from src.services.team_client_search import prepare_team_client_session
+
+                self.progress_signal.emit("connecting")
+                payload = prepare_team_client_session(
+                    self.server_url,
+                    api_port_default=self.api_port,
+                )
+                self.progress_signal.emit("ready")
+                self.finished_signal.emit(dict(payload or {}))
+                return
+            self.finished_signal.emit({})
+        except Exception as exc:
+            logger.exception("Team connect failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
 class SearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
@@ -132,28 +164,30 @@ class SearchWorker(QThread):
         config = self.config
         try:
             from src.app.config import load_config
-            from src.services.team_paths import normalize_team_mode
+            from src.services.team_mode_service import is_team_client_mode
             from src.services.search_service import filter_hits_by_min_score, run_dialogue_search, run_search
 
             app_cfg = load_config()
-            if normalize_team_mode(app_cfg.get("team_mode", "off")) == "client":
+            if is_team_client_mode(app_cfg):
                 from src.services.team_client_search import run_team_client_search
 
                 kind = str(config.search_kind or "").strip().lower()
-                if kind == "dialogue":
-                    raise RuntimeError("Team client mode does not support dialogue search yet.")
                 results = run_team_client_search(
                     server_url=str(app_cfg.get("team_server_url") or ""),
                     query_data=config.query,
                     is_text=bool(config.is_text),
                     search_mode=config.search_mode,
                     search_precision_mode=config.search_precision_mode,
+                    search_kind=kind or None,
                     top_k=config.top_k,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
                 results = filter_hits_by_min_score(results, config.min_score)
+                if kind == "dialogue":
+                    self.dialogue_status_message = ""
+                    self.dialogue_matched_by = "team"
                 self.result_ready.emit(list(results) if results is not None else [])
                 return
 

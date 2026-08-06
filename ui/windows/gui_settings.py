@@ -35,7 +35,7 @@ from src.utils import (
 )
 from ui.dialogs import SamplingRulesDialog
 from ui.threading_utils import shutdown_thread
-from ui.workers import StorageRootMigrateWorker
+from ui.workers import StorageRootMigrateWorker, TeamConnectWorker
 
 
 class SettingsGuiMixin:
@@ -198,10 +198,17 @@ class SettingsGuiMixin:
         )
         agent_api_enabled = bool(config.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"]))
         self.settings_page.input_agent_api_enabled.setCurrentIndex(1 if agent_api_enabled else 0)
-        team_mode = str(config.get("team_mode", DEFAULT_CONFIG.get("team_mode", "off")) or "off")
+        from src.services.team_mode_service import get_team_mode
+
+        # Role is session-only; combo follows this run, URL may be remembered.
+        team_mode = get_team_mode()
+        self.settings_page.input_team_mode.blockSignals(True)
         team_idx = self.settings_page.input_team_mode.findData(team_mode)
         self.settings_page.input_team_mode.setCurrentIndex(0 if team_idx < 0 else team_idx)
+        self.settings_page.input_team_mode.blockSignals(False)
+        self.settings_page.input_team_server_url.blockSignals(True)
         self.settings_page.input_team_server_url.setText(str(config.get("team_server_url", "") or ""))
+        self.settings_page.input_team_server_url.blockSignals(False)
         self.settings_page.input_data_root.setText(get_configured_data_root(config))
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
@@ -218,67 +225,175 @@ class SettingsGuiMixin:
         if hasattr(self, "load_understanding_settings"):
             self.load_understanding_settings()
 
-    def _sync_team_mode_widgets_from_config(self, config=None):
-        config = config or load_config()
-        team_mode = str(config.get("team_mode", "off") or "off")
-        idx = self.settings_page.input_team_mode.findData(team_mode)
-        self.settings_page.input_team_mode.setCurrentIndex(0 if idx < 0 else idx)
-        self.settings_page.input_team_server_url.setText(str(config.get("team_server_url") or ""))
+    def _sync_team_mode_widgets_from_session(self, config=None):
+        from src.services.team_mode_service import get_team_mode
 
-    def _on_team_apply_clicked(self):
-        """Persist team fields and start/stop server or switch to client."""
+        config = config or load_config()
+        team_mode = get_team_mode()
+        page = self.settings_page
+        page.input_team_mode.blockSignals(True)
+        idx = page.input_team_mode.findData(team_mode)
+        page.input_team_mode.setCurrentIndex(0 if idx < 0 else idx)
+        page.input_team_mode.blockSignals(False)
+        page.input_team_server_url.blockSignals(True)
+        page.input_team_server_url.setText(str(config.get("team_server_url") or ""))
+        page.input_team_server_url.blockSignals(False)
+
+    def _on_team_mode_ui_changed(self, *_args):
+        if getattr(self, "_team_mode_ui_applying", False):
+            return
+        self._apply_team_mode_from_ui()
+
+    def _on_team_server_url_editing_finished(self):
+        if getattr(self, "_team_mode_ui_applying", False):
+            return
+        from src.services.team_mode_service import get_team_mode
+
+        # Always remember the URL; only reconnect when already in client mode.
+        config = load_config()
+        new_url = str(self.settings_page.input_team_server_url.text() or "").strip()
+        config["team_mode"] = "off"
+        config["team_server_url"] = new_url
+        save_config(config)
+        if get_team_mode() != "client":
+            self._refresh_team_mode_status()
+            return
+        self._apply_team_mode_from_ui()
+
+    def _apply_team_mode_from_ui(self):
+        """Session-only team role: combo/URL change applies immediately with a loading dialog."""
+        if getattr(self, "_team_mode_ui_applying", False):
+            return
+        from src.services.team_mode_service import get_team_mode, set_session_team_mode
+        from ui.workers import TeamConnectWorker
+
+        self._team_mode_ui_applying = True
         try:
             config = load_config()
-            previous_mode = str(config.get("team_mode") or "off")
+            previous_mode = get_team_mode()
             previous_url = str(config.get("team_server_url") or "").strip()
             new_mode = str(self.settings_page.input_team_mode.currentData() or "off")
             new_url = str(self.settings_page.input_team_server_url.text() or "").strip()
-            config["team_mode"] = new_mode
+            config["team_mode"] = "off"
             config["team_server_url"] = new_url
             save_config(config)
-            if new_mode == "client":
-                if not new_url:
-                    config["team_mode"] = previous_mode
-                    config["team_server_url"] = previous_url
-                    save_config(config)
-                    self._sync_team_mode_widgets_from_config(config)
-                    self.show_info_dialog(
-                        self.texts.get("error_title", "Error"),
-                        self.texts.get(
-                            "setting_team_status_client",
-                            "员工机 · 连接 {url}",
-                        ).format(url="（未填写）"),
-                        kind="warning",
-                    )
-                    self._apply_team_mode_settings(refresh_library=True)
-                    self._apply_agent_api_settings()
-                    return
-                try:
-                    from src.services.team_client_search import probe_team_server
 
-                    probe_team_server(
-                        new_url,
-                        api_port_default=int(config.get("team_api_port", 8765) or 8765),
-                    )
-                except Exception as exc:
-                    # Do not leave half-applied client mode + hang on remote library dump.
-                    config["team_mode"] = previous_mode
-                    config["team_server_url"] = previous_url
-                    save_config(config)
-                    self._sync_team_mode_widgets_from_config(config)
-                    self.show_info_dialog(
-                        self.texts.get("error_title", "Error"),
-                        f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=new_url)}\n{exc}",
-                        kind="warning",
-                    )
-                    self._apply_team_mode_settings(refresh_library=True)
+            if new_mode == "client" and not new_url:
+                set_session_team_mode(previous_mode)
+                config["team_server_url"] = previous_url
+                save_config(config)
+                self._sync_team_mode_widgets_from_session(config)
+                self.show_info_dialog(
+                    self.texts.get("error_title", "Error"),
+                    self.texts.get(
+                        "setting_team_status_client",
+                        "员工机 · 连接 {url}",
+                    ).format(url="（未填写）"),
+                    kind="warning",
+                )
+                self._apply_team_mode_settings(refresh_library=True)
+                self._apply_agent_api_settings()
+                return
+
+            if new_mode == previous_mode and new_mode != "client":
+                # off↔off or server already on — still ensure services match.
+                if new_mode == "server":
+                    self._apply_team_mode_settings(refresh_library=False)
                     self._apply_agent_api_settings()
-                    return
-            self._apply_team_mode_settings(refresh_library=True)
-            self._apply_agent_api_settings()
-            self._set_settings_dirty(False)
+                else:
+                    self._refresh_team_mode_status()
+                self._set_settings_dirty(False)
+                return
+
+            title = self.texts.get("setting_team_mode", "团队模式")
+            label = self.texts.get("setting_team_connecting", "正在连接团队模式…")
+            if new_mode == "server":
+                label = self.texts.get("setting_team_starting_server", "正在启动服务机…")
+            elif new_mode == "client":
+                label = self.texts.get("setting_team_loading_library", "正在加载共享片库与字幕库…")
+
+            dialog = QProgressDialog(label, None, 0, 0, self)
+            dialog.setWindowTitle(title)
+            dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+            dialog.setMinimumDuration(0)
+            dialog.setCancelButton(None)
+            dialog.setRange(0, 0)
+            dialog.show()
+            QApplication.processEvents()
+            try:
+                api_port = int(config.get("team_api_port", 8765) or 8765)
+                preload = {}
+                if new_mode == "client":
+                    worker = TeamConnectWorker(new_mode, new_url, api_port=api_port)
+                    loop = QEventLoop()
+                    box = {"payload": None, "error": None}
+
+                    def _on_progress(phase):
+                        key = str(phase or "").strip().lower()
+                        if key == "connecting":
+                            dialog.setLabelText(
+                                self.texts.get("setting_team_connecting", "正在连接团队模式…")
+                            )
+                        else:
+                            dialog.setLabelText(
+                                self.texts.get(
+                                    "setting_team_loading_library",
+                                    "正在加载共享片库与字幕库…",
+                                )
+                            )
+                        QApplication.processEvents()
+
+                    def _on_finished(payload):
+                        box["payload"] = dict(payload or {})
+                        loop.quit()
+
+                    def _on_error(message):
+                        box["error"] = str(message or "").strip() or "connect failed"
+                        loop.quit()
+
+                    worker.progress_signal.connect(_on_progress)
+                    worker.finished_signal.connect(_on_finished)
+                    worker.error_signal.connect(_on_error)
+                    worker.start()
+                    loop.exec()
+                    shutdown_thread(worker)
+                    if box["error"]:
+                        set_session_team_mode(previous_mode)
+                        config["team_server_url"] = previous_url
+                        save_config(config)
+                        self._sync_team_mode_widgets_from_session(config)
+                        self.show_info_dialog(
+                            self.texts.get("error_title", "Error"),
+                            f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=new_url)}\n{box['error']}",
+                            kind="warning",
+                        )
+                        self._apply_team_mode_settings(refresh_library=True)
+                        self._apply_agent_api_settings()
+                        return
+                    preload = box["payload"] or {}
+
+                set_session_team_mode(new_mode)
+                self._sync_team_mode_widgets_from_session(config)
+                status = (
+                    self.team_mode_controller.apply_from_config()
+                    if hasattr(self, "team_mode_controller")
+                    else None
+                )
+                self._refresh_team_mode_status(status)
+                if new_mode == "client" and hasattr(self, "apply_team_client_library_payload"):
+                    self.apply_team_client_library_payload(preload)
+                elif hasattr(self, "refresh_library_table"):
+                    self.refresh_library_table()
+                    if hasattr(self, "refresh_dialogue_library_table"):
+                        self.refresh_dialogue_library_table()
+                self._apply_agent_api_settings()
+                self._set_settings_dirty(False)
+            finally:
+                dialog.close()
         except Exception as exc:
             self.show_error_dialog(self.texts.get("settings_save_failed", "Save failed"), exc)
+        finally:
+            self._team_mode_ui_applying = False
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -544,7 +659,8 @@ class SettingsGuiMixin:
                 self.settings_page.input_close_window_action.currentData() or "exit"
             )
             config["agent_api_enabled"] = bool(self.settings_page.input_agent_api_enabled.currentData())
-            config["team_mode"] = str(self.settings_page.input_team_mode.currentData() or "off")
+            # Team role is session-only (Apply button); never persist server/client.
+            config["team_mode"] = "off"
             config["team_server_url"] = str(self.settings_page.input_team_server_url.text() or "").strip()
             selected_profile_id = str(self.settings_page.input_active_model_profile.currentData() or "").strip()
             models = config.get("models")
@@ -644,7 +760,7 @@ class SettingsGuiMixin:
                 self._offer_cleanup_old_after_storage_migrate("data", migration_result)
             self._set_settings_dirty(False)
             self._apply_agent_api_settings()
-            self._apply_team_mode_settings()
+            # Team mode is applied only via the dedicated Apply button (session-only).
         except Exception as exc:
             detail = str(exc or "").strip()
             if "Data migration failed" in detail or "migration failed" in detail.lower():

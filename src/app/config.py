@@ -509,6 +509,9 @@ def _sanitize_general_settings(config):
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()
         sanitized[key] = value if value in allowed_values else DEFAULT_CONFIG[key]
 
+    # Team role is session-only; never restore server/client across restarts.
+    sanitized["team_mode"] = "off"
+
     # Removed setting: strip from older config.json on load/save.
     sanitized.pop("ffmpeg_hwaccel", None)
     sanitized.pop("remote_max_frames", None)
@@ -611,6 +614,13 @@ def load_config():
     config_path = _resolve_config_path()
     if os.path.exists(config_path):
         raw_config = _load_json(config_path)
+        from src.services.team_paths import normalize_team_mode
+
+        # Wipe legacy persisted server/client so startup never auto-enables team mode.
+        had_persisted_team_role = normalize_team_mode(raw_config.get("team_mode", "off")) in {
+            "server",
+            "client",
+        }
         should_persist_new_defaults = any(key not in raw_config for key in DEFAULT_CONFIG)
         has_explicit_data_root = bool(str(raw_config.get("data_root", "") or "").strip())
         has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
@@ -650,7 +660,12 @@ def load_config():
         config, chunk_migrated = _sanitize_chunk_settings(config)
         config = _sanitize_general_settings(config)
         config = _migrate_legacy_storage_if_needed(config)
-        if should_persist_new_defaults or chunk_migrated or os.path.normpath(config_path) != os.path.normpath(CONFIG_FILE):
+        if (
+            should_persist_new_defaults
+            or chunk_migrated
+            or had_persisted_team_role
+            or os.path.normpath(config_path) != os.path.normpath(CONFIG_FILE)
+        ):
             save_config(config)
         return config
 

@@ -127,8 +127,13 @@ def start_nginx(*, library_paths: List[str], listen_port: int) -> List[Dict[str,
 
     # Prefer controlling via master process signals; start if not running.
     if is_nginx_running():
-        reload_nginx()
-        return mounts
+        try:
+            reload_nginx()
+            return mounts
+        except RuntimeError as exc:
+            # Windows: stale pid / wrong process → OpenEvent("Global\\ngx_reload_*") fails.
+            logger.warning("nginx reload failed (%s); forcing restart", exc)
+            stop_nginx()
 
     exe = get_nginx_exe()
     root = get_nginx_root()
@@ -214,6 +219,38 @@ def _force_kill_nginx_pid() -> None:
             pass
 
 
+def _windows_pid_is_nginx(pid: int) -> bool:
+    """True only if *pid* is a live nginx.exe (avoids stale pid reuse)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        try:
+            QueryFullProcessImageNameW = kernel32.QueryFullProcessImageNameW
+            QueryFullProcessImageNameW.argtypes = [
+                wintypes.HANDLE,
+                wintypes.DWORD,
+                wintypes.LPWSTR,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            QueryFullProcessImageNameW.restype = wintypes.BOOL
+            size = wintypes.DWORD(32768)
+            buf = ctypes.create_unicode_buffer(size.value)
+            if not QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return False
+            image = (buf.value or "").replace("/", "\\").lower()
+            return image.endswith("\\nginx.exe") or os.path.basename(image) == "nginx.exe"
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
 def is_nginx_running() -> bool:
     root = get_nginx_root()
     pid_file = os.path.join(root, "logs", "nginx.pid")
@@ -227,17 +264,7 @@ def is_nginx_running() -> bool:
     if pid <= 0:
         return False
     if os.name == "nt":
-        try:
-            import ctypes
-
-            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-            if not handle:
-                return False
-            kernel32.CloseHandle(handle)
-            return True
-        except Exception:
-            return False
+        return _windows_pid_is_nginx(pid)
     try:
         os.kill(pid, 0)
         return True

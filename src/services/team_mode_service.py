@@ -1,8 +1,13 @@
-"""Team mode orchestration (server: API + nginx; client: connection state)."""
+"""Team mode orchestration (server: API + nginx; client: connection state).
+
+Team role (off / server / client) is session-only: never restored from disk on
+startup. Users must explicitly Apply each run. team_server_url may still be
+remembered for convenience.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
@@ -15,11 +20,25 @@ logger = get_logger("team_mode")
 # In-process server mounts (used when enriching Agent search hits)
 _active_mounts: List[Dict[str, str]] = []
 _active_media_base: str = ""
+# Session role — not persisted. Always starts as off.
+_session_team_mode: str = "off"
 
 
 def get_team_mode(config=None) -> str:
-    cfg = config if config is not None else load_config()
-    return normalize_team_mode(cfg.get("team_mode", "off"))
+    """Active team role for this process (session-only; ignores config)."""
+    _ = config
+    return normalize_team_mode(_session_team_mode)
+
+
+def set_session_team_mode(mode) -> str:
+    """Set in-memory team role for this run. Does not write config."""
+    global _session_team_mode
+    _session_team_mode = normalize_team_mode(mode)
+    return _session_team_mode
+
+
+def clear_session_team_mode() -> None:
+    set_session_team_mode("off")
 
 
 def is_team_client_mode(config=None) -> bool:
