@@ -182,8 +182,8 @@ class VlcPreviewPlayer:
     def shutdown(self, fast=False):
         """Stop playback and release libvlc resources.
 
-        ``fast`` is kept for call-site compatibility; the native media player is always
-        released so audio does not continue after the widget is hidden.
+        ``fast=True`` skips native ``stop()`` / ``release()`` which can block the UI
+        thread indefinitely on Windows. Prefer fast teardown when closing dialogs.
         """
         if self._released:
             return
@@ -197,6 +197,22 @@ class VlcPreviewPlayer:
         if self._player is not None:
             self._detach_output_window()
             try:
+                self._player.audio_set_mute(True)
+            except Exception as exc:
+                _log_vlc_debug("mute before shutdown", exc)
+            if fast:
+                # Avoid stop()/release() hangs; drop media binding and abandon native objs.
+                try:
+                    self._player.set_media(None)
+                except Exception as exc:
+                    _log_vlc_debug("fast clear media", exc)
+                old = self._current_media
+                self._current_media = None
+                self._release_media_object(old)
+                self._player = None
+                self._instance = None
+                return
+            try:
                 self._player.pause()
             except Exception as exc:
                 _log_vlc_debug("pause before shutdown", exc)
@@ -205,12 +221,6 @@ class VlcPreviewPlayer:
             except Exception as exc:
                 _log_vlc_debug("stop before shutdown", exc)
             self._clear_media()
-            try:
-                self._player.audio_set_mute(True)
-            except Exception as exc:
-                _log_vlc_debug("mute before shutdown", exc)
-            # Always release the native media player; omitting release() (historically when fast=True)
-            # can leave audio/video playing after the Qt host is hidden or destroyed.
             try:
                 self._player.release()
             except Exception as exc:

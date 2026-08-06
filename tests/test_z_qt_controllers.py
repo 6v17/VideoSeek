@@ -969,32 +969,45 @@ class PreviewDialogTests(unittest.TestCase):
 
     @patch("ui.playback.preview_dialog.get_video_duration_seconds", return_value=120.0)
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
-    def test_load_preview_disposes_and_recreates_player(self, mock_vlc_cls, _mock_duration):
+    def test_load_preview_reuses_player_without_full_teardown(self, mock_vlc_cls, _mock_duration):
         parent = MagicMock()
-        first = MagicMock()
-        first.play.return_value = True
-        first.get_length.return_value = 120000
-        first.get_time.return_value = 0
-        first.is_playing.return_value = False
-        first.is_available.return_value = True
-        second = MagicMock()
-        second.play.return_value = True
-        second.get_length.return_value = 120000
-        second.get_time.return_value = 0
-        second.is_playing.return_value = False
-        second.is_available.return_value = True
-        mock_vlc_cls.side_effect = [first, second]
+        player = MagicMock()
+        player.play.return_value = True
+        player.get_length.return_value = 120000
+        player.get_time.return_value = 0
+        player.is_playing.return_value = False
+        player.is_available.return_value = True
+        mock_vlc_cls.return_value = player
 
         dialog = PreviewDialog(parent, "D:/videos/clip.mp4", 10.0, 16.0, {"preview_dialog_pause": "Pause"})
-        self.assertIs(dialog.player, first)
+        self.assertIs(dialog.player, player)
 
         dialog.load_preview("D:/videos/other.mp4", 20.0, 26.0, suggested_sec=22.0)
 
-        first.stop.assert_called()
-        first.shutdown.assert_called()
-        self.assertIs(dialog.player, second)
-        second.play.assert_called_once_with("D:/videos/other.mp4", 20.0, stop_sec=26.0)
-        self.assertEqual(mock_vlc_cls.call_count, 2)
+        player.shutdown.assert_not_called()
+        self.assertIs(dialog.player, player)
+        self.assertEqual(player.play.call_count, 2)
+        player.play.assert_called_with("D:/videos/other.mp4", 20.0, stop_sec=26.0)
+        self.assertEqual(mock_vlc_cls.call_count, 1)
+
+    def test_shutdown_fast_skips_blocking_stop_and_release(self):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        mock_player = MagicMock()
+        mock_instance = MagicMock()
+        player._player = mock_player
+        player._instance = mock_instance
+        player._owns_instance = True
+
+        player.shutdown(fast=True)
+
+        mock_player.stop.assert_not_called()
+        mock_player.release.assert_not_called()
+        mock_instance.release.assert_not_called()
+        mock_player.audio_set_mute.assert_called_once_with(True)
+        self.assertTrue(player._released)
+        self.assertIsNone(player._player)
 
 
 if __name__ == "__main__":

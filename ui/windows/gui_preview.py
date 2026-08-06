@@ -13,7 +13,6 @@ from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
 from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
-from ui.widgets.results_float_window import force_widget_foreground
 
 logger = get_logger("gui_preview")
 
@@ -26,17 +25,6 @@ class PreviewGuiMixin:
         if not self.preview_controller.play(path, sec, end_sec=end_sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
         self._update_expand_preview_button()
-        # Floated results stay open; bring main window forward so inline preview is visible.
-        if self.search_page.is_results_floating():
-            self._bring_main_forward_for_preview()
-
-    def _bring_main_forward_for_preview(self) -> None:
-        # Independent float can still cover main; lower it, then force main foreground (Win32).
-        self.search_page.lower_results_float()
-        app = QApplication.instance()
-        if app is not None:
-            app.processEvents()
-        force_widget_foreground(self)
 
     def open_segment_preview_dialog(
         self,

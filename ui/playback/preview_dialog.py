@@ -267,15 +267,18 @@ class PreviewDialog(QDialog):
         self._close_requested = False
         self._close_after_export = False
         self._pending_close = False
-        self._extend_close_guard(1.0)
+        self._extend_close_guard(0.35)
         self._playback_ready = False
         self._detail_error = None
         self._detail_notice = None
         self._segment_line_override = None
         self.update_timer.stop()
-        # Full teardown between loads avoids dirty libvlc state after rapid reopen/seek.
-        self._dispose_player()
-        self._ensure_player()
+        # Soft reload: reuse the same player. Full dispose/recreate calls libvlc stop/release
+        # on the UI thread and can freeze the whole app ("Python 未响应").
+        player = self._ensure_player()
+        if not player.is_available():
+            self._dispose_player(fast=True)
+            player = self._ensure_player()
         if self.isFullScreen():
             self.showNormal()
             self._schedule_rebind()
@@ -360,7 +363,7 @@ class PreviewDialog(QDialog):
             finish_playback_session(actual_sec=self._current_time_seconds(), source="dialog")
         except Exception as exc:
             logger.debug("Preview dialog playback telemetry finish skipped: %s", exc)
-        self._dispose_player()
+        self._dispose_player(fast=True)
         if self.isFullScreen():
             self.showNormal()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
@@ -377,13 +380,11 @@ class PreviewDialog(QDialog):
     def _dispose_player(self, fast=False):
         if self.player is None:
             return
-        try:
-            self.player.stop()
-        finally:
-            self.player.shutdown(fast=fast)
-            self.player = None
-            if hasattr(self.video_host, "set_player"):
-                self.video_host.set_player(None)
+        # shutdown() already stops/releases; do not call stop() first (double hang risk).
+        self.player.shutdown(fast=fast)
+        self.player = None
+        if hasattr(self.video_host, "set_player"):
+            self.video_host.set_player(None)
 
     def _schedule_rebind(self):
         player = self.player
