@@ -150,7 +150,32 @@ def resolve_team_library_browse_url(
 def probe_team_server(server_url: str, *, api_port_default: int = 8765) -> dict:
     """Cheap connectivity check — uses health ping, not a full index snapshot."""
     base = _team_base(server_url, api_port_default=api_port_default)
-    return _get_json(f"{base}/api/v1/health?mode=ping", timeout=5.0)
+    url = f"{base}/api/v1/health?mode=ping"
+    parsed = urllib.parse.urlparse(base)
+    port_text = str(parsed.port or api_port_default)
+    try:
+        return _get_json(url, timeout=5.0)
+    except urllib.error.HTTPError as exc:
+        code = int(getattr(exc, "code", 0) or 0)
+        raise RuntimeError(
+            f"服务机有响应但返回 HTTP {code}：{base}。"
+            "请确认对方是 VideoSeek「服务机」模式，且版本兼容。"
+        ) from exc
+    except urllib.error.URLError as exc:
+        reason = str(getattr(exc, "reason", "") or exc).strip() or "network error"
+        raise RuntimeError(
+            f"无法连接服务机 {base}（{reason}）。\n"
+            "请确认：\n"
+            "1) 对方已选「本机作为服务机」并已保存，状态显示服务机已启动；\n"
+            f"2) 填写的地址/端口正确（当前端口 {port_text}）；\n"
+            "3) 两台电脑同一局域网（手机热点/访客 Wi‑Fi 常隔离）；\n"
+            f"4) 服务机防火墙放行入站 TCP {port_text}（以及视频端口，默认 18080）。"
+        ) from exc
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"连接服务机超时：{base}。\n"
+            f"请检查对方是否在线、地址/端口（{port_text}）是否正确、防火墙是否放行。"
+        ) from exc
 
 
 def list_team_client_libraries(

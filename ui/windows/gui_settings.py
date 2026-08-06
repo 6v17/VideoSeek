@@ -35,7 +35,7 @@ from src.utils import (
 )
 from ui.dialogs import SamplingRulesDialog
 from ui.threading_utils import shutdown_thread
-from ui.workers import StorageRootMigrateWorker, TeamConnectWorker
+from ui.workers import StorageRootMigrateWorker, TeamConnectWorker, TeamServerLifecycleWorker
 
 
 class SettingsGuiMixin:
@@ -198,17 +198,8 @@ class SettingsGuiMixin:
         )
         agent_api_enabled = bool(config.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"]))
         self.settings_page.input_agent_api_enabled.setCurrentIndex(1 if agent_api_enabled else 0)
-        from src.services.team_mode_service import get_team_mode
-
-        # Role is session-only; combo follows this run, URL may be remembered.
-        team_mode = get_team_mode()
-        self.settings_page.input_team_mode.blockSignals(True)
-        team_idx = self.settings_page.input_team_mode.findData(team_mode)
-        self.settings_page.input_team_mode.setCurrentIndex(0 if team_idx < 0 else team_idx)
-        self.settings_page.input_team_mode.blockSignals(False)
-        self.settings_page.input_team_server_url.blockSignals(True)
-        self.settings_page.input_team_server_url.setText(str(config.get("team_server_url", "") or ""))
-        self.settings_page.input_team_server_url.blockSignals(False)
+        # Unified share-mode combo: off / agent / server / client
+        self._sync_team_mode_widgets_from_session(config)
         self.settings_page.input_data_root.setText(get_configured_data_root(config))
         self.settings_page.input_ffmpeg_path.setText(config.get("ffmpeg_path", DEFAULT_CONFIG["ffmpeg_path"]))
         self.settings_page.input_model_dir.setText(config.get("model_dir", DEFAULT_CONFIG["model_dir"]))
@@ -218,99 +209,248 @@ class SettingsGuiMixin:
         self._refresh_pending_cleanup_actions(config)
         self._settings_loading = False
         self._set_settings_dirty(False)
-        self._refresh_agent_api_status()
         self._refresh_team_mode_status()
         if hasattr(self, "_refresh_search_precision_controls"):
             self._refresh_search_precision_controls()
         if hasattr(self, "load_understanding_settings"):
             self.load_understanding_settings()
 
-    def _sync_team_mode_widgets_from_session(self, config=None):
+    def _resolve_share_mode(self, config=None) -> str:
+        """Active UI mode: team role wins; else agent API preference; else off."""
         from src.services.team_mode_service import get_team_mode
 
+        mode = get_team_mode()
+        if mode in ("server", "client"):
+            return mode
+        cfg = config or load_config()
+        if bool(cfg.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"])):
+            return "agent"
+        return "off"
+
+    def _sync_team_mode_widgets_from_session(self, config=None):
         config = config or load_config()
-        team_mode = get_team_mode()
+        share_mode = self._resolve_share_mode(config)
         page = self.settings_page
         page.input_team_mode.blockSignals(True)
-        idx = page.input_team_mode.findData(team_mode)
+        idx = page.input_team_mode.findData(share_mode)
         page.input_team_mode.setCurrentIndex(0 if idx < 0 else idx)
         page.input_team_mode.blockSignals(False)
         page.input_team_server_url.blockSignals(True)
         page.input_team_server_url.setText(str(config.get("team_server_url") or ""))
         page.input_team_server_url.blockSignals(False)
+        # Keep hidden agent toggle aligned with combo (except server/client keep prior pref).
+        if share_mode == "agent":
+            page.input_agent_api_enabled.setCurrentIndex(1)
+        elif share_mode == "off":
+            page.input_agent_api_enabled.setCurrentIndex(0)
+        self._update_share_mode_chrome(share_mode)
+
+    def _preview_server_api_url(self) -> str:
+        from src.services.team_paths import detect_lan_ip
+
+        cfg = load_config()
+        api_port = int(cfg.get("team_api_port", 8765) or 8765)
+        return f"http://{detect_lan_ip()}:{api_port}"
+
+    def _preview_server_media_url(self) -> str:
+        from src.services.team_paths import detect_lan_ip
+
+        cfg = load_config()
+        media_port = int(cfg.get("team_nginx_port", 18080) or 18080)
+        return f"http://{detect_lan_ip()}:{media_port}"
+
+    def _update_share_mode_chrome(self, mode: str | None = None, *, pending: bool = False):
+        """Show mode-specific controls under the share-mode combo."""
+        if not hasattr(self, "settings_page"):
+            return
+        page = self.settings_page
+        mode = str(mode or page.input_team_mode.currentData() or "off")
+        page.share_agent_panel.setVisible(mode == "agent")
+        page.share_server_panel.setVisible(mode == "server")
+        page.share_client_panel.setVisible(mode == "client")
+
+        if mode == "server":
+            api_url = self._preview_server_api_url()
+            if not pending and hasattr(self, "team_mode_controller"):
+                from src.services.team_mode_service import get_team_mode
+
+                if get_team_mode() == "server":
+                    status = self.team_mode_controller.refresh_status()
+                    api_url = str(status.get("api_base_url") or api_url).strip() or api_url
+            page.input_team_share_url.setText(api_url)
+            page.btn_copy_team_share_url.setEnabled(bool(api_url))
+        elif mode == "client":
+            url = str(page.input_team_server_url.text() or "").strip()
+            if url:
+                page.lbl_team_client_url.setText(
+                    self.texts.get(
+                        "setting_team_client_url_display",
+                        "服务机：{url}",
+                    ).format(url=url)
+                )
+            else:
+                page.lbl_team_client_url.setText(
+                    self.texts.get(
+                        "setting_team_client_url_empty",
+                        "尚未填写服务机地址",
+                    )
+                )
+        elif mode == "agent":
+            running = hasattr(self, "agent_api_controller") and self.agent_api_controller.is_running()
+            page.btn_copy_agent_api_url.setEnabled(bool(running and not pending))
+            page.btn_copy_agent_starter.setEnabled(bool(running and not pending))
+
+    def _on_edit_team_client_url(self):
+        from ui.dialogs.team_mode_dialog import prompt_team_client_url
+
+        page = self.settings_page
+        chosen = prompt_team_client_url(
+            self,
+            self.texts,
+            initial_url=str(page.input_team_server_url.text() or "").strip(),
+        )
+        if chosen is None:
+            return
+        page.input_team_server_url.setText(chosen)
+        self._mark_settings_dirty()
+        self._update_share_mode_chrome("client", pending=True)
+        page.lbl_team_status.setText(
+            self.texts.get(
+                "setting_team_status_client_pending",
+                "待保存：员工机将连接上方地址",
+            )
+        )
+
+    def _on_copy_team_share_url(self):
+        page = self.settings_page
+        url = str(page.input_team_share_url.text() or "").strip()
+        if not url:
+            return
+        QApplication.clipboard().setText(url)
+        page.lbl_status.setText(
+            self.texts.get("setting_agent_api_copy_url_done", "已复制接口地址。")
+        )
 
     def _on_team_mode_ui_changed(self, *_args):
+        """Dropdown prepares pending role; chrome updates inline. Save applies."""
         if getattr(self, "_team_mode_ui_applying", False):
             return
-        self._apply_team_mode_from_ui()
 
-    def _on_team_server_url_editing_finished(self):
-        if getattr(self, "_team_mode_ui_applying", False):
-            return
-        from src.services.team_mode_service import get_team_mode
+        page = self.settings_page
+        new_mode = str(page.input_team_mode.currentData() or "off")
+        if new_mode == "agent":
+            page.input_agent_api_enabled.setCurrentIndex(1)
+        elif new_mode == "off":
+            page.input_agent_api_enabled.setCurrentIndex(0)
 
-        # Always remember the URL; only reconnect when already in client mode.
-        config = load_config()
-        new_url = str(self.settings_page.input_team_server_url.text() or "").strip()
-        config["team_mode"] = "off"
-        config["team_server_url"] = new_url
-        save_config(config)
-        if get_team_mode() != "client":
-            self._refresh_team_mode_status()
-            return
-        self._apply_team_mode_from_ui()
+        self._mark_settings_dirty()
+        self._update_share_mode_chrome(new_mode, pending=True)
+
+        if new_mode == "client":
+            page.lbl_team_status.setText(
+                self.texts.get(
+                    "setting_team_status_client_pending",
+                    "待保存：员工机将连接上方地址",
+                )
+            )
+        elif new_mode == "server":
+            page.lbl_team_status.setText(
+                self.texts.get(
+                    "setting_team_status_server_pending",
+                    "待保存：启动服务机后，员工机填写上方 API 地址即可连接",
+                )
+            )
+        elif new_mode == "agent":
+            page.lbl_team_status.setText(
+                self.texts.get(
+                    "setting_team_status_agent_pending",
+                    "待保存：开启本机 Agent API（仅本机可访问）",
+                )
+            )
+        else:
+            if self._resolve_share_mode() == "off":
+                page.lbl_team_status.setText(
+                    self.texts.get("setting_team_status_off", "已关闭")
+                )
+            else:
+                page.lbl_team_status.setText(
+                    self.texts.get(
+                        "setting_team_status_off_pending",
+                        "待保存：关闭接口",
+                    )
+                )
 
     def _apply_team_mode_from_ui(self):
-        """Session-only team role: combo/URL change applies immediately with a loading dialog."""
+        """Apply pending share mode from settings widgets (called from Save)."""
         if getattr(self, "_team_mode_ui_applying", False):
             return
         from src.services.team_mode_service import get_team_mode, set_session_team_mode
-        from ui.workers import TeamConnectWorker
+        from ui.dialogs.team_mode_dialog import prompt_team_client_url
+        from ui.workers import TeamConnectWorker, TeamServerLifecycleWorker
 
         self._team_mode_ui_applying = True
         try:
             config = load_config()
-            previous_mode = get_team_mode()
+            previous_team = get_team_mode()
+            previous_share = self._resolve_share_mode(config)
             previous_url = str(config.get("team_server_url") or "").strip()
+            previous_agent = bool(config.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"]))
             new_mode = str(self.settings_page.input_team_mode.currentData() or "off")
             new_url = str(self.settings_page.input_team_server_url.text() or "").strip()
+
+            # Persist agent preference from unified combo; team role stays session-only.
+            if new_mode == "agent":
+                config["agent_api_enabled"] = True
+            elif new_mode == "off":
+                config["agent_api_enabled"] = False
+            else:
+                # server/client: keep last local Agent preference for when team ends
+                config["agent_api_enabled"] = previous_agent
             config["team_mode"] = "off"
             config["team_server_url"] = new_url
             save_config(config)
+            self.settings_page.input_agent_api_enabled.setCurrentIndex(
+                1 if config["agent_api_enabled"] else 0
+            )
 
             if new_mode == "client" and not new_url:
-                set_session_team_mode(previous_mode)
-                config["team_server_url"] = previous_url
+                chosen = prompt_team_client_url(self, self.texts, initial_url=previous_url)
+                if not chosen:
+                    set_session_team_mode(previous_team)
+                    config["team_server_url"] = previous_url
+                    config["agent_api_enabled"] = previous_agent
+                    save_config(config)
+                    self._sync_team_mode_widgets_from_session(config)
+                    self._apply_team_mode_settings(refresh_library=True)
+                    self._apply_agent_api_settings()
+                    return
+                new_url = chosen
+                self.settings_page.input_team_server_url.setText(new_url)
+                config["team_server_url"] = new_url
                 save_config(config)
-                self._sync_team_mode_widgets_from_session(config)
-                self.show_info_dialog(
-                    self.texts.get("error_title", "Error"),
-                    self.texts.get(
-                        "setting_team_status_client",
-                        "员工机 · 连接 {url}",
-                    ).format(url="（未填写）"),
-                    kind="warning",
-                )
-                self._apply_team_mode_settings(refresh_library=True)
-                self._apply_agent_api_settings()
-                return
 
-            if new_mode == previous_mode and new_mode != "client":
-                # off↔off or server already on — still ensure services match.
+            if new_mode == previous_share and (new_mode != "client" or new_url == previous_url):
                 if new_mode == "server":
+                    self._apply_team_mode_settings(refresh_library=False)
+                    self._apply_agent_api_settings()
+                elif new_mode == "agent":
+                    set_session_team_mode("off")
                     self._apply_team_mode_settings(refresh_library=False)
                     self._apply_agent_api_settings()
                 else:
                     self._refresh_team_mode_status()
-                self._set_settings_dirty(False)
                 return
 
-            title = self.texts.get("setting_team_mode", "团队模式")
+            title = self.texts.get("setting_share_mode", self.texts.get("setting_team_mode", "搜索接口"))
             label = self.texts.get("setting_team_connecting", "正在连接团队模式…")
             if new_mode == "server":
                 label = self.texts.get("setting_team_starting_server", "正在启动服务机…")
             elif new_mode == "client":
-                label = self.texts.get("setting_team_loading_library", "正在加载共享片库与字幕库…")
+                label = self.texts.get("setting_team_connecting", "正在连接服务机…")
+            elif new_mode == "agent":
+                label = self.texts.get("setting_agent_api_status_pending", "正在启动本机 Agent API…")
+            elif new_mode == "off":
+                label = self.texts.get("setting_team_stopping", "正在关闭…")
 
             dialog = QProgressDialog(label, None, 0, 0, self)
             dialog.setWindowTitle(title)
@@ -323,6 +463,7 @@ class SettingsGuiMixin:
             try:
                 api_port = int(config.get("team_api_port", 8765) or 8765)
                 preload = {}
+                status = None
                 if new_mode == "client":
                     worker = TeamConnectWorker(new_mode, new_url, api_port=api_port)
                     loop = QEventLoop()
@@ -332,7 +473,7 @@ class SettingsGuiMixin:
                         key = str(phase or "").strip().lower()
                         if key == "connecting":
                             dialog.setLabelText(
-                                self.texts.get("setting_team_connecting", "正在连接团队模式…")
+                                self.texts.get("setting_team_connecting", "正在连接服务机…")
                             )
                         else:
                             dialog.setLabelText(
@@ -358,42 +499,131 @@ class SettingsGuiMixin:
                     loop.exec()
                     shutdown_thread(worker)
                     if box["error"]:
-                        set_session_team_mode(previous_mode)
+                        set_session_team_mode(previous_team)
                         config["team_server_url"] = previous_url
+                        config["agent_api_enabled"] = previous_agent
                         save_config(config)
                         self._sync_team_mode_widgets_from_session(config)
-                        self.show_info_dialog(
-                            self.texts.get("error_title", "Error"),
-                            f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=new_url)}\n{box['error']}",
-                            kind="warning",
+                        fail_title = self.texts.get(
+                            "setting_team_client_connect_failed_title",
+                            "连接服务机失败",
                         )
+                        fail_body = self.texts.get(
+                            "setting_team_client_connect_failed_body",
+                            "地址：{url}\n\n{detail}",
+                        ).format(url=new_url or "—", detail=box["error"])
+                        self.show_info_dialog(fail_title, fail_body, kind="warning")
                         self._apply_team_mode_settings(refresh_library=True)
                         self._apply_agent_api_settings()
                         return
                     preload = box["payload"] or {}
 
-                set_session_team_mode(new_mode)
+                # Session team role is only server/client; agent/off clear it.
+                set_session_team_mode(new_mode if new_mode in ("server", "client") else "off")
                 self._sync_team_mode_widgets_from_session(config)
-                status = (
-                    self.team_mode_controller.apply_from_config()
-                    if hasattr(self, "team_mode_controller")
-                    else None
-                )
-                self._refresh_team_mode_status(status)
+
+                needs_server_lifecycle = new_mode == "server" or previous_team == "server"
+                if needs_server_lifecycle and hasattr(self, "team_mode_controller"):
+                    action = "start" if new_mode == "server" else "stop"
+                    lifecycle = TeamServerLifecycleWorker(self.team_mode_controller, action)
+                    life_loop = QEventLoop()
+                    life_box = {"status": None, "error": None}
+
+                    def _on_life_progress(phase):
+                        dialog.setLabelText(self._team_server_progress_label(phase, action=action))
+                        QApplication.processEvents()
+
+                    def _on_life_finished(payload):
+                        life_box["status"] = dict(payload or {})
+                        life_loop.quit()
+
+                    def _on_life_error(message):
+                        life_box["error"] = str(message or "").strip() or "server lifecycle failed"
+                        life_loop.quit()
+
+                    lifecycle.progress_signal.connect(_on_life_progress)
+                    lifecycle.finished_signal.connect(_on_life_finished)
+                    lifecycle.error_signal.connect(_on_life_error)
+                    lifecycle.start()
+                    life_loop.exec()
+                    shutdown_thread(lifecycle)
+                    if life_box["error"]:
+                        set_session_team_mode(previous_team)
+                        config["agent_api_enabled"] = previous_agent
+                        save_config(config)
+                        self._sync_team_mode_widgets_from_session(config)
+                        self.show_info_dialog(
+                            self.texts.get("error_title", "Error"),
+                            self.texts.get(
+                                "setting_team_server_start_failed",
+                                "服务机启动失败：\n{detail}",
+                            ).format(detail=life_box["error"]),
+                            kind="warning",
+                        )
+                        if hasattr(self, "team_mode_controller"):
+                            # Best-effort restore previous role.
+                            set_session_team_mode(previous_team)
+                            self.team_mode_controller.apply_from_config()
+                        self._apply_agent_api_settings()
+                        self._refresh_team_mode_status()
+                        return
+                    status = life_box["status"]
+                elif hasattr(self, "team_mode_controller"):
+                    status = self.team_mode_controller.apply_from_config()
+
                 if new_mode == "client" and hasattr(self, "apply_team_client_library_payload"):
                     self.apply_team_client_library_payload(preload)
-                elif hasattr(self, "refresh_library_table"):
-                    self.refresh_library_table()
-                    if hasattr(self, "refresh_dialogue_library_table"):
-                        self.refresh_dialogue_library_table()
+                elif new_mode in ("server", "off", "agent") and hasattr(self, "refresh_library_table"):
+                    # Leaving client or changing ownership may need library refresh.
+                    if previous_share == "client" or new_mode == "server":
+                        self.refresh_library_table()
+                        if hasattr(self, "refresh_dialogue_library_table"):
+                            self.refresh_dialogue_library_table()
                 self._apply_agent_api_settings()
-                self._set_settings_dirty(False)
+                self._refresh_team_mode_status(status)
+                if new_mode == "server" and isinstance(status, dict) and status.get("port_note"):
+                    self.settings_page.lbl_status.setText(str(status.get("port_note")))
             finally:
                 dialog.close()
         except Exception as exc:
             self.show_error_dialog(self.texts.get("settings_save_failed", "Save failed"), exc)
         finally:
             self._team_mode_ui_applying = False
+
+    def _team_server_progress_label(self, phase: str, *, action: str = "start") -> str:
+        key = str(phase or "").strip().lower()
+        mapping = {
+            "allocating_ports": self.texts.get(
+                "setting_team_progress_allocating_ports", "正在检查可用端口…"
+            ),
+            "stopping_old": self.texts.get(
+                "setting_team_progress_stopping_old", "正在停用旧接口…"
+            ),
+            "starting_media": self.texts.get(
+                "setting_team_progress_starting_media", "正在启动视频分享…"
+            ),
+            "starting_api": self.texts.get(
+                "setting_team_progress_starting_api", "正在启动搜索 API…"
+            ),
+            "starting_api_retry": self.texts.get(
+                "setting_team_progress_starting_api_retry", "端口冲突，正在换端口重试…"
+            ),
+            "stopping_api": self.texts.get(
+                "setting_team_progress_stopping_api", "正在关闭搜索 API…"
+            ),
+            "stopping_media": self.texts.get(
+                "setting_team_progress_stopping_media", "正在关闭视频分享…"
+            ),
+            "restoring_agent": self.texts.get(
+                "setting_team_progress_restoring_agent", "正在恢复本机 Agent API…"
+            ),
+            "ready": self.texts.get("setting_team_progress_ready", "即将完成…"),
+        }
+        if key in mapping:
+            return mapping[key]
+        if action == "stop":
+            return self.texts.get("setting_team_stopping", "正在关闭服务机…")
+        return self.texts.get("setting_team_starting_server", "正在启动服务机…")
 
     def _bind_settings_dirty_tracking(self):
         if self._settings_dirty_tracking_bound:
@@ -425,7 +655,8 @@ class SettingsGuiMixin:
             self.settings_page.input_auto_cleanup_missing_files,
             self.settings_page.input_close_window_action,
             self.settings_page.input_agent_api_enabled,
-            self.settings_page.input_team_mode,
+            # team_mode dirty is handled in _on_team_mode_ui_changed (after dialogs),
+            # so cancelling the client URL dialog does not leave a false dirty state.
             self.settings_page.input_team_server_url,
             self.settings_page.input_active_model_profile,
             self.settings_page.input_data_root,
@@ -658,8 +889,20 @@ class SettingsGuiMixin:
             config["close_window_action"] = str(
                 self.settings_page.input_close_window_action.currentData() or "exit"
             )
-            config["agent_api_enabled"] = bool(self.settings_page.input_agent_api_enabled.currentData())
-            # Team role is session-only (Apply button); never persist server/client.
+            share_mode = str(self.settings_page.input_team_mode.currentData() or "off")
+            if share_mode == "agent":
+                config["agent_api_enabled"] = True
+            elif share_mode == "off":
+                config["agent_api_enabled"] = False
+            else:
+                # server/client: preserve last local Agent preference
+                config["agent_api_enabled"] = bool(
+                    self.settings_page.input_agent_api_enabled.currentData()
+                )
+            self.settings_page.input_agent_api_enabled.setCurrentIndex(
+                1 if config["agent_api_enabled"] else 0
+            )
+            # Team role is session-only; never persist server/client.
             config["team_mode"] = "off"
             config["team_server_url"] = str(self.settings_page.input_team_server_url.text() or "").strip()
             selected_profile_id = str(self.settings_page.input_active_model_profile.currentData() or "").strip()
@@ -759,8 +1002,8 @@ class SettingsGuiMixin:
             if isinstance(migration_result, dict) and migration_result.get("migrated"):
                 self._offer_cleanup_old_after_storage_migrate("data", migration_result)
             self._set_settings_dirty(False)
-            self._apply_agent_api_settings()
-            # Team mode is applied only via the dedicated Apply button (session-only).
+            # Unified share-mode apply owns Agent API + team server/client startup.
+            self._apply_team_mode_from_ui()
         except Exception as exc:
             detail = str(exc or "").strip()
             if "Data migration failed" in detail or "migration failed" in detail.lower():
@@ -805,64 +1048,103 @@ class SettingsGuiMixin:
         if not hasattr(self, "settings_page"):
             return
         page = self.settings_page
-        if status is None and hasattr(self, "team_mode_controller"):
-            status = self.team_mode_controller.refresh_status()
-        status = status or {}
-        mode = str(status.get("mode") or "off")
-        if mode == "server":
-            api = status.get("api_base_url") or ""
-            media = status.get("media_base_url") or ""
-            err = str(status.get("error") or "").strip()
-            mounts = int(len(status.get("mounts") or []))
-            text = self.texts.get(
-                "setting_team_status_server",
-                "服务机 · API {api} · 视频 {media} · 挂载库 {n}",
-            ).format(api=api, media=media, n=mounts)
-            if err:
-                text = f"{text}\n{err}"
-            page.input_team_server_url.setEnabled(False)
-        elif mode == "client":
-            url = str(status.get("server_url") or page.input_team_server_url.text() or "").strip()
-            text = self.texts.get(
-                "setting_team_status_client",
-                "员工机 · 连接 {url}",
-            ).format(url=url or "（未填写）")
-            page.input_team_server_url.setEnabled(True)
-        else:
-            text = self.texts.get("setting_team_status_off", "团队模式关闭（本机独立使用）")
-            page.input_team_server_url.setEnabled(True)
-        page.lbl_team_status.setText(text)
-
-    def _refresh_agent_api_status(self):
-        if not hasattr(self, "settings_page"):
-            return
         from src.services.team_mode_service import get_team_mode
 
-        if get_team_mode() == "server" and hasattr(self, "team_mode_controller"):
-            status = self.team_mode_controller.refresh_status()
-            running = bool(status.get("api_running"))
-            url = status.get("api_base_url") or ""
-            if running and url:
-                text = self.texts.get("setting_agent_api_status_running", "Running: {url}").format(url=url)
-                self.settings_page.btn_copy_agent_api_url.setEnabled(True)
-                self.settings_page.btn_copy_agent_starter.setEnabled(False)
+        team = get_team_mode()
+        combo_mode = str(page.input_team_mode.currentData() or "off")
+
+        if team == "server" or combo_mode == "server":
+            if status is None and hasattr(self, "team_mode_controller") and team == "server":
+                status = self.team_mode_controller.refresh_status()
+            status = status or {}
+            api = str(status.get("api_base_url") or self._preview_server_api_url()).strip()
+            media = str(status.get("media_base_url") or self._preview_server_media_url()).strip()
+            err = str(status.get("error") or "").strip()
+            mounts = int(len(status.get("mounts") or []))
+            if team == "server":
+                text = self.texts.get(
+                    "setting_team_status_server",
+                    "服务机已启动 · 视频 {media} · 挂载库 {n}",
+                ).format(api=api, media=media, n=mounts)
+                note = str(status.get("port_note") or "").strip()
+                if note:
+                    text = f"{text}\n{note}"
+                if err and err != note:
+                    text = f"{text}\n{err}"
             else:
-                text = self.texts.get("setting_agent_api_status_stopped", "Stopped")
-                self.settings_page.btn_copy_agent_api_url.setEnabled(False)
-                self.settings_page.btn_copy_agent_starter.setEnabled(False)
-            self.settings_page.lbl_agent_api_status.setText(text)
+                text = self.texts.get(
+                    "setting_team_status_server_pending",
+                    "待保存：启动服务机后，员工机填写上方 API 地址即可连接",
+                )
+            page.lbl_team_status.setText(text)
+            self._update_share_mode_chrome("server", pending=team != "server")
+            page.input_team_server_url.hide()
             return
+
+        if team == "client" or combo_mode == "client":
+            url = str(page.input_team_server_url.text() or "").strip()
+            if status is None and hasattr(self, "team_mode_controller") and team == "client":
+                status = self.team_mode_controller.refresh_status()
+            status = status or {}
+            url = str(status.get("server_url") or url).strip()
+            if url:
+                page.input_team_server_url.blockSignals(True)
+                page.input_team_server_url.setText(url)
+                page.input_team_server_url.blockSignals(False)
+            if team == "client":
+                page.lbl_team_status.setText(
+                    self.texts.get("setting_team_status_client", "员工机 · 已连接")
+                )
+            else:
+                page.lbl_team_status.setText(
+                    self.texts.get(
+                        "setting_team_status_client_pending",
+                        "待保存：员工机将连接上方地址",
+                    )
+                )
+            self._update_share_mode_chrome("client", pending=team != "client")
+            page.input_team_server_url.hide()
+            return
+
         running = hasattr(self, "agent_api_controller") and self.agent_api_controller.is_running()
-        if running:
-            url = self.agent_api_controller.get_base_url()
-            text = self.texts.get("setting_agent_api_status_running", "Running: {url}").format(url=url)
-            self.settings_page.btn_copy_agent_api_url.setEnabled(True)
-            self.settings_page.btn_copy_agent_starter.setEnabled(True)
+        cfg = load_config()
+        agent_pref = bool(cfg.get("agent_api_enabled", DEFAULT_CONFIG["agent_api_enabled"]))
+        if combo_mode == "agent" or (combo_mode == "off" and agent_pref):
+            if running:
+                page.lbl_team_status.setText(
+                    self.texts.get(
+                        "setting_team_status_agent",
+                        "本机 Agent API · {url}",
+                    ).format(url=self.agent_api_controller.get_base_url())
+                )
+            elif combo_mode == "agent" and bool(getattr(self, "_settings_dirty", False)):
+                page.lbl_team_status.setText(
+                    self.texts.get(
+                        "setting_team_status_agent_pending",
+                        "待保存：开启本机 Agent API（仅本机可访问）",
+                    )
+                )
+            else:
+                page.lbl_team_status.setText(
+                    self.texts.get(
+                        "setting_team_status_agent_stopped",
+                        "本机 Agent API · 未启动",
+                    )
+                )
+            self._update_share_mode_chrome(
+                "agent",
+                pending=not running or bool(getattr(self, "_settings_dirty", False)),
+            )
         else:
-            text = self.texts.get("setting_agent_api_status_stopped", "Stopped")
-            self.settings_page.btn_copy_agent_api_url.setEnabled(False)
-            self.settings_page.btn_copy_agent_starter.setEnabled(False)
-        self.settings_page.lbl_agent_api_status.setText(text)
+            page.lbl_team_status.setText(
+                self.texts.get("setting_team_status_off", "已关闭")
+            )
+            self._update_share_mode_chrome("off")
+        page.input_team_server_url.hide()
+
+    def _refresh_agent_api_status(self):
+        # Status lives on the unified share-mode row now.
+        self._refresh_team_mode_status()
 
     def _build_agent_starter_text(self) -> str:
         if not hasattr(self, "agent_api_controller") or not self.agent_api_controller.is_running():
@@ -875,10 +1157,21 @@ class SettingsGuiMixin:
         locale = getattr(self, "language", "zh") or "zh"
         return build_agent_starter_text(base_url, health, locale=locale)
 
+    def _current_share_api_url(self) -> str:
+        from src.services.team_mode_service import get_team_mode
+
+        if get_team_mode() == "server" and hasattr(self, "team_mode_controller"):
+            status = self.team_mode_controller.refresh_status()
+            return str(status.get("api_base_url") or "").strip()
+        if hasattr(self, "agent_api_controller") and self.agent_api_controller.is_running():
+            return str(self.agent_api_controller.get_base_url() or "").strip()
+        return ""
+
     def copy_agent_api_url(self):
-        if not hasattr(self, "agent_api_controller") or not self.agent_api_controller.is_running():
+        url = self._current_share_api_url()
+        if not url:
             return
-        QApplication.clipboard().setText(self.agent_api_controller.get_base_url())
+        QApplication.clipboard().setText(url)
         self.settings_page.lbl_status.setText(
             self.texts.get("setting_agent_api_copy_url_done", "Interface URL copied.")
         )

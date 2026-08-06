@@ -175,47 +175,77 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
         self.input_auto_cleanup_missing_files = NoWheelComboBox()
         self.input_close_window_action = NoWheelComboBox()
-        self.input_agent_api_enabled = NoWheelComboBox()
-        self.lbl_agent_api_status = QLabel()
-        self.lbl_agent_api_status.setObjectName("StatusHint")
-        self.lbl_agent_api_status.setWordWrap(True)
+        # Hidden legacy toggle: kept in sync from the unified share-mode combo.
+        self.input_agent_api_enabled = NoWheelComboBox(self)
+        self.input_agent_api_enabled.hide()
+        self.lbl_agent_api_status = QLabel(self)
+        self.lbl_agent_api_status.hide()
         self.btn_copy_agent_api_url = QPushButton()
         self.btn_copy_agent_api_url.setObjectName("AccentGhostButton")
         self.btn_copy_agent_api_url.setMinimumHeight(34)
         self.btn_copy_agent_starter = QPushButton()
         self.btn_copy_agent_starter.setObjectName("SuccessGhostButton")
         self.btn_copy_agent_starter.setMinimumHeight(34)
-        self.input_agent_api_bundle = QWidget()
-        agent_api_bundle_layout = QHBoxLayout(self.input_agent_api_bundle)
-        agent_api_bundle_layout.setContentsMargins(0, 0, 0, 0)
-        agent_api_bundle_layout.setSpacing(8)
-        agent_api_bundle_layout.addWidget(self.input_agent_api_enabled, 0)
-        agent_api_bundle_layout.addWidget(self.lbl_agent_api_status, 1)
-        agent_api_buttons = QWidget()
-        agent_api_buttons_layout = QHBoxLayout(agent_api_buttons)
-        agent_api_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        agent_api_buttons_layout.setSpacing(6)
-        agent_api_buttons_layout.addWidget(self.btn_copy_agent_api_url, 0)
-        agent_api_buttons_layout.addWidget(self.btn_copy_agent_starter, 0)
-        agent_api_bundle_layout.addWidget(agent_api_buttons, 0)
+        self.input_agent_api_bundle = QWidget(self)
+        self.input_agent_api_bundle.hide()
         self.input_team_mode = NoWheelComboBox()
         self.input_team_server_url = QLineEdit()
         self.input_team_server_url.setPlaceholderText("http://192.168.1.10:8765")
+        # URL is collected via dialog when choosing 员工机; keep the field as hidden storage.
+        self.input_team_server_url.hide()
         self.lbl_team_status = QLabel()
         self.lbl_team_status.setObjectName("StatusHint")
         self.lbl_team_status.setWordWrap(True)
+        # Mode-specific chrome (shown after the combo based on selection).
+        self.share_agent_panel = QWidget()
+        agent_panel_layout = QHBoxLayout(self.share_agent_panel)
+        agent_panel_layout.setContentsMargins(0, 0, 0, 0)
+        agent_panel_layout.setSpacing(6)
+        agent_panel_layout.addWidget(self.btn_copy_agent_api_url, 0)
+        agent_panel_layout.addWidget(self.btn_copy_agent_starter, 0)
+        self.share_server_panel = QWidget()
+        server_panel_layout = QHBoxLayout(self.share_server_panel)
+        server_panel_layout.setContentsMargins(0, 0, 0, 0)
+        server_panel_layout.setSpacing(6)
+        self.input_team_share_url = QLineEdit()
+        self.input_team_share_url.setReadOnly(True)
+        self.input_team_share_url.setPlaceholderText("http://192.168.1.5:8765")
+        self.btn_copy_team_share_url = QPushButton()
+        self.btn_copy_team_share_url.setObjectName("AccentGhostButton")
+        self.btn_copy_team_share_url.setMinimumHeight(34)
+        server_panel_layout.addWidget(self.input_team_share_url, 1)
+        server_panel_layout.addWidget(self.btn_copy_team_share_url, 0)
+        self.share_client_panel = QWidget()
+        client_panel_layout = QHBoxLayout(self.share_client_panel)
+        client_panel_layout.setContentsMargins(0, 0, 0, 0)
+        client_panel_layout.setSpacing(6)
+        self.lbl_team_client_url = QLabel()
+        self.lbl_team_client_url.setObjectName("StatusHint")
+        self.lbl_team_client_url.setWordWrap(False)
+        self.lbl_team_client_url.setMinimumWidth(120)
+        self.btn_edit_team_client_url = QPushButton()
+        self.btn_edit_team_client_url.setObjectName("AccentGhostButton")
+        self.btn_edit_team_client_url.setMinimumHeight(34)
+        client_panel_layout.addWidget(self.lbl_team_client_url, 1)
+        client_panel_layout.addWidget(self.btn_edit_team_client_url, 0)
         self.input_team_bundle = QWidget()
         team_bundle_layout = QVBoxLayout(self.input_team_bundle)
         team_bundle_layout.setContentsMargins(0, 0, 0, 0)
         team_bundle_layout.setSpacing(6)
-        team_row = QWidget()
-        team_row_layout = QHBoxLayout(team_row)
-        team_row_layout.setContentsMargins(0, 0, 0, 0)
-        team_row_layout.setSpacing(8)
-        team_row_layout.addWidget(self.input_team_mode, 0)
-        team_row_layout.addWidget(self.input_team_server_url, 1)
-        team_bundle_layout.addWidget(team_row)
+        team_bundle_layout.addWidget(self.input_team_server_url, 0)
+        self.share_mode_row = QWidget()
+        share_mode_row_layout = QHBoxLayout(self.share_mode_row)
+        share_mode_row_layout.setContentsMargins(0, 0, 0, 0)
+        share_mode_row_layout.setSpacing(8)
+        share_mode_row_layout.addWidget(self.input_team_mode, 0)
+        share_mode_row_layout.addWidget(self.share_agent_panel, 0)
+        share_mode_row_layout.addWidget(self.share_server_panel, 1)
+        share_mode_row_layout.addWidget(self.share_client_panel, 1)
+        team_bundle_layout.addWidget(self.share_mode_row, 0)
         team_bundle_layout.addWidget(self.lbl_team_status)
+        self.share_agent_panel.hide()
+        self.share_server_panel.hide()
+        self.share_client_panel.hide()
         self.input_export_video_silent = NoWheelComboBox()
         self.input_active_model_profile = NoWheelComboBox()
         self.btn_download_runtime_resources = QPushButton()
@@ -372,7 +402,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_close_window_action, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_agent_api_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
-        self._configure_setting_input(self.input_team_mode, width=COMPONENT_SIZES["settings_input_width"] + 72)
+        self._configure_setting_input(self.input_team_mode, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self._configure_setting_input(self.input_export_video_silent, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_active_model_profile, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
@@ -622,16 +652,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_close_window_action,
             self.hint_close_window_action,
         )
+        # Agent API + team roles are one share-mode dropdown (see input_team_mode).
+        self.label_agent_api_enabled.hide()
+        self.hint_agent_api_enabled.hide()
         self._add_setting_row(
             self.section_general_form,
             2,
-            self.label_agent_api_enabled,
-            self.input_agent_api_bundle,
-            self.hint_agent_api_enabled,
-        )
-        self._add_setting_row(
-            self.section_general_form,
-            3,
             self.label_team_mode,
             self.input_team_bundle,
             self.hint_team_mode,
@@ -1014,13 +1040,19 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_close_window_action.setText(texts["setting_close_window_action"])
         self.label_agent_api_enabled.setText(texts["setting_agent_api_enabled"])
         self.label_team_mode.setText(
-            texts.get("setting_team_mode", _fallback_text(texts, "setting_team_mode", "团队模式", "Team mode"))
+            texts.get(
+                "setting_share_mode",
+                texts.get("setting_team_mode", "搜索接口"),
+            )
         )
         current_team_mode = self.input_team_mode.currentData()
         self.input_team_mode.blockSignals(True)
         self.input_team_mode.clear()
         self.input_team_mode.addItem(
-            texts.get("setting_team_mode_off", "关闭（本机）"), "off"
+            texts.get("setting_team_mode_off", "关闭"), "off"
+        )
+        self.input_team_mode.addItem(
+            texts.get("setting_team_mode_agent", "本机 Agent API"), "agent"
         )
         self.input_team_mode.addItem(
             texts.get("setting_team_mode_server", "本机作为服务机"), "server"
@@ -1033,6 +1065,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_team_mode.blockSignals(False)
         self.btn_copy_agent_api_url.setText(texts["setting_agent_api_copy_url"])
         self.btn_copy_agent_starter.setText(texts["setting_agent_api_copy_starter"])
+        self.btn_copy_team_share_url.setText(
+            texts.get("setting_agent_api_copy_url", texts.get("copy", "复制"))
+        )
+        self.btn_edit_team_client_url.setText(
+            texts.get("setting_team_edit_client_url", "编辑服务地址")
+        )
         current_agent_api_enabled = self.input_agent_api_enabled.currentData()
         self.input_agent_api_enabled.blockSignals(True)
         self.input_agent_api_enabled.clear()
@@ -1163,8 +1201,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_agent_api_enabled.setText(texts["setting_agent_api_enabled_hint"])
         self.hint_team_mode.setText(
             texts.get(
-                "setting_team_mode_hint",
-                "服务机：启动局域网搜索 + nginx 视频分享。员工机：填写服务机地址后，搜索走服务器，预览用 HTTP URL。",
+                "setting_share_mode_hint",
+                texts.get(
+                    "setting_team_mode_hint",
+                    "关闭 / 本机 Agent API / 服务机 / 员工机。选员工机会弹出地址框；保存设置后才生效。",
+                ),
             )
         )
         self.hint_active_model_profile.setText(
@@ -1218,6 +1259,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_auto_cleanup_missing_files,
             self.label_close_window_action,
             self.label_agent_api_enabled,
+            self.label_team_mode,
             self.label_active_model_profile,
             self.label_data_root,
             self.label_ffmpeg_path,

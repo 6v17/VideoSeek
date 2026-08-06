@@ -356,8 +356,10 @@ class MainWindow(
         self.settings_page.btn_cleanup_old_model_dir.clicked.connect(self.cleanup_old_model_dir)
         self.settings_page.btn_copy_agent_api_url.clicked.connect(self.copy_agent_api_url)
         self.settings_page.btn_copy_agent_starter.clicked.connect(self.copy_agent_starter)
+        self.settings_page.btn_copy_team_share_url.clicked.connect(self._on_copy_team_share_url)
+        self.settings_page.btn_edit_team_client_url.clicked.connect(self._on_edit_team_client_url)
         self.settings_page.input_team_mode.currentIndexChanged.connect(self._on_team_mode_ui_changed)
-        self.settings_page.input_team_server_url.editingFinished.connect(self._on_team_server_url_editing_finished)
+        # team_server_url is edited via dialog; no inline editingFinished apply.
 
         self.setAcceptDrops(True)
         app = QApplication.instance()

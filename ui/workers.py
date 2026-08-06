@@ -142,6 +142,41 @@ class TeamConnectWorker(QThread):
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
+class TeamServerLifecycleWorker(QThread):
+    """Start/stop team server (API + nginx) off the UI thread with phase progress."""
+
+    progress_signal = Signal(str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, controller, action: str):
+        super().__init__()
+        self.controller = controller
+        self.action = str(action or "start").strip().lower() or "start"
+
+    def run(self):
+        try:
+            def _progress(phase: str) -> None:
+                self.progress_signal.emit(str(phase or ""))
+
+            if self.action == "start":
+                status = self.controller.start_server(progress_callback=_progress)
+                if isinstance(status, dict) and status.get("error") and not status.get("api_running"):
+                    self.error_signal.emit(str(status.get("error") or "server start failed"))
+                    return
+                self.finished_signal.emit(dict(status or {}))
+                return
+            if self.action == "stop":
+                self.controller.stop_server(progress_callback=_progress)
+                self.finished_signal.emit({})
+                return
+            status = self.controller.apply_from_config(progress_callback=_progress)
+            self.finished_signal.emit(dict(status or {}))
+        except Exception as exc:
+            logger.exception("Team server lifecycle failed (%s)", self.action)
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
 class SearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)

@@ -116,17 +116,19 @@ def build_team_server_status(config=None) -> Dict[str, Any]:
     }
 
 
-def start_team_server_media(config=None) -> Dict[str, Any]:
+def start_team_server_media(config=None, *, listen_port: int | None = None) -> Dict[str, Any]:
     """Write nginx conf for current libraries and start/reload nginx."""
     global _active_mounts, _active_media_base
     cfg = config if config is not None else load_config()
-    nginx_port = int(cfg.get("team_nginx_port", 18080) or 18080)
+    nginx_port = int(listen_port if listen_port is not None else (cfg.get("team_nginx_port", 18080) or 18080))
     libraries = list_local_library_paths(cfg)
     mounts = start_nginx(library_paths=libraries, listen_port=nginx_port)
     lan_ip = detect_lan_ip()
     _active_mounts = mounts
     _active_media_base = f"http://{lan_ip}:{nginx_port}"
     status = build_team_server_status(cfg)
+    status["nginx_port"] = nginx_port
+    status["media_base_url"] = _active_media_base
     status["mounts"] = mounts_public_payload(mounts)
     status["nginx_running"] = True
     return status
