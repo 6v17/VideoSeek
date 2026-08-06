@@ -25,6 +25,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# Bundled VLC runtime (local / packaging; do not commit DLLs)
+vlc_lib/
+
 # Build / packaging
 dist/
 build/
