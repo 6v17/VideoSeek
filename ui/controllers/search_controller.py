@@ -409,6 +409,20 @@ class SearchController(QObject):
         if self._is_shutdown or not self._is_current_worker():
             return
         self.parent_window.push_inference_status()
+        from src.services.team_client_search import is_team_search_busy_error
+
+        if is_team_search_busy_error(error_text):
+            busy_text = self.parent_window.texts.get(
+                "search_team_busy",
+                "服务机搜索繁忙，请稍后再试。",
+            )
+            self.parent_window.search_page.lbl_status.setText(busy_text)
+            self.parent_window.show_info_dialog(
+                self.parent_window.texts.get("info_title", self.parent_window.texts.get("warning_title", "Info")),
+                busy_text,
+                kind="warning",
+            )
+            return
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["search_failed"])
         runtime_warning = get_engine_runtime_warning()
         if runtime_warning:

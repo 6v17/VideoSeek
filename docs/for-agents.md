@@ -130,7 +130,8 @@
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
 | `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
-| `max_concurrent_searches` | 搜索并发上限（2） |
+| `max_concurrent_searches` | 搜索并发上限（默认 10，可配 `agent_api_max_concurrent_searches`） |
+| `search_queue_wait_sec` | 拿不到搜索槽位时最多等待秒数（默认 12，可配 `agent_api_search_queue_wait_sec`）；超时返回 `503 engine_busy` |
 | `search_timeout_sec` / `search_timeout_precise_sec` | 单次搜索超时（可配置） |
 | `max_batch_queries` | 64 |
 | `max_batch_export_clips` | 64 |

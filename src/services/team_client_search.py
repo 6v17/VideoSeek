@@ -17,6 +17,46 @@ from src.services.team_paths import normalize_http_base
 logger = get_logger("team_client_search")
 
 _VIDEO_PAGE_LIMIT = 2000
+_TEAM_ENGINE_BUSY_MARKER = "TEAM_ENGINE_BUSY"
+
+
+class TeamSearchBusyError(RuntimeError):
+    """Team server rejected the search because the concurrency queue was full."""
+
+    def __init__(self, message: str = ""):
+        detail = str(message or "").strip()
+        super().__init__(f"{_TEAM_ENGINE_BUSY_MARKER}:{detail}" if detail else _TEAM_ENGINE_BUSY_MARKER)
+
+
+def is_team_search_busy_error(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    if raw.startswith(_TEAM_ENGINE_BUSY_MARKER) or _TEAM_ENGINE_BUSY_MARKER in raw:
+        return True
+    lower = raw.lower()
+    return "search engine is busy" in lower or "engine_busy" in lower
+
+
+def _raise_from_http_error(exc: urllib.error.HTTPError) -> None:
+    raw = ""
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        raw = ""
+    data: dict = {}
+    try:
+        parsed = json.loads(raw or "{}")
+        if isinstance(parsed, dict):
+            data = parsed
+    except Exception:
+        data = {}
+    err = data.get("error") if isinstance(data.get("error"), dict) else {}
+    code = str(err.get("code") or "").strip().lower()
+    message = str(err.get("message") or "").strip() or str(exc.reason or raw or "team request failed")
+    if code == "engine_busy" or int(getattr(exc, "code", 0) or 0) == 503:
+        raise TeamSearchBusyError(message)
+    raise RuntimeError(message)
 
 
 def _post_json(url: str, payload: dict, *, timeout: float = 120.0) -> dict:
@@ -27,8 +67,12 @@ def _post_json(url: str, payload: dict, *, timeout: float = 120.0) -> dict:
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        _raise_from_http_error(exc)
+        raise
     data = json.loads(raw or "{}")
     if not isinstance(data, dict):
         raise RuntimeError("invalid team search response")
@@ -50,6 +94,57 @@ def _team_base(server_url: str, *, api_port_default: int = 8765) -> str:
     if not base:
         raise ValueError("team_server_url is empty")
     return base
+
+
+def _browse_url_from_http_play_url(text: str) -> str:
+    """http://host:port/videos/<libid>/rel/file.mp4 → library root listing URL."""
+    parsed = urllib.parse.urlparse(text)
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) >= 2 and parts[0].lower() == "videos":
+        folder = "/" + "/".join(parts[:2]) + "/"
+        return urllib.parse.urlunparse(
+            (parsed.scheme, parsed.netloc, folder, "", "", "")
+        )
+    if text.endswith("/"):
+        return text
+    parent = text.rstrip("/").rsplit("/", 1)[0]
+    return parent + "/" if parent else text
+
+
+def resolve_team_library_browse_url(
+    path_or_url: str,
+    *,
+    server_url: str = "",
+    api_port_default: int = 8765,
+) -> str:
+    """Turn a team play URL / server path hint into a browser library folder URL."""
+    text = str(path_or_url or "").strip()
+    if not text:
+        return ""
+    if text.lower().startswith(("http://", "https://")):
+        return _browse_url_from_http_play_url(text)
+
+    # Server absolute path on the employee machine → map via health mounts.
+    if not str(server_url or "").strip():
+        return ""
+    try:
+        from src.services.team_media_map import absolute_path_to_library_browse_url
+
+        base = _team_base(server_url, api_port_default=api_port_default)
+        health = _get_json(f"{base}/api/v1/health", timeout=8.0)
+        team = health.get("team") if isinstance(health.get("team"), dict) else {}
+        mounts = team.get("mounts") or []
+        media_base = str(team.get("media_base_url") or "").strip()
+        if not media_base or not isinstance(mounts, list):
+            return ""
+        return absolute_path_to_library_browse_url(
+            text,
+            mounts,
+            media_base_url=media_base,
+        )
+    except Exception:
+        logger.exception("resolve_team_library_browse_url failed for %s", text)
+        return ""
 
 
 def probe_team_server(server_url: str, *, api_port_default: int = 8765) -> dict:
@@ -397,6 +492,7 @@ def run_team_client_search(
     top_k: Optional[int] = None,
     scope_video_paths: Optional[Sequence[str]] = None,
     scope_library_paths: Optional[Sequence[str]] = None,
+    video_discovery_enabled: Optional[bool] = None,
     api_port_default: int = 8765,
     timeout: float = 180.0,
 ) -> List[SearchHit]:
@@ -418,6 +514,8 @@ def run_team_client_search(
     precision = str(search_precision_mode or "").strip().lower()
     if precision:
         payload["search_precision_mode"] = precision
+    if video_discovery_enabled is not None and kind != "dialogue":
+        payload["video_discovery_enabled"] = bool(video_discovery_enabled)
 
     video_paths = [str(p).strip() for p in (scope_video_paths or []) if str(p or "").strip()]
     library_paths = [str(p).strip() for p in (scope_library_paths or []) if str(p or "").strip()]

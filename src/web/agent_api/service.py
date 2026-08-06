@@ -19,7 +19,7 @@ from src.services.agent_starter_service import build_agent_doc_payload, build_ag
 
 from ._fastapi import FastAPI, HTTPException, JSONResponse, PlainTextResponse, _IMPORT_ERROR, uvicorn
 from .constants import API_VERSION, DEFAULT_HOST, DEFAULT_PORT
-from .errors import IndexNotReadyError, api_error_payload, raise_api_error
+from .errors import IndexNotReadyError, SearchEngineBusyError, api_error_payload, raise_api_error
 from .export_ops import _resolve_batch_search_export_timeout_sec, execute_export_manifest
 from .health import build_health_payload
 from .schemas import (
@@ -98,6 +98,9 @@ class AgentApiService:
             )
 
     def start(self):
+        from .constants import configure_search_concurrency
+
+        configure_search_concurrency()
         with self._lock:
             if self.is_running():
                 return
@@ -308,6 +311,8 @@ class AgentApiService:
                     "For precise image search, allow more time or reduce top_k / pixel rerank settings."
                 ),
             )
+        except SearchEngineBusyError as exc:
+            raise_api_error(503, "engine_busy", str(exc))
         except IndexNotReadyError as exc:
             raise_api_error(409, "index_not_ready", str(exc))
         except ValueError as exc:
@@ -338,6 +343,8 @@ class AgentApiService:
                 "Reduce batch size, use search_precision_mode=fast, or raise agent_api_batch_timeout_sec."
             )
             raise_api_error(503, "engine_busy", detail)
+        except SearchEngineBusyError as exc:
+            raise_api_error(503, "engine_busy", str(exc))
         except IndexNotReadyError as exc:
             raise_api_error(409, "index_not_ready", str(exc))
         except ValueError as exc:

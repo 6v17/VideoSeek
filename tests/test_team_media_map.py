@@ -46,6 +46,33 @@ class TeamMediaMapTests(unittest.TestCase):
             self.assertTrue(url.startswith("http://192.168.1.5:18080/videos/"))
             self.assertTrue(url.endswith("clip.mp4"))
 
+    def test_library_browse_url_from_play_url(self):
+        from src.services.team_media_map import absolute_path_to_library_browse_url
+
+        browse = absolute_path_to_library_browse_url(
+            "http://192.168.1.5:18080/videos/libabc12345/sub/clip.mp4",
+            [],
+            media_base_url="",
+        )
+        self.assertEqual(browse, "http://192.168.1.5:18080/videos/libabc12345/")
+
+    def test_library_browse_url_from_path(self):
+        from src.services.team_media_map import absolute_path_to_library_browse_url
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = os.path.join(tmp, "library")
+            os.makedirs(lib)
+            video = os.path.join(lib, "clip.mp4")
+            with open(video, "wb") as handle:
+                handle.write(b"x")
+            mounts = build_media_mounts([lib])
+            browse = absolute_path_to_library_browse_url(
+                video,
+                mounts,
+                media_base_url="http://192.168.1.5:18080",
+            )
+            self.assertEqual(browse, f"http://192.168.1.5:18080{mounts[0]['url_prefix']}")
+
 
 if __name__ == "__main__":
     unittest.main()

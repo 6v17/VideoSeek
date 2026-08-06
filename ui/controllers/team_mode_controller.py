@@ -47,6 +47,9 @@ class TeamModeController(QObject):
         api_port = int(cfg.get("team_api_port", DEFAULT_PORT) or DEFAULT_PORT)
         media_error = ""
         try:
+            from src.web.agent_api import configure_search_concurrency
+
+            configure_search_concurrency(cfg)
             media_status = start_team_server_media(cfg)
         except Exception as exc:
             # Media proxy is optional for connect/search; keep going so API still binds.

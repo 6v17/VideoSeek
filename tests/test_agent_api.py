@@ -527,6 +527,24 @@ class AgentApiPresetTests(unittest.TestCase):
         kwargs = mock_run_search.call_args.kwargs
         self.assertEqual(kwargs.get("search_precision_mode"), "precise")
 
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    def test_execute_agent_search_passes_video_discovery_enabled(self, mock_run_search, mock_snapshot):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/clip.mp4")]
+        with patch("src.web.agent_api.search.os.path.isfile", return_value=True):
+            body = AgentSearchRequest(
+                query="D:/ref.png",
+                query_type="image_path",
+                search_precision_mode="fast",
+                mode="frame",
+                video_discovery_enabled=True,
+            )
+            payload = execute_agent_search(body)
+        self.assertTrue(payload["meta"].get("video_discovery_enabled"))
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertTrue(kwargs.get("video_discovery_enabled"))
+
     @patch("src.services.search_scope.resolve_default_active_search_scope", return_value=(None, ["D:/lib"]))
     @patch("src.services.search_preset_service.build_preset_search_plan")
     @patch("src.web.agent_api.search._index_snapshot")

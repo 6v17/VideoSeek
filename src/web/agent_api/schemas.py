@@ -30,6 +30,8 @@ class AgentSearchRequest(BaseModel):
     search_mode: Optional[str] = None  # alias of mode for team clients
     min_score: Optional[float] = None
     search_precision_mode: Optional[str] = None
+    # Image search: keep best hit per video (desktop 「视频择优」). Only for global fast frame search.
+    video_discovery_enabled: Optional[bool] = None
     client_request_id: Optional[str] = None
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
@@ -60,6 +62,7 @@ class AgentBatchSearchRequest(BaseModel):
     mode: Optional[str] = None
     min_score: Optional[float] = None
     search_precision_mode: Optional[str] = None
+    video_discovery_enabled: Optional[bool] = None
     continue_on_error: bool = True
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True

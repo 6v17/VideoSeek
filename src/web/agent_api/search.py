@@ -34,7 +34,7 @@ from .constants import (
     MAX_BATCH_QUERIES,
     _duration_cache,
     _duration_cache_lock,
-    _search_semaphore,
+    acquire_search_slot,
 )
 from .errors import IndexNotReadyError
 from .export_ops import _attach_batch_search_export, _format_timecode
@@ -547,6 +547,7 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         "top_k": top_k,
         "min_score": min_score,
         "search_precision_mode": search_precision_mode,
+        "video_discovery_enabled": getattr(body, "video_discovery_enabled", None),
         "team_play_urls": team_play_urls,
         "scope_library_paths": scope_library_paths,
         "scope_video_paths": scope_video_paths,
@@ -661,7 +662,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             )
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
-    with _search_semaphore:
+    with acquire_search_slot():
         search_kwargs = {
             "top_k": top_k,
             "scope_video_paths": scope_video_paths,
@@ -669,6 +670,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "query_vector": resolved["query_vector"],
             "search_precision_mode": resolved["search_precision_mode"],
             "pixel_query_data": resolved["pixel_query_data"],
+            "video_discovery_enabled": resolved.get("video_discovery_enabled"),
         }
         if preview_anchor_sec is not None:
             search_kwargs["preview_anchor_sec"] = preview_anchor_sec
@@ -710,6 +712,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "top_k": top_k,
             "fetch_top_k": fetch_k,
             "search_precision_mode": resolved["search_precision_mode"],
+            "video_discovery_enabled": resolved.get("video_discovery_enabled"),
             "index_ready": True,
             "global_index_state": snapshot["global_index_state"],
             "search_index_schema_version": snapshot.get("search_index_schema_version"),
@@ -748,7 +751,7 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
     )
     dialogue_stats = get_dialogue_index_stats(config=cfg)
 
-    with _search_semaphore:
+    with acquire_search_slot():
         hits, message, matched_by = run_dialogue_search(
             query,
             top_k=top_k,
@@ -763,6 +766,15 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
         _scope_from_resolved_paths(scope_video_paths, scope_library_paths),
         config=cfg,
     )
+    team_play_urls = bool(getattr(body, "team_play_urls", False))
+    if not team_play_urls:
+        try:
+            from src.services.team_mode_service import is_team_server_mode
+
+            if is_team_server_mode(cfg):
+                team_play_urls = True
+        except Exception:
+            pass
     response = {
         "api_version": API_VERSION,
         "ok": True,
@@ -777,6 +789,7 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
             expand_frame_hits=False,
             pad_before_sec=0.0,
             pad_after_sec=0.0,
+            team_play_urls=team_play_urls,
         ),
         "meta": {
             "returned": len(hits),
@@ -809,12 +822,18 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
             if item.search_precision_mode is not None
             else batch.search_precision_mode
         ),
+        video_discovery_enabled=(
+            item.video_discovery_enabled
+            if item.video_discovery_enabled is not None
+            else batch.video_discovery_enabled
+        ),
         client_request_id=item.client_request_id,
         scope=item.scope if item.scope is not None else batch.scope,
         expand_frame_hits=batch.expand_frame_hits,
         pad_before_sec=batch.pad_before_sec,
         pad_after_sec=batch.pad_after_sec,
         preview_anchor_sec=item.preview_anchor_sec,
+        team_play_urls=bool(getattr(item, "team_play_urls", False)),
     )
 
 

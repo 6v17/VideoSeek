@@ -144,6 +144,8 @@ DEFAULT_CONFIG = {
     "agent_api_search_timeout_precise_sec": 180,
     "agent_api_batch_timeout_sec": 1200,
     "agent_api_default_image_precision": "fast",
+    "agent_api_max_concurrent_searches": 10,
+    "agent_api_search_queue_wait_sec": 12,
     "team_mode": "off",
     "team_api_port": 8765,
     "team_nginx_port": 18080,
@@ -173,6 +175,8 @@ CONFIG_BOUNDS = {
     "agent_api_search_timeout_fast_sec": (30, 600),
     "agent_api_search_timeout_precise_sec": (30, 900),
     "agent_api_batch_timeout_sec": (60, 7200),
+    "agent_api_max_concurrent_searches": (1, 32),
+    "agent_api_search_queue_wait_sec": (0, 60),
     "team_api_port": (1024, 65535),
     "team_nginx_port": (1024, 65535),
     "preview_seconds": (2, 20),
@@ -210,6 +214,8 @@ CONFIG_INT_KEYS = {
     "subtitle_ocr_batch_size",
     "team_api_port",
     "team_nginx_port",
+    "agent_api_max_concurrent_searches",
+    "agent_api_search_queue_wait_sec",
 }
 
 CONFIG_ENUMS = {

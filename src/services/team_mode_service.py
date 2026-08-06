@@ -61,14 +61,39 @@ def list_local_library_paths(config=None) -> List[str]:
     from src.services.library_service import list_libraries
 
     _ = config  # libraries come from active model meta
+    paths: List[str] = []
+    seen: set[str] = set()
     try:
         libraries = list_libraries(maintain=False)
     except Exception:
         logger.exception("list_libraries failed")
-        return []
+        libraries = {}
     if isinstance(libraries, dict):
-        return [str(path) for path in libraries.keys() if str(path or "").strip()]
-    return []
+        for path in libraries.keys():
+            text = str(path or "").strip()
+            if not text:
+                continue
+            key = text.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(text)
+    # Subtitle libraries may differ from CLIP visual roots; mount both for team play URLs.
+    try:
+        from src.services.subtitle_library_service import list_subtitle_libraries
+
+        for path in list_subtitle_libraries(config=config, seed=True).keys():
+            text = str(path or "").strip()
+            if not text:
+                continue
+            key = text.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(text)
+    except Exception:
+        logger.exception("list_subtitle_libraries failed while building team mounts")
+    return paths
 
 
 def build_team_server_status(config=None) -> Dict[str, Any]:

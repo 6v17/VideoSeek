@@ -89,7 +89,7 @@ def write_videos_conf(*, library_paths: List[str], listen_port: int) -> List[Dic
                     f"    # {comment}",
                     f"    location {prefix} {{",
                     f"        alias   {alias};",
-                    "        autoindex off;",
+                    "        autoindex on;",
                     "        add_header Accept-Ranges bytes;",
                     "    }",
                     "",

@@ -24,9 +24,10 @@ from .constants import (
     API_VERSION,
     _BATCH_TIMEOUT_FALLBACK_SEC,
     MAX_BATCH_QUERIES,
-    MAX_CONCURRENT_SEARCHES,
     _SEARCH_TIMEOUT_FAST_FALLBACK_SEC,
     _SEARCH_TIMEOUT_PRECISE_FALLBACK_SEC,
+    get_max_concurrent_searches,
+    get_search_queue_wait_sec,
 )
 
 
@@ -231,7 +232,8 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "library_indexes_ready": snapshot["library_indexes_ready"],
         "library_indexes_stale": snapshot["library_indexes_stale"],
         "saved_search_scope_mode": get_search_scope_mode(config),
-        "max_concurrent_searches": MAX_CONCURRENT_SEARCHES,
+        "max_concurrent_searches": get_max_concurrent_searches(),
+        "search_queue_wait_sec": get_search_queue_wait_sec(),
         "search_timeout_sec": timeouts["search_timeout_fast_sec"],
         "search_timeout_precise_sec": timeouts["search_timeout_precise_sec"],
         "agent_api_default_image_precision": default_agent_image_precision_mode(config),

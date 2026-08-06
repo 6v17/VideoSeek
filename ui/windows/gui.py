@@ -360,6 +360,9 @@ class MainWindow(
         self.settings_page.input_team_server_url.editingFinished.connect(self._on_team_server_url_editing_finished)
 
         self.setAcceptDrops(True)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
             page.header.runtime_banner_action.clicked.connect(self.open_runtime_resource_dialog)
 
@@ -372,6 +375,11 @@ class MainWindow(
         return scroll
 
     def eventFilter(self, watched, event):  # noqa: N802
+        if event.type() == QEvent.Type.KeyPress:
+            from PySide6.QtGui import QKeySequence
+
+            if event.matches(QKeySequence.StandardKey.Paste) and self._try_paste_clipboard_image():
+                return True
         if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
             if watched is getattr(self, "video_widget", None) or watched is getattr(
                 getattr(self, "search_page", None), "btn_manage_presets", None
@@ -382,6 +390,32 @@ class MainWindow(
                 event.ignore()
                 return False
         return super().eventFilter(watched, event)
+
+    def _try_paste_clipboard_image(self) -> bool:
+        """If the clipboard holds an image (or image file), load it into image/compose search."""
+        from src.services.clipboard_image_service import resolve_clipboard_image_path
+
+        clipboard = QApplication.clipboard()
+        mime = clipboard.mimeData() if clipboard is not None else None
+        # Only steal Ctrl+V when clipboard actually carries image bits or an image file URL.
+        # Plain text paste in dialogue/text fields must keep working.
+        has_image = bool(mime and mime.hasImage())
+        has_image_file = False
+        if mime and mime.hasUrls():
+            from src.services.clipboard_image_service import is_image_file_path
+
+            for url in mime.urls() or []:
+                if is_image_file_path(str(url.toLocalFile() or "")):
+                    has_image_file = True
+                    break
+        if not has_image and not has_image_file:
+            return False
+
+        path = resolve_clipboard_image_path(clipboard)
+        if not path:
+            return False
+        self.upload_file_path(path)
+        return True
 
     def _nav_page_index(self, page_name: str) -> int:
         return self._NAV_PAGE_ORDER.index(page_name)
@@ -1442,7 +1476,63 @@ class MainWindow(
         self.search_page.lbl_status.setText(self.texts["ready"])
 
     def open_result_in_explorer(self, path):
-        open_in_explorer(path)
+        target = str(path or "").strip()
+        if not target:
+            return
+        from src.services.team_mode_service import is_team_client_mode
+
+        if target.lower().startswith(("http://", "https://")) or is_team_client_mode():
+            self._open_team_result_in_browser(target)
+            return
+        open_in_explorer(target)
+
+    def _open_team_result_in_browser(self, path_or_url: str) -> None:
+        """In shared mode, open the video's shared library folder in the system browser."""
+        import webbrowser
+
+        from src.app.config import load_config
+        from src.services.team_client_search import resolve_team_library_browse_url
+        from src.services.team_media_map import absolute_path_to_library_browse_url
+        from src.services.team_mode_service import (
+            get_active_media_base_url,
+            get_active_media_mounts,
+            is_team_client_mode,
+        )
+
+        text = str(path_or_url or "").strip()
+        browse_url = ""
+        if is_team_client_mode():
+            try:
+                cfg = load_config()
+                browse_url = resolve_team_library_browse_url(
+                    text,
+                    server_url=str(cfg.get("team_server_url") or ""),
+                    api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+                )
+            except Exception:
+                browse_url = ""
+        if not browse_url:
+            browse_url = absolute_path_to_library_browse_url(
+                text,
+                get_active_media_mounts(),
+                media_base_url=get_active_media_base_url(),
+            )
+        if not browse_url and text.lower().startswith(("http://", "https://")):
+            browse_url = text.rstrip("/").rsplit("/", 1)[0] + "/" if "/" in text.rstrip("/") else text
+        if not browse_url:
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_open_remote_hint",
+                    "共享库文件在服务机上，员工机无法直接打开本地文件夹。请用搜索结果预览播放。",
+                ),
+                kind="info",
+            )
+            return
+        try:
+            webbrowser.open(browse_url)
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("error_title", "Error"), exc)
 
     def upload_file(self):
         path, _ = QFileDialog.getOpenFileName(self, self.texts["select_image"], "", self.texts["image_filter"])

@@ -182,6 +182,7 @@ class SearchWorker(QThread):
                     top_k=config.top_k,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
+                    video_discovery_enabled=config.video_discovery_enabled,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
                 results = filter_hits_by_min_score(results, config.min_score)
@@ -684,7 +685,8 @@ class ThumbLoader(QThread):
 
             hit = coerce_search_hit(raw)
             video_path = str(hit.video_path or "").strip()
-            if not video_path or not os.path.isfile(video_path):
+            is_http = video_path.lower().startswith(("http://", "https://"))
+            if not video_path or (not is_http and not os.path.isfile(video_path)):
                 self.thumb_ready.emit(table_row, None)
                 continue
 

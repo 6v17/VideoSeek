@@ -17,6 +17,11 @@ from .constants import (
     DEFAULT_PORT,
     MAX_BATCH_QUERIES,
     MAX_CONCURRENT_SEARCHES,
+    SearchEngineBusyError,
+    acquire_search_slot,
+    configure_search_concurrency,
+    get_max_concurrent_searches,
+    get_search_queue_wait_sec,
 )
 from .errors import IndexNotReadyError, api_error_payload, raise_api_error
 from .export_ops import (
@@ -84,6 +89,11 @@ __all__ = [
     "IndexNotReadyError",
     "MAX_BATCH_QUERIES",
     "MAX_CONCURRENT_SEARCHES",
+    "SearchEngineBusyError",
+    "acquire_search_slot",
+    "configure_search_concurrency",
+    "get_max_concurrent_searches",
+    "get_search_queue_wait_sec",
     "_agent_timeout_settings",
     "_batch_requests_precise_mode",
     "_build_ffmpeg_info",

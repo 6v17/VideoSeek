@@ -60,8 +60,49 @@ def absolute_path_to_play_url(
     abs_video = os.path.abspath(str(video_path or "").strip())
     if not base or not abs_video:
         return ""
+    mount = _best_mount_for_path(abs_video, mounts)
+    if mount is None:
+        return ""
+    rel = _relative_under_mount(abs_video, mount)
+    if rel is None:
+        return ""
+    prefix = str(mount.get("url_prefix") or f"/videos/{mount.get('id')}/").rstrip("/") + "/"
+    return f"{base}{prefix}{rel}"
+
+
+def absolute_path_to_library_browse_url(
+    video_or_library_path: str,
+    mounts: List[Dict[str, str]],
+    *,
+    media_base_url: str,
+) -> str:
+    """HTTP URL for the shared library folder that contains *video_or_library_path*."""
+    text = str(video_or_library_path or "").strip()
+    if text.lower().startswith(("http://", "https://")):
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(text)
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if len(path_parts) >= 2 and path_parts[0].lower() == "videos":
+            folder = "/" + "/".join(path_parts[:2]) + "/"
+            return urlunparse((parsed.scheme, parsed.netloc, folder, "", "", ""))
+        if "/" in text.rstrip("/"):
+            return text.rstrip("/").rsplit("/", 1)[0] + "/"
+        return text
+
+    base = str(media_base_url or "").strip().rstrip("/")
+    abs_path = os.path.abspath(text) if text else ""
+    if not base or not abs_path:
+        return ""
+    mount = _best_mount_for_path(abs_path, mounts)
+    if mount is None:
+        return ""
+    prefix = str(mount.get("url_prefix") or f"/videos/{mount.get('id')}/").rstrip("/") + "/"
+    return f"{base}{prefix}"
+
+
+def _best_mount_for_path(abs_video: str, mounts: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
     abs_norm = abs_video.replace("\\", "/")
-    # Longest prefix wins
     best: Optional[Dict[str, str]] = None
     best_len = -1
     for mount in mounts or []:
@@ -75,7 +116,6 @@ def absolute_path_to_play_url(
         # Compare case-insensitive on Windows
         if os.name == "nt":
             if not candidate.lower().startswith(root_norm.rstrip("/").lower()):
-                # also allow without trailing compare
                 root_cmp = root_norm.rstrip("/").lower()
                 cand_cmp = candidate.lower()
                 if cand_cmp != root_cmp and not cand_cmp.startswith(root_cmp + "/"):
@@ -88,9 +128,12 @@ def absolute_path_to_play_url(
         if length > best_len:
             best = mount
             best_len = length
-    if best is None:
-        return ""
-    root_abs = os.path.abspath(str(best["library_path"])).replace("\\", "/")
+    return best
+
+
+def _relative_under_mount(abs_video: str, mount: Dict[str, str]) -> Optional[str]:
+    abs_norm = abs_video.replace("\\", "/")
+    root_abs = os.path.abspath(str(mount["library_path"])).replace("\\", "/")
     if not root_abs.endswith("/"):
         root_abs += "/"
     rel = abs_norm
@@ -104,14 +147,12 @@ def absolute_path_to_play_url(
             elif rel.lower() == root_cmp:
                 rel = ""
             else:
-                return ""
+                return None
     else:
         if not rel.startswith(root_abs):
-            return ""
+            return None
         rel = rel[len(root_abs) :]
-    rel = rel.lstrip("/")
-    prefix = str(best.get("url_prefix") or f"/videos/{best.get('id')}/").rstrip("/") + "/"
-    return f"{base}{prefix}{rel}"
+    return rel.lstrip("/")
 
 
 def mounts_public_payload(mounts: List[Dict[str, str]]) -> List[Dict[str, Any]]:

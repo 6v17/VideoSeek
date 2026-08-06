@@ -359,30 +359,44 @@ class LibraryIndexingGuiMixin:
 
         client = is_team_client_mode()
         page = self.library_page
-        for name in (
-            "btn_add_lib",
-            "btn_remove_lib",
-            "btn_sync_db",
-            "btn_stop_index",
-            "btn_index_issues",
-            "btn_cleanup_missing",
-            "btn_vector_details",
-            "btn_debug_gpu_oom",
-            "btn_debug_system_oom",
-            "btn_build_dialogue_index",
-            "btn_reembed_dialogue",
-            "btn_clear_dialogue",
-            "btn_export_dialogue",
-            "btn_refresh_dialogue_library",
-            "btn_stop_dialogue_index",
-            "input_subtitle_sample_interval",
-            "input_subtitle_ocr_batch",
-            "lbl_subtitle_sample_interval",
-            "lbl_subtitle_ocr_batch",
-        ):
+        debug_enabled = bool(getattr(self, "_debug_tools_enabled", False))
+        visual_indexing = False
+        dialogue_indexing = False
+        try:
+            visual_indexing = bool(self.indexing_controller.is_running())
+        except Exception:
+            visual_indexing = False
+        try:
+            dialogue_indexing = bool(self._dialogue_index_running())
+        except Exception:
+            dialogue_indexing = False
+
+        visibility = {
+            "btn_add_lib": not client,
+            "btn_remove_lib": not client,
+            "btn_sync_db": not client,
+            "btn_index_issues": not client,
+            "btn_cleanup_missing": not client,
+            "btn_vector_details": not client,
+            "btn_build_dialogue_index": not client,
+            "btn_reembed_dialogue": not client,
+            "btn_clear_dialogue": not client,
+            "btn_export_dialogue": not client,
+            "btn_refresh_dialogue_library": not client,
+            "input_subtitle_sample_interval": not client,
+            "input_subtitle_ocr_batch": not client,
+            "lbl_subtitle_sample_interval": not client,
+            "lbl_subtitle_ocr_batch": not client,
+            # Stop / debug must never be force-shown just because we left client mode.
+            "btn_stop_index": (not client) and visual_indexing,
+            "btn_stop_dialogue_index": (not client) and dialogue_indexing,
+            "btn_debug_gpu_oom": (not client) and debug_enabled,
+            "btn_debug_system_oom": (not client) and debug_enabled,
+        }
+        for name, visible in visibility.items():
             widget = getattr(page, name, None)
             if widget is not None:
-                widget.setVisible(not client)
+                widget.setVisible(bool(visible))
         # Subtitle tab stays available on 员工机 (read-only shared view).
         if getattr(page, "btn_tab_dialogue", None) is not None:
             page.btn_tab_dialogue.setEnabled(True)
@@ -429,14 +443,18 @@ class LibraryIndexingGuiMixin:
         from src.services.team_mode_service import is_team_client_mode
 
         if is_team_client_mode():
-            self.show_info_dialog(
-                self.texts.get("info_title", self.texts.get("success_title", "Info")),
-                self.texts.get(
-                    "library_team_open_remote_hint",
-                    "共享库文件在服务机上，员工机无法直接打开本地文件夹。请用搜索结果预览播放。",
-                ),
-                kind="info",
-            )
+            # Shared mode: open the library folder via nginx autoindex in the browser.
+            if hasattr(self, "_open_team_result_in_browser"):
+                self._open_team_result_in_browser(path)
+            else:
+                self.show_info_dialog(
+                    self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                    self.texts.get(
+                        "library_team_open_remote_hint",
+                        "共享库文件在服务机上，员工机无法直接打开本地文件夹。请用搜索结果预览播放。",
+                    ),
+                    kind="info",
+                )
             return
         open_folder_in_explorer(path)
 
