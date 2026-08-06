@@ -526,10 +526,14 @@ class SearchPage(QWidget):
         self.results_float_hint = QLabel()
         self.results_float_hint.setObjectName("Hint")
         self.results_float_hint.setWordWrap(False)
+        self.btn_focus_results = QPushButton()
+        self.btn_focus_results.setObjectName("AccentGhostButton")
+        self.btn_focus_results.setMinimumHeight(30)
         self.btn_dock_results = QPushButton()
         self.btn_dock_results.setObjectName("GhostButton")
         self.btn_dock_results.setMinimumHeight(30)
         placeholder_row.addWidget(self.results_float_hint, 1)
+        placeholder_row.addWidget(self.btn_focus_results, 0)
         placeholder_row.addWidget(self.btn_dock_results, 0)
         placeholder_layout.addLayout(placeholder_row)
         self.results_float_placeholder.hide()
@@ -542,9 +546,11 @@ class SearchPage(QWidget):
             "title": "检索结果",
             "detach": "弹出窗口",
             "dock": "嵌回主窗口",
+            "focus": "返回列表",
             "hint": "检索结果已在独立窗口中显示。",
         }
         self.btn_detach_results.clicked.connect(self.toggle_results_float)
+        self.btn_focus_results.clicked.connect(self.focus_results_float)
         self.btn_dock_results.clicked.connect(self.dock_results)
         self._sync_detach_button_label()
 
@@ -556,6 +562,7 @@ class SearchPage(QWidget):
         title = str(texts.get("results_panel", self._results_float_texts["title"]) or "检索结果")
         detach = str(texts.get("results_detach", self._results_float_texts["detach"]) or "弹出窗口")
         dock = str(texts.get("results_dock", self._results_float_texts["dock"]) or "嵌回主窗口")
+        focus = str(texts.get("results_focus_list", self._results_float_texts["focus"]) or "返回列表")
         hint = str(
             texts.get("results_float_hint", self._results_float_texts["hint"])
             or "检索结果已在独立窗口中显示。"
@@ -564,9 +571,12 @@ class SearchPage(QWidget):
             "title": title,
             "detach": detach,
             "dock": dock,
+            "focus": focus,
             "hint": hint,
         }
         self.results_float_hint.setText(hint)
+        self.btn_focus_results.setText(focus)
+        self.btn_focus_results.setToolTip(focus)
         self.btn_dock_results.setText(dock)
         if self._results_float_window is not None:
             self._results_float_window.setWindowTitle(title)
@@ -584,12 +594,22 @@ class SearchPage(QWidget):
         else:
             self.float_results()
 
+    def focus_results_float(self) -> None:
+        """Bring the floated results window to the front without docking."""
+        if not self.is_results_floating():
+            return
+        window = self._results_float_window
+        if window is None:
+            return
+        if window.isMinimized():
+            window.showNormal()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
     def float_results(self) -> None:
         if self.is_results_floating():
-            window = self._results_float_window
-            if window is not None:
-                window.raise_()
-                window.activateWindow()
+            self.focus_results_float()
             return
         window = self._ensure_results_float_window()
         self.results_slot_layout.removeWidget(self.results_card)

@@ -25,6 +25,19 @@ class PreviewGuiMixin:
         if not self.preview_controller.play(path, sec, end_sec=end_sec):
             self.search_page.lbl_status.setText(self.texts["preview_failed"])
         self._update_expand_preview_button()
+        # Floated results stay open; bring main window forward so inline preview is visible.
+        if self.search_page.is_results_floating():
+            self._bring_main_forward_for_preview()
+
+    def _bring_main_forward_for_preview(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        app = QApplication.instance()
+        if app is not None:
+            app.setActiveWindow(self)
 
     def open_segment_preview_dialog(
         self,
