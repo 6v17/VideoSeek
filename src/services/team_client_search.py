@@ -53,8 +53,9 @@ def _team_base(server_url: str, *, api_port_default: int = 8765) -> str:
 
 
 def probe_team_server(server_url: str, *, api_port_default: int = 8765) -> dict:
+    """Cheap connectivity check — uses health ping, not a full index snapshot."""
     base = _team_base(server_url, api_port_default=api_port_default)
-    return _get_json(f"{base}/api/v1/health?mode=summary", timeout=8.0)
+    return _get_json(f"{base}/api/v1/health?mode=ping", timeout=5.0)
 
 
 def list_team_client_libraries(

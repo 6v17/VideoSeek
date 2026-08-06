@@ -713,7 +713,8 @@ class MainWindow(
         self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
-        self._apply_team_mode_settings()
+        # Avoid a second blocking remote library dump right after refresh above.
+        self._apply_team_mode_settings(refresh_library=False)
         self._apply_agent_api_settings()
         QTimer.singleShot(0, self._bootstrap_understanding_resources)
         QTimer.singleShot(1500, self._idle_maintain_library_metadata)

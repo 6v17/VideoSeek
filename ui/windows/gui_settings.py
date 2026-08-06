@@ -218,17 +218,30 @@ class SettingsGuiMixin:
         if hasattr(self, "load_understanding_settings"):
             self.load_understanding_settings()
 
+    def _sync_team_mode_widgets_from_config(self, config=None):
+        config = config or load_config()
+        team_mode = str(config.get("team_mode", "off") or "off")
+        idx = self.settings_page.input_team_mode.findData(team_mode)
+        self.settings_page.input_team_mode.setCurrentIndex(0 if idx < 0 else idx)
+        self.settings_page.input_team_server_url.setText(str(config.get("team_server_url") or ""))
+
     def _on_team_apply_clicked(self):
         """Persist team fields and start/stop server or switch to client."""
         try:
             config = load_config()
-            config["team_mode"] = str(self.settings_page.input_team_mode.currentData() or "off")
-            config["team_server_url"] = str(self.settings_page.input_team_server_url.text() or "").strip()
+            previous_mode = str(config.get("team_mode") or "off")
+            previous_url = str(config.get("team_server_url") or "").strip()
+            new_mode = str(self.settings_page.input_team_mode.currentData() or "off")
+            new_url = str(self.settings_page.input_team_server_url.text() or "").strip()
+            config["team_mode"] = new_mode
+            config["team_server_url"] = new_url
             save_config(config)
-            mode = str(config["team_mode"] or "off")
-            if mode == "client":
-                url = str(config.get("team_server_url") or "").strip()
-                if not url:
+            if new_mode == "client":
+                if not new_url:
+                    config["team_mode"] = previous_mode
+                    config["team_server_url"] = previous_url
+                    save_config(config)
+                    self._sync_team_mode_widgets_from_config(config)
                     self.show_info_dialog(
                         self.texts.get("error_title", "Error"),
                         self.texts.get(
@@ -237,23 +250,31 @@ class SettingsGuiMixin:
                         ).format(url="（未填写）"),
                         kind="warning",
                     )
-                    self._apply_team_mode_settings()
+                    self._apply_team_mode_settings(refresh_library=True)
                     self._apply_agent_api_settings()
                     return
                 try:
                     from src.services.team_client_search import probe_team_server
 
                     probe_team_server(
-                        url,
+                        new_url,
                         api_port_default=int(config.get("team_api_port", 8765) or 8765),
                     )
                 except Exception as exc:
+                    # Do not leave half-applied client mode + hang on remote library dump.
+                    config["team_mode"] = previous_mode
+                    config["team_server_url"] = previous_url
+                    save_config(config)
+                    self._sync_team_mode_widgets_from_config(config)
                     self.show_info_dialog(
                         self.texts.get("error_title", "Error"),
-                        f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=url)}\n{exc}",
+                        f"{self.texts.get('setting_team_status_client', 'Client · {url}').format(url=new_url)}\n{exc}",
                         kind="warning",
                     )
-            self._apply_team_mode_settings()
+                    self._apply_team_mode_settings(refresh_library=True)
+                    self._apply_agent_api_settings()
+                    return
+            self._apply_team_mode_settings(refresh_library=True)
             self._apply_agent_api_settings()
             self._set_settings_dirty(False)
         except Exception as exc:
@@ -653,14 +674,15 @@ class SettingsGuiMixin:
             self.agent_api_controller.stop()
         self._refresh_agent_api_status()
 
-    def _apply_team_mode_settings(self):
+    def _apply_team_mode_settings(self, *, refresh_library: bool = True):
         if not hasattr(self, "team_mode_controller"):
             return
         status = self.team_mode_controller.apply_from_config()
         self._refresh_team_mode_status(status)
-        # Library data source follows team_mode; refresh immediately so 员工机
-        # shows the shared tree without requiring an app restart.
-        if hasattr(self, "refresh_library_table"):
+        # Library data source follows team_mode; refresh so 员工机 shows the
+        # shared tree without requiring an app restart. Callers that already
+        # refreshed (startup) should pass refresh_library=False.
+        if refresh_library and hasattr(self, "refresh_library_table"):
             self.refresh_library_table()
 
     def _refresh_team_mode_status(self, status=None):

@@ -46,14 +46,15 @@ class TeamModeController(QObject):
     def start_server(self) -> dict:
         cfg = load_config()
         api_port = int(cfg.get("team_api_port", DEFAULT_PORT) or DEFAULT_PORT)
+        media_error = ""
         try:
             media_status = start_team_server_media(cfg)
         except Exception as exc:
+            # Media proxy is optional for connect/search; keep going so API still binds.
             logger.exception("Failed to start team nginx")
             media_status = build_team_server_status(cfg)
-            media_status["error"] = str(exc)
-            self.status_changed.emit(media_status)
-            return media_status
+            media_error = str(exc)
+            media_status["error"] = media_error
 
         # Bind LAN API (reuse Agent API surface)
         host = os.environ.get("VIDEOSEEK_AGENT_API_HOST", "0.0.0.0")
@@ -71,7 +72,7 @@ class TeamModeController(QObject):
         except Exception as exc:
             logger.exception("Failed to start team API")
             stop_team_server_media()
-            media_status["error"] = str(exc)
+            media_status["error"] = str(exc) if not media_error else f"{media_error}\n{exc}"
             media_status["api_running"] = False
             self.status_changed.emit(media_status)
             return media_status

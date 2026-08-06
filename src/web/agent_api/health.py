@@ -173,7 +173,20 @@ def _build_capabilities(
     }
 
 
+def build_health_ping_payload() -> Dict[str, Any]:
+    """Lightweight liveness for team-client connect probes (no index scan)."""
+    return {
+        "api_version": API_VERSION,
+        "ok": True,
+        "service": "videoseek-agent-api",
+        "ping": True,
+    }
+
+
 def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
+    # Probe clients historically used mode=summary; keep that as a cheap ping.
+    if str(mode or "").strip().lower() in {"ping", "summary", "lite"}:
+        return build_health_ping_payload()
     config = load_config()
     mode = _normalize_mode(mode)
     spec = get_active_embedding_spec(config=config)

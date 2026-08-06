@@ -30,6 +30,7 @@ from .health import (
     _index_snapshot,
     _normalize_mode,
     build_health_payload,
+    build_health_ping_payload,
 )
 from .schemas import (
     AgentBatchExportClipItem,
@@ -103,6 +104,7 @@ __all__ = [
     "api_error_payload",
     "build_batch_export_items_from_search_results",
     "build_health_payload",
+    "build_health_ping_payload",
     "dedupe_manifest_items",
     "execute_agent_batch_search",
     "execute_agent_search",
