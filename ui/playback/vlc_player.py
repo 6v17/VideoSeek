@@ -140,6 +140,9 @@ class VlcPreviewPlayer:
         self._reset_for_replay()
         if not self.is_available():
             return False
+        # Keep hwnd bound across media swaps; clearing to None first can spawn a
+        # standalone "VLC (Direct3D11 output)" window on the second play.
+        self.rebind_output_window()
         try:
             media = self._instance.media_new(os.fspath(video_path), f":start-time={start_sec:.3f}")
             self._set_media(media)
@@ -165,6 +168,7 @@ class VlcPreviewPlayer:
         self.rebind_output_window()
         QTimer.singleShot(0, self.rebind_output_window)
         QTimer.singleShot(80, self.rebind_output_window)
+        QTimer.singleShot(250, self.rebind_output_window)
         if self._stop_at_ms > 0:
             self._timer.start()
         return True
@@ -403,7 +407,9 @@ class VlcPreviewPlayer:
             self._player.pause()
         except Exception as exc:
             _log_vlc_debug("pause before replay", exc)
-        self._clear_media()
+        # Intentionally do not set_media(None) here. On Windows that often tears down
+        # the embedded Direct3D11 vout and opens a separate "VLC (Direct3D11 output)"
+        # window on the next play(). The following _set_media() replaces media in place.
 
     def _pause_at_stop_time(self):
         stop_at_ms = self._stop_at_ms
@@ -436,6 +442,7 @@ class VlcPreviewPlayer:
         start_sec = max(0.0, float(target_ms) / 1000.0)
         try:
             media = self._instance.media_new(self._current_video_path, f":start-time={start_sec:.3f}")
+            self.rebind_output_window()
             self._set_media(media)
             self.rebind_output_window()
             result = self._player.play()
@@ -444,6 +451,9 @@ class VlcPreviewPlayer:
             return False
         if result == -1:
             return False
+        self.rebind_output_window()
+        QTimer.singleShot(0, self.rebind_output_window)
+        QTimer.singleShot(80, self.rebind_output_window)
         self._pending_seek_ms = None
         if self._stop_at_ms > 0:
             self._timer.start()
