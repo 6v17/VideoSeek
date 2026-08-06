@@ -2,9 +2,37 @@
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QDialog, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QSizePolicy, QVBoxLayout, QWidget
+
+
+def force_widget_foreground(widget) -> None:
+    """Raise ``widget`` above other windows; Windows needs SetForegroundWindow."""
+    if widget is None:
+        return
+    if hasattr(widget, "isMinimized") and widget.isMinimized():
+        widget.showNormal()
+    widget.show()
+    widget.raise_()
+    widget.activateWindow()
+    app = QApplication.instance()
+    if app is not None:
+        app.setActiveWindow(widget)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            hwnd = int(widget.winId())
+            user32 = ctypes.windll.user32
+            # ASFW_ANY = -1: allow this process to steal foreground.
+            user32.AllowSetForegroundWindow(-1)
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+        except Exception:
+            pass
 
 
 class ResultsFloatWindow(QDialog):

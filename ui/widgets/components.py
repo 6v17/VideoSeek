@@ -39,7 +39,7 @@ from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import ResultTable
 from ui.widgets.search_results_pager import SearchResultsPager
 from ui.widgets.result_view import ResultView
-from ui.widgets.results_float_window import ResultsFloatWindow
+from ui.widgets.results_float_window import ResultsFloatWindow, force_widget_foreground
 from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
     PageHeader,
@@ -601,11 +601,14 @@ class SearchPage(QWidget):
         window = self._results_float_window
         if window is None:
             return
-        if window.isMinimized():
-            window.showNormal()
-        window.show()
-        window.raise_()
-        window.activateWindow()
+        force_widget_foreground(window)
+
+    def lower_results_float(self) -> None:
+        """Send the floated results window behind other windows (e.g. before preview)."""
+        window = self._results_float_window
+        if window is None or not window.isVisible():
+            return
+        window.lower()
 
     def float_results(self) -> None:
         if self.is_results_floating():
@@ -618,9 +621,7 @@ class SearchPage(QWidget):
         self.results_slot_layout.addStretch(1)
         self.results_float_placeholder.show()
         window.setWindowTitle(self._results_float_texts["title"])
-        window.show()
-        window.raise_()
-        window.activateWindow()
+        force_widget_foreground(window)
         self._sync_detach_button_label()
         self.results_float_changed.emit(True)
 
@@ -645,8 +646,8 @@ class SearchPage(QWidget):
 
     def _ensure_results_float_window(self) -> ResultsFloatWindow:
         if self._results_float_window is None:
-            top = self.window() if self.window() is not self else None
-            self._results_float_window = ResultsFloatWindow(top)
+            # Top-level (no parent) so the float can sit behind the main window on preview.
+            self._results_float_window = ResultsFloatWindow(None)
             self._results_float_window.dock_requested.connect(self.dock_results)
         return self._results_float_window
 
@@ -659,7 +660,6 @@ class SearchPage(QWidget):
         if window is not None:
             window.close()
             window.deleteLater()
-
 
 
 class DialogueLibraryRow(QFrame):

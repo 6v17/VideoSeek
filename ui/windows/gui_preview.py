@@ -13,6 +13,7 @@ from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
 from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
+from ui.widgets.results_float_window import force_widget_foreground
 
 logger = get_logger("gui_preview")
 
@@ -30,14 +31,12 @@ class PreviewGuiMixin:
             self._bring_main_forward_for_preview()
 
     def _bring_main_forward_for_preview(self) -> None:
-        if self.isMinimized():
-            self.showNormal()
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        # Independent float can still cover main; lower it, then force main foreground (Win32).
+        self.search_page.lower_results_float()
         app = QApplication.instance()
         if app is not None:
-            app.setActiveWindow(self)
+            app.processEvents()
+        force_widget_foreground(self)
 
     def open_segment_preview_dialog(
         self,
