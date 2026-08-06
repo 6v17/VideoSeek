@@ -161,6 +161,10 @@ class VlcPreviewPlayer:
             self._stop_at_ms = -1
             self._locked_stop_at_ms = -1
             return False
+        # Windows often needs hwnd rebound after play() or VLC opens its own D3D window.
+        self.rebind_output_window()
+        QTimer.singleShot(0, self.rebind_output_window)
+        QTimer.singleShot(80, self.rebind_output_window)
         if self._stop_at_ms > 0:
             self._timer.start()
         return True
@@ -183,7 +187,8 @@ class VlcPreviewPlayer:
         """Stop playback and release libvlc resources.
 
         ``fast=True`` skips native ``stop()`` / ``release()`` which can block the UI
-        thread indefinitely on Windows. Prefer fast teardown when closing dialogs.
+        thread on Windows. Never detach the hwnd while video is still bound — that
+        makes libvlc spawn a standalone ``VLC (Direct3D11 output)`` window.
         """
         if self._released:
             return
@@ -195,13 +200,16 @@ class VlcPreviewPlayer:
         self._pending_seek_ms = None
         self._current_video_path = ""
         if self._player is not None:
-            self._detach_output_window()
             try:
                 self._player.audio_set_mute(True)
             except Exception as exc:
                 _log_vlc_debug("mute before shutdown", exc)
+            try:
+                self._player.pause()
+            except Exception as exc:
+                _log_vlc_debug("pause before shutdown", exc)
             if fast:
-                # Avoid stop()/release() hangs; drop media binding and abandon native objs.
+                # Clear media first so video stops rendering, then detach hwnd.
                 try:
                     self._player.set_media(None)
                 except Exception as exc:
@@ -209,18 +217,16 @@ class VlcPreviewPlayer:
                 old = self._current_media
                 self._current_media = None
                 self._release_media_object(old)
+                self._detach_output_window()
                 self._player = None
                 self._instance = None
                 return
-            try:
-                self._player.pause()
-            except Exception as exc:
-                _log_vlc_debug("pause before shutdown", exc)
             try:
                 self._player.stop()
             except Exception as exc:
                 _log_vlc_debug("stop before shutdown", exc)
             self._clear_media()
+            self._detach_output_window()
             try:
                 self._player.release()
             except Exception as exc:

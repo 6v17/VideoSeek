@@ -242,20 +242,13 @@ class PreviewDialog(QDialog):
         self.load_preview(video_path, start_sec, end_sec, suggested_sec=suggested_sec)
 
     def closeEvent(self, event):
+        # Always hide immediately so the user is never trapped behind a busy/frozen dialog.
         if self._close_requested:
+            self.hide()
             event.ignore()
             return
         self._begin_close()
-        now = time.monotonic()
-        if now < self._min_close_at:
-            self._pending_close = True
-            self._detail_notice = self.texts.get(
-                "preview_dialog_busy", "Preview is still switching. Try again in a moment."
-            )
-            self._apply_detail_label()
-            QTimer.singleShot(max(1, int((self._min_close_at - now) * 1000)), self._complete_deferred_close)
-            event.ignore()
-            return
+        self.hide()
         self._finalize_close()
         event.ignore()
 
@@ -363,12 +356,13 @@ class PreviewDialog(QDialog):
             finish_playback_session(actual_sec=self._current_time_seconds(), source="dialog")
         except Exception as exc:
             logger.debug("Preview dialog playback telemetry finish skipped: %s", exc)
-        self._dispose_player(fast=True)
+        # Hide before native teardown so a stuck VLC call cannot trap the dialog on screen.
         if self.isFullScreen():
             self.showNormal()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
         self._detail_notice = None
         self.hide()
+        self._dispose_player(fast=True)
 
     def _ensure_player(self):
         if self.player is None:

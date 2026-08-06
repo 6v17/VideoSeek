@@ -787,12 +787,6 @@ class VlcPreviewPlayerTests(unittest.TestCase):
 
         player.shutdown()
 
-        if sys.platform == "win32":
-            mock_player.set_hwnd.assert_called_once_with(0)
-        elif sys.platform == "darwin":
-            mock_player.set_nsobject.assert_called_once_with(0)
-        else:
-            mock_player.set_xwindow.assert_called_once_with(0)
         mock_player.pause.assert_called_once()
         mock_player.stop.assert_called_once()
         mock_player.release.assert_called_once()
@@ -800,6 +794,13 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         self.assertIsNone(player._player)
         self.assertIsNone(player._instance)
         self.assertTrue(player._released)
+        # Detach happens after stop/clear, not before.
+        if sys.platform == "win32":
+            self.assertEqual(mock_player.set_hwnd.call_args_list[-1][0][0], 0)
+        elif sys.platform == "darwin":
+            self.assertEqual(mock_player.set_nsobject.call_args_list[-1][0][0], 0)
+        else:
+            self.assertEqual(mock_player.set_xwindow.call_args_list[-1][0][0], 0)
 
     def test_shutdown_with_shared_instance_does_not_release_instance(self):
         host = MagicMock()
@@ -810,12 +811,6 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         mock_player = player._player
         player.shutdown()
 
-        if sys.platform == "win32":
-            mock_player.set_hwnd.assert_called_once_with(0)
-        elif sys.platform == "darwin":
-            mock_player.set_nsobject.assert_called_once_with(0)
-        else:
-            mock_player.set_xwindow.assert_called_once_with(0)
         mock_player.pause.assert_called_once()
         mock_player.stop.assert_called_once()
         mock_player.release.assert_called_once()
@@ -1006,6 +1001,8 @@ class PreviewDialogTests(unittest.TestCase):
         mock_player.release.assert_not_called()
         mock_instance.release.assert_not_called()
         mock_player.audio_set_mute.assert_called_once_with(True)
+        mock_player.pause.assert_called_once()
+        mock_player.set_media.assert_called_with(None)
         self.assertTrue(player._released)
         self.assertIsNone(player._player)
 
