@@ -507,7 +507,7 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         query_type=query_type,
         config=cfg,
     )
-    mode = _normalize_mode(body.mode) or _normalize_mode(getattr(body, "search_mode", None))
+    mode = _normalize_mode(body.mode or getattr(body, "search_mode", None))
     top_k = _clamp_top_k(body.top_k if body.top_k is not None else query_part.get("default_top_k"))
     min_score = body.min_score if body.min_score is not None else query_part.get("default_min_score")
     search_precision_mode = normalize_search_precision_mode(

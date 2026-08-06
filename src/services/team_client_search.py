@@ -524,6 +524,8 @@ def run_team_client_search(
     base = _team_base(server_url, api_port_default=api_port_default)
 
     payload: dict[str, Any] = {
+        # Keep expand for clip/export helpers on the server, but rebuild
+        # employee SearchHits from raw_* so frame mode still shows 帧.
         "expand_frame_hits": True,
         "team_play_urls": True,
     }
@@ -535,6 +537,8 @@ def run_team_client_search(
         payload["top_k"] = int(top_k)
     mode = str(search_mode or "").strip().lower()
     if kind != "dialogue" and mode in {"frame", "chunk"}:
+        # Send both keys: older servers only read `mode`; `search_mode` is the team alias.
+        payload["mode"] = mode
         payload["search_mode"] = mode
     precision = str(search_precision_mode or "").strip().lower()
     if precision:
@@ -576,15 +580,41 @@ def run_team_client_search(
         path = play or str(row.get("video_path") or "").strip()
         if not path:
             continue
+        start_sec, end_sec = _team_hit_time_range(row, preferred_mode=mode)
+        match_kind = str(row.get("match_kind") or "").strip().lower()
+        if not match_kind:
+            if kind == "dialogue":
+                match_kind = "dialogue"
+            elif mode == "chunk":
+                match_kind = "chunk"
+            else:
+                match_kind = "frame"
         out.append(
             SearchHit(
-                start_sec=float(row.get("start_sec") or 0.0),
-                end_sec=float(row.get("end_sec") or 0.0),
+                start_sec=start_sec,
+                end_sec=end_sec,
                 score=float(row.get("score") or 0.0),
                 video_path=path,
-                match_kind=str(row.get("match_kind") or ("dialogue" if kind == "dialogue" else "frame")),
+                match_kind=match_kind,
                 video_id=str(row.get("video_id") or ""),
                 matched_text=str(row.get("matched_text") or ""),
             )
         )
     return out
+
+
+def _team_hit_time_range(row: dict, *, preferred_mode: str = "") -> tuple[float, float]:
+    """Prefer raw match times so expanded clip windows do not hide frame-level hits."""
+    _ = preferred_mode
+    clip = row.get("clip_window") if isinstance(row.get("clip_window"), dict) else {}
+    raw_start = row.get("raw_start_sec", clip.get("raw_start_sec"))
+    raw_end = row.get("raw_end_sec", clip.get("raw_end_sec"))
+    if raw_start is not None and raw_end is not None:
+        try:
+            return float(raw_start), float(raw_end)
+        except (TypeError, ValueError):
+            pass
+    try:
+        return float(row.get("start_sec") or 0.0), float(row.get("end_sec") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0, 0.0
