@@ -75,11 +75,11 @@ def export_shot_list_fcpxml(
     write_path: str,
     project: str = "VideoSeek",
 ) -> Dict[str, Any]:
-    from src.services.fcpxml_export_service import export_shot_list_fcpxml as _export
+    from src.services.fcpxml_export_service import export_shot_list_nle_xml
 
     if not items:
         raise ValueError("Shot list is empty.")
-    return _export(
+    return export_shot_list_nle_xml(
         items,
         write_path=write_path,
         project_name=str(project or "VideoSeek"),

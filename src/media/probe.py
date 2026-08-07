@@ -113,7 +113,7 @@ def _probe_video_stream_with_opencv(video_path):
     capture = cv2.VideoCapture(path)
     if not capture.isOpened():
         capture.release()
-        return {"width": None, "height": None, "duration": None, "fps": None}
+        return {"width": None, "height": None, "duration": None, "fps": None, "frame_count": None}
 
     width = float(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0.0)
     height = float(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0.0)
@@ -130,6 +130,7 @@ def _probe_video_stream_with_opencv(video_path):
         "height": int(height) if height > 0.0 else None,
         "duration": duration,
         "fps": float(fps) if fps > 0.0 else None,
+        "frame_count": int(frame_count) if frame_count > 0.0 else None,
     }
 
 

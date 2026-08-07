@@ -196,6 +196,8 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.lbl_team_status = QLabel()
         self.lbl_team_status.setObjectName("StatusHint")
         self.lbl_team_status.setWordWrap(True)
+        # Status text used to sit under the combo; keep the label for code paths but hide it.
+        self.lbl_team_status.hide()
         # Mode-specific chrome (shown after the combo based on selection).
         self.share_agent_panel = QWidget()
         agent_panel_layout = QHBoxLayout(self.share_agent_panel)
@@ -210,6 +212,8 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_team_share_url = QLineEdit()
         self.input_team_share_url.setReadOnly(True)
         self.input_team_share_url.setPlaceholderText("http://192.168.1.5:8765")
+        self.input_team_share_url.setMinimumWidth(280)
+        self.input_team_share_url.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.btn_copy_team_share_url = QPushButton()
         self.btn_copy_team_share_url.setObjectName("AccentGhostButton")
         self.btn_copy_team_share_url.setMinimumHeight(34)
@@ -239,10 +243,11 @@ class SettingsPage(QWidget, SettingsFormMixin):
         share_mode_row_layout.setSpacing(8)
         share_mode_row_layout.addWidget(self.input_team_mode, 0)
         share_mode_row_layout.addWidget(self.share_agent_panel, 0)
-        share_mode_row_layout.addWidget(self.share_server_panel, 1)
         share_mode_row_layout.addWidget(self.share_client_panel, 1)
+        share_mode_row_layout.addStretch(1)
         team_bundle_layout.addWidget(self.share_mode_row, 0)
-        team_bundle_layout.addWidget(self.lbl_team_status)
+        # Server URL on its own row so http://host:port is never clipped by the combo.
+        team_bundle_layout.addWidget(self.share_server_panel, 0)
         self.share_agent_panel.hide()
         self.share_server_panel.hide()
         self.share_client_panel.hide()

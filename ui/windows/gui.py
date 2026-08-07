@@ -477,10 +477,6 @@ class MainWindow(
         self.setWindowTitle(f"{t['app_name']} v{get_app_version()}")
         self.sidebar.title.setText(t["app_name"])
         self.sidebar.subtitle.setText(t["app_subtitle"])
-        github_url = str(get_donate_payload().get("github_url") or "").strip() or "https://github.com/6v17/VideoSeek"
-        tip = t.get("brand_free_tip", "永久免费 · 开源")
-        self.sidebar.free_tip.setText(f'<a href="{github_url}">{tip}</a>')
-        self.sidebar.free_tip.setToolTip(t.get("brand_free_tip_tooltip", github_url))
         self.sidebar.hero_tag.setText(t["hero_tag"])
         self.sidebar.hero_title.setText(t["hero_title"])
         self.sidebar.hero_body.setText(t["hero_body"])

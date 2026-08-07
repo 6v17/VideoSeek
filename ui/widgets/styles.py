@@ -103,18 +103,6 @@ QMenu::separator {
 #BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint {
     color: __MUTED__;
 }
-#BrandFreeTip {
-    color: __MUTED__;
-    font-size: 11px;
-    font-weight: 600;
-}
-#BrandFreeTip a {
-    color: __ACCENT__;
-    text-decoration: none;
-}
-#BrandFreeTip a:hover {
-    text-decoration: underline;
-}
 #CardHint {
     line-height: 1.45em;
 }

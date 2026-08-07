@@ -100,7 +100,7 @@ class ShotListDialog(QDialog):
         export_row.setSpacing(8)
         self.btn_export_manifest = QPushButton(self.texts.get("shot_list_export_manifest", "Export manifest"))
         self.btn_export_fcpxml = QPushButton(
-            self.texts.get("shot_list_export_fcpxml", "导出 FCPXML")
+            self.texts.get("shot_list_export_fcpxml", "导出剪辑 XML")
         )
         self.btn_batch_export = QPushButton(self.texts.get("shot_list_batch_export", "Batch export clips"))
         self.btn_export_manifest.setObjectName("GhostButton")
@@ -108,7 +108,7 @@ class ShotListDialog(QDialog):
         self.btn_export_fcpxml.setToolTip(
             self.texts.get(
                 "shot_list_export_fcpxml_tip",
-                "导出供 Premiere / 达芬奇导入的 FCPXML 时间线（需本地视频文件）",
+                "默认导出 Premiere / 达芬奇可用的 FCP7 XML（*.xml）；也可选 FCPXML 给达芬奇。需本地视频文件。",
             )
         )
         self.btn_batch_export.setObjectName("GhostButton")

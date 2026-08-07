@@ -127,34 +127,48 @@ class ShotListGuiMixin:
         items = self.shot_list.list_items()
         if not items:
             return
-        default_name = self.texts.get("shot_list_fcpxml_default_name", "shot_list.fcpxml")
-        save_path, _ = QFileDialog.getSaveFileName(
+        default_name = self.texts.get("shot_list_fcpxml_default_name", "shot_list.xml")
+        save_path, selected_filter = QFileDialog.getSaveFileName(
             self,
-            self.texts.get("shot_list_export_fcpxml_title", "Export FCPXML"),
+            self.texts.get("shot_list_export_fcpxml_title", "Export edit XML"),
             default_name,
-            self.texts.get("shot_list_fcpxml_filter", "FCPXML (*.fcpxml)"),
+            self.texts.get(
+                "shot_list_fcpxml_filter",
+                "Premiere / Resolve XML (*.xml);;Resolve FCPXML (*.fcpxml)",
+            ),
         )
         if not save_path:
             return
-        if not str(save_path).lower().endswith(".fcpxml"):
-            save_path = f"{save_path}.fcpxml"
+        lower = str(save_path).lower()
+        wants_fcpxml = "fcpxml" in str(selected_filter or "").lower() or lower.endswith(".fcpxml")
+        if wants_fcpxml:
+            if not lower.endswith(".fcpxml"):
+                save_path = f"{save_path}.fcpxml"
+        elif not lower.endswith(".xml"):
+            save_path = f"{save_path}.xml"
         try:
             payload = export_shot_list_fcpxml(items, write_path=save_path)
             written = payload.get("write_path") or save_path
             clip_count = int(payload.get("exported_count") or payload.get("clip_count") or 0)
-            message = self.texts.get(
-                "shot_list_export_fcpxml_success",
-                "FCPXML exported ({count} clips): {path}",
-            ).format(count=clip_count, path=written)
+            if str(payload.get("format") or "") == "fcp7_xml":
+                message = self.texts.get(
+                    "shot_list_export_premiere_xml_success",
+                    "Premiere XML exported ({count} clips): {path}",
+                ).format(count=clip_count, path=written)
+            else:
+                message = self.texts.get(
+                    "shot_list_export_fcpxml_success",
+                    "FCPXML exported ({count} clips): {path}",
+                ).format(count=clip_count, path=written)
             self.search_page.lbl_status.setText(message)
             self.show_info_dialog(
-                self.texts.get("shot_list_export_fcpxml_title", "Export FCPXML"),
+                self.texts.get("shot_list_export_fcpxml_title", "Export edit XML"),
                 message,
                 kind="info",
             )
         except Exception as exc:
             self.show_error_dialog(
-                self.texts.get("shot_list_export_fcpxml_title", "Export FCPXML"),
+                self.texts.get("shot_list_export_fcpxml_title", "Export edit XML"),
                 str(exc),
             )
 
