@@ -109,8 +109,20 @@ class PreviewGuiMixin:
         chrome.apply_texts(self.texts)
         chrome.export_requested.connect(self._queue_preview_export)
         chrome.export_status_changed.connect(self._handle_preview_export_status)
+        chrome.add_to_shot_list_requested.connect(self._add_preview_clip_to_shot_list)
         chrome.maximize_toggled.connect(self._on_preview_maximize_toggled)
         self._expanded_chrome_wired = True
+
+    def _add_preview_clip_to_shot_list(self, video_path, start_sec, end_sec, match_kind="clip"):
+        if not hasattr(self, "add_hit_to_shot_list"):
+            return
+        self.add_hit_to_shot_list(
+            video_path,
+            start_sec,
+            end_sec,
+            score=None,
+            match_kind=str(match_kind or "clip"),
+        )
 
     def _sync_preview_chrome(self, video_path, start_sec, end_sec, suggested_sec):
         self._ensure_preview_chrome()

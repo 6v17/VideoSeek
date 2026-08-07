@@ -35,6 +35,7 @@ class ShotListDialog(QDialog):
         on_preview=None,
         on_locate=None,
         on_export_manifest=None,
+        on_export_fcpxml=None,
         on_batch_export=None,
         ffmpeg_available: bool = True,
     ):
@@ -44,6 +45,7 @@ class ShotListDialog(QDialog):
         self.on_preview = on_preview
         self.on_locate = on_locate
         self.on_export_manifest = on_export_manifest
+        self.on_export_fcpxml = on_export_fcpxml
         self.on_batch_export = on_batch_export
         self.ffmpeg_available = bool(ffmpeg_available)
         self._selected_item_id = ""
@@ -97,8 +99,18 @@ class ShotListDialog(QDialog):
         export_row = QHBoxLayout()
         export_row.setSpacing(8)
         self.btn_export_manifest = QPushButton(self.texts.get("shot_list_export_manifest", "Export manifest"))
+        self.btn_export_fcpxml = QPushButton(
+            self.texts.get("shot_list_export_fcpxml", "导出 FCPXML")
+        )
         self.btn_batch_export = QPushButton(self.texts.get("shot_list_batch_export", "Batch export clips"))
         self.btn_export_manifest.setObjectName("GhostButton")
+        self.btn_export_fcpxml.setObjectName("GhostButton")
+        self.btn_export_fcpxml.setToolTip(
+            self.texts.get(
+                "shot_list_export_fcpxml_tip",
+                "导出供 Premiere / 达芬奇导入的 FCPXML 时间线（需本地视频文件）",
+            )
+        )
         self.btn_batch_export.setObjectName("GhostButton")
         self.btn_batch_export.setEnabled(self.ffmpeg_available)
         if not self.ffmpeg_available:
@@ -106,6 +118,7 @@ class ShotListDialog(QDialog):
                 self.texts.get("shot_list_batch_export_ffmpeg_required", "FFmpeg is required for clip export.")
             )
         export_row.addWidget(self.btn_export_manifest)
+        export_row.addWidget(self.btn_export_fcpxml)
         export_row.addWidget(self.btn_batch_export)
         export_row.addStretch(1)
         root.addLayout(export_row)
@@ -141,6 +154,7 @@ class ShotListDialog(QDialog):
         self.btn_preview.clicked.connect(self._preview_selected)
         self.btn_locate.clicked.connect(self._locate_selected)
         self.btn_export_manifest.clicked.connect(self._export_manifest)
+        self.btn_export_fcpxml.clicked.connect(self._export_fcpxml)
         self.btn_batch_export.clicked.connect(self._batch_export)
         self.btn_close.clicked.connect(self.accept)
 
@@ -202,11 +216,16 @@ class ShotListDialog(QDialog):
             button.setEnabled(has_selection)
         self.btn_clear.setEnabled(self.store.count() > 0)
         self.btn_export_manifest.setEnabled(self.store.count() > 0)
+        self.btn_export_fcpxml.setEnabled(self.store.count() > 0)
         self.btn_batch_export.setEnabled(self.store.count() > 0 and self.ffmpeg_available)
 
     def _export_manifest(self) -> None:
         if self.on_export_manifest is not None:
             self.on_export_manifest()
+
+    def _export_fcpxml(self) -> None:
+        if self.on_export_fcpxml is not None:
+            self.on_export_fcpxml()
 
     def _batch_export(self) -> None:
         if self.on_batch_export is not None:

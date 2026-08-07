@@ -28,6 +28,7 @@ class ExpandedPreviewChrome(QWidget):
 
     export_requested = Signal(str, float, float, str, str)
     export_status_changed = Signal(str, str)
+    add_to_shot_list_requested = Signal(str, float, float, str)
     collapse_requested = Signal()
     maximize_toggled = Signal(bool)
 
@@ -114,6 +115,9 @@ class ExpandedPreviewChrome(QWidget):
         self.set_end_button = QPushButton()
         self.clear_segment_button = QPushButton()
         self.clear_segment_button.setObjectName("GhostButton")
+        self.add_to_shot_list_button = QPushButton()
+        self.add_to_shot_list_button.setObjectName("AccentGhostButton")
+        self.add_to_shot_list_button.setEnabled(False)
         self.export_button = QPushButton()
         self.export_button.setObjectName("PrimaryButton")
         self.export_button.setEnabled(False)
@@ -121,6 +125,7 @@ class ExpandedPreviewChrome(QWidget):
         segment_row.addWidget(self.set_end_button)
         segment_row.addStretch(1)
         segment_row.addWidget(self.clear_segment_button)
+        segment_row.addWidget(self.add_to_shot_list_button)
         segment_row.addWidget(self.export_button)
         root.addLayout(segment_row)
 
@@ -134,6 +139,7 @@ class ExpandedPreviewChrome(QWidget):
         self.set_start_button.clicked.connect(self._mark_start)
         self.set_end_button.clicked.connect(self._mark_end)
         self.clear_segment_button.clicked.connect(self._clear_segment)
+        self.add_to_shot_list_button.clicked.connect(self._add_to_shot_list)
         self.export_button.clicked.connect(self._export_segment)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
@@ -152,6 +158,15 @@ class ExpandedPreviewChrome(QWidget):
         self.set_start_button.setText(self.texts.get("preview_dialog_set_start", "Set Start"))
         self.set_end_button.setText(self.texts.get("preview_dialog_set_end", "Set End"))
         self.clear_segment_button.setText(self.texts.get("preview_dialog_clear_segment", "Clear Segment"))
+        self.add_to_shot_list_button.setText(
+            self.texts.get(
+                "preview_dialog_add_to_shot_list",
+                self.texts.get("shot_list_add", "加入素材篮"),
+            )
+        )
+        self.add_to_shot_list_button.setToolTip(
+            self.texts.get("shot_list_add_tip", "加入素材篮，稍后统一查看或导出")
+        )
         self.export_button.setText(self.texts.get("preview_dialog_export", "Export Segment"))
 
     def bind_player(self, player):
@@ -177,6 +192,7 @@ class ExpandedPreviewChrome(QWidget):
         self.set_end_button.setEnabled(True)
         self.clear_segment_button.setEnabled(True)
         self.maximize_button.setEnabled(True)
+        self.add_to_shot_list_button.setEnabled(bool(self.video_path))
         self._update_segment_ui()
         if self._playback_ready:
             self.update_timer.start()
@@ -328,6 +344,7 @@ class ExpandedPreviewChrome(QWidget):
         self.set_end_button.setEnabled(False)
         self.clear_segment_button.setEnabled(False)
         self.maximize_button.setEnabled(False)
+        self.add_to_shot_list_button.setEnabled(False)
         self.export_button.setEnabled(False)
         self._refresh_segment_bounds_labels()
         self._refresh_segment_queue_hint()
@@ -373,6 +390,23 @@ class ExpandedPreviewChrome(QWidget):
         self.segment_end_sec = None
         self._update_segment_ui()
 
+    def _add_to_shot_list(self):
+        path = str(self.video_path or "").strip()
+        if not path:
+            return
+        segment = self._normalized_segment()
+        if segment is not None:
+            start_sec, end_sec = segment
+            match_kind = "clip"
+        else:
+            start_sec = float(self.start_sec or 0.0)
+            end_sec = float(self.end_sec if self.end_sec is not None else start_sec)
+            if end_sec < start_sec:
+                start_sec, end_sec = end_sec, start_sec
+            # Preview window already has an in/out → treat as segment; else keep frame.
+            match_kind = "clip" if abs(end_sec - start_sec) > 0.05 else "frame"
+        self.add_to_shot_list_requested.emit(path, start_sec, end_sec, match_kind)
+
     def _export_segment(self):
         segment = self._normalized_segment()
         if segment is None:
@@ -416,6 +450,7 @@ class ExpandedPreviewChrome(QWidget):
                 self.segment_start_sec, self.segment_end_sec = self.segment_end_sec, self.segment_start_sec
         segment = self._normalized_segment()
         self.export_button.setEnabled(segment is not None)
+        self.add_to_shot_list_button.setEnabled(bool(self.video_path))
         self._refresh_segment_bounds_labels()
         self._refresh_segment_queue_hint()
 

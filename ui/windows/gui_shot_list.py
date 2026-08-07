@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from src.domain.search_hit import SearchHit
 from src.services.agent_clip_service import _MAX_BATCH_EXPORT_CLIPS
-from src.services.shot_list_export_service import export_shot_list_manifest
+from src.services.shot_list_export_service import export_shot_list_fcpxml, export_shot_list_manifest
 from src.utils import has_ffmpeg, open_folder_in_explorer
 from ui.dialogs.shot_list_dialog import ShotListDialog
 from ui.threading_utils import shutdown_thread
@@ -86,6 +86,7 @@ class ShotListGuiMixin:
             on_preview=self.handle_play,
             on_locate=self.open_result_in_explorer,
             on_export_manifest=lambda: self._export_shot_list_manifest(),
+            on_export_fcpxml=lambda: self._export_shot_list_fcpxml(),
             on_batch_export=lambda: self._export_shot_list_clips(),
             ffmpeg_available=has_ffmpeg(),
         )
@@ -119,6 +120,41 @@ class ShotListGuiMixin:
         except Exception as exc:
             self.show_error_dialog(
                 self.texts.get("shot_list_export_manifest_title", "Export shot list manifest"),
+                str(exc),
+            )
+
+    def _export_shot_list_fcpxml(self) -> None:
+        items = self.shot_list.list_items()
+        if not items:
+            return
+        default_name = self.texts.get("shot_list_fcpxml_default_name", "shot_list.fcpxml")
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.texts.get("shot_list_export_fcpxml_title", "Export FCPXML"),
+            default_name,
+            self.texts.get("shot_list_fcpxml_filter", "FCPXML (*.fcpxml)"),
+        )
+        if not save_path:
+            return
+        if not str(save_path).lower().endswith(".fcpxml"):
+            save_path = f"{save_path}.fcpxml"
+        try:
+            payload = export_shot_list_fcpxml(items, write_path=save_path)
+            written = payload.get("write_path") or save_path
+            clip_count = int(payload.get("exported_count") or payload.get("clip_count") or 0)
+            message = self.texts.get(
+                "shot_list_export_fcpxml_success",
+                "FCPXML exported ({count} clips): {path}",
+            ).format(count=clip_count, path=written)
+            self.search_page.lbl_status.setText(message)
+            self.show_info_dialog(
+                self.texts.get("shot_list_export_fcpxml_title", "Export FCPXML"),
+                message,
+                kind="info",
+            )
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("shot_list_export_fcpxml_title", "Export FCPXML"),
                 str(exc),
             )
 

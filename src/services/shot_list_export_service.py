@@ -1,4 +1,4 @@
-"""Export helpers for the desktop shot list (manifest + batch clips)."""
+"""Export helpers for the desktop shot list (manifest + batch clips + FCPXML)."""
 
 from __future__ import annotations
 
@@ -67,6 +67,24 @@ def export_shot_list_manifest(
         write_path=str(write_path),
     )
     return execute_export_manifest(body)
+
+
+def export_shot_list_fcpxml(
+    items: Sequence[ShotListItem],
+    *,
+    write_path: str,
+    project: str = "VideoSeek",
+) -> Dict[str, Any]:
+    from src.services.fcpxml_export_service import export_shot_list_fcpxml as _export
+
+    if not items:
+        raise ValueError("Shot list is empty.")
+    return _export(
+        items,
+        write_path=write_path,
+        project_name=str(project or "VideoSeek"),
+        event_name="VideoSeek Shot List",
+    )
 
 
 def build_shot_list_batch_export_items(

@@ -62,6 +62,7 @@ def write_videos_conf(*, library_paths: List[str], listen_port: int) -> List[Dic
         "server {",
         f"    listen       {int(listen_port)};",
         "    server_name  localhost;",
+        "    charset      utf-8;",
         "",
         "    location = /health {",
         "        default_type text/plain;",

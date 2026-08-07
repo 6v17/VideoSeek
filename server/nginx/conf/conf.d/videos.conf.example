@@ -5,6 +5,7 @@ server {
     # Prefer non-80 to avoid admin rights on Windows
     listen       18080;
     server_name  localhost;
+    charset      utf-8;
 
     # Health / placeholder
     location = /health {
