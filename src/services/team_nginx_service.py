@@ -30,12 +30,22 @@ def ensure_nginx_runtime_dirs() -> None:
     os.makedirs(get_nginx_conf_d_dir(), exist_ok=True)
 
 
+def _nginx_prefix_root() -> str:
+    """nginx ``-p`` prefix with trailing separator (Windows long path)."""
+    root = get_nginx_root()
+    if not root.endswith(("\\", "/")):
+        root = root + os.sep
+    return root
+
+
 def _run_nginx(args: List[str], *, timeout: float = 8.0) -> subprocess.CompletedProcess:
     ensure_nginx_runtime_dirs()
     exe = get_nginx_exe()
     root = get_nginx_root()
-    conf = os.path.join(root, "conf", "nginx.conf")
-    cmd = [exe, "-p", root + os.sep, "-c", conf, *args]
+    prefix = _nginx_prefix_root()
+    # Relative -c under -p: absolute 8.3 conf paths break Win nginx CreateFile.
+    conf = "conf/nginx.conf"
+    cmd = [exe, "-p", prefix, "-c", conf, *args]
     logger.info("nginx cmd: %s", " ".join(cmd))
     return subprocess.run(
         cmd,
@@ -138,13 +148,14 @@ def start_nginx(*, library_paths: List[str], listen_port: int) -> List[Dict[str,
 
     exe = get_nginx_exe()
     root = get_nginx_root()
-    conf = os.path.join(root, "conf", "nginx.conf")
+    prefix = _nginx_prefix_root()
+    conf = "conf/nginx.conf"
     creationflags = 0
     if os.name == "nt":
         # CREATE_NO_WINDOW only — DETACHED_PROCESS can prevent a reliable master process.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     _process = subprocess.Popen(
-        [exe, "-p", root + os.sep, "-c", conf],
+        [exe, "-p", prefix, "-c", conf],
         cwd=root,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

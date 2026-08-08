@@ -7,16 +7,18 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
-from src.app.config import DEFAULT_CONFIG, load_config, save_config
+from src.app.config import load_config, save_config
 from src.app.logging_utils import get_logger
 from src.services.team_mode_service import (
     build_team_server_status,
+    get_preferred_team_ports,
     get_team_mode,
+    set_active_team_ports,
     start_team_server_media,
     stop_team_server_media,
 )
 from src.services.team_paths import detect_lan_ip, find_available_tcp_port
-from src.web.agent_api import DEFAULT_PORT, AgentApiService, is_agent_api_enabled
+from src.web.agent_api import AgentApiService, is_agent_api_enabled
 
 logger = get_logger("team_mode_controller")
 
@@ -52,10 +54,36 @@ class TeamModeController(QObject):
             except Exception:
                 logger.exception("team progress callback failed for %s", phase)
 
+    def _heal_preferred_ports_in_config(self, cfg: dict) -> dict:
+        """Undo older builds that persisted busy-port remaps into config.json."""
+        preferred_api, preferred_media = get_preferred_team_ports()
+        dirty = False
+        try:
+            saved_api = int(cfg.get("team_api_port", preferred_api) or preferred_api)
+        except (TypeError, ValueError):
+            saved_api = preferred_api
+        try:
+            saved_media = int(cfg.get("team_nginx_port", preferred_media) or preferred_media)
+        except (TypeError, ValueError):
+            saved_media = preferred_media
+        if saved_api != preferred_api:
+            cfg["team_api_port"] = preferred_api
+            dirty = True
+        if saved_media != preferred_media:
+            cfg["team_nginx_port"] = preferred_media
+            dirty = True
+        if dirty:
+            save_config(cfg)
+            logger.info(
+                "Reset persisted team ports to defaults api=%s media=%s",
+                preferred_api,
+                preferred_media,
+            )
+        return cfg
+
     def start_server(self, progress_callback: ProgressCallback = None) -> dict:
-        cfg = load_config()
-        preferred_api = int(cfg.get("team_api_port", DEFAULT_PORT) or DEFAULT_PORT)
-        preferred_media = int(cfg.get("team_nginx_port", DEFAULT_CONFIG.get("team_nginx_port", 18080)) or 18080)
+        cfg = self._heal_preferred_ports_in_config(load_config())
+        preferred_api, preferred_media = get_preferred_team_ports()
         host = os.environ.get("VIDEOSEEK_AGENT_API_HOST", "0.0.0.0")
         port_notes: list[str] = []
 
@@ -71,15 +99,17 @@ class TeamModeController(QObject):
             self.status_changed.emit(status)
             return status
 
+        # Remaps are session-only — never write team_*_port back to config.
         if api_port != preferred_api:
-            port_notes.append(f"API 端口 {preferred_api} 被占用，已改用 {api_port}")
-            cfg["team_api_port"] = api_port
+            port_notes.append(
+                f"API 端口 {preferred_api} 被占用，本次改用 {api_port}（下次仍优先 {preferred_api}）"
+            )
         if media_port != preferred_media:
-            port_notes.append(f"视频端口 {preferred_media} 被占用，已改用 {media_port}")
-            cfg["team_nginx_port"] = media_port
+            port_notes.append(
+                f"视频端口 {preferred_media} 被占用，本次改用 {media_port}（下次仍优先 {preferred_media}）"
+            )
         if port_notes:
-            save_config(cfg)
-            logger.warning("Team ports remapped: %s", "；".join(port_notes))
+            logger.warning("Team ports remapped for this session: %s", "；".join(port_notes))
 
         # Stop previous LAN API / loopback agent before binding.
         self._emit_progress(progress_callback, "stopping_old")
@@ -124,9 +154,9 @@ class TeamModeController(QObject):
                 self._api_service = AgentApiService(host=host, port=fallback)
                 self._api_service.start()
                 api_port = fallback
-                cfg["team_api_port"] = api_port
-                save_config(cfg)
-                port_notes.append(f"API 启动失败后改用端口 {api_port}")
+                port_notes.append(
+                    f"API 启动失败后本次改用端口 {api_port}（下次仍优先 {preferred_api}）"
+                )
             except Exception as retry_exc:
                 logger.exception("Failed to start team API after retry")
                 stop_team_server_media()
@@ -140,6 +170,7 @@ class TeamModeController(QObject):
                 self.status_changed.emit(media_status)
                 return media_status
 
+        set_active_team_ports(api_port=api_port, nginx_port=media_port)
         self._emit_progress(progress_callback, "ready")
         lan_ip = detect_lan_ip()
         media_status["api_running"] = True

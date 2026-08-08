@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from src.app.config import load_config
+from src.app.config import DEFAULT_CONFIG, load_config
 from src.app.logging_utils import get_logger
 from src.services.team_media_map import mounts_public_payload
 from src.services.team_nginx_service import is_nginx_running, start_nginx, stop_nginx
@@ -20,8 +20,28 @@ logger = get_logger("team_mode")
 # In-process server mounts (used when enriching Agent search hits)
 _active_mounts: List[Dict[str, str]] = []
 _active_media_base: str = ""
+# Session bind ports (may differ from defaults when preferred ports are busy).
+_active_api_port: int = 0
+_active_nginx_port: int = 0
 # Session role — not persisted. Always starts as off.
 _session_team_mode: str = "off"
+
+
+def get_preferred_team_ports() -> tuple[int, int]:
+    """Canonical preferred ports. Remaps are session-only and must not stick in config."""
+    api = int(DEFAULT_CONFIG.get("team_api_port", 8765) or 8765)
+    media = int(DEFAULT_CONFIG.get("team_nginx_port", 18080) or 18080)
+    return api, media
+
+
+def set_active_team_ports(*, api_port: int = 0, nginx_port: int = 0) -> None:
+    global _active_api_port, _active_nginx_port
+    _active_api_port = int(api_port or 0)
+    _active_nginx_port = int(nginx_port or 0)
+
+
+def clear_active_team_ports() -> None:
+    set_active_team_ports(api_port=0, nginx_port=0)
 
 
 def get_team_mode(config=None) -> str:
@@ -100,31 +120,36 @@ def build_team_server_status(config=None) -> Dict[str, Any]:
     cfg = config if config is not None else load_config()
     mode = get_team_mode(cfg)
     lan_ip = detect_lan_ip()
-    api_port = int(cfg.get("team_api_port", 8765) or 8765)
-    nginx_port = int(cfg.get("team_nginx_port", 18080) or 18080)
+    preferred_api, preferred_media = get_preferred_team_ports()
+    # Prefer live session binds so UI/share URLs match the actual listener.
+    api_port = int(_active_api_port or preferred_api)
+    nginx_port = int(_active_nginx_port or preferred_media)
+    media_base = str(_active_media_base or "").strip() or f"http://{lan_ip}:{nginx_port}"
     return {
         "mode": mode,
         "lan_ip": lan_ip,
         "api_port": api_port,
         "nginx_port": nginx_port,
         "api_base_url": f"http://{lan_ip}:{api_port}",
-        "media_base_url": f"http://{lan_ip}:{nginx_port}",
+        "media_base_url": media_base,
         "nginx_ready": nginx_bundle_ready(),
         "nginx_running": is_nginx_running(),
         "mounts": mounts_public_payload(_active_mounts),
-        "server_url": normalize_http_base(str(cfg.get("team_server_url") or ""), default_port=api_port),
+        "server_url": normalize_http_base(str(cfg.get("team_server_url") or ""), default_port=preferred_api),
     }
 
 
 def start_team_server_media(config=None, *, listen_port: int | None = None) -> Dict[str, Any]:
     """Write nginx conf for current libraries and start/reload nginx."""
-    global _active_mounts, _active_media_base
+    global _active_mounts, _active_media_base, _active_nginx_port
     cfg = config if config is not None else load_config()
-    nginx_port = int(listen_port if listen_port is not None else (cfg.get("team_nginx_port", 18080) or 18080))
+    _preferred_api, preferred_media = get_preferred_team_ports()
+    nginx_port = int(listen_port if listen_port is not None else preferred_media)
     libraries = list_local_library_paths(cfg)
     mounts = start_nginx(library_paths=libraries, listen_port=nginx_port)
     lan_ip = detect_lan_ip()
     _active_mounts = mounts
+    _active_nginx_port = nginx_port
     _active_media_base = f"http://{lan_ip}:{nginx_port}"
     status = build_team_server_status(cfg)
     status["nginx_port"] = nginx_port
@@ -141,6 +166,7 @@ def stop_team_server_media() -> None:
     finally:
         _active_mounts = []
         _active_media_base = ""
+        clear_active_team_ports()
 
 
 def refresh_team_server_media(config=None) -> Dict[str, Any]:

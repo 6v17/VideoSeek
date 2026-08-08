@@ -6,16 +6,17 @@ import os
 import socket
 from typing import Iterable, List, Optional, Set, Tuple
 
-from src.infra.paths import get_resource_path
+from src.infra.paths import get_resource_path, resolve_windows_long_path
 
 
 def get_nginx_root() -> str:
     """Resolved ``server/nginx`` directory (dev install or packaged)."""
-    return get_resource_path(os.path.join("server", "nginx"))
+    # Long path: Win nginx cannot open conf under 8.3 short roots like D:\\VIDEOS~1.
+    return resolve_windows_long_path(get_resource_path(os.path.join("server", "nginx")))
 
 
 def get_nginx_exe() -> str:
-    return os.path.join(get_nginx_root(), "nginx.exe")
+    return resolve_windows_long_path(os.path.join(get_nginx_root(), "nginx.exe"))
 
 
 def get_nginx_conf_dir() -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 
 def get_app_data_dir():
@@ -21,6 +22,49 @@ def ensure_folder_exists(file_path):
     folder = os.path.dirname(file_path)
     if folder:
         os.makedirs(folder, exist_ok=True)
+
+
+def resolve_windows_long_path(path: str) -> str:
+    """Expand Windows 8.3 short paths (``D:\\VIDEOS~1`` → ``D:\\VideoSeek``).
+
+    Packaged launches sometimes expose ``sys.executable`` as a short path. Python
+    can often still open those paths, but Win nginx ``CreateFile`` fails with
+    "The system cannot find the file specified" for ``nginx.conf``.
+    """
+    text = os.path.abspath(str(path or "").strip() or ".")
+    if os.name != "nt":
+        return text
+    try:
+        import ctypes
+
+        get_long = ctypes.windll.kernel32.GetLongPathNameW  # type: ignore[attr-defined]
+        needed = int(get_long(text, None, 0) or 0)
+        if needed > 0:
+            buffer = ctypes.create_unicode_buffer(needed)
+            written = int(get_long(text, buffer, needed) or 0)
+            if written > 0 and buffer.value:
+                return buffer.value
+    except Exception:
+        pass
+    try:
+        return str(Path(text).resolve())
+    except OSError:
+        return text
+
+
+def _windows_module_dir() -> str:
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = int(ctypes.windll.kernel32.GetModuleFileNameW(None, buffer, len(buffer)) or 0)
+        if length <= 0:
+            return ""
+        return os.path.dirname(buffer.value[:length])
+    except Exception:
+        return ""
 
 
 def _is_standalone_app() -> bool:
@@ -42,9 +86,15 @@ def _is_standalone_app() -> bool:
 def get_app_install_dir() -> str:
     """Directory containing the app entrypoint (repo root in dev, exe dir when packaged)."""
     if _is_standalone_app():
-        return os.path.dirname(os.path.abspath(sys.executable))
+        # Prefer module filename: avoids 8.3 short paths from some launchers/Nuitka.
+        module_dir = _windows_module_dir()
+        if module_dir:
+            return resolve_windows_long_path(module_dir)
+        return resolve_windows_long_path(os.path.dirname(os.path.abspath(sys.executable)))
     # src/infra/paths.py -> repo root is parents[2]
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return resolve_windows_long_path(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
 
 
 def get_resource_path(relative_path):
@@ -52,8 +102,8 @@ def get_resource_path(relative_path):
     if hasattr(sys, "_MEIPASS"):
         bundled = os.path.join(sys._MEIPASS, relative_path)
         if os.path.exists(bundled):
-            return bundled
-    return os.path.join(get_app_install_dir(), relative_path)
+            return resolve_windows_long_path(bundled)
+    return resolve_windows_long_path(os.path.join(get_app_install_dir(), relative_path))
 
 
 def resolve_resource_path(relative_path, configured_base_dir=""):

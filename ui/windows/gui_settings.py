@@ -246,17 +246,17 @@ class SettingsGuiMixin:
         self._update_share_mode_chrome(share_mode)
 
     def _preview_server_api_url(self) -> str:
+        from src.services.team_mode_service import get_preferred_team_ports
         from src.services.team_paths import detect_lan_ip
 
-        cfg = load_config()
-        api_port = int(cfg.get("team_api_port", 8765) or 8765)
+        api_port, _media_port = get_preferred_team_ports()
         return f"http://{detect_lan_ip()}:{api_port}"
 
     def _preview_server_media_url(self) -> str:
+        from src.services.team_mode_service import get_preferred_team_ports
         from src.services.team_paths import detect_lan_ip
 
-        cfg = load_config()
-        media_port = int(cfg.get("team_nginx_port", 18080) or 18080)
+        _api_port, media_port = get_preferred_team_ports()
         return f"http://{detect_lan_ip()}:{media_port}"
 
     def _update_share_mode_chrome(self, mode: str | None = None, *, pending: bool = False):
@@ -581,8 +581,21 @@ class SettingsGuiMixin:
                             self.refresh_dialogue_library_table()
                 self._apply_agent_api_settings()
                 self._refresh_team_mode_status(status)
-                if new_mode == "server" and isinstance(status, dict) and status.get("port_note"):
-                    self.settings_page.lbl_status.setText(str(status.get("port_note")))
+                if new_mode == "server" and isinstance(status, dict):
+                    if status.get("port_note"):
+                        self.settings_page.lbl_status.setText(str(status.get("port_note")))
+                    media_err = str(status.get("error") or "").strip()
+                    if media_err:
+                        # API may still be up for search; surface media failure so
+                        # previews/thumbnails are not silently broken for clients.
+                        self.show_info_dialog(
+                            self.texts.get("error_title", "Error"),
+                            self.texts.get(
+                                "setting_team_media_start_failed",
+                                "搜索服务已启动，但视频分享（nginx）失败，员工机将无法预览：\n{detail}",
+                            ).format(detail=media_err),
+                            kind="warning",
+                        )
             finally:
                 dialog.close()
         except Exception as exc:
