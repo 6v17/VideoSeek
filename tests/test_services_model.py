@@ -290,6 +290,124 @@ class ModelResourceDirTests(unittest.TestCase):
             self.assertEqual(os.path.normcase(resolved), os.path.normcase(legacy_dir))
 
 
+class RediscoverModelProfilesTests(unittest.TestCase):
+    def test_ensure_default_clip_manifest_skips_when_onnx_missing(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            ghost_dir = Path(model_root) / "openai-clip" / "vit-base-patch32"
+            ghost_dir.mkdir(parents=True)
+            config = {
+                "model_dir": model_root,
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "display_name": "OpenAI CLIP",
+                            "runtime": {
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch32",
+                            },
+                            "files": {
+                                "visual_model": "clip_visual.onnx",
+                                "text_model": "clip_text.onnx",
+                                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+                            },
+                        }
+                    ],
+                },
+            }
+            written = model_package_service.ensure_default_clip_manifest(config=config)
+            self.assertEqual(written, "")
+            self.assertFalse((ghost_dir / "model_manifest.json").exists())
+
+    def test_rediscover_imports_chinese_and_prunes_ghost_openai(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            required_files = [
+                "chinese_clip_image.onnx",
+                "chinese_clip_text.onnx",
+                "vocab.txt",
+                "preprocessor_config.json",
+                "config.json",
+            ]
+            chinese_dir = Path(model_root) / "chinese-clip" / "vit-base-patch16"
+            chinese_dir.mkdir(parents=True)
+            for name in required_files:
+                (chinese_dir / name).write_bytes(b"x")
+            (chinese_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "chinese_clip_vit_base_patch16",
+                        "provider": "chinese_clip_onnx",
+                        "variant": "vit-base-patch16",
+                        "display_name": "Chinese CLIP",
+                        "required_files": required_files,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            ghost_dir = Path(model_root) / "openai-clip" / "vit-base-patch32"
+            ghost_dir.mkdir(parents=True)
+            (ghost_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "clip_onnx_default",
+                        "provider": "clip_onnx",
+                        "variant": "vit-base-patch32",
+                        "required_files": [
+                            "clip_visual.onnx",
+                            "clip_text.onnx",
+                            "bpe_simple_vocab_16e6.txt.gz",
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            config = {
+                "model_dir": model_root,
+                "models": {
+                    "active_profile": "clip_onnx_default",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_default",
+                            "provider": "clip_onnx",
+                            "display_name": "OpenAI CLIP",
+                            "enabled": True,
+                            "runtime": {
+                                "prefer_gpu": True,
+                                "model_dir": model_root,
+                                "model_variant": "vit-base-patch32",
+                            },
+                            "files": {
+                                "visual_model": "clip_visual.onnx",
+                                "text_model": "clip_text.onnx",
+                                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+                            },
+                        }
+                    ],
+                },
+            }
+
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config"),
+                patch("src.services.model_package_service.get_config_schema_version", return_value=2),
+            ):
+                result = model_package_service.rediscover_model_profiles(model_root)
+
+            self.assertEqual(result["imported"], 1)
+            self.assertIn("clip_onnx_default", result["removed"])
+            self.assertEqual(result["active_profile"], "chinese_clip_vit_base_patch16")
+            self.assertEqual(
+                [p["id"] for p in config["models"]["profiles"]],
+                ["chinese_clip_vit_base_patch16"],
+            )
+
+
 class RemoveModelProfileTests(unittest.TestCase):
     def test_remove_model_profile_deletes_resource_and_asset_dirs(self):
         with tempfile.TemporaryDirectory() as temp_dir:

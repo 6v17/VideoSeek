@@ -253,6 +253,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.share_client_panel.hide()
         self.input_export_video_silent = NoWheelComboBox()
         self.input_active_model_profile = NoWheelComboBox()
+        self.btn_rediscover_models = QPushButton()
         self.btn_download_runtime_resources = QPushButton()
         self.btn_remove_model_profile = QPushButton()
         self.input_data_root = QLineEdit()
@@ -412,6 +413,8 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_active_model_profile, width=COMPONENT_SIZES["settings_input_width"] + 120)
         self.btn_download_runtime_resources.setObjectName("AccentGhostButton")
         self.btn_download_runtime_resources.setMinimumHeight(34)
+        self.btn_rediscover_models.setObjectName("AccentGhostButton")
+        self.btn_rediscover_models.setMinimumHeight(34)
         self.btn_remove_model_profile.setObjectName("DangerGhostButton")
         self.btn_remove_model_profile.setMinimumHeight(34)
         self._configure_setting_input(self.input_data_root, width=COMPONENT_SIZES["settings_path_input_width"], expanding=True)
@@ -458,6 +461,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         active_model_profile_bundle_layout.setContentsMargins(0, 0, 0, 0)
         active_model_profile_bundle_layout.setSpacing(8)
         active_model_profile_bundle_layout.addWidget(self.input_active_model_profile, 1)
+        active_model_profile_bundle_layout.addWidget(self.btn_rediscover_models, 0)
         active_model_profile_bundle_layout.addWidget(self.btn_download_runtime_resources, 0)
         active_model_profile_bundle_layout.addWidget(self.btn_remove_model_profile, 0)
 
@@ -1167,6 +1171,15 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_browse_model_dir.setText(texts["browse_folder"])
         self.btn_migrate_model_dir.setText(texts["migrate_model_root"])
         self.btn_download_runtime_resources.setText(texts.get("import_runtime_resources", texts["download_models"]))
+        self.btn_rediscover_models.setText(
+            texts.get("model_rediscover", texts.get("model_scan_model_dir", "重新探测模型"))
+        )
+        self.btn_rediscover_models.setToolTip(
+            texts.get(
+                "model_rediscover_hint",
+                "扫描模型目录，把磁盘上已有的完整模型包重新登记到切换列表。",
+            )
+        )
         self.btn_remove_model_profile.setText(
             texts.get("remove_model_profile", "Remove Current Model")
         )

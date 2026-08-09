@@ -1,4 +1,5 @@
 import gc
+import hashlib
 import os
 import time
 
@@ -185,13 +186,31 @@ def _get_debug_forced_failure():
     return None
 
 
-def _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, asset_state, sync_failure_reason=""):
+def _upsert_file_record(
+    lib_files,
+    rel_path,
+    video_id,
+    video_mod_time,
+    asset_state,
+    sync_failure_reason="",
+    *,
+    file_size=None,
+    content_fp="",
+):
     key = canonicalize_library_rel_path(rel_path)
     previous = dict(lib_files.get(key) or lib_files.get(rel_path) or {})
     updated = dict(previous)
     updated["vid"] = video_id
     updated["mod_time"] = video_mod_time
     updated["asset_state"] = asset_state
+    if file_size is not None:
+        try:
+            updated["file_size"] = int(file_size)
+        except (TypeError, ValueError):
+            pass
+    content_fp = str(content_fp or "").strip()
+    if content_fp:
+        updated["content_fp"] = content_fp
     if asset_state == "sync_failed":
         updated["sync_failure_reason"] = str(sync_failure_reason or "").strip().lower() or "processing_error"
     else:
@@ -749,100 +768,291 @@ def _video_identity_for_path(abs_path):
     return current_vid, legacy_vid
 
 
+def _content_fingerprint_for_path(abs_path) -> tuple[str, int]:
+    """mtime-independent fingerprint: sha256(size + first 10MiB), plus size."""
+    try:
+        stat = os.stat(abs_path)
+        size = int(stat.st_size)
+    except OSError:
+        return "", 0
+    digest = hashlib.sha256()
+    digest.update(str(size).encode("utf-8"))
+    try:
+        with open(abs_path, "rb") as handle:
+            digest.update(handle.read(10 * 1024 * 1024))
+    except OSError:
+        return "", size
+    return digest.hexdigest(), size
+
+
+def _fingerprint_kwargs(abs_path) -> dict:
+    content_fp, file_size = _content_fingerprint_for_path(abs_path)
+    out = {}
+    if file_size:
+        out["file_size"] = file_size
+    if content_fp:
+        out["content_fp"] = content_fp
+    return out
+
+
+def _orphan_identity_map(root_path, lib_files, *, known_abs_paths=None) -> dict:
+    """Map orphan rel_path -> identity for files present on disk but not source-ready in meta."""
+    satisfied_paths = {
+        canonicalize_library_rel_path(rel)
+        for rel in list(lib_files.keys())
+        if _file_record_source_ready(root_path, rel)
+    }
+    source_paths = known_abs_paths if known_abs_paths is not None else discover_video_files(root_path)
+    identity_by_rel = {}
+    for abs_path in source_paths:
+        rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
+        if rel_path in satisfied_paths:
+            continue
+        if not _is_valid_video_source(abs_path, probe=False):
+            continue
+        current_vid, legacy_vid = _video_identity_for_path(abs_path)
+        if not current_vid:
+            continue
+        content_fp, file_size = _content_fingerprint_for_path(abs_path)
+        identity_by_rel[rel_path] = {
+            "current_vid": current_vid,
+            "legacy_vid": legacy_vid,
+            "content_fp": content_fp,
+            "file_size": file_size,
+            "basename": os.path.basename(rel_path).lower(),
+            "abs_path": abs_path,
+        }
+    return identity_by_rel
+
+
+def _match_orphan_for_missing(info, identity_by_rel, used_candidates):
+    """Return (matched_rel, identity) for a missing meta row, or (None, None)."""
+    saved_vid = str(info.get("vid", "") or "").strip()
+    saved_fp = str(info.get("content_fp", "") or "").strip()
+    try:
+        saved_size = int(info.get("file_size")) if info.get("file_size") is not None else None
+    except (TypeError, ValueError):
+        saved_size = None
+    saved_name = os.path.basename(str(info.get("_rel_path", "") or "")).lower()
+
+    # 1) Strong: video_id / legacy content hash
+    if saved_vid:
+        for rel_path, identity in identity_by_rel.items():
+            if rel_path in used_candidates:
+                continue
+            if saved_vid in {identity.get("current_vid"), identity.get("legacy_vid")}:
+                return rel_path, identity
+
+    # 2) mtime-drift tolerant: content fingerprint recorded at last sync
+    if saved_fp:
+        for rel_path, identity in identity_by_rel.items():
+            if rel_path in used_candidates:
+                continue
+            if identity.get("content_fp") and identity.get("content_fp") == saved_fp:
+                return rel_path, identity
+
+    # 3) Weak unique fallback: basename + size (only when unambiguous)
+    if saved_size is not None and saved_name:
+        hits = []
+        for rel_path, identity in identity_by_rel.items():
+            if rel_path in used_candidates:
+                continue
+            if identity.get("basename") == saved_name and int(identity.get("file_size") or -1) == saved_size:
+                hits.append((rel_path, identity))
+        if len(hits) == 1:
+            return hits[0]
+
+    return None, None
+
+
+def _pop_library_rel_path(lib_files, rel_path) -> bool:
+    """Delete all ``files`` keys that canonicalize to ``rel_path``."""
+    want = canonicalize_library_rel_path(rel_path)
+    removed = False
+    for key in list(lib_files.keys()):
+        if canonicalize_library_rel_path(key) == want:
+            del lib_files[key]
+            removed = True
+    return removed
+
+
+def _apply_source_transfer(lib_files, old_rel, info, matched_rel, identity) -> bool:
+    """Move a meta row onto matched_rel inside lib_files. Returns True when applied."""
+    saved_vid = str(info.get("vid", "") or "").strip()
+    existing = lib_files.get(matched_rel) or lib_files.get(canonicalize_library_rel_path(matched_rel))
+    if existing:
+        existing_vid = str(existing.get("vid", "") or "").strip()
+        if existing_vid and saved_vid and existing_vid != saved_vid:
+            return False
+        if existing_vid == saved_vid and canonicalize_library_rel_path(old_rel) != matched_rel:
+            _pop_library_rel_path(lib_files, old_rel)
+            return True
+
+    transferred = dict(info)
+    transferred.pop("_rel_path", None)
+    transferred.pop("_library_path", None)
+    matched_abs = str(identity.get("abs_path", "") or "")
+    if matched_abs:
+        try:
+            transferred["mod_time"] = os.path.getmtime(matched_abs)
+        except OSError:
+            pass
+    if identity.get("file_size"):
+        transferred["file_size"] = int(identity["file_size"])
+    if identity.get("content_fp"):
+        transferred["content_fp"] = str(identity["content_fp"])
+    # Source is back; keep prior readiness when vectors were already ready.
+    if str(transferred.get("asset_state", "")).strip().lower() == "missing_source":
+        transferred["asset_state"] = "ready"
+    lib_files[matched_rel] = transferred
+    if canonicalize_library_rel_path(old_rel) != matched_rel:
+        _pop_library_rel_path(lib_files, old_rel)
+    return True
+
+
 def reconcile_library_file_paths(root_path, lib_files, *, known_abs_paths=None):
-    """Align meta paths after in-library rename/move when video content (video_id) is unchanged."""
+    """Align meta paths after in-library rename/move when video identity is unchanged."""
     if not root_path or not os.path.exists(root_path):
         return 0
 
     missing_entries = []
-    satisfied_paths = set()
     for rel_path, info in list(lib_files.items()):
         if _file_record_source_ready(root_path, rel_path):
-            satisfied_paths.add(rel_path)
             continue
-        missing_entries.append((rel_path, dict(info)))
+        row = dict(info)
+        row["_rel_path"] = canonicalize_library_rel_path(rel_path)
+        missing_entries.append((canonicalize_library_rel_path(rel_path), row))
 
     if not missing_entries:
         return 0
 
-    orphan_candidates = []
-    source_paths = known_abs_paths if known_abs_paths is not None else discover_video_files(root_path)
-    satisfied_normalized = {canonicalize_library_rel_path(path) for path in satisfied_paths}
-    for abs_path in source_paths:
-        rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
-        if rel_path in satisfied_normalized:
-            continue
-        if not _is_valid_video_source(abs_path, probe=False):
-            continue
-        orphan_candidates.append((rel_path, abs_path))
-
-    if not orphan_candidates:
+    identity_by_rel = _orphan_identity_map(root_path, lib_files, known_abs_paths=known_abs_paths)
+    if not identity_by_rel:
         return 0
-
-    identity_by_rel = {}
-    for rel_path, abs_path in orphan_candidates:
-        current_vid, legacy_vid = _video_identity_for_path(abs_path)
-        if not current_vid:
-            continue
-        identity_by_rel[rel_path] = {
-            "current_vid": current_vid,
-            "legacy_vid": legacy_vid,
-            "abs_path": abs_path,
-        }
 
     used_candidates = set()
     reconciled = 0
     for old_rel, info in missing_entries:
-        saved_vid = str(info.get("vid", "") or "").strip()
-        if not saved_vid:
+        matched_rel, identity = _match_orphan_for_missing(info, identity_by_rel, used_candidates)
+        if not matched_rel or not identity:
             continue
-
-        matched_rel = None
-        matched_abs = ""
-        for rel_path, identity in identity_by_rel.items():
-            if rel_path in used_candidates:
-                continue
-            current_vid = identity.get("current_vid")
-            legacy_vid = identity.get("legacy_vid")
-            if saved_vid not in {current_vid, legacy_vid}:
-                continue
-            matched_rel = rel_path
-            matched_abs = identity.get("abs_path", "")
-            break
-
-        if not matched_rel:
+        if not _apply_source_transfer(lib_files, old_rel, info, matched_rel, identity):
             continue
-
-        existing = lib_files.get(matched_rel)
-        if existing:
-            existing_vid = str(existing.get("vid", "") or "").strip()
-            if existing_vid and existing_vid != saved_vid:
-                continue
-            if existing_vid == saved_vid and old_rel != matched_rel:
-                del lib_files[old_rel]
-                reconciled += 1
-                used_candidates.add(matched_rel)
-                continue
-
-        transferred = dict(info)
-        if matched_abs:
-            try:
-                transferred["mod_time"] = os.path.getmtime(matched_abs)
-            except OSError:
-                pass
-        lib_files[matched_rel] = transferred
-        if old_rel != matched_rel and old_rel in lib_files:
-            del lib_files[old_rel]
         reconciled += 1
         used_candidates.add(matched_rel)
         logger.info(
             "Reconciled relocated library file %s -> %s (video_id=%s)",
             old_rel,
             matched_rel,
-            saved_vid,
+            str(info.get("vid", "") or "").strip(),
         )
 
     return reconciled
+
+
+def _library_files_dict(meta, library_path: str):
+    """Return the mutable ``files`` dict for ``library_path``, or None."""
+    want = canonicalize_library_path(library_path)
+    libraries = (meta or {}).get("libraries") or {}
+    for key, lib_data in libraries.items():
+        if not isinstance(lib_data, dict):
+            continue
+        if canonicalize_library_path(key) != want:
+            continue
+        files = lib_data.setdefault("files", {})
+        return files if isinstance(files, dict) else None
+    return None
+
+
+def relink_relocated_library_sources(meta, root_path, lib_files, *, known_abs_paths=None) -> int:
+    """Relink indexed videos whose files reappeared under ``root_path`` (incl. cross-library).
+
+    Does not manage folders — only repairs meta links so existing vectors keep working after
+    users move files between libraries or into arbitrary subfolders. Lance path columns are
+    refreshed later by the normal per-file sync/reuse path.
+    """
+    if not meta or not root_path or not os.path.exists(root_path):
+        return 0
+
+    target_root = canonicalize_library_path(root_path)
+    identity_by_rel = _orphan_identity_map(root_path, lib_files, known_abs_paths=known_abs_paths)
+    if not identity_by_rel:
+        return 0
+
+    missing_entries = []
+    libraries = meta.get("libraries") or {}
+    for lib_root, lib_data in list(libraries.items()):
+        if not isinstance(lib_data, dict):
+            continue
+        files = lib_data.get("files") or {}
+        if not isinstance(files, dict):
+            continue
+        canon_root = canonicalize_library_path(lib_root)
+        # Same-library moves are handled by reconcile_library_file_paths.
+        if canon_root == target_root:
+            continue
+        for rel_path, info in list(files.items()):
+            if not isinstance(info, dict):
+                continue
+            if _file_record_source_ready(lib_root, rel_path):
+                continue
+            row = dict(info)
+            row["_rel_path"] = canonicalize_library_rel_path(rel_path)
+            missing_entries.append((canon_root, canonicalize_library_rel_path(rel_path), row))
+
+    if not missing_entries:
+        return 0
+
+    used_candidates = set()
+    relinked = 0
+    for src_root, old_rel, info in missing_entries:
+        saved_vid = str(info.get("vid", "") or "").strip()
+        if not saved_vid and not str(info.get("content_fp", "") or "").strip():
+            continue
+        matched_rel, identity = _match_orphan_for_missing(info, identity_by_rel, used_candidates)
+        if not matched_rel or not identity:
+            continue
+
+        existing = lib_files.get(matched_rel)
+        if existing:
+            existing_vid = str(existing.get("vid", "") or "").strip()
+            if existing_vid and saved_vid and existing_vid != saved_vid:
+                continue
+
+        transferred = dict(info)
+        transferred.pop("_rel_path", None)
+        matched_abs = str(identity.get("abs_path", "") or "")
+        if matched_abs:
+            try:
+                transferred["mod_time"] = os.path.getmtime(matched_abs)
+            except OSError:
+                pass
+        if identity.get("file_size"):
+            transferred["file_size"] = int(identity["file_size"])
+        if identity.get("content_fp"):
+            transferred["content_fp"] = str(identity["content_fp"])
+        if str(transferred.get("asset_state", "")).strip().lower() in {"", "missing_source", "sync_failed"}:
+            # Prefer ready so reuse path can refresh Lance location without re-embed.
+            transferred["asset_state"] = "ready"
+            transferred.pop("sync_failure_reason", None)
+        lib_files[matched_rel] = transferred
+
+        src_files = _library_files_dict(meta, src_root)
+        if isinstance(src_files, dict):
+            _pop_library_rel_path(src_files, old_rel)
+
+        relinked += 1
+        used_candidates.add(matched_rel)
+        logger.info(
+            "Relinked indexed video across libraries %s:%s -> %s:%s (video_id=%s)",
+            src_root,
+            old_rel,
+            target_root,
+            matched_rel,
+            saved_vid,
+        )
+
+    return relinked
 
 
 def _is_excluded_video_path(abs_path):
@@ -950,7 +1160,14 @@ def process_single_video(
         )
         if lance_cached is not None:
             video_id = lance_cached["canonical_vid"]
-            metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
+            metadata_updated = _upsert_file_record(
+                lib_files,
+                rel_path,
+                video_id,
+                video_mod_time,
+                "ready",
+                **_fingerprint_kwargs(abs_path),
+            )
             if progress_reporter is not None:
                 progress_reporter.emit("reuse", force=True)
             logger.info(
@@ -1018,7 +1235,14 @@ def process_single_video(
                     detail=f"reuse sync failed (disk_vid={disk_vid})",
                 )
                 return None, None, metadata_updated, bool(saved.get("vid"))
-            metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
+            metadata_updated = _upsert_file_record(
+                lib_files,
+                rel_path,
+                video_id,
+                video_mod_time,
+                "ready",
+                **_fingerprint_kwargs(abs_path),
+            )
             if disk_vid != video_id:
                 # Re-key must not wipe another library still pointing at disk_vid.
                 ref_meta = meta
@@ -1130,7 +1354,14 @@ def process_single_video(
                 detail="full index Lance sync failed",
             )
             return None, None, metadata_updated, bool(saved.get("vid"))
-        metadata_updated = _upsert_file_record(lib_files, rel_path, video_id, video_mod_time, "ready")
+        metadata_updated = _upsert_file_record(
+            lib_files,
+            rel_path,
+            video_id,
+            video_mod_time,
+            "ready",
+            **_fingerprint_kwargs(abs_path),
+        )
         health = assess_index_timestamp_health(abs_path, timestamps, config=config)
         if health.get("warnings"):
             _emit_issue(
@@ -1306,6 +1537,14 @@ def scan_target_libraries(
                 known_abs_paths=valid_files,
             )
             if reconciled_count:
+                _queue_meta_persist()
+            relinked_count = relink_relocated_library_sources(
+                meta,
+                root_path,
+                lib_files,
+                known_abs_paths=valid_files,
+            )
+            if relinked_count:
                 _queue_meta_persist()
 
             planned_files = plan_library_scan_paths(

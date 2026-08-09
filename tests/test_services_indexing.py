@@ -1197,6 +1197,117 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0]["reason"], "gpu_out_of_memory")
 
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_shared")
+    @patch("src.services.indexing_service._content_fingerprint_for_path", return_value=("fp_shared", 1234))
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=200.0)
+    @patch("src.services.indexing_service.os.path.exists")
+    def test_relink_relocated_library_sources_cross_library(
+        self,
+        mock_exists,
+        _mock_mtime,
+        _mock_fp,
+        _mock_video_hash,
+        _mock_legacy_hash,
+        _mock_valid_source,
+    ):
+        meta = {
+            "libraries": {
+                "D:\\lib_a": {
+                    "files": {
+                        "old/folder/clip.mp4": {
+                            "vid": "vid_shared",
+                            "asset_state": "missing_source",
+                            "mod_time": 100.0,
+                            "content_fp": "fp_shared",
+                            "file_size": 1234,
+                        }
+                    }
+                },
+                "D:\\lib_b": {"files": {}},
+            }
+        }
+        lib_b_files = meta["libraries"]["D:\\lib_b"]["files"]
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized.endswith("/lib_a/old/folder/clip.mp4"):
+                return False
+            if normalized.endswith("/lib_b/random/new/clip.mp4"):
+                return True
+            if normalized in {"D:/lib_a", "D:/lib_b"}:
+                return True
+            return False
+
+        mock_exists.side_effect = fake_exists
+
+        relinked = indexing_service.relink_relocated_library_sources(
+            meta,
+            "D:\\lib_b",
+            lib_b_files,
+            known_abs_paths=["D:\\lib_b\\random\\new\\clip.mp4"],
+        )
+
+        self.assertEqual(relinked, 1)
+        self.assertNotIn("old/folder/clip.mp4", meta["libraries"]["D:\\lib_a"]["files"])
+        self.assertIn("random/new/clip.mp4", lib_b_files)
+        self.assertEqual(lib_b_files["random/new/clip.mp4"]["vid"], "vid_shared")
+        self.assertEqual(lib_b_files["random/new/clip.mp4"]["asset_state"], "ready")
+
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_new")
+    @patch("src.services.indexing_service._content_fingerprint_for_path", return_value=("fp_shared", 1234))
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=200.0)
+    @patch("src.services.indexing_service.os.path.exists")
+    def test_relink_relocated_library_sources_matches_content_fp_after_mtime_drift(
+        self,
+        mock_exists,
+        _mock_mtime,
+        _mock_fp,
+        _mock_video_hash,
+        _mock_legacy_hash,
+        _mock_valid_source,
+    ):
+        meta = {
+            "libraries": {
+                "D:\\lib_a": {
+                    "files": {
+                        "clip.mp4": {
+                            "vid": "vid_old_mtime",
+                            "asset_state": "missing_source",
+                            "content_fp": "fp_shared",
+                            "file_size": 1234,
+                        }
+                    }
+                },
+                "D:\\lib_b": {"files": {}},
+            }
+        }
+        lib_b_files = meta["libraries"]["D:\\lib_b"]["files"]
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized.endswith("/lib_a/clip.mp4"):
+                return False
+            if normalized.endswith("/lib_b/clip.mp4"):
+                return True
+            return normalized in {"D:/lib_a", "D:/lib_b"}
+
+        mock_exists.side_effect = fake_exists
+
+        relinked = indexing_service.relink_relocated_library_sources(
+            meta,
+            "D:\\lib_b",
+            lib_b_files,
+            known_abs_paths=["D:\\lib_b\\clip.mp4"],
+        )
+
+        self.assertEqual(relinked, 1)
+        self.assertEqual(lib_b_files["clip.mp4"]["vid"], "vid_old_mtime")
+        self.assertNotIn("clip.mp4", meta["libraries"]["D:\\lib_a"]["files"])
+
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1254,6 +1365,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
+    @patch("src.services.indexing_service.relink_relocated_library_sources", return_value=0)
     @patch("src.services.indexing_service.reconcile_library_file_paths", return_value=0)
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
     @patch("src.services.indexing_service.discover_video_files", return_value=["D:\\videos\\clip.mp4"])
@@ -1264,6 +1376,7 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_discover,
         _mock_cleanup_invalid,
         _mock_reconcile,
+        _mock_relink,
         mock_process_single_video,
         _mock_load_chunks,
     ):

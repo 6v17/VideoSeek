@@ -10,7 +10,12 @@ import zipfile
 
 from src.app.config import load_config, save_config
 from src.app.logging_utils import get_logger
-from src.storage.config_store import get_config_schema_version, get_data_paths, resolve_model_resource_dir
+from src.storage.config_store import (
+    get_config_schema_version,
+    get_data_paths,
+    iter_provider_resource_dir_candidates,
+    resolve_model_resource_dir,
+)
 
 logger = get_logger("model_package_service")
 
@@ -401,10 +406,14 @@ def import_model_packages(model_root, manifest_files=None):
 
         provider_dir = _provider_dir(provider)
         effective_resource_dir = os.path.dirname(manifest_file)
-        expected_dir = os.path.join(root, provider_dir, variant)
-        if os.path.normcase(os.path.normpath(effective_resource_dir)) != os.path.normcase(os.path.normpath(expected_dir)):
+        expected_dirs = {
+            os.path.normcase(os.path.normpath(os.path.join(root, candidate_dir, variant)))
+            for candidate_dir in iter_provider_resource_dir_candidates(provider)
+        }
+        if os.path.normcase(os.path.normpath(effective_resource_dir)) not in expected_dirs:
             errors.append(
-                f"{manifest_file}: expected manifest under {expected_dir} (same folder as model files)"
+                f"{manifest_file}: expected manifest under "
+                f"{os.path.join(root, provider_dir, variant)} (same folder as model files)"
             )
             continue
         required_files = manifest.get("required_files")
@@ -600,6 +609,9 @@ def ensure_default_clip_manifest(config=None):
     """
     Backfill a default model_manifest.json for the legacy/default CLIP profile
     under <model_dir>/openai-clip/<variant>/model_manifest.json.
+
+    Only writes when required ONNX/vocab files are already present — otherwise a
+    ghost manifest makes the UI show a non-working OpenAI CLIP profile.
     """
     cfg = dict(config or load_config())
     models = cfg.get("models")
@@ -631,6 +643,9 @@ def ensure_default_clip_manifest(config=None):
 
     variant = str(runtime.get("model_variant", "") or target_profile.get("model_variant", "") or "").strip() or "vit-base-patch32"
     target_dir = os.path.join(model_root, "openai-clip", variant)
+    required_files = _profile_required_files(target_profile) or list(REQUIRED_MODEL_FILES)
+    if not all(os.path.isfile(os.path.join(target_dir, name)) for name in required_files):
+        return ""
     os.makedirs(target_dir, exist_ok=True)
     manifest_file = os.path.join(target_dir, "model_manifest.json")
     if os.path.exists(manifest_file):
@@ -642,9 +657,117 @@ def ensure_default_clip_manifest(config=None):
         "variant": variant,
         "display_name": str(target_profile.get("display_name", "") or "OpenAI CLIP"),
         "prefer_gpu": bool(runtime.get("prefer_gpu", True)),
-        "required_files": list(REQUIRED_MODEL_FILES),
+        "required_files": list(required_files),
         "files": dict(target_profile.get("files") or {}),
     }
     with open(manifest_file, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
     return manifest_file
+
+
+def prune_incomplete_model_profiles(config=None) -> dict:
+    """Drop config profiles whose required model files are missing on disk."""
+    cfg = dict(config or load_config())
+    models = cfg.get("models")
+    if not isinstance(models, dict):
+        return {"removed": [], "active_profile": "", "changed": False}
+    profiles = models.get("profiles")
+    if not isinstance(profiles, list):
+        return {"removed": [], "active_profile": "", "changed": False}
+
+    kept = []
+    removed = []
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        profile_id = str(profile.get("id", "") or "").strip()
+        if _profile_files_ready(profile):
+            kept.append(profile)
+            continue
+        removed.append(profile_id or "(unnamed)")
+
+    active = str(models.get("active_profile", "") or "").strip()
+    changed = len(removed) > 0 or (active and not _find_profile_by_id(kept, active))
+    if not changed and len(kept) == len(profiles):
+        return {"removed": [], "active_profile": active, "changed": False}
+
+    models["profiles"] = kept
+    if kept:
+        if not _find_profile_by_id(kept, active) or not _profile_files_ready(_find_profile_by_id(kept, active) or {}):
+            models["active_profile"] = _pick_ready_profile_id(kept, [str(p.get("id") or "") for p in kept]) or str(
+                kept[0].get("id") or ""
+            )
+    else:
+        models["active_profile"] = ""
+    cfg["models"] = models
+    save_config(cfg)
+    return {
+        "removed": removed,
+        "active_profile": str(models.get("active_profile", "") or "").strip(),
+        "changed": True,
+    }
+
+
+def rediscover_model_profiles(model_root: str | None = None) -> dict:
+    """Rescan ``model_dir`` manifests, register complete packs, drop incomplete ghosts.
+
+    Fault-tolerance for lost/corrupt ``models.profiles`` in config.json: as long as
+    ONNX packs remain under the model root, one click (or startup auto-scan) restores them.
+    """
+    cfg = load_config()
+    root = str(model_root or "").strip()
+    if not root:
+        root = str(cfg.get("model_dir", "") or "").strip()
+    if not root:
+        try:
+            from src.storage.config_store import get_effective_model_dir
+
+            root = str(get_effective_model_dir(config=cfg) or "").strip()
+        except Exception:
+            root = ""
+    if not root:
+        return {
+            "imported": 0,
+            "updated": 0,
+            "removed": [],
+            "errors": ["model_dir is empty"],
+            "active_profile": "",
+            "active_profile_switched": False,
+            "manifests_found": 0,
+        }
+
+    root = os.path.normpath(os.path.abspath(os.fspath(root)))
+    # Trim accidental provider/variant leaf paths back to the models root.
+    try:
+        from src.storage.config_store import get_active_model_profile
+
+        profile = get_active_model_profile(config=cfg)
+        provider = str(profile.get("provider", "") or "").strip()
+        runtime = dict(profile.get("runtime") or {})
+        variant = str(runtime.get("model_variant", "") or profile.get("model_variant", "") or "").strip()
+        if provider and variant:
+            for provider_dir in iter_provider_resource_dir_candidates(provider):
+                expected_tail = os.path.normcase(os.path.normpath(os.path.join(provider_dir, variant)))
+                if os.path.normcase(root).endswith(expected_tail):
+                    parent = os.path.dirname(os.path.dirname(root))
+                    if parent:
+                        root = parent
+                    break
+    except Exception:
+        pass
+
+    manifests = _discover_manifest_files(root)
+    import_result = import_model_packages(root, manifest_files=manifests or None)
+    prune_result = prune_incomplete_model_profiles()
+    active_before = str(import_result.get("active_profile", "") or "").strip()
+    active_after = str(prune_result.get("active_profile", "") or active_before).strip()
+    return {
+        "imported": int(import_result.get("imported", 0) or 0),
+        "updated": int(import_result.get("updated", 0) or 0),
+        "removed": list(prune_result.get("removed") or []),
+        "errors": list(import_result.get("errors") or []),
+        "active_profile": active_after,
+        "active_profile_switched": bool(import_result.get("active_profile_switched")) or (active_before != active_after),
+        "manifests_found": len(manifests),
+        "model_root": root,
+    }

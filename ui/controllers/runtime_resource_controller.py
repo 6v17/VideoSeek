@@ -34,6 +34,25 @@ class RuntimeResourceController(QObject):
 
     def check_resources(self, show_dialog=True):
         status = get_runtime_resource_status()
+        # Config can lose profiles while ONNX packs remain on disk — rescan once.
+        if not status.get("model_ready"):
+            try:
+                from src.services.model_package_service import rediscover_model_profiles
+
+                rediscover = rediscover_model_profiles()
+                if int(rediscover.get("imported", 0) or 0) or int(rediscover.get("updated", 0) or 0) or rediscover.get(
+                    "removed"
+                ):
+                    status = get_runtime_resource_status()
+                    parent = self.parent_window
+                    if hasattr(parent, "_populate_model_profile_options"):
+                        from src.app.config import load_config
+
+                        parent._populate_model_profile_options(load_config())
+                    if hasattr(parent, "refresh_runtime_resource_ui"):
+                        parent.refresh_runtime_resource_ui(sync_dialog=False)
+            except Exception:
+                pass
         self.status_changed.emit(status)
         if status["resources_ready"]:
             return True

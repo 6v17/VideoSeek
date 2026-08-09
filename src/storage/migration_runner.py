@@ -6,7 +6,6 @@ import time
 from src.app.config import get_configured_data_root, load_config, save_config
 from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_metadata, load_numpy_payload, save_metadata, save_numpy_payload
-from src.services.model_package_service import ensure_default_clip_manifest
 from src.storage.config_store import (
     get_active_model_profile,
     get_active_model_resource_dir,
@@ -686,6 +685,8 @@ def run_startup_migration_quick(progress_callback=None):
 
     meta = _load_meta_for_startup(config)
     try:
+        from src.services.model_package_service import ensure_default_clip_manifest
+
         ensure_default_clip_manifest(config=config)
     except Exception:
         logger.warning("Failed to backfill default CLIP model manifest on quick startup check", exc_info=True)
@@ -719,6 +720,8 @@ def run_startup_migration(progress_callback=None):
 
     if _already_migrated(config, meta):
         try:
+            from src.services.model_package_service import ensure_default_clip_manifest
+
             ensure_default_clip_manifest(config=config)
         except Exception:
             logger.warning("Failed to backfill default CLIP model manifest on already-migrated config", exc_info=True)
@@ -796,6 +799,8 @@ def run_startup_migration(progress_callback=None):
 
     _emit(progress_callback, 94, "正在写入迁移状态")
     try:
+        from src.services.model_package_service import ensure_default_clip_manifest
+
         ensure_default_clip_manifest(config=latest_config)
     except Exception:
         logger.warning("Failed to write default CLIP model manifest after migration", exc_info=True)

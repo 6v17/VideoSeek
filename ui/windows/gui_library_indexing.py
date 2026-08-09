@@ -1413,9 +1413,13 @@ class LibraryIndexingGuiMixin:
             return
 
         if not self.show_confirm_dialog(
-            self.texts["confirm_title"],
+            self.texts.get("cleanup_missing_vectors_confirm_title", self.texts["confirm_title"]),
             self.texts["cleanup_missing_vectors_confirm"].format(count=len(reviewed_entries)),
             kind="warning",
+            confirm_text=self.texts.get(
+                "cleanup_missing_vectors_confirm_action",
+                self.texts.get("cleanup_missing_vectors_action", "清理失效索引"),
+            ),
         ):
             return
         self._start_index_update(
@@ -1437,14 +1441,9 @@ class LibraryIndexingGuiMixin:
                 ]
             )
 
-        subtitle = "\n".join(
-            [
-                self.texts["cleanup_missing_vectors_preview_summary"].format(
-                    count=len(missing_entries),
-                    libraries=len({entry["library_path"] for entry in missing_entries}),
-                ),
-                self.texts["cleanup_missing_vectors_preview_continue"],
-            ]
+        subtitle = self.texts["cleanup_missing_vectors_preview_summary"].format(
+            count=len(missing_entries),
+            libraries=len({entry["library_path"] for entry in missing_entries}),
         )
         dialog = ResourceTableDialog(
             parent=self,
@@ -1462,13 +1461,19 @@ class LibraryIndexingGuiMixin:
                 3: 140,
             },
             confirm_mode=True,
-            confirm_text=self.texts["confirm_action"],
-            issue_row_predicate=lambda row: True,
+            confirm_text=self.texts.get(
+                "cleanup_missing_vectors_action",
+                "清理失效索引",
+            ),
             summary_text=self.texts["cleanup_missing_vectors_preview_continue"],
             row_payloads=missing_entries,
+            show_utility_actions=False,
             extra_actions=[
                 {
-                    "label": self.texts["details_exclude_selected"],
+                    "label": self.texts.get(
+                        "cleanup_missing_vectors_exclude",
+                        self.texts.get("details_exclude_selected", "从列表排除"),
+                    ),
                     "object_name": "Ghost",
                     "handler": self._exclude_cleanup_preview_selection,
                 }

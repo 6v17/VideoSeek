@@ -235,7 +235,9 @@ class StartupMigrationGateTests(unittest.TestCase):
             with (
                 patch.object(migration_runner_module, "load_config", _load_config),
                 patch.object(migration_runner_module, "save_config", _save_config),
-                patch.object(migration_runner_module, "ensure_default_clip_manifest"),
+                patch(
+                    "src.services.model_package_service.ensure_default_clip_manifest",
+                ),
                 patch.object(
                     migration_runner_module,
                     "_apply_post_schema_maintenance",

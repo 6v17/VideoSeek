@@ -46,6 +46,7 @@ class ResourceTableDialog(QDialog):
         selection_mode=QAbstractItemView.SingleSelection,
         row_double_click_handler=None,
         allow_sorting=True,
+        show_utility_actions=True,
     ):
         super().__init__(parent)
         self.texts = get_texts(language)
@@ -63,6 +64,7 @@ class ResourceTableDialog(QDialog):
         self.selection_mode = selection_mode
         self.row_double_click_handler = row_double_click_handler
         self.allow_sorting = bool(allow_sorting)
+        self.show_utility_actions = bool(show_utility_actions)
         self.filtered_rows = list(self.rows)
         self.filtered_payloads = list(self.row_payloads)
 
@@ -163,9 +165,14 @@ class ResourceTableDialog(QDialog):
         self.btn_cancel = QPushButton(self.texts["cancel"])
         self.btn_close = QPushButton(self.texts["close"])
         self.btn_close.setObjectName("PrimaryButton")
-        button_row.addWidget(self.btn_copy)
-        button_row.addWidget(self.btn_export)
-        button_row.addWidget(self.btn_copy_row)
+        if self.show_utility_actions:
+            button_row.addWidget(self.btn_copy)
+            button_row.addWidget(self.btn_export)
+            button_row.addWidget(self.btn_copy_row)
+        else:
+            self.btn_copy.hide()
+            self.btn_export.hide()
+            self.btn_copy_row.hide()
         for action in self.extra_actions:
             button = QPushButton(action.get("label", "Action"))
             object_name = str(action.get("object_name", "") or "").strip()

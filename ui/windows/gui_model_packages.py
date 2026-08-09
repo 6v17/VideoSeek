@@ -9,7 +9,10 @@ from PySide6.QtWidgets import QFileDialog
 
 from src.app.config import load_config, save_config
 from src.core.clip_embedding import reset_engine
-from src.services.model_package_service import remove_model_profile
+from src.services.model_package_service import (
+    rediscover_model_profiles as run_rediscover_model_profiles,
+    remove_model_profile,
+)
 from src.storage.config_store import get_active_model_profile, get_effective_model_dir, resolve_provider_dir
 from src.utils import get_configured_ffmpeg_target_path
 from ui.workers import ModelPackageImportWorker
@@ -17,6 +20,62 @@ from ui.workers import ModelPackageImportWorker
 
 class ModelPackagesGuiMixin:
     """ZIP/manifest import via worker, ffmpeg.exe drop-in, and active profile removal."""
+
+    def rediscover_model_profiles(self):
+        """Scan model_dir for complete packs and repair the profile switcher."""
+        try:
+            result = run_rediscover_model_profiles()
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("model_rediscover_failed", "重新探测模型失败"),
+                exc,
+            )
+            return
+        try:
+            reset_engine()
+        except Exception:
+            pass
+        config = load_config()
+        if hasattr(self, "_populate_model_profile_options"):
+            self._populate_model_profile_options(config)
+        if hasattr(self, "refresh_runtime_resource_ui"):
+            self.refresh_runtime_resource_ui(sync_dialog=True)
+        if hasattr(self, "push_inference_status"):
+            self.push_inference_status()
+
+        imported = int(result.get("imported", 0) or 0)
+        updated = int(result.get("updated", 0) or 0)
+        removed = list(result.get("removed") or [])
+        errors = list(result.get("errors") or [])
+        active = str(result.get("active_profile", "") or "").strip()
+        if imported or updated or removed:
+            message = self.texts.get(
+                "model_rediscover_done",
+                "已重新探测模型：新增 {imported}，更新 {updated}，移除不完整配置 {removed}。当前：{active}",
+            ).format(
+                imported=imported,
+                updated=updated,
+                removed=len(removed),
+                active=active or "-",
+            )
+            if errors:
+                message = f"{message}\n\n" + "\n".join(str(item) for item in errors[:6])
+            self.show_info_dialog(self.texts["success_title"], message, kind="success")
+            return
+        if errors:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("model_rediscover_none", "模型目录下没有发现完整可用的模型包。")
+                + "\n\n"
+                + "\n".join(str(item) for item in errors[:8]),
+                kind="warning",
+            )
+            return
+        self.show_info_dialog(
+            self.texts.get("warning_title", "Warning"),
+            self.texts.get("model_rediscover_none", "模型目录下没有发现完整可用的模型包。"),
+            kind="warning",
+        )
 
     def parse_model_packages(self, selected_files=None, scan_only=False):
         config = load_config()
