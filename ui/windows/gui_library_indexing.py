@@ -682,7 +682,7 @@ class LibraryIndexingGuiMixin:
     def _finish_remove_library(self, success):
         try:
             self.library_page.btn_sync_db.setEnabled(True)
-        self.library_page.btn_refresh_visual_library.setEnabled(True)
+            self.library_page.btn_refresh_visual_library.setEnabled(True)
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_clear_dialogue.setEnabled(True)
@@ -1362,7 +1362,7 @@ class LibraryIndexingGuiMixin:
     def _finish_dialogue_index(self, success, stopped, summary):
         try:
             self.library_page.btn_sync_db.setEnabled(True)
-        self.library_page.btn_refresh_visual_library.setEnabled(True)
+            self.library_page.btn_refresh_visual_library.setEnabled(True)
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_clear_dialogue.setEnabled(True)
@@ -1568,7 +1568,7 @@ class LibraryIndexingGuiMixin:
                 self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
                 return
             self.library_page.btn_sync_db.setEnabled(False)
-        self.library_page.btn_refresh_visual_library.setEnabled(False)
+            self.library_page.btn_refresh_visual_library.setEnabled(False)
             self.library_page.btn_build_dialogue_index.setEnabled(False)
             self.library_page.btn_reembed_dialogue.setEnabled(False)
             self.library_page.btn_clear_dialogue.setEnabled(False)
