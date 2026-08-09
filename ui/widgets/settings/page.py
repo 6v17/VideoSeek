@@ -191,7 +191,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_team_mode = NoWheelComboBox()
         self.input_team_server_url = QLineEdit()
         self.input_team_server_url.setPlaceholderText("http://192.168.1.10:8765")
-        # URL is collected via dialog when choosing 员工机; keep the field as hidden storage.
+        # URL is collected via dialog when choosing 用户机; keep the field as hidden storage.
         self.input_team_server_url.hide()
         self.lbl_team_status = QLabel()
         self.lbl_team_status.setObjectName("StatusHint")
@@ -1067,7 +1067,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             texts.get("setting_team_mode_server", "本机作为服务机"), "server"
         )
         self.input_team_mode.addItem(
-            texts.get("setting_team_mode_client", "本机作为员工机"), "client"
+            texts.get("setting_team_mode_client", "本机作为用户机"), "client"
         )
         restore_team = self.input_team_mode.findData(current_team_mode)
         self.input_team_mode.setCurrentIndex(0 if restore_team < 0 else restore_team)
@@ -1222,7 +1222,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
                 "setting_share_mode_hint",
                 texts.get(
                     "setting_team_mode_hint",
-                    "关闭 / 本机 Agent API / 服务机 / 员工机。选员工机会弹出地址框；保存设置后才生效。",
+                    "关闭 / 本机 Agent API / 服务机 / 用户机。选用户机会弹出地址框；保存设置后才生效。",
                 ),
             )
         )

@@ -101,6 +101,7 @@ class StartupMigrationGuiMixin:
         widgets = [
             self.search_page.btn_search,
             self.library_page.btn_sync_db,
+            self.library_page.btn_refresh_visual_library,
             self.link_page.btn_probe,
             self.link_page.btn_download,
             self.settings_page.btn_save,

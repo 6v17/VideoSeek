@@ -298,11 +298,13 @@ class NavigationSidebar(QWidget):
         self.btn_page_search = self._build_nav_button("Search", checked=True)
         self.btn_page_library = self._build_nav_button("Libraries")
         self.btn_page_understanding = self._build_nav_button("Evidence")
+        self.btn_page_clone = self._build_nav_button("Video Clone")
         self.btn_page_link = self._build_nav_button("Link Match")
         self.btn_page_settings = self._build_nav_button("Settings")
         layout.addWidget(self.btn_page_search)
         layout.addWidget(self.btn_page_library)
         layout.addWidget(self.btn_page_understanding)
+        layout.addWidget(self.btn_page_clone)
         layout.addWidget(self.btn_page_link)
         layout.addWidget(self.btn_page_settings)
         self.runtime_hint = QLabel("")
@@ -376,6 +378,7 @@ class NavigationSidebar(QWidget):
             "link": self.btn_page_link,
             "library": self.btn_page_library,
             "understanding": self.btn_page_understanding,
+            "clone": self.btn_page_clone,
             "settings": self.btn_page_settings,
         }
         for name, button in mapping.items():
@@ -814,6 +817,8 @@ class LibraryPage(QWidget):
         toolbar.setSpacing(8)
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
+        self.btn_refresh_visual_library = QPushButton()
+        self.btn_refresh_visual_library.setObjectName("GhostButton")
         self.btn_stop_index = QPushButton()
         self.btn_stop_index.setObjectName("DangerGhostButton")
         self.btn_stop_index.setEnabled(False)
@@ -832,6 +837,7 @@ class LibraryPage(QWidget):
         self.btn_debug_system_oom.setObjectName("GhostButton")
         self.btn_debug_system_oom.setVisible(False)
         toolbar.addWidget(self.btn_sync_db)
+        toolbar.addWidget(self.btn_refresh_visual_library)
         toolbar.addSpacing(4)
         toolbar.addWidget(_toolbar_divider())
         toolbar.addSpacing(4)

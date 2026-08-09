@@ -301,6 +301,9 @@ class MainWindow(
         self.library_page.btn_sync_db.clicked.connect(
             lambda: self.start_update_index(checked_only=True)
         )
+        self.library_page.btn_refresh_visual_library.clicked.connect(
+            self.refresh_selected_visual_libraries
+        )
         self.library_page.btn_build_dialogue_index.clicked.connect(self.start_dialogue_index)
         self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
         self.library_page.btn_clear_dialogue.clicked.connect(self.clear_selected_dialogue_transcripts)
@@ -575,6 +578,15 @@ class MainWindow(
             self.library_page.btn_remove_lib.setToolTip(t.get("remove_library_hint", ""))
         self.library_page.btn_sync_db.setText(
             t.get("sync_selected_videos", t.get("update_index", "Sync selected"))
+        )
+        self.library_page.btn_refresh_visual_library.setText(
+            t.get("refresh_visual_library", "刷新选中库")
+        )
+        self.library_page.btn_refresh_visual_library.setToolTip(
+            t.get(
+                "refresh_visual_library_hint",
+                "重新扫描勾选库文件夹，把新拖入的视频登记到列表（不会立刻建索；登记后请再点同步）。",
+            )
         )
         self.library_page.visual_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
@@ -1523,7 +1535,7 @@ class MainWindow(
                 self.texts.get("info_title", self.texts.get("success_title", "Info")),
                 self.texts.get(
                     "library_team_open_remote_hint",
-                    "共享库文件在服务机上，员工机无法直接打开本地文件夹。请用搜索结果预览播放。",
+                    "共享库文件在服务机上，用户机无法直接打开本地文件夹。请用搜索结果预览播放。",
                 ),
                 kind="info",
             )

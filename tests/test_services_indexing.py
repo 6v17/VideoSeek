@@ -462,6 +462,23 @@ class IndexingServiceTests(unittest.TestCase):
             self.assertIn("stable", lib_data["discover_cache"]["dir_snapshots"])
             self.assertIn("changed", lib_data["discover_cache"]["dir_snapshots"])
 
+    def test_discover_video_files_incremental_finds_nested_new_video(self):
+        """Parent dir listing can look unchanged while a deeper folder gains a file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nested = root / "A" / "B"
+            nested.mkdir(parents=True)
+            (root / "A" / "old_a.mp4").write_bytes(b"a")
+            (nested / "old_b.mp4").write_bytes(b"b")
+            lib_data = {}
+            indexing_service.refresh_library_video_file_list(str(root), lib_data)
+
+            (nested / "new_b.mp4").write_bytes(b"n")
+            result = indexing_service.discover_video_files_incremental(str(root), lib_data)
+
+            names = sorted(Path(path).relative_to(root).as_posix() for path in result)
+            self.assertEqual(names, ["A/B/new_b.mp4", "A/B/old_b.mp4", "A/old_a.mp4"])
+
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")

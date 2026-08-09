@@ -101,7 +101,7 @@ def show_team_server_share_dialog(
         str(
             texts.get(
                 title_key,
-                "分享给员工机" if not pending else "服务机地址（保存后生效）",
+                "分享给用户机" if not pending else "服务机地址（保存后生效）",
             )
         )
     )
@@ -115,14 +115,14 @@ def show_team_server_share_dialog(
         body = str(
             texts.get(
                 "setting_team_server_share_pending_hint",
-                "保存设置后本机将作为服务机启动。可先复制下面地址发给员工机：",
+                "保存设置后本机将作为服务机启动。可先复制下面地址发给用户机：",
             )
         )
     else:
         body = str(
             texts.get(
                 "setting_team_server_share_hint",
-                "服务机已启动。把下面地址发给员工机填写即可连接：",
+                "服务机已启动。把下面地址发给用户机填写即可连接：",
             )
         )
     hint = QLabel(body)
@@ -158,7 +158,7 @@ def show_team_server_share_dialog(
         str(
             texts.get(
                 "setting_team_share_note",
-                "员工机团队模式选「员工机」后粘贴 API 地址。需同一局域网，并放行防火墙端口。",
+                "用户机团队模式选「用户机」后粘贴 API 地址。需同一局域网，并放行防火墙端口。",
             )
         )
     )

@@ -335,6 +335,7 @@ class RuntimeGuiMixin:
         # Visual tabs still gate inside start_search via check_runtime_resources.
         self.search_page.btn_search.setEnabled(True)
         self.library_page.btn_sync_db.setEnabled(resources_ready)
+        self.library_page.btn_refresh_visual_library.setEnabled(resources_ready)
         if resources_ready:
             if getattr(self, "_startup_complete", False):
                 self._start_runtime_warmup()

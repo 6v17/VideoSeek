@@ -328,7 +328,7 @@ class LibraryIndexingGuiMixin:
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
             )
-            # Drop stale local rows before remote fetch when switching to 员工机.
+            # Drop stale local rows before remote fetch when switching to 用户机.
             if is_team_client_mode():
                 tree.refresh_from_entries([], library_paths=[])
             entries, library_paths = self._build_visual_tree_entries(register=False)
@@ -375,6 +375,7 @@ class LibraryIndexingGuiMixin:
             "btn_add_lib": not client,
             "btn_remove_lib": not client,
             "btn_sync_db": not client,
+            "btn_refresh_visual_library": not client,
             "btn_index_issues": not client,
             "btn_cleanup_missing": not client,
             "btn_vector_details": not client,
@@ -397,7 +398,7 @@ class LibraryIndexingGuiMixin:
             widget = getattr(page, name, None)
             if widget is not None:
                 widget.setVisible(bool(visible))
-        # Subtitle tab stays available on 员工机 (read-only shared view).
+        # Subtitle tab stays available on 用户机 (read-only shared view).
         if getattr(page, "btn_tab_dialogue", None) is not None:
             page.btn_tab_dialogue.setEnabled(True)
         hint = getattr(page, "lbl_shared_library_hint", None)
@@ -407,7 +408,7 @@ class LibraryIndexingGuiMixin:
             hint.setText(
                 self.texts.get(
                     "library_team_shared_hint",
-                    "员工机：显示服务机共享库与字幕库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
+                    "用户机：显示服务机共享库与字幕库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
                 )
             )
         else:
@@ -418,25 +419,72 @@ class LibraryIndexingGuiMixin:
                 )
             )
 
+    def refresh_selected_visual_libraries(self):
+        """Rescan checked libraries so newly dropped files appear in the tree."""
+        from src.services.team_mode_service import is_team_client_mode
+        from src.services.library_service import register_library_videos
+
+        if is_team_client_mode():
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_readonly",
+                    "用户机为只读：不能添加库或建索引，请在服务机操作。",
+                ),
+                kind="warning",
+            )
+            return
+        if self.indexing_controller.is_running() or self._dialogue_index_running():
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+
+        paths = self.library_page.visual_video_tree.collect_checked_library_paths()
+        if not paths:
+            self.show_info_dialog(
+                self.texts.get("refresh_visual_library", "刷新选中库"),
+                self.texts.get("library_select_libraries_first", "请先勾选一个或多个视频库。"),
+                kind="info",
+            )
+            return
+
+        registered = 0
+        try:
+            for path in paths:
+                result = register_library_videos(library_path=path)
+                registered += int(result.get("registered") or 0)
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("library_load_failed", "Failed"), exc)
+            return
+
+        self.refresh_library_table()
+        message = self.texts.get(
+            "refresh_visual_library_done",
+            "已刷新 {libraries} 个库：新登记 {registered} 个视频。",
+        ).format(libraries=len(paths), registered=registered)
+        self.library_page.lbl_status.setText(message)
+        self.show_info_dialog(
+            self.texts.get("success_title", "Success"),
+            message,
+            kind="success",
+        )
+
     def sync_library(self, path):
         from src.services.team_mode_service import is_team_client_mode
+        from src.services.library_service import register_library_videos
 
         if is_team_client_mode():
             return
-        # Sync every registered video under one library folder.
-        entries, _ = self._build_visual_tree_entries()
-        video_ids = [
-            str(item.get("video_id") or "").strip()
-            for item in entries
-            if str(item.get("library_path") or "").strip()
-            and os.path.normcase(os.path.normpath(item["library_path"]))
-            == os.path.normcase(os.path.normpath(path))
-        ]
-        video_ids = [vid for vid in video_ids if vid]
+        # Full-library sync: discover newly dropped files first, then scan the
+        # whole folder. Passing only already-registered video_ids skips anything
+        # added after the library was first created.
+        try:
+            register_library_videos(library_path=path)
+        except Exception:
+            pass
         self.start_update_index(
             target_lib=path,
             rebuild_global_assets=False,
-            video_ids=video_ids or None,
+            video_ids=None,
         )
 
     def open_library_folder(self, path):
@@ -451,7 +499,7 @@ class LibraryIndexingGuiMixin:
                     self.texts.get("info_title", self.texts.get("success_title", "Info")),
                     self.texts.get(
                         "library_team_open_remote_hint",
-                        "共享库文件在服务机上，员工机无法直接打开本地文件夹。请用搜索结果预览播放。",
+                        "共享库文件在服务机上，用户机无法直接打开本地文件夹。请用搜索结果预览播放。",
                     ),
                     kind="info",
                 )
@@ -466,7 +514,7 @@ class LibraryIndexingGuiMixin:
                 self.texts.get("info_title", self.texts.get("success_title", "Info")),
                 self.texts.get(
                     "library_team_readonly",
-                    "员工机不能添加本地库。请在服务机添加并索引。",
+                    "用户机不能添加本地库。请在服务机添加并索引。",
                 ),
                 kind="warning",
             )
@@ -560,6 +608,7 @@ class LibraryIndexingGuiMixin:
         self._remove_library_running = True
         self._remove_library_mode = "subtitle" if subtitle_mode else "visual"
         self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_refresh_visual_library.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -633,6 +682,7 @@ class LibraryIndexingGuiMixin:
     def _finish_remove_library(self, success):
         try:
             self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_refresh_visual_library.setEnabled(True)
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_clear_dialogue.setEnabled(True)
@@ -677,7 +727,7 @@ class LibraryIndexingGuiMixin:
                 self.texts.get("info_title", self.texts.get("success_title", "Info")),
                 self.texts.get(
                     "library_team_readonly",
-                    "员工机不能添加本地库。请在服务机添加并索引。",
+                    "用户机不能添加本地库。请在服务机添加并索引。",
                 ),
                 kind="warning",
             )
@@ -1235,6 +1285,7 @@ class LibraryIndexingGuiMixin:
         ocr_batch_size = self._read_subtitle_ocr_batch()
 
         self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_refresh_visual_library.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -1311,6 +1362,7 @@ class LibraryIndexingGuiMixin:
     def _finish_dialogue_index(self, success, stopped, summary):
         try:
             self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_refresh_visual_library.setEnabled(True)
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_clear_dialogue.setEnabled(True)
@@ -1516,6 +1568,7 @@ class LibraryIndexingGuiMixin:
                 self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
                 return
             self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_refresh_visual_library.setEnabled(False)
             self.library_page.btn_build_dialogue_index.setEnabled(False)
             self.library_page.btn_reembed_dialogue.setEnabled(False)
             self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -1605,6 +1658,7 @@ class LibraryIndexingGuiMixin:
     def _finish_indexing(self, success, target_lib, stopped=False, has_search_assets=False, issues=None, rebuild_global_assets=True):
         self.ui_state.set_indexing_running(False)
         self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_refresh_visual_library.setEnabled(True)
         self.library_page.btn_build_dialogue_index.setEnabled(True)
         self.library_page.btn_reembed_dialogue.setEnabled(True)
         self.library_page.btn_clear_dialogue.setEnabled(True)

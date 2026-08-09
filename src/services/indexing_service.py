@@ -614,35 +614,14 @@ def _build_dir_snapshots_from_walk(root_path: str) -> dict[str, dict]:
     return snapshots
 
 
-def _append_snapshotted_subtree(
-    root_path: str,
-    rel_dir: str,
-    dir_snapshots: dict[str, dict],
-    discovered: list[str],
-    updated_snapshots: dict[str, dict],
-) -> None:
-    rel_key = _discover_snapshot_key(rel_dir)
-    snap = dir_snapshots.get(rel_key)
-    if not snap:
-        return
-    abs_dir = root_path if rel_key == "." else os.path.join(root_path, rel_dir)
-    for name in snap.get("videos", []):
-        discovered.append(os.path.join(abs_dir, name))
-    updated_snapshots[rel_key] = snap
-    prefix = "" if rel_key == "." else f"{rel_key}{os.sep}"
-    for key, value in dir_snapshots.items():
-        if key == rel_key or key in updated_snapshots:
-            continue
-        if rel_key != "." and not key.startswith(prefix):
-            continue
-        sub_rel = "" if key == "." else key
-        sub_abs = root_path if key == "." else os.path.join(root_path, sub_rel)
-        for name in value.get("videos", []):
-            discovered.append(os.path.join(sub_abs, name))
-        updated_snapshots[key] = value
-
-
 def discover_video_files_incremental(root_path, lib_data):
+    """Discover videos with per-directory snapshots.
+
+    Always ``scandir`` every directory. An earlier optimization reused a whole
+    cached subtree when a parent folder's *immediate* listing looked unchanged,
+    which missed new files added deeper (e.g. drop into ``lib/A/B/``).
+    ``scandir`` is cheap; missing brand-new videos is not.
+    """
     cache = lib_data.get(DISCOVER_CACHE_KEY) or {}
     dir_snapshots = dict(cache.get("dir_snapshots") or {})
     if not dir_snapshots:
@@ -664,14 +643,7 @@ def discover_video_files_incremental(root_path, lib_data):
                 continue
             sub_abs = os.path.join(abs_dir, subdir)
             sub_rel = os.path.join(rel_dir, subdir) if rel_dir else subdir
-            sub_key = _discover_snapshot_key(sub_rel)
-            sub_snap = _snapshot_directory_videos(sub_abs)
-            if sub_snap is None:
-                continue
-            if dir_snapshots.get(sub_key) == sub_snap:
-                _append_snapshotted_subtree(root_path, sub_rel, dir_snapshots, discovered, updated_snapshots)
-            else:
-                visit(sub_abs, sub_rel)
+            visit(sub_abs, sub_rel)
 
     visit(root_path, "")
     discovered.sort()

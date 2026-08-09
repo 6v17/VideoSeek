@@ -317,7 +317,7 @@ class SettingsGuiMixin:
         page.lbl_team_status.setText(
             self.texts.get(
                 "setting_team_status_client_pending",
-                "待保存：员工机将连接上方地址",
+                "待保存：用户机将连接上方地址",
             )
         )
 
@@ -350,14 +350,14 @@ class SettingsGuiMixin:
             page.lbl_team_status.setText(
                 self.texts.get(
                     "setting_team_status_client_pending",
-                    "待保存：员工机将连接上方地址",
+                    "待保存：用户机将连接上方地址",
                 )
             )
         elif new_mode == "server":
             page.lbl_team_status.setText(
                 self.texts.get(
                     "setting_team_status_server_pending",
-                    "待保存：启动服务机后，员工机填写上方 API 地址即可连接",
+                    "待保存：启动服务机后，用户机填写上方 API 地址即可连接",
                 )
             )
         elif new_mode == "agent":
@@ -592,7 +592,7 @@ class SettingsGuiMixin:
                             self.texts.get("error_title", "Error"),
                             self.texts.get(
                                 "setting_team_media_start_failed",
-                                "搜索服务已启动，但视频分享（nginx）失败，员工机将无法预览：\n{detail}",
+                                "搜索服务已启动，但视频分享（nginx）失败，用户机将无法预览：\n{detail}",
                             ).format(detail=media_err),
                             kind="warning",
                         )
@@ -1051,7 +1051,7 @@ class SettingsGuiMixin:
             return
         status = self.team_mode_controller.apply_from_config()
         self._refresh_team_mode_status(status)
-        # Library data source follows team_mode; refresh so 员工机 shows the
+        # Library data source follows team_mode; refresh so 用户机 shows the
         # shared tree without requiring an app restart. Callers that already
         # refreshed (startup) should pass refresh_library=False.
         if refresh_library and hasattr(self, "refresh_library_table"):
@@ -1087,7 +1087,7 @@ class SettingsGuiMixin:
             else:
                 text = self.texts.get(
                     "setting_team_status_server_pending",
-                    "待保存：启动服务机后，员工机填写上方 API 地址即可连接",
+                    "待保存：启动服务机后，用户机填写上方 API 地址即可连接",
                 )
             page.lbl_team_status.setText(text)
             self._update_share_mode_chrome("server", pending=team != "server")
@@ -1106,13 +1106,13 @@ class SettingsGuiMixin:
                 page.input_team_server_url.blockSignals(False)
             if team == "client":
                 page.lbl_team_status.setText(
-                    self.texts.get("setting_team_status_client", "员工机 · 已连接")
+                    self.texts.get("setting_team_status_client", "用户机 · 已连接")
                 )
             else:
                 page.lbl_team_status.setText(
                     self.texts.get(
                         "setting_team_status_client_pending",
-                        "待保存：员工机将连接上方地址",
+                        "待保存：用户机将连接上方地址",
                     )
                 )
             self._update_share_mode_chrome("client", pending=team != "client")
