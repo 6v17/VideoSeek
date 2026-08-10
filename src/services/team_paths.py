@@ -3,20 +3,51 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 from typing import Iterable, List, Optional, Set, Tuple
 
-from src.infra.paths import get_resource_path, resolve_windows_long_path
+from src.infra.paths import get_app_data_dir, get_resource_path, resolve_windows_long_path
 
 
-def get_nginx_root() -> str:
-    """Resolved ``server/nginx`` directory (dev install or packaged)."""
+def get_nginx_bundle_root() -> str:
+    """Install/repo ``server/nginx`` (exe + static conf templates)."""
     # Long path: Win nginx cannot open conf under 8.3 short roots like D:\\VIDEOS~1.
     return resolve_windows_long_path(get_resource_path(os.path.join("server", "nginx")))
 
 
+def _nginx_dir_is_writable(path: str) -> bool:
+    """True when we can create/write a probe file under ``path``."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".vs_write_probe")
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("1")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def get_nginx_runtime_root() -> str:
+    """Writable nginx ``-p`` prefix.
+
+    Prefer the bundled tree when writable (dev / portable installs). Under
+    ``Program Files`` the bundle is read-only, so use ``%LOCALAPPDATA%\\VideoSeek\\nginx``.
+    """
+    bundle = get_nginx_bundle_root()
+    if _nginx_dir_is_writable(os.path.join(bundle, "conf", "conf.d")):
+        return bundle
+    return resolve_windows_long_path(os.path.join(get_app_data_dir(), "nginx"))
+
+
+def get_nginx_root() -> str:
+    """Writable nginx prefix used for ``-p``, logs, and generated site conf."""
+    return get_nginx_runtime_root()
+
+
 def get_nginx_exe() -> str:
-    return resolve_windows_long_path(os.path.join(get_nginx_root(), "nginx.exe"))
+    return resolve_windows_long_path(os.path.join(get_nginx_bundle_root(), "nginx.exe"))
 
 
 def get_nginx_conf_dir() -> str:
@@ -31,9 +62,34 @@ def get_nginx_videos_conf_path() -> str:
     return os.path.join(get_nginx_conf_d_dir(), "videos.conf")
 
 
+def sync_nginx_runtime_from_bundle() -> str:
+    """Ensure runtime prefix has logs/temp/conf templates; return runtime root."""
+    bundle = get_nginx_bundle_root()
+    runtime = get_nginx_runtime_root()
+    os.makedirs(os.path.join(runtime, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(runtime, "temp"), exist_ok=True)
+    os.makedirs(os.path.join(runtime, "conf", "conf.d"), exist_ok=True)
+
+    bundle_abs = os.path.normcase(os.path.abspath(bundle))
+    runtime_abs = os.path.normcase(os.path.abspath(runtime))
+    if bundle_abs == runtime_abs:
+        return runtime
+
+    src_conf = os.path.join(bundle, "conf")
+    dst_conf = os.path.join(runtime, "conf")
+    if os.path.isdir(src_conf):
+        for name in os.listdir(src_conf):
+            if name == "conf.d":
+                continue
+            src = os.path.join(src_conf, name)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(dst_conf, name))
+    return runtime
+
+
 def nginx_bundle_ready() -> bool:
     exe = get_nginx_exe()
-    conf = os.path.join(get_nginx_conf_dir(), "nginx.conf")
+    conf = os.path.join(get_nginx_bundle_root(), "conf", "nginx.conf")
     return os.path.isfile(exe) and os.path.isfile(conf)
 
 

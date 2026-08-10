@@ -15,6 +15,7 @@ from src.services.team_paths import (
     get_nginx_root,
     get_nginx_videos_conf_path,
     nginx_bundle_ready,
+    sync_nginx_runtime_from_bundle,
 )
 
 logger = get_logger("team_nginx")
@@ -23,10 +24,8 @@ _process: Optional[subprocess.Popen] = None
 
 
 def ensure_nginx_runtime_dirs() -> None:
-    """Fresh clones omit gitignored logs/temp; nginx needs them before any -t/-s/start."""
-    root = get_nginx_root()
-    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
-    os.makedirs(os.path.join(root, "temp"), exist_ok=True)
+    """Ensure writable prefix has logs/temp/conf (AppData when Program Files is locked)."""
+    sync_nginx_runtime_from_bundle()
     os.makedirs(get_nginx_conf_d_dir(), exist_ok=True)
 
 
