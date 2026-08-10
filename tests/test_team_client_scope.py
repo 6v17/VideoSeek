@@ -82,6 +82,34 @@ class TeamClientScopeTests(unittest.TestCase):
         self.assertEqual(captured["payload"].get("search_mode"), "frame")
         self.assertEqual(captured["payload"].get("search_precision_mode"), "fast")
 
+    def test_search_sends_preview_anchor_sec_for_deep_locate(self):
+        captured = {}
+
+        def fake_post(url, payload, timeout=120.0):
+            captured["payload"] = payload
+            return {"ok": True, "hits": []}
+
+        with mock.patch("src.services.team_client_search._post_json", side_effect=fake_post):
+            with mock.patch(
+                "src.services.team_client_search._encode_image_query",
+                return_value={"query_type": "image", "image_base64": "xx", "image_mime": "image/png"},
+            ):
+                run_team_client_search(
+                    server_url="http://192.168.1.2:8765",
+                    query_data="D:/q.png",
+                    is_text=False,
+                    search_mode="frame",
+                    search_precision_mode="precise",
+                    scope_video_paths=["http://192.168.1.2:18080/videos/lib1/a.mp4"],
+                    preview_anchor_sec=64.5,
+                )
+        self.assertEqual(captured["payload"].get("preview_anchor_sec"), 64.5)
+        scope = captured["payload"].get("scope") or {}
+        self.assertEqual(
+            scope.get("video_paths"),
+            ["http://192.168.1.2:18080/videos/lib1/a.mp4"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ import time
 from typing import Dict, List, Optional
 
 from src.app.logging_utils import get_logger
+from src.infra.win_process import hidden_subprocess_kwargs
 from src.services.team_media_map import build_media_mounts
 from src.services.team_paths import (
     get_nginx_conf_d_dir,
@@ -53,6 +54,7 @@ def _run_nginx(args: List[str], *, timeout: float = 8.0) -> subprocess.Completed
         text=True,
         timeout=timeout,
         check=False,
+        **hidden_subprocess_kwargs(),
     )
 
 
@@ -149,16 +151,13 @@ def start_nginx(*, library_paths: List[str], listen_port: int) -> List[Dict[str,
     root = get_nginx_root()
     prefix = _nginx_prefix_root()
     conf = "conf/nginx.conf"
-    creationflags = 0
-    if os.name == "nt":
-        # CREATE_NO_WINDOW only — DETACHED_PROCESS can prevent a reliable master process.
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    popen_kwargs = dict(hidden_subprocess_kwargs())
     _process = subprocess.Popen(
         [exe, "-p", prefix, "-c", conf],
         cwd=root,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=creationflags,
+        **popen_kwargs,
     )
     time.sleep(0.35)
     if not is_nginx_running():
@@ -219,7 +218,7 @@ def _force_kill_nginx_pid() -> None:
                 text=True,
                 timeout=5,
                 check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_subprocess_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("taskkill nginx failed: %s", exc)

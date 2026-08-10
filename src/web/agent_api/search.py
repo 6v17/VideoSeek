@@ -522,6 +522,16 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
         preset_scope_video_paths=query_part.get("preset_scope_video_paths"),
         config=cfg,
     )
+    # Employee deep-locate scopes use play_url; rewrite to server filesystem paths.
+    if scope_video_paths and any(
+        str(p or "").strip().lower().startswith(("http://", "https://")) for p in scope_video_paths
+    ):
+        try:
+            from src.services.team_media_map import rewrite_team_scope_video_paths
+
+            scope_video_paths = rewrite_team_scope_video_paths(scope_video_paths)
+        except Exception:
+            logger.exception("Failed to rewrite team play_url scope paths")
 
     team_play_urls = bool(getattr(body, "team_play_urls", False))
     if not team_play_urls:

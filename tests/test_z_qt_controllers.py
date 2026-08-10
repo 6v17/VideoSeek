@@ -711,6 +711,20 @@ class PreviewControllerTests(unittest.TestCase):
         vlc_player.play.assert_called_once_with("D:/videos/clip.mp4", 27.0, stop_sec=33.0)
         parent.media_player.setSource.assert_called_once()
 
+    @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
+    def test_play_http_prefers_qt_multimedia(self, mock_vlc_cls, _mock_window):
+        parent = _make_parent_window()
+        controller = PreviewController(parent)
+        url = "http://192.168.1.2:18080/videos/lib1/a.mp4"
+        controller._play_remote_with_qt = MagicMock(return_value=True)
+
+        result = controller.play(url, 30.0, end_sec=33.0)
+
+        self.assertTrue(result)
+        controller._play_remote_with_qt.assert_called_once_with(url, 27.0, 33.0)
+        mock_vlc_cls.assert_not_called()
+
     @patch("ui.controllers.preview_controller.create_preview_clip")
     @patch("ui.controllers.preview_controller.build_preview_cache_path", return_value="D:/cache/preview.mp4")
     @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
@@ -763,6 +777,16 @@ class PreviewControllerTests(unittest.TestCase):
 
 
 class VlcPreviewPlayerTests(unittest.TestCase):
+    def test_build_vlc_media_options_http_skips_start_time(self):
+        from ui.playback.vlc_player import _build_vlc_media_options
+
+        options = _build_vlc_media_options("http://host/videos/lib1/a.mp4", 64.0)
+        self.assertIn(":network-caching=800", options)
+        self.assertTrue(all(not item.startswith(":start-time=") for item in options))
+
+        local = _build_vlc_media_options(r"D:\videos\a.mp4", 64.0)
+        self.assertIn(":start-time=64.000", local)
+
     def test_handle_timeout_pauses_instead_of_stopping(self):
         host = MagicMock()
         host.winId.return_value = 123

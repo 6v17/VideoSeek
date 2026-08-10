@@ -510,6 +510,47 @@ class LibraryIndexingGuiMixin:
             self._end_library_register_ui()
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
 
+    def refresh_selected_subtitle_libraries(self):
+        """Rescan checked subtitle libraries so newly dropped files appear in the tree."""
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_readonly",
+                    "用户机为只读：不能添加库或建索引，请在服务机操作。",
+                ),
+                kind="warning",
+            )
+            return
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+
+        paths = self.library_page.subtitle_video_tree.collect_checked_library_paths()
+        if not paths:
+            self.show_info_dialog(
+                self.texts.get("refresh_dialogue_library", "刷新"),
+                self.texts.get("library_select_libraries_first", "请先勾选一个或多个视频库。"),
+                kind="info",
+            )
+            return
+
+        self._begin_library_register_ui()
+        if not self.indexing_controller.start_register(
+            paths,
+            then_index=False,
+            mode="subtitle",
+            context={"subtitle_mode": True, "finish_kind": "refresh"},
+        ):
+            self._end_library_register_ui()
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+
     def sync_library(self, path):
         from src.services.team_mode_service import is_team_client_mode
 
@@ -620,6 +661,14 @@ class LibraryIndexingGuiMixin:
             self.refresh_library_table()
         if finish_kind == "library_added":
             message = self.texts.get("library_added", "Library added.")
+        elif subtitle_mode:
+            message = self.texts.get(
+                "refresh_dialogue_library_done",
+                "已刷新 {libraries} 个字幕库：新登记 {registered} 个视频。",
+            ).format(
+                libraries=int(result.get("libraries") or 0),
+                registered=int(result.get("registered") or 0),
+            )
         else:
             message = self.texts.get(
                 "refresh_visual_library_done",

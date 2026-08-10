@@ -45,19 +45,21 @@ def get_video_stream_info(video_path):
         os.fspath(video_path),
     ]
 
-    startupinfo = None
-    if hasattr(subprocess, "STARTUPINFO"):
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0
+    run_kwargs = {}
+    try:
+        from src.infra.win_process import hidden_subprocess_kwargs
+
+        run_kwargs = hidden_subprocess_kwargs()
+    except Exception:
+        run_kwargs = {}
 
     try:
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            startupinfo=startupinfo,
             timeout=10,
+            **run_kwargs,
         )
         if result.returncode != 0:
             return {

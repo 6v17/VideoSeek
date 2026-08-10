@@ -380,12 +380,8 @@ def _probe_gpu_runtime_subprocess():
 
     env = os.environ.copy()
     env["VIDEOSEEK_GPU_PROBE_CHILD"] = "1"
-    windows_no_window_kwargs = {}
-    if os.name == "nt":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        windows_no_window_kwargs["startupinfo"] = startupinfo
-        windows_no_window_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    from src.infra.win_process import hidden_subprocess_kwargs
+
     logger.info("Starting GPU runtime probe subprocess: command=%s", command)
     try:
         result = subprocess.run(
@@ -394,7 +390,7 @@ def _probe_gpu_runtime_subprocess():
             text=True,
             timeout=25,
             env=env,
-            **windows_no_window_kwargs,
+            **hidden_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired:
         logger.warning("GPU runtime probe subprocess timed out after 25s")

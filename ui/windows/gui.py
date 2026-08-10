@@ -310,7 +310,9 @@ class MainWindow(
         self.library_page.btn_build_dialogue_index.clicked.connect(self.start_dialogue_index)
         self.library_page.btn_reembed_dialogue.clicked.connect(self.start_dialogue_reembed)
         self.library_page.btn_clear_dialogue.clicked.connect(self.clear_selected_dialogue_transcripts)
-        self.library_page.btn_refresh_dialogue_library.clicked.connect(self.refresh_dialogue_library_table)
+        self.library_page.btn_refresh_dialogue_library.clicked.connect(
+            self.refresh_selected_subtitle_libraries
+        )
         self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
         self.library_page.input_subtitle_sample_interval.editingFinished.connect(
             self._on_subtitle_sample_interval_changed
@@ -382,6 +384,9 @@ class MainWindow(
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Reserve the vertical scrollbar gutter so first open does not shrink
+        # content width when AsNeeded suddenly shows a bar.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         scroll.setWidget(page_widget)
         return scroll
 
@@ -456,15 +461,38 @@ class MainWindow(
             self._refresh_agent_api_status()
             self.refresh_search_telemetry_panel()
         if page_name == "understanding":
+            self._settle_understanding_page_layout()
+        if page_name == "link":
+            self._settle_link_page_layout()
+
+    def _settle_understanding_page_layout(self) -> None:
+        """Refresh understanding chrome while painting is frozen (avoids first-open jump)."""
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return
+        page.setUpdatesEnabled(False)
+        try:
             if hasattr(self, "load_understanding_settings"):
                 self.load_understanding_settings(refresh_status=False)
-            # Load timeline/scope before first paint settles so the track does not jump.
             if hasattr(self, "_refresh_understanding_scope_options"):
                 self._refresh_understanding_scope_options()
-            QTimer.singleShot(0, self._deferred_understanding_page_refresh)
-        if page_name == "link":
+            if hasattr(self, "_refresh_understanding_page_fast"):
+                self._refresh_understanding_page_fast(install_bootstrap=False)
+        finally:
+            page.setUpdatesEnabled(True)
+
+    def _settle_link_page_layout(self) -> None:
+        """Refresh download page labels while painting is frozen (avoids first-open jump)."""
+        page = getattr(self, "link_page", None)
+        if page is None:
+            return
+        page.setUpdatesEnabled(False)
+        try:
             if hasattr(self, "video_download_controller"):
                 self.video_download_controller.refresh_default_dir_label()
+            page.updateGeometry()
+        finally:
+            page.setUpdatesEnabled(True)
 
     def _update_version_info(self, version_info):
         self.version_info = version_info

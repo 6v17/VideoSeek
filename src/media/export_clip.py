@@ -83,13 +83,21 @@ def create_preview_clip(input_path, start_sec, output_path, duration_sec=None):
     return subprocess.run(cmd, startupinfo=startupinfo, capture_output=True)
 
 
-def _resolve_base_clip_window(video_path, start_sec, end_sec=None, *, config=None):
+def _resolve_base_clip_window(
+    video_path,
+    start_sec,
+    end_sec=None,
+    *,
+    config=None,
+    skip_duration_probe: bool = False,
+):
     """Centered preview window or explicit [start_sec, end_sec] — no export padding."""
     from src.app.config import load_config
 
     cfg = config or load_config()
     start_sec = float(start_sec)
-    video_duration = get_video_duration_seconds(video_path)
+    # Team play_url: remote ffprobe/OpenCV on the UI thread can stall for seconds.
+    video_duration = None if skip_duration_probe else get_video_duration_seconds(video_path)
     if video_duration is not None:
         video_duration = max(0.0, float(video_duration))
 

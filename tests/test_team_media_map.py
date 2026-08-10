@@ -30,10 +30,14 @@ class TeamMediaMapTests(unittest.TestCase):
         )
 
     def test_build_mounts_and_play_url(self):
+        from src.services.team_media_map import play_url_to_absolute_path, rewrite_team_scope_video_paths
+
         with tempfile.TemporaryDirectory() as tmp:
             lib = os.path.join(tmp, "library")
             os.makedirs(lib)
-            video = os.path.join(lib, "clip.mp4")
+            nested = os.path.join(lib, "sub")
+            os.makedirs(nested)
+            video = os.path.join(nested, "clip.mp4")
             with open(video, "wb") as handle:
                 handle.write(b"x")
             mounts = build_media_mounts([lib])
@@ -45,6 +49,14 @@ class TeamMediaMapTests(unittest.TestCase):
             )
             self.assertTrue(url.startswith("http://192.168.1.5:18080/videos/"))
             self.assertTrue(url.endswith("clip.mp4"))
+            mapped = play_url_to_absolute_path(url, mounts)
+            self.assertEqual(os.path.normcase(os.path.abspath(mapped)), os.path.normcase(os.path.abspath(video)))
+            rewritten = rewrite_team_scope_video_paths([url], mounts=mounts)
+            self.assertEqual(len(rewritten or []), 1)
+            self.assertEqual(
+                os.path.normcase(os.path.abspath(rewritten[0])),
+                os.path.normcase(os.path.abspath(video)),
+            )
 
     def test_library_browse_url_from_play_url(self):
         from src.services.team_media_map import absolute_path_to_library_browse_url

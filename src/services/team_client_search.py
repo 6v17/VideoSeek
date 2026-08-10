@@ -518,6 +518,7 @@ def run_team_client_search(
     scope_video_paths: Optional[Sequence[str]] = None,
     scope_library_paths: Optional[Sequence[str]] = None,
     video_discovery_enabled: Optional[bool] = None,
+    preview_anchor_sec: Optional[float] = None,
     api_port_default: int = 8765,
     timeout: float = 180.0,
 ) -> List[SearchHit]:
@@ -545,6 +546,11 @@ def run_team_client_search(
         payload["search_precision_mode"] = precision
     if video_discovery_enabled is not None and kind != "dialogue":
         payload["video_discovery_enabled"] = bool(video_discovery_enabled)
+    if preview_anchor_sec is not None and kind != "dialogue":
+        try:
+            payload["preview_anchor_sec"] = max(0.0, float(preview_anchor_sec))
+        except (TypeError, ValueError):
+            pass
 
     video_paths = [str(p).strip() for p in (scope_video_paths or []) if str(p or "").strip()]
     library_paths = [str(p).strip() for p in (scope_library_paths or []) if str(p or "").strip()]

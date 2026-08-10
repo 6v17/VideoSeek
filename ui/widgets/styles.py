@@ -740,52 +740,50 @@ QPushButton#SearchResultsPagerButton:disabled {
 }
 #NavButton {
     text-align: left;
-    padding: 8px 12px 8px 14px;
+    padding: 8px 12px;
     font-weight: 600;
     border-radius: 6px;
-    border: 1px solid transparent;
-    border-left: 3px solid transparent;
-    background: transparent;
+    border: 1px solid __LINE_STRONG__;
+    background: __PANEL__;
     color: __HEADLINE__;
 }
 #NavButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border: 1px solid transparent;
-    border-left: 3px solid transparent;
+    border: 1px solid __LINE_STRONG__;
 }
 #NavButton:pressed {
     background: __TRACK__;
-    border: 1px solid transparent;
-    border-left: 3px solid transparent;
+    border: 1px solid __LINE_STRONG__;
     padding-top: 9px;
     padding-bottom: 7px;
 }
 #NavButton:checked {
     background: __ACCENT_SOFT__;
-    border: 1px solid transparent;
+    border: 1px solid __ACCENT__;
     border-left: 3px solid __ACCENT__;
     color: __HEADLINE__;
 }
 #NavButton:checked:hover {
     background: __ACCENT_SOFT__;
+    border: 1px solid __ACCENT_HOVER__;
     border-left: 3px solid __ACCENT_HOVER__;
 }
 /* Sidebar bottom row + link-page file/cache utilities: visible on light panels (avoid four identical AccentGhost). */
 #SidebarFooterButton, #NeutralToolButton {
     border-radius: 6px;
-    border: 1px solid __LINE__;
-    background: transparent;
+    border: 1px solid __LINE_STRONG__;
+    background: __PANEL__;
     color: __HEADLINE__;
     padding: 7px 12px;
     font-weight: 600;
 }
 #SidebarFooterButton:hover, #NeutralToolButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE__;
+    border-color: __LINE_STRONG__;
 }
 #SidebarFooterButton:pressed, #NeutralToolButton:pressed {
     background: __TRACK__;
-    border-color: __LINE__;
+    border-color: __LINE_STRONG__;
     padding-top: 8px;
     padding-bottom: 6px;
 }
@@ -797,48 +795,48 @@ QPushButton#SearchResultsPagerButton:disabled {
 }
 #SidebarFooterGhost {
     border-radius: 6px;
-    border: 1px solid __LINE__;
-    background: transparent;
+    border: 1px solid __LINE_STRONG__;
+    background: __PANEL__;
     color: __HEADLINE__;
     padding: 7px 12px;
     font-weight: 600;
 }
 #SidebarFooterGhost:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE__;
+    border-color: __LINE_STRONG__;
 }
 #SidebarFooterGhost:pressed {
     background: __TRACK__;
-    border-color: __LINE__;
+    border-color: __LINE_STRONG__;
     padding-top: 8px;
     padding-bottom: 6px;
 }
 #SidebarFooterGhost:disabled {
     color: __MUTED__;
     border-color: __LINE__;
-    background: transparent;
+    background: __FIELD__;
     font-weight: 600;
 }
 #SidebarIconButton {
     border-radius: 6px;
-    border: 1px solid __LINE__;
-    background: transparent;
+    border: 1px solid __LINE_STRONG__;
+    background: __PANEL__;
     color: __HEADLINE__;
     font-weight: 700;
     padding: 0px;
 }
 #SidebarIconButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE__;
+    border-color: __LINE_STRONG__;
 }
 #SidebarIconButton:pressed {
     background: __TRACK__;
-    border-color: __LINE__;
+    border-color: __LINE_STRONG__;
 }
 #SidebarDonateButton {
     border-radius: 6px;
-    border: 1px solid __LINE__;
-    background: transparent;
+    border: 1px solid __LINE_STRONG__;
+    background: __PANEL__;
     color: #e81123;
     font-weight: 700;
     padding: 0px;
@@ -2369,15 +2367,15 @@ THEME_COLORS_LIGHT_BASE = {
     "WARN_SOFT": "#fff4ce",
     "DANGER": "#c42b1c",
     "DANGER_SOFT": "#fde7e9",
-    "SIDEBAR": "#f9f9f9",
+    "SIDEBAR": "#efefef",
     "PANEL": "#ffffff",
     "FIELD": "#ffffff",
-    "HERO": "#f0f0f0",
-    "HERO_LINE": "#e5e5e5",
-    "LINE": "#e5e5e5",
-    "LINE_STRONG": "#d1d1d1",
-    "TRACK": "#ebebeb",
-    "SCROLL": "#c4c4c4",
+    "HERO": "#e8e8e8",
+    "HERO_LINE": "#d4d4d4",
+    "LINE": "#d4d4d4",
+    "LINE_STRONG": "#bdbdbd",
+    "TRACK": "#e4e4e4",
+    "SCROLL": "#b0b0b0",
     "BUTTON_SOFT": "#f5f5f5",
     "BUTTON_SOFT_HOVER": "#ebebeb",
     "VIDEO_BG": "#ececec",

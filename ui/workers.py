@@ -218,6 +218,7 @@ class SearchWorker(QThread):
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
                     video_discovery_enabled=config.video_discovery_enabled,
+                    preview_anchor_sec=config.preview_anchor_sec,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
                 results = filter_hits_by_min_score(results, config.min_score)

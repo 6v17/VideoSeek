@@ -50,11 +50,43 @@ def _prepare_vlc_runtime():
     return vlc, vlc_dir
 
 
+def is_http_media_url(video_path: str) -> bool:
+    text = str(video_path or "").strip().lower()
+    return text.startswith("http://") or text.startswith("https://")
+
+
+# Back-compat alias used inside this module.
+_is_http_media_url = is_http_media_url
+
+
 def _vlc_embed_instance_args():
-    args = ["--quiet", "--no-video-title-show"]
+    # Network caching helps HTTP team play_url; keep modest so start is still snappy.
+    args = [
+        "--quiet",
+        "--no-video-title-show",
+        "--network-caching=800",
+        "--http-caching=800",
+    ]
     if sys.platform.startswith("linux"):
         args.append("--no-xlib")
     return args
+
+
+def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
+    """Media options for preview. HTTP avoids :start-time (slow linear demux over HTTP)."""
+    options: list[str] = []
+    if _is_http_media_url(video_path):
+        options.extend(
+            [
+                ":network-caching=800",
+                ":http-caching=800",
+            ]
+        )
+        return options
+    start = max(0.0, float(start_sec or 0.0))
+    if start > 0.0:
+        options.append(f":start-time={start:.3f}")
+    return options
 
 
 def create_vlc_preview_instance():
@@ -149,6 +181,7 @@ class VlcPreviewPlayer:
         self._pending_seek_ms = None
         start_sec = max(0.0, float(start_sec))
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
+        remote = _is_http_media_url(self._current_video_path)
 
         self._reset_for_replay()
         if not self.is_available():
@@ -157,7 +190,8 @@ class VlcPreviewPlayer:
         # standalone "VLC (Direct3D11 output)" window on the second play.
         self.rebind_output_window()
         try:
-            media = self._instance.media_new(os.fspath(video_path), f":start-time={start_sec:.3f}")
+            options = _build_vlc_media_options(self._current_video_path, start_sec)
+            media = self._instance.media_new(self._current_video_path, *options)
             self._set_media(media)
             self.rebind_output_window()
         except Exception as exc:
@@ -185,10 +219,42 @@ class VlcPreviewPlayer:
         # rapid enlarge-preview clicks made the UI feel frozen.
         self.rebind_output_window()
         QTimer.singleShot(80, self.rebind_output_window)
+        if remote and start_sec > 0.05:
+            # Browser-like: open stream first, then byte-range seek — much faster than :start-time.
+            self._pending_seek_ms = int(start_sec * 1000)
+            self._schedule_pending_seek()
         if self._stop_at_ms > 0:
             self._timer.start()
         self._session_active = True
         return True
+
+    def release_native_output(self):
+        """Detach libvlc from the host HWND so QMediaPlayer can use the same widget."""
+        self.suspend()
+        self._detach_output_window()
+
+    def _schedule_pending_seek(self, attempt: int = 0) -> None:
+        if self._released or self._player is None or self._pending_seek_ms is None:
+            return
+        target_ms = int(self._pending_seek_ms)
+        applied = False
+        try:
+            length_ms = int(self._player.get_length() or 0)
+            playing = bool(self._player.is_playing())
+            if playing or length_ms > 0 or attempt >= 4:
+                self._player.set_time(target_ms)
+                applied = True
+                current = int(self._player.get_time() or -1)
+                if current >= 0 and abs(current - target_ms) <= 1500:
+                    self._pending_seek_ms = None
+                    return
+        except Exception as exc:
+            _log_vlc_debug("pending http seek", exc)
+        if attempt >= 20:
+            self._pending_seek_ms = None
+            return
+        delay_ms = 80 if applied else 120
+        QTimer.singleShot(delay_ms, lambda: self._schedule_pending_seek(attempt + 1))
 
     def stop(self):
         """Hard stop. Prefer ``suspend()`` / ``clear_session()`` from UI paths to avoid hangs."""
@@ -509,8 +575,10 @@ class VlcPreviewPlayer:
         ):
             return False
         start_sec = max(0.0, float(target_ms) / 1000.0)
+        remote = _is_http_media_url(self._current_video_path)
         try:
-            media = self._instance.media_new(self._current_video_path, f":start-time={start_sec:.3f}")
+            options = _build_vlc_media_options(self._current_video_path, start_sec)
+            media = self._instance.media_new(self._current_video_path, *options)
             self.rebind_output_window()
             self._set_media(media)
             self.rebind_output_window()
@@ -523,7 +591,11 @@ class VlcPreviewPlayer:
         self.rebind_output_window()
         QTimer.singleShot(0, self.rebind_output_window)
         QTimer.singleShot(80, self.rebind_output_window)
-        self._pending_seek_ms = None
+        if remote and start_sec > 0.05:
+            self._pending_seek_ms = int(start_sec * 1000)
+            self._schedule_pending_seek()
+        else:
+            self._pending_seek_ms = None
         if self._stop_at_ms > 0:
             self._timer.start()
         return True

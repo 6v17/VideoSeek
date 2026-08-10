@@ -70,6 +70,65 @@ def absolute_path_to_play_url(
     return f"{base}{prefix}{rel}"
 
 
+def play_url_to_absolute_path(play_url: str, mounts: List[Dict[str, str]]) -> str:
+    """Reverse of absolute_path_to_play_url: http://host/videos/<id>/rel → abs path."""
+    from urllib.parse import unquote, urlparse
+
+    text = str(play_url or "").strip()
+    if not text:
+        return ""
+    if not text.lower().startswith(("http://", "https://")):
+        return text
+    parsed = urlparse(text)
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) < 2 or parts[0].lower() != "videos":
+        return ""
+    lib_id = str(parts[1] or "").strip()
+    rel = unquote("/".join(parts[2:]))
+    if not lib_id:
+        return ""
+    for mount in mounts or []:
+        if str(mount.get("id") or "").strip() != lib_id:
+            continue
+        root = str(mount.get("library_path") or "").strip()
+        if not root:
+            continue
+        if not rel:
+            return os.path.abspath(root)
+        return os.path.normpath(os.path.join(os.path.abspath(root), rel.replace("/", os.sep)))
+    return ""
+
+
+def rewrite_team_scope_video_paths(
+    video_paths: Optional[List[str]],
+    mounts: Optional[List[Dict[str, str]]] = None,
+) -> Optional[List[str]]:
+    """Map team play_url scope entries back to server-local filesystem paths."""
+    if not video_paths:
+        return video_paths
+    active = list(mounts) if mounts is not None else []
+    if not active:
+        try:
+            from src.services.team_mode_service import get_active_media_mounts, list_local_library_paths
+
+            active = get_active_media_mounts()
+            if not active:
+                active = build_media_mounts(list_local_library_paths())
+        except Exception:
+            active = []
+    out: List[str] = []
+    for raw in video_paths:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if text.lower().startswith(("http://", "https://")):
+            mapped = play_url_to_absolute_path(text, active)
+            out.append(mapped or text)
+        else:
+            out.append(text)
+    return out or None
+
+
 def absolute_path_to_library_browse_url(
     video_or_library_path: str,
     mounts: List[Dict[str, str]],
