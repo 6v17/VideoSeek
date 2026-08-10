@@ -484,7 +484,7 @@ class LibraryRegisterWorker(QThread):
     finished_signal = Signal(bool, object)
     error_signal = Signal(str)
 
-    def __init__(self, library_paths):
+    def __init__(self, library_paths, *, mode: str = "visual"):
         super().__init__()
         if isinstance(library_paths, (list, tuple, set)):
             paths = [str(p or "").strip() for p in library_paths if str(p or "").strip()]
@@ -492,6 +492,7 @@ class LibraryRegisterWorker(QThread):
             text = str(library_paths or "").strip()
             paths = [text] if text else []
         self.library_paths = paths
+        self.mode = "subtitle" if str(mode or "").strip().lower() == "subtitle" else "visual"
         self._stop_requested = False
 
     def stop(self):
@@ -499,12 +500,15 @@ class LibraryRegisterWorker(QThread):
         self.requestInterruption()
 
     def run(self):
-        from src.services.library_service import register_library_videos
-
         registered = 0
         updated = 0
         ok = False
         try:
+            if self.mode == "subtitle":
+                from src.services.subtitle_library_service import register_subtitle_library_videos as register_fn
+            else:
+                from src.services.library_service import register_library_videos as register_fn
+
             paths = list(self.library_paths)
             total = max(len(paths), 1)
             for index, path in enumerate(paths):
@@ -514,7 +518,7 @@ class LibraryRegisterWorker(QThread):
                     int((index / total) * 100),
                     f"register_library|{index + 1}|{len(paths)}|{path}",
                 )
-                result = register_library_videos(library_path=path) or {}
+                result = register_fn(library_path=path) or {}
                 registered += int(result.get("registered") or 0)
                 updated += int(result.get("updated") or 0)
             else:
@@ -525,6 +529,7 @@ class LibraryRegisterWorker(QThread):
                 "updated": updated,
                 "libraries": len(paths),
                 "paths": paths,
+                "mode": self.mode,
                 "stopped": bool(self._stop_requested or self.isInterruptionRequested()) and not ok,
             }
         except Exception as exc:
@@ -535,6 +540,7 @@ class LibraryRegisterWorker(QThread):
                 "updated": updated,
                 "libraries": len(self.library_paths),
                 "paths": list(self.library_paths),
+                "mode": self.mode,
                 "error": str(exc).strip() or repr(exc),
             }
             ok = False

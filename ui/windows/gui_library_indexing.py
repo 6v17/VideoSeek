@@ -16,7 +16,6 @@ from src.services.library_service import (
     list_libraries,
     list_library_video_entries,
     list_local_vector_details,
-    register_library_videos,
 )
 from src.services.subtitle_library_service import (
     add_subtitle_library,
@@ -541,6 +540,8 @@ class LibraryIndexingGuiMixin:
     def _finish_library_register(self, success, payload):
         result = dict(payload or {})
         then_index = bool(result.get("then_index"))
+        subtitle_mode = bool(result.get("subtitle_mode")) or str(result.get("mode") or "") == "subtitle"
+        finish_kind = str(result.get("finish_kind") or "refresh").strip() or "refresh"
         if not success:
             self._end_library_register_ui()
             error = str(result.get("error") or "").strip()
@@ -557,14 +558,20 @@ class LibraryIndexingGuiMixin:
             return
 
         self._end_library_register_ui()
-        self.refresh_library_table()
-        message = self.texts.get(
-            "refresh_visual_library_done",
-            "已刷新 {libraries} 个库：新登记 {registered} 个视频。",
-        ).format(
-            libraries=int(result.get("libraries") or 0),
-            registered=int(result.get("registered") or 0),
-        )
+        if subtitle_mode:
+            self.refresh_dialogue_library_table()
+        else:
+            self.refresh_library_table()
+        if finish_kind == "library_added":
+            message = self.texts.get("library_added", "Library added.")
+        else:
+            message = self.texts.get(
+                "refresh_visual_library_done",
+                "已刷新 {libraries} 个库：新登记 {registered} 个视频。",
+            ).format(
+                libraries=int(result.get("libraries") or 0),
+                registered=int(result.get("registered") or 0),
+            )
         self.library_page.lbl_status.setText(message)
         self.show_info_dialog(
             self.texts.get("success_title", "Success"),
@@ -604,6 +611,13 @@ class LibraryIndexingGuiMixin:
                 kind="warning",
             )
             return
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
         path = QFileDialog.getExistingDirectory(self, self.texts["select_folder"])
         if not path:
             return
@@ -614,22 +628,23 @@ class LibraryIndexingGuiMixin:
             else:
                 result = add_library(path)
             if result.get("added"):
-                try:
+                lib_path = str(result.get("path") or path or "").strip() or path
+                self._begin_library_register_ui()
+                started = self.indexing_controller.start_register(
+                    [lib_path],
+                    mode="subtitle" if subtitle_mode else "visual",
+                    context={
+                        "finish_kind": "library_added",
+                        "subtitle_mode": bool(subtitle_mode),
+                    },
+                )
+                if not started:
+                    self._end_library_register_ui()
                     if subtitle_mode:
-                        register_subtitle_library_videos(
-                            library_path=result.get("path") or path
-                        )
+                        self.refresh_dialogue_library_table()
                     else:
-                        register_library_videos(library_path=result.get("path") or path)
-                except Exception:
-                    pass
-                if subtitle_mode:
-                    self.refresh_dialogue_library_table()
-                else:
-                    self.refresh_library_table()
-                status_text = self.texts["library_added"]
-                self.library_page.lbl_status.setText(status_text)
-                self.show_info_dialog(self.texts["success_title"], status_text, kind="success")
+                        self.refresh_library_table()
+                    self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             elif result.get("reason") == "overlap":
                 message = self.texts["library_overlap"].format(path=result.get("conflict_path", ""))
                 self.library_page.lbl_status.setText(message)

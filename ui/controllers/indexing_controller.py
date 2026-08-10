@@ -24,6 +24,7 @@ class IndexingController(QObject):
         self.current_index_from_vectors_only = False
         self._register_then_index = False
         self._pending_index_kwargs = None
+        self._register_context = {}
 
     def is_running(self):
         return self.worker is not None and self.worker.isRunning()
@@ -71,7 +72,15 @@ class IndexingController(QObject):
         self.worker.start()
         return True
 
-    def start_register(self, library_paths, *, then_index=False, index_kwargs=None):
+    def start_register(
+        self,
+        library_paths,
+        *,
+        then_index=False,
+        index_kwargs=None,
+        mode: str = "visual",
+        context=None,
+    ):
         """Register videos under ``library_paths`` on a background thread."""
         if self.is_busy():
             return False
@@ -85,7 +94,8 @@ class IndexingController(QObject):
 
         self._register_then_index = bool(then_index)
         self._pending_index_kwargs = dict(index_kwargs or {}) if then_index else None
-        self.register_worker = LibraryRegisterWorker(paths)
+        self._register_context = dict(context or {})
+        self.register_worker = LibraryRegisterWorker(paths, mode=mode)
         self.register_worker.progress_signal.connect(self.register_progress.emit)
         self.register_worker.error_signal.connect(self.register_error.emit)
         self.register_worker.finished_signal.connect(self._finish_register)
@@ -110,8 +120,11 @@ class IndexingController(QObject):
         result["then_index"] = bool(self._register_then_index)
         if self._pending_index_kwargs is not None:
             result["index_kwargs"] = dict(self._pending_index_kwargs)
+        if self._register_context:
+            result.update(self._register_context)
         self._register_then_index = False
         self._pending_index_kwargs = None
+        self._register_context = {}
         worker = self.register_worker
         self.register_worker = None
         if worker is not None:
