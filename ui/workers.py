@@ -13,6 +13,8 @@ from src.domain.search_hit import SearchHit, coerce_search_hit
 from src.services.about_service import get_about_payload
 from src.services.ffmpeg_service import download_ffmpeg
 from src.services.library_service import list_local_vector_details
+from src.services.clone_import_service import import_clone_component_zip
+from src.services.clone_paths import CLONE_MANIFEST_FILENAME
 from src.services.model_package_service import import_model_package_zip, import_model_packages
 from src.services.understanding_import_service import classify_package_zip, import_understanding_component_zip
 from src.services.understanding_resource_service import SEARCH_MODEL_MANIFEST_FILENAME, UNDERSTANDING_MANIFEST_FILENAME
@@ -475,6 +477,70 @@ class RemoveLibraryWorker(QThread):
             ok = False
         finally:
             self.finished_signal.emit(ok)
+
+
+class LibraryRegisterWorker(QThread):
+    """Discover/register videos under library folders off the UI thread."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, object)
+    error_signal = Signal(str)
+
+    def __init__(self, library_paths):
+        super().__init__()
+        if isinstance(library_paths, (list, tuple, set)):
+            paths = [str(p or "").strip() for p in library_paths if str(p or "").strip()]
+        else:
+            text = str(library_paths or "").strip()
+            paths = [text] if text else []
+        self.library_paths = paths
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        from src.services.library_service import register_library_videos
+
+        registered = 0
+        updated = 0
+        ok = False
+        try:
+            paths = list(self.library_paths)
+            total = max(len(paths), 1)
+            for index, path in enumerate(paths):
+                if self._stop_requested or self.isInterruptionRequested():
+                    break
+                self.progress_signal.emit(
+                    int((index / total) * 100),
+                    f"register_library|{index + 1}|{len(paths)}|{path}",
+                )
+                result = register_library_videos(library_path=path) or {}
+                registered += int(result.get("registered") or 0)
+                updated += int(result.get("updated") or 0)
+            else:
+                ok = True
+                self.progress_signal.emit(100, f"register_library|{len(paths)}|{len(paths)}|done")
+            payload = {
+                "registered": registered,
+                "updated": updated,
+                "libraries": len(paths),
+                "paths": paths,
+                "stopped": bool(self._stop_requested or self.isInterruptionRequested()) and not ok,
+            }
+        except Exception as exc:
+            logger.exception("Library register worker failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+            payload = {
+                "registered": registered,
+                "updated": updated,
+                "libraries": len(self.library_paths),
+                "paths": list(self.library_paths),
+                "error": str(exc).strip() or repr(exc),
+            }
+            ok = False
+        self.finished_signal.emit(bool(ok), payload)
 
 
 class IndexUpdateWorker(QThread):
@@ -954,6 +1020,8 @@ class ModelPackageImportWorker(QThread):
                     "updated": 0,
                     "understanding_imported": [],
                     "understanding_updated": [],
+                    "clone_imported": [],
+                    "clone_updated": [],
                     "errors": [],
                     "checksum_verified_count": 0,
                 }
@@ -981,6 +1049,19 @@ class ModelPackageImportWorker(QThread):
                         else:
                             aggregate["imported"] += 1
                             aggregate["understanding_imported"].append(component_id)
+                    elif package_kind == "clone":
+                        package_result = import_clone_component_zip(
+                            self.model_root,
+                            zip_path,
+                            sha256_file=matching_sha or None,
+                        )
+                        component_id = str(package_result.get("component_id", "") or "").strip()
+                        if package_result.get("updated"):
+                            aggregate["updated"] += 1
+                            aggregate["clone_updated"].append(component_id)
+                        else:
+                            aggregate["imported"] += 1
+                            aggregate["clone_imported"].append(component_id)
                     elif package_kind == "search":
                         package_result = import_model_package_zip(
                             self.model_root,
@@ -993,7 +1074,8 @@ class ModelPackageImportWorker(QThread):
                     else:
                         aggregate["errors"].append(
                             f"{os.path.basename(zip_path)}: unrecognized package "
-                            f"(expected root {UNDERSTANDING_MANIFEST_FILENAME} or nested {SEARCH_MODEL_MANIFEST_FILENAME})"
+                            f"(expected root {CLONE_MANIFEST_FILENAME}, "
+                            f"{UNDERSTANDING_MANIFEST_FILENAME}, or nested {SEARCH_MODEL_MANIFEST_FILENAME})"
                         )
                         continue
                     if package_result.get("checksum_verified"):
@@ -1049,4 +1131,149 @@ class ShotListBatchExportWorker(QThread):
             self.finished_payload.emit(dict(payload or {}))
         except Exception as exc:
             logger.exception("Shot list batch export failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
+class CloneIndexWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+
+    def __init__(
+        self,
+        library_path: str = "",
+        *,
+        fps: float = 5.0,
+        force: bool = False,
+        video_rel_paths: list | None = None,
+        jobs: list | None = None,
+    ):
+        super().__init__()
+        # Prefer explicit jobs; fall back to a single library job.
+        if jobs:
+            self.jobs = [
+                {
+                    "library_path": str(item.get("library_path") or ""),
+                    "video_rel_paths": item.get("video_rel_paths"),
+                }
+                for item in jobs
+                if str((item or {}).get("library_path") or "").strip()
+            ]
+        else:
+            self.jobs = [
+                {
+                    "library_path": str(library_path or ""),
+                    "video_rel_paths": list(video_rel_paths) if video_rel_paths is not None else None,
+                }
+            ]
+        self.fps = float(fps)
+        self.force = bool(force)
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        from src.services.clone_index_service import index_clone_library
+
+        try:
+            aggregated = {
+                "indexed": 0,
+                "skipped": 0,
+                "failed": 0,
+                "videos": [],
+                "library_path": "",
+                "stopped": False,
+            }
+            job_count = max(len(self.jobs), 1)
+            for job_index, job in enumerate(self.jobs):
+                if self._stop_requested or self.isInterruptionRequested():
+                    aggregated["stopped"] = True
+                    break
+                lib = str(job.get("library_path") or "")
+                rels = job.get("video_rel_paths")
+
+                def _progress(value: int, text: str, *, _ji=job_index, _jc=job_count):
+                    # Map each job into a slice of the overall bar.
+                    base = int(_ji * 100 / _jc)
+                    span = max(int(100 / _jc), 1)
+                    mapped = min(99, base + int(max(0, min(int(value), 100)) * span / 100))
+                    self.progress_signal.emit(mapped, str(text))
+
+                result = index_clone_library(
+                    lib,
+                    fps=self.fps,
+                    force=self.force,
+                    video_rel_paths=rels,
+                    progress_callback=_progress,
+                    should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                )
+                aggregated["indexed"] += int(result.get("indexed", 0) or 0)
+                aggregated["skipped"] += int(result.get("skipped", 0) or 0)
+                aggregated["failed"] += int(result.get("failed", 0) or 0)
+                aggregated["videos"].extend(list(result.get("videos") or []))
+                aggregated["library_path"] = str(result.get("library_path") or lib)
+                if result.get("stopped"):
+                    aggregated["stopped"] = True
+                    break
+            stopped = bool(aggregated.get("stopped")) or bool(self._stop_requested)
+            self.progress_signal.emit(100, "clone_index_finished" if not stopped else "clone_index_stopped")
+            self.finished_signal.emit(True, stopped, aggregated)
+        except Exception as exc:
+            logger.exception("Clone index failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
+class CloneMatchWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+
+    def __init__(
+        self,
+        query_path: str,
+        library_path: str = "",
+        *,
+        fps: float = 5.0,
+        min_score: float = 0.82,
+        min_hits: int = 2,
+        top_k: int = 1,
+        mode: str = "balanced",
+        source_video_paths: list | None = None,
+    ):
+        super().__init__()
+        self.query_path = str(query_path or "")
+        self.library_path = str(library_path or "")
+        self.fps = float(fps)
+        self.min_score = float(min_score)
+        self.min_hits = int(min_hits)
+        self.top_k = int(top_k)
+        self.mode = str(mode or "balanced")
+        self.source_video_paths = [str(p) for p in (source_video_paths or []) if str(p or "").strip()]
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        from src.services.clone_match_service import match_video
+
+        try:
+            result = match_video(
+                self.query_path,
+                self.library_path,
+                fps=self.fps,
+                min_score=self.min_score,
+                min_hits=self.min_hits,
+                top_k=self.top_k,
+                source_video_paths=self.source_video_paths or None,
+                progress_callback=lambda value, text: self.progress_signal.emit(int(value), str(text)),
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+            )
+            if isinstance(result, dict):
+                result["mode"] = self.mode
+            stopped = bool(result.get("stopped")) or bool(self._stop_requested)
+            self.finished_signal.emit(True, stopped, result)
+        except Exception as exc:
+            logger.exception("Clone match failed")
             self.error_signal.emit(str(exc).strip() or repr(exc))

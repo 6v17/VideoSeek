@@ -152,6 +152,9 @@ class MainWindow(
         self.indexing_controller.runtime_status_changed.connect(self.push_inference_status)
         self.indexing_controller.error_occurred.connect(self._handle_indexing_error)
         self.indexing_controller.finished.connect(self._finish_indexing)
+        self.indexing_controller.register_progress.connect(self._update_library_register_progress)
+        self.indexing_controller.register_error.connect(self._handle_library_register_error)
+        self.indexing_controller.register_finished.connect(self._finish_library_register)
         self.dialogue_index_worker = None
         self.understanding_controller = UnderstandingController(self)
         self.understanding_controller.status_changed.connect(self._update_understanding_progress)

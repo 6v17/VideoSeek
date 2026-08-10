@@ -299,7 +299,7 @@ class LibraryIndexingGuiMixin:
         if (
             getattr(self, "_remove_library_running", False)
             or self._remove_library_worker_running()
-            or self.indexing_controller.is_running()
+            or self.indexing_controller.is_busy()
             or self._dialogue_index_running()
         ):
             btn.setEnabled(False)
@@ -422,7 +422,6 @@ class LibraryIndexingGuiMixin:
     def refresh_selected_visual_libraries(self):
         """Rescan checked libraries so newly dropped files appear in the tree."""
         from src.services.team_mode_service import is_team_client_mode
-        from src.services.library_service import register_library_videos
 
         if is_team_client_mode():
             self.show_info_dialog(
@@ -434,7 +433,11 @@ class LibraryIndexingGuiMixin:
                 kind="warning",
             )
             return
-        if self.indexing_controller.is_running() or self._dialogue_index_running():
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             return
 
@@ -447,44 +450,126 @@ class LibraryIndexingGuiMixin:
             )
             return
 
-        registered = 0
-        try:
-            for path in paths:
-                result = register_library_videos(library_path=path)
-                registered += int(result.get("registered") or 0)
-        except Exception as exc:
-            self.show_error_dialog(self.texts.get("library_load_failed", "Failed"), exc)
+        self._begin_library_register_ui()
+        if not self.indexing_controller.start_register(paths, then_index=False):
+            self._end_library_register_ui()
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+
+    def sync_library(self, path):
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            return
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+        # Discover newly dropped files off the UI thread, then full-library index.
+        self._begin_library_register_ui()
+        started = self.indexing_controller.start_register(
+            [path],
+            then_index=True,
+            index_kwargs={
+                "target_lib": path,
+                "rebuild_global_assets": False,
+                "video_ids": None,
+            },
+        )
+        if not started:
+            self._end_library_register_ui()
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+
+    def _begin_library_register_ui(self):
+        self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_refresh_visual_library.setEnabled(False)
+        self.library_page.btn_build_dialogue_index.setEnabled(False)
+        self.library_page.btn_reembed_dialogue.setEnabled(False)
+        self.library_page.btn_clear_dialogue.setEnabled(False)
+        self.library_page.btn_export_dialogue.setEnabled(False)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(False)
+        self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(False)
+        self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_remove_lib.setEnabled(False)
+        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self.library_page.progress_bar.setVisible(True)
+        self.library_page.progress_bar.setValue(0)
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_registering", "正在扫描并登记视频...")
+        )
+
+    def _end_library_register_ui(self):
+        self.library_page.btn_sync_db.setEnabled(True)
+        self.library_page.btn_refresh_visual_library.setEnabled(True)
+        self.library_page.btn_build_dialogue_index.setEnabled(True)
+        self.library_page.btn_reembed_dialogue.setEnabled(True)
+        self.library_page.btn_clear_dialogue.setEnabled(True)
+        self.library_page.btn_export_dialogue.setEnabled(True)
+        self.library_page.btn_refresh_dialogue_library.setEnabled(True)
+        self.library_page.input_subtitle_sample_interval.setEnabled(True)
+        self.library_page.input_subtitle_ocr_batch.setEnabled(True)
+        self.library_page.btn_add_lib.setEnabled(True)
+        self.library_page.btn_cleanup_missing.setEnabled(True)
+        self.library_page.progress_bar.setVisible(False)
+        self._refresh_remove_library_button()
+
+    def _update_library_register_progress(self, value, text):
+        self.library_page.progress_bar.setValue(int(value))
+        raw = str(text or "")
+        if raw.startswith("register_library|"):
+            parts = raw.split("|")
+            if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "library_registering_progress",
+                        "正在登记库 {current}/{total}...",
+                    ).format(current=parts[1], total=parts[2])
+                )
+                return
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_registering", "正在扫描并登记视频...")
+        )
+
+    def _handle_library_register_error(self, message):
+        self.library_page.lbl_status.setText(
+            self.texts.get("library_load_failed", "Failed")
+        )
+
+    def _finish_library_register(self, success, payload):
+        result = dict(payload or {})
+        then_index = bool(result.get("then_index"))
+        if not success:
+            self._end_library_register_ui()
+            error = str(result.get("error") or "").strip()
+            self.show_error_dialog(
+                self.texts.get("library_load_failed", "Failed"),
+                error or self.texts.get("library_load_failed", "Failed"),
+            )
+            return
+        if then_index:
+            # Hand off to the normal index start path (buttons/progress handled there).
+            self._end_library_register_ui()
+            index_kwargs = dict(result.get("index_kwargs") or {})
+            self.start_update_index(**index_kwargs)
             return
 
+        self._end_library_register_ui()
         self.refresh_library_table()
         message = self.texts.get(
             "refresh_visual_library_done",
             "已刷新 {libraries} 个库：新登记 {registered} 个视频。",
-        ).format(libraries=len(paths), registered=registered)
+        ).format(
+            libraries=int(result.get("libraries") or 0),
+            registered=int(result.get("registered") or 0),
+        )
         self.library_page.lbl_status.setText(message)
         self.show_info_dialog(
             self.texts.get("success_title", "Success"),
             message,
             kind="success",
-        )
-
-    def sync_library(self, path):
-        from src.services.team_mode_service import is_team_client_mode
-        from src.services.library_service import register_library_videos
-
-        if is_team_client_mode():
-            return
-        # Full-library sync: discover newly dropped files first, then scan the
-        # whole folder. Passing only already-registered video_ids skips anything
-        # added after the library was first created.
-        try:
-            register_library_videos(library_path=path)
-        except Exception:
-            pass
-        self.start_update_index(
-            target_lib=path,
-            rebuild_global_assets=False,
-            video_ids=None,
         )
 
     def open_library_folder(self, path):
@@ -567,7 +652,10 @@ class LibraryIndexingGuiMixin:
         if getattr(self, "_remove_library_running", False) or self._remove_library_worker_running():
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             return
-        if self.indexing_controller.is_running() or self._dialogue_index_running():
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+        ):
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
             return
         if isinstance(path, (list, tuple, set)):
@@ -1094,7 +1182,7 @@ class LibraryIndexingGuiMixin:
         title = self.texts.get(title_key, title_key)
 
         if (
-            self.indexing_controller.is_running()
+            self.indexing_controller.is_busy()
             or self._dialogue_index_running()
             or self._remove_library_worker_running()
         ):
@@ -1561,7 +1649,7 @@ class LibraryIndexingGuiMixin:
                 return
             self.switch_page("library")
             if (
-                self.indexing_controller.is_running()
+                self.indexing_controller.is_busy()
                 or self._dialogue_index_running()
                 or self._remove_library_worker_running()
             ):
