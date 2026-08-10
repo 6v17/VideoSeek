@@ -887,38 +887,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
                 parts.append(item)
         self.sampling_rules_summary.setText(" | ".join(parts[:3]) + (" ..." if len(parts) > 3 else ""))
 
-    def get_sampling_fps_mode(self):
-        return str(self.input_sampling_fps_mode.currentData() or "fixed")
-
-    def set_sampling_fps_mode(self, mode):
-        normalized_mode = str(mode or "fixed")
-        index = self.input_sampling_fps_mode.findData(normalized_mode)
-        self.input_sampling_fps_mode.setCurrentIndex(0 if index < 0 else index)
-        self._update_sampling_mode_visibility()
-
-    def set_sampling_fps_rules_text(self, rules_text):
-        self.input_sampling_fps_rules.setText(str(rules_text or "").strip())
-        self.refresh_sampling_rules_summary()
-
-    def get_sampling_fps_rules_text(self):
-        return self.input_sampling_fps_rules.text().strip()
-
-    def set_sampling_rules_error_state(self, has_error):
-        self.sampling_rules_summary.setProperty("state", "error" if has_error else "neutral")
-        repolish_widget(self.sampling_rules_summary)
-
-    def refresh_sampling_rules_summary(self):
-        normalized = self.get_sampling_fps_rules_text()
-        if not normalized:
-            self.sampling_rules_summary.setText("")
-            return
-        parts = []
-        for chunk in normalized.split(";"):
-            item = chunk.strip()
-            if item:
-                parts.append(item)
-        self.sampling_rules_summary.setText(" | ".join(parts[:3]) + (" ..." if len(parts) > 3 else ""))
-
     def is_chunk_policy_syncing(self) -> bool:
         return bool(self._chunk_policy_syncing)
 

@@ -2,8 +2,6 @@
 from .about import AboutDialog
 from .app_message import AppMessageDialog
 from .common import SortableTableWidgetItem, dialog_palette
-from .legacy_resource_table import LegacyResourceTableDialog
-from .link_editor import LinkEditorDialog
 from .mobile_bridge import MobileBridgeDialog
 from .model_download import ModelDownloadDialog
 from .donate import DonateDialog
@@ -14,8 +12,6 @@ from .sampling_rules import SamplingRulesDialog
 __all__ = [
     "AboutDialog",
     "AppMessageDialog",
-    "LegacyResourceTableDialog",
-    "LinkEditorDialog",
     "MobileBridgeDialog",
     "ModelDownloadDialog",
     "DonateDialog",
