@@ -54,7 +54,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.scroll.setWidget(self.scroll_content)
         content_layout = QVBoxLayout(self.scroll_content)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(10)
 
         self.general_title = QLabel()
         self.general_title.setObjectName("CardTitle")

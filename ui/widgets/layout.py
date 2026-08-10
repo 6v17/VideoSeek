@@ -31,8 +31,8 @@ WINDOW_SIZES = {
 
 COMPONENT_SIZES = {
     "sidebar_width": 248,
-    "nav_button_height": 42,
-    "sidebar_action_height": 36,
+    "nav_button_height": 36,
+    "sidebar_action_height": 32,
     "image_drop_min_height": 280,
     "search_query_tab_chrome_height": 41,
     "search_query_tab_page_margins_v": 11,

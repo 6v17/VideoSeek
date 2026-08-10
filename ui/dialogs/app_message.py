@@ -40,8 +40,8 @@ class AppMessageDialog(QDialog):
         )
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 18, 18, 18)
-        card = VSCard(variant="dialog", margins=(22, 22, 22, 18), spacing=14)
+        outer.setContentsMargins(14, 14, 14, 14)
+        card = VSCard(variant="dialog", margins=(18, 18, 18, 14), spacing=12)
         layout = card.content_layout
 
         top = QHBoxLayout()

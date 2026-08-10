@@ -266,8 +266,8 @@ class NavigationSidebar(QWidget):
         self.setFixedWidth(COMPONENT_SIZES["sidebar_width"])
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 20, 18, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 16, 12, 12)
+        layout.setSpacing(8)
 
         self.title = QLabel("VideoSeek")
         self.title.setObjectName("BrandTitle")
@@ -280,8 +280,8 @@ class NavigationSidebar(QWidget):
         self.hero_card = QFrame()
         self.hero_card.setObjectName("HeroCard")
         hero_layout = QVBoxLayout(self.hero_card)
-        hero_layout.setContentsMargins(14, 14, 14, 14)
-        hero_layout.setSpacing(6)
+        hero_layout.setContentsMargins(12, 10, 12, 10)
+        hero_layout.setSpacing(4)
         self.hero_tag = QLabel("WORKSPACE")
         self.hero_tag.setObjectName("HeroTag")
         self.hero_title = QLabel("Operate search, indexing, and settings separately")
@@ -298,13 +298,11 @@ class NavigationSidebar(QWidget):
         self.btn_page_search = self._build_nav_button("Search", checked=True)
         self.btn_page_library = self._build_nav_button("Libraries")
         self.btn_page_understanding = self._build_nav_button("Evidence")
-        self.btn_page_clone = self._build_nav_button("Video Clone")
         self.btn_page_link = self._build_nav_button("Link Match")
         self.btn_page_settings = self._build_nav_button("Settings")
         layout.addWidget(self.btn_page_search)
         layout.addWidget(self.btn_page_library)
         layout.addWidget(self.btn_page_understanding)
-        layout.addWidget(self.btn_page_clone)
         layout.addWidget(self.btn_page_link)
         layout.addWidget(self.btn_page_settings)
         self.runtime_hint = QLabel("")
@@ -378,7 +376,6 @@ class NavigationSidebar(QWidget):
             "link": self.btn_page_link,
             "library": self.btn_page_library,
             "understanding": self.btn_page_understanding,
-            "clone": self.btn_page_clone,
             "settings": self.btn_page_settings,
         }
         for name, button in mapping.items():

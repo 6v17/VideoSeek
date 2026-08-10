@@ -5,6 +5,7 @@ See docs/pyside6_ui_architecture.md §9 for component ↔ objectName mapping and
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -105,10 +106,20 @@ class PageHeader(QFrame):
         super().__init__(parent)
         self.setObjectName("PageHeader")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(10)
         self.title = QLabel()
         self.title.setObjectName("PageTitle")
+        self.badge = QLabel()
+        self.badge.setObjectName("PageTitleBadge")
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.badge.hide()
+        title_row.addWidget(self.title, 0)
+        title_row.addWidget(self.badge, 0)
+        title_row.addStretch(1)
         self.subtitle = QLabel()
         self.subtitle.setObjectName("PageSubtitle")
         self.subtitle.setWordWrap(True)
@@ -126,9 +137,15 @@ class PageHeader(QFrame):
         banner_layout.addWidget(self.runtime_banner_text, 1)
         banner_layout.addWidget(self.runtime_banner_action, 0)
         self.runtime_banner.hide()
-        layout.addWidget(self.title)
+        layout.addLayout(title_row)
         layout.addWidget(self.subtitle)
         layout.addWidget(self.runtime_banner)
+
+    def set_badge(self, text: str = "", *, visible: bool | None = None) -> None:
+        label = str(text or "").strip()
+        self.badge.setText(label)
+        show = bool(label) if visible is None else bool(visible)
+        self.badge.setVisible(show and bool(label))
 
 
 class PageScaffold(QWidget):

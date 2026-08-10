@@ -39,17 +39,21 @@ QMenu::separator {
 #AppRoot, #ContentArea {
     background: __WINDOW__;
 }
-#NavSidebar, #PageHeader, #PanelCard, #SubPanelCard, #NoticeCard {
+#NavSidebar {
     background: __SIDEBAR__;
-    border: 1px solid __LINE__;
-    border-radius: 18px;
+    border: none;
+    border-right: 1px solid __LINE__;
+    border-radius: 0px;
 }
 #PageHeader, #PanelCard, #SubPanelCard {
     background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
 }
 #NoticeCard {
     background: __NOTICE_BG__;
     border: 1px solid __NOTICE_LINE__;
+    border-radius: 10px;
 }
 #NoticeUpdateHint {
     color: __ACCENT__;
@@ -61,7 +65,7 @@ QMenu::separator {
 #RuntimeBanner {
     background: __ACCENT_SOFT__;
     border: 1px solid __ACCENT__;
-    border-radius: 18px;
+    border-radius: 8px;
 }
 #RuntimeBanner #RuntimeBannerText {
     color: __TEXT__;
@@ -71,7 +75,7 @@ QMenu::separator {
 #RuntimeBanner[bannerTone="warn"] {
     background: __WARN_SOFT__;
     border: 1px solid __WARN__;
-    border-radius: 18px;
+    border-radius: 8px;
 }
 #RuntimeBanner[bannerTone="warn"] #RuntimeBannerText {
     color: __WARN__;
@@ -92,12 +96,17 @@ QMenu::separator {
 #SettingsSectionHeader {
     background: __FIELD__;
     border-bottom: 1px solid __LINE__;
-    border-top-left-radius: 18px;
-    border-top-right-radius: 18px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+#SettingsSectionHeader #CardTitle {
+    font-size: 14px;
+    font-weight: 700;
+    color: __HEADLINE__;
 }
 #BrandTitle {
     color: __HEADLINE__;
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 700;
 }
 #BrandSubtitle, #HeroBody, #PageSubtitle, #CardHint {
@@ -220,8 +229,8 @@ QCheckBox:disabled {
     font-size: 12px;
     font-weight: 600;
     background: __ACCENT_SOFT__;
-    border: 1px solid __LINE_STRONG__;
-    border-radius: 10px;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
     padding: 8px 12px;
     line-height: 1.35em;
     min-height: 18px;
@@ -229,7 +238,7 @@ QCheckBox:disabled {
 #HeroCard {
     background: __HERO__;
     border: 1px solid __HERO_LINE__;
-    border-radius: 16px;
+    border-radius: 8px;
 }
 #HeroTag {
     color: __ACCENT__;
@@ -241,7 +250,17 @@ QCheckBox:disabled {
     font-weight: 700;
 }
 #PageTitle {
-    font-size: 24px;
+    font-size: 20px;
+}
+#PageTitleBadge {
+    color: __WARN__;
+    background: __WARN_SOFT__;
+    border: 1px solid __WARN__;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    min-height: 22px;
 }
 #CardTitle {
     font-size: 16px;
@@ -253,9 +272,9 @@ QCheckBox:disabled {
     padding: 2px 0 4px 0;
 }
 QPushButton {
-    border-radius: 10px;
+    border-radius: 7px;
     border: 1px solid __LINE__;
-    padding: 8px 12px;
+    padding: 7px 12px;
     background: __BUTTON_SOFT__;
     color: __HEADLINE__;
 }
@@ -438,10 +457,15 @@ QPushButton:disabled {
 }
 #GhostButton {
     background: transparent;
+    border-color: __LINE__;
+}
+#GhostButton:hover {
+    background: __BUTTON_SOFT__;
+    border-color: __LINE__;
 }
 #GhostButton:pressed {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE_STRONG__;
+    border-color: __LINE__;
 }
 #PresetChipButton {
     background: __ACCENT_SOFT__;
@@ -460,7 +484,7 @@ QPushButton:disabled {
 #SearchPresetsTrack {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 6px;
 }
 #SearchPresetsScroll {
     background: transparent;
@@ -659,47 +683,54 @@ QPushButton#SearchResultsPagerButton:disabled {
 }
 #NavButton {
     text-align: left;
-    padding: 8px 12px;
-    padding-left: 14px;
+    padding: 8px 12px 8px 14px;
     font-weight: 600;
-    border-radius: 10px;
-    border: 1px solid __LINE_STRONG__;
-    background: __TRACK__;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
+    background: transparent;
     color: __HEADLINE__;
 }
 #NavButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE_STRONG__;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
 }
 #NavButton:pressed {
-    background: __BUTTON_SOFT__;
-    border-color: __LINE_STRONG__;
+    background: __TRACK__;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
     padding-top: 9px;
     padding-bottom: 7px;
 }
 #NavButton:checked {
     background: __ACCENT_SOFT__;
-    border-color: __ACCENT__;
+    border: 1px solid transparent;
+    border-left: 3px solid __ACCENT__;
     color: __HEADLINE__;
+}
+#NavButton:checked:hover {
+    background: __ACCENT_SOFT__;
+    border-left: 3px solid __ACCENT_HOVER__;
 }
 /* Sidebar bottom row + link-page file/cache utilities: visible on light panels (avoid four identical AccentGhost). */
 #SidebarFooterButton, #NeutralToolButton {
-    border-radius: 10px;
-    border: 1px solid __LINE_STRONG__;
-    background: __TRACK__;
+    border-radius: 6px;
+    border: 1px solid __LINE__;
+    background: transparent;
     color: __HEADLINE__;
-    padding: 8px 12px;
+    padding: 7px 12px;
     font-weight: 600;
 }
 #SidebarFooterButton:hover, #NeutralToolButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE_STRONG__;
+    border-color: __LINE__;
 }
 #SidebarFooterButton:pressed, #NeutralToolButton:pressed {
-    background: __BUTTON_SOFT__;
-    border-color: __LINE_STRONG__;
-    padding-top: 9px;
-    padding-bottom: 7px;
+    background: __TRACK__;
+    border-color: __LINE__;
+    padding-top: 8px;
+    padding-bottom: 6px;
 }
 #SidebarFooterButton:disabled, #NeutralToolButton:disabled {
     color: __MUTED__;
@@ -708,22 +739,22 @@ QPushButton#SearchResultsPagerButton:disabled {
     font-weight: 600;
 }
 #SidebarFooterGhost {
-    border-radius: 10px;
-    border: 1px solid __LINE_STRONG__;
+    border-radius: 6px;
+    border: 1px solid __LINE__;
     background: transparent;
     color: __HEADLINE__;
-    padding: 8px 12px;
+    padding: 7px 12px;
     font-weight: 600;
 }
 #SidebarFooterGhost:hover {
-    background: __TRACK__;
-    border-color: __LINE_STRONG__;
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE__;
 }
 #SidebarFooterGhost:pressed {
-    background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE_STRONG__;
-    padding-top: 9px;
-    padding-bottom: 7px;
+    background: __TRACK__;
+    border-color: __LINE__;
+    padding-top: 8px;
+    padding-bottom: 6px;
 }
 #SidebarFooterGhost:disabled {
     color: __MUTED__;
@@ -732,25 +763,25 @@ QPushButton#SearchResultsPagerButton:disabled {
     font-weight: 600;
 }
 #SidebarIconButton {
-    border-radius: 10px;
-    border: 1px solid __LINE_STRONG__;
-    background: __TRACK__;
+    border-radius: 6px;
+    border: 1px solid __LINE__;
+    background: transparent;
     color: __HEADLINE__;
     font-weight: 700;
     padding: 0px;
 }
 #SidebarIconButton:hover {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE_STRONG__;
+    border-color: __LINE__;
 }
 #SidebarIconButton:pressed {
-    background: __BUTTON_SOFT__;
-    border-color: __LINE_STRONG__;
+    background: __TRACK__;
+    border-color: __LINE__;
 }
 #SidebarDonateButton {
-    border-radius: 10px;
-    border: 1px solid __LINE_STRONG__;
-    background: __TRACK__;
+    border-radius: 6px;
+    border: 1px solid __LINE__;
+    background: transparent;
     color: #e81123;
     font-weight: 700;
     padding: 0px;
@@ -772,14 +803,14 @@ QPushButton#SearchResultsPagerButton:disabled {
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
-    padding: 8px 10px;
+    border-radius: 6px;
+    padding: 7px 10px;
     color: __TEXT__;
 }
 QTextEdit#SearchInput {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 6px;
     padding: 8px 10px;
     color: __TEXT__;
     selection-background-color: __ACCENT_SOFT__;
@@ -792,7 +823,7 @@ QTextEdit#SearchInput:focus {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 6px;
     /* Keep padding modest; fixed widget height must leave room for both border edges. */
     padding: 2px 8px;
     min-height: 22px;
@@ -849,15 +880,19 @@ QLabel[settingLabel="true"] {
     line-height: 1.35em;
 }
 #SubPanelCard QLabel[settingLabel="true"] {
-    padding-top: 6px;
+    padding-top: 4px;
+    font-size: 13px;
+}
+QLabel[settingLabel="true"][detailActive="true"] {
+    color: __ACCENT__;
 }
 #SettingHintButton {
     min-width: 18px;
     max-width: 18px;
     min-height: 18px;
     max-height: 18px;
-    border: 1px solid __LINE_STRONG__;
-    border-radius: 9px;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
     color: __MUTED__;
     background: __FIELD__;
     font-weight: 700;
@@ -866,20 +901,23 @@ QLabel[settingLabel="true"] {
 #SettingHintButton:hover {
     border-color: __ACCENT__;
     color: __ACCENT__;
+    background: __ACCENT_SOFT__;
 }
 QSpinBox[settingField="true"], QDoubleSpinBox[settingField="true"], QComboBox[settingField="true"], QLineEdit[settingField="true"] {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
-    padding: 7px 10px;
-    min-height: 34px;
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 32px;
     color: __HEADLINE__;
 }
 QSpinBox[settingField="true"]:hover, QDoubleSpinBox[settingField="true"]:hover, QComboBox[settingField="true"]:hover, QLineEdit[settingField="true"]:hover {
     border-color: __LINE_STRONG__;
+    background: __PANEL__;
 }
 QSpinBox[settingField="true"]:focus, QDoubleSpinBox[settingField="true"]:focus, QComboBox[settingField="true"]:focus, QLineEdit[settingField="true"]:focus {
     border-color: __ACCENT__;
+    background: __PANEL__;
 }
 QComboBox[settingField="true"]::drop-down {
     border: none;
@@ -889,16 +927,16 @@ QComboBox[settingField="true"] QAbstractItemView {
     background: __PANEL__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 4px;
     outline: 0;
     selection-background-color: __ACCENT_SOFT__;
     selection-color: __HEADLINE__;
 }
 QComboBox[settingField="true"] QAbstractItemView::item {
-    min-height: 30px;
+    min-height: 28px;
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: 4px;
 }
 QComboBox[settingField="true"] QAbstractItemView::item:hover {
     background: __BUTTON_SOFT_HOVER__;
@@ -911,6 +949,9 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #SettingRowContainer {
     background: transparent;
     border-bottom: 1px solid __LINE__;
+}
+#SettingRowContainer:hover {
+    background: __BUTTON_SOFT__;
 }
 #SettingRow {
     background: transparent;
@@ -929,7 +970,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 }
 #SearchQueryTabs::pane {
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
     background: __FIELD__;
     top: -1px;
 }
@@ -937,8 +978,8 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE__;
     border-bottom: none;
-    border-top-left-radius: 10px;
-    border-top-right-radius: 10px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
     padding: 8px 18px;
     margin-right: 4px;
     color: __MUTED__;
@@ -961,14 +1002,14 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryTabs QTabBar::tab {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 6px;
     min-width: 112px;
-    min-height: 36px;
-    padding: 10px 28px;
-    margin-right: 8px;
+    min-height: 34px;
+    padding: 8px 22px;
+    margin-right: 6px;
     color: __MUTED__;
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
 }
 #LibraryTabs QTabBar::tab:selected {
     background: __ACCENT_SOFT__;
@@ -989,7 +1030,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibrarySharedStrip #DangerGhostButton {
     min-height: 32px;
     padding: 5px 14px;
-    border-radius: 10px;
+    border-radius: 6px;
 }
 #LibraryStack {
     background: transparent;
@@ -998,7 +1039,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryModeSegment {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 6px;
 }
 #LibraryModeBtn {
     background: transparent;
@@ -1026,7 +1067,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryGroupedList {
     background: __PANEL__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
 }
 #LibraryLibCard {
     background: __PANEL__;
@@ -1201,7 +1242,7 @@ QTableView#LibraryGroupedLibTree::item:selected {
 #ImageDropZone, #PreviewPlaceholder {
     background: __FIELD__;
     border: 1px dashed __LINE_STRONG__;
-    border-radius: 14px;
+    border-radius: 8px;
     padding: 12px;
 }
 #PreviewPlaceholder {
@@ -1218,7 +1259,7 @@ QTableView#LibraryGroupedLibTree::item:selected {
 #VideoContainer {
     background: __VIDEO_BG__;
     border: 1px solid __LINE__;
-    border-radius: 16px;
+    border-radius: 8px;
 }
 #PreviewTimeLabel {
     color: __HEADLINE__;
@@ -1238,35 +1279,44 @@ QTableView#LibraryGroupedLibTree::item:selected {
     background: transparent;
     padding: 0 4px 2px 4px;
 }
-#ResultTable {
+#ResultTable, #DataTable {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 14px;
-    gridline-color: __LINE__;
+    border-radius: 8px;
+    gridline-color: transparent;
     outline: none;
+    selection-background-color: __ACCENT_SOFT__;
+    selection-color: __HEADLINE__;
 }
-#ResultTable::item {
+#ResultTable::item, #DataTable::item {
     border-left: none;
     border-right: none;
     border-top: none;
     border-bottom: 1px solid __LINE__;
-    padding: 8px 8px;
+    padding: 7px 10px;
+    color: __TEXT__;
 }
-#ResultTable::item:hover {
-    background: __ACCENT_SOFT__;
+#ResultTable::item:hover, #DataTable::item:hover {
+    background: __BUTTON_SOFT__;
+    color: __TEXT__;
 }
-#ResultTable::item:selected {
+#ResultTable::item:selected, #DataTable::item:selected {
     background: __TRACK__;
     color: __HEADLINE__;
     border-bottom: 1px solid __LINE__;
 }
-#ResultTable::item:selected:active {
+#ResultTable::item:selected:active, #DataTable::item:selected:active {
     background: __ACCENT_SOFT__;
+    color: __HEADLINE__;
+}
+#ResultTable::item:selected:!active, #DataTable::item:selected:!active {
+    background: __TRACK__;
+    color: __HEADLINE__;
 }
 #DownloadListTable {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 14px;
+    border-radius: 8px;
     gridline-color: transparent;
     outline: none;
 }
@@ -1289,12 +1339,12 @@ QTableView#LibraryGroupedLibTree::item:selected {
 #DownloadListTable QHeaderView::section {
     background: __PANEL__;
     border: none;
-    border-bottom: 2px solid __LINE_STRONG__;
+    border-bottom: 1px solid __LINE__;
     border-right: 1px solid __LINE__;
-    padding: 10px 8px;
+    padding: 8px 10px;
     color: __MUTED__;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.02em;
 }
 #DownloadCellHost {
@@ -1413,14 +1463,15 @@ QWidget[strongJumpRow="true"] {
     background: __DANGER_SOFT__;
     border-radius: 10px;
 }
-#ResultTable QHeaderView::section {
+#ResultTable QHeaderView::section, #DataTable QHeaderView::section {
     background: __PANEL__;
     border: none;
-    border-bottom: 2px solid __LINE_STRONG__;
+    border-bottom: 1px solid __LINE__;
     border-right: 1px solid __LINE__;
-    padding: 9px 10px;
+    padding: 8px 10px;
     color: __MUTED__;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 600;
 }
 #LibraryListScroll {
     background: transparent;
@@ -1442,23 +1493,23 @@ QWidget[strongJumpRow="true"] {
 #LibraryCard {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 14px;
+    border-radius: 8px;
 }
 #LibraryCard:hover {
-    background: __ACCENT_SOFT__;
-    border-color: __LINE_STRONG__;
+    background: __BUTTON_SOFT__;
+    border-color: __LINE__;
 }
 #LibraryCardIndex {
     color: __HEADLINE__;
-    font-size: 14px;
-    font-weight: 800;
+    font-size: 13px;
+    font-weight: 700;
     background: __PANEL__;
     border: 1px solid __LINE__;
-    border-radius: 20px;
-    min-width: 40px;
-    max-width: 40px;
-    min-height: 40px;
-    max-height: 40px;
+    border-radius: 8px;
+    min-width: 36px;
+    max-width: 36px;
+    min-height: 36px;
+    max-height: 36px;
 }
 #LibraryCardTitle {
     color: __HEADLINE__;
@@ -1480,17 +1531,17 @@ QWidget[strongJumpRow="true"] {
 QFrame#Card, #DialogCard {
     background: __PANEL__;
     border: 1px solid __LINE__;
-    border-radius: 20px;
+    border-radius: 10px;
 }
 #ToolbarCard, #DetailsCard, #StatusCard, #PreviewCard {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 14px;
+    border-radius: 8px;
 }
 #SummaryCard {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
     padding: 8px 10px;
 }
 #SummaryValue {
@@ -1505,20 +1556,20 @@ QFrame#Card, #DialogCard {
     background: transparent;
 }
 #DialogHeroTitle {
-    font-size: 22px;
-    font-weight: 800;
+    font-size: 18px;
+    font-weight: 700;
     color: __HEADLINE__;
     background: transparent;
 }
 #DialogPageTitle {
-    font-size: 20px;
-    font-weight: 800;
+    font-size: 17px;
+    font-weight: 700;
     color: __HEADLINE__;
     background: transparent;
 }
 #DialogHeadline {
-    font-size: 24px;
-    font-weight: 800;
+    font-size: 20px;
+    font-weight: 700;
     color: __HEADLINE__;
     background: transparent;
 }
@@ -1553,7 +1604,7 @@ QFrame#Card, #DialogCard {
 }
 QFrame#ExportModeOptionCard {
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
     background: __FIELD__;
 }
 QFrame#ExportModeOptionCard:hover {
@@ -1584,14 +1635,14 @@ QFrame#ExportModeOptionCard[selected="true"] {
     background: __FIELD__;
     color: __MUTED__;
     border: 1px solid __LINE__;
-    border-radius: 16px;
+    border-radius: 8px;
     padding: 12px;
     font-size: 13px;
 }
 #DialogCodeBox {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
     padding: 10px 12px;
     color: __HEADLINE__;
     font-weight: 600;
@@ -1616,13 +1667,14 @@ QFrame#ExportModeOptionCard[selected="true"] {
     selection-color: __HEADLINE__;
 }
 #MessageBadge {
-    min-width: 34px;
-    max-width: 34px;
-    min-height: 34px;
-    max-height: 34px;
-    border-radius: 17px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    border-radius: 6px;
     color: __INVERSE_TEXT__;
-    font-weight: 800;
+    font-size: 12px;
+    font-weight: 700;
     background: __ACCENT__;
 }
 #MessageBadge[kind="success"] {
@@ -1637,12 +1689,12 @@ QFrame#ExportModeOptionCard[selected="true"] {
 }
 #ModelUploadArea {
     text-align: center;
-    border: 2px dashed __LINE_STRONG__;
-    border-radius: 16px;
-    padding: 20px;
+    border: 1px dashed __LINE_STRONG__;
+    border-radius: 8px;
+    padding: 18px;
     background: __PANEL__;
     color: __HEADLINE__;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     min-height: 96px;
 }
@@ -1652,7 +1704,7 @@ QFrame#ExportModeOptionCard[selected="true"] {
 }
 QListWidget#ModelFileList {
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
     background: __PANEL__;
     padding: 6px;
     outline: 0;
@@ -1690,7 +1742,7 @@ QListWidget#DialogueLibraryList::item:selected {
 #DialogueLibraryRow {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 14px;
+    border-radius: 8px;
 }
 #DialogueLibraryRow[selected="true"] {
     background: __ACCENT_SOFT__;
@@ -1728,15 +1780,15 @@ QListWidget#DialogueLibraryList::item:selected {
     border: 1px solid __DANGER__;
     color: __INVERSE_TEXT__;
     font-weight: 700;
-    border-radius: 10px;
-    padding: 10px 16px;
+    border-radius: 7px;
+    padding: 8px 14px;
 }
 #DialogRulesTable, #ResourceDialogTable {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
-    gridline-color: __LINE__;
+    border-radius: 8px;
+    gridline-color: transparent;
     outline: none;
 }
 #DialogRulesTable::item, #ResourceDialogTable::item {
@@ -1815,8 +1867,8 @@ ClickableLabel[detailActive="true"] {
 }
 #SettingDetailPopup {
     background: __PANEL__;
-    border: 1px solid __LINE_STRONG__;
-    border-radius: 12px;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
 }
 #SettingDetailPopupTitle {
     color: __HEADLINE__;
@@ -1844,11 +1896,11 @@ ClickableLabel[detailActive="true"] {
 #SearchScopeLibRow {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
 }
 #SearchScopeLibRow:hover {
-    background: __ACCENT_SOFT__;
-    border-color: __LINE_STRONG__;
+    background: __BUTTON_SOFT__;
+    border-color: __LINE__;
 }
 #SearchScopeLibRow[selectedRow="true"] {
     border-color: __ACCENT__;
@@ -1889,11 +1941,11 @@ ClickableLabel[detailActive="true"] {
 #SearchPresetManageRow {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
 }
 #SearchPresetManageRow:hover {
-    background: __ACCENT_SOFT__;
-    border-color: __LINE_STRONG__;
+    background: __BUTTON_SOFT__;
+    border-color: __LINE__;
 }
 #SearchPresetManageAccent {
     background: __ACCENT__;
@@ -1939,7 +1991,7 @@ ClickableLabel[detailActive="true"] {
 #VideoScopeList {
     background: __PANEL__;
     border: 1px solid __LINE__;
-    border-radius: 12px;
+    border-radius: 8px;
 }
 #VideoScopeLibCard {
     background: __PANEL__;
@@ -2024,21 +2076,29 @@ QProgressBar::chunk {
 }
 QScrollBar:vertical {
     background: transparent;
-    width: 10px;
+    width: 8px;
+    margin: 2px 1px 2px 1px;
 }
 QScrollBar::handle:vertical {
     background: __SCROLL__;
-    border-radius: 5px;
-    min-height: 30px;
+    border-radius: 4px;
+    min-height: 28px;
+}
+QScrollBar::handle:vertical:hover {
+    background: __LINE_STRONG__;
 }
 QScrollBar:horizontal {
     background: transparent;
-    height: 10px;
+    height: 8px;
+    margin: 1px 2px 1px 2px;
 }
 QScrollBar::handle:horizontal {
     background: __SCROLL__;
-    border-radius: 5px;
-    min-width: 30px;
+    border-radius: 4px;
+    min-width: 28px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: __LINE_STRONG__;
 }
 QScrollBar::add-line, QScrollBar::sub-line {
     border: none;
@@ -2048,8 +2108,8 @@ QScrollBar::add-line, QScrollBar::sub-line {
 QPushButton[class="TableBtn"], QPushButton[class="TableLocateBtn"], QPushButton[class="TableDeleteBtn"] {
     background: transparent;
     border: 1px solid transparent;
-    padding: 6px 8px;
-    border-radius: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
 }
 QPushButton[class="TableBtn"] {
     color: __ACCENT__;
@@ -2074,9 +2134,13 @@ QToolTip, QMessageBox, QDialog {
     color: __HEADLINE__;
     border: 1px solid __LINE__;
 }
+QDialog {
+    border-radius: 8px;
+}
 QToolTip {
     /* Width/wrapping handled by ui.widgets.tooltip_utils (QSS max-width clips CJK). */
     padding: 6px 8px;
+    border-radius: 6px;
 }
 """
 
@@ -2105,68 +2169,70 @@ def build_style(colors):
 from ui.widgets.theme_tokens import load_merged_theme_colors
 
 THEME_COLORS_DARK_BASE = {
-    "WINDOW": "#0b1220",
-    "TEXT": "#d7deea",
-    "HEADLINE": "#f5f8ff",
-    "MUTED": "#91a0ba",
-    "ACCENT": "#4e8cff",
-    "ACCENT_HOVER": "#6ba0ff",
-    "ACCENT_SOFT": "#1d3158",
-    "SUCCESS": "#2ec27e",
-    "SUCCESS_HOVER": "#45d690",
-    "SUCCESS_SOFT": "#173d30",
-    "WARN": "#f4c95d",
-    "WARN_SOFT": "#43381a",
-    "DANGER": "#ff6b6b",
-    "DANGER_SOFT": "#432326",
-    "SIDEBAR": "#121a2a",
-    "PANEL": "#172235",
-    "FIELD": "#0f1a2b",
-    "HERO": "#1a2a45",
-    "HERO_LINE": "#294267",
-    "LINE": "#283752",
-    "LINE_STRONG": "#40557f",
-    "TRACK": "#22314a",
-    "SCROLL": "#41567c",
-    "BUTTON_SOFT": "#1b2940",
-    "BUTTON_SOFT_HOVER": "#24385b",
-    "VIDEO_BG": "#060c16",
-    "NOTICE_BG": "#21365f",
-    "NOTICE_LINE": "#5d87d6",
-    "NOTICE_TEXT": "#eef4ff",
+    # Win11-like neutral layers (less cold blue-black).
+    "WINDOW": "#202020",
+    "TEXT": "#e5e5e5",
+    "HEADLINE": "#ffffff",
+    "MUTED": "#a3a3a3",
+    "ACCENT": "#60a5fa",
+    "ACCENT_HOVER": "#93c5fd",
+    "ACCENT_SOFT": "#1e3a5f",
+    "SUCCESS": "#3dd68c",
+    "SUCCESS_HOVER": "#56e0a0",
+    "SUCCESS_SOFT": "#0f3d2a",
+    "WARN": "#fbbf24",
+    "WARN_SOFT": "#4a3510",
+    "DANGER": "#f87171",
+    "DANGER_SOFT": "#4c1d1d",
+    "SIDEBAR": "#1b1b1b",
+    "PANEL": "#2b2b2b",
+    "FIELD": "#242424",
+    "HERO": "#262626",
+    "HERO_LINE": "#3a3a3a",
+    "LINE": "#3a3a3a",
+    "LINE_STRONG": "#525252",
+    "TRACK": "#2f2f2f",
+    "SCROLL": "#6b6b6b",
+    "BUTTON_SOFT": "#323232",
+    "BUTTON_SOFT_HOVER": "#3a3a3a",
+    "VIDEO_BG": "#141414",
+    "NOTICE_BG": "#1e3a5f",
+    "NOTICE_LINE": "#60a5fa",
+    "NOTICE_TEXT": "#e8f1ff",
     "INVERSE_TEXT": "#ffffff",
 }
 
 THEME_COLORS_LIGHT_BASE = {
-    "WINDOW": "#f3f6fb",
-    "TEXT": "#223047",
-    "HEADLINE": "#121826",
-    "MUTED": "#65758b",
-    "ACCENT": "#2f6df6",
-    "ACCENT_HOVER": "#4a82fb",
-    "ACCENT_SOFT": "#dfeaff",
-    "SUCCESS": "#198754",
-    "SUCCESS_HOVER": "#28a068",
-    "SUCCESS_SOFT": "#def4e8",
-    "WARN": "#9a6b00",
-    "WARN_SOFT": "#fff1c9",
-    "DANGER": "#d9534f",
-    "DANGER_SOFT": "#fbe2e1",
-    "SIDEBAR": "#eaf0f9",
+    # Win11-like gray shell; accent stays product blue.
+    "WINDOW": "#f3f3f3",
+    "TEXT": "#2b2b2b",
+    "HEADLINE": "#1a1a1a",
+    "MUTED": "#6b6b6b",
+    "ACCENT": "#0078d4",
+    "ACCENT_HOVER": "#1a86d9",
+    "ACCENT_SOFT": "#e8f3fc",
+    "SUCCESS": "#0f7b3a",
+    "SUCCESS_HOVER": "#159345",
+    "SUCCESS_SOFT": "#e6f5ec",
+    "WARN": "#9a6700",
+    "WARN_SOFT": "#fff4ce",
+    "DANGER": "#c42b1c",
+    "DANGER_SOFT": "#fde7e9",
+    "SIDEBAR": "#f9f9f9",
     "PANEL": "#ffffff",
-    "FIELD": "#f7f9fd",
-    "HERO": "#dfe9ff",
-    "HERO_LINE": "#c6d8ff",
-    "LINE": "#d5ddea",
-    "LINE_STRONG": "#afbed8",
-    "TRACK": "#dbe3ef",
-    "SCROLL": "#afbdd3",
-    "BUTTON_SOFT": "#f6f8fc",
-    "BUTTON_SOFT_HOVER": "#e7eef9",
-    "VIDEO_BG": "#e3ebf8",
-    "NOTICE_BG": "#e8f0ff",
-    "NOTICE_LINE": "#7ca2f7",
-    "NOTICE_TEXT": "#1a3f8a",
+    "FIELD": "#ffffff",
+    "HERO": "#f0f0f0",
+    "HERO_LINE": "#e5e5e5",
+    "LINE": "#e5e5e5",
+    "LINE_STRONG": "#d1d1d1",
+    "TRACK": "#ebebeb",
+    "SCROLL": "#c4c4c4",
+    "BUTTON_SOFT": "#f5f5f5",
+    "BUTTON_SOFT_HOVER": "#ebebeb",
+    "VIDEO_BG": "#ececec",
+    "NOTICE_BG": "#e8f3fc",
+    "NOTICE_LINE": "#0078d4",
+    "NOTICE_TEXT": "#0b3b66",
     "INVERSE_TEXT": "#ffffff",
 }
 
