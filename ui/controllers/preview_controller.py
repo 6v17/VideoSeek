@@ -24,11 +24,6 @@ class PreviewController:
         self.current_preview_context = None
         self.vlc_player = None
         self._warmup_started = False
-        self._qt_status_hook = None
-        self._qt_position_hook = None
-        self._qt_seek_ms = -1
-        self._qt_stop_ms = -1
-        self._qt_seek_done = False
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         return _resolve_base_clip_window(
@@ -43,7 +38,6 @@ class PreviewController:
         media_player = self.parent_window.media_player
         media_player.stop()
         media_player.setSource(QUrl())
-        self._clear_qt_preview_hooks()
 
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
         clip_end = clip_start + clip_duration
@@ -66,20 +60,13 @@ class PreviewController:
         except Exception as exc:
             logger.debug("Playback telemetry session start skipped: %s", exc)
 
-        # Team play_url: prefer Qt Multimedia (same family as browser / WMF) over VLC HTTP.
-        if is_http_media_url(video_path):
-            if self._play_remote_with_qt(video_path, clip_start, clip_end):
-                return True
-            vlc_player = self._ensure_vlc_player()
-            if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
-                return True
-            # Do not ffmpeg-remux remote URLs on the UI thread (can hang for a long time).
-            return False
-
         vlc_player = self._ensure_vlc_player()
-
         if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
             return True
+
+        # Team play_url: never ffmpeg-remux remote HTTP on the UI thread (can hang / crash).
+        if is_http_media_url(video_path):
+            return False
 
         cache_path = build_preview_cache_path(video_path, clip_start)
         result = create_preview_clip(video_path, clip_start, cache_path, duration_sec=clip_duration)
@@ -92,96 +79,6 @@ class PreviewController:
         if os.path.exists(cache_path):
             os.remove(cache_path)
         return False
-
-    def _play_remote_with_qt(self, video_path: str, start_sec: float, end_sec: float) -> bool:
-        """Play HTTP media via QMediaPlayer so team preview matches browser speed."""
-        try:
-            from PySide6.QtMultimedia import QMediaPlayer
-        except ImportError:
-            return False
-
-        try:
-            if self.vlc_player is not None:
-                self.vlc_player.release_native_output()
-        except Exception as exc:
-            logger.debug("Detach VLC for Qt HTTP preview skipped: %s", exc)
-
-        media_player = self.parent_window.media_player
-        self._qt_seek_ms = max(0, int(float(start_sec) * 1000))
-        self._qt_stop_ms = max(self._qt_seek_ms, int(float(end_sec) * 1000))
-        self._qt_seek_done = False
-
-        def on_status(status):
-            if self._qt_seek_done:
-                return
-            ready = {
-                QMediaPlayer.MediaStatus.LoadedMedia,
-                QMediaPlayer.MediaStatus.BufferedMedia,
-                QMediaPlayer.MediaStatus.BufferingMedia,
-            }
-            if status not in ready:
-                return
-            try:
-                if media_player.duration() <= 0 and status == QMediaPlayer.MediaStatus.LoadingMedia:
-                    return
-                media_player.setPosition(self._qt_seek_ms)
-                self._qt_seek_done = True
-            except Exception as exc:
-                logger.debug("Qt HTTP preview seek skipped: %s", exc)
-
-        def on_position(position_ms):
-            if self._qt_stop_ms > 0 and int(position_ms) >= self._qt_stop_ms:
-                try:
-                    media_player.pause()
-                except Exception as exc:
-                    logger.debug("Qt HTTP preview stop skipped: %s", exc)
-
-        self._qt_status_hook = on_status
-        self._qt_position_hook = on_position
-        try:
-            media_player.mediaStatusChanged.connect(on_status)
-            media_player.positionChanged.connect(on_position)
-            media_player.setSource(QUrl(str(video_path)))
-            media_player.play()
-        except Exception as exc:
-            logger.warning("Qt HTTP preview failed: %s", exc)
-            self._clear_qt_preview_hooks()
-            return False
-
-        QTimer.singleShot(250, lambda: self._ensure_qt_http_seek(media_player))
-        return True
-
-    def _ensure_qt_http_seek(self, media_player) -> None:
-        if self._qt_seek_done or self._qt_seek_ms < 0:
-            return
-        try:
-            from PySide6.QtMultimedia import QMediaPlayer
-
-            if media_player.playbackState() == QMediaPlayer.PlaybackState.StoppedState:
-                return
-            media_player.setPosition(self._qt_seek_ms)
-            self._qt_seek_done = True
-        except Exception as exc:
-            logger.debug("Qt HTTP delayed seek skipped: %s", exc)
-
-    def _clear_qt_preview_hooks(self) -> None:
-        media_player = getattr(self.parent_window, "media_player", None)
-        if media_player is not None:
-            if self._qt_status_hook is not None:
-                try:
-                    media_player.mediaStatusChanged.disconnect(self._qt_status_hook)
-                except Exception:
-                    pass
-            if self._qt_position_hook is not None:
-                try:
-                    media_player.positionChanged.disconnect(self._qt_position_hook)
-                except Exception:
-                    pass
-        self._qt_status_hook = None
-        self._qt_position_hook = None
-        self._qt_seek_ms = -1
-        self._qt_stop_ms = -1
-        self._qt_seek_done = False
 
     def start_warmup(self):
         """Warm libvlc on the UI thread (libvlc is not thread-safe for Instance create)."""
@@ -217,7 +114,6 @@ class PreviewController:
                 logger.debug("Playback telemetry cancel skipped: %s", exc)
         else:
             self._record_playback_telemetry(source="inline")
-        self._clear_qt_preview_hooks()
         if self.vlc_player is not None:
             self.vlc_player.suspend()
         try:
@@ -235,7 +131,6 @@ class PreviewController:
                 logger.debug("Playback telemetry cancel skipped: %s", exc)
         else:
             self._record_playback_telemetry(source="inline")
-        self._clear_qt_preview_hooks()
         if self.vlc_player is not None:
             # End the clip session so Play cannot resume after 清空.
             self.vlc_player.clear_session()
@@ -317,7 +212,6 @@ class PreviewController:
         self.current_preview_path = None
 
     def shutdown(self):
-        self._clear_qt_preview_hooks()
         if self.vlc_player is not None:
             self.vlc_player.shutdown(fast=True)
             self.vlc_player = None

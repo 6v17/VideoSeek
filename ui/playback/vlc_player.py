@@ -55,17 +55,29 @@ def is_http_media_url(video_path: str) -> bool:
     return text.startswith("http://") or text.startswith("https://")
 
 
+def normalize_http_media_url(video_path: str) -> str:
+    """Percent-encode HTTP path segments ([ ] spaces, etc.) without double-encoding."""
+    text = str(video_path or "").strip()
+    if not is_http_media_url(text):
+        return text
+    from urllib.parse import quote, unquote, urlsplit, urlunsplit
+
+    parts = urlsplit(text)
+    path = "/".join(quote(unquote(seg), safe="") for seg in parts.path.split("/"))
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
 # Back-compat alias used inside this module.
 _is_http_media_url = is_http_media_url
 
 
 def _vlc_embed_instance_args():
-    # Network caching helps HTTP team play_url; keep modest so start is still snappy.
+    # network-caching helps HTTP team play_url. Do not pass --http-caching:
+    # modern libvlc removed it and may warn/misbehave.
     args = [
         "--quiet",
         "--no-video-title-show",
         "--network-caching=800",
-        "--http-caching=800",
     ]
     if sys.platform.startswith("linux"):
         args.append("--no-xlib")
@@ -76,12 +88,7 @@ def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
     """Media options for preview. HTTP avoids :start-time (slow linear demux over HTTP)."""
     options: list[str] = []
     if _is_http_media_url(video_path):
-        options.extend(
-            [
-                ":network-caching=800",
-                ":http-caching=800",
-            ]
-        )
+        options.append(":network-caching=800")
         return options
     start = max(0.0, float(start_sec or 0.0))
     if start > 0.0:
@@ -177,7 +184,7 @@ class VlcPreviewPlayer:
         if not self.is_available():
             return False
 
-        self._current_video_path = os.fspath(video_path)
+        self._current_video_path = normalize_http_media_url(os.fspath(video_path))
         self._pending_seek_ms = None
         start_sec = max(0.0, float(start_sec))
         stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))

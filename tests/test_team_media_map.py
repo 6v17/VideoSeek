@@ -50,6 +50,20 @@ class TeamMediaMapTests(unittest.TestCase):
             self.assertTrue(url.startswith("http://192.168.1.5:18080/videos/"))
             self.assertTrue(url.endswith("clip.mp4"))
             mapped = play_url_to_absolute_path(url, mounts)
+            # Round-trip still works after path encoding.
+            bracket = os.path.join(nested, "[clip].mp4")
+            with open(bracket, "wb") as handle:
+                handle.write(b"x")
+            bracket_url = absolute_path_to_play_url(
+                bracket,
+                mounts,
+                media_base_url="http://192.168.1.5:18080",
+            )
+            self.assertIn("%5Bclip%5D.mp4", bracket_url)
+            self.assertEqual(
+                os.path.normcase(os.path.abspath(play_url_to_absolute_path(bracket_url, mounts))),
+                os.path.normcase(os.path.abspath(bracket)),
+            )
             self.assertEqual(os.path.normcase(os.path.abspath(mapped)), os.path.normcase(os.path.abspath(video)))
             rewritten = rewrite_team_scope_video_paths([url], mounts=mounts)
             self.assertEqual(len(rewritten or []), 1)

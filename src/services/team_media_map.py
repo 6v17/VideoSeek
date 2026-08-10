@@ -56,6 +56,8 @@ def absolute_path_to_play_url(
     media_base_url: str,
 ) -> str:
     """Rewrite an absolute file path to http://host:port/videos/<id>/rel."""
+    from urllib.parse import quote
+
     base = str(media_base_url or "").strip().rstrip("/")
     abs_video = os.path.abspath(str(video_path or "").strip())
     if not base or not abs_video:
@@ -67,7 +69,9 @@ def absolute_path_to_play_url(
     if rel is None:
         return ""
     prefix = str(mount.get("url_prefix") or f"/videos/{mount.get('id')}/").rstrip("/") + "/"
-    return f"{base}{prefix}{rel}"
+    # Encode [ ] spaces etc. Browsers tolerate raw brackets; VLC/ffmpeg often do not.
+    rel_url = "/".join(quote(part, safe="") for part in rel.replace("\\", "/").split("/"))
+    return f"{base}{prefix}{rel_url}"
 
 
 def play_url_to_absolute_path(play_url: str, mounts: List[Dict[str, str]]) -> str:

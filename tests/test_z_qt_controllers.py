@@ -713,17 +713,18 @@ class PreviewControllerTests(unittest.TestCase):
 
     @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
-    def test_play_http_prefers_qt_multimedia(self, mock_vlc_cls, _mock_window):
+    def test_play_http_uses_vlc_without_ffmpeg_fallback(self, mock_vlc_cls, _mock_window):
         parent = _make_parent_window()
+        vlc_player = MagicMock()
+        vlc_player.play.return_value = True
+        mock_vlc_cls.return_value = vlc_player
         controller = PreviewController(parent)
         url = "http://192.168.1.2:18080/videos/lib1/a.mp4"
-        controller._play_remote_with_qt = MagicMock(return_value=True)
 
         result = controller.play(url, 30.0, end_sec=33.0)
 
         self.assertTrue(result)
-        controller._play_remote_with_qt.assert_called_once_with(url, 27.0, 33.0)
-        mock_vlc_cls.assert_not_called()
+        vlc_player.play.assert_called_once_with(url, 27.0, stop_sec=33.0)
 
     @patch("ui.controllers.preview_controller.create_preview_clip")
     @patch("ui.controllers.preview_controller.build_preview_cache_path", return_value="D:/cache/preview.mp4")
@@ -778,14 +779,19 @@ class PreviewControllerTests(unittest.TestCase):
 
 class VlcPreviewPlayerTests(unittest.TestCase):
     def test_build_vlc_media_options_http_skips_start_time(self):
-        from ui.playback.vlc_player import _build_vlc_media_options
+        from ui.playback.vlc_player import _build_vlc_media_options, normalize_http_media_url
 
         options = _build_vlc_media_options("http://host/videos/lib1/a.mp4", 64.0)
         self.assertIn(":network-caching=800", options)
         self.assertTrue(all(not item.startswith(":start-time=") for item in options))
+        self.assertTrue(all(not item.startswith(":http-caching=") for item in options))
 
         local = _build_vlc_media_options(r"D:\videos\a.mp4", 64.0)
         self.assertIn(":start-time=64.000", local)
+        self.assertIn(
+            "%5Bclip%5D.mp4",
+            normalize_http_media_url("http://host/videos/lib1/[clip].mp4"),
+        )
 
     def test_handle_timeout_pauses_instead_of_stopping(self):
         host = MagicMock()
