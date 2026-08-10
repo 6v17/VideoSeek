@@ -337,6 +337,8 @@ class MainWindow(
         self.understanding_page.btn_stop.clicked.connect(self.stop_understanding_generation)
         self.understanding_page.btn_save_config.clicked.connect(self.save_understanding_settings)
         self.understanding_page.btn_test_vlm_connection.clicked.connect(self.test_understanding_vlm_connection)
+        self.understanding_page.chk_use_custom_prompts.toggled.connect(self._on_use_custom_prompts_toggled)
+        self.understanding_page.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
         self.understanding_page.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
         self.understanding_page.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
         self.understanding_page.scope_combo.currentIndexChanged.connect(self._on_understanding_scope_changed)
@@ -441,6 +443,9 @@ class MainWindow(
             self.preview_controller.stop_preview()
             if hasattr(self, "_reset_preview_chrome"):
                 self._reset_preview_chrome()
+        # Floating preview (e.g. Understanding chunk double-click) should not linger
+        # after leaving the page that opened it.
+        if prev_idx != next_idx:
             dlg = getattr(self, "_preview_dialog", None)
             if dlg is not None:
                 try:
@@ -561,24 +566,32 @@ class MainWindow(
         self.library_page.header.subtitle.setText(t["library_page_desc"])
         self.library_page.btn_tab_visual.setText(t.get("library_tab_visual", "Videos"))
         self.library_page.btn_tab_dialogue.setText(t.get("library_tab_dialogue", "Dialogue"))
+        if getattr(self.library_page, "lbl_mode_caption", None) is not None:
+            self.library_page.lbl_mode_caption.setText(
+                t.get("library_mode_caption", "Library type")
+            )
+        if getattr(self.library_page, "lbl_action_caption", None) is not None:
+            self.library_page.lbl_action_caption.setText(
+                t.get("library_action_caption", "Actions for current type")
+            )
         self.library_page.table_title.setText(t["library_table_title"])
         self.library_page.dialogue_table_title.setText(
             t.get("dialogue_library_table_title", "Extracted dialogue")
         )
-        self.library_page.lbl_shared_library_hint.setText(
-            t.get(
-                "library_shared_add_hint",
-                "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
-            )
-        )
-        if hasattr(self, "_refresh_team_client_library_chrome"):
-            self._refresh_team_client_library_chrome()
-        self.library_page.btn_add_lib.setText(t["add_folder"])
-        self.library_page.btn_remove_lib.setText(t.get("remove_library", "Remove Library"))
         if hasattr(self, "_refresh_library_action_hints"):
             self._refresh_library_action_hints()
         else:
+            self.library_page.btn_add_lib.setText(t.get("add_folder", "Add Library"))
+            self.library_page.btn_remove_lib.setText(t.get("remove_library", "Remove Library"))
             self.library_page.btn_remove_lib.setToolTip(t.get("remove_library_hint", ""))
+            self.library_page.lbl_shared_library_hint.setText(
+                t.get(
+                    "library_shared_add_hint",
+                    "Add/Remove applies to the current type: Videos are per CLIP model; Subtitles are global.",
+                )
+            )
+        if hasattr(self, "_refresh_team_client_library_chrome"):
+            self._refresh_team_client_library_chrome()
         self.library_page.btn_sync_db.setText(
             t.get("sync_selected_videos", t.get("update_index", "Sync selected"))
         )
@@ -695,6 +708,15 @@ class MainWindow(
         self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
         self.understanding_page.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
         self.understanding_page.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
+        self.understanding_page.chk_use_custom_prompts.setText(t["understanding_use_custom_prompts"])
+        self.understanding_page.hint_custom_prompts.setText(t["understanding_custom_prompts_hint"])
+        self.understanding_page.label_custom_caption_prompt.setText(
+            t["understanding_custom_caption_prompt_label"]
+        )
+        self.understanding_page.label_custom_summary_prompt.setText(
+            t["understanding_custom_summary_prompt_label"]
+        )
+        self.understanding_page.btn_reset_custom_prompts.setText(t["understanding_reset_custom_prompts"])
         self.understanding_page.btn_save_config.setText(t["understanding_save_config"])
         self.understanding_page.btn_test_vlm_connection.setText(t["understanding_test_vlm_connection"])
         self.understanding_page.btn_test_vlm_connection.setToolTip(t["understanding_test_vlm_connection_hint"])
@@ -1562,6 +1584,9 @@ class MainWindow(
         self.update()
         self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
         self._refresh_sidebar_icon_buttons()
+        timeline = getattr(getattr(self, "understanding_page", None), "chunk_timeline", None)
+        if timeline is not None:
+            timeline.update()
 
     def toggle_theme(self):
         self.is_dark_mode = not self.is_dark_mode

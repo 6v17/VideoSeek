@@ -48,6 +48,8 @@ DEFAULT_UNDERSTANDING_PROFILES = [
     }
 ]
 
+_CUSTOM_PROMPT_MAX_CHARS = 4000
+
 DEFAULT_REMOTE_VLM_CONFIG = {
     "provider_mode": "local",
     "provider_preset": "lm_studio",
@@ -55,6 +57,9 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "model": "qwen3-vl-8b-instruct",
     "api_keys": {},
     "caption_language": "zh",
+    "use_custom_prompts": False,
+    "custom_caption_prompt": "",
+    "custom_summary_prompt": "",
     "prompt": (
         "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
     ),
@@ -133,6 +138,40 @@ def get_caption_prompt_for_language(language: str) -> str:
 
 def get_video_summary_prompt_for_language(language: str) -> str:
     return VIDEO_SUMMARY_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def normalize_use_custom_prompts(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
+def normalize_custom_prompt_text(value) -> str:
+    text = str(value or "").strip()
+    if len(text) > _CUSTOM_PROMPT_MAX_CHARS:
+        return text[:_CUSTOM_PROMPT_MAX_CHARS]
+    return text
+
+
+def resolve_caption_prompt(settings: Mapping[str, Any] | None) -> str:
+    raw = dict(settings or {})
+    language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
+    custom = normalize_custom_prompt_text(raw.get("custom_caption_prompt"))
+    if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
+        return custom
+    return get_caption_prompt_for_language(language)
+
+
+def resolve_video_summary_prompt(settings: Mapping[str, Any] | None) -> str:
+    raw = dict(settings or {})
+    language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
+    custom = normalize_custom_prompt_text(raw.get("custom_summary_prompt"))
+    if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
+        return custom
+    return get_video_summary_prompt_for_language(language)
 
 
 def _normalize_vlm_base_url_for_compare(base_url: str) -> str:
@@ -306,7 +345,16 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
         remote_vlm["model"] = model
     language = resolve_remote_vlm_caption_language(raw_remote_vlm)
     remote_vlm["caption_language"] = language
-    remote_vlm["prompt"] = get_caption_prompt_for_language(language)
+    remote_vlm["use_custom_prompts"] = normalize_use_custom_prompts(
+        raw_remote_vlm.get("use_custom_prompts", DEFAULT_REMOTE_VLM_CONFIG["use_custom_prompts"])
+    )
+    remote_vlm["custom_caption_prompt"] = normalize_custom_prompt_text(
+        raw_remote_vlm.get("custom_caption_prompt", "")
+    )
+    remote_vlm["custom_summary_prompt"] = normalize_custom_prompt_text(
+        raw_remote_vlm.get("custom_summary_prompt", "")
+    )
+    remote_vlm["prompt"] = resolve_caption_prompt(remote_vlm)
     try:
         remote_vlm["timeout_sec"] = max(5.0, float(raw_remote_vlm.get("timeout_sec", remote_vlm["timeout_sec"])))
     except (TypeError, ValueError):

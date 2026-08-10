@@ -364,6 +364,32 @@ class VlcPreviewPlayer:
     def has_locked_window(self):
         return not self._released and self._locked_stop_at_ms > 0 and not self._user_unlocked
 
+    def set_host_widget(self, host_widget) -> None:
+        """Move the embed surface to another native host (one player, many surfaces)."""
+        if host_widget is None or host_widget is self.host_widget:
+            return
+        previous = self.host_widget
+        if previous is not None and hasattr(previous, "set_player"):
+            try:
+                previous.set_player(None)
+            except Exception as exc:
+                _log_vlc_debug("clear previous host player", exc)
+        self.host_widget = host_widget
+        self.host_widget.setAttribute(Qt.WA_NativeWindow, True)
+        if hasattr(self.host_widget, "set_player"):
+            try:
+                self.host_widget.set_player(self)
+            except Exception as exc:
+                _log_vlc_debug("attach host player", exc)
+        # Keep the QTimer alive on a living QObject; re-parent to the new host.
+        try:
+            if self._timer is not None:
+                self._timer.setParent(self.host_widget)
+        except Exception as exc:
+            _log_vlc_debug("reparent playback timer", exc)
+        self.rebind_output_window()
+        QTimer.singleShot(80, self.rebind_output_window)
+
     def rebind_output_window(self):
         """Re-attach libvlc output after host resize / fullscreen toggles."""
         self._bind_output_window()

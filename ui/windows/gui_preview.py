@@ -12,7 +12,7 @@ from src.app.logging_utils import get_logger
 from src.utils import format_timecode_seconds, open_folder_in_explorer, open_in_explorer
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
-from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker
+from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
 
 logger = get_logger("gui_preview")
 
@@ -100,6 +100,111 @@ class PreviewGuiMixin:
         finally:
             QTimer.singleShot(350, self._release_preview_dialog_gate)
         return True
+
+    def open_floating_preview_dialog(
+        self,
+        video_path,
+        start_sec,
+        end_sec,
+        *,
+        suggested_sec=None,
+        on_status=None,
+    ) -> bool:
+        """Open a floating PreviewDialog without leaving the current page."""
+
+        def set_status(message: str) -> None:
+            if callable(on_status):
+                on_status(message)
+
+        video_path = str(video_path or "").strip()
+        if not video_path:
+            return False
+
+        now = time.monotonic()
+        if self._preview_dialog_opening or now < self._preview_dialog_cooldown_until:
+            set_status(
+                self.texts.get(
+                    "preview_dialog_busy",
+                    "Preview is still switching. Try again in a moment.",
+                )
+            )
+            return False
+
+        start_sec = float(start_sec)
+        end_sec = float(end_sec)
+        if end_sec <= start_sec:
+            end_sec = start_sec + 0.1
+        suggested = float(
+            suggested_sec if suggested_sec is not None else (start_sec + end_sec) / 2.0
+        )
+
+        self._preview_dialog_opening = True
+        self._preview_dialog_cooldown_until = now + 0.35
+        try:
+            # One VLC only: soft-pause the search-page surface, then rebind the
+            # same player into the floating dialog (never create a second instance).
+            try:
+                if hasattr(self, "_collapse_preview_maximize"):
+                    self._collapse_preview_maximize()
+                self.preview_controller.suspend_for_dialog()
+                if hasattr(self, "_reset_preview_chrome"):
+                    self._reset_preview_chrome()
+            except Exception as exc:
+                logger.debug("Pause main preview before floating dialog skipped: %s", exc)
+
+            shared_player = self.preview_controller._ensure_vlc_player()
+            dialog = getattr(self, "_preview_dialog", None)
+            if dialog is None:
+                dialog = PreviewDialog(
+                    self,
+                    video_path,
+                    start_sec,
+                    end_sec,
+                    self.texts,
+                    suggested_sec=suggested,
+                    shared_player=shared_player,
+                    on_release_shared_player=self._restore_shared_preview_player_host,
+                )
+                dialog.export_requested.connect(self._queue_preview_export)
+                dialog.export_status_changed.connect(self._handle_preview_export_status)
+                self._preview_dialog = dialog
+            else:
+                dialog.texts = self.texts
+                dialog._shared_player = shared_player
+                dialog._owns_player = False
+                dialog._on_release_shared_player = self._restore_shared_preview_player_host
+                dialog.load_preview(
+                    video_path,
+                    start_sec,
+                    end_sec,
+                    suggested_sec=suggested,
+                )
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return True
+        except Exception as exc:
+            logger.exception("Floating preview dialog failed: %s", exc)
+            set_status(self.texts.get("preview_failed", "Preview failed"))
+            self._restore_shared_preview_player_host(
+                getattr(getattr(self, "preview_controller", None), "vlc_player", None)
+            )
+            return False
+        finally:
+            QTimer.singleShot(350, self._release_preview_dialog_gate)
+
+    def _restore_shared_preview_player_host(self, player=None) -> None:
+        """Return the shared VLC output to the search-page video widget."""
+        shared = player or getattr(getattr(self, "preview_controller", None), "vlc_player", None)
+        host = getattr(self, "video_widget", None)
+        if shared is None or host is None:
+            return
+        try:
+            if hasattr(shared, "set_host_widget"):
+                shared.set_host_widget(host)
+            shared.suspend()
+        except Exception as exc:
+            logger.debug("Restore shared preview host skipped: %s", exc)
 
     def _ensure_preview_chrome(self):
         chrome = self.search_page.expanded_chrome

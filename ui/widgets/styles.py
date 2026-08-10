@@ -266,10 +266,67 @@ QCheckBox:disabled {
     font-size: 16px;
 }
 #UnderstandingChunkTimeLabel {
-    color: __SUCCESS__;
-    font-size: 14px;
+    color: __ACCENT__;
+    font-size: 13px;
     font-weight: 700;
-    padding: 2px 0 4px 0;
+    padding: 0;
+}
+#UnderstandingConfigHeader {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+}
+#UnderstandingConfigHeader:hover {
+    background: __BUTTON_SOFT__;
+}
+#UnderstandingToolbar {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#UnderstandingToolbar #PrimaryButton,
+#UnderstandingToolbar #GhostButton,
+#UnderstandingToolbar #DangerGhostButton {
+    min-height: 34px;
+    padding: 6px 14px;
+    border-radius: 8px;
+}
+#UnderstandingTimelineBlock {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#ChunkTimelineScroll {
+    background: transparent;
+    border: none;
+}
+#UnderstandingDetailPanel {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#UnderstandingDetailPanel #CardTitle {
+    font-size: 14px;
+}
+QPlainTextEdit#UnderstandingOutput {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: __TEXT__;
+    selection-background-color: __ACCENT_SOFT__;
+}
+QPlainTextEdit#UnderstandingOutput:focus {
+    border: 1px solid __ACCENT__;
+}
+#UnderstandingChromeHint {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 500;
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 8px 10px;
 }
 QPushButton {
     border-radius: 7px;
@@ -807,7 +864,7 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     padding: 7px 10px;
     color: __TEXT__;
 }
-QTextEdit#SearchInput {
+QTextEdit#SearchInput, QPlainTextEdit#SearchInput {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 6px;
@@ -816,7 +873,7 @@ QTextEdit#SearchInput {
     selection-background-color: __ACCENT_SOFT__;
     selection-color: __HEADLINE__;
 }
-QTextEdit#SearchInput:focus {
+QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     border: 1px solid __ACCENT__;
 }
 #SearchModeSelect {
@@ -835,6 +892,37 @@ QTextEdit#SearchInput:focus {
     selection-background-color: __ACCENT_SOFT__;
     selection-color: __HEADLINE__;
     outline: 0;
+}
+#SearchableIdCombo {
+    background: transparent;
+    border: none;
+}
+#SearchableIdComboFace {
+    background: __FIELD__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
+    min-height: 28px;
+}
+#SearchableIdComboFace:hover {
+    border-color: __LINE_STRONG__;
+    background: __BUTTON_SOFT_HOVER__;
+}
+#SearchableIdComboText {
+    background: transparent;
+    border: none;
+    color: __HEADLINE__;
+    font-size: 13px;
+    padding: 0;
+}
+#SearchableIdComboArrow {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 14px;
+    padding: 0 2px 0 0;
 }
 #SearchableIdComboPopup {
     background: __PANEL__;
@@ -1022,15 +1110,34 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     border-color: __LINE_STRONG__;
 }
 #LibrarySharedStrip {
-    background: transparent;
-    border: none;
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
 }
 /* Same family as 添加库 / 删除库; never set max-height (clips bottom borders). */
 #LibrarySharedStrip #SuccessGhostButton,
 #LibrarySharedStrip #DangerGhostButton {
-    min-height: 32px;
-    padding: 5px 14px;
-    border-radius: 6px;
+    min-height: 34px;
+    padding: 6px 16px;
+    border-radius: 8px;
+}
+#LibraryChromeCaption {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+#LibraryChromeHint {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 500;
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 8px 10px;
 }
 #LibraryStack {
     background: transparent;
@@ -1039,7 +1146,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryModeSegment {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 6px;
+    border-radius: 10px;
 }
 #LibraryModeBtn {
     background: transparent;
@@ -1048,8 +1155,8 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     color: __MUTED__;
     font-size: 13px;
     font-weight: 700;
-    min-height: 26px;
-    padding: 3px 14px;
+    min-height: 30px;
+    padding: 5px 16px;
 }
 #LibraryModeBtn:hover:!checked {
     background: __BUTTON_SOFT_HOVER__;
@@ -1528,15 +1635,62 @@ QWidget[strongJumpRow="true"] {
     padding: 28px 16px;
 }
 /* --- Dialog & popup chrome (object names + theme tokens) --- */
+QDialog#VSDialogShell,
+QDialog#AppBusyDialog {
+    background: __WINDOW__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+QDialog#AppBusyDialog #DialogBodyLabel {
+    min-height: 36px;
+}
+QProgressBar#DialogBusyProgress {
+    background: __TRACK__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
+    max-height: 10px;
+    min-height: 8px;
+    text-align: center;
+}
+QProgressBar#DialogBusyProgress::chunk {
+    background: __ACCENT__;
+    border-radius: 5px;
+}
 QFrame#Card, #DialogCard {
     background: __PANEL__;
     border: 1px solid __LINE__;
     border-radius: 10px;
 }
+#DialogHeader {
+    background: transparent;
+    border: none;
+}
+#DialogContent {
+    background: transparent;
+    border: none;
+}
+#DialogFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid __LINE__;
+}
+#DialogFooter #PrimaryButton,
+#DialogFooter #GhostButton,
+#DialogFooter #DangerGhostButton,
+#DialogFooter #SuccessGhostButton,
+#DialogFooter #AccentGhostButton {
+    min-height: 34px;
+    padding: 6px 16px;
+    border-radius: 8px;
+}
 #ToolbarCard, #DetailsCard, #StatusCard, #PreviewCard {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 8px;
+    border-radius: 10px;
+}
+#AppBusyDialog #DialogFooter,
+QDialog#VSDialogShell #DialogFooter {
+    margin-top: 2px;
 }
 #SummaryCard {
     background: __FIELD__;
@@ -1882,9 +2036,6 @@ ClickableLabel[detailActive="true"] {
     font-weight: 600;
     line-height: 1.45em;
     background: transparent;
-}
-#SearchScopeEditorDialog {
-    background: __WINDOW__;
 }
 #SearchScopeScroll {
     background: transparent;

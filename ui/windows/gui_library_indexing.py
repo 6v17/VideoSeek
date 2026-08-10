@@ -267,23 +267,80 @@ class LibraryIndexingGuiMixin:
         return int(self.library_page.library_mode()) == 1
 
     def _refresh_library_action_hints(self):
-        btn = getattr(self.library_page, "btn_remove_lib", None)
-        if btn is None:
-            return
-        if self._is_subtitle_library_mode():
-            btn.setToolTip(
-                self.texts.get(
-                    "remove_subtitle_library_hint",
-                    self.texts.get("remove_library_hint", ""),
+        page = self.library_page
+        subtitle_mode = self._is_subtitle_library_mode()
+        add_btn = getattr(page, "btn_add_lib", None)
+        remove_btn = getattr(page, "btn_remove_lib", None)
+        hint = getattr(page, "lbl_shared_library_hint", None)
+
+        if add_btn is not None:
+            if subtitle_mode:
+                add_btn.setText(
+                    self.texts.get(
+                        "add_subtitle_library",
+                        self.texts.get("add_folder", "Add Library"),
+                    )
                 )
-            )
-        else:
-            btn.setToolTip(
-                self.texts.get(
-                    "remove_visual_library_hint",
-                    self.texts.get("remove_library_hint", ""),
+            else:
+                add_btn.setText(
+                    self.texts.get(
+                        "add_visual_library",
+                        self.texts.get("add_folder", "Add Library"),
+                    )
                 )
-            )
+
+        if remove_btn is not None:
+            if subtitle_mode:
+                remove_btn.setText(
+                    self.texts.get(
+                        "remove_subtitle_library",
+                        self.texts.get("remove_library", "Remove Library"),
+                    )
+                )
+                remove_btn.setToolTip(
+                    self.texts.get(
+                        "remove_subtitle_library_hint",
+                        self.texts.get("remove_library_hint", ""),
+                    )
+                )
+            else:
+                remove_btn.setText(
+                    self.texts.get(
+                        "remove_visual_library",
+                        self.texts.get("remove_library", "Remove Library"),
+                    )
+                )
+                remove_btn.setToolTip(
+                    self.texts.get(
+                        "remove_visual_library_hint",
+                        self.texts.get("remove_library_hint", ""),
+                    )
+                )
+
+        # Team-client chrome owns the hint text when active.
+        try:
+            from src.services.team_mode_service import is_team_client_mode
+
+            if is_team_client_mode():
+                return
+        except Exception:
+            pass
+
+        if hint is not None:
+            if subtitle_mode:
+                hint.setText(
+                    self.texts.get(
+                        "library_subtitle_mode_hint",
+                        self.texts.get("library_shared_add_hint", ""),
+                    )
+                )
+            else:
+                hint.setText(
+                    self.texts.get(
+                        "library_visual_mode_hint",
+                        self.texts.get("library_shared_add_hint", ""),
+                    )
+                )
 
     def _active_library_tree(self):
         page = self.library_page
@@ -397,6 +454,9 @@ class LibraryIndexingGuiMixin:
             widget = getattr(page, name, None)
             if widget is not None:
                 widget.setVisible(bool(visible))
+        action_caption = getattr(page, "lbl_action_caption", None)
+        if action_caption is not None:
+            action_caption.setVisible(not client)
         # Subtitle tab stays available on 用户机 (read-only shared view).
         if getattr(page, "btn_tab_dialogue", None) is not None:
             page.btn_tab_dialogue.setEnabled(True)
@@ -411,12 +471,8 @@ class LibraryIndexingGuiMixin:
                 )
             )
         else:
-            hint.setText(
-                self.texts.get(
-                    "library_shared_add_hint",
-                    "Add a folder once; then sync visuals or extract subtitles from the tabs below.",
-                )
-            )
+            # Keep mode-aware add/remove copy (not the generic shared fallback).
+            self._refresh_library_action_hints()
 
     def refresh_selected_visual_libraries(self):
         """Rescan checked libraries so newly dropped files appear in the tree."""
@@ -1004,10 +1060,9 @@ class LibraryIndexingGuiMixin:
 
     def _on_library_tab_changed(self, index: int):
         self._refresh_library_action_hints()
+        self._refresh_remove_library_button()
         if int(index) == 1:
             self.refresh_dialogue_library_table()
-        else:
-            self._refresh_remove_library_button()
 
     def refresh_dialogue_library_table(self):
         from src.services.team_mode_service import is_team_client_mode

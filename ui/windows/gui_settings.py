@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QEventLoop, Qt
-from PySide6.QtWidgets import QApplication, QFileDialog, QProgressDialog
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from src.app.config import (
     DEFAULT_CONFIG,
@@ -34,6 +34,7 @@ from src.utils import (
     validate_sampling_fps_rules_full_coverage,
 )
 from ui.dialogs import SamplingRulesDialog
+from ui.dialogs.busy_progress import AppBusyDialog
 from ui.threading_utils import shutdown_thread
 from ui.workers import StorageRootMigrateWorker, TeamConnectWorker, TeamServerLifecycleWorker
 
@@ -452,12 +453,13 @@ class SettingsGuiMixin:
             elif new_mode == "off":
                 label = self.texts.get("setting_team_stopping", "正在关闭…")
 
-            dialog = QProgressDialog(label, None, 0, 0, self)
-            dialog.setWindowTitle(title)
-            dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-            dialog.setMinimumDuration(0)
-            dialog.setCancelButton(None)
-            dialog.setRange(0, 0)
+            dialog = AppBusyDialog(
+                self,
+                title=title,
+                label=label,
+                maximum=0,
+                minimum_width=440,
+            )
             dialog.show()
             QApplication.processEvents()
             try:
@@ -1285,13 +1287,13 @@ class SettingsGuiMixin:
             title = self.texts.get("data_root_move_progress_title", self.texts.get("browse_data_root", "数据搬家"))
             label = self.texts.get("data_root_move_progress_label", "正在复制数据文件，请稍候…")
 
-        dialog = QProgressDialog(label, None, 0, 100, self)
-        dialog.setWindowTitle(title)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.setMinimumDuration(0)
-        dialog.setAutoClose(False)
-        dialog.setAutoReset(False)
-        dialog.setCancelButton(None)
+        dialog = AppBusyDialog(
+            self,
+            title=title,
+            label=label,
+            maximum=100,
+            minimum_width=460,
+        )
         dialog.setValue(0)
         dialog.show()
         QApplication.processEvents()

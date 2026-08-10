@@ -135,18 +135,9 @@ class ChunkTimelineWidget(QWidget):
     chunk_clicked = Signal(int)
     chunk_double_clicked = Signal(int)
 
-    _COLOR_PENDING = QColor("#C9A227")
-    _COLOR_READY = QColor("#3DAA6D")
-    _COLOR_EMPTY = QColor("#4A4A4A")
-    _COLOR_TRACK = QColor("#1E1E1E")
-    _COLOR_TRACK_BORDER = QColor("#3A3A3A")
-    _COLOR_SEPARATOR = QColor("#0F0F0F")
-    _COLOR_SELECTED = QColor("#FFFFFF")
-    _COLOR_ACTIVE = QColor("#FFE08A")
-
     _SEGMENT_GAP = 2
-    _OUTER_RADIUS = 6
-    _INNER_RADIUS = 3
+    _OUTER_RADIUS = 8
+    _INNER_RADIUS = 4
     _MIN_SEGMENT_WIDTH = 14
     _PIXELS_PER_SECOND = 6.0
     _VIEWPORT_MIN_WIDTH = 320
@@ -165,6 +156,37 @@ class ChunkTimelineWidget(QWidget):
         self._selected_index = -1
         self._generating_index = -1
         self._duration_sec = 0.0
+
+    def _theme_colors(self) -> dict[str, str]:
+        try:
+            from PySide6.QtWidgets import QApplication
+
+            from ui.widgets.styles import theme_color_map
+
+            app = QApplication.instance()
+            is_dark = True
+            if app is not None:
+                prop = app.property("videoseek_is_dark")
+                if prop is None:
+                    is_dark = app.palette().color(app.palette().ColorRole.Window).lightness() < 128
+                else:
+                    is_dark = bool(prop)
+            return theme_color_map(is_dark)
+        except Exception:
+            return {
+                "WARN": "#C9A227",
+                "SUCCESS": "#3DAA6D",
+                "LINE_STRONG": "#4A4A4A",
+                "TRACK": "#1E1E1E",
+                "LINE": "#3A3A3A",
+                "HEADLINE": "#FFFFFF",
+                "MUTED": "#777777",
+                "ACCENT": "#60a5fa",
+            }
+
+    def _qcolor(self, key: str, fallback: str) -> QColor:
+        colors = self._theme_colors()
+        return QColor(str(colors.get(key) or fallback))
 
     def set_segments(self, segments: list[ChunkTimelineSegment], *, duration_sec: float = 0.0):
         self._segments = list(segments or [])
@@ -369,22 +391,22 @@ class ChunkTimelineWidget(QWidget):
 
     def _segment_color(self, segment: ChunkTimelineSegment, index: int) -> QColor:
         if segment.state == "ready":
-            return self._COLOR_READY
+            return self._qcolor("SUCCESS", "#3DAA6D")
         if segment.state == "pending" or segment.state == "generating":
-            return self._COLOR_PENDING
-        return self._COLOR_EMPTY
+            return self._qcolor("WARN", "#C9A227")
+        return self._qcolor("LINE_STRONG", "#4A4A4A")
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         track_rect = self._track_rect()
 
-        painter.setPen(QPen(self._COLOR_TRACK_BORDER, 1))
-        painter.setBrush(self._COLOR_TRACK)
+        painter.setPen(QPen(self._qcolor("LINE", "#3A3A3A"), 1))
+        painter.setBrush(self._qcolor("TRACK", "#1E1E1E"))
         painter.drawRoundedRect(track_rect, self._OUTER_RADIUS, self._OUTER_RADIUS)
 
         if not self._segments or self._effective_duration() <= 0:
-            painter.setPen(QPen(QColor("#777777")))
+            painter.setPen(QPen(self._qcolor("MUTED", "#777777")))
             painter.drawText(track_rect, Qt.AlignmentFlag.AlignCenter, "—")
             painter.end()
             return
@@ -401,11 +423,11 @@ class ChunkTimelineWidget(QWidget):
             painter.drawRoundedRect(segment_rect, self._INNER_RADIUS, self._INNER_RADIUS)
 
             if index == self._generating_index and segment.state != "ready":
-                painter.setPen(QPen(self._COLOR_ACTIVE, 2))
+                painter.setPen(QPen(self._qcolor("WARN", "#FFE08A"), 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRoundedRect(segment_rect.adjusted(1, 1, -1, -1), self._INNER_RADIUS, self._INNER_RADIUS)
             elif index == self._selected_index:
-                painter.setPen(QPen(self._COLOR_SELECTED, 2))
+                painter.setPen(QPen(self._qcolor("ACCENT", "#FFFFFF"), 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRoundedRect(segment_rect.adjusted(1, 1, -1, -1), self._INNER_RADIUS, self._INNER_RADIUS)
 

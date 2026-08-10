@@ -7,24 +7,21 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
-    QHBoxLayout,
     QHeaderView,
-    QLabel,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
 )
 
 from src.app.i18n import get_texts
 from src.services.shot_list_service import ShotListStore
 from src.services.search_service import format_clip_score_percent
+from ui.dialogs.shell import VSDialogShell
 from ui.views.table_views import _format_time_range
 from ui.widgets.scaffold import VSCard
 
 
-class ShotListDialog(QDialog):
+class ShotListDialog(VSDialogShell):
     def __init__(
         self,
         parent=None,
@@ -39,7 +36,6 @@ class ShotListDialog(QDialog):
         on_batch_export=None,
         ffmpeg_available: bool = True,
     ):
-        super().__init__(parent)
         self.store = store
         self.texts = get_texts(language)
         self.on_preview = on_preview
@@ -50,21 +46,18 @@ class ShotListDialog(QDialog):
         self.ffmpeg_available = bool(ffmpeg_available)
         self._selected_item_id = ""
 
-        self.setWindowTitle(self.texts.get("shot_list_title", "Shot list"))
+        super().__init__(
+            parent,
+            title=self.texts.get("shot_list_title", "Shot list"),
+            body="",
+            minimum_width=860,
+            outer_margins=(14, 14, 14, 14),
+            card_margins=(18, 16, 18, 14),
+            card_spacing=12,
+        )
         self.setMinimumSize(860, 520)
         self.resize(980, 620)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(10)
-
-        title = QLabel(self.texts.get("shot_list_title", "Shot list"))
-        title.setObjectName("DialogPageTitle")
-        self.subtitle = QLabel("")
-        self.subtitle.setObjectName("Hint")
-        self.subtitle.setWordWrap(True)
-        root.addWidget(title)
-        root.addWidget(self.subtitle)
+        self.subtitle = self.body_label
 
         card = VSCard(margins=(14, 12, 14, 12), spacing=10)
         card_layout = card.content_layout
@@ -94,10 +87,9 @@ class ShotListDialog(QDialog):
         self.table.setColumnWidth(2, 108)
         self.table.setColumnWidth(3, 74)
         card_layout.addWidget(self.table)
-        root.addWidget(card, 1)
+        self.content_layout.addWidget(card, 1)
 
-        export_row = QHBoxLayout()
-        export_row.setSpacing(8)
+        self.clear_footer(keep_stretch=False)
         self.btn_export_manifest = QPushButton(self.texts.get("shot_list_export_manifest", "Export manifest"))
         self.btn_export_fcpxml = QPushButton(
             self.texts.get("shot_list_export_fcpxml", "导出剪辑 XML")
@@ -117,14 +109,10 @@ class ShotListDialog(QDialog):
             self.btn_batch_export.setToolTip(
                 self.texts.get("shot_list_batch_export_ffmpeg_required", "FFmpeg is required for clip export.")
             )
-        export_row.addWidget(self.btn_export_manifest)
-        export_row.addWidget(self.btn_export_fcpxml)
-        export_row.addWidget(self.btn_batch_export)
-        export_row.addStretch(1)
-        root.addLayout(export_row)
+        self.footer_layout.addWidget(self.btn_export_manifest)
+        self.footer_layout.addWidget(self.btn_export_fcpxml)
+        self.footer_layout.addWidget(self.btn_batch_export)
 
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
         self.btn_move_up = QPushButton(self.texts.get("shot_list_move_up", "Move up"))
         self.btn_move_down = QPushButton(self.texts.get("shot_list_move_down", "Move down"))
         self.btn_remove = QPushButton(self.texts.get("shot_list_remove", "Remove"))
@@ -140,12 +128,11 @@ class ShotListDialog(QDialog):
             self.btn_locate,
         ):
             button.setObjectName("GhostButton")
-            toolbar.addWidget(button)
-        toolbar.addStretch(1)
+            self.footer_layout.addWidget(button)
+        self.footer_layout.addStretch(1)
         self.btn_close = QPushButton(self.texts.get("close", "Close"))
         self.btn_close.setObjectName("PrimaryButton")
-        toolbar.addWidget(self.btn_close)
-        root.addLayout(toolbar)
+        self.footer_layout.addWidget(self.btn_close)
 
         self.btn_move_up.clicked.connect(self._move_up)
         self.btn_move_down.clicked.connect(self._move_down)
@@ -162,7 +149,7 @@ class ShotListDialog(QDialog):
 
     def _reload_table(self) -> None:
         items = self.store.list_items()
-        self.subtitle.setText(
+        self.set_body(
             self.texts.get("shot_list_subtitle", "{count} clips collected").format(count=len(items))
         )
         self.table.setRowCount(0)

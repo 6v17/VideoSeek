@@ -1,14 +1,13 @@
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
+    QWidget,
 )
 
 from src.app.i18n import get_texts
@@ -19,40 +18,32 @@ from src.utils import (
     validate_sampling_fps_rules_full_coverage,
 )
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
-from ui.widgets.scaffold import VSCard
 
 from .app_message import AppMessageDialog
+from .shell import VSDialogShell
 
 
-class SamplingRulesDialog(QDialog):
+class SamplingRulesDialog(VSDialogShell):
     def __init__(self, parent=None, is_dark=True, language="zh", rules_text=""):
-        super().__init__(parent)
         self.language = language
         self.texts = get_texts(language)
         self._is_dark = bool(is_dark)
         self._rules_text = normalize_sampling_fps_rules_text(rules_text)
 
-        self.setWindowTitle(self.texts["sampling_rules_title"])
+        super().__init__(
+            parent,
+            title=self.texts["sampling_rules_title"],
+            body=self.texts["sampling_rules_hint"],
+            card_margins=(16, 16, 16, 16),
+            card_spacing=10,
+            outer_margins=(12, 12, 12, 12),
+        )
         apply_dialog_size(
             self,
             QSize(760, 460),
             QSize(620, 380),
             WINDOW_SIZES["notice_dialog"]["screen_margin"],
         )
-        self.setModal(True)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(0)
-
-        shell = VSCard(margins=(16, 16, 16, 16), spacing=10)
-        root_layout = shell.content_layout
-
-        title = QLabel(self.texts["sampling_rules_title"])
-        title.setObjectName("DialogSectionTitle")
-        hint = QLabel(self.texts["sampling_rules_hint"])
-        hint.setObjectName("Hint")
-        hint.setWordWrap(True)
 
         self.table = QTableWidget(0, 3)
         self.table.setObjectName("DialogRulesTable")
@@ -69,8 +60,12 @@ class SamplingRulesDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.content_layout.addWidget(self.table, 1)
 
-        toolbar = QHBoxLayout()
+        toolbar_host = QWidget()
+        toolbar = QHBoxLayout(toolbar_host)
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(8)
         self.empty_hint = QLabel(self.texts["sampling_rules_empty"])
         self.empty_hint.setObjectName("Hint")
         self.empty_hint.setWordWrap(True)
@@ -81,28 +76,22 @@ class SamplingRulesDialog(QDialog):
         self.btn_remove.setObjectName("GhostButton")
         toolbar.addWidget(self.btn_add)
         toolbar.addWidget(self.btn_remove)
+        self.content_layout.addWidget(toolbar_host)
 
-        actions = QHBoxLayout()
-        actions.addStretch()
-        self.btn_cancel = QPushButton(self.texts["cancel"])
-        self.btn_cancel.setObjectName("GhostButton")
-        self.btn_apply = QPushButton(self.texts["sampling_rules_apply"])
-        self.btn_apply.setObjectName("PrimaryButton")
-        actions.addWidget(self.btn_cancel)
-        actions.addWidget(self.btn_apply)
-
-        root_layout.addWidget(title)
-        root_layout.addWidget(hint)
-        root_layout.addWidget(self.table, 1)
-        root_layout.addLayout(toolbar)
-        root_layout.addLayout(actions)
-
-        root.addWidget(shell, 1)
+        self.btn_cancel = self.add_footer_button(
+            self.texts["cancel"],
+            object_name="GhostButton",
+            on_click=self.reject,
+        )
+        self.btn_apply = self.add_footer_button(
+            self.texts["sampling_rules_apply"],
+            object_name="PrimaryButton",
+            on_click=self._apply_rules,
+            default=True,
+        )
 
         self.btn_add.clicked.connect(lambda: self._append_row("", "", ""))
         self.btn_remove.clicked.connect(self._remove_selected_row)
-        self.btn_cancel.clicked.connect(self.reject)
-        self.btn_apply.clicked.connect(self._apply_rules)
 
         self._load_rules(self._rules_text)
 

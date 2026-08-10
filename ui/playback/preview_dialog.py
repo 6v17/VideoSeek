@@ -120,7 +120,18 @@ class PreviewDialog(QDialog):
     export_requested = Signal(str, float, float, str, str)
     export_status_changed = Signal(str, str)
 
-    def __init__(self, parent, video_path, start_sec, end_sec, texts, suggested_sec=None):
+    def __init__(
+        self,
+        parent,
+        video_path,
+        start_sec,
+        end_sec,
+        texts,
+        suggested_sec=None,
+        *,
+        shared_player=None,
+        on_release_shared_player=None,
+    ):
         super().__init__(parent)
         self.texts = texts
         self.video_path = ""
@@ -144,6 +155,9 @@ class PreviewDialog(QDialog):
         self._segment_line_override = None
         self._play_token = 0
         self._duration_cache = {}
+        self._shared_player = shared_player
+        self._owns_player = shared_player is None
+        self._on_release_shared_player = on_release_shared_player
 
         self.setWindowTitle(self.texts.get("preview_dialog_title", "Large Preview"))
         self.resize(1000, 660)
@@ -227,7 +241,9 @@ class PreviewDialog(QDialog):
         segment_row.addWidget(self.export_button)
         layout.addLayout(segment_row)
 
-        self.player = None
+        self.player = self._shared_player
+        if self.player is not None and hasattr(self.video_host, "set_player"):
+            self.video_host.set_player(self.player)
         self.update_timer = QTimer(self)
         self.update_timer.setInterval(120)
         self.update_timer.timeout.connect(self._sync_ui)
@@ -273,11 +289,12 @@ class PreviewDialog(QDialog):
         # Soft reload: reuse the same player. Full dispose/recreate calls libvlc stop/release
         # on the UI thread and can freeze the whole app ("Python 未响应").
         player = self._ensure_player()
-        if not player.is_available():
+        if not player.is_available() and self._owns_player:
+            # Only owned players may be torn down/recreated; shared app player must stay.
             self._dispose_player(fast=True)
             player = self._ensure_player()
         # Pause immediately so stacked enlarge clicks don't pile up play() calls.
-        if player.is_available():
+        if player is not None and player.is_available():
             player.suspend()
         if self.isFullScreen():
             self.showNormal()
@@ -375,16 +392,38 @@ class PreviewDialog(QDialog):
         self.hide()
         if self.player is not None:
             self.player.suspend()
+        self._release_shared_player_host()
 
     def _ensure_player(self):
+        if self._shared_player is not None:
+            self.player = self._shared_player
+            if hasattr(self.player, "set_host_widget"):
+                self.player.set_host_widget(self.video_host)
+            elif hasattr(self.video_host, "set_player"):
+                self.video_host.set_player(self.player)
+            return self.player
         if self.player is None:
             self.player = VlcPreviewPlayer(self.video_host)
             if hasattr(self.video_host, "set_player"):
                 self.video_host.set_player(self.player)
         return self.player
 
+    def _release_shared_player_host(self) -> None:
+        if self._owns_player or self._shared_player is None:
+            return
+        if callable(self._on_release_shared_player):
+            try:
+                self._on_release_shared_player(self._shared_player)
+            except Exception as exc:
+                logger.debug("Release shared preview player host skipped: %s", exc)
+
     def _dispose_player(self, fast=False):
         if self.player is None:
+            return
+        if not self._owns_player:
+            # Shared app player: never shutdown/release here.
+            self.player.suspend()
+            self._release_shared_player_host()
             return
         # shutdown() already stops/releases; do not call stop() first (double hang risk).
         self.player.shutdown(fast=fast)

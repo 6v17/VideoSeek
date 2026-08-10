@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ui.dialogs.app_message import AppMessageDialog
+from ui.dialogs.shell import VSDialogShell
 from ui.widgets.layout import WINDOW_SIZES, message_dialog_min_width
-from ui.widgets.video_scope_tree import VideoScopeTreeWidget
-from ui.widgets.scaffold import VSCard
 from ui.widgets.styles import repolish_widget
+from ui.widgets.video_scope_tree import VideoScopeTreeWidget
 
 
-class SearchScopeEditorDialog(QDialog):
+class SearchScopeEditorDialog(VSDialogShell):
     def __init__(
         self,
         parent,
@@ -24,40 +24,32 @@ class SearchScopeEditorDialog(QDialog):
         is_dark: bool,
         language: str = "zh",
     ):
-        super().__init__(parent)
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.setWindowTitle(str(texts.get("search_scope_dialog_title", "")))
-        self.setMinimumWidth(
-            message_dialog_min_width(760, WINDOW_SIZES["message_dialog"]["screen_margin"])
+        super().__init__(
+            parent,
+            title=str(texts.get("search_scope_dialog_title", "")),
+            body=str(texts.get("search_scope_dialog_hint", "")),
+            minimum_width=message_dialog_min_width(
+                760, WINDOW_SIZES["message_dialog"]["screen_margin"]
+            ),
+            card_margins=(18, 16, 18, 16),
+            card_spacing=12,
         )
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.resize(820, 560)
         self._texts = texts
         self._language = str(language or "zh")
         self._is_dark = bool(is_dark)
         self._entries = list(entries or [])
         self._mode = "selected" if str(mode or "").strip().lower() == "selected" else "all"
-        self._selected_paths = [str(path) for path in (selected_video_paths or []) if str(path or "").strip()]
+        self._selected_paths = [
+            str(path) for path in (selected_video_paths or []) if str(path or "").strip()
+        ]
         self._result_mode = "all"
         self._result_video_paths: list[str] = []
 
-        self.setObjectName("SearchScopeEditorDialog")
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        shell = VSCard(margins=(18, 16, 18, 16), spacing=12)
-        inner = shell.content_layout
-
-        hero = QLabel(str(texts.get("search_scope_dialog_title", "")))
-        hero.setObjectName("DialogHeroTitle")
-        inner.addWidget(hero)
-
-        hint = QLabel(str(texts.get("search_scope_dialog_hint", "")))
-        hint.setObjectName("DialogBodyLabel")
-        hint.setWordWrap(True)
-        inner.addWidget(hint)
-
-        toolbar = QHBoxLayout()
+        toolbar_host = QWidget()
+        toolbar = QHBoxLayout(toolbar_host)
+        toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(10)
         self._summary_label = QLabel()
         self._summary_label.setObjectName("DialogMetaLabel")
@@ -70,27 +62,26 @@ class SearchScopeEditorDialog(QDialog):
         toolbar.addWidget(self._summary_label, 1)
         toolbar.addWidget(btn_select_all, 0)
         toolbar.addWidget(btn_clear_all, 0)
-        inner.addLayout(toolbar)
+        self.content_layout.addWidget(toolbar_host)
 
         self.scope_tree = VideoScopeTreeWidget(self)
         self.scope_tree.set_header_labels(
             str(texts.get("search_scope_video_col", "Video")),
             "",
         )
-        inner.addWidget(self.scope_tree, 1)
+        self.content_layout.addWidget(self.scope_tree, 1)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        cancel = QPushButton(str(texts.get("cancel", "Cancel")))
-        cancel.setObjectName("GhostButton")
-        cancel.clicked.connect(self.reject)
-        ok = QPushButton(str(texts.get("confirm_action", "OK")))
-        ok.setObjectName("PrimaryButton")
-        ok.clicked.connect(self._accept_scope)
-        btn_row.addWidget(cancel, 0)
-        btn_row.addWidget(ok, 0)
-        inner.addLayout(btn_row)
-        root.addWidget(shell, 1)
+        self.add_footer_button(
+            str(texts.get("cancel", "Cancel")),
+            object_name="GhostButton",
+            on_click=self.reject,
+        )
+        self.add_footer_button(
+            str(texts.get("confirm_action", "OK")),
+            object_name="PrimaryButton",
+            on_click=self._accept_scope,
+            default=True,
+        )
 
         self._load_tree()
         btn_select_all.setEnabled(self.scope_tree.total_video_items() > 0)
@@ -98,7 +89,6 @@ class SearchScopeEditorDialog(QDialog):
         repolish_widget(self)
 
     def _load_tree(self) -> None:
-        total = self.scope_tree.total_video_items()
         if not self._entries:
             self._refresh_summary()
             return

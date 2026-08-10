@@ -5,12 +5,13 @@ from typing import Any
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QEvent,
     QModelIndex,
     QSortFilterProxyModel,
     Qt,
     Signal,
 )
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -18,8 +19,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListView,
     QSizePolicy,
-    QStyle,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -101,26 +100,43 @@ class SearchableIdCombo(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._button = QToolButton(self)
-        self._button.setObjectName("SearchModeSelect")
-        self._button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self._button.setPopupMode(QToolButton.ToolButtonPopupMode.DelayedPopup)
-        self._button.setArrowType(Qt.ArrowType.NoArrow)
-        self._button.setAutoRaise(False)
-        self._button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._button.clicked.connect(self._toggle_popup)
-        root.addWidget(self._button, 1)
+        # Combo-like face: text left, chevron right (match QComboBox#SearchModeSelect).
+        self._face = QFrame(self)
+        self._face.setObjectName("SearchableIdComboFace")
+        self._face.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._face.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._face.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        face_row = QHBoxLayout(self._face)
+        face_row.setContentsMargins(8, 2, 6, 2)
+        face_row.setSpacing(6)
+
+        self._text = QLabel(self._face)
+        self._text.setObjectName("SearchableIdComboText")
+        self._text.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._text.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._arrow = QLabel("▾", self._face)
+        self._arrow.setObjectName("SearchableIdComboArrow")
+        self._arrow.setAlignment(
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+        )
+        face_row.addWidget(self._text, 1)
+        face_row.addWidget(self._arrow, 0)
+        self._face.installEventFilter(self)
+        root.addWidget(self._face, 1)
 
         self._sync_button_text()
 
     def setMinimumWidth(self, width: int) -> None:  # noqa: N802 — Qt API
         super().setMinimumWidth(width)
-        self._button.setMinimumWidth(width)
+        self._face.setMinimumWidth(width)
 
     def setMaximumWidth(self, width: int) -> None:  # noqa: N802 — Qt API
         super().setMaximumWidth(width)
-        self._button.setMaximumWidth(width)
+        self._face.setMaximumWidth(width)
 
     def set_placeholders(self, *, empty: str = "", filter_text: str = "") -> None:
         if empty:
@@ -189,12 +205,11 @@ class SearchableIdCombo(QWidget):
     def _sync_button_text(self) -> None:
         text = self.currentText() if self._current_index >= 0 else (self._placeholder or "—")
         # Keep the face readable; full path stays on tooltip.
-        self._button.setText(text)
-        self._button.setToolTip(text)
-        style = self.style()
-        if style is not None:
-            icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
-            self._button.setIcon(icon)
+        metrics = self._text.fontMetrics()
+        elided = metrics.elidedText(text, Qt.TextElideMode.ElideMiddle, max(80, self._face.width() - 36))
+        self._text.setText(elided or text)
+        self._face.setToolTip(text)
+        self._text.setToolTip(text)
 
     def _ensure_popup(self) -> QFrame:
         if self._popup is not None:
@@ -322,6 +337,17 @@ class SearchableIdCombo(QWidget):
         if not index.isValid() and self._proxy.rowCount() > 0:
             index = self._proxy.index(0, 0)
         self._on_view_clicked(index)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._face and event.type() == QEvent.Type.MouseButtonRelease:
+            if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
+                self._toggle_popup()
+                return True
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_button_text()
 
     def hideEvent(self, event) -> None:
         self._close_popup()

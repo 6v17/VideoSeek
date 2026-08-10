@@ -385,6 +385,41 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         self.assertIn("中文", zh_prompt)
         self.assertTrue(en_prompt.startswith("Below are chronological segment descriptions"))
 
+    def test_finalize_uses_custom_prompts_when_enabled(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "caption_language": "zh",
+                "use_custom_prompts": True,
+                "custom_caption_prompt": "  Custom caption only.  ",
+                "custom_summary_prompt": "Custom summary only.",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "model": "qwen3-vl-8b-instruct",
+            }
+        )
+        self.assertTrue(settings["use_custom_prompts"])
+        self.assertEqual(settings["prompt"], "Custom caption only.")
+        self.assertEqual(
+            understanding_resource_service.resolve_video_summary_prompt(settings),
+            "Custom summary only.",
+        )
+
+    def test_custom_prompt_empty_falls_back_to_language_default(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "caption_language": "en",
+                "use_custom_prompts": True,
+                "custom_caption_prompt": "",
+                "custom_summary_prompt": "Only summary customized.",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "model": "qwen3-vl-8b-instruct",
+            }
+        )
+        self.assertTrue(settings["prompt"].startswith("Describe this video frame"))
+        self.assertEqual(
+            understanding_resource_service.resolve_video_summary_prompt(settings),
+            "Only summary customized.",
+        )
+
     def test_finalize_remote_vlm_settings_preserves_api_key(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
             {

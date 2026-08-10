@@ -81,6 +81,16 @@ class UnderstandingGuiMixin:
         page.input_caption_concurrency.setValue(
             max(1, min(4, int(remote_vlm.get("concurrency", 2) or 2)))
         )
+        page.chk_use_custom_prompts.blockSignals(True)
+        page.chk_use_custom_prompts.setChecked(bool(remote_vlm.get("use_custom_prompts")))
+        page.chk_use_custom_prompts.blockSignals(False)
+        page.input_custom_caption_prompt.setPlainText(
+            str(remote_vlm.get("custom_caption_prompt", "") or "")
+        )
+        page.input_custom_summary_prompt.setPlainText(
+            str(remote_vlm.get("custom_summary_prompt", "") or "")
+        )
+        self._sync_custom_prompt_fields_visible()
         if refresh_status:
             self._refresh_understanding_settings_status()
 
@@ -423,15 +433,17 @@ class UnderstandingGuiMixin:
             remote_vlm["model"] = model
             remote_vlm["api_keys"] = dict(self._remote_vlm_api_keys)
             from src.services.understanding_resource_service import (
-                get_caption_prompt_for_language,
+                finalize_remote_vlm_settings,
                 normalize_caption_language,
             )
 
             language = normalize_caption_language(page.input_caption_language.currentData())
             remote_vlm["caption_language"] = language
-            remote_vlm["prompt"] = get_caption_prompt_for_language(language)
+            remote_vlm["use_custom_prompts"] = bool(page.chk_use_custom_prompts.isChecked())
+            remote_vlm["custom_caption_prompt"] = page.input_custom_caption_prompt.toPlainText().strip()
+            remote_vlm["custom_summary_prompt"] = page.input_custom_summary_prompt.toPlainText().strip()
             remote_vlm["concurrency"] = int(page.input_caption_concurrency.value())
-            understanding["remote_vlm"] = remote_vlm
+            understanding["remote_vlm"] = finalize_remote_vlm_settings(remote_vlm)
             config["understanding"] = understanding
             save_config(config)
             self._clear_cached_vlm_connection_probe()
@@ -454,8 +466,51 @@ class UnderstandingGuiMixin:
         page.input_remote_vlm_model.setEnabled(enabled)
         page.input_caption_language.setEnabled(enabled)
         page.input_caption_concurrency.setEnabled(enabled)
+        page.chk_use_custom_prompts.setEnabled(enabled)
         page.btn_test_vlm_connection.setEnabled(enabled)
         page.btn_save_config.setEnabled(enabled)
+        self._sync_custom_prompt_fields_visible(config_enabled=enabled)
+
+    def _sync_custom_prompt_fields_visible(self, *, config_enabled: bool | None = None):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        if config_enabled is None:
+            config_enabled = page.chk_use_custom_prompts.isEnabled()
+        show_fields = bool(page.chk_use_custom_prompts.isChecked())
+        page.custom_prompt_fields.setVisible(show_fields)
+        editors_on = bool(config_enabled and show_fields)
+        page.input_custom_caption_prompt.setEnabled(editors_on)
+        page.input_custom_summary_prompt.setEnabled(editors_on)
+        page.btn_reset_custom_prompts.setEnabled(editors_on)
+
+    def _on_use_custom_prompts_toggled(self, checked: bool):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        if checked:
+            caption = page.input_custom_caption_prompt.toPlainText().strip()
+            summary = page.input_custom_summary_prompt.toPlainText().strip()
+            if not caption and not summary:
+                self._fill_custom_prompts_with_language_defaults()
+        self._sync_custom_prompt_fields_visible()
+
+    def _fill_custom_prompts_with_language_defaults(self):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        from src.services.understanding_resource_service import (
+            get_caption_prompt_for_language,
+            get_video_summary_prompt_for_language,
+            normalize_caption_language,
+        )
+
+        language = normalize_caption_language(page.input_caption_language.currentData())
+        page.input_custom_caption_prompt.setPlainText(get_caption_prompt_for_language(language))
+        page.input_custom_summary_prompt.setPlainText(get_video_summary_prompt_for_language(language))
+
+    def _on_reset_custom_prompts_clicked(self):
+        self._fill_custom_prompts_with_language_defaults()
 
     def _is_current_page(self, page_name: str) -> bool:
         return self.pages.currentIndex() == self._nav_page_index(page_name)
@@ -584,7 +639,8 @@ class UnderstandingGuiMixin:
             return
 
         self._show_understanding_chunk_detail(int(index))
-        opened = self.open_segment_preview_dialog(
+        # Stay on Understanding — floating dialog instead of jumping to Search preview.
+        opened = self.open_floating_preview_dialog(
             video_path,
             start_sec,
             end_sec,

@@ -62,6 +62,9 @@ DEFAULT_UNDERSTANDING_CONFIG = {
         "model": "qwen3-vl-8b-instruct",
         "api_keys": {},
         "caption_language": "zh",
+        "use_custom_prompts": False,
+        "custom_caption_prompt": "",
+        "custom_summary_prompt": "",
         "prompt": (
             "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
         ),

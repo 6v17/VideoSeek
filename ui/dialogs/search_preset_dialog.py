@@ -5,14 +5,13 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
-    QDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -27,12 +26,13 @@ from src.services.search_preset_service import (
     resolve_preset_ref_paths,
     update_preset,
 )
-from ui.widgets.scaffold import VSCard
+from ui.dialogs.app_message import AppMessageDialog
+from ui.dialogs.shell import VSDialogShell
 from ui.widgets.search_compose_form import SearchComposeFormWidget
 from ui.widgets.styles import repolish_widget
 
 
-class SearchPresetFormDialog(QDialog):
+class SearchPresetFormDialog(VSDialogShell):
     """Create or edit a preset: tag name, description text, and helper images."""
 
     def __init__(
@@ -45,8 +45,9 @@ class SearchPresetFormDialog(QDialog):
         language="zh",
         is_dark=True,
     ):
-        super().__init__(parent)
         self.texts = get_texts(language)
+        self.language = language
+        self.is_dark = bool(is_dark)
         self.preset = dict(preset or {})
         self.draft = dict(draft or {})
         self.save_context = dict(save_context or {})
@@ -54,32 +55,37 @@ class SearchPresetFormDialog(QDialog):
         self._is_edit = bool(self.preset.get("id"))
 
         title_key = "search_presets_edit_title" if self._is_edit else "search_presets_save_title"
-        self.setWindowTitle(self.texts.get(title_key, "Preset"))
-        self.setMinimumWidth(620)
+        super().__init__(
+            parent,
+            title=self.texts.get(title_key, "Preset"),
+            minimum_width=620,
+        )
 
-        root = QVBoxLayout(self)
-        card = VSCard(variant="dialog")
         form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(10)
         default_name = str(self.preset.get("name", "") or self.draft.get("name", "") or "")
         self.input_name = QLineEdit(default_name)
+        self.input_name.setObjectName("SearchInput")
         form.addRow(self.texts.get("search_presets_field_name", "Name"), self.input_name)
-        card.content_layout.addLayout(form)
+        form_host = QWidget()
+        form_host.setLayout(form)
+        self.content_layout.addWidget(form_host)
 
         self.compose_form = SearchComposeFormWidget(texts=self.texts)
-        card.content_layout.addWidget(self.compose_form)
+        self.content_layout.addWidget(self.compose_form)
 
-        root.addWidget(card)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        btn_cancel = QPushButton(self.texts.get("cancel", "Cancel"))
-        btn_save = QPushButton(self.texts.get("search_presets_save", "Save"))
-        btn_save.setObjectName("PrimaryButton")
-        btn_cancel.clicked.connect(self.reject)
-        btn_save.clicked.connect(self._save)
-        buttons.addWidget(btn_cancel)
-        buttons.addWidget(btn_save)
-        root.addLayout(buttons)
+        self.add_footer_button(
+            self.texts.get("cancel", "Cancel"),
+            object_name="GhostButton",
+            on_click=self.reject,
+        )
+        self.add_footer_button(
+            self.texts.get("search_presets_save", "Save"),
+            object_name="PrimaryButton",
+            on_click=self._save,
+            default=True,
+        )
 
         if self._is_edit:
             self.compose_form.load_preset(self.preset)
@@ -87,6 +93,16 @@ class SearchPresetFormDialog(QDialog):
         else:
             self.compose_form.load_draft(self.draft)
             self._initial_image_paths = list(self.compose_form.image_paths())
+
+    def _warn(self, message: str) -> None:
+        AppMessageDialog(
+            self.texts.get("warning_title", "Warning"),
+            message,
+            kind="warning",
+            parent=self,
+            is_dark=self.is_dark,
+            language=self.language,
+        ).exec()
 
     def _images_changed(self) -> bool:
         current = [os.path.normpath(path) for path in self.compose_form.image_paths()]
@@ -96,24 +112,16 @@ class SearchPresetFormDialog(QDialog):
     def _save(self):
         name = self.input_name.text().strip()
         if not name:
-            QMessageBox.warning(
-                self,
-                self.texts.get("warning_title", "Warning"),
-                self.texts.get("search_presets_name_required", ""),
-            )
+            self._warn(self.texts.get("search_presets_name_required", ""))
             return
         try:
             query = self.compose_form.normalized_query()
         except ValueError as exc:
-            QMessageBox.warning(self, self.texts.get("warning_title", "Warning"), str(exc))
+            self._warn(str(exc))
             return
         image_paths = self.compose_form.image_paths()
         if not query and not image_paths:
-            QMessageBox.warning(
-                self,
-                self.texts.get("warning_title", "Warning"),
-                self.texts.get("search_presets_save_empty", ""),
-            )
+            self._warn(self.texts.get("search_presets_save_empty", ""))
             return
         try:
             fusion = self.compose_form.current_fusion()
@@ -138,7 +146,14 @@ class SearchPresetFormDialog(QDialog):
                     payload["fusion"] = fusion
                 self._result_preset = create_preset(**payload)
         except Exception as exc:
-            QMessageBox.critical(self, self.texts.get("error_title", "Error"), str(exc))
+            AppMessageDialog(
+                self.texts.get("error_title", "Error"),
+                str(exc),
+                kind="error",
+                parent=self,
+                is_dark=self.is_dark,
+                language=self.language,
+            ).exec()
             return
         self.accept()
 
@@ -167,9 +182,12 @@ class SearchPresetManageRow(QFrame):
         accent = QWidget()
         accent.setObjectName("SearchPresetManageAccent")
         accent.setFixedSize(4, 44)
+        accent.setAutoFillBackground(True)
         color = str((preset.get("ui") or {}).get("color", "") or "").strip()
         if color:
-            accent.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
+            palette = accent.palette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(color))
+            accent.setPalette(palette)
 
         text_wrap = QWidget()
         text_col = QVBoxLayout(text_wrap)
@@ -245,27 +263,20 @@ class SearchPresetManageRow(QFrame):
         layout.addLayout(actions, 0)
 
 
-class SearchPresetManageDialog(QDialog):
+class SearchPresetManageDialog(VSDialogShell):
     def __init__(self, parent=None, *, language="zh", is_dark=True):
-        super().__init__(parent)
         self.texts = get_texts(language)
         self.language = language
         self.is_dark = is_dark
-        self.setWindowTitle(self.texts.get("search_presets_manage_title", "Manage search presets"))
-        self.setMinimumSize(760, 520)
-
-        root = QVBoxLayout(self)
-        card = VSCard(variant="dialog", margins=(22, 20, 22, 18), spacing=14)
-        card_layout = card.content_layout
-
-        hero = QLabel(self.texts.get("search_presets_manage_title", "Manage search presets"))
-        hero.setObjectName("DialogHeroTitle")
-        card_layout.addWidget(hero)
-
-        hint = QLabel(self.texts.get("search_presets_manage_hint", ""))
-        hint.setObjectName("DialogBodyLabel")
-        hint.setWordWrap(True)
-        card_layout.addWidget(hint)
+        super().__init__(
+            parent,
+            title=self.texts.get("search_presets_manage_title", "Manage search presets"),
+            body=self.texts.get("search_presets_manage_hint", ""),
+            minimum_width=760,
+            card_margins=(22, 20, 22, 18),
+            card_spacing=14,
+        )
+        self.setMinimumHeight(520)
 
         list_host = QWidget()
         list_host.setObjectName("SearchPresetManageList")
@@ -280,22 +291,20 @@ class SearchPresetManageDialog(QDialog):
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setWidget(list_host)
-        card_layout.addWidget(self._scroll, 1)
+        self.content_layout.addWidget(self._scroll, 1)
 
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(10)
-        self.btn_add = QPushButton(self.texts.get("search_presets_add", "Add preset"))
-        self.btn_add.setObjectName("PrimaryButton")
-        self.btn_close = QPushButton(self.texts.get("close", "Close"))
-        self.btn_close.setObjectName("GhostButton")
-        toolbar.addWidget(self.btn_add)
-        toolbar.addStretch(1)
-        toolbar.addWidget(self.btn_close)
-        card_layout.addLayout(toolbar)
-        root.addWidget(card)
+        self.btn_close = self.add_footer_button(
+            self.texts.get("close", "Close"),
+            object_name="GhostButton",
+            on_click=self.accept,
+        )
+        self.btn_add = self.add_footer_button(
+            self.texts.get("search_presets_add", "Add preset"),
+            object_name="PrimaryButton",
+            on_click=self._create_preset,
+            default=True,
+        )
 
-        self.btn_add.clicked.connect(self._create_preset)
-        self.btn_close.clicked.connect(self.accept)
         self._presets = []
         self.reload()
         repolish_widget(self)
@@ -348,14 +357,17 @@ class SearchPresetManageDialog(QDialog):
             self._refresh_parent_presets_bar()
 
     def _delete_preset(self, preset_id: str):
-        if (
-            QMessageBox.question(
-                self,
-                self.texts.get("confirm_title", "Confirm"),
-                self.texts.get("search_presets_delete_confirm", "Delete this preset?"),
-            )
-            != QMessageBox.StandardButton.Yes
-        ):
+        confirm = AppMessageDialog(
+            self.texts.get("confirm_title", "Confirm"),
+            self.texts.get("search_presets_delete_confirm", "Delete this preset?"),
+            kind="warning",
+            parent=self,
+            is_dark=self.is_dark,
+            language=self.language,
+            confirm=True,
+        )
+        confirm.exec()
+        if not confirm.confirmed():
             return
         delete_preset(preset_id)
         self.reload()

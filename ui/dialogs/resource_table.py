@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QCheckBox,
-    QDialog,
     QFileDialog,
     QFrame,
     QHeaderView,
@@ -16,15 +15,16 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
-    QVBoxLayout,
 )
 
 from src.app.i18n import get_texts
 from ui.widgets.scaffold import VSCard
 
 from .common import SortableTableWidgetItem
+from .shell import VSDialogShell
 
-class ResourceTableDialog(QDialog):
+
+class ResourceTableDialog(VSDialogShell):
     def __init__(
         self,
         parent=None,
@@ -48,7 +48,16 @@ class ResourceTableDialog(QDialog):
         allow_sorting=True,
         show_utility_actions=True,
     ):
-        super().__init__(parent)
+        resolved_title = title or get_texts(language).get("details_title_default", "Details")
+        super().__init__(
+            parent,
+            title=resolved_title,
+            body=str(subtitle or ""),
+            minimum_width=860,
+            outer_margins=(14, 14, 14, 14),
+            card_margins=(18, 16, 18, 14),
+            card_spacing=12,
+        )
         self.texts = get_texts(language)
         self.rows = list(rows or [])
         self.headers = list(headers or [])
@@ -67,21 +76,10 @@ class ResourceTableDialog(QDialog):
         self.show_utility_actions = bool(show_utility_actions)
         self.filtered_rows = list(self.rows)
         self.filtered_payloads = list(self.row_payloads)
+        self.subtitle_label = self.body_label
 
-        self.setWindowTitle(title or self.texts["details_title_default"])
         self.setMinimumSize(860, 540)
         self.resize(1040, 640)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(10)
-
-        title_label = QLabel(title or self.texts["details_title_default"])
-        title_label.setObjectName("DialogPageTitle")
-        subtitle_label = QLabel(subtitle)
-        subtitle_label.setObjectName("Hint")
-        subtitle_label.setWordWrap(True)
-        self.subtitle_label = subtitle_label
 
         toolbar_card = VSCard(object_name="ToolbarCard", margins=(14, 12, 14, 12), spacing=10)
         toolbar_layout = toolbar_card.content_layout
@@ -89,6 +87,7 @@ class ResourceTableDialog(QDialog):
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
         self.input_filter = QLineEdit()
+        self.input_filter.setObjectName("SearchInput")
         self.input_filter.setPlaceholderText(self.texts["details_filter_placeholder"])
         self.toggle_issues = QCheckBox(self.texts["details_show_issues"])
         self.btn_reset_filter = QPushButton(self.texts["details_reset_filter"])
@@ -114,6 +113,7 @@ class ResourceTableDialog(QDialog):
         self.summary_hint.setWordWrap(True)
         self.summary_hint.setVisible(bool(self.summary_text))
         toolbar_layout.addWidget(self.summary_hint)
+        self.content_layout.addWidget(toolbar_card)
 
         self.table = QTableWidget(0, len(self.headers))
         self.table.setObjectName("ResourceDialogTable")
@@ -130,13 +130,16 @@ class ResourceTableDialog(QDialog):
         self.table.setSortingEnabled(self.allow_sorting)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.setMinimumHeight(360)
+        self.table.setMinimumHeight(320)
+        self.content_layout.addWidget(self.table, 1)
 
         details_card = VSCard(object_name="DetailsCard", margins=(14, 12, 14, 12), spacing=6)
         details_layout = details_card.content_layout
         details_title = QLabel(self._inline_text("选中项详情", "Selected Details"))
         details_title.setObjectName("DialogInlineTitle")
-        details_hint = QLabel(self._inline_text("只显示当前选中行的关键信息。", "Shows the key fields for the selected row."))
+        details_hint = QLabel(
+            self._inline_text("只显示当前选中行的关键信息。", "Shows the key fields for the selected row.")
+        )
         details_hint.setObjectName("Hint")
         details_hint.setWordWrap(True)
         self.details_text = QPlainTextEdit()
@@ -157,42 +160,41 @@ class ResourceTableDialog(QDialog):
         self.status_hint.setObjectName("Hint")
         self.status_hint.setWordWrap(True)
         status_layout.addWidget(self.status_hint)
+        self.content_layout.addWidget(status_card)
 
-        button_row = QHBoxLayout()
+        self.clear_footer(keep_stretch=False)
         self.btn_copy = QPushButton(self.texts["details_copy_json"])
+        self.btn_copy.setObjectName("GhostButton")
         self.btn_export = QPushButton(self.texts["details_export_json"])
+        self.btn_export.setObjectName("GhostButton")
         self.btn_copy_row = QPushButton(self._inline_text("复制选中行", "Copy Selected"))
+        self.btn_copy_row.setObjectName("GhostButton")
         self.btn_cancel = QPushButton(self.texts["cancel"])
+        self.btn_cancel.setObjectName("GhostButton")
         self.btn_close = QPushButton(self.texts["close"])
         self.btn_close.setObjectName("PrimaryButton")
+
         if self.show_utility_actions:
-            button_row.addWidget(self.btn_copy)
-            button_row.addWidget(self.btn_export)
-            button_row.addWidget(self.btn_copy_row)
+            self.footer_layout.addWidget(self.btn_copy)
+            self.footer_layout.addWidget(self.btn_export)
+            self.footer_layout.addWidget(self.btn_copy_row)
         else:
             self.btn_copy.hide()
             self.btn_export.hide()
             self.btn_copy_row.hide()
         for action in self.extra_actions:
             button = QPushButton(action.get("label", "Action"))
-            object_name = str(action.get("object_name", "") or "").strip()
-            if object_name:
-                button.setObjectName(object_name)
-            button.clicked.connect(lambda _, handler=action.get("handler"): handler(self) if callable(handler) else None)
-            button_row.addWidget(button)
-        button_row.addStretch()
+            object_name = str(action.get("object_name", "") or "").strip() or "GhostButton"
+            button.setObjectName(object_name)
+            button.clicked.connect(
+                lambda _, handler=action.get("handler"): handler(self) if callable(handler) else None
+            )
+            self.footer_layout.addWidget(button)
+        self.footer_layout.addStretch(1)
         if self.confirm_mode:
-            self.btn_cancel.setObjectName("GhostButton")
-            button_row.addWidget(self.btn_cancel)
+            self.footer_layout.addWidget(self.btn_cancel)
             self.btn_close.setText(self.confirm_text)
-        button_row.addWidget(self.btn_close)
-
-        root.addWidget(title_label)
-        root.addWidget(subtitle_label)
-        root.addWidget(toolbar_card)
-        root.addWidget(self.table, 1)
-        root.addWidget(status_card)
-        root.addLayout(button_row)
+        self.footer_layout.addWidget(self.btn_close)
 
         self._refresh_rows()
         self._apply_column_layout()
@@ -222,7 +224,7 @@ class ResourceTableDialog(QDialog):
         self._apply_column_layout()
 
     def set_subtitle(self, text):
-        self.subtitle_label.setText(str(text or ""))
+        self.set_body(str(text or ""))
 
     def set_summary_text(self, text):
         self.summary_text = str(text or "")
@@ -258,7 +260,11 @@ class ResourceTableDialog(QDialog):
         return True
 
     def _refresh_rows(self):
-        filtered_pairs = [(row, payload) for row, payload in zip(self.rows, self.row_payloads) if self._matches_filter(row)]
+        filtered_pairs = [
+            (row, payload)
+            for row, payload in zip(self.rows, self.row_payloads)
+            if self._matches_filter(row)
+        ]
         self.filtered_rows = [row for row, _ in filtered_pairs]
         self.filtered_payloads = [payload for _, payload in filtered_pairs]
         self.table.setSortingEnabled(False)
@@ -282,11 +288,14 @@ class ResourceTableDialog(QDialog):
         self.summary_visible.value_label.setText(str(visible_rows))
         self.summary_issues.value_label.setText(str(issue_rows))
         self.status_hint.setText(
-            self.texts["details_empty"] if not self.filtered_rows else self.texts["details_showing_count"].format(
+            self.texts["details_empty"]
+            if not self.filtered_rows
+            else self.texts["details_showing_count"].format(
                 visible=visible_rows,
                 total=total_rows,
             )
         )
+
     def _apply_column_layout(self):
         if not self.headers:
             return
@@ -307,14 +316,22 @@ class ResourceTableDialog(QDialog):
                 self.table.horizontalHeader().setSectionResizeMode(col_index, QHeaderView.Fixed)
                 self.table.setColumnWidth(col_index, col_width)
 
-        if 0 <= stretch_col < len(self.headers) and stretch_col not in {int(k) for k in self.fixed_column_widths.keys()}:
+        if 0 <= stretch_col < len(self.headers) and stretch_col not in {
+            int(k) for k in self.fixed_column_widths.keys()
+        }:
             self.table.setColumnWidth(stretch_col, max(self.table.columnWidth(stretch_col), 360))
 
     def _update_details(self):
         return
 
     def _copy_json(self):
-        QApplication.clipboard().setText(json.dumps({"headers": self.headers, "rows": self.filtered_rows}, ensure_ascii=False, indent=2))
+        QApplication.clipboard().setText(
+            json.dumps(
+                {"headers": self.headers, "rows": self.filtered_rows},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         self.status_hint.setText(self.texts["details_copy_done"])
 
     def _copy_selected_row(self):
@@ -327,7 +344,9 @@ class ResourceTableDialog(QDialog):
             self.status_hint.setText(self.texts["details_nothing_selected"])
             return
         row_data = self.filtered_rows[row_index]
-        QApplication.clipboard().setText("\n".join(f"{header}: {value}" for header, value in zip(self.headers, row_data)))
+        QApplication.clipboard().setText(
+            "\n".join(f"{header}: {value}" for header, value in zip(self.headers, row_data))
+        )
         self.status_hint.setText(self.texts["details_copy_done"])
 
     def _copy_selected_cell(self):
@@ -349,7 +368,12 @@ class ResourceTableDialog(QDialog):
             return
         try:
             with open(path, "w", encoding="utf-8") as handle:
-                json.dump({"headers": self.headers, "rows": self.filtered_rows}, handle, ensure_ascii=False, indent=2)
+                json.dump(
+                    {"headers": self.headers, "rows": self.filtered_rows},
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
         except Exception:
             self.status_hint.setText(self.texts["details_export_failed"])
             return
@@ -364,13 +388,21 @@ class ResourceTableDialog(QDialog):
 
     def get_selected_payloads(self):
         selected_indexes = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
-        return [self.filtered_payloads[row] for row in selected_indexes if 0 <= row < len(self.filtered_payloads)]
+        return [
+            self.filtered_payloads[row]
+            for row in selected_indexes
+            if 0 <= row < len(self.filtered_payloads)
+        ]
 
     def remove_selected_payloads(self):
         selected = self.get_selected_payloads()
         if not selected:
             return 0
-        remaining_pairs = [(row, payload) for row, payload in zip(self.rows, self.row_payloads) if payload not in selected]
+        remaining_pairs = [
+            (row, payload)
+            for row, payload in zip(self.rows, self.row_payloads)
+            if payload not in selected
+        ]
         self.rows = [row for row, _ in remaining_pairs]
         self.row_payloads = [payload for _, payload in remaining_pairs]
         self._refresh_rows()
@@ -419,4 +451,3 @@ class ResourceTableDialog(QDialog):
         row_index = item.row()
         if callable(self.row_double_click_handler) and 0 <= row_index < len(self.filtered_payloads):
             self.row_double_click_handler(self, self.filtered_payloads[row_index], item)
-

@@ -683,14 +683,12 @@ def generate_video_summary_from_chunks(
     from src.core.understanding.components.remote_vl_caption import call_remote_vlm_text_completion
     from src.services.understanding_resource_service import (
         get_remote_vlm_settings,
-        get_video_summary_prompt_for_language,
-        normalize_caption_language,
+        resolve_video_summary_prompt,
     )
 
     cfg = dict(config or load_config())
     remote_vlm = get_remote_vlm_settings(cfg)
-    language = normalize_caption_language(remote_vlm.get("caption_language", "zh"))
-    instruction = get_video_summary_prompt_for_language(language)
+    instruction = resolve_video_summary_prompt(remote_vlm)
     prompt = f"{instruction}\n\n{segment_text}"
     try:
         summary_text = call_remote_vlm_text_completion(
