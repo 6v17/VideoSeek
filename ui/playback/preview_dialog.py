@@ -130,6 +130,7 @@ class PreviewDialog(QDialog):
         suggested_sec=None,
         *,
         shared_player=None,
+        shared_instance=None,
         on_release_shared_player=None,
     ):
         super().__init__(parent)
@@ -155,6 +156,9 @@ class PreviewDialog(QDialog):
         self._segment_line_override = None
         self._play_token = 0
         self._duration_cache = {}
+        # Prefer shared_instance + dedicated MediaPlayer (no HWND thrash with main preview).
+        # shared_player is legacy: one player hop between hosts (kept for compat).
+        self._shared_instance = shared_instance
         self._shared_player = shared_player
         self._owns_player = shared_player is None
         self._on_release_shared_player = on_release_shared_player
@@ -397,15 +401,25 @@ class PreviewDialog(QDialog):
     def _ensure_player(self):
         if self._shared_player is not None:
             self.player = self._shared_player
-            if hasattr(self.player, "set_host_widget"):
-                self.player.set_host_widget(self.video_host)
-            elif hasattr(self.video_host, "set_player"):
-                self.video_host.set_player(self.player)
+            if getattr(self.player, "host_widget", None) is not self.video_host:
+                if hasattr(self.player, "set_host_widget"):
+                    self.player.set_host_widget(self.video_host, force=True)
+                elif hasattr(self.video_host, "set_player"):
+                    self.video_host.set_player(self.player)
             return self.player
         if self.player is None:
-            self.player = VlcPreviewPlayer(self.video_host)
+            if self._shared_instance is not None:
+                self.player = VlcPreviewPlayer(
+                    self.video_host,
+                    shared_instance=self._shared_instance,
+                )
+            else:
+                self.player = VlcPreviewPlayer(self.video_host)
             if hasattr(self.video_host, "set_player"):
                 self.video_host.set_player(self.player)
+        elif getattr(self.player, "host_widget", None) is not self.video_host:
+            if hasattr(self.player, "set_host_widget"):
+                self.player.set_host_widget(self.video_host, force=True)
         return self.player
 
     def _release_shared_player_host(self) -> None:

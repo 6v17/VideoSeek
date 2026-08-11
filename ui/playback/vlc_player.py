@@ -156,6 +156,7 @@ class VlcPreviewPlayer:
         self._pending_seek_ms = None
         self._play_busy = False
         self._session_active = False
+        self._rebind_gen = 0
         if shared_instance is not None:
             self._instance = shared_instance
             try:
@@ -218,14 +219,10 @@ class VlcPreviewPlayer:
             self._stop_at_ms = -1
             self._locked_stop_at_ms = -1
             return False
-        try:
-            self._player.audio_set_mute(False)
-        except Exception as exc:
-            _log_vlc_debug("unmute on play", exc)
+        self._unmute()
         # One immediate + one delayed rebind is enough; stacking many timers under
         # rapid enlarge-preview clicks made the UI feel frozen.
-        self.rebind_output_window()
-        QTimer.singleShot(80, self.rebind_output_window)
+        self._schedule_rebind(delay_ms=80)
         if remote and start_sec > 0.05:
             # Browser-like: open stream first, then byte-range seek — much faster than :start-time.
             self._pending_seek_ms = int(start_sec * 1000)
@@ -407,14 +404,19 @@ class VlcPreviewPlayer:
         result = self._player.play()
         if result == -1:
             return False
-        try:
-            self._player.audio_set_mute(False)
-        except Exception as exc:
-            _log_vlc_debug("unmute on resume", exc)
+        self._unmute()
         self._pending_seek_ms = None
         if self._stop_at_ms > 0:
             self._timer.start()
         return True
+
+    def _unmute(self) -> None:
+        if self._player is None or self._released:
+            return
+        try:
+            self._player.audio_set_mute(False)
+        except Exception as exc:
+            _log_vlc_debug("unmute", exc)
 
     def unlock_full_playback(self):
         if self._released:
@@ -437,10 +439,17 @@ class VlcPreviewPlayer:
     def has_locked_window(self):
         return not self._released and self._locked_stop_at_ms > 0 and not self._user_unlocked
 
-    def set_host_widget(self, host_widget) -> None:
+    def set_host_widget(self, host_widget, *, force: bool = False) -> None:
         """Move the embed surface to another native host (one player, many surfaces)."""
-        if host_widget is None or host_widget is self.host_widget:
+        if host_widget is None:
             return
+        if host_widget is self.host_widget:
+            # Same surface: only rebind hwnd. Never suspend/mute — dialog slider
+            # paths call ensure_player often and must not silence playback.
+            if force:
+                self._schedule_rebind(delay_ms=80)
+            return
+        self.suspend()
         previous = self.host_widget
         if previous is not None and hasattr(previous, "set_player"):
             try:
@@ -460,8 +469,22 @@ class VlcPreviewPlayer:
                 self._timer.setParent(self.host_widget)
         except Exception as exc:
             _log_vlc_debug("reparent playback timer", exc)
+        self._schedule_rebind(delay_ms=80)
+
+    def _schedule_rebind(self, *, delay_ms: int = 0) -> None:
+        """Rebind hwnd now and optionally once more; cancel stale delayed rebinds."""
+        self._rebind_gen = int(getattr(self, "_rebind_gen", 0) or 0) + 1
+        token = self._rebind_gen
         self.rebind_output_window()
-        QTimer.singleShot(80, self.rebind_output_window)
+        if delay_ms <= 0:
+            return
+
+        def _delayed():
+            if token != getattr(self, "_rebind_gen", 0):
+                return
+            self.rebind_output_window()
+
+        QTimer.singleShot(int(delay_ms), _delayed)
 
     def rebind_output_window(self):
         """Re-attach libvlc output after host resize / fullscreen toggles."""
@@ -595,9 +618,8 @@ class VlcPreviewPlayer:
             return False
         if result == -1:
             return False
-        self.rebind_output_window()
-        QTimer.singleShot(0, self.rebind_output_window)
-        QTimer.singleShot(80, self.rebind_output_window)
+        self._unmute()
+        self._schedule_rebind(delay_ms=80)
         if remote and start_sec > 0.05:
             self._pending_seek_ms = int(start_sec * 1000)
             self._schedule_pending_seek()

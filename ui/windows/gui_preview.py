@@ -141,8 +141,8 @@ class PreviewGuiMixin:
         self._preview_dialog_opening = True
         self._preview_dialog_cooldown_until = now + 0.35
         try:
-            # One VLC only: soft-pause the search-page surface, then rebind the
-            # same player into the floating dialog (never create a second instance).
+            # Soft-pause main preview. Floating dialog uses a second MediaPlayer on the
+            # same libvlc Instance — never steal the main HWND (that caused black video).
             try:
                 if hasattr(self, "_collapse_preview_maximize"):
                     self._collapse_preview_maximize()
@@ -152,7 +152,9 @@ class PreviewGuiMixin:
             except Exception as exc:
                 logger.debug("Pause main preview before floating dialog skipped: %s", exc)
 
-            shared_player = self.preview_controller._ensure_vlc_player()
+            shared_instance = self.preview_controller.ensure_vlc_instance()
+            # Ensure main player exists on the shared instance before dialog borrows it.
+            self.preview_controller._ensure_vlc_player()
             dialog = getattr(self, "_preview_dialog", None)
             if dialog is None:
                 dialog = PreviewDialog(
@@ -162,17 +164,14 @@ class PreviewGuiMixin:
                     end_sec,
                     self.texts,
                     suggested_sec=suggested,
-                    shared_player=shared_player,
-                    on_release_shared_player=self._restore_shared_preview_player_host,
+                    shared_instance=shared_instance,
                 )
                 dialog.export_requested.connect(self._queue_preview_export)
                 dialog.export_status_changed.connect(self._handle_preview_export_status)
                 self._preview_dialog = dialog
             else:
                 dialog.texts = self.texts
-                dialog._shared_player = shared_player
-                dialog._owns_player = False
-                dialog._on_release_shared_player = self._restore_shared_preview_player_host
+                self._migrate_floating_preview_off_shared_player(dialog, shared_instance)
                 dialog.load_preview(
                     video_path,
                     start_sec,
@@ -186,22 +185,37 @@ class PreviewGuiMixin:
         except Exception as exc:
             logger.exception("Floating preview dialog failed: %s", exc)
             set_status(self.texts.get("preview_failed", "Preview failed"))
-            self._restore_shared_preview_player_host(
-                getattr(getattr(self, "preview_controller", None), "vlc_player", None)
-            )
             return False
         finally:
             QTimer.singleShot(350, self._release_preview_dialog_gate)
 
+    def _migrate_floating_preview_off_shared_player(self, dialog, shared_instance) -> None:
+        """Drop legacy one-player host hopping if this dialog was created before the fix."""
+        main_player = getattr(getattr(self, "preview_controller", None), "vlc_player", None)
+        legacy_shared = getattr(dialog, "_shared_player", None)
+        if legacy_shared is not None:
+            # Do not shutdown — that object is (or was) the main search preview player.
+            if dialog.player is legacy_shared or dialog.player is main_player:
+                dialog.player = None
+            dialog._shared_player = None
+            dialog._owns_player = True
+            dialog._on_release_shared_player = None
+            if hasattr(dialog, "video_host") and hasattr(dialog.video_host, "set_player"):
+                try:
+                    dialog.video_host.set_player(None)
+                except Exception as exc:
+                    logger.debug("Clear legacy floating host player skipped: %s", exc)
+        dialog._shared_instance = shared_instance
+
     def _restore_shared_preview_player_host(self, player=None) -> None:
-        """Return the shared VLC output to the search-page video widget."""
+        """Legacy no-op keeper: floating preview no longer steals the main HWND."""
         shared = player or getattr(getattr(self, "preview_controller", None), "vlc_player", None)
         host = getattr(self, "video_widget", None)
         if shared is None or host is None:
             return
         try:
             if hasattr(shared, "set_host_widget"):
-                shared.set_host_widget(host)
+                shared.set_host_widget(host, force=True)
             shared.suspend()
         except Exception as exc:
             logger.debug("Restore shared preview host skipped: %s", exc)

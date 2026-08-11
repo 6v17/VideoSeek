@@ -695,9 +695,10 @@ class PreviewControllerTests(unittest.TestCase):
         args[1]()
         mock_warmup.assert_called_once_with()
 
+    @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
     @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
-    def test_play_prefers_vlc_for_direct_preview(self, mock_vlc_cls, _mock_window):
+    def test_play_prefers_vlc_for_direct_preview(self, mock_vlc_cls, _mock_window, _mock_instance):
         parent = _make_parent_window()
         vlc_player = MagicMock()
         vlc_player.play.return_value = True
@@ -708,6 +709,7 @@ class PreviewControllerTests(unittest.TestCase):
 
         self.assertTrue(result)
         mock_vlc_cls.assert_called_once_with(parent.video_widget)
+        vlc_player.set_host_widget.assert_called_once_with(parent.video_widget, force=True)
         vlc_player.play.assert_called_once_with("D:/videos/clip.mp4", 27.0, stop_sec=33.0)
         parent.media_player.setSource.assert_called_once()
 

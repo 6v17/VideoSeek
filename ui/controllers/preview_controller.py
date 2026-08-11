@@ -12,7 +12,12 @@ from src.media.export_clip import (
     resolve_export_clip_window,
     start_export_original_clip_process,
 )
-from ui.playback.vlc_player import VlcPreviewPlayer, is_http_media_url, warmup_vlc_runtime
+from ui.playback.vlc_player import (
+    VlcPreviewPlayer,
+    create_vlc_preview_instance,
+    is_http_media_url,
+    warmup_vlc_runtime,
+)
 
 logger = get_logger("preview_controller")
 
@@ -23,6 +28,7 @@ class PreviewController:
         self.current_preview_path = None
         self.current_preview_context = None
         self.vlc_player = None
+        self._vlc_instance = None
         self._warmup_started = False
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
@@ -61,6 +67,11 @@ class PreviewController:
             logger.debug("Playback telemetry session start skipped: %s", exc)
 
         vlc_player = self._ensure_vlc_player()
+        # Keep main preview on the search-page surface (floating dialog uses another MediaPlayer).
+        try:
+            vlc_player.set_host_widget(self.parent_window.video_widget, force=True)
+        except Exception as exc:
+            logger.debug("Assert main preview host skipped: %s", exc)
         if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
             return True
 
@@ -93,9 +104,22 @@ class PreviewController:
         except Exception as exc:
             logger.warning("Preview warmup failed: %s", exc)
 
+    def ensure_vlc_instance(self):
+        """Shared libvlc Instance for main + floating preview MediaPlayers."""
+        if self._vlc_instance is None:
+            self._vlc_instance = create_vlc_preview_instance()
+        return self._vlc_instance
+
     def _ensure_vlc_player(self):
         if self.vlc_player is None:
-            self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+            instance = self.ensure_vlc_instance()
+            if instance is not None:
+                self.vlc_player = VlcPreviewPlayer(
+                    self.parent_window.video_widget,
+                    shared_instance=instance,
+                )
+            else:
+                self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
         return self.vlc_player
 
     def suspend_for_dialog(self, *, skip_telemetry: bool = True):
@@ -215,6 +239,12 @@ class PreviewController:
         if self.vlc_player is not None:
             self.vlc_player.shutdown(fast=True)
             self.vlc_player = None
+        if self._vlc_instance is not None:
+            try:
+                self._vlc_instance.release()
+            except Exception as exc:
+                logger.debug("Release shared VLC instance skipped: %s", exc)
+            self._vlc_instance = None
         self.parent_window.media_player.stop()
         self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
