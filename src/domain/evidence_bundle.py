@@ -94,6 +94,7 @@ class EvidenceChunk:
     end_sec: float
     sample: ChunkSample
     evidence: ChunkEvidence
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,26 @@ def _parse_chunk_evidence(raw_value: object, field_name: str) -> ChunkEvidence:
     )
 
 
+def _parse_chunk_tags(raw_value: object, field_name: str) -> tuple[str, ...]:
+    if raw_value is None:
+        return ()
+    values = _require_list(raw_value, field_name)
+    tags: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(values):
+        text = str(item or "").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(text)
+        if len(tags) >= 48:
+            break
+    return tuple(tags)
+
+
 def _parse_chunk(raw_value: object, field_name: str) -> EvidenceChunk:
     payload = _require_mapping(raw_value, field_name)
     sample_payload = _require_mapping(payload.get("sample"), f"{field_name}.sample")
@@ -208,6 +229,7 @@ def _parse_chunk(raw_value: object, field_name: str) -> EvidenceChunk:
             strategy=_require_text(sample_payload.get("strategy"), f"{field_name}.sample.strategy"),
         ),
         evidence=_parse_chunk_evidence(payload.get("evidence"), f"{field_name}.evidence"),
+        tags=_parse_chunk_tags(payload.get("tags"), f"{field_name}.tags"),
     )
 
 
@@ -322,6 +344,7 @@ def evidence_bundle_to_dict(bundle: EvidenceBundle) -> dict[str, Any]:
                 "start_sec": chunk.start_sec,
                 "end_sec": chunk.end_sec,
                 "sample": asdict(chunk.sample),
+                "tags": list(chunk.tags),
                 "evidence": {
                     "vision": vision_payload,
                     "audio": dict(chunk.evidence.audio),

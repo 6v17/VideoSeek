@@ -44,6 +44,53 @@ from .schemas import AgentBatchSearchRequest, AgentSearchRequest, AgentSearchSco
 logger = get_logger("agent_api")
 
 
+def _coerce_agent_query_vector(raw) -> Any:
+    """Accept a flat float list / nested list and return a (1, D) float32 row."""
+    import numpy as np
+
+    if raw is None:
+        raise ValueError("query_vector is empty")
+    try:
+        arr = np.asarray(raw, dtype=np.float32)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("query_vector must be a list of floats") from exc
+    if arr.ndim == 0:
+        raise ValueError("query_vector must be a list of floats")
+    if arr.ndim > 2:
+        raise ValueError("query_vector must be 1-D or a single row")
+    if arr.ndim == 2:
+        if arr.shape[0] != 1:
+            raise ValueError("query_vector must be a single embedding row")
+    else:
+        arr = arr.reshape(1, -1)
+    if arr.shape[1] < 8:
+        raise ValueError("query_vector dimension looks invalid")
+    # Keep cosine-ready; clients normally send L2-normalized CLIP rows.
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-12)
+    return (arr / norms).astype(np.float32)
+
+
+def _resolve_dialogue_match_mode(body: AgentSearchRequest) -> str:
+    raw = getattr(body, "match_mode", None)
+    if raw is None or not str(raw).strip():
+        # Team clients put exact/fuzzy in search_mode when search_kind=dialogue.
+        raw = getattr(body, "search_mode", None)
+    if raw is None or not str(raw).strip():
+        raw = getattr(body, "mode", None)
+    mode = str(raw or "auto").strip().lower()
+    if mode in {"fuzzy", "tolerant", "approx"}:
+        return "fuzzy"
+    if mode in {"exact", "segment", "keyword", "literal"}:
+        return "exact"
+    if mode in {"auto", "semantic", "vector"}:
+        return mode
+    # Ignore visual modes (frame/chunk) leaked into dialogue requests.
+    if mode in {"frame", "chunk", "precise", "video_discovery"}:
+        return "auto"
+    return "auto"
+
+
 def _clamp_top_k(top_k: Optional[int]) -> int:
     config = load_config()
     default_k = get_search_top_k(config)
@@ -494,19 +541,44 @@ def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Opti
 
 def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[str, Any]:
     cfg = config or load_config()
+    explicit_vector = getattr(body, "query_vector", None)
     query, query_type = _normalize_agent_search_query_fields(body)
-    if not body.preset_id and not query:
+    if not body.preset_id and not query and explicit_vector is None:
         raise ValueError(
-            "Provide preset_id or query. "
+            "Provide preset_id, query, or query_vector. "
             "For image search: {\"query\": \"D:/a.png\", \"query_type\": \"image_path\"} "
             "or shorthand {\"image_path\": \"D:/a.png\"}."
         )
-    query_part = resolve_search_query_inputs(
-        preset_id=body.preset_id,
-        query=query,
-        query_type=query_type,
-        config=cfg,
-    )
+
+    if explicit_vector is not None:
+        coerced = _coerce_agent_query_vector(explicit_vector)
+        # Prefer caller's query_type so compose text-only vs image/mixed stays aligned.
+        normalized_type = str(query_type or body.query_type or "text").strip().lower() or "text"
+        if normalized_type not in {"text", "image_path"}:
+            normalized_type = "text"
+        is_text = normalized_type == "text"
+        label = str(query or body.query or body.client_request_id or "compose").strip() or "compose"
+        query_part = {
+            "preset": None,
+            "preset_id": None,
+            "query_data": label,
+            "query_label": label,
+            "query_type": normalized_type,
+            "is_text": is_text,
+            "has_image": not is_text,
+            "query_vector": coerced,
+            "pixel_query_data": None,
+            "default_top_k": None,
+            "default_min_score": None,
+            "preset_scope_video_paths": None,
+        }
+    else:
+        query_part = resolve_search_query_inputs(
+            preset_id=body.preset_id,
+            query=query,
+            query_type=query_type,
+            config=cfg,
+        )
     mode = _normalize_mode(body.mode or getattr(body, "search_mode", None))
     top_k = _clamp_top_k(body.top_k if body.top_k is not None else query_part.get("default_top_k"))
     min_score = body.min_score if body.min_score is not None else query_part.get("default_min_score")
@@ -769,7 +841,7 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
             scope_library_paths=scope_library_paths,
             min_score=body.min_score,
             config=cfg,
-            match_mode="auto",
+            match_mode=_resolve_dialogue_match_mode(body),
         )
 
     scope_meta = _build_scope_meta(

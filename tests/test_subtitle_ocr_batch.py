@@ -106,22 +106,56 @@ class SubtitleOcrBatchTests(unittest.TestCase):
         self.assertTrue(_is_ort_runtime_fail(wrapped))
         self.assertFalse(_is_ort_runtime_fail(ValueError("bad image")))
 
-    def test_ocr_frames_fallback_when_ambiguous(self):
+    def test_ocr_frames_stacked_gpu_fail_falls_back_per_frame(self):
+        from src.core.subtitle_ocr import rapidocr_engine as engine
+
         frames = [
             np.zeros((20, 40, 3), dtype=np.uint8) + 10,
             np.zeros((20, 40, 3), dtype=np.uint8) + 40,
         ]
+        engine.reset_rapidocr_runtime_state()
+        try:
+            with mock.patch.object(
+                engine,
+                "ocr_image_bgr",
+                side_effect=RuntimeError("onnxruntime.capi.onnxruntime_pybind11_state.Fail"),
+            ) as stacked, mock.patch.object(
+                engine,
+                "ocr_frame_to_line",
+                side_effect=["甲", "乙"],
+            ) as per_frame:
+                lines = ocr_frames_to_lines(frames, prefer_gpu=True)
+            self.assertEqual(lines, ["甲", "乙"])
+            self.assertEqual(per_frame.call_count, 2)
+            # Stacked call must not silently retry the tall image on CPU.
+            self.assertEqual(stacked.call_count, 1)
+            self.assertFalse(stacked.call_args.kwargs.get("allow_cpu_retry", True))
+        finally:
+            engine.reset_rapidocr_runtime_state()
 
-        with mock.patch(
-            "src.core.subtitle_ocr.rapidocr_engine.ocr_image_bgr",
-            return_value=[{"text": "bad", "score": 0.9, "y_center": 999.0, "x_center": 1.0}],
-        ), mock.patch(
-            "src.core.subtitle_ocr.rapidocr_engine.ocr_frame_to_line",
-            side_effect=["一", "二"],
-        ) as per_frame:
-            lines = ocr_frames_to_lines(frames)
-        self.assertEqual(lines, ["一", "二"])
-        self.assertEqual(per_frame.call_count, 2)
+    def test_ocr_frames_skips_stack_when_force_cpu(self):
+        from src.core.subtitle_ocr import rapidocr_engine as engine
+
+        frames = [
+            np.zeros((20, 40, 3), dtype=np.uint8) + 10,
+            np.zeros((20, 40, 3), dtype=np.uint8) + 40,
+        ]
+        engine.reset_rapidocr_runtime_state()
+        try:
+            engine._FORCE_CPU = True
+            with mock.patch.object(
+                engine,
+                "ocr_image_bgr",
+            ) as stacked, mock.patch.object(
+                engine,
+                "ocr_frame_to_line",
+                side_effect=["一", "二"],
+            ):
+                lines = ocr_frames_to_lines(frames, prefer_gpu=True)
+            self.assertEqual(lines, ["一", "二"])
+            stacked.assert_not_called()
+        finally:
+            engine.reset_rapidocr_runtime_state()
 
     def test_pipeline_batches_rois(self):
         frames = [
@@ -141,7 +175,7 @@ class SubtitleOcrBatchTests(unittest.TestCase):
         with mock.patch.object(ocr_pipeline, "iter_frames_at_times", side_effect=fake_iter), mock.patch.object(
             ocr_pipeline, "roi_likely_blank", return_value=False
         ), mock.patch.object(
-            ocr_pipeline, "crop_subtitle_roi", side_effect=lambda frame, **_k: frame
+            ocr_pipeline, "crop_subtitle_rois", side_effect=lambda frame, **_k: [("bottom", frame)]
         ), mock.patch.dict(
             __import__("os").environ, {"VIDEOSEEK_DISABLE_SUBTITLE_OCR_OVERLAP": "1"}, clear=False
         ):

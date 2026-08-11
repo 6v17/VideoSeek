@@ -12,12 +12,10 @@ from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_t
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
-from src.services.indexing_service import load_video_chunks_by_id
 from src.services.search_scope import (
     apply_search_scope,
     is_search_scoped,
     resolve_fetch_top_k,
-    resolve_per_video_fetch_top_k,
     resolve_scope_video_ids,
     resolve_subtitle_scope_video_ids,
 )
@@ -43,6 +41,8 @@ from src.services.search_assets import (
     load_chunk_search_assets,
     load_library_chunk_search_assets,
     load_library_frame_search_assets,
+    load_scoped_video_chunk_search_assets,
+    load_scoped_video_frame_search_assets,
     load_search_assets,
 )
 from src.services.search_locate import (
@@ -158,13 +158,124 @@ def _run_frame_search_per_videos(
     preview_anchor_sec: float | None = None,
     locate_anchor_score: float | None = None,
     locate_score_margin: float | None = None,
+    use_video_discovery: bool = False,
 ) -> List[SearchHit]:
     targets = _resolve_scoped_video_targets(scope_video_paths, config)
     if not targets:
         return []
-    per_k = resolve_per_video_fetch_top_k(top_k, len(targets))
+
+    # Locate needs per-video vectors / windows; keep the materialize loop there only.
+    if preview_anchor_sec is not None:
+        return _run_frame_locate_per_videos(
+            query_vector,
+            targets,
+            top_k,
+            config,
+            query_data=query_data,
+            pixel_query_data=pixel_query_data,
+            preview_anchor_sec=preview_anchor_sec,
+            locate_anchor_score=locate_anchor_score,
+            locate_score_margin=locate_score_margin,
+        )
+
+    video_ids = [video_id for _path, video_id in targets]
+    scope_paths = [path for path, _video_id in targets]
+    fetch_k = _resolve_frame_fetch_top_k(
+        top_k,
+        True,
+        is_text,
+        config,
+        precise_image=precise_image,
+    )
+    if use_video_discovery and not precise_image:
+        fetch_k = max(int(fetch_k), int(resolve_fetch_top_k(top_k, True)))
+    with profile_phase("load_assets"):
+        search_index, timestamps, video_paths = load_scoped_video_frame_search_assets(video_ids, config)
+    _merge_search_index_steps(video_paths, timestamps)
+    if search_index is None:
+        return []
+
+    with profile_phase("faiss_search"):
+        matched_results, matched_ids = _search_frame_results_with_ids(
+            query_vector,
+            search_index,
+            timestamps,
+            video_paths,
+            top_k=int(fetch_k),
+        )
+    clip_seeds = [float(hit.start_sec) for hit in matched_results]
     if precise_image:
-        per_k = _resolve_frame_fetch_top_k(per_k, scoped=True, is_text=False, config=config, precise_image=True)
+        with profile_phase("bounded_neighbor"):
+            matched_results = _apply_bounded_neighbor_refine(
+                matched_results,
+                matched_ids,
+                query_vector,
+                search_index,
+                timestamps,
+                video_paths,
+            )
+        with profile_phase("pixel_rerank"):
+            refined = _refine_precise_seed_hits(
+                query_data,
+                matched_results,
+                top_k,
+                config,
+                seed_times=clip_seeds,
+                pixel_query_data=pixel_query_data,
+            )
+        from src.services.search_scope import filter_hits_by_video_paths
+
+        refined = filter_hits_by_video_paths(refined, scope_paths)
+        return _merge_search_hits(refined, top_k)
+
+    with profile_phase("neighbor_rerank"):
+        matched_results = _apply_frame_neighbor_rerank(
+            matched_results,
+            matched_ids,
+            query_vector,
+            search_index,
+            timestamps,
+            video_paths,
+            config,
+            is_text=is_text,
+            precise_image=False,
+        )
+    with profile_phase("scope_filter"):
+        # Keep expanded pool until after video-discovery aggregation.
+        scope_keep_k = fetch_k if use_video_discovery else top_k
+        scoped_hits = apply_search_scope(
+            matched_results,
+            video_paths=scope_paths,
+            top_k=scope_keep_k,
+        )
+    merge_keep_k = fetch_k if use_video_discovery else top_k
+    results = _finalize_frame_hits(
+        query_data,
+        is_text,
+        scoped_hits,
+        merge_keep_k,
+        config,
+        precise_image=False,
+        pixel_query_data=pixel_query_data,
+    )
+    return _apply_video_discovery_presentation(
+        results,
+        top_k,
+        enabled=use_video_discovery,
+    )
+
+
+def _run_frame_locate_per_videos(
+    query_vector,
+    targets,
+    top_k,
+    config,
+    query_data=None,
+    pixel_query_data=None,
+    preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
+) -> List[SearchHit]:
     rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
     crop_query = is_likely_cropped_query_image(rerank_query)
     merged_hits: List[SearchHit] = []
@@ -174,180 +285,97 @@ def _run_frame_search_per_videos(
                 video_id,
                 abs_path,
                 config,
-                include_vectors=preview_anchor_sec is None,
+                include_vectors=True,
             )
         _merge_search_index_steps(video_paths, timestamps)
         if search_index is None:
             continue
-        anchor_sec = None
-        if preview_anchor_sec is not None:
-            try:
-                anchor_sec = float(preview_anchor_sec)
-            except (TypeError, ValueError):
-                anchor_sec = None
-        if anchor_sec is not None:
-            emit_search_progress("locate_progress_load")
+        try:
+            anchor_sec = float(preview_anchor_sec)
+        except (TypeError, ValueError):
+            continue
+        emit_search_progress("locate_progress_load")
         with profile_phase("faiss_search"):
-            if anchor_sec is not None:
-                locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
-                progress_key = (
-                    "locate_progress_crop_clip"
-                    if crop_query
-                    else "locate_progress_clip"
-                )
-                emit_search_progress(progress_key)
-                if crop_query:
-                    matched_results = _search_locate_crop_trusted_hits(
-                        query_vector,
-                        abs_path,
-                        anchor_sec,
-                        config,
-                        per_video_index=search_index,
-                        per_video_timestamps=timestamps,
-                        per_video_paths=video_paths,
-                        per_video_vectors=vector_matrix,
-                    )
-                else:
-                    clip_window_sec = resolve_locate_clip_window_sec(
-                        score=locate_anchor_score,
-                        margin=locate_score_margin,
-                        is_crop=False,
-                        config=config,
-                    )
-                    matched_results = _search_locate_anchor_window_hits(
-                        query_vector,
-                        abs_path,
-                        anchor_sec,
-                        locate_top_k,
-                        config,
-                        per_video_index=search_index,
-                        per_video_timestamps=timestamps,
-                        per_video_paths=video_paths,
-                        per_video_vectors=vector_matrix,
-                        window_sec=clip_window_sec,
-                    )
-                    if matched_results:
-                        try:
-                            from src.services.locate_telemetry_utils import classify_video_pace
-                            from src.services.search_telemetry import record_locate_clip_window
-
-                            record_locate_clip_window(
-                                window_sec=clip_window_sec,
-                                score=locate_anchor_score,
-                                margin=locate_score_margin,
-                                anchor_sec=anchor_sec,
-                                result_sec=float(matched_results[0].start_sec),
-                                is_crop=False,
-                                confidence=compute_locate_confidence(
-                                    locate_anchor_score,
-                                    locate_score_margin,
-                                ),
-                                video_pace=classify_video_pace(timestamps, anchor_sec),
-                            )
-                        except Exception as exc:
-                            logger.debug("Locate telemetry record skipped: %s", exc)
-            elif precise_image:
-                clip_seeds: List[float] = []
-                matched_results = []
-                global_index, global_ts, global_paths = load_search_assets(config)
-                if global_index is not None:
-                    fetch_k = _resolve_frame_fetch_top_k(top_k, True, False, config, precise_image=True)
-                    global_hits, global_ids = _search_frame_results_with_ids(
-                        query_vector,
-                        global_index,
-                        global_ts,
-                        global_paths,
-                        top_k=fetch_k,
-                    )
-                    clip_seeds = [float(hit.start_sec) for hit in global_hits]
-                    global_hits = _apply_bounded_neighbor_refine(
-                        global_hits,
-                        global_ids,
-                        query_vector,
-                        global_index,
-                        global_ts,
-                        global_paths,
-                    )
-                    matched_results, clip_seeds = _scope_filter_hits_with_seeds(
-                        global_hits,
-                        clip_seeds,
-                        video_paths=[abs_path],
-                        top_k=top_k,
-                    )
-                if not matched_results and search_index is not None:
-                    matched_results, matched_ids = _search_frame_results_with_ids(
-                        query_vector,
-                        search_index,
-                        timestamps,
-                        video_paths,
-                        top_k=min(int(top_k), 32),
-                    )
-                    clip_seeds = [float(hit.start_sec) for hit in matched_results]
-                    matched_results = _apply_bounded_neighbor_refine(
-                        matched_results,
-                        matched_ids,
-                        query_vector,
-                        search_index,
-                        timestamps,
-                        video_paths,
-                    )
-                merged_hits.extend(
-                    _refine_precise_seed_hits(
-                        query_data,
-                        matched_results,
-                        top_k,
-                        config,
-                        seed_times=clip_seeds,
-                        pixel_query_data=pixel_query_data,
-                    )
-                )
-                continue
-            else:
-                matched_results, matched_ids = _search_frame_results_with_ids(
-                    query_vector,
-                    search_index,
-                    timestamps,
-                    video_paths,
-                    top_k=int(per_k),
-                )
-        if anchor_sec is not None:
             locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
-            if not crop_query and should_allow_pixel_refine(
-                is_crop=False,
-                score=locate_anchor_score,
-                margin=locate_score_margin,
-            ):
-                emit_search_progress("locate_progress_pixel")
-            merged_hits.extend(
-                _refine_precise_seed_hits(
-                    query_data,
-                    matched_results,
+            progress_key = (
+                "locate_progress_crop_clip"
+                if crop_query
+                else "locate_progress_clip"
+            )
+            emit_search_progress(progress_key)
+            if crop_query:
+                matched_results = _search_locate_crop_trusted_hits(
+                    query_vector,
+                    abs_path,
+                    anchor_sec,
+                    config,
+                    per_video_index=search_index,
+                    per_video_timestamps=timestamps,
+                    per_video_paths=video_paths,
+                    per_video_vectors=vector_matrix,
+                )
+            else:
+                clip_window_sec = resolve_locate_clip_window_sec(
+                    score=locate_anchor_score,
+                    margin=locate_score_margin,
+                    is_crop=False,
+                    config=config,
+                )
+                matched_results = _search_locate_anchor_window_hits(
+                    query_vector,
+                    abs_path,
+                    anchor_sec,
                     locate_top_k,
                     config,
-                    pixel_query_data=pixel_query_data,
-                    locate_anchor_sec=anchor_sec,
-                    locate_anchor_score=locate_anchor_score,
-                    locate_score_margin=locate_score_margin,
+                    per_video_index=search_index,
+                    per_video_timestamps=timestamps,
+                    per_video_paths=video_paths,
+                    per_video_vectors=vector_matrix,
+                    window_sec=clip_window_sec,
                 )
+                if matched_results:
+                    try:
+                        from src.services.locate_telemetry_utils import classify_video_pace
+                        from src.services.search_telemetry import record_locate_clip_window
+
+                        record_locate_clip_window(
+                            window_sec=clip_window_sec,
+                            score=locate_anchor_score,
+                            margin=locate_score_margin,
+                            anchor_sec=anchor_sec,
+                            result_sec=float(matched_results[0].start_sec),
+                            is_crop=False,
+                            confidence=compute_locate_confidence(
+                                locate_anchor_score,
+                                locate_score_margin,
+                            ),
+                            video_pace=classify_video_pace(timestamps, anchor_sec),
+                        )
+                    except Exception as exc:
+                        logger.debug("Locate telemetry record skipped: %s", exc)
+        locate_top_k = _resolve_locate_result_top_k(top_k, crop_query=crop_query)
+        if not crop_query and should_allow_pixel_refine(
+            is_crop=False,
+            score=locate_anchor_score,
+            margin=locate_score_margin,
+        ):
+            emit_search_progress("locate_progress_pixel")
+        merged_hits.extend(
+            _refine_precise_seed_hits(
+                query_data,
+                matched_results,
+                locate_top_k,
+                config,
+                pixel_query_data=pixel_query_data,
+                locate_anchor_sec=anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
             )
-        else:
-            merged_hits.extend(matched_results)
-    if preview_anchor_sec is not None:
-        crop_final = is_likely_cropped_query_image(rerank_query)
-        return _merge_search_hits(
-            merged_hits,
-            _resolve_locate_result_top_k(top_k, crop_query=crop_final),
         )
-    if precise_image:
-        return _merge_search_hits(merged_hits, top_k)
-    return _finalize_frame_hits(
-        query_data,
-        is_text,
+    crop_final = is_likely_cropped_query_image(rerank_query)
+    return _merge_search_hits(
         merged_hits,
-        top_k,
-        config,
-        precise_image=False,
-        pixel_query_data=pixel_query_data,
+        _resolve_locate_result_top_k(top_k, crop_query=crop_final),
     )
 
 
@@ -355,27 +383,20 @@ def _run_chunk_search_per_videos(query_vector, scope_video_paths, top_k, config)
     targets = _resolve_scoped_video_targets(scope_video_paths, config)
     if not targets:
         return []
-    try:
-        query = query_vector[0]
-    except Exception:
+    video_ids = [video_id for _path, video_id in targets]
+    with profile_phase("load_assets"):
+        search_index, ranges, video_paths = load_scoped_video_chunk_search_assets(video_ids, config)
+    if search_index is None:
         return []
-    merged_hits: List[SearchHit] = []
-    for abs_path, video_id in targets:
-        chunks = load_video_chunks_by_id(video_id, config)
-        if not chunks:
-            continue
-        for chunk in chunks:
-            embedding = chunk.get("embedding")
-            if embedding is None:
-                continue
-            vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
-            if vector.size <= 0:
-                continue
-            score = float(np.dot(query, vector))
-            merged_hits.append(
-                SearchHit(float(chunk["start"]), float(chunk["end"]), score, abs_path)
-            )
-    return _merge_search_hits(merged_hits, top_k)
+    with profile_phase("faiss_search"):
+        hits = _search_chunk_results(
+            query_vector,
+            search_index,
+            ranges,
+            video_paths,
+            top_k=top_k,
+        )
+    return _merge_search_hits(hits, top_k)
 
 
 def run_search(
@@ -510,6 +531,7 @@ def _run_search_impl(
                 preview_anchor_sec=preview_anchor_sec,
                 locate_anchor_score=locate_anchor_score,
                 locate_score_margin=locate_score_margin,
+                use_video_discovery=use_video_discovery,
             )
             record_search_profile_result_count(len(results))
             return results
@@ -522,6 +544,8 @@ def _run_search_impl(
         ):
             merged_hits: List[SearchHit] = []
             library_fetch_k = _resolve_frame_fetch_top_k(top_k, True, is_text, config, precise_image=precise_image)
+            if use_video_discovery and not precise_image:
+                library_fetch_k = max(int(library_fetch_k), int(resolve_fetch_top_k(top_k, True)))
             for library_path in scope_library_paths:
                 with profile_phase("load_assets"):
                     search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
@@ -562,15 +586,22 @@ def _run_search_impl(
                         )
                 merged_hits.extend(matched_results)
             with profile_phase("scope_filter"):
-                scoped_hits = _merge_search_hits(merged_hits, library_fetch_k)
+                # Keep expanded pool until after video-discovery aggregation.
+                merge_keep_k = library_fetch_k if use_video_discovery else top_k
+                scoped_hits = _merge_search_hits(merged_hits, merge_keep_k)
             results = _finalize_frame_hits(
                 query_data,
                 is_text,
                 scoped_hits,
-                top_k,
+                merge_keep_k,
                 config,
                 precise_image=precise_image,
                 pixel_query_data=pixel_query_data,
+            )
+            results = _apply_video_discovery_presentation(
+                results,
+                top_k,
+                enabled=use_video_discovery,
             )
             record_search_profile_result_count(len(results))
             return results
@@ -631,11 +662,14 @@ def _run_search_impl(
                     top_k=fetch_k,
                 )
             else:
+                # Keep the expanded recall pool until after video-discovery aggregation;
+                # truncating to top_k here collapses many videos into one dominant clip.
+                scope_keep_k = fetch_k if use_video_discovery else top_k
                 scoped_hits = apply_search_scope(
                     matched_results,
                     video_paths=scope_video_paths,
                     library_paths=scope_library_paths,
-                    top_k=top_k,
+                    top_k=scope_keep_k,
                 )
                 scoped_seeds = None
         if precise_image:
@@ -649,7 +683,8 @@ def _run_search_impl(
                     pixel_query_data=pixel_query_data,
                 )
         else:
-            results = _merge_search_hits(scoped_hits, top_k)
+            merge_keep_k = fetch_k if use_video_discovery else top_k
+            results = _merge_search_hits(scoped_hits, merge_keep_k)
         if precise_image and scoped and scope_video_paths:
             from src.services.search_scope import filter_hits_by_video_paths
 

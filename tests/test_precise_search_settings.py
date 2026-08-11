@@ -7,6 +7,7 @@ from src.services.image_search_rerank import (
     is_likely_cropped_query_image,
     resolve_probe_params,
 )
+from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
 from src.services.search_scope import resolve_per_video_fetch_top_k
 from src.services.search_service import (
     _aggregate_hits_to_video_discovery,
@@ -59,17 +60,16 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
     def test_fetch_multiplier_expands_precise_recall(self):
         config = dict(DEFAULT_CONFIG)
         config["image_search_fetch_multiplier"] = 3
-        fetch_k = _resolve_frame_fetch_top_k(20, scoped=False, is_text=False, config=config, precise_image=True)
-        self.assertGreaterEqual(fetch_k, 100)
-        self.assertLessEqual(fetch_k, 200)
-        self.assertEqual(
-            _resolve_frame_fetch_top_k(20, scoped=False, is_text=False, config=config, precise_image=False),
-            20,
-        )
-        self.assertEqual(
-            _resolve_frame_fetch_top_k(20, scoped=False, is_text=True, config=config, precise_image=False),
-            20,
-        )
+        precise_k = _resolve_frame_fetch_top_k(20, scoped=False, is_text=False, config=config, precise_image=True)
+        self.assertGreaterEqual(precise_k, 100)
+        self.assertLessEqual(precise_k, 200)
+        # Fast/text paths over-fetch for missing-source filtering, but do not use the precise multiplier.
+        expected_fast = resolve_source_filtered_fetch_top_k(20, False)
+        fast_k = _resolve_frame_fetch_top_k(20, scoped=False, is_text=False, config=config, precise_image=False)
+        text_k = _resolve_frame_fetch_top_k(20, scoped=False, is_text=True, config=config, precise_image=False)
+        self.assertEqual(fast_k, expected_fast)
+        self.assertEqual(text_k, expected_fast)
+        self.assertGreater(precise_k, fast_k)
 
     def test_pixel_top_n_read_from_config(self):
         config = {"image_pixel_rerank_top_n": 12}
@@ -138,11 +138,25 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertGreaterEqual(fetch_k, 200)
         self.assertLessEqual(fetch_k, 400)
 
-    def test_video_discovery_mode_only_for_global_fast_image(self):
-        self.assertTrue(_use_video_discovery_results(is_text=False, precise_image=False, scoped=False))
-        self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=True, scoped=False))
-        self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=False, scoped=True))
-        self.assertFalse(_use_video_discovery_results(is_text=True, precise_image=False, scoped=False))
+    def test_video_discovery_mode_for_fast_image_any_scope(self):
+        self.assertTrue(
+            _use_video_discovery_results(
+                is_text=False,
+                precise_image=False,
+                scoped=False,
+                video_discovery_enabled=True,
+            )
+        )
+        self.assertTrue(
+            _use_video_discovery_results(
+                is_text=False,
+                precise_image=False,
+                scoped=True,
+                video_discovery_enabled=True,
+            )
+        )
+        self.assertFalse(_use_video_discovery_results(is_text=False, precise_image=True, scoped=False, video_discovery_enabled=True))
+        self.assertFalse(_use_video_discovery_results(is_text=True, precise_image=False, scoped=False, video_discovery_enabled=True))
         self.assertFalse(
             _use_video_discovery_results(
                 is_text=False,

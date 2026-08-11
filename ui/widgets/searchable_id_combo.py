@@ -7,12 +7,14 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QEvent,
     QModelIndex,
+    QPoint,
     QSortFilterProxyModel,
     Qt,
     Signal,
 )
 from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -95,6 +97,7 @@ class SearchableIdCombo(QWidget):
         self._popup: QFrame | None = None
         self._filter_edit: QLineEdit | None = None
         self._list_view: QListView | None = None
+        self._app_click_filter_installed = False
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -215,8 +218,16 @@ class SearchableIdCombo(QWidget):
         if self._popup is not None:
             return self._popup
 
-        popup = QFrame(None, Qt.WindowType.Popup)
+        # Avoid Qt.Popup: on Windows it often blocks Chinese/Japanese IME composition.
+        # Tool + frameless keeps a floating panel while still accepting IME input.
+        popup = QFrame(
+            None,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
         popup.setObjectName("SearchableIdComboPopup")
+        popup.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         popup.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         layout = QVBoxLayout(popup)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -226,6 +237,8 @@ class SearchableIdCombo(QWidget):
         filter_edit.setObjectName("SearchableIdComboFilter")
         filter_edit.setClearButtonEnabled(True)
         filter_edit.setPlaceholderText(self._filter_placeholder)
+        filter_edit.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+        filter_edit.setInputMethodHints(Qt.InputMethodHint.ImhNone)
         filter_edit.textChanged.connect(self._on_filter_text_changed)
         filter_edit.returnPressed.connect(self._select_current_proxy_row)
         layout.addWidget(filter_edit)
@@ -309,7 +322,9 @@ class SearchableIdCombo(QWidget):
                 pos.setX(max(geo.left(), geo.right() - width))
         popup.move(pos)
         popup.show()
+        self._install_outside_click_filter()
         self._filter_edit.setFocus(Qt.FocusReason.PopupFocusReason)
+        self._filter_edit.activateWindow()
 
         if self._current_index >= 0:
             proxy_index = self._proxy.mapFromSource(self._model.index(self._current_index, 0))
@@ -317,7 +332,25 @@ class SearchableIdCombo(QWidget):
                 self._list_view.setCurrentIndex(proxy_index)
                 self._list_view.scrollTo(proxy_index)
 
+    def _install_outside_click_filter(self) -> None:
+        if self._app_click_filter_installed:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.installEventFilter(self)
+        self._app_click_filter_installed = True
+
+    def _remove_outside_click_filter(self) -> None:
+        if not self._app_click_filter_installed:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._app_click_filter_installed = False
+
     def _close_popup(self) -> None:
+        self._remove_outside_click_filter()
         if self._popup is not None:
             self._popup.hide()
 
@@ -338,11 +371,29 @@ class SearchableIdCombo(QWidget):
             index = self._proxy.index(0, 0)
         self._on_view_clicked(index)
 
+    def _click_is_outside_popup(self, global_pos: QPoint) -> bool:
+        if self._popup is None or not self._popup.isVisible():
+            return False
+        if self._popup.geometry().contains(global_pos):
+            return False
+        if self.rect().contains(self.mapFromGlobal(global_pos)):
+            return False
+        return True
+
     def eventFilter(self, watched, event) -> bool:
         if watched is self._face and event.type() == QEvent.Type.MouseButtonRelease:
             if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
                 self._toggle_popup()
                 return True
+        if (
+            self._popup is not None
+            and self._popup.isVisible()
+            and event.type() == QEvent.Type.MouseButtonPress
+            and isinstance(event, QMouseEvent)
+        ):
+            if self._click_is_outside_popup(event.globalPosition().toPoint()):
+                self._close_popup()
+                return False
         return super().eventFilter(watched, event)
 
     def resizeEvent(self, event) -> None:

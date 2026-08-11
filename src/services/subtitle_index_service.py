@@ -1,9 +1,11 @@
-"""Build shared subtitle library via VAD + frame OCR (RapidOCR ONNX).
+"""Build shared subtitle library via timeline/VAD probe + frame OCR (RapidOCR ONNX).
 
-Pipeline: FFmpeg PCM pipe → Silero VAD → sample frames inside speech segments
-→ decode thread + bounded queue → RapidOCR on main thread (CLIP-style overlap)
-→ shared transcript JSON.
-Keyword search reads the shared store; CLIP semantic search is deferred.
+Pipeline strategies:
+- ``timeline``: sample across the full video (better for BGM-heavy PVs)
+- ``vad``: Silero VAD speech segments only (faster for dialogue-heavy media)
+
+Both paths share: decode + blank/unchanged subtitle-band gates → RapidOCR on
+changed plates → shared transcript JSON.
 """
 
 from __future__ import annotations
@@ -17,7 +19,10 @@ import numpy as np
 
 from src.app.logging_utils import get_logger
 from src.core.asr.vad_segment import segment_media_speech
-from src.core.subtitle_ocr.frame_sample import sample_times_in_segment
+from src.core.subtitle_ocr.frame_sample import (
+    sample_times_across_timeline,
+    sample_times_in_segment,
+)
 from src.core.subtitle_ocr.merge_cues import merge_ocr_observations
 from src.core.subtitle_ocr.ocr_pipeline import collect_ocr_observations
 from src.core.subtitle_ocr.rapidocr_engine import (
@@ -47,15 +52,45 @@ logger = get_logger("subtitle_index")
 ProgressCallback = Callable[[float, str], None]
 StopCallback = Callable[[], bool]
 SubtitleIndexMode = Literal["auto", "ocr", "reuse"]
+SubtitleSampleStrategy = Literal["timeline", "vad"]
 
 OCR_SOURCE_ID = OCR_COMPONENT_ID
+SUBTITLE_SAMPLE_STRATEGY_TIMELINE = "timeline"
+SUBTITLE_SAMPLE_STRATEGY_VAD = "vad"
+DEFAULT_SUBTITLE_SAMPLE_STRATEGY = SUBTITLE_SAMPLE_STRATEGY_TIMELINE
 
-# Absolute safety valve only (≈2h speech @ 0.8s). Normal budget comes from VAD speech seconds.
+# Absolute safety valve for probe timestamps (decode cost). OCR is gated separately.
 _SUBTITLE_FRAME_BUDGET_SAFETY_MAX = 9000
 
 
 def _stopped(stop_callback: StopCallback | None) -> bool:
     return bool(stop_callback and stop_callback())
+
+
+def normalize_subtitle_sample_strategy(value: str | None) -> SubtitleSampleStrategy:
+    text = str(value or "").strip().lower()
+    if text in {"vad", "speech", "fast"}:
+        return SUBTITLE_SAMPLE_STRATEGY_VAD
+    if text in {"timeline", "full", "probe", "pv"}:
+        return SUBTITLE_SAMPLE_STRATEGY_TIMELINE
+    return DEFAULT_SUBTITLE_SAMPLE_STRATEGY
+
+
+def resolve_subtitle_sample_strategy(*, config=None, explicit: str | None = None) -> SubtitleSampleStrategy:
+    if explicit is not None and str(explicit).strip():
+        return normalize_subtitle_sample_strategy(explicit)
+    try:
+        from src.app.config import DEFAULT_CONFIG, load_config
+
+        cfg = dict(config or load_config())
+        return normalize_subtitle_sample_strategy(
+            cfg.get(
+                "subtitle_sample_strategy",
+                DEFAULT_CONFIG.get("subtitle_sample_strategy", DEFAULT_SUBTITLE_SAMPLE_STRATEGY),
+            )
+        )
+    except Exception:
+        return DEFAULT_SUBTITLE_SAMPLE_STRATEGY
 
 
 def _speech_duration_sec(segments: Sequence[Any]) -> float:
@@ -68,21 +103,21 @@ def _speech_duration_sec(segments: Sequence[Any]) -> float:
 
 
 def resolve_subtitle_frame_budget(
-    speech_sec: float,
+    span_sec: float,
     *,
     sample_interval_sec: float,
-    segment_count: int = 0,
     max_total_frames: int = 0,
+    segment_count: int = 0,
 ) -> int:
-    """Budget OCR frames from VAD speech duration and sample interval.
+    """Budget probe timestamps from a time span (full duration or VAD speech).
 
+    ``segment_count`` adds a little headroom for VAD segment edges.
     ``max_total_frames <= 0``: fully dynamic (only a large safety ceiling).
     ``max_total_frames > 0``: optional hard ceiling on top of the dynamic estimate.
     """
     interval = max(0.1, float(sample_interval_sec))
-    speech = max(0.0, float(speech_sec))
-    # Expected samples ≈ speech/interval, plus a little headroom for segment edges.
-    expected = int(math.ceil(speech / interval)) + max(0, int(segment_count))
+    span = max(0.0, float(span_sec))
+    expected = int(math.ceil(span / interval)) + max(0, int(segment_count))
     expected = int(math.ceil(expected * 1.05)) + 8
     floor = 40
     ceiling = _SUBTITLE_FRAME_BUDGET_SAFETY_MAX
@@ -143,6 +178,106 @@ def list_subtitle_library(*, config=None) -> list[dict[str, Any]]:
     return rows
 
 
+def _build_probe_times_timeline(
+    *,
+    duration: float,
+    sample_interval_sec: float,
+    max_total_frames: int,
+) -> tuple[list[float], int]:
+    frame_cap = resolve_subtitle_frame_budget(
+        duration,
+        sample_interval_sec=sample_interval_sec,
+        max_total_frames=max_total_frames,
+    )
+    times = sample_times_across_timeline(
+        duration,
+        interval_sec=sample_interval_sec,
+        max_frames=frame_cap,
+    )
+    logger.info(
+        "Subtitle OCR probe plan (timeline): duration=%.1fs interval=%.2fs times=%d cap=%d",
+        duration,
+        sample_interval_sec,
+        len(times),
+        frame_cap,
+    )
+    return times, frame_cap
+
+
+def _build_probe_times_vad(
+    *,
+    media_path: str,
+    duration: float,
+    sample_interval_sec: float,
+    max_frames_per_segment: int,
+    max_total_frames: int,
+    progress_callback: ProgressCallback | None,
+    stop_callback: StopCallback | None,
+) -> tuple[list[float], int, int]:
+    def _vad_progress(ratio: float, stage: str) -> None:
+        if not progress_callback:
+            return
+        stage_name = "subtitle_extract_audio" if "extract" in str(stage) else "subtitle_vad"
+        progress_callback(0.04 + 0.14 * max(0.0, min(1.0, float(ratio))), stage_name)
+
+    if progress_callback:
+        progress_callback(0.04, "subtitle_extract_audio")
+    if _stopped(stop_callback):
+        raise InterruptedError("stopped")
+
+    segments = list(segment_media_speech(media_path, progress_callback=_vad_progress) or [])
+    if not segments:
+        logger.info("Subtitle OCR VAD found no speech segments for %s", media_path)
+        return [], 0, 0
+
+    times: list[float] = []
+    for seg in segments:
+        start = float(getattr(seg, "start_sec", 0.0) or 0.0)
+        end = float(getattr(seg, "end_sec", start) or start)
+        times.extend(
+            sample_times_in_segment(
+                start,
+                end,
+                interval_sec=sample_interval_sec,
+                max_frames=max_frames_per_segment,
+            )
+        )
+    deduped: list[float] = []
+    min_spacing = max(0.05, min(0.35, float(sample_interval_sec) * 0.4))
+    for t in sorted(times):
+        if not deduped or abs(t - deduped[-1]) >= min_spacing:
+            deduped.append(t)
+    times = deduped
+
+    speech_sec = _speech_duration_sec(segments)
+    frame_cap = resolve_subtitle_frame_budget(
+        speech_sec,
+        sample_interval_sec=sample_interval_sec,
+        segment_count=len(segments),
+        max_total_frames=max_total_frames,
+    )
+    if len(times) > frame_cap:
+        logger.info(
+            "Subtitle OCR frame budget trim (vad): speech=%.1fs interval=%.2fs times=%d -> cap=%d",
+            speech_sec,
+            sample_interval_sec,
+            len(times),
+            frame_cap,
+        )
+        idxs = np.linspace(0, len(times) - 1, num=frame_cap, dtype=int)
+        times = [times[int(i)] for i in idxs]
+    else:
+        logger.info(
+            "Subtitle OCR probe plan (vad): speech=%.1fs duration=%.1fs interval=%.2fs times=%d cap=%d",
+            speech_sec,
+            duration,
+            sample_interval_sec,
+            len(times),
+            frame_cap,
+        )
+    return times, frame_cap, len(segments)
+
+
 def index_video_subtitles(
     video_id: str,
     video_path: str,
@@ -154,17 +289,21 @@ def index_video_subtitles(
     keep_wav: bool = False,
     mode: SubtitleIndexMode = "auto",
     sample_interval_sec: float = 1.2,
+    sample_strategy: str | None = None,
     ocr_batch_size: int | None = None,
     max_frames_per_segment: int = 0,
     max_total_frames: int = 0,
 ) -> dict[str, Any]:
-    """Extract hard-subtitle cues: VAD speech segments → sparse frames → RapidOCR.
+    """Extract hard-subtitle cues with change-gated RapidOCR.
 
-    Default sample interval is 1.2s. Per-segment frame cap is off by default
-    (``max_frames_per_segment<=0``). Whole-video OCR budget is derived from
-    VAD speech duration / interval; ``max_total_frames>0`` only sets an optional ceiling.
-    ``ocr_batch_size`` stacks 1–6 ROIs per RapidOCR pass (1 = off).
-    ``keep_wav`` is accepted for API compatibility (default uses PCM pipe).
+    ``sample_strategy``:
+    - ``timeline``: probe the full video (default; better for BGM/PV);
+      OCR both a top title band (~0–20%) and bottom dialogue band (~60–100%)
+    - ``vad``: only sample inside Silero speech segments (faster for dialogue);
+      bottom band only
+
+    Blank / unchanged subtitle bands are skipped so OCR cost tracks subtitle
+    changes. ``max_total_frames>0`` only caps probe count.
     """
     del keep_wav
     video_id = str(video_id or "").strip()
@@ -177,6 +316,7 @@ def index_video_subtitles(
     except (TypeError, ValueError):
         sample_interval_sec = 1.2
     sample_interval_sec = max(0.1, min(6.0, sample_interval_sec))
+    strategy = resolve_subtitle_sample_strategy(config=config, explicit=sample_strategy)
     if ocr_batch_size is None:
         batch_size = resolve_subtitle_ocr_batch_size(config=config)
     else:
@@ -234,22 +374,11 @@ def index_video_subtitles(
         return {"ok": False, "error": ready_error, "segment_rows": 0, "mode": "ocr"}
 
     try:
-        if progress_callback:
-            progress_callback(0.04, "subtitle_extract_audio")
         if _stopped(stop_callback):
             return {"ok": False, "error": "stopped", "segment_rows": 0}
 
-        def _vad_progress(ratio: float, stage: str) -> None:
-            if not progress_callback:
-                return
-            stage_name = "subtitle_extract_audio" if "extract" in str(stage) else "subtitle_vad"
-            progress_callback(0.04 + 0.14 * max(0.0, min(1.0, float(ratio))), stage_name)
-
-        speech = segment_media_speech(media_path, progress_callback=_vad_progress)
-        segments = list(speech or [])
-
         duration = float(get_video_duration_seconds(media_path) or 0.0)
-        if not segments:
+        if duration <= 1e-3:
             save_dialogue_transcript(
                 video_id,
                 [],
@@ -282,53 +411,74 @@ def index_video_subtitles(
                 "video_id": video_id,
                 "segment_rows": 0,
                 "mode": "ocr",
-                "speech_segments": 0,
+                "sample_strategy": strategy,
                 "sample_frames": 0,
+                "speech_segments": 0,
+                "probed": 0,
+                "ocr_calls": 0,
+                "blank_skips": 0,
+                "unchanged_skips": 0,
             }
 
-        times: list[float] = []
-        for seg in segments:
-            start = float(getattr(seg, "start_sec", 0.0) or 0.0)
-            end = float(getattr(seg, "end_sec", start) or start)
-            times.extend(
-                sample_times_in_segment(
-                    start,
-                    end,
-                    interval_sec=sample_interval_sec,
-                    max_frames=max_frames_per_segment,
+        speech_segments = 0
+        if strategy == SUBTITLE_SAMPLE_STRATEGY_VAD:
+            times, _frame_cap, speech_segments = _build_probe_times_vad(
+                media_path=media_path,
+                duration=duration,
+                sample_interval_sec=sample_interval_sec,
+                max_frames_per_segment=max_frames_per_segment,
+                max_total_frames=max_total_frames,
+                progress_callback=progress_callback,
+                stop_callback=stop_callback,
+            )
+            if not times:
+                save_dialogue_transcript(
+                    video_id,
+                    [],
+                    library_path=lib_path,
+                    video_path=media_path,
+                    asr_source=OCR_SOURCE_ID,
+                    config=config,
                 )
-            )
-        deduped: list[float] = []
-        min_spacing = max(0.05, min(0.35, float(sample_interval_sec) * 0.4))
-        for t in sorted(times):
-            if not deduped or abs(t - deduped[-1]) >= min_spacing:
-                deduped.append(t)
-        times = deduped
-
-        speech_sec = _speech_duration_sec(segments)
-        frame_cap = resolve_subtitle_frame_budget(
-            speech_sec,
-            sample_interval_sec=sample_interval_sec,
-            segment_count=len(segments),
-            max_total_frames=max_total_frames,
-        )
-        if len(times) > frame_cap:
-            logger.info(
-                "Subtitle OCR frame budget trim: speech=%.1fs interval=%.2fs times=%d -> cap=%d",
-                speech_sec,
-                sample_interval_sec,
-                len(times),
-                frame_cap,
-            )
-            idxs = np.linspace(0, len(times) - 1, num=frame_cap, dtype=int)
-            times = [times[int(i)] for i in idxs]
+                try:
+                    set_dialogue_index_state(
+                        profile_base_dir,
+                        video_id,
+                        DIALOGUE_INDEX_STATE_READY,
+                        extras={
+                            "dialogue_segment_rows": 0,
+                            "dialogue_asr_source": OCR_SOURCE_ID,
+                            "dialogue_error": "",
+                        },
+                    )
+                except Exception as state_exc:
+                    logger.warning(
+                        "Empty-subtitle state update failed for %s: %s",
+                        video_id,
+                        state_exc,
+                    )
+                if progress_callback:
+                    progress_callback(1.0, "subtitle_done")
+                return {
+                    "ok": True,
+                    "video_id": video_id,
+                    "segment_rows": 0,
+                    "mode": "ocr",
+                    "sample_strategy": strategy,
+                    "sample_frames": 0,
+                    "speech_segments": 0,
+                    "probed": 0,
+                    "ocr_calls": 0,
+                    "blank_skips": 0,
+                    "unchanged_skips": 0,
+                }
         else:
-            logger.info(
-                "Subtitle OCR frame budget: speech=%.1fs interval=%.2fs times=%d cap=%d",
-                speech_sec,
-                sample_interval_sec,
-                len(times),
-                frame_cap,
+            if progress_callback:
+                progress_callback(0.06, "subtitle_probe")
+            times, _frame_cap = _build_probe_times_timeline(
+                duration=duration,
+                sample_interval_sec=sample_interval_sec,
+                max_total_frames=max_total_frames,
             )
 
         if _stopped(stop_callback):
@@ -342,6 +492,7 @@ def index_video_subtitles(
         def _ocr_rois(rois):
             return ocr_frames_to_lines(rois, config=config)
 
+        probe_stats: dict[str, int] = {}
         try:
             observations = collect_ocr_observations(
                 media_path,
@@ -356,6 +507,9 @@ def index_video_subtitles(
                 progress_base=0.20,
                 progress_span=0.70,
                 queue_size=max(12, batch_size * 3),
+                stats_out=probe_stats,
+                # Top titles/names: timeline/PV only. VAD stays bottom dialogue band.
+                include_top_band=(strategy == SUBTITLE_SAMPLE_STRATEGY_TIMELINE),
             )
         except InterruptedError:
             return {"ok": False, "error": "stopped", "segment_rows": 0}
@@ -403,12 +557,19 @@ def index_video_subtitles(
             "ok": True,
             "video_id": video_id,
             "segment_rows": int(save.get("segment_count") or len(cues)),
-            "speech_segments": len(segments),
+            "sample_strategy": strategy,
             "sample_frames": len(times),
+            "speech_segments": speech_segments,
+            "probed": int(probe_stats.get("probed", 0) or 0),
+            "ocr_calls": int(probe_stats.get("ocr_calls", 0) or 0),
+            "blank_skips": int(probe_stats.get("blank_skips", 0) or 0),
+            "unchanged_skips": int(probe_stats.get("unchanged_skips", 0) or 0),
             "mode": "ocr",
             "reused_transcripts": False,
             "asr_source": OCR_SOURCE_ID,
         }
+    except InterruptedError:
+        return {"ok": False, "error": "stopped", "segment_rows": 0}
     except Exception as exc:
         logger.exception("Subtitle index failed for %s: %s", video_id, exc)
         try:

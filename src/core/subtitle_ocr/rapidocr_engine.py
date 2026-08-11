@@ -363,6 +363,7 @@ def _effective_prefer_gpu(prefer_gpu: bool) -> bool:
 
 def _mark_force_cpu(reason: str) -> None:
     global _FORCE_CPU
+    doomed: list[Any] = []
     with _ENGINE_LOCK:
         if not _FORCE_CPU:
             logger.warning(
@@ -370,7 +371,17 @@ def _mark_force_cpu(reason: str) -> None:
                 str(reason or "").strip()[:500],
             )
         _FORCE_CPU = True
+        # Drop GPU sessions off-thread: DirectML/ORT destructors can hang after a mid-run Fail.
+        doomed = list(_ENGINE_CACHE.values())
         _ENGINE_CACHE.clear()
+    if doomed:
+        def _drop_engines(refs: list[Any] = doomed) -> None:
+            try:
+                refs.clear()
+            except Exception:
+                pass
+
+        threading.Thread(target=_drop_engines, name="VSRapidOcrEngineDrop", daemon=True).start()
 
 
 def _is_ort_runtime_fail(exc: BaseException) -> bool:
@@ -460,8 +471,19 @@ def _parse_ocr_item(item: Any) -> dict[str, Any] | None:
     return row
 
 
-def ocr_image_bgr(frame_bgr: np.ndarray, *, config=None, prefer_gpu: bool = True) -> list[dict[str, Any]]:
-    """Run OCR on one BGR frame. Returns ``[{text, score, y_center?}, ...]``."""
+def ocr_image_bgr(
+    frame_bgr: np.ndarray,
+    *,
+    config=None,
+    prefer_gpu: bool = True,
+    allow_cpu_retry: bool = True,
+) -> list[dict[str, Any]]:
+    """Run OCR on one BGR frame. Returns ``[{text, score, y_center?}, ...]``.
+
+    When ``allow_cpu_retry`` is False, an ORT GPU failure marks sticky CPU and
+    re-raises so callers (e.g. stacked multi-ROI) can switch to a safer path
+    instead of re-running a tall image on CPU (often looks like a hang).
+    """
     if frame_bgr is None or not isinstance(frame_bgr, np.ndarray) or frame_bgr.size <= 0:
         return []
     use_gpu = _effective_prefer_gpu(prefer_gpu)
@@ -471,6 +493,8 @@ def ocr_image_bgr(frame_bgr: np.ndarray, *, config=None, prefer_gpu: bool = True
     except Exception as exc:
         if use_gpu and _is_ort_runtime_fail(exc):
             _mark_force_cpu(exc)
+            if not allow_cpu_retry:
+                raise
             engine = get_rapidocr_engine(config=config, prefer_gpu=False)
             result = _run_engine_ocr(engine, frame_bgr)
         else:
@@ -605,11 +629,22 @@ def ocr_frames_to_lines(
             for frame in ordered
         ]
 
+    # After sticky CPU fallback, tall stacked images are extremely slow and can
+    # look hung — prefer per-frame so progress keeps moving.
+    if not _effective_prefer_gpu(prefer_gpu):
+        return _per_frame()
+
     stacked, bands = stack_rois_vertically(ordered)
     try:
-        rows = ocr_image_bgr(stacked, config=config, prefer_gpu=prefer_gpu)
+        # Do not retry the full stack on CPU after a GPU Fail (see allow_cpu_retry).
+        rows = ocr_image_bgr(
+            stacked,
+            config=config,
+            prefer_gpu=prefer_gpu,
+            allow_cpu_retry=False,
+        )
     except Exception as exc:
-        # Tall stacked image is more likely to OOM on weak DirectML devices.
+        # Tall stacked image is more likely to OOM / Fail on weak DirectML devices.
         if _is_ort_runtime_fail(exc):
             if _effective_prefer_gpu(prefer_gpu):
                 _mark_force_cpu(exc)

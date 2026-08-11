@@ -5,8 +5,15 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from src.services.team_client_search import _team_hit_time_range
 from src.web.agent_api.schemas import AgentSearchRequest
+from src.web.agent_api.search import (
+    _coerce_agent_query_vector,
+    _resolve_agent_search_inputs,
+    _resolve_dialogue_match_mode,
+)
 
 
 class TeamHitTimeRangeTests(unittest.TestCase):
@@ -37,8 +44,6 @@ class AgentSearchModeAliasTests(unittest.TestCase):
         mock_query_inputs,
         _mock_scope,
     ):
-        from src.web.agent_api.search import _resolve_agent_search_inputs
-
         mock_query_inputs.return_value = {
             "preset": None,
             "preset_id": None,
@@ -56,6 +61,42 @@ class AgentSearchModeAliasTests(unittest.TestCase):
         body = AgentSearchRequest(query="cat", query_type="text", search_mode="frame")
         resolved = _resolve_agent_search_inputs(body)
         self.assertEqual(resolved.get("mode"), "frame")
+
+
+class AgentQueryVectorAndDialogueModeTests(unittest.TestCase):
+    def test_coerce_query_vector_normalizes_row(self):
+        raw = [3.0] + [0.0] * 31
+        arr = _coerce_agent_query_vector(raw)
+        self.assertEqual(arr.shape, (1, 32))
+        self.assertAlmostEqual(float(np.linalg.norm(arr)), 1.0, places=5)
+
+    def test_resolve_inputs_prefers_explicit_query_vector(self):
+        body = AgentSearchRequest(
+            query="compose",
+            query_type="image_path",
+            query_vector=[0.2] * 32,
+            search_mode="frame",
+        )
+        with patch("src.web.agent_api.search.resolve_effective_search_scope", return_value=(None, None)):
+            with patch("src.web.agent_api.search.resolve_search_query_inputs") as mock_resolve:
+                resolved = _resolve_agent_search_inputs(body)
+        mock_resolve.assert_not_called()
+        self.assertIsNotNone(resolved.get("query_vector"))
+        self.assertFalse(resolved.get("is_text"))
+        self.assertTrue(resolved.get("has_image"))
+        self.assertEqual(resolved.get("query_label"), "compose")
+
+    def test_dialogue_match_mode_from_body(self):
+        body = AgentSearchRequest(query="hi", search_kind="dialogue", match_mode="fuzzy")
+        self.assertEqual(_resolve_dialogue_match_mode(body), "fuzzy")
+
+    def test_dialogue_match_mode_falls_back_to_search_mode(self):
+        body = AgentSearchRequest(query="hi", search_kind="dialogue", search_mode="exact")
+        self.assertEqual(_resolve_dialogue_match_mode(body), "exact")
+
+    def test_dialogue_match_mode_ignores_visual_modes(self):
+        body = AgentSearchRequest(query="hi", search_kind="dialogue", search_mode="frame")
+        self.assertEqual(_resolve_dialogue_match_mode(body), "auto")
 
 
 if __name__ == "__main__":

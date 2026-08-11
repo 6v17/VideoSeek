@@ -356,14 +356,15 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
             {"caption_language": "zh", "base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
         )
         self.assertEqual(settings["caption_language"], "zh")
-        self.assertIn("中文", settings["prompt"])
+        self.assertIn("标签", settings["prompt"])
+        self.assertIn("JSON", settings["prompt"])
 
     def test_finalize_remote_vlm_settings_uses_english_prompt(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
             {"caption_language": "en", "base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
         )
         self.assertEqual(settings["caption_language"], "en")
-        self.assertTrue(settings["prompt"].startswith("Describe this video frame"))
+        self.assertTrue(settings["prompt"].startswith("Extract concise English tags"))
 
     def test_get_remote_vlm_settings_infers_legacy_english_prompt(self):
         config = {
@@ -383,7 +384,19 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         zh_prompt = understanding_resource_service.get_video_summary_prompt_for_language("zh")
         en_prompt = understanding_resource_service.get_video_summary_prompt_for_language("en")
         self.assertIn("中文", zh_prompt)
+        self.assertIn("画面描述", zh_prompt)
         self.assertTrue(en_prompt.startswith("Below are chronological segment descriptions"))
+
+    def test_mode_switches_chunk_prompt(self):
+        tag_settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {"understanding_mode": "tags", "caption_language": "zh"}
+        )
+        summary_settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {"understanding_mode": "summary", "caption_language": "zh"}
+        )
+        self.assertIn("标签", tag_settings["prompt"])
+        self.assertIn("描述", summary_settings["prompt"])
+        self.assertNotEqual(tag_settings["prompt"], summary_settings["prompt"])
 
     def test_finalize_uses_custom_prompts_when_enabled(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
@@ -414,7 +427,7 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                 "model": "qwen3-vl-8b-instruct",
             }
         )
-        self.assertTrue(settings["prompt"].startswith("Describe this video frame"))
+        self.assertTrue(settings["prompt"].startswith("Extract concise English tags"))
         self.assertEqual(
             understanding_resource_service.resolve_video_summary_prompt(settings),
             "Only summary customized.",

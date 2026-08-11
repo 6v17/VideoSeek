@@ -159,10 +159,6 @@ class UnderstandingServiceTests(unittest.TestCase):
         with (
             patch("src.services.understanding_service.UnderstandingPipeline", return_value=fake_pipeline),
             patch(
-                "src.services.understanding_service.generate_video_summary_from_chunks",
-                return_value={"text": "Overall the clip shows a quiet workspace.", "source": "remote_vlm"},
-            ),
-            patch(
                 "src.services.understanding_service.get_active_embedding_spec",
                 return_value={"model_id": "clip_onnx_default", "provider": "clip_onnx"},
             ),
@@ -187,20 +183,22 @@ class UnderstandingServiceTests(unittest.TestCase):
         self.assertEqual(bundle.video.video_id, "abc123")
         self.assertEqual(bundle.provenance.understanding_profile_id, "vision_baseline_v1")
         self.assertEqual(len(bundle.chunks), 1)
-        self.assertIsNotNone(bundle.summary)
-        self.assertEqual(bundle.summary.text, "Overall the clip shows a quiet workspace.")
+        self.assertIsNone(bundle.summary)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            evidence_path = os.path.join(temp_dir, "data", "evidence", "videos", "abc123.json")
+            evidence_path = os.path.join(temp_dir, "data", "evidence", "tags", "abc123.json")
             with patch(
                 "src.services.understanding_service.get_evidence_path",
                 return_value=evidence_path,
             ):
-                written_path = write_evidence_bundle("abc123", payload, config={"data_root": temp_dir})
+                written_path = write_evidence_bundle(
+                    "abc123", payload, config={"data_root": temp_dir}, mode="tags"
+                )
             self.assertEqual(written_path, evidence_path)
             self.assertTrue(os.path.isfile(evidence_path))
             loaded = json.loads(Path(evidence_path).read_text(encoding="utf-8"))
             validate_evidence_bundle(loaded)
+            self.assertEqual(loaded["provenance"].get("understanding_mode"), "tags")
 
     def test_list_local_evidence_details_reads_provenance(self):
         from src.services.understanding_service import list_local_evidence_details
@@ -249,13 +247,22 @@ class UnderstandingServiceTests(unittest.TestCase):
         }
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            evidence_dir = os.path.join(temp_dir, "data", "evidence", "videos")
+            evidence_dir = os.path.join(temp_dir, "data", "evidence", "tags")
             os.makedirs(evidence_dir, exist_ok=True)
             evidence_path = os.path.join(evidence_dir, "vid001.json")
             Path(evidence_path).write_text(json.dumps(evidence_payload), encoding="utf-8")
             with patch("src.services.library_service.list_local_vector_details", return_value=vector_detail), patch(
-                "src.services.understanding_service.get_evidence_videos_dir",
+                "src.services.understanding_service.get_evidence_tags_dir",
                 return_value=evidence_dir,
+            ), patch(
+                "src.services.understanding_service.get_evidence_summaries_dir",
+                return_value=os.path.join(temp_dir, "data", "evidence", "summaries"),
+            ), patch(
+                "src.services.understanding_service.get_evidence_videos_dir",
+                return_value=os.path.join(temp_dir, "data", "evidence", "videos"),
+            ), patch(
+                "src.services.understanding_service.get_evidence_root",
+                return_value=os.path.join(temp_dir, "data", "evidence"),
             ):
                 detail = list_local_evidence_details(config={"data_root": temp_dir})
 
@@ -267,29 +274,44 @@ class UnderstandingServiceTests(unittest.TestCase):
         self.assertEqual(entry["clip_model"], "vit-base-patch32")
         self.assertEqual(entry["chunk_count"], 1)
         self.assertEqual(entry["evidence_state"], "ready")
+        self.assertEqual(entry["evidence_store"], "tags")
 
     def test_delete_and_clear_evidence_files(self):
         from src.services.understanding_service import clear_all_evidence, delete_evidence_for_video
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            evidence_dir = os.path.join(temp_dir, "data", "evidence", "videos")
-            os.makedirs(evidence_dir, exist_ok=True)
-            first_path = os.path.join(evidence_dir, "vid001.json")
+            tags_dir = os.path.join(temp_dir, "data", "evidence", "tags")
+            summaries_dir = os.path.join(temp_dir, "data", "evidence", "summaries")
+            videos_dir = os.path.join(temp_dir, "data", "evidence", "videos")
+            os.makedirs(tags_dir, exist_ok=True)
+            os.makedirs(summaries_dir, exist_ok=True)
+            os.makedirs(videos_dir, exist_ok=True)
+            first_path = os.path.join(tags_dir, "vid001.json")
             first_tmp = f"{first_path}.tmp"
-            second_path = os.path.join(evidence_dir, "vid002.json")
+            second_path = os.path.join(summaries_dir, "vid002.json")
             Path(first_path).write_text("{}", encoding="utf-8")
             Path(first_tmp).write_text("{}", encoding="utf-8")
             Path(second_path).write_text("{}", encoding="utf-8")
             config = {"data_root": temp_dir}
             with patch(
-                "src.services.understanding_service.get_evidence_path",
-                side_effect=lambda video_id, config=None: os.path.join(evidence_dir, f"{video_id}.json"),
+                "src.services.understanding_service.iter_evidence_candidate_paths",
+                side_effect=lambda video_id, config=None, mode=None: [
+                    os.path.join(tags_dir, f"{video_id}.json"),
+                    os.path.join(summaries_dir, f"{video_id}.json"),
+                    os.path.join(videos_dir, f"{video_id}.json"),
+                ],
+            ), patch(
+                "src.services.understanding_service.get_evidence_tags_dir",
+                return_value=tags_dir,
+            ), patch(
+                "src.services.understanding_service.get_evidence_summaries_dir",
+                return_value=summaries_dir,
             ), patch(
                 "src.services.understanding_service.get_evidence_videos_dir",
-                return_value=evidence_dir,
+                return_value=videos_dir,
             ), patch(
                 "src.services.understanding_service.get_evidence_root",
-                return_value=os.path.dirname(evidence_dir),
+                return_value=os.path.dirname(tags_dir),
             ):
                 self.assertTrue(delete_evidence_for_video("vid001", config=config))
                 self.assertFalse(os.path.isfile(first_path))
@@ -397,8 +419,7 @@ class UnderstandingServiceTests(unittest.TestCase):
                 patch("src.services.understanding_service.get_evidence_path", return_value=evidence_path),
                 patch(
                     "src.services.understanding_service.generate_video_summary_from_chunks",
-                    return_value={"text": "summary", "source": "remote_vlm"},
-                ),
+                ) as summary_mock,
                 patch(
                     "src.services.understanding_service.get_active_embedding_spec",
                     return_value={"model_id": "clip_onnx_default", "provider": "clip_onnx"},
@@ -419,11 +440,112 @@ class UnderstandingServiceTests(unittest.TestCase):
             self.assertEqual(result.get("chunk_count"), 2)
             self.assertEqual(result.get("resumed_from"), 1)
             fake_pipeline.run_chunk.assert_called_once()
+            summary_mock.assert_not_called()
             self.assertTrue(written_paths)
             loaded = json.loads(Path(written_paths[-1]).read_text(encoding="utf-8"))
             self.assertEqual(loaded["provenance"]["generation_status"], "completed")
             self.assertEqual(len(loaded["chunks"]), 2)
             self.assertTrue(chunk_payload_has_evidence(loaded["chunks"][0]))
+            self.assertNotIn("summary", loaded)
+
+    def test_generate_summary_mode_writes_summary(self):
+        from src.services.understanding_service import generate_evidence_for_video
+
+        video_context = {
+            "video_id": "abc123",
+            "video_path": "D:/Videos/AnimeS1/ep01.mp4",
+            "video_rel_path": "ep01.mp4",
+            "library_path": "D:/Videos/AnimeS1",
+            "duration_sec": 2.0,
+            "source_exists": True,
+        }
+        chunks = [{"start": 0.0, "end": 2.0}]
+        generated_chunk = {
+            "chunk_index": 0,
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "sample": {"timestamp_sec": 1.0, "strategy": "midpoint"},
+            "tags": [],
+            "evidence": {
+                "vision": {
+                    "image_caption": {
+                        "source": "vision/image_caption/qwen3-vl-remote",
+                        "text": "a quiet desk",
+                    },
+                },
+                "audio": {},
+            },
+        }
+        fake_pipeline = MagicMock()
+        fake_pipeline.run_chunk.return_value = generated_chunk
+        fake_pipeline.component_map.return_value = {
+            "image_caption": "vision/image_caption/qwen3-vl-remote",
+        }
+        fake_pipeline.keyframe_strategy = "midpoint"
+        fake_pipeline.close = MagicMock()
+        fake_pipeline.output_mode = "summary"
+
+        config = {
+            "models": {
+                "active_profile": "clip_onnx_default",
+                "profiles": [
+                    {
+                        "id": "clip_onnx_default",
+                        "provider": "clip_onnx",
+                        "runtime": {"model_variant": "vit-base-patch32"},
+                    }
+                ],
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            evidence_path = os.path.join(temp_dir, "data", "evidence", "videos", "abc123.json")
+            config["data_root"] = temp_dir
+            written_paths: list[str] = []
+
+            def _capture_write(path, payload):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                written_paths.append(str(path))
+
+            with (
+                patch(
+                    "src.services.understanding_service.get_understanding_resource_status",
+                    return_value={"understanding_ready": True, "missing_components": []},
+                ),
+                patch("src.services.understanding_service.resolve_video_context", return_value=video_context),
+                patch("src.services.indexing_service.load_video_chunks_by_id", return_value=chunks),
+                patch(
+                    "src.services.understanding_service.get_active_understanding_profile",
+                    return_value={"id": "vision_baseline_v1", "manifest": PROFILE_MANIFEST},
+                ),
+                patch("src.services.understanding_service.UnderstandingPipeline", return_value=fake_pipeline),
+                patch("src.services.understanding_service.load_evidence_bundle", return_value=None),
+                patch("src.services.understanding_service.get_evidence_path", return_value=evidence_path),
+                patch(
+                    "src.services.understanding_service.generate_video_summary_from_chunks",
+                    return_value={"text": "Quiet workspace.", "source": "remote_vlm"},
+                ) as summary_mock,
+                patch(
+                    "src.services.understanding_service.get_active_embedding_spec",
+                    return_value={"model_id": "clip_onnx_default", "provider": "clip_onnx"},
+                ),
+                patch(
+                    "src.services.understanding_service.get_active_model_profile",
+                    return_value={
+                        "id": "clip_onnx_default",
+                        "provider": "clip_onnx",
+                        "runtime": {"model_variant": "vit-base-patch32"},
+                    },
+                ),
+                patch("src.services.understanding_service._atomic_write_json", side_effect=_capture_write),
+            ):
+                result = generate_evidence_for_video("abc123", config=config, mode="summary")
+
+            summary_mock.assert_called_once()
+            self.assertEqual(result.get("understanding_mode"), "summary")
+            loaded = json.loads(Path(written_paths[-1]).read_text(encoding="utf-8"))
+            self.assertEqual(loaded["summary"]["text"], "Quiet workspace.")
 
 
 class CaptionConcurrencyControllerTests(unittest.TestCase):

@@ -33,6 +33,7 @@ class UnderstandingPipeline:
         *,
         model_dir: str | None = None,
         config=None,
+        output_mode: str | None = None,
     ):
         self.profile_manifest = dict(profile_manifest)
         self.model_dir = str(model_dir or "").strip() or None
@@ -40,6 +41,19 @@ class UnderstandingPipeline:
         defaults = dict(self.profile_manifest.get("defaults") or {})
         self.keyframe_strategy = str(defaults.get("keyframe_strategy", "midpoint") or "midpoint")
         self._component_cache: dict[str, Any] = {}
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_TAGS,
+            get_remote_vlm_settings,
+            normalize_understanding_mode,
+        )
+
+        if output_mode:
+            self.output_mode = normalize_understanding_mode(output_mode)
+        else:
+            settings = get_remote_vlm_settings(config)
+            self.output_mode = normalize_understanding_mode(
+                settings.get("understanding_mode", UNDERSTANDING_MODE_TAGS)
+            )
 
     def close(self) -> None:
         for component in self._component_cache.values():
@@ -98,6 +112,29 @@ class UnderstandingPipeline:
                 chunk_completed_callback(chunk_index, total, result)
         return results
 
+    def _wrap_step_result(self, component_id: str, step_name: str, infer_result: Mapping[str, Any]) -> dict[str, Any]:
+        if step_name == "image_caption":
+            from src.services.understanding_resource_service import UNDERSTANDING_MODE_TAGS
+            from src.services.understanding_tags import format_tags_for_display, parse_vlm_tag_list
+
+            raw_text = str(infer_result.get("text", "") or "").strip()
+            if self.output_mode == UNDERSTANDING_MODE_TAGS:
+                tags = parse_vlm_tag_list(raw_text)
+                display_text = format_tags_for_display(tags) if tags else raw_text
+                return {
+                    "source": component_id,
+                    "text": display_text,
+                    "raw_text": raw_text,
+                    "tags": tags,
+                }
+            return {
+                "source": component_id,
+                "text": raw_text,
+                "raw_text": raw_text,
+                "tags": [],
+            }
+        return {"source": component_id, **dict(infer_result)}
+
     def run_chunk(
         self,
         *,
@@ -111,6 +148,7 @@ class UnderstandingPipeline:
         timestamp_sec = self._sample_timestamp(start_sec, end_sec)
         frame_bgr = get_single_thumbnail(video_path, timestamp_sec)
         evidence = {"vision": {}, "audio": {}}
+        tags: list[str] = []
 
         if frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
             logger.warning(
@@ -139,11 +177,14 @@ class UnderstandingPipeline:
                     if callable(bind_stop):
                         bind_stop(should_stop_callback)
                     infer_result = component.infer(frame_bgr)
-                    evidence["vision"][vision_key] = self._wrap_step_result(
+                    wrapped = self._wrap_step_result(
                         component_id,
                         step_name,
                         infer_result,
                     )
+                    evidence["vision"][vision_key] = wrapped
+                    if step_name == "image_caption":
+                        tags = list(wrapped.get("tags") or [])
                 except UnderstandingStoppedError:
                     raise
                 except Exception as exc:
@@ -162,6 +203,7 @@ class UnderstandingPipeline:
                 "timestamp_sec": timestamp_sec,
                 "strategy": self.keyframe_strategy,
             },
+            "tags": tags,
             "evidence": evidence,
         }
 
@@ -186,11 +228,3 @@ class UnderstandingPipeline:
                 params=dict(step_params or {}),
             )
         return self._component_cache[cache_key]
-
-    def _wrap_step_result(self, component_id: str, step_name: str, infer_result: Mapping[str, Any]) -> dict[str, Any]:
-        if step_name == "image_caption":
-            return {
-                "source": component_id,
-                "text": str(infer_result.get("text", "") or ""),
-            }
-        return {"source": component_id, **dict(infer_result)}

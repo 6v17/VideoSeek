@@ -51,21 +51,59 @@ def invalidate_lance_runtime_caches(profile_base_dir: str = "") -> None:
         _READY_CACHE.pop(key, None)
         _INDEXED_VIDEO_IDS_CACHE.pop(key, None)
         _VIDEO_ROW_COUNTS_CACHE.pop(key, None)
-        return
-    _READY_CACHE.clear()
-    _INDEXED_VIDEO_IDS_CACHE.clear()
-    _VIDEO_ROW_COUNTS_CACHE.clear()
+    else:
+        _READY_CACHE.clear()
+        _INDEXED_VIDEO_IDS_CACHE.clear()
+        _VIDEO_ROW_COUNTS_CACHE.clear()
+    try:
+        from src.services.understanding_service import invalidate_ready_video_entries_cache
+
+        invalidate_ready_video_entries_cache()
+    except Exception:
+        pass
 
 
 def _sql_literal(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _build_scope_where(*, library_path: str = "", video_id: str = "") -> str:
+def _normalize_video_ids(video_ids: Sequence[str] | None) -> list[str]:
+    if video_ids is None:
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in video_ids:
+        value = str(raw or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _build_video_ids_predicate(video_ids: Sequence[str]) -> str:
+    ids = _normalize_video_ids(list(video_ids))
+    if not ids:
+        return "1 = 0"
+    if len(ids) == 1:
+        return f"video_id = {_sql_literal(ids[0])}"
+    joined = ", ".join(_sql_literal(value) for value in ids)
+    return f"video_id IN ({joined})"
+
+
+def _build_scope_where(
+    *,
+    library_path: str = "",
+    video_id: str = "",
+    video_ids: Sequence[str] | None = None,
+) -> str:
     predicates = []
-    normalized_video = str(video_id or "").strip()
-    if normalized_video:
-        predicates.append(f"video_id = {_sql_literal(normalized_video)}")
+    if video_ids is not None:
+        predicates.append(_build_video_ids_predicate(video_ids))
+    else:
+        normalized_video = str(video_id or "").strip()
+        if normalized_video:
+            predicates.append(f"video_id = {_sql_literal(normalized_video)}")
     normalized_library = canonicalize_library_path(library_path) if library_path else ""
     if normalized_library:
         predicates.append(f"library_path = {_sql_literal(normalized_library)}")
@@ -93,17 +131,25 @@ def _load_columns_arrow(
     *,
     library_path: str = "",
     video_id: str = "",
+    video_ids: Sequence[str] | None = None,
     limit: int = _LANCE_ROW_SCAN_LIMIT,
 ):
-    where = _build_scope_where(library_path=library_path, video_id=video_id)
+    where = _build_scope_where(library_path=library_path, video_id=video_id, video_ids=video_ids)
     builder = table.search().select(list(columns))
     if where:
         builder = builder.where(where)
     return builder.limit(int(limit)).to_arrow()
 
 
-def _load_table_arrow(table, *, library_path: str = "", video_id: str = "", columns: Sequence[str] | None = None):
-    where = _build_scope_where(library_path=library_path, video_id=video_id)
+def _load_table_arrow(
+    table,
+    *,
+    library_path: str = "",
+    video_id: str = "",
+    video_ids: Sequence[str] | None = None,
+    columns: Sequence[str] | None = None,
+):
+    where = _build_scope_where(library_path=library_path, video_id=video_id, video_ids=video_ids)
     if where or columns:
         builder = table.search()
         if where:
@@ -566,19 +612,42 @@ def _open_lance_table(profile_base_dir: str, table_name: str):
     return db.open_table(table_name)
 
 
-def _should_materialize_in_memory(*, library_path: str = "", video_id: str = "") -> bool:
+def _should_materialize_in_memory(
+    *,
+    library_path: str = "",
+    video_id: str = "",
+    video_ids: Sequence[str] | None = None,
+) -> bool:
+    # Multi-id scope must stream via Lance where-filter; materializing would reload
+    # every selected video into RAM (the slow "指定视频" path).
+    if video_ids is not None:
+        return False
     return bool(str(video_id or "").strip())
 
 
-def load_lance_frame_search_assets(profile_base_dir: str, *, library_path: str = "", video_id: str = ""):
+def load_lance_frame_search_assets(
+    profile_base_dir: str,
+    *,
+    library_path: str = "",
+    video_id: str = "",
+    video_ids: Sequence[str] | None = None,
+):
     if not lance_search_is_ready(profile_base_dir):
         return None, None, None
     table = _open_lance_table(profile_base_dir, FRAMES_TABLE_NAME)
     if table is None:
         return None, None, None
 
-    if not _should_materialize_in_memory(library_path=library_path, video_id=video_id):
-        where = _build_scope_where(library_path=library_path, video_id=video_id)
+    if not _should_materialize_in_memory(
+        library_path=library_path,
+        video_id=video_id,
+        video_ids=video_ids,
+    ):
+        where = _build_scope_where(
+            library_path=library_path,
+            video_id=video_id,
+            video_ids=video_ids,
+        )
         return LanceTableSearchIndex(table, where=where, is_chunk=False), None, None
 
     normalized_library = canonicalize_library_path(library_path) if library_path else ""
@@ -596,15 +665,20 @@ def load_lance_frame_search_assets(profile_base_dir: str, *, library_path: str =
     return InMemoryFlatSearchIndex(vectors), timestamps, video_paths
 
 
-def load_lance_chunk_search_assets(profile_base_dir: str, *, library_path: str = ""):
+def load_lance_chunk_search_assets(
+    profile_base_dir: str,
+    *,
+    library_path: str = "",
+    video_ids: Sequence[str] | None = None,
+):
     if not lance_search_is_ready(profile_base_dir):
         return None, None, None
     table = _open_lance_table(profile_base_dir, CHUNKS_TABLE_NAME)
     if table is None:
         return None, None, None
 
-    if not _should_materialize_in_memory(library_path=library_path):
-        where = _build_scope_where(library_path=library_path)
+    if not _should_materialize_in_memory(library_path=library_path, video_ids=video_ids):
+        where = _build_scope_where(library_path=library_path, video_ids=video_ids)
         return LanceTableSearchIndex(table, where=where, is_chunk=True), None, None
 
     normalized_library = canonicalize_library_path(library_path) if library_path else ""
@@ -669,3 +743,39 @@ def load_lance_video_chunks(profile_base_dir: str, video_id: str):
             }
         )
     return chunks
+
+
+def load_lance_chunk_time_ranges(
+    profile_base_dir: str,
+    *,
+    library_path: str = "",
+    video_ids: Sequence[str] | None = None,
+) -> dict[str, list[tuple[float, float]]]:
+    """Stream chunk (start, end) by video_path without materializing embeddings."""
+    if not lance_search_is_ready(profile_base_dir):
+        return {}
+    table = _open_lance_table(profile_base_dir, CHUNKS_TABLE_NAME)
+    if table is None:
+        return {}
+    try:
+        arrow = _load_columns_arrow(
+            table,
+            ["video_path", "start", "end"],
+            library_path=library_path,
+            video_ids=video_ids,
+        )
+    except Exception as exc:
+        logger.debug("Failed to load Lance chunk time ranges: %s", exc)
+        return {}
+    if arrow.num_rows <= 0:
+        return {}
+    paths = [str(value or "") for value in arrow["video_path"].to_pylist()]
+    starts = arrow["start"].to_pylist()
+    ends = arrow["end"].to_pylist()
+    by_path: dict[str, list[tuple[float, float]]] = {}
+    for index, path in enumerate(paths):
+        key = str(path or "").strip()
+        if not key:
+            continue
+        by_path.setdefault(key, []).append((float(starts[index] or 0.0), float(ends[index] or 0.0)))
+    return by_path

@@ -1,11 +1,42 @@
 import unittest
 
-from src.core.subtitle_ocr.frame_sample import sample_times_across_timeline, sample_times_in_segment
+from src.core.subtitle_ocr.frame_sample import (
+    crop_subtitle_rois,
+    sample_times_across_timeline,
+    sample_times_in_segment,
+)
 from src.core.subtitle_ocr.merge_cues import merge_ocr_observations
-from src.services.subtitle_index_service import resolve_subtitle_frame_budget
+from src.services.subtitle_index_service import (
+    SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
+    SUBTITLE_SAMPLE_STRATEGY_VAD,
+    normalize_subtitle_sample_strategy,
+    resolve_subtitle_frame_budget,
+    resolve_subtitle_sample_strategy,
+)
 
 
 class SubtitleOcrHelpersTests(unittest.TestCase):
+    def test_sample_strategy_normalize(self):
+        self.assertEqual(normalize_subtitle_sample_strategy("vad"), SUBTITLE_SAMPLE_STRATEGY_VAD)
+        self.assertEqual(normalize_subtitle_sample_strategy("speech"), SUBTITLE_SAMPLE_STRATEGY_VAD)
+        self.assertEqual(normalize_subtitle_sample_strategy("timeline"), SUBTITLE_SAMPLE_STRATEGY_TIMELINE)
+        self.assertEqual(normalize_subtitle_sample_strategy("pv"), SUBTITLE_SAMPLE_STRATEGY_TIMELINE)
+        self.assertEqual(normalize_subtitle_sample_strategy(""), SUBTITLE_SAMPLE_STRATEGY_TIMELINE)
+
+    def test_sample_strategy_resolve_explicit_and_config(self):
+        self.assertEqual(
+            resolve_subtitle_sample_strategy(explicit="vad"),
+            SUBTITLE_SAMPLE_STRATEGY_VAD,
+        )
+        self.assertEqual(
+            resolve_subtitle_sample_strategy(config={"subtitle_sample_strategy": "vad"}),
+            SUBTITLE_SAMPLE_STRATEGY_VAD,
+        )
+        self.assertEqual(
+            resolve_subtitle_sample_strategy(config={"subtitle_sample_strategy": "timeline"}),
+            SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
+        )
+
     def test_sample_times_respects_max_frames(self):
         times = sample_times_in_segment(0.0, 20.0, interval_sec=0.5, max_frames=4)
         self.assertLessEqual(len(times), 4)
@@ -26,9 +57,9 @@ class SubtitleOcrHelpersTests(unittest.TestCase):
         self.assertLessEqual(times[-1], 30.0)
         self.assertLessEqual(len(times), 16)
 
-    def test_frame_budget_scales_with_speech_duration(self):
-        short = resolve_subtitle_frame_budget(60.0, sample_interval_sec=0.8, segment_count=5)
-        long = resolve_subtitle_frame_budget(600.0, sample_interval_sec=0.8, segment_count=20)
+    def test_frame_budget_scales_with_duration(self):
+        short = resolve_subtitle_frame_budget(60.0, sample_interval_sec=0.8)
+        long = resolve_subtitle_frame_budget(600.0, sample_interval_sec=0.8)
         self.assertGreater(long, short)
         self.assertGreaterEqual(short, 40)
         # ~600/0.8 ≈ 750, plus headroom — should be near that, not a flat 500.
@@ -38,7 +69,6 @@ class SubtitleOcrHelpersTests(unittest.TestCase):
         capped = resolve_subtitle_frame_budget(
             600.0,
             sample_interval_sec=0.8,
-            segment_count=20,
             max_total_frames=200,
         )
         self.assertEqual(capped, 200)
@@ -55,6 +85,23 @@ class SubtitleOcrHelpersTests(unittest.TestCase):
         self.assertEqual(merged[0]["text"], "你好")
         self.assertAlmostEqual(merged[0]["end"], 2.0)
         self.assertEqual(merged[1]["text"], "世界")
+
+    def test_crop_rois_bottom_only_by_default(self):
+        import numpy as np
+
+        frame = np.zeros((1000, 800, 3), dtype=np.uint8)
+        bands = crop_subtitle_rois(frame, include_top=False)
+        self.assertEqual([b for b, _ in bands], ["bottom"])
+        self.assertEqual(bands[0][1].shape[0], 400)  # lower 40%
+
+    def test_crop_rois_includes_top_band(self):
+        import numpy as np
+
+        frame = np.zeros((1000, 800, 3), dtype=np.uint8)
+        bands = crop_subtitle_rois(frame, include_top=True, top_ratio=0.20, bottom_ratio=0.40)
+        self.assertEqual([b for b, _ in bands], ["top", "bottom"])
+        self.assertEqual(bands[0][1].shape[0], 200)
+        self.assertEqual(bands[1][1].shape[0], 400)
 
 
 if __name__ == "__main__":

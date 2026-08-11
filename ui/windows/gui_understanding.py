@@ -78,6 +78,7 @@ class UnderstandingGuiMixin:
         self._sync_vlm_provider_ui()
         self._remember_vlm_ui_selection(page)
         self._populate_understanding_caption_language_options(remote_vlm.get("caption_language", "zh"))
+        self._populate_understanding_mode_options(remote_vlm.get("understanding_mode", "tags"))
         page.input_caption_concurrency.setValue(
             max(1, min(4, int(remote_vlm.get("concurrency", 2) or 2)))
         )
@@ -85,14 +86,112 @@ class UnderstandingGuiMixin:
         page.chk_use_custom_prompts.setChecked(bool(remote_vlm.get("use_custom_prompts")))
         page.chk_use_custom_prompts.blockSignals(False)
         page.input_custom_caption_prompt.setPlainText(
-            str(remote_vlm.get("custom_caption_prompt", "") or "")
+            str(remote_vlm.get("custom_tag_prompt") or remote_vlm.get("custom_caption_prompt", "") or "")
+        )
+        page.input_custom_description_prompt.setPlainText(
+            str(remote_vlm.get("custom_description_prompt", "") or "")
         )
         page.input_custom_summary_prompt.setPlainText(
             str(remote_vlm.get("custom_summary_prompt", "") or "")
         )
         self._sync_custom_prompt_fields_visible()
+        self._sync_understanding_mode_ui()
         if refresh_status:
             self._refresh_understanding_settings_status()
+
+    def _populate_understanding_mode_options(self, active_mode=None):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_SUMMARY,
+            UNDERSTANDING_MODE_TAGS,
+            normalize_understanding_mode,
+        )
+
+        combo = page.input_understanding_mode
+        active = normalize_understanding_mode(active_mode or UNDERSTANDING_MODE_TAGS)
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(self.texts.get("understanding_mode_tags", "标签"), UNDERSTANDING_MODE_TAGS)
+        combo.addItem(self.texts.get("understanding_mode_summary", "总结"), UNDERSTANDING_MODE_SUMMARY)
+        index = combo.findData(active)
+        combo.setCurrentIndex(0 if index < 0 else index)
+        combo.blockSignals(False)
+
+    def _current_understanding_mode(self) -> str:
+        page = self._understanding_config_widgets()
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_TAGS,
+            normalize_understanding_mode,
+        )
+
+        if page is None:
+            return UNDERSTANDING_MODE_TAGS
+        return normalize_understanding_mode(page.input_understanding_mode.currentData())
+
+    def _sync_understanding_mode_ui(self, *, reload_timeline: bool = False):
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+
+        mode = self._current_understanding_mode()
+        is_summary = mode == UNDERSTANDING_MODE_SUMMARY
+        page.btn_generate_evidence.setText(
+            self.texts.get(
+                "understanding_generate_summary_button" if is_summary else "understanding_generate_selected_video",
+                "Generate summary" if is_summary else "Generate tags",
+            )
+        )
+        page.btn_generate_batch.setText(
+            self.texts.get(
+                "understanding_generate_batch_summary" if is_summary else "understanding_generate_batch_tags",
+                "Batch summary" if is_summary else "Batch tags",
+            )
+        )
+        page.btn_generate_batch.setToolTip(
+            self.texts.get(
+                "understanding_generate_batch_tip",
+                "Queue videos in the current scope that are still missing results for this mode. Processes one video at a time.",
+            )
+        )
+        page.chunk_detail_title.setText(
+            self.texts.get(
+                "understanding_chunk_detail_title_summary" if is_summary else "understanding_chunk_detail_title",
+                "Segment description" if is_summary else "Segment tags",
+            )
+        )
+        page.btn_evidence_details.setText(
+            self.texts.get(
+                "library_evidence_detail_summary" if is_summary else "library_evidence_detail_tags",
+                self.texts.get(
+                    "library_evidence_detail",
+                    "Summary history" if is_summary else "Tag history",
+                ),
+            )
+        )
+        page.video_summary_title.setText(
+            self.texts.get("understanding_video_summary_title", "Video summary")
+        )
+        page.video_summary_card.setVisible(is_summary)
+        # Keep layout from reserving empty space when hidden.
+        page.video_summary_card.setMaximumWidth(16777215 if is_summary else 0)
+        if not is_summary:
+            self._set_understanding_readonly_text(page.video_summary_text, "")
+            page.video_summary_meta_label.setText("")
+        self._sync_custom_prompt_fields_visible()
+        page.btn_export_video_json.setEnabled(
+            (not (getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()))
+            and self._current_video_has_exportable_evidence()
+        )
+        if reload_timeline:
+            self._load_understanding_video_timeline()
+        elif is_summary:
+            self._refresh_understanding_video_summary()
+
+    def _on_understanding_mode_changed(self, *_args):
+        self._sync_understanding_mode_ui(reload_timeline=True)
 
     def _populate_understanding_caption_language_options(self, active_language=None):
         page = self._understanding_config_widgets()
@@ -439,8 +538,11 @@ class UnderstandingGuiMixin:
 
             language = normalize_caption_language(page.input_caption_language.currentData())
             remote_vlm["caption_language"] = language
+            remote_vlm["understanding_mode"] = self._current_understanding_mode()
             remote_vlm["use_custom_prompts"] = bool(page.chk_use_custom_prompts.isChecked())
-            remote_vlm["custom_caption_prompt"] = page.input_custom_caption_prompt.toPlainText().strip()
+            remote_vlm["custom_tag_prompt"] = page.input_custom_caption_prompt.toPlainText().strip()
+            remote_vlm["custom_caption_prompt"] = remote_vlm["custom_tag_prompt"]
+            remote_vlm["custom_description_prompt"] = page.input_custom_description_prompt.toPlainText().strip()
             remote_vlm["custom_summary_prompt"] = page.input_custom_summary_prompt.toPlainText().strip()
             remote_vlm["concurrency"] = int(page.input_caption_concurrency.value())
             understanding["remote_vlm"] = finalize_remote_vlm_settings(remote_vlm)
@@ -465,6 +567,7 @@ class UnderstandingGuiMixin:
         page.input_remote_vlm_api_key.setEnabled(enabled)
         page.input_remote_vlm_model.setEnabled(enabled)
         page.input_caption_language.setEnabled(enabled)
+        page.input_understanding_mode.setEnabled(enabled)
         page.input_caption_concurrency.setEnabled(enabled)
         page.chk_use_custom_prompts.setEnabled(enabled)
         page.btn_test_vlm_connection.setEnabled(enabled)
@@ -480,8 +583,18 @@ class UnderstandingGuiMixin:
         show_fields = bool(page.chk_use_custom_prompts.isChecked())
         page.custom_prompt_fields.setVisible(show_fields)
         editors_on = bool(config_enabled and show_fields)
-        page.input_custom_caption_prompt.setEnabled(editors_on)
-        page.input_custom_summary_prompt.setEnabled(editors_on)
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+
+        is_summary = self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
+        page.label_custom_caption_prompt.setVisible(show_fields and not is_summary)
+        page.input_custom_caption_prompt.setVisible(show_fields and not is_summary)
+        page.input_custom_caption_prompt.setEnabled(editors_on and not is_summary)
+        page.label_custom_description_prompt.setVisible(show_fields and is_summary)
+        page.input_custom_description_prompt.setVisible(show_fields and is_summary)
+        page.input_custom_description_prompt.setEnabled(editors_on and is_summary)
+        page.label_custom_summary_prompt.setVisible(show_fields and is_summary)
+        page.input_custom_summary_prompt.setVisible(show_fields and is_summary)
+        page.input_custom_summary_prompt.setEnabled(editors_on and is_summary)
         page.btn_reset_custom_prompts.setEnabled(editors_on)
 
     def _on_use_custom_prompts_toggled(self, checked: bool):
@@ -490,8 +603,9 @@ class UnderstandingGuiMixin:
             return
         if checked:
             caption = page.input_custom_caption_prompt.toPlainText().strip()
+            description = page.input_custom_description_prompt.toPlainText().strip()
             summary = page.input_custom_summary_prompt.toPlainText().strip()
-            if not caption and not summary:
+            if not caption and not description and not summary:
                 self._fill_custom_prompts_with_language_defaults()
         self._sync_custom_prompt_fields_visible()
 
@@ -500,17 +614,22 @@ class UnderstandingGuiMixin:
         if page is None:
             return
         from src.services.understanding_resource_service import (
-            get_caption_prompt_for_language,
+            get_description_prompt_for_language,
+            get_tag_prompt_for_language,
             get_video_summary_prompt_for_language,
             normalize_caption_language,
         )
 
         language = normalize_caption_language(page.input_caption_language.currentData())
-        page.input_custom_caption_prompt.setPlainText(get_caption_prompt_for_language(language))
+        page.input_custom_caption_prompt.setPlainText(get_tag_prompt_for_language(language))
+        page.input_custom_description_prompt.setPlainText(get_description_prompt_for_language(language))
         page.input_custom_summary_prompt.setPlainText(get_video_summary_prompt_for_language(language))
 
     def _on_reset_custom_prompts_clicked(self):
         self._fill_custom_prompts_with_language_defaults()
+
+    def _on_understanding_mode_changed(self, *_args):
+        self._sync_understanding_mode_ui()
 
     def _is_current_page(self, page_name: str) -> bool:
         return self.pages.currentIndex() == self._nav_page_index(page_name)
@@ -673,7 +792,15 @@ class UnderstandingGuiMixin:
         page = self.understanding_page
         if evidence is None:
             video_id = self._selected_understanding_video_id()
-            evidence = load_evidence_bundle(video_id, config=load_config()) if video_id else None
+            evidence = (
+                load_evidence_bundle(
+                    video_id,
+                    config=load_config(),
+                    mode=self._current_understanding_mode(),
+                )
+                if video_id
+                else None
+            )
         if not isinstance(evidence, dict):
             page.video_summary_meta_label.setText("")
             return
@@ -696,19 +823,28 @@ class UnderstandingGuiMixin:
         page = self.understanding_page
         if evidence is None:
             video_id = self._selected_understanding_video_id()
-            evidence = load_evidence_bundle(video_id, config=load_config()) if video_id else None
+            evidence = (
+                load_evidence_bundle(
+                    video_id,
+                    config=load_config(),
+                    mode=self._current_understanding_mode(),
+                )
+                if video_id
+                else None
+            )
         summary_text = self._extract_video_summary_text(evidence)
         if summary_text:
             self._set_understanding_readonly_text(page.video_summary_text, summary_text)
             self._refresh_understanding_video_meta(evidence)
             return
         running = getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()
-        if running:
+        mode = str(getattr(self.understanding_controller, "current_mode", "") or "") if running else ""
+        if running and mode == "summary":
             self._set_understanding_readonly_text(
                 page.video_summary_text,
                 self.texts.get(
                     "understanding_video_summary_generating",
-                    "Generating video summary after all segments…",
+                    "Generating video summary…",
                 ),
             )
             self._refresh_understanding_video_meta(evidence)
@@ -717,7 +853,7 @@ class UnderstandingGuiMixin:
             page.video_summary_text,
             self.texts.get(
                 "understanding_video_summary_empty",
-                "Video summary will appear after generation.",
+                "Click “Generate summary” after tags are ready.",
             ),
         )
         self._refresh_understanding_video_meta(evidence)
@@ -725,6 +861,9 @@ class UnderstandingGuiMixin:
     def _chunk_payload_has_evidence(self, payload) -> bool:
         if not isinstance(payload, dict):
             return False
+        tags = [str(item).strip() for item in list(payload.get("tags") or []) if str(item or "").strip()]
+        if tags:
+            return True
         evidence = dict(payload.get("evidence") or {})
         vision = dict(evidence.get("vision") or {})
         caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
@@ -750,12 +889,20 @@ class UnderstandingGuiMixin:
 
         config = load_config()
         try:
-            self._understanding_video_context = resolve_video_context(video_id, config=config)
+            self._understanding_video_context = resolve_video_context(
+                video_id,
+                config=config,
+                probe_duration=False,
+            )
         except Exception:
             self._understanding_video_context = {}
         index_chunks = load_video_chunks_by_id(video_id, config)
         self._understanding_index_chunks = list(index_chunks)
-        evidence = load_evidence_bundle(video_id, config=config) or {}
+        evidence = load_evidence_bundle(
+            video_id,
+            config=config,
+            mode=self._current_understanding_mode(),
+        ) or {}
         evidence_chunks = {
             int(item.get("chunk_index", -1)): dict(item)
             for item in (evidence.get("chunks") or [])
@@ -824,9 +971,19 @@ class UnderstandingGuiMixin:
         )
         vision = dict(dict(payload.get("evidence") or {}).get("vision") or {})
         caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
+        tags = [str(item).strip() for item in list(payload.get("tags") or []) if str(item or "").strip()]
+        if not tags:
+            nested = dict(vision.get("image_caption") or {}).get("tags") or []
+            tags = [str(item).strip() for item in list(nested) if str(item or "").strip()]
+        if tags:
+            from src.services.understanding_tags import format_tags_for_display
+
+            display = format_tags_for_display(tags)
+        else:
+            display = caption
         self._set_understanding_readonly_text(
             page.chunk_caption_text,
-            caption or self.texts.get("understanding_chunk_no_caption", "No caption."),
+            display or self.texts.get("understanding_chunk_no_caption", "No caption."),
         )
 
     def _handle_understanding_chunk_completed(self, index, total, payload):
@@ -856,10 +1013,7 @@ class UnderstandingGuiMixin:
         page.chunk_timeline.set_generating_index(
             first_pending if first_pending is not None else (0 if total else -1)
         )
-        self._set_understanding_readonly_text(
-            page.video_summary_text,
-            self.texts.get("understanding_video_summary_generating", "Generating video summary after all segments…"),
-        )
+        self._refresh_understanding_video_summary()
 
     def _selected_understanding_target_lib(self):
         if not hasattr(self, "understanding_page"):
@@ -904,10 +1058,20 @@ class UnderstandingGuiMixin:
     def _deferred_understanding_page_refresh(self) -> None:
         if not self._is_current_page("understanding"):
             return
+        page = getattr(self, "understanding_page", None)
+        if page is not None and hasattr(page, "lbl_status"):
+            page.lbl_status.setText(
+                self.texts.get("understanding_loading_videos", "Loading indexed videos…")
+            )
         if hasattr(self, "_refresh_understanding_scope_options"):
             self._refresh_understanding_scope_options()
         # Bootstrap copies run once after startup; avoid redoing them on every page visit.
         self._refresh_understanding_page_fast(install_bootstrap=False)
+        if page is not None and hasattr(page, "lbl_status"):
+            # Timeline load may have set a more specific status; only clear our placeholder.
+            current = str(page.lbl_status.text() or "")
+            if current == self.texts.get("understanding_loading_videos", "Loading indexed videos…"):
+                page.lbl_status.setText("")
 
     def _refresh_understanding_page_fast(self, *, install_bootstrap: bool = False):
         status = self._fetch_understanding_resource_status(
@@ -947,9 +1111,14 @@ class UnderstandingGuiMixin:
                 ).format(missing=missing or self.texts.get("understanding_not_ready", "Not ready"))
             )
 
+        has_video = bool(self._selected_understanding_video_id())
         page.btn_generate_evidence.setEnabled(
-            ready and not understanding_running and not indexing_running and bool(self._selected_understanding_video_id())
+            ready and not understanding_running and not indexing_running and has_video
         )
+        page.btn_generate_batch.setEnabled(ready and not understanding_running and not indexing_running)
+        if hasattr(page, "btn_generate_summary"):
+            page.btn_generate_summary.setEnabled(False)
+            page.btn_generate_summary.hide()
         page.btn_evidence_details.setEnabled(not understanding_running)
         page.btn_export_video_json.setEnabled(
             not understanding_running and self._current_video_has_exportable_evidence()
@@ -972,9 +1141,11 @@ class UnderstandingGuiMixin:
                 )
             )
         if not ready:
-            page.btn_generate_evidence.setToolTip(self.texts.get("understanding_not_ready", "Not ready"))
+            tip = self.texts.get("understanding_not_ready", "Not ready")
+            page.btn_generate_evidence.setToolTip(tip)
         else:
             page.btn_generate_evidence.setToolTip("")
+        self._sync_understanding_mode_ui()
 
     def open_understanding_settings(self):
         self.switch_page("understanding")
@@ -1088,6 +1259,10 @@ class UnderstandingGuiMixin:
         page = self.understanding_page
         self.switch_page("understanding")
         page.btn_generate_evidence.setEnabled(False)
+        if hasattr(page, "btn_generate_batch"):
+            page.btn_generate_batch.setEnabled(False)
+        if hasattr(page, "btn_generate_summary"):
+            page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
         page.btn_export_video_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -1112,10 +1287,139 @@ class UnderstandingGuiMixin:
                 ).format(saved=resumed)
             )
 
-        if self.understanding_controller.start_video(video_id):
+        if self.understanding_controller.start_video(video_id, mode=self._current_understanding_mode()):
             if hasattr(self, "_sync_tray_stop_action"):
                 self._sync_tray_stop_action()
 
+    def start_generate_understanding_batch(self):
+        if not self._ensure_startup_migration_idle("feature_understanding"):
+            return
+        if self.indexing_controller.is_running():
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        try:
+            status = get_understanding_resource_status(config=load_config())
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("understanding_generation_failed", "Failed to generate evidence."), exc)
+            return
+        if not status.get("understanding_ready"):
+            self._refresh_understanding_ui()
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_not_ready", "Understanding models are not ready."),
+                kind="warning",
+            )
+            return
+
+        mode = self._current_understanding_mode()
+        target_lib = self._selected_understanding_target_lib() or None
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+        from src.services.understanding_service import evidence_exists_for_video, list_ready_video_entries
+
+        entries = list_ready_video_entries(library_path=target_lib or "", config=load_config())
+        pending = [
+            entry
+            for entry in entries
+            if str(entry.get("video_id", "") or "").strip()
+            and not evidence_exists_for_video(
+                str(entry.get("video_id", "") or "").strip(),
+                config=load_config(),
+                mode=mode,
+            )
+        ]
+        if not pending:
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "understanding_batch_empty",
+                    "No pending videos in this scope for the current mode.",
+                ),
+                kind="info",
+            )
+            return
+
+        if not self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            self.texts.get(
+                "understanding_batch_confirm",
+                "Queue {count} videos in the current scope for {mode}? Already finished ones are skipped. Processes one video at a time.",
+            ).format(
+                count=len(pending),
+                mode=self.texts.get(
+                    "understanding_mode_summary" if mode == UNDERSTANDING_MODE_SUMMARY else "understanding_mode_tags",
+                    mode,
+                ),
+            ),
+            kind="question",
+        ):
+            return
+
+        page = self.understanding_page
+        self.switch_page("understanding")
+        page.btn_generate_evidence.setEnabled(False)
+        page.btn_generate_batch.setEnabled(False)
+        if hasattr(page, "btn_generate_summary"):
+            page.btn_generate_summary.setEnabled(False)
+        page.btn_evidence_details.setEnabled(False)
+        page.btn_export_video_json.setEnabled(False)
+        page.scope_combo.setEnabled(False)
+        page.video_combo.setEnabled(False)
+        self._set_understanding_config_enabled(False)
+        page.btn_stop.setEnabled(True)
+        page.btn_stop.setVisible(True)
+        page.progress_bar.setVisible(True)
+        page.progress_bar.setValue(0)
+        page.lbl_status.setText(
+            self.texts.get(
+                "understanding_batch_started",
+                "Batch queued: {count} videos…",
+            ).format(count=len(pending))
+        )
+        page.understanding_notice.hide()
+
+        if self.understanding_controller.start(target_lib=target_lib, mode=mode, skip_existing=True):
+            if hasattr(self, "_sync_tray_stop_action"):
+                self._sync_tray_stop_action()
+
+    def _on_understanding_batch_video_started(self, video_id, current, total):
+        video_id = str(video_id or "").strip()
+        if not video_id or not hasattr(self, "understanding_page"):
+            return
+        page = self.understanding_page
+        combo = page.video_combo
+        # SearchableIdCombo has findData/currentData, not QComboBox.itemData.
+        index = combo.findData(video_id, Qt.ItemDataRole.UserRole) if hasattr(combo, "findData") else -1
+        if index >= 0 and combo.currentIndex() != index:
+            combo.blockSignals(True)
+            try:
+                combo.setCurrentIndex(index)
+            finally:
+                combo.blockSignals(False)
+        # Always refresh pending/ready markers — first queue item may already be selected.
+        self._prepare_understanding_timeline_for_generation()
+        page.lbl_status.setText(
+            self.texts.get(
+                "understanding_batch_progress",
+                "Queue {current}/{total}: {video_id}",
+            ).format(current=int(current), total=int(total), video_id=video_id)
+        )
+        page.progress_bar.setVisible(True)
+        if page.progress_bar.maximum() <= 0:
+            page.progress_bar.setMaximum(100)
+
+
+    def start_generate_understanding_summary(self, video_id=None):
+        # Compatibility shim: switch to summary mode and run the same generate path.
+        page = self._understanding_config_widgets()
+        if page is not None:
+            from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+
+            index = page.input_understanding_mode.findData(UNDERSTANDING_MODE_SUMMARY)
+            if index >= 0:
+                page.input_understanding_mode.setCurrentIndex(index)
+            self._sync_understanding_mode_ui()
+        self.start_generate_understanding_evidence(video_id=video_id)
     def stop_understanding_generation(self):
         if not getattr(self, "understanding_controller", None) or not self.understanding_controller.is_running():
             return
@@ -1133,6 +1437,11 @@ class UnderstandingGuiMixin:
         result = dict(result or {})
         page = self.understanding_page
         page.btn_generate_evidence.setEnabled(True)
+        if hasattr(page, "btn_generate_batch"):
+            page.btn_generate_batch.setEnabled(True)
+        if hasattr(page, "btn_generate_summary"):
+            page.btn_generate_summary.setEnabled(False)
+            page.btn_generate_summary.hide()
         page.btn_evidence_details.setEnabled(True)
         page.btn_export_video_json.setEnabled(self._current_video_has_exportable_evidence())
         page.scope_combo.setEnabled(True)
@@ -1143,7 +1452,47 @@ class UnderstandingGuiMixin:
         page.progress_bar.setVisible(False)
         page.chunk_timeline.set_generating_index(-1)
 
-        if result.get("video_id"):
+        mode = str(result.get("mode", "") or "")
+        is_batch = bool(result.get("batch")) or (
+            "generated_count" in result and "chunk_count" not in result and not result.get("video_id")
+        )
+        if is_batch:
+            generated_count = int(result.get("generated_count", 0) or 0)
+            error_count = int(result.get("error_count", len(result.get("errors") or [])) or 0)
+            requested_count = int(result.get("requested_count", 0) or 0)
+            if stopped:
+                status_text = self.texts.get(
+                    "understanding_batch_stopped",
+                    "Batch stopped. Done {done}/{total}.",
+                ).format(done=generated_count, total=requested_count)
+            elif requested_count == 0:
+                status_text = self.texts.get(
+                    "understanding_batch_empty",
+                    "No pending videos in this scope for the current mode.",
+                )
+            elif error_count:
+                status_text = self.texts.get(
+                    "understanding_batch_done_with_errors",
+                    "Batch done: {done}/{total}, {errors} failed.",
+                ).format(done=generated_count, total=requested_count, errors=error_count)
+            else:
+                status_text = self.texts.get(
+                    "understanding_batch_done",
+                    "Batch finished: {done}/{total}.",
+                ).format(done=generated_count, total=requested_count)
+            page.lbl_status.setText(status_text)
+            self._load_understanding_video_timeline()
+        elif result.get("video_id") and mode == "summary":
+            if stopped:
+                page.lbl_status.setText(self.texts.get("understanding_generation_stopped", "Stopped."))
+            elif success:
+                page.lbl_status.setText(
+                    self.texts.get("understanding_summary_generation_done", "Video summary done.")
+                )
+            else:
+                page.lbl_status.setText(self.texts.get("understanding_generation_failed", "Failed."))
+            self._load_understanding_video_timeline()
+        elif result.get("video_id"):
             chunk_count = int(result.get("chunk_count", 0) or 0)
             chunk_total = int(result.get("chunk_total", chunk_count) or chunk_count)
             if stopped:
@@ -1152,36 +1501,22 @@ class UnderstandingGuiMixin:
                     "Stopped. Saved {saved}/{total} segments.",
                 ).format(saved=chunk_count, total=chunk_total)
             elif success:
-                status_text = self.texts.get(
-                    "understanding_video_generation_done",
-                    "Finished: {count} segments.",
-                ).format(count=chunk_count)
+                if mode == "summary":
+                    status_text = self.texts.get(
+                        "understanding_summary_generation_done",
+                        "Video summary done.",
+                    )
+                else:
+                    status_text = self.texts.get(
+                        "understanding_video_generation_done",
+                        "Finished: {count} segments.",
+                    ).format(count=chunk_count)
             else:
                 status_text = self.texts.get("understanding_generation_failed", "Failed.")
             page.lbl_status.setText(status_text)
             self._load_understanding_video_timeline()
         else:
-            generated_count = int(result.get("generated_count", 0) or 0)
-            error_count = len(result.get("errors") or [])
-            requested_count = int(result.get("requested_count", 0) or 0)
-            if stopped:
-                status_text = self.texts.get("understanding_generation_stopped", "Stopped.")
-            elif success or generated_count > 0:
-                if requested_count == 0:
-                    status_text = self.texts.get("understanding_generation_none", "No indexed videos are ready.")
-                elif error_count:
-                    status_text = self.texts.get(
-                        "understanding_generation_done_with_errors",
-                        "Finished: {count} videos, {errors} failed.",
-                    ).format(count=generated_count, errors=error_count)
-                else:
-                    status_text = self.texts.get(
-                        "understanding_generation_done",
-                        "Finished: {count} videos.",
-                    ).format(count=generated_count)
-            else:
-                status_text = self.texts.get("understanding_generation_failed", "Failed.")
-            page.lbl_status.setText(status_text)
+            page.lbl_status.setText(self.texts.get("understanding_generation_failed", "Failed."))
 
         self._refresh_understanding_ui()
         if hasattr(self, "_sync_tray_stop_action"):
@@ -1200,13 +1535,27 @@ class UnderstandingGuiMixin:
         video_id = self._selected_understanding_video_id()
         if not video_id:
             return False
-        return load_evidence_bundle(video_id, config=load_config()) is not None
+        return (
+            load_evidence_bundle(
+                video_id,
+                config=load_config(),
+                mode=self._current_understanding_mode(),
+            )
+            is not None
+        )
 
     def _default_understanding_export_name(self, evidence: dict) -> str:
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+
         video = dict(evidence.get("video") or {})
         rel_path = str(video.get("video_rel_path") or video.get("video_id") or "video").strip()
         stem = os.path.splitext(os.path.basename(rel_path))[0] or "video"
-        return f"{stem}_understanding.json"
+        suffix = (
+            "summary"
+            if self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
+            else "tags"
+        )
+        return f"{stem}_{suffix}.json"
 
     def export_current_video_understanding_json(self):
         video_id = self._selected_understanding_video_id()
@@ -1217,7 +1566,11 @@ class UnderstandingGuiMixin:
                 kind="warning",
             )
             return
-        evidence = load_evidence_bundle(video_id, config=load_config())
+        evidence = load_evidence_bundle(
+            video_id,
+            config=load_config(),
+            mode=self._current_understanding_mode(),
+        )
         if not evidence:
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
@@ -1246,7 +1599,8 @@ class UnderstandingGuiMixin:
 
     def show_local_evidence_details(self):
         try:
-            dialog = self._create_evidence_detail_dialog(list_local_evidence_details())
+            detail = list_local_evidence_details(mode=self._current_understanding_mode())
+            dialog = self._create_evidence_detail_dialog(detail)
             dialog.exec()
         except Exception as exc:
             self.show_error_dialog(self.texts["library_evidence_load_failed"], exc)
@@ -1255,6 +1609,13 @@ class UnderstandingGuiMixin:
         yes_text = self.texts["details_yes"]
         no_text = self.texts["details_no"]
         rows, payloads = self._build_local_evidence_detail_rows(detail, yes_text=yes_text, no_text=no_text)
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+
+        is_summary = self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
+        title = self.texts.get(
+            "library_evidence_title_summary" if is_summary else "library_evidence_title_tags",
+            self.texts["library_evidence_title"],
+        )
         subtitle = self.texts["library_evidence_subtitle"].format(
             total=detail["total_entries"],
             evidence_dir=detail["evidence_dir"],
@@ -1264,7 +1625,7 @@ class UnderstandingGuiMixin:
             parent=self,
             is_dark=self.is_dark_mode,
             language=self.language,
-            title=self.texts["library_evidence_title"],
+            title=title,
             subtitle=subtitle,
             headers=self.texts["library_evidence_headers"],
             rows=rows,
@@ -1320,7 +1681,7 @@ class UnderstandingGuiMixin:
         )
 
     def _reload_evidence_detail_dialog(self, dialog):
-        detail = list_local_evidence_details()
+        detail = list_local_evidence_details(mode=self._current_understanding_mode())
         yes_text = self.texts["details_yes"]
         no_text = self.texts["details_no"]
         rows, payloads = self._build_local_evidence_detail_rows(detail, yes_text=yes_text, no_text=no_text)
@@ -1338,11 +1699,18 @@ class UnderstandingGuiMixin:
             kind="warning",
         ):
             return
-        video_ids = [str(item.get("video_id", "") or "").strip() for item in selected]
-        result = delete_evidence_for_videos(video_ids)
+        paths = []
+        for item in selected:
+            evidence_file = str(item.get("evidence_file", "") or "").strip()
+            if evidence_file:
+                paths.append(evidence_file)
+                paths.append(f"{evidence_file}.tmp")
+        from src.services.understanding_service import _remove_paths
+
+        removed, errors = _remove_paths(paths)
         detail = self._reload_evidence_detail_dialog(dialog)
-        deleted_count = int(result.get("deleted_count", 0) or 0)
-        error_count = len(result.get("errors") or [])
+        deleted_count = len({os.path.splitext(os.path.basename(path))[0] for path in removed})
+        error_count = len(errors or [])
         if error_count:
             dialog.status_hint.setText(
                 self.texts["library_evidence_delete_done_with_errors"].format(
@@ -1357,6 +1725,7 @@ class UnderstandingGuiMixin:
                     total=detail["evidence_count"],
                 )
             )
+        self._load_understanding_video_timeline()
 
     def _clear_all_evidence_records(self, dialog):
         detail = list_local_evidence_details()
@@ -1491,14 +1860,21 @@ class UnderstandingGuiMixin:
 
     def _open_evidence_detail_folder(self, dialog):
         try:
-            detail = list_local_evidence_details()
-            evidence_dir = str(detail.get("evidence_dir", "") or "").strip()
-            if evidence_dir:
+            from src.services.understanding_paths import get_evidence_mode_dir, get_evidence_root
+
+            mode = self._current_understanding_mode()
+            evidence_dir = os.path.normpath(get_evidence_mode_dir(mode, config=load_config()))
+            os.makedirs(evidence_dir, exist_ok=True)
+            open_folder_in_explorer(evidence_dir)
+            dialog.status_hint.setText(evidence_dir)
+            return
+        except Exception as exc:
+            try:
+                evidence_dir = os.path.normpath(get_evidence_root(config=load_config()))
                 os.makedirs(evidence_dir, exist_ok=True)
                 open_folder_in_explorer(evidence_dir)
                 dialog.status_hint.setText(evidence_dir)
                 return
-        except Exception as exc:
-            dialog.status_hint.setText(str(exc))
-            return
-        dialog.status_hint.setText(self.texts["details_nothing_selected"])
+            except Exception:
+                dialog.status_hint.setText(str(exc))
+                return

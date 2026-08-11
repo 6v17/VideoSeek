@@ -452,9 +452,20 @@ def load_video_chunks_by_id(video_id, config):
     if not video_id:
         return []
 
-    from src.storage.lance_search_index import load_lance_video_frame_arrays
+    from src.storage.lance_search_index import load_lance_video_chunks, load_lance_video_frame_arrays
+    from src.storage.lance_store import get_stored_chunk_config
 
-    vectors, timestamps = load_lance_video_frame_arrays(model_dirs["base_dir"], video_id)
+    profile_base_dir = model_dirs["base_dir"]
+    current_chunk_config = build_chunk_config(config)
+    existing = load_lance_video_chunks(profile_base_dir, video_id)
+    saved_chunk_config = get_stored_chunk_config(profile_base_dir, video_id)
+    if (
+        existing
+        and normalize_chunk_config_snapshot(saved_chunk_config) == current_chunk_config
+    ):
+        return existing
+
+    vectors, timestamps = load_lance_video_frame_arrays(profile_base_dir, video_id)
     if not _has_usable_vectors(vectors, timestamps):
         return []
     chunks, rebuilt, chunk_config = _ensure_video_chunks(

@@ -10,7 +10,9 @@ UNDERSTANDING_DIR_NAME = "understanding"
 COMPONENTS_DIR_NAME = "components"
 PROFILES_DIR_NAME = "profiles"
 EVIDENCE_DIR_NAME = "evidence"
-EVIDENCE_VIDEOS_DIR_NAME = "videos"
+EVIDENCE_VIDEOS_DIR_NAME = "videos"  # legacy combined store
+EVIDENCE_TAGS_DIR_NAME = "tags"
+EVIDENCE_SUMMARIES_DIR_NAME = "summaries"
 BUILTIN_PROFILES_RELPATH = os.path.join("resources", "understanding_profiles")
 BUILTIN_COMPONENTS_RELPATH = os.path.join("resources", "understanding_components")
 COMPONENT_ID_PATTERN = re.compile(
@@ -133,9 +135,69 @@ def get_evidence_root(config=None) -> str:
 
 
 def get_evidence_videos_dir(config=None) -> str:
+    """Legacy combined evidence folder (pre tag/summary split)."""
     return os.path.join(get_evidence_root(config=config), EVIDENCE_VIDEOS_DIR_NAME)
 
 
-def get_evidence_path(video_id: str, config=None) -> str:
+def get_evidence_tags_dir(config=None) -> str:
+    return os.path.join(get_evidence_root(config=config), EVIDENCE_TAGS_DIR_NAME)
+
+
+def get_evidence_summaries_dir(config=None) -> str:
+    return os.path.join(get_evidence_root(config=config), EVIDENCE_SUMMARIES_DIR_NAME)
+
+
+def get_evidence_mode_dir(mode: str | None = None, config=None) -> str:
+    from src.services.understanding_resource_service import (
+        UNDERSTANDING_MODE_SUMMARY,
+        UNDERSTANDING_MODE_TAGS,
+        normalize_understanding_mode,
+    )
+
+    resolved = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
+    if resolved == UNDERSTANDING_MODE_SUMMARY:
+        return get_evidence_summaries_dir(config=config)
+    return get_evidence_tags_dir(config=config)
+
+
+def get_evidence_path(video_id: str, config=None, *, mode: str | None = None) -> str:
+    """Path for mode-specific evidence. Defaults to tags store."""
+    normalized_id = _normalize_video_id(video_id)
+    return os.path.join(get_evidence_mode_dir(mode, config=config), f"{normalized_id}.json")
+
+
+def get_legacy_evidence_path(video_id: str, config=None) -> str:
     normalized_id = _normalize_video_id(video_id)
     return os.path.join(get_evidence_videos_dir(config=config), f"{normalized_id}.json")
+
+
+def iter_evidence_candidate_paths(video_id: str, config=None, *, mode: str | None = None) -> list[str]:
+    """Mode store first, then the other mode, then legacy combined store."""
+    from src.services.understanding_resource_service import (
+        UNDERSTANDING_MODE_SUMMARY,
+        UNDERSTANDING_MODE_TAGS,
+        normalize_understanding_mode,
+    )
+
+    normalized_id = _normalize_video_id(video_id)
+    primary = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
+    secondary = (
+        UNDERSTANDING_MODE_SUMMARY
+        if primary == UNDERSTANDING_MODE_TAGS
+        else UNDERSTANDING_MODE_TAGS
+    )
+    paths = [
+        get_evidence_path(normalized_id, config=config, mode=primary),
+        get_evidence_path(normalized_id, config=config, mode=secondary),
+        get_legacy_evidence_path(normalized_id, config=config),
+    ]
+    # Preserve order while dropping duplicates.
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = os.path.normcase(os.path.normpath(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(os.path.normpath(path))
+    return ordered

@@ -215,10 +215,13 @@ class SearchWorker(QThread):
                     search_precision_mode=config.search_precision_mode,
                     search_kind=kind or None,
                     top_k=config.top_k,
+                    min_score=config.min_score,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
                     video_discovery_enabled=config.video_discovery_enabled,
                     preview_anchor_sec=config.preview_anchor_sec,
+                    query_vector=config.query_vector,
+                    match_mode=config.search_mode if kind == "dialogue" else None,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
                 results = filter_hits_by_min_score(results, config.min_score)
@@ -317,12 +320,14 @@ class DialogueIndexWorker(QThread):
         targets=None,
         mode: str = "auto",
         sample_interval_sec: float | None = None,
+        sample_strategy: str | None = None,
         ocr_batch_size: int | None = None,
     ):
         super().__init__()
         self.targets = list(targets or [])
         self.mode = str(mode or "auto").strip().lower() or "auto"
         self.sample_interval_sec = None if sample_interval_sec is None else float(sample_interval_sec)
+        self.sample_strategy = None if sample_strategy is None else str(sample_strategy)
         self.ocr_batch_size = None if ocr_batch_size is None else int(ocr_batch_size)
         self._stop_requested = False
 
@@ -371,6 +376,7 @@ class DialogueIndexWorker(QThread):
                     stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
                     mode=self.mode,
                     sample_interval_sec=self.sample_interval_sec,
+                    sample_strategy=self.sample_strategy,
                     ocr_batch_size=self.ocr_batch_size,
                 )
                 if result.get("ok"):
@@ -648,10 +654,11 @@ class UnderstandingVideoWorker(QThread):
     finished_signal = Signal(bool, bool, object)
     error_signal = Signal(str)
 
-    def __init__(self, video_id, model_dir=None):
+    def __init__(self, video_id, model_dir=None, mode=None):
         super().__init__()
         self.video_id = str(video_id or "").strip()
         self.model_dir = model_dir
+        self.mode = str(mode or "").strip() or None
         self._stop_requested = False
 
     def stop(self):
@@ -682,6 +689,7 @@ class UnderstandingVideoWorker(QThread):
                 self.video_id,
                 config=config,
                 model_dir=self.model_dir,
+                mode=self.mode,
                 chunk_completed_callback=_chunk_completed,
                 should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
             )
@@ -698,16 +706,79 @@ class UnderstandingVideoWorker(QThread):
             self.finished_signal.emit(False, False, {})
 
 
-class UnderstandingWorker(QThread):
+class UnderstandingSummaryWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(bool, bool, object)
     error_signal = Signal(str)
 
-    def __init__(self, target_lib=None, model_dir=None):
+    def __init__(self, video_id, model_dir=None):
+        super().__init__()
+        self.video_id = str(video_id or "").strip()
+        self.model_dir = model_dir
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.understanding_service import generate_summary_for_video
+
+            config = load_config()
+            language = config.get("language", "zh")
+            texts = get_texts(language)
+            self.progress_signal.emit(
+                5,
+                texts.get("understanding_video_summary_generating", "Generating video summary…"),
+            )
+            result = dict(
+                generate_summary_for_video(
+                    self.video_id,
+                    config=config,
+                    model_dir=self.model_dir,
+                    should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                )
+                or {}
+            )
+            result.setdefault("video_id", self.video_id)
+            result["summary"] = True
+            stopped = bool(result.get("stopped")) or bool(getattr(self, "_stop_requested", False))
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Summary done."))
+            self.finished_signal.emit(not stopped, stopped, result)
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(
+                    False, True, {"video_id": self.video_id, "stopped": True, "summary": True}
+                )
+                return
+            logger.exception("Understanding summary worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {"video_id": self.video_id, "summary": True})
+
+
+class UnderstandingWorker(QThread):
+    progress_signal = Signal(int, str)
+    video_started = Signal(str, int, int)  # video_id, current, total
+    chunk_completed = Signal(int, int, object)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+
+    def __init__(self, target_lib=None, model_dir=None, mode=None, skip_existing=True):
         super().__init__()
         self.target_lib = target_lib
         self.model_dir = model_dir
+        self.mode = str(mode or "").strip() or None
+        self.skip_existing = bool(skip_existing)
         self._stop_requested = False
+        self._batch_current = 0
+        self._batch_total = 0
+        self._active_video_id = ""
 
     def stop(self):
         self._stop_requested = True
@@ -724,22 +795,50 @@ class UnderstandingWorker(QThread):
             texts = get_texts(language)
 
             def _progress_callback(progress, video_id, current, total):
+                self._batch_current = int(current)
+                self._batch_total = max(int(total), 1)
+                self._active_video_id = str(video_id or "").strip()
                 if total <= 0:
                     message = texts.get("understanding_generation_started", "Generating understanding evidence…")
                 elif not video_id:
-                    message = texts.get("understanding_generation_done", "Understanding evidence generation finished.")
+                    message = texts.get(
+                        "understanding_batch_done",
+                        "Batch finished: {done}/{total}.",
+                    ).format(done=total, total=total)
                 else:
                     message = texts.get(
-                        "understanding_progress",
-                        "Generating evidence ({current}/{total}): {video_id}",
+                        "understanding_batch_progress",
+                        "Queue {current}/{total}: {video_id}",
                     ).format(current=current, total=total, video_id=video_id)
+                    self.video_started.emit(str(video_id), int(current), int(total))
                 self.progress_signal.emit(int(progress), message)
+
+            def _chunk_completed(index, total, payload):
+                batch_total = max(int(self._batch_total), 1)
+                video_slot = max(int(self._batch_current) - 1, 0)
+                chunk_frac = (int(index) + 1) / max(int(total), 1)
+                overall = int(((video_slot + chunk_frac) / batch_total) * 100)
+                overall = min(99, max(0, overall))
+                message = texts.get(
+                    "understanding_batch_chunk_progress",
+                    "Queue {current}/{total} · segment {chunk}/{chunk_total}",
+                ).format(
+                    current=int(self._batch_current),
+                    total=batch_total,
+                    chunk=int(index) + 1,
+                    chunk_total=int(total),
+                )
+                self.progress_signal.emit(overall, message)
+                self.chunk_completed.emit(int(index), int(total), payload)
 
             result = generate_evidence_batch(
                 target_lib=self.target_lib,
                 config=config,
                 model_dir=self.model_dir,
+                mode=self.mode,
+                skip_existing=self.skip_existing,
                 progress_callback=_progress_callback,
+                chunk_completed_callback=_chunk_completed,
                 should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
             )
             stopped = bool(result.get("stopped"))
@@ -748,7 +847,7 @@ class UnderstandingWorker(QThread):
         except Exception as exc:
             logger.exception("Understanding evidence worker failed")
             self.error_signal.emit(str(exc))
-            self.finished_signal.emit(False, False, {})
+            self.finished_signal.emit(False, False, {"batch": True})
 
 
 def _iter_thumb_jobs(results):

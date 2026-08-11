@@ -30,8 +30,12 @@ class AgentSearchRequest(BaseModel):
     search_mode: Optional[str] = None  # alias of mode for team clients
     min_score: Optional[float] = None
     search_precision_mode: Optional[str] = None
-    # Image search: keep best hit per video (desktop 「视频择优」). Only for global fast frame search.
+    # Image search: keep best hit per video (desktop 「视频择优」).
     video_discovery_enabled: Optional[bool] = None
+    # Precomputed CLIP vector (compose / presets). When set, server skips re-encoding.
+    query_vector: Optional[List[float]] = None
+    # Dialogue only: exact | fuzzy | auto (team clients may also send via search_mode).
+    match_mode: Optional[str] = None
     client_request_id: Optional[str] = None
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True

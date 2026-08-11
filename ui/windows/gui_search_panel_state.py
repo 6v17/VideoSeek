@@ -139,11 +139,7 @@ class SearchPanelStateMixin:
     def _resolve_video_discovery_enabled(self, *, is_text: bool, has_image: bool) -> bool:
         if is_text or not has_image:
             return False
-        if self._image_search_mode_from_ui() != "video_discovery":
-            return False
-        if not self._search_scope_is_global():
-            return False
-        return True
+        return self._image_search_mode_from_ui() == "video_discovery"
 
     def _resolve_effective_search_mode(
         self,

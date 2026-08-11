@@ -57,11 +57,12 @@ def sample_evidence_bundle_payload() -> dict:
                         },
                         "image_caption": {
                             "source": "vision/image_caption/qwen3-vl-remote",
-                            "text": "a person sitting at a table",
+                            "text": "person · table",
                         },
                     },
                     "audio": {},
                 },
+                "tags": ["person", "table"],
             }
         ],
     }
@@ -88,7 +89,8 @@ class EvidenceBundleSchemaTests(unittest.TestCase):
         self.assertAlmostEqual(detected.confidence, 0.91)
         self.assertEqual(detected.bbox, (0.1, 0.08, 0.55, 0.92))
         self.assertIsNotNone(chunk.evidence.vision.image_caption)
-        self.assertEqual(chunk.evidence.vision.image_caption.text, "a person sitting at a table")
+        self.assertEqual(chunk.evidence.vision.image_caption.text, "person · table")
+        self.assertEqual(chunk.tags, ("person", "table"))
 
     def test_round_trip_to_dict(self):
         payload = sample_evidence_bundle_payload()

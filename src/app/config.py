@@ -137,6 +137,7 @@ DEFAULT_CONFIG = {
     "download_quality": "best",
     "auto_cleanup_missing_files": False,
     "subtitle_sample_interval_sec": 1.2,
+    "subtitle_sample_strategy": "timeline",
     "subtitle_ocr_batch_size": 1,
     "export_video_silent": False,
     "export_encode_mode": "original",
@@ -238,6 +239,7 @@ CONFIG_ENUMS = {
     "download_cookie_mode": {"none", "file", "browser"},
     "download_cookie_browser": {"chrome", "edge", "firefox", "brave", "chromium", "opera", "vivaldi"},
     "close_window_action": {"exit", "tray"},
+    "subtitle_sample_strategy": {"timeline", "vad"},
 }
 
 PATH_KEYS = {

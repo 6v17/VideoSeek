@@ -506,6 +506,21 @@ def _encode_image_query(query_data) -> Optional[dict]:
     raise TypeError(f"unsupported image query type: {type(query_data).__name__}")
 
 
+def _encode_query_vector_payload(query_vector) -> Optional[List[float]]:
+    """Flatten a CLIP row into a JSON-safe float list."""
+    if query_vector is None:
+        return None
+    try:
+        import numpy as np
+
+        arr = np.asarray(query_vector, dtype=np.float32).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if arr.size < 8:
+        return None
+    return [float(x) for x in arr.tolist()]
+
+
 def run_team_client_search(
     *,
     server_url: str,
@@ -515,10 +530,13 @@ def run_team_client_search(
     search_precision_mode: Optional[str] = None,
     search_kind: Optional[str] = None,
     top_k: Optional[int] = None,
+    min_score: Optional[float] = None,
     scope_video_paths: Optional[Sequence[str]] = None,
     scope_library_paths: Optional[Sequence[str]] = None,
     video_discovery_enabled: Optional[bool] = None,
     preview_anchor_sec: Optional[float] = None,
+    query_vector=None,
+    match_mode: Optional[str] = None,
     api_port_default: int = 8765,
     timeout: float = 180.0,
 ) -> List[SearchHit]:
@@ -536,8 +554,17 @@ def run_team_client_search(
         payload["expand_frame_hits"] = False
     if top_k is not None:
         payload["top_k"] = int(top_k)
+    if min_score is not None:
+        try:
+            payload["min_score"] = float(min_score)
+        except (TypeError, ValueError):
+            pass
     mode = str(search_mode or "").strip().lower()
-    if kind != "dialogue" and mode in {"frame", "chunk"}:
+    if kind == "dialogue":
+        dialogue_mode = str(match_mode or mode or "").strip().lower()
+        if dialogue_mode in {"exact", "fuzzy", "auto", "segment", "keyword", "literal", "tolerant", "approx"}:
+            payload["match_mode"] = dialogue_mode
+    elif mode in {"frame", "chunk"}:
         # Send both keys: older servers only read `mode`; `search_mode` is the team alias.
         payload["mode"] = mode
         payload["search_mode"] = mode
@@ -562,7 +589,16 @@ def run_team_client_search(
             scope["library_paths"] = library_paths
         payload["scope"] = scope
 
-    if is_text:
+    encoded_vector = _encode_query_vector_payload(query_vector)
+    if encoded_vector is not None and kind != "dialogue":
+        payload["query_vector"] = encoded_vector
+        # Keep query_type so server preserves text vs image/mixed compose semantics.
+        payload["query_type"] = "text" if is_text else "image_path"
+        label = str(query_data or "").strip()
+        if not is_text and label:
+            label = os.path.basename(label) or label
+        payload["query"] = label or "compose"
+    elif is_text:
         payload["query_type"] = "text"
         payload["query"] = str(query_data or "")
     else:

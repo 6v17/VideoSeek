@@ -110,6 +110,52 @@ class TeamClientScopeTests(unittest.TestCase):
             ["http://192.168.1.2:18080/videos/lib1/a.mp4"],
         )
 
+    def test_search_sends_query_vector_for_compose(self):
+        captured = {}
+
+        def fake_post(url, payload, timeout=120.0):
+            captured["payload"] = payload
+            return {"ok": True, "hits": []}
+
+        vector = [0.1] * 32
+        with mock.patch("src.services.team_client_search._post_json", side_effect=fake_post):
+            run_team_client_search(
+                server_url="http://192.168.1.2:8765",
+                query_data="D:/refs/a.png",
+                is_text=False,
+                search_mode="frame",
+                search_precision_mode="fast",
+                query_vector=vector,
+            )
+        payload = captured["payload"]
+        self.assertEqual(payload.get("query_type"), "image_path")
+        self.assertEqual(payload.get("query"), "a.png")
+        self.assertNotIn("image_base64", payload)
+        sent = payload.get("query_vector") or []
+        self.assertEqual(len(sent), 32)
+        self.assertTrue(all(abs(float(v) - 0.1) < 1e-6 for v in sent))
+
+    def test_search_sends_dialogue_match_mode(self):
+        captured = {}
+
+        def fake_post(url, payload, timeout=120.0):
+            captured["payload"] = payload
+            return {"ok": True, "hits": []}
+
+        with mock.patch("src.services.team_client_search._post_json", side_effect=fake_post):
+            run_team_client_search(
+                server_url="http://192.168.1.2:8765",
+                query_data="你好",
+                is_text=True,
+                search_kind="dialogue",
+                search_mode="fuzzy",
+                match_mode="fuzzy",
+            )
+        payload = captured["payload"]
+        self.assertEqual(payload.get("search_kind"), "dialogue")
+        self.assertEqual(payload.get("match_mode"), "fuzzy")
+        self.assertNotIn("mode", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

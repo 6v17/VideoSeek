@@ -34,13 +34,15 @@ def _cap_hits_per_video(hits: List[SearchHit], cap: int) -> List[SearchHit]:
 def _use_video_discovery_results(
     is_text: bool,
     precise_image: bool,
-    scoped: bool,
+    scoped: bool = False,
     *,
     video_discovery_enabled: bool = False,
 ) -> bool:
+    """Enable best-per-video presentation for fast image search (any scope)."""
+    del scoped  # kept for call-site compatibility; discovery is no longer global-only
     if not video_discovery_enabled:
         return False
-    return (not is_text) and (not precise_image) and (not scoped)
+    return (not is_text) and (not precise_image)
 
 
 def _resolve_video_discovery_enabled(config, explicit: bool | None) -> bool:

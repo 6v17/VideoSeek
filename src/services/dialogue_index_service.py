@@ -91,9 +91,10 @@ def index_video_dialogue(
     keep_wav: bool = False,
     mode: DialogueIndexMode = "auto",
     sample_interval_sec: float | None = None,
+    sample_strategy: str | None = None,
     ocr_batch_size: int | None = None,
 ) -> dict[str, Any]:
-    """Build shared subtitle cues (VAD + RapidOCR). ``language`` ignored."""
+    """Build shared subtitle cues (timeline/VAD probe + RapidOCR). ``language`` ignored."""
     del language
     from src.services.subtitle_index_service import index_video_subtitles
 
@@ -114,6 +115,8 @@ def index_video_dialogue(
     }
     if sample_interval_sec is not None:
         kwargs["sample_interval_sec"] = float(sample_interval_sec)
+    if sample_strategy is not None:
+        kwargs["sample_strategy"] = str(sample_strategy)
     if ocr_batch_size is not None:
         kwargs["ocr_batch_size"] = int(ocr_batch_size)
     return index_video_subtitles(video_id, video_path, **kwargs)

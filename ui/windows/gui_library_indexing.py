@@ -441,8 +441,10 @@ class LibraryIndexingGuiMixin:
             "btn_export_dialogue": not client,
             "btn_refresh_dialogue_library": not client,
             "input_subtitle_sample_interval": not client,
+            "input_subtitle_sample_strategy": not client,
             "input_subtitle_ocr_batch": not client,
             "lbl_subtitle_sample_interval": not client,
+            "lbl_subtitle_sample_strategy": not client,
             "lbl_subtitle_ocr_batch": not client,
             # Stop / debug must never be force-shown just because we left client mode.
             "btn_stop_index": (not client) and visual_indexing,
@@ -587,6 +589,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_sample_strategy.setEnabled(False)
         self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
@@ -606,6 +609,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.btn_refresh_dialogue_library.setEnabled(True)
         self.library_page.input_subtitle_sample_interval.setEnabled(True)
+        self.library_page.input_subtitle_sample_strategy.setEnabled(True)
         self.library_page.input_subtitle_ocr_batch.setEnabled(True)
         self.library_page.btn_add_lib.setEnabled(True)
         self.library_page.btn_cleanup_missing.setEnabled(True)
@@ -823,6 +827,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_sample_strategy.setEnabled(False)
         self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
@@ -897,6 +902,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
+            self.library_page.input_subtitle_sample_strategy.setEnabled(True)
             self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self.library_page.btn_cleanup_missing.setEnabled(True)
@@ -1066,6 +1072,72 @@ class LibraryIndexingGuiMixin:
 
     def _on_subtitle_sample_interval_changed(self, _value=None):
         self._read_subtitle_sample_interval()
+
+    def load_subtitle_sample_strategy(self):
+        from src.app.config import DEFAULT_CONFIG, load_config
+        from src.services.subtitle_index_service import (
+            SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
+            SUBTITLE_SAMPLE_STRATEGY_VAD,
+            normalize_subtitle_sample_strategy,
+        )
+
+        try:
+            config = load_config()
+            value = normalize_subtitle_sample_strategy(
+                config.get(
+                    "subtitle_sample_strategy",
+                    DEFAULT_CONFIG.get("subtitle_sample_strategy", SUBTITLE_SAMPLE_STRATEGY_TIMELINE),
+                )
+            )
+        except Exception:
+            value = SUBTITLE_SAMPLE_STRATEGY_TIMELINE
+        combo = self.library_page.input_subtitle_sample_strategy
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(
+            self.texts.get("subtitle_sample_strategy_timeline", "Timeline probe"),
+            SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
+        )
+        combo.addItem(
+            self.texts.get("subtitle_sample_strategy_vad", "VAD fast"),
+            SUBTITLE_SAMPLE_STRATEGY_VAD,
+        )
+        index = combo.findData(value)
+        combo.setCurrentIndex(0 if index < 0 else index)
+        combo.blockSignals(False)
+
+    def _read_subtitle_sample_strategy(self) -> str:
+        from src.app.config import load_config, save_config
+        from src.services.subtitle_index_service import (
+            SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
+            normalize_subtitle_sample_strategy,
+        )
+
+        combo = self.library_page.input_subtitle_sample_strategy
+        value = normalize_subtitle_sample_strategy(combo.currentData() or SUBTITLE_SAMPLE_STRATEGY_TIMELINE)
+        try:
+            config = load_config()
+            previous = normalize_subtitle_sample_strategy(config.get("subtitle_sample_strategy"))
+            if previous != value:
+                config["subtitle_sample_strategy"] = value
+                save_config(config)
+        except Exception:
+            pass
+        return value
+
+    def _on_subtitle_sample_strategy_changed(self, _value=None):
+        self._read_subtitle_sample_strategy()
+
+    def _subtitle_strategy_label(self, strategy: str | None = None) -> str:
+        from src.services.subtitle_index_service import (
+            SUBTITLE_SAMPLE_STRATEGY_VAD,
+            normalize_subtitle_sample_strategy,
+        )
+
+        value = normalize_subtitle_sample_strategy(strategy or self._read_subtitle_sample_strategy())
+        if value == SUBTITLE_SAMPLE_STRATEGY_VAD:
+            return self.texts.get("subtitle_sample_strategy_vad", "VAD fast")
+        return self.texts.get("subtitle_sample_strategy_timeline", "Timeline probe")
 
     def load_subtitle_ocr_batch(self):
         from src.app.config import DEFAULT_CONFIG, load_config
@@ -1422,8 +1494,8 @@ class LibraryIndexingGuiMixin:
                 return
             confirm = self.texts.get(
                 "reembed_dialogue_index_confirm",
-                "Re-embed dialogue vectors for {count} videos?",
-            ).format(count=len(targets))
+                "Force re-OCR subtitles for {count} videos (strategy: {strategy})?",
+            ).format(count=len(targets), strategy=self._subtitle_strategy_label())
             running = self.texts.get(
                 "reembed_dialogue_index_running",
                 "Re-embedding dialogue vectors...",
@@ -1465,8 +1537,8 @@ class LibraryIndexingGuiMixin:
                     return
             confirm = self.texts.get(
                 "build_dialogue_index_confirm",
-                "Build dialogue index for {count} videos?",
-            ).format(count=len(targets))
+                "Build dialogue index for {count} videos (strategy: {strategy})?",
+            ).format(count=len(targets), strategy=self._subtitle_strategy_label())
             running = self.texts.get("build_dialogue_index_running", "Building dialogue index...")
 
         # Show confirm immediately — do not import OCR engines before the dialog.
@@ -1489,6 +1561,7 @@ class LibraryIndexingGuiMixin:
         from ui.workers import DialogueIndexWorker
 
         sample_interval_sec = self._read_subtitle_sample_interval()
+        sample_strategy = self._read_subtitle_sample_strategy()
         ocr_batch_size = self._read_subtitle_ocr_batch()
 
         self.library_page.btn_sync_db.setEnabled(False)
@@ -1499,6 +1572,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
+        self.library_page.input_subtitle_sample_strategy.setEnabled(False)
         self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
@@ -1514,6 +1588,7 @@ class LibraryIndexingGuiMixin:
             targets=targets,
             mode=mode_value,
             sample_interval_sec=sample_interval_sec,
+            sample_strategy=sample_strategy,
             ocr_batch_size=ocr_batch_size,
         )
         self.dialogue_index_worker = worker
@@ -1576,6 +1651,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
+            self.library_page.input_subtitle_sample_strategy.setEnabled(True)
             self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self.library_page.btn_cleanup_missing.setEnabled(True)
@@ -1781,6 +1857,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_clear_dialogue.setEnabled(False)
             self.library_page.btn_export_dialogue.setEnabled(False)
             self.library_page.input_subtitle_sample_interval.setEnabled(False)
+            self.library_page.input_subtitle_sample_strategy.setEnabled(False)
             self.library_page.input_subtitle_ocr_batch.setEnabled(False)
             self.library_page.btn_stop_index.setEnabled(True)
             self.library_page.btn_stop_index.setVisible(True)
@@ -1871,6 +1948,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_clear_dialogue.setEnabled(True)
         self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.input_subtitle_sample_interval.setEnabled(True)
+        self.library_page.input_subtitle_sample_strategy.setEnabled(True)
         self.library_page.input_subtitle_ocr_batch.setEnabled(True)
         self.library_page.btn_stop_index.setEnabled(False)
         self.library_page.btn_stop_index.setVisible(False)

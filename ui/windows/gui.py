@@ -160,6 +160,7 @@ class MainWindow(
         self.understanding_controller.status_changed.connect(self._update_understanding_progress)
         self.understanding_controller.error_occurred.connect(self._handle_understanding_error)
         self.understanding_controller.chunk_completed.connect(self._handle_understanding_chunk_completed)
+        self.understanding_controller.video_started.connect(self._on_understanding_batch_video_started)
         self.understanding_controller.finished.connect(self._finish_understanding_generation)
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
@@ -317,6 +318,9 @@ class MainWindow(
         self.library_page.input_subtitle_sample_interval.editingFinished.connect(
             self._on_subtitle_sample_interval_changed
         )
+        self.library_page.input_subtitle_sample_strategy.currentIndexChanged.connect(
+            self._on_subtitle_sample_strategy_changed
+        )
         self.library_page.input_subtitle_ocr_batch.editingFinished.connect(
             self._on_subtitle_ocr_batch_changed
         )
@@ -333,6 +337,7 @@ class MainWindow(
         self.library_page.btn_debug_system_oom.clicked.connect(self.start_debug_system_oom)
 
         self.understanding_page.btn_generate_evidence.clicked.connect(self.start_generate_understanding_evidence)
+        self.understanding_page.btn_generate_batch.clicked.connect(self.start_generate_understanding_batch)
         self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
         self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
         self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
@@ -341,6 +346,7 @@ class MainWindow(
         self.understanding_page.btn_test_vlm_connection.clicked.connect(self.test_understanding_vlm_connection)
         self.understanding_page.chk_use_custom_prompts.toggled.connect(self._on_use_custom_prompts_toggled)
         self.understanding_page.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
+        self.understanding_page.input_understanding_mode.currentIndexChanged.connect(self._on_understanding_mode_changed)
         self.understanding_page.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
         self.understanding_page.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
         self.understanding_page.scope_combo.currentIndexChanged.connect(self._on_understanding_scope_changed)
@@ -466,7 +472,7 @@ class MainWindow(
             self._settle_link_page_layout()
 
     def _settle_understanding_page_layout(self) -> None:
-        """Refresh understanding chrome while painting is frozen (avoids first-open jump)."""
+        """Paint understanding chrome first; defer video-list/timeline (O(N) / disk)."""
         page = getattr(self, "understanding_page", None)
         if page is None:
             return
@@ -474,12 +480,12 @@ class MainWindow(
         try:
             if hasattr(self, "load_understanding_settings"):
                 self.load_understanding_settings(refresh_status=False)
-            if hasattr(self, "_refresh_understanding_scope_options"):
-                self._refresh_understanding_scope_options()
             if hasattr(self, "_refresh_understanding_page_fast"):
                 self._refresh_understanding_page_fast(install_bootstrap=False)
         finally:
             page.setUpdatesEnabled(True)
+        # Heavy: list_ready_video_entries + chunks/evidence. Keep off the first paint.
+        QTimer.singleShot(0, self._deferred_understanding_page_refresh)
 
     def _settle_link_page_layout(self) -> None:
         """Refresh download page labels while painting is frozen (avoids first-open jump)."""
@@ -677,6 +683,14 @@ class MainWindow(
         self.library_page.input_subtitle_sample_interval.setToolTip(interval_tip)
         if hasattr(self, "load_subtitle_sample_interval"):
             self.load_subtitle_sample_interval()
+        self.library_page.lbl_subtitle_sample_strategy.setText(
+            t.get("subtitle_sample_strategy", "Sample strategy")
+        )
+        strategy_tip = t.get("subtitle_sample_strategy_hint", "")
+        self.library_page.lbl_subtitle_sample_strategy.setToolTip(strategy_tip)
+        self.library_page.input_subtitle_sample_strategy.setToolTip(strategy_tip)
+        if hasattr(self, "load_subtitle_sample_strategy"):
+            self.load_subtitle_sample_strategy()
         self.library_page.lbl_subtitle_ocr_batch.setText(
             t.get("subtitle_ocr_batch", "OCR stack")
         )
@@ -712,6 +726,16 @@ class MainWindow(
         self._apply_index_issue_button_state(bool(self._last_index_issues))
 
         self.understanding_page.header.title.setText(t["understanding_page_title"])
+        self.understanding_page.header.set_badge(
+            t.get("understanding_page_badge", "Beta"),
+            visible=True,
+        )
+        self.understanding_page.header.badge.setToolTip(
+            t.get(
+                "understanding_page_badge_tip",
+                "Test feature: APIs and storage may still change.",
+            )
+        )
         self.understanding_page.header.subtitle.setText(t["understanding_page_desc"])
         self.understanding_page.config_title.setText(t["understanding_config_title"])
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
@@ -734,12 +758,26 @@ class MainWindow(
         current_language = self.understanding_page.input_caption_language.currentData()
         self._populate_understanding_caption_language_options(current_language or "zh")
         self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
+        self.understanding_page.label_understanding_mode.setText(
+            t.get("understanding_mode_label", "Mode")
+        )
+        current_mode = self.understanding_page.input_understanding_mode.currentData()
+        self._populate_understanding_mode_options(current_mode)
+        self.understanding_page.input_understanding_mode.setToolTip(
+            t.get(
+                "understanding_mode_hint",
+                "Tags: chunk tagging only. Summary: chunk descriptions then whole-video summary.",
+            )
+        )
         self.understanding_page.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
         self.understanding_page.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
         self.understanding_page.chk_use_custom_prompts.setText(t["understanding_use_custom_prompts"])
         self.understanding_page.hint_custom_prompts.setText(t["understanding_custom_prompts_hint"])
         self.understanding_page.label_custom_caption_prompt.setText(
-            t["understanding_custom_caption_prompt_label"]
+            t.get("understanding_custom_tag_prompt_label", t["understanding_custom_caption_prompt_label"])
+        )
+        self.understanding_page.label_custom_description_prompt.setText(
+            t.get("understanding_custom_description_prompt_label", "Segment description prompt")
         )
         self.understanding_page.label_custom_summary_prompt.setText(
             t["understanding_custom_summary_prompt_label"]
@@ -754,7 +792,7 @@ class MainWindow(
         self.understanding_page.timeline_hint.setText(t["understanding_timeline_hint"])
         self.understanding_page.chunk_detail_title.setText(t["understanding_chunk_detail_title"])
         self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
-        self.understanding_page.btn_generate_evidence.setText(t["understanding_generate_selected_video"])
+        self._sync_understanding_mode_ui()
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
         self.understanding_page.btn_understanding_setup.setText(t["understanding_setup_action"])

@@ -145,6 +145,30 @@ def load_library_chunk_search_assets(library_path, config):
     return value
 
 
+def load_scoped_video_frame_search_assets(video_ids, config):
+    """One Lance where-filtered frame index for many video_ids (no RAM dump)."""
+    profile_base_dir = _profile_base_dir(config)
+    ids = [str(value or "").strip() for value in (video_ids or []) if str(value or "").strip()]
+    if not ids:
+        return None, None, None
+    if not lance_search_is_ready(profile_base_dir):
+        _log_lance_assets_missing(profile_base_dir, kind="frame", config=config)
+        return None, None, None
+    return load_lance_frame_search_assets(profile_base_dir, video_ids=ids)
+
+
+def load_scoped_video_chunk_search_assets(video_ids, config):
+    """One Lance where-filtered chunk index for many video_ids (no per-video Python scan)."""
+    profile_base_dir = _profile_base_dir(config)
+    ids = [str(value or "").strip() for value in (video_ids or []) if str(value or "").strip()]
+    if not ids:
+        return None, None, None
+    if not lance_search_is_ready(profile_base_dir):
+        _log_lance_assets_missing(profile_base_dir, kind="chunk", config=config)
+        return None, None, None
+    return load_lance_chunk_search_assets(profile_base_dir, video_ids=ids)
+
+
 def _load_per_video_frame_assets(video_id, abs_path, config, *, include_vectors: bool = True):
     profile_base_dir = _profile_base_dir(config)
     search_index, timestamps, video_paths = load_lance_frame_search_assets(

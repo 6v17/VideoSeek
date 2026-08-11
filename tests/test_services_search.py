@@ -66,6 +66,7 @@ class SearchServiceTests(unittest.TestCase):
             "query",
             is_text=True,
             top_k=5,
+            search_mode="frame",
             scope_video_paths=["D:/clip.mp4"],
         )
 

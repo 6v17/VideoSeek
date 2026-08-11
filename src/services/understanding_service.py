@@ -18,13 +18,24 @@ from src.domain.evidence_bundle import (
     evidence_bundle_to_dict,
     validate_evidence_bundle,
 )
-from src.services.understanding_paths import get_evidence_path, get_evidence_root, get_evidence_videos_dir
+from src.services.understanding_paths import (
+    get_evidence_path,
+    get_evidence_root,
+    get_evidence_summaries_dir,
+    get_evidence_tags_dir,
+    get_evidence_videos_dir,
+    get_legacy_evidence_path,
+    iter_evidence_candidate_paths,
+)
 from src.services.understanding_resource_service import (
+    UNDERSTANDING_MODE_SUMMARY,
+    UNDERSTANDING_MODE_TAGS,
     get_active_understanding_profile,
     get_remote_vlm_concurrency,
     get_remote_vlm_settings,
     get_understanding_resource_status,
     load_profile_manifest,
+    normalize_understanding_mode,
 )
 from src.storage.asset_store import load_model_metadata
 from src.storage.config_store import get_active_embedding_spec, get_active_model_profile
@@ -35,6 +46,17 @@ logger = get_logger("understanding.service")
 
 class UnderstandingGenerationError(RuntimeError):
     """Raised when evidence generation cannot proceed."""
+
+
+def _config_with_understanding_mode(config: Mapping[str, Any] | None, mode: str | None) -> dict[str, Any]:
+    cfg = dict(config or load_config())
+    understanding = dict(cfg.get("understanding") or {})
+    remote_vlm = dict(understanding.get("remote_vlm") or {})
+    resolved = normalize_understanding_mode(mode or remote_vlm.get("understanding_mode") or UNDERSTANDING_MODE_TAGS)
+    remote_vlm["understanding_mode"] = resolved
+    understanding["remote_vlm"] = remote_vlm
+    cfg["understanding"] = understanding
+    return cfg
 
 
 _worker_pipelines: dict[int, UnderstandingPipeline] = {}
@@ -125,7 +147,17 @@ def _get_worker_pipeline(
     with _worker_pipelines_lock:
         pipeline = _worker_pipelines.get(thread_id)
         if pipeline is None:
-            pipeline = UnderstandingPipeline(profile_manifest, model_dir=model_dir, config=config)
+            output_mode = normalize_understanding_mode(
+                dict(dict(config.get("understanding") or {}).get("remote_vlm") or {}).get(
+                    "understanding_mode"
+                )
+            )
+            pipeline = UnderstandingPipeline(
+                profile_manifest,
+                model_dir=model_dir,
+                config=config,
+                output_mode=output_mode,
+            )
             _worker_pipelines[thread_id] = pipeline
         return pipeline
 
@@ -191,6 +223,9 @@ def _process_completed_chunk(
             config=config,
             generation_status="in_progress",
             generated_at=generated_at,
+            mode=dict(dict(config.get("understanding") or {}).get("remote_vlm") or {}).get(
+                "understanding_mode"
+            ),
         )
 
 
@@ -383,6 +418,9 @@ def _utc_timestamp() -> str:
 def chunk_payload_has_evidence(payload: Mapping[str, Any] | None) -> bool:
     if not isinstance(payload, dict):
         return False
+    tags = [str(item).strip() for item in list(payload.get("tags") or []) if str(item or "").strip()]
+    if tags:
+        return True
     evidence = dict(payload.get("evidence") or {})
     vision = dict(evidence.get("vision") or {})
     caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
@@ -511,9 +549,25 @@ def _serialize_evidence_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     return output
 
 
-def write_evidence_bundle(video_id: str, payload: Mapping[str, Any], *, config=None) -> str:
-    path = get_evidence_path(video_id, config=config)
-    _atomic_write_json(path, _serialize_evidence_payload(payload))
+def write_evidence_bundle(
+    video_id: str,
+    payload: Mapping[str, Any],
+    *,
+    config=None,
+    mode: str | None = None,
+) -> str:
+    cfg = _config_with_understanding_mode(config, mode)
+    output_mode = normalize_understanding_mode(
+        mode
+        or dict(dict(cfg.get("understanding") or {}).get("remote_vlm") or {}).get("understanding_mode")
+        or UNDERSTANDING_MODE_TAGS
+    )
+    path = get_evidence_path(video_id, config=cfg, mode=output_mode)
+    serialized = _serialize_evidence_payload(payload)
+    provenance = dict(serialized.get("provenance") or {})
+    provenance["understanding_mode"] = output_mode
+    serialized["provenance"] = provenance
+    _atomic_write_json(path, serialized)
     return path
 
 
@@ -528,6 +582,7 @@ def _checkpoint_evidence_bundle(
     config: Mapping[str, Any],
     generation_status: str,
     generated_at: str | None = None,
+    mode: str | None = None,
 ) -> str:
     payload = _assemble_evidence_payload(
         video_context=video_context,
@@ -539,10 +594,10 @@ def _checkpoint_evidence_bundle(
         chunk_total=chunk_total,
         generated_at=generated_at,
     )
-    return write_evidence_bundle(video_id, payload, config=config)
+    return write_evidence_bundle(video_id, payload, config=config, mode=mode)
 
 
-def resolve_video_context(video_id: str, config=None) -> dict[str, Any]:
+def resolve_video_context(video_id: str, config=None, *, probe_duration: bool = True) -> dict[str, Any]:
     from src.services.search_scope import iter_indexed_video_entries
 
     video_text = str(video_id or "").strip()
@@ -564,7 +619,7 @@ def resolve_video_context(video_id: str, config=None) -> dict[str, Any]:
             if str(info.get("vid", "") or "").strip() != video_text:
                 continue
             video_path = os.path.normpath(os.path.join(root, str(rel_path)))
-            duration_sec = get_video_duration_seconds(video_path)
+            duration_sec = get_video_duration_seconds(video_path) if probe_duration else None
             return {
                 "video_id": video_text,
                 "video_path": video_path,
@@ -578,7 +633,7 @@ def resolve_video_context(video_id: str, config=None) -> dict[str, Any]:
     for abs_path, candidate_id, info in iter_indexed_video_entries(meta):
         if candidate_id != video_text:
             continue
-        duration_sec = get_video_duration_seconds(abs_path)
+        duration_sec = get_video_duration_seconds(abs_path) if probe_duration else None
         library_path = ""
         video_rel_path = ""
         for root, library_data in (meta.get("libraries") or {}).items():
@@ -603,16 +658,38 @@ def resolve_video_context(video_id: str, config=None) -> dict[str, Any]:
     raise UnderstandingGenerationError(f"Video not found in library metadata: {video_text}")
 
 
-def list_ready_video_entries(*, library_path: str | None = None, config=None) -> list[dict[str, Any]]:
-    """List indexed-ready videos for pickers — meta + Lance id set only (no storage stats)."""
+_READY_VIDEO_ENTRIES_CACHE: dict[tuple, tuple[float, tuple[dict[str, Any], ...]]] = {}
+
+
+def invalidate_ready_video_entries_cache() -> None:
+    _READY_VIDEO_ENTRIES_CACHE.clear()
+
+
+def list_ready_video_entries(
+    *,
+    library_path: str | None = None,
+    config=None,
+    check_exists: bool = False,
+) -> list[dict[str, Any]]:
+    """List indexed-ready videos for pickers — meta ∩ Lance ids (optional path exists)."""
     from src.services.library_service import list_libraries
     from src.storage.config_store import get_local_model_asset_dirs
-    from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
+    from src.storage.lance_search_index import (
+        _lance_state_mtime,
+        get_lance_indexed_video_ids,
+        lance_search_is_ready,
+    )
 
     cfg = dict(config or load_config())
     target_library = canonicalize_library_path(library_path) if library_path else ""
     profile_base_dir = os.path.normpath(get_local_model_asset_dirs(config=cfg)["base_dir"])
     lance_ready = lance_search_is_ready(profile_base_dir)
+    state_mtime = _lance_state_mtime(profile_base_dir) if lance_ready else 0.0
+    cache_key = (profile_base_dir, target_library, bool(check_exists), float(state_mtime))
+    cached = _READY_VIDEO_ENTRIES_CACHE.get(cache_key)
+    if cached is not None and cached[0] == float(state_mtime):
+        return [dict(item) for item in cached[1]]
+
     lance_ids = get_lance_indexed_video_ids(profile_base_dir) if lance_ready else frozenset()
 
     ready_entries: list[dict[str, Any]] = []
@@ -633,25 +710,31 @@ def list_ready_video_entries(*, library_path: str | None = None, config=None) ->
             if not rel:
                 continue
             video_path = os.path.normpath(os.path.join(entry_library, rel))
-            if not os.path.exists(video_path):
+            if check_exists and not os.path.exists(video_path):
                 continue
             ready_entries.append(
                 {
                     "library_path": entry_library,
                     "video_rel_path": rel,
                     "video_id": video_id,
-                    "source_exists": True,
+                    "source_exists": (not check_exists) or os.path.exists(video_path),
                     "asset_state": "ready",
                     "video_path": video_path,
                 }
             )
     ready_entries.sort(key=lambda item: (item["library_path"], item["video_rel_path"]))
+    _READY_VIDEO_ENTRIES_CACHE[cache_key] = (float(state_mtime), tuple(dict(item) for item in ready_entries))
     return ready_entries
 
 
 def _extract_chunk_caption_text(chunk_payload: Mapping[str, Any]) -> str:
     if not isinstance(chunk_payload, dict):
         return ""
+    tags = [str(item).strip() for item in list(chunk_payload.get("tags") or []) if str(item or "").strip()]
+    if tags:
+        from src.services.understanding_tags import format_tags_for_display
+
+        return format_tags_for_display(tags)
     vision = dict(dict(chunk_payload.get("evidence") or {}).get("vision") or {})
     return str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
 
@@ -718,9 +801,13 @@ def build_evidence_bundle_payload(
     config=None,
     should_stop_callback=None,
     chunk_completed_callback=None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    cfg = dict(config or load_config())
-    pipeline = UnderstandingPipeline(profile_manifest, config=cfg)
+    cfg = _config_with_understanding_mode(config, mode)
+    output_mode = normalize_understanding_mode(
+        dict(dict(cfg.get("understanding") or {}).get("remote_vlm") or {}).get("understanding_mode")
+    )
+    pipeline = UnderstandingPipeline(profile_manifest, config=cfg, output_mode=output_mode)
     try:
         chunk_payloads = pipeline.run_video_chunks(
             video_path=str(video_context["video_path"]),
@@ -735,15 +822,12 @@ def build_evidence_bundle_payload(
         raise UnderstandingStoppedError("Evidence generation stopped by user")
 
     summary_payload = None
-    if "image_caption" in pipeline.component_map():
-        try:
-            summary_payload = generate_video_summary_from_chunks(
-                chunk_payloads,
-                config=cfg,
-                should_stop_callback=should_stop_callback,
-            )
-        except UnderstandingStoppedError:
-            raise
+    if output_mode == UNDERSTANDING_MODE_SUMMARY:
+        summary_payload = generate_video_summary_from_chunks(
+            chunk_payloads,
+            config=cfg,
+            should_stop_callback=should_stop_callback,
+        )
 
     payload = _assemble_evidence_payload(
         video_context=video_context,
@@ -769,9 +853,14 @@ def _run_video_evidence_generation(
     model_dir: str | None = None,
     should_stop_callback=None,
     chunk_completed_callback=None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
+    cfg = _config_with_understanding_mode(config, mode)
+    output_mode = normalize_understanding_mode(
+        dict(dict(cfg.get("understanding") or {}).get("remote_vlm") or {}).get("understanding_mode")
+    )
     total = len(chunks)
-    existing_bundle = load_evidence_bundle(video_id, config=config) or {}
+    existing_bundle = load_evidence_bundle(video_id, config=cfg, mode=output_mode) or {}
     generated_at = str(dict(existing_bundle.get("provenance") or {}).get("generated_at", "") or "").strip() or None
     completed = _load_resumable_chunk_payloads(existing_bundle, chunks)
     resumed_count = len(completed)
@@ -784,7 +873,9 @@ def _run_video_evidence_generation(
             total,
         )
 
-    pipeline = UnderstandingPipeline(profile_manifest, model_dir=model_dir, config=config)
+    pipeline = UnderstandingPipeline(
+        profile_manifest, model_dir=model_dir, config=cfg, output_mode=output_mode
+    )
     output_path = ""
     try:
         output_path = _run_pending_chunks(
@@ -794,7 +885,7 @@ def _run_video_evidence_generation(
             profile_manifest=profile_manifest,
             profile_id=profile_id,
             checkpoint_pipeline=pipeline,
-            config=config,
+            config=cfg,
             model_dir=model_dir,
             completed=completed,
             total=total,
@@ -814,9 +905,10 @@ def _run_video_evidence_generation(
                     pipeline=pipeline,
                     completed=completed,
                     chunk_total=total,
-                    config=config,
+                    config=cfg,
                     generation_status="in_progress",
                     generated_at=generated_at,
+                    mode=output_mode,
                 )
             return {
                 "video_id": video_id,
@@ -824,74 +916,51 @@ def _run_video_evidence_generation(
                 "chunk_count": saved_count,
                 "chunk_total": total,
                 "understanding_profile_id": profile_id,
+                "understanding_mode": output_mode,
                 "stopped": True,
                 "resumed_from": resumed_count,
             }
 
         chunk_payloads = [completed[index] for index in range(total)]
         summary_payload = None
-        if "image_caption" in pipeline.component_map():
-            try:
-                summary_payload = generate_video_summary_from_chunks(
-                    chunk_payloads,
-                    config=config,
-                    should_stop_callback=should_stop_callback,
-                )
-            except UnderstandingStoppedError:
-                output_path = write_evidence_bundle(
-                    video_id,
-                    _assemble_evidence_payload(
-                        video_context=video_context,
-                        profile_id=profile_id,
-                        pipeline=pipeline,
-                        chunk_payloads=chunk_payloads,
-                        config=config,
-                        generation_status="in_progress",
-                        chunk_total=total,
-                        generated_at=generated_at,
-                    ),
-                    config=config,
-                )
-                return {
-                    "video_id": video_id,
-                    "evidence_path": output_path,
-                    "chunk_count": total,
-                    "chunk_total": total,
-                    "understanding_profile_id": profile_id,
-                    "stopped": True,
-                    "resumed_from": resumed_count,
-                }
-
+        if output_mode == UNDERSTANDING_MODE_SUMMARY:
+            summary_payload = generate_video_summary_from_chunks(
+                chunk_payloads,
+                config=cfg,
+                should_stop_callback=should_stop_callback,
+            )
         final_payload = _assemble_evidence_payload(
             video_context=video_context,
             profile_id=profile_id,
             pipeline=pipeline,
             chunk_payloads=chunk_payloads,
-            config=config,
+            config=cfg,
             generation_status="completed",
             chunk_total=total,
             summary_payload=summary_payload,
             generated_at=generated_at,
         )
-        output_path = write_evidence_bundle(video_id, final_payload, config=config)
+        output_path = write_evidence_bundle(
+            video_id, final_payload, config=cfg, mode=output_mode
+        )
         return {
             "video_id": video_id,
             "evidence_path": output_path,
             "chunk_count": total,
             "chunk_total": total,
             "understanding_profile_id": profile_id,
+            "understanding_mode": output_mode,
             "stopped": False,
             "resumed_from": resumed_count,
-            "caption_concurrency": get_remote_vlm_concurrency(config),
+            "caption_concurrency": get_remote_vlm_concurrency(cfg),
         }
     finally:
         pipeline.close()
         _close_worker_pipelines()
 
 
-def load_evidence_bundle(video_id: str, *, config=None) -> dict[str, Any] | None:
-    path = get_evidence_path(video_id, config=config)
-    if not os.path.isfile(path):
+def _read_evidence_json_file(path: str) -> dict[str, Any] | None:
+    if not path or not os.path.isfile(path):
         return None
     try:
         with open(path, "r", encoding="utf-8") as handle:
@@ -903,6 +972,74 @@ def load_evidence_bundle(video_id: str, *, config=None) -> dict[str, Any] | None
     return payload
 
 
+def load_evidence_bundle(
+    video_id: str,
+    *,
+    config=None,
+    mode: str | None = None,
+    allow_cross_mode: bool = False,
+) -> dict[str, Any] | None:
+    """Load mode-specific evidence.
+
+    Tags and summaries are sibling stores. Legacy ``evidence/videos`` is only used
+    when neither split store has a file yet (pre-migration data).
+    """
+    cfg = dict(config or load_config())
+    resolved_mode = normalize_understanding_mode(
+        mode
+        or dict(dict(cfg.get("understanding") or {}).get("remote_vlm") or {}).get("understanding_mode")
+        or UNDERSTANDING_MODE_TAGS
+    )
+    other_mode = (
+        UNDERSTANDING_MODE_SUMMARY
+        if resolved_mode == UNDERSTANDING_MODE_TAGS
+        else UNDERSTANDING_MODE_TAGS
+    )
+    primary_path = get_evidence_path(video_id, config=cfg, mode=resolved_mode)
+    payload = _read_evidence_json_file(primary_path)
+    if payload is not None:
+        return payload
+
+    if allow_cross_mode:
+        for path in iter_evidence_candidate_paths(video_id, config=cfg, mode=resolved_mode):
+            payload = _read_evidence_json_file(path)
+            if payload is not None:
+                return payload
+        return None
+
+    other_path = get_evidence_path(video_id, config=cfg, mode=other_mode)
+    legacy_path = get_legacy_evidence_path(video_id, config=cfg)
+    # Once either split folder exists for this video, do not fall back to legacy
+    # (avoids tags/summary both showing the same old combined JSON).
+    if os.path.isfile(other_path):
+        return None
+    return _read_evidence_json_file(legacy_path)
+
+def evidence_exists_for_video(
+    video_id: str,
+    *,
+    config=None,
+    mode: str | None = None,
+) -> bool:
+    """Return True when this mode already has usable evidence on disk.
+
+    Mirrors ``load_evidence_bundle``: prefer the mode-specific file; if the other
+    split store exists, do not treat legacy as covering this mode; only fall back
+    to legacy when neither split file exists yet.
+    """
+    cfg = dict(config or load_config())
+    resolved_mode = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
+    other_mode = (
+        UNDERSTANDING_MODE_SUMMARY
+        if resolved_mode == UNDERSTANDING_MODE_TAGS
+        else UNDERSTANDING_MODE_TAGS
+    )
+    if os.path.isfile(get_evidence_path(video_id, config=cfg, mode=resolved_mode)):
+        return True
+    if os.path.isfile(get_evidence_path(video_id, config=cfg, mode=other_mode)):
+        return False
+    return os.path.isfile(get_legacy_evidence_path(video_id, config=cfg))
+
 def generate_evidence_for_video(
     video_id: str,
     *,
@@ -910,10 +1047,11 @@ def generate_evidence_for_video(
     model_dir: str | None = None,
     should_stop_callback=None,
     chunk_completed_callback=None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
     from src.services.indexing_service import load_video_chunks_by_id
 
-    cfg = dict(config or load_config())
+    cfg = _config_with_understanding_mode(config, mode)
     status = get_understanding_resource_status(config=cfg, model_dir=model_dir)
     if not status.get("understanding_ready"):
         missing = ", ".join(status.get("missing_components") or [])
@@ -943,7 +1081,67 @@ def generate_evidence_for_video(
         model_dir=model_dir,
         should_stop_callback=should_stop_callback,
         chunk_completed_callback=chunk_completed_callback,
+        mode=mode,
     )
+
+
+def generate_summary_for_video(
+    video_id: str,
+    *,
+    config=None,
+    model_dir: str | None = None,
+    should_stop_callback=None,
+) -> dict[str, Any]:
+    """Generate whole-video summary into the summaries store (from summary-mode chunks)."""
+    cfg = _config_with_understanding_mode(config, UNDERSTANDING_MODE_SUMMARY)
+    status = get_understanding_resource_status(config=cfg, model_dir=model_dir)
+    if not status.get("understanding_ready"):
+        missing = ", ".join(status.get("missing_components") or [])
+        raise UnderstandingGenerationError(
+            f"Understanding resources are not ready (missing: {missing or 'unknown'})"
+        )
+
+    video_id = str(video_id or "").strip()
+    existing = load_evidence_bundle(video_id, config=cfg, mode=UNDERSTANDING_MODE_SUMMARY)
+    if not isinstance(existing, dict):
+        raise UnderstandingGenerationError("请先用「总结」模式生成段描述，再生成视频总结。")
+
+    chunk_payloads = [item for item in list(existing.get("chunks") or []) if isinstance(item, dict)]
+    if not chunk_payloads:
+        raise UnderstandingGenerationError("请先用「总结」模式生成段描述，再生成视频总结。")
+    if not any(_extract_chunk_caption_text(chunk) for chunk in chunk_payloads):
+        raise UnderstandingGenerationError("当前视频还没有可用段描述，请先用总结模式生成。")
+
+    if should_stop_callback and should_stop_callback():
+        raise UnderstandingStoppedError("Evidence generation stopped by user")
+
+    summary_payload = generate_video_summary_from_chunks(
+        chunk_payloads,
+        config=cfg,
+        should_stop_callback=should_stop_callback,
+    )
+    if not summary_payload or not str(summary_payload.get("text", "") or "").strip():
+        raise UnderstandingGenerationError("视频总结生成失败，未得到有效文本。")
+
+    payload = dict(existing)
+    payload["summary"] = dict(summary_payload)
+    provenance = dict(payload.get("provenance") or {})
+    provenance["updated_at"] = _utc_timestamp()
+    provenance["understanding_mode"] = UNDERSTANDING_MODE_SUMMARY
+    payload["provenance"] = provenance
+    output_path = write_evidence_bundle(
+        video_id, payload, config=cfg, mode=UNDERSTANDING_MODE_SUMMARY
+    )
+    return {
+        "video_id": video_id,
+        "evidence_path": output_path,
+        "chunk_count": len(chunk_payloads),
+        "chunk_total": len(chunk_payloads),
+        "summary": True,
+        "understanding_mode": UNDERSTANDING_MODE_SUMMARY,
+        "understanding_profile_id": str(provenance.get("understanding_profile_id", "") or ""),
+        "stopped": False,
+    }
 
 
 def generate_evidence_batch(
@@ -953,10 +1151,20 @@ def generate_evidence_batch(
     model_dir: str | None = None,
     progress_callback=None,
     should_stop_callback=None,
+    chunk_completed_callback=None,
+    mode: str | None = None,
+    skip_existing: bool = True,
+    video_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Queue videos and process them one-by-one for the given understanding mode."""
     from src.services.library_service import list_libraries
 
-    cfg = dict(config or load_config())
+    cfg = _config_with_understanding_mode(config, mode)
+    output_mode = normalize_understanding_mode(
+        mode
+        or dict(dict(cfg.get("understanding") or {}).get("remote_vlm") or {}).get("understanding_mode")
+        or UNDERSTANDING_MODE_TAGS
+    )
     status = get_understanding_resource_status(config=cfg, model_dir=model_dir)
     if not status.get("understanding_ready"):
         missing = ", ".join(status.get("missing_components") or [])
@@ -964,18 +1172,48 @@ def generate_evidence_batch(
             f"Understanding resources are not ready (missing: {missing or 'unknown'})"
         )
 
-    if target_lib:
-        library_paths = [canonicalize_library_path(target_lib)]
-    else:
-        library_paths = sorted(str(path) for path in list_libraries().keys())
-
+    requested_ids = [str(item or "").strip() for item in list(video_ids or []) if str(item or "").strip()]
     jobs: list[tuple[str, dict[str, Any]]] = []
-    for library_path in library_paths:
-        for entry in list_ready_video_entries(library_path=library_path, config=cfg):
-            jobs.append((library_path, entry))
+    if requested_ids:
+        for video_id in requested_ids:
+            try:
+                context = resolve_video_context(video_id, config=cfg, probe_duration=False)
+            except Exception as exc:
+                logger.warning("Skip batch video %s: %s", video_id, exc)
+                continue
+            jobs.append(
+                (
+                    str(context.get("library_path", "") or ""),
+                    {
+                        "video_id": video_id,
+                        "library_path": str(context.get("library_path", "") or ""),
+                        "video_rel_path": str(context.get("video_rel_path", "") or ""),
+                    },
+                )
+            )
+    else:
+        if target_lib:
+            library_paths = [canonicalize_library_path(target_lib)]
+        else:
+            library_paths = sorted(str(path) for path in list_libraries().keys())
+        for library_path in library_paths:
+            for entry in list_ready_video_entries(library_path=library_path, config=cfg):
+                jobs.append((library_path, entry))
+
+    if skip_existing:
+        filtered: list[tuple[str, dict[str, Any]]] = []
+        for library_path, entry in jobs:
+            video_id = str(entry.get("video_id", "") or "").strip()
+            if not video_id:
+                continue
+            if evidence_exists_for_video(video_id, config=cfg, mode=output_mode):
+                continue
+            filtered.append((library_path, entry))
+        jobs = filtered
 
     generated: list[dict[str, Any]] = []
     errors: list[str] = []
+    skipped_existing = 0
     stopped = False
     total = len(jobs)
 
@@ -995,7 +1233,9 @@ def generate_evidence_batch(
                     video_id,
                     config=cfg,
                     model_dir=model_dir,
+                    mode=output_mode,
                     should_stop_callback=should_stop_callback,
+                    chunk_completed_callback=chunk_completed_callback,
                 )
             )
         except UnderstandingStoppedError:
@@ -1010,12 +1250,15 @@ def generate_evidence_batch(
 
     return {
         "target_lib": canonicalize_library_path(target_lib) if target_lib else "",
-        "library_paths": library_paths,
+        "understanding_mode": output_mode,
         "generated": generated,
         "errors": errors,
         "requested_count": total,
         "generated_count": len(generated),
+        "error_count": len(errors),
+        "skipped_existing": skipped_existing,
         "stopped": stopped,
+        "batch": True,
     }
 
 
@@ -1099,11 +1342,20 @@ def _read_evidence_file_summary(evidence_path: str) -> dict[str, Any]:
     }
 
 
-def list_local_evidence_details(*, config=None) -> dict[str, Any]:
+def list_local_evidence_details(*, config=None, mode: str | None = None) -> dict[str, Any]:
     from src.services.library_service import list_local_vector_details
 
     cfg = dict(config or load_config())
-    evidence_dir = os.path.normpath(get_evidence_videos_dir(config=cfg))
+    mode_filter = normalize_understanding_mode(mode) if mode else None
+    evidence_dirs = [
+        ("tags", os.path.normpath(get_evidence_tags_dir(config=cfg))),
+        ("summaries", os.path.normpath(get_evidence_summaries_dir(config=cfg))),
+        ("legacy", os.path.normpath(get_evidence_videos_dir(config=cfg))),
+    ]
+    if mode_filter == UNDERSTANDING_MODE_TAGS:
+        evidence_dirs = [evidence_dirs[0], evidence_dirs[2]]
+    elif mode_filter == UNDERSTANDING_MODE_SUMMARY:
+        evidence_dirs = [evidence_dirs[1], evidence_dirs[2]]
     library_by_video_id: dict[str, dict[str, Any]] = {}
     for item in list_local_vector_details(validate_contents=False).get("entries") or []:
         video_id = str(item.get("video_id", "") or "").strip()
@@ -1111,7 +1363,11 @@ def list_local_evidence_details(*, config=None) -> dict[str, Any]:
             library_by_video_id[video_id] = dict(item)
 
     entries: list[dict[str, Any]] = []
-    if os.path.isdir(evidence_dir):
+    seen_keys: set[tuple[str, str]] = set()
+    split_video_ids: set[str] = set()
+    for store_kind, evidence_dir in evidence_dirs:
+        if not os.path.isdir(evidence_dir):
+            continue
         for name in sorted(os.listdir(evidence_dir)):
             if not str(name).lower().endswith(".json"):
                 continue
@@ -1123,6 +1379,15 @@ def list_local_evidence_details(*, config=None) -> dict[str, Any]:
             summary = _read_evidence_file_summary(evidence_file)
             if not video_id:
                 video_id = str(summary.get("video_id", "") or "").strip()
+            if store_kind == "legacy" and video_id in split_video_ids:
+                # Prefer the new tags/summaries file over the old combined one.
+                continue
+            dedupe_key = (video_id, store_kind)
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            if store_kind in {"tags", "summaries"} and video_id:
+                split_video_ids.add(video_id)
             library_item = library_by_video_id.get(video_id, {})
 
             library_path = str(summary.get("library_path", "") or library_item.get("library_path", "") or "")
@@ -1148,6 +1413,7 @@ def list_local_evidence_details(*, config=None) -> dict[str, Any]:
                     "source_exists": source_exists,
                     "asset_state": str(library_item.get("asset_state", "") or "").strip().lower(),
                     "evidence_file": evidence_file,
+                    "evidence_store": store_kind,
                     "evidence_exists": True,
                     "evidence_state": evidence_state,
                     "clip_model": str(summary.get("clip_model", "") or ""),
@@ -1162,7 +1428,8 @@ def list_local_evidence_details(*, config=None) -> dict[str, Any]:
 
     count = len(entries)
     return {
-        "evidence_dir": evidence_dir,
+        "evidence_dir": os.path.normpath(get_evidence_root(config=cfg)),
+        "mode": mode_filter or "",
         "entries": entries,
         "total_entries": count,
         "evidence_count": count,
@@ -1170,8 +1437,10 @@ def list_local_evidence_details(*, config=None) -> dict[str, Any]:
 
 
 def _evidence_file_paths(video_id: str, *, config=None) -> list[str]:
-    base_path = get_evidence_path(video_id, config=config)
-    paths = [base_path, f"{base_path}.tmp"]
+    paths: list[str] = []
+    for base_path in iter_evidence_candidate_paths(video_id, config=config, mode=UNDERSTANDING_MODE_TAGS):
+        paths.append(base_path)
+        paths.append(f"{base_path}.tmp")
     return [os.path.normpath(path) for path in paths]
 
 
@@ -1216,12 +1485,22 @@ def delete_evidence_for_videos(video_ids: list[str], *, config=None) -> dict[str
 def clear_all_evidence(*, config=None) -> dict[str, Any]:
     cfg = dict(config or load_config())
     evidence_root = os.path.normpath(get_evidence_root(config=cfg))
-    evidence_dir = os.path.normpath(get_evidence_videos_dir(config=cfg))
+    folders = [
+        os.path.normpath(get_evidence_tags_dir(config=cfg)),
+        os.path.normpath(get_evidence_summaries_dir(config=cfg)),
+        os.path.normpath(get_evidence_videos_dir(config=cfg)),
+        evidence_root,
+    ]
     deleted: list[str] = []
     errors: list[str] = []
 
     targets: list[str] = []
-    for folder in (evidence_dir, evidence_root):
+    seen_folders: set[str] = set()
+    for folder in folders:
+        key = os.path.normcase(folder)
+        if key in seen_folders:
+            continue
+        seen_folders.add(key)
         if not os.path.isdir(folder):
             continue
         for name in sorted(os.listdir(folder)):

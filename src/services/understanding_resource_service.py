@@ -57,14 +57,20 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "model": "qwen3-vl-8b-instruct",
     "api_keys": {},
     "caption_language": "zh",
+    "understanding_mode": "tags",
     "use_custom_prompts": False,
     "custom_caption_prompt": "",
+    "custom_tag_prompt": "",
+    "custom_description_prompt": "",
     "custom_summary_prompt": "",
     "prompt": (
-        "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
+        "为这一视频帧提取简洁中文标签。只输出 JSON："
+        '{"tags":["标签1","标签2"]}。'
+        "标签覆盖人物/角色、场景地点、可见物体、动作、氛围风格；"
+        "每条2-8字，不要句子，不要解释，不要 markdown。"
     ),
     "timeout_sec": 120,
-    "max_tokens": 128,
+    "max_tokens": 192,
     "concurrency": 2,
 }
 
@@ -102,13 +108,38 @@ REMOTE_VLM_API_KEY_PRESET_IDS = frozenset(CLOUD_VLM_PRESET_IDS)
 CAPTION_LANGUAGE_ZH = "zh"
 CAPTION_LANGUAGE_EN = "en"
 SUPPORTED_CAPTION_LANGUAGES = {CAPTION_LANGUAGE_ZH, CAPTION_LANGUAGE_EN}
-CAPTION_LANGUAGE_PROMPTS = {
+
+UNDERSTANDING_MODE_TAGS = "tags"
+UNDERSTANDING_MODE_SUMMARY = "summary"
+SUPPORTED_UNDERSTANDING_MODES = {UNDERSTANDING_MODE_TAGS, UNDERSTANDING_MODE_SUMMARY}
+
+# Tag mode: chunk tags only.
+TAG_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: (
-        "用一至两句中文描述这一视频帧画面，说明可见的人物、物体、动作与场景，不要输出分析过程。"
+        "为这一视频帧提取简洁中文标签。只输出 JSON："
+        '{"tags":["标签1","标签2"]}。'
+        "标签覆盖人物/角色、场景地点、可见物体、动作、氛围风格；"
+        "每条2-8字，不要句子，不要解释，不要 markdown。"
+    ),
+    CAPTION_LANGUAGE_EN: (
+        "Extract concise English tags for this video frame. "
+        'Output JSON only: {"tags":["tag1","tag2"]}. '
+        "Cover people/characters, place/setting, visible objects, actions, mood/style. "
+        "Use short tags (1-3 words). No sentences, no explanation, no markdown."
+    ),
+}
+# Keep old name as alias so existing imports/tests keep working.
+CAPTION_LANGUAGE_PROMPTS = TAG_LANGUAGE_PROMPTS
+
+# Summary mode: chunk descriptions (then whole-video summary).
+DESCRIPTION_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: (
+        "用一两句简洁的中文描述这一视频帧的画面内容。"
+        "只写可见内容，不要列举分析过程，不要 markdown。"
     ),
     CAPTION_LANGUAGE_EN: (
         "Describe this video frame in one or two concise sentences. "
-        "Focus on visible people, objects, actions, and setting."
+        "Only what is visible. No analysis steps, no markdown."
     ),
 }
 VIDEO_SUMMARY_LANGUAGE_PROMPTS = {
@@ -132,8 +163,31 @@ def normalize_caption_language(value, *, default: str = CAPTION_LANGUAGE_ZH) -> 
     return fallback if fallback in SUPPORTED_CAPTION_LANGUAGES else CAPTION_LANGUAGE_ZH
 
 
+def normalize_understanding_mode(value, *, default: str = UNDERSTANDING_MODE_TAGS) -> str:
+    text = str(value or "").strip().lower()
+    if text in SUPPORTED_UNDERSTANDING_MODES:
+        return text
+    # Accept a few aliases from older UI copy.
+    if text in {"tag", "label", "labels"}:
+        return UNDERSTANDING_MODE_TAGS
+    if text in {"caption", "captions", "describe", "description", "descriptions"}:
+        return UNDERSTANDING_MODE_SUMMARY
+    fallback = str(default or UNDERSTANDING_MODE_TAGS).strip().lower()
+    return fallback if fallback in SUPPORTED_UNDERSTANDING_MODES else UNDERSTANDING_MODE_TAGS
+
+
+def get_tag_prompt_for_language(language: str) -> str:
+    return TAG_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
 def get_caption_prompt_for_language(language: str) -> str:
-    return CAPTION_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+    # Historical name: used as the chunk prompt for the active product path.
+    # Prefer get_tag_prompt_for_language / get_description_prompt_for_language.
+    return get_tag_prompt_for_language(language)
+
+
+def get_description_prompt_for_language(language: str) -> str:
+    return DESCRIPTION_LANGUAGE_PROMPTS[normalize_caption_language(language)]
 
 
 def get_video_summary_prompt_for_language(language: str) -> str:
@@ -156,13 +210,31 @@ def normalize_custom_prompt_text(value) -> str:
     return text
 
 
-def resolve_caption_prompt(settings: Mapping[str, Any] | None) -> str:
+def resolve_tag_prompt(settings: Mapping[str, Any] | None) -> str:
     raw = dict(settings or {})
     language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
-    custom = normalize_custom_prompt_text(raw.get("custom_caption_prompt"))
+    custom = normalize_custom_prompt_text(raw.get("custom_tag_prompt") or raw.get("custom_caption_prompt"))
     if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
         return custom
-    return get_caption_prompt_for_language(language)
+    return get_tag_prompt_for_language(language)
+
+
+def resolve_description_prompt(settings: Mapping[str, Any] | None) -> str:
+    raw = dict(settings or {})
+    language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
+    custom = normalize_custom_prompt_text(raw.get("custom_description_prompt"))
+    if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
+        return custom
+    return get_description_prompt_for_language(language)
+
+
+def resolve_caption_prompt(settings: Mapping[str, Any] | None) -> str:
+    """Chunk VLM prompt for the active understanding mode (tags or descriptions)."""
+    raw = dict(settings or {})
+    mode = normalize_understanding_mode(raw.get("understanding_mode", UNDERSTANDING_MODE_TAGS))
+    if mode == UNDERSTANDING_MODE_SUMMARY:
+        return resolve_description_prompt(raw)
+    return resolve_tag_prompt(raw)
 
 
 def resolve_video_summary_prompt(settings: Mapping[str, Any] | None) -> str:
@@ -326,11 +398,15 @@ def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> st
     if explicit:
         return normalize_caption_language(explicit)
     prompt = str(raw_remote_vlm.get("prompt", "") or "").strip()
-    if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] or prompt.startswith("Describe this video frame"):
+    if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] or prompt.startswith("Describe this video frame") or (
+        "Extract concise English tags" in prompt
+    ):
         return CAPTION_LANGUAGE_EN
-    if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_ZH] or any(token in prompt for token in ("中文", "视频帧")):
+    if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_ZH] or any(
+        token in prompt for token in ("中文", "视频帧", "标签")
+    ):
         return CAPTION_LANGUAGE_ZH
-    return CAPTION_LANGUAGE_EN if prompt and "Describe" in prompt else CAPTION_LANGUAGE_ZH
+    return CAPTION_LANGUAGE_EN if prompt and ("Describe" in prompt or "Extract concise English tags" in prompt) else CAPTION_LANGUAGE_ZH
 
 
 def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -345,15 +421,24 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
         remote_vlm["model"] = model
     language = resolve_remote_vlm_caption_language(raw_remote_vlm)
     remote_vlm["caption_language"] = language
+    remote_vlm["understanding_mode"] = normalize_understanding_mode(
+        raw_remote_vlm.get("understanding_mode", DEFAULT_REMOTE_VLM_CONFIG["understanding_mode"])
+    )
     remote_vlm["use_custom_prompts"] = normalize_use_custom_prompts(
         raw_remote_vlm.get("use_custom_prompts", DEFAULT_REMOTE_VLM_CONFIG["use_custom_prompts"])
     )
-    remote_vlm["custom_caption_prompt"] = normalize_custom_prompt_text(
-        raw_remote_vlm.get("custom_caption_prompt", "")
+    # custom_caption_prompt kept for backward compatibility (maps to tag prompt).
+    legacy_caption = normalize_custom_prompt_text(raw_remote_vlm.get("custom_caption_prompt", ""))
+    remote_vlm["custom_tag_prompt"] = normalize_custom_prompt_text(
+        raw_remote_vlm.get("custom_tag_prompt", "") or legacy_caption
+    )
+    remote_vlm["custom_description_prompt"] = normalize_custom_prompt_text(
+        raw_remote_vlm.get("custom_description_prompt", "")
     )
     remote_vlm["custom_summary_prompt"] = normalize_custom_prompt_text(
         raw_remote_vlm.get("custom_summary_prompt", "")
     )
+    remote_vlm["custom_caption_prompt"] = remote_vlm["custom_tag_prompt"]
     remote_vlm["prompt"] = resolve_caption_prompt(remote_vlm)
     try:
         remote_vlm["timeout_sec"] = max(5.0, float(raw_remote_vlm.get("timeout_sec", remote_vlm["timeout_sec"])))
