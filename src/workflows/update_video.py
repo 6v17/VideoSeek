@@ -79,6 +79,15 @@ def update_videos_flow(
 ):
     # Retained intentionally: imported dynamically inside IndexUpdateWorker.run().
     del rebuild_global_assets
+    from src.services.indexing_runtime_status import (
+        IndexSyncBusyError,
+        clear_index_sync_running,
+        try_acquire_index_sync,
+    )
+
+    if not try_acquire_index_sync(target_lib):
+        raise IndexSyncBusyError("An indexing task is already running.")
+
     flow_start = time.perf_counter()
     selected_note = ""
     if video_ids is not None:
@@ -88,6 +97,36 @@ def update_videos_flow(
         f" for {target_lib}" if target_lib else "",
         selected_note,
     )
+    try:
+        return _update_videos_flow_body(
+            target_lib=target_lib,
+            progress_callback=progress_callback,
+            force_cleanup_missing_files=force_cleanup_missing_files,
+            should_stop_callback=should_stop_callback,
+            cleanup_missing_entries=cleanup_missing_entries,
+            issue_callback=issue_callback,
+            include_existing_assets=include_existing_assets,
+            video_ids=video_ids,
+            flow_start=flow_start,
+        )
+    finally:
+        clear_index_sync_running()
+
+
+def _update_videos_flow_body(
+    *,
+    target_lib=None,
+    progress_callback=None,
+    force_cleanup_missing_files=False,
+    should_stop_callback=None,
+    cleanup_missing_entries=None,
+    issue_callback=None,
+    include_existing_assets=True,
+    video_ids=None,
+    flow_start=None,
+):
+    if flow_start is None:
+        flow_start = time.perf_counter()
     garbage_collect_indices()
     config = load_config()
     meta = load_model_metadata(config=config)
@@ -152,6 +191,17 @@ def update_videos_flow(
             scan_s,
             time.perf_counter() - flow_start,
         )
+        try:
+            from src.services.library_service import reconcile_ready_assets_with_lance
+
+            demoted = reconcile_ready_assets_with_lance(meta, config=config)
+            if demoted:
+                logger.warning(
+                    "Demoted %s meta-ready videos after interrupted sync (not present in Lance)",
+                    demoted,
+                )
+        except Exception as reconcile_exc:
+            logger.warning("Lance/meta ready reconcile after interrupt failed: %s", reconcile_exc)
         save_model_metadata(meta, config=config)
         raise
     scan_s = time.perf_counter() - t_scan
@@ -176,15 +226,34 @@ def update_videos_flow(
 
     # Finalize in memory, then one pretty meta write (+ path-index invalidate).
     _mark_missing_source_entries(meta, target_lib=target_lib)
+    try:
+        from src.services.library_service import reconcile_ready_assets_with_lance
+
+        demoted = reconcile_ready_assets_with_lance(meta, config=config)
+        if demoted:
+            logger.warning(
+                "Demoted %s meta-ready videos to missing_asset (not present in Lance)",
+                demoted,
+            )
+    except Exception as exc:
+        logger.warning("Lance/meta ready reconcile failed: %s", exc)
     _finalize_library_index_state(meta, target_lib=target_lib)
     save_model_metadata(meta, config=config)
     try:
         # Artifact cleanup only — avoid maintain_library_metadata() reloading/rewriting meta.
         from src.services.library_service import prune_legacy_search_index_artifacts
-        from src.storage.config_store import get_local_model_asset_dirs
-        from src.storage.lance_store import drop_lance_vector_indexes
+        from src.storage.lance_store import (
+            drop_lance_vector_indexes,
+            ensure_lance_vector_indexes,
+            is_lance_ann_enabled,
+        )
 
-        drop_lance_vector_indexes(get_local_model_asset_dirs(config=config)["base_dir"])
+        base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+        # Do not unconditionally drop IVF after sync — that erased ANN built in end_lance_index_batch.
+        if is_lance_ann_enabled(config):
+            ensure_lance_vector_indexes(base_dir, config=config)
+        else:
+            drop_lance_vector_indexes(base_dir)
         prune_legacy_search_index_artifacts(meta, config=config)
     except Exception as exc:
         logger.warning("Post-index library artifact cleanup failed: %s", exc)

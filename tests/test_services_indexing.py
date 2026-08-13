@@ -542,7 +542,7 @@ class IndexingServiceTests(unittest.TestCase):
 
         indexing_service.scan_target_libraries(
             meta,
-            {},
+            {"indexing_video_workers": 1},
             lambda _path: "vid_a",
             persist_meta_callback=None,
             progress_callback=lambda value, text: progress_events.append((value, text)),
@@ -593,7 +593,7 @@ class IndexingServiceTests(unittest.TestCase):
         with self.assertRaises(indexing_service.IndexUpdateInterrupted):
             indexing_service.scan_target_libraries(
                 meta,
-                {},
+                {"indexing_video_workers": 1},
                 lambda _path: "vid",
                 should_stop_callback=stop_callback,
             )
@@ -1369,7 +1369,7 @@ class IndexingServiceTests(unittest.TestCase):
 
         indexing_service.scan_target_libraries(
             meta,
-            {},
+            {"indexing_video_workers": 1},
             lambda path: "vid_a",
             persist_meta_callback=lambda: persist_calls.append("saved"),
         )
@@ -1403,7 +1403,7 @@ class IndexingServiceTests(unittest.TestCase):
 
         indexing_service.scan_target_libraries(
             meta,
-            {},
+            {"indexing_video_workers": 1},
             lambda path: "vid_a",
             persist_meta_callback=lambda: persist_calls.append("saved"),
         )
@@ -1428,7 +1428,7 @@ class IndexingServiceTests(unittest.TestCase):
 
         result = indexing_service.scan_target_libraries(
             meta,
-            {},
+            {"indexing_video_workers": 1},
             lambda path: "vid_a",
             persist_meta_callback=lambda: persist_calls.append("saved"),
         )
@@ -1455,7 +1455,7 @@ class IndexingServiceTests(unittest.TestCase):
 
         failed_videos, search_assets_changed = indexing_service.scan_target_libraries(
             meta,
-            {},
+            {"indexing_video_workers": 1},
             lambda path: "vid_a",
             include_existing_assets=True,
         )
@@ -1490,7 +1490,7 @@ class IndexingServiceTests(unittest.TestCase):
 
         indexing_service.scan_target_libraries(
             meta,
-            {"index_dir": "index", "vector_dir": "vector"},
+            {"index_dir": "index", "vector_dir": "vector", "indexing_video_workers": 1},
             lambda path: "vid_a",
             persist_meta_callback=lambda: persist_calls.append("saved"),
         )
@@ -1499,6 +1499,9 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(mock_remove.call_count, 2)
         self.assertEqual(persist_calls, ["saved"])
 
+    @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
+    @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
+    @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
     @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", side_effect=AssertionError("should not cleanup"))
@@ -1515,6 +1518,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_cleanup,
         _mock_save_meta,
         _mock_scan,
+        _mock_reconcile,
+        _mock_ann,
+        _mock_drop,
     ):
         mock_load_config.return_value = {
             "auto_cleanup_missing_files": False,
@@ -1527,6 +1533,9 @@ class IndexingServiceTests(unittest.TestCase):
         saved_meta = mock_load_meta.return_value
         self.assertEqual(saved_meta["libraries"]["D:\\videos"]["index_state"], "ready")
 
+    @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
+    @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
+    @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
     @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(()))
@@ -1541,6 +1550,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_cleanup,
         _mock_save_meta,
         mock_scan,
+        _mock_reconcile,
+        _mock_ann,
+        _mock_drop,
     ):
         mock_load_config.return_value = {
             "auto_cleanup_missing_files": False,
@@ -1553,6 +1565,9 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIsNotNone(output[0])
         self.assertTrue(callable(mock_scan.call_args.kwargs["issue_callback"]))
 
+    @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
+    @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
+    @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
     @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(()))
@@ -1573,6 +1588,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_cleanup,
         _mock_save_meta,
         mock_scan,
+        _mock_reconcile,
+        _mock_ann,
+        _mock_drop,
     ):
         mock_load_config.return_value = {
             "auto_cleanup_missing_files": False,
@@ -1637,6 +1655,9 @@ class IndexingServiceTests(unittest.TestCase):
         saved_meta = mock_load_meta.return_value
         self.assertEqual(saved_meta["libraries"]["D:\\videos"]["files"]["missing.mp4"]["asset_state"], "missing_source")
 
+    @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
+    @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
+    @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
     @patch("src.workflows.update_video.delete_physical_video_data")
     @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
     @patch("src.workflows.update_video.save_model_metadata")
@@ -1653,6 +1674,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_save_meta,
         _mock_scan,
         mock_delete_video_data,
+        _mock_reconcile,
+        _mock_ann,
+        _mock_drop,
     ):
         mock_load_config.return_value = {
             "auto_cleanup_missing_files": False,
@@ -1665,6 +1689,9 @@ class IndexingServiceTests(unittest.TestCase):
         mock_cleanup.assert_called_once()
         mock_delete_video_data.assert_called_once_with("vid_a", mock_load_config.return_value)
 
+    @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
+    @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
+    @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
     @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(["vid_a"]))
@@ -1681,6 +1708,9 @@ class IndexingServiceTests(unittest.TestCase):
         mock_cleanup,
         _mock_save_meta,
         _mock_scan,
+        _mock_reconcile,
+        _mock_ann,
+        _mock_drop,
     ):
         selected_entries = [{"library_path": "D:\\videos", "video_rel_path": "missing.mp4"}]
         mock_load_config.return_value = {

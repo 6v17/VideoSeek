@@ -103,9 +103,14 @@ DEFAULT_CONFIG = {
     "thumb_width": 130,
     "thumb_height": 75,
     "prefer_gpu": True,
+    "inference_ep": "auto",
     "experimental_hw_decode": False,
     "gpu_probe_unknown_keep_gpu": False,
     "embedding_batch_size": 16,
+    "indexing_video_workers": 2,
+    "lance_ann_enabled": False,
+    "lance_ann_min_rows": 2000,
+    "lance_ann_refine_multiplier": 4,
     "close_window_action": "exit",
     "chunk_policy": "balanced",
     "similarity_threshold": 0.87,
@@ -191,6 +196,9 @@ CONFIG_BOUNDS = {
     "thumb_width": (80, 480),
     "thumb_height": (45, 320),
     "embedding_batch_size": (1, 64),
+    "indexing_video_workers": (1, 2),
+    "lance_ann_min_rows": (500, 100000),
+    "lance_ann_refine_multiplier": (2, 16),
     "similarity_threshold": (0.1, 1.0),
     "chunk_edge_threshold": (0.1, 1.0),
     "min_chunk_size": (1, 50),
@@ -214,6 +222,9 @@ CONFIG_INT_KEYS = {
     "thumb_width",
     "thumb_height",
     "embedding_batch_size",
+    "indexing_video_workers",
+    "lance_ann_min_rows",
+    "lance_ann_refine_multiplier",
     "min_chunk_size",
     "subtitle_ocr_batch_size",
     "team_api_port",
@@ -240,6 +251,7 @@ CONFIG_ENUMS = {
     "download_cookie_browser": {"chrome", "edge", "firefox", "brave", "chromium", "opera", "vivaldi"},
     "close_window_action": {"exit", "tray"},
     "subtitle_sample_strategy": {"timeline", "vad"},
+    "inference_ep": {"auto", "cuda", "dml", "cpu"},
 }
 
 PATH_KEYS = {
@@ -531,6 +543,10 @@ def _sanitize_general_settings(config):
     sanitized["prefer_gpu"] = _coerce_bool(
         sanitized.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]),
         DEFAULT_CONFIG["prefer_gpu"],
+    )
+    sanitized["lance_ann_enabled"] = _coerce_bool(
+        sanitized.get("lance_ann_enabled", DEFAULT_CONFIG["lance_ann_enabled"]),
+        DEFAULT_CONFIG["lance_ann_enabled"],
     )
     sanitized["experimental_hw_decode"] = _coerce_bool(
         sanitized.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"]),

@@ -4,7 +4,12 @@ import numpy as np
 import onnxruntime as ort
 
 from src.app.logging_utils import get_logger
-from src.core.onnx_session import build_session_options
+from src.core.onnx_session import (
+    build_session_options,
+    gpu_backend_label,
+    providers_indicate_gpu,
+    resolve_onnx_providers,
+)
 
 logger = get_logger("onnx_vision_engine")
 INFERENCE_LOCK = threading.RLock()
@@ -76,9 +81,14 @@ class OnnxVisionBatchMixin:
 
     def visual_session_providers(self):
         prefer_gpu = bool(getattr(self, "prefer_gpu", False)) and not self._visual_force_cpu
-        if prefer_gpu:
-            return ["DmlExecutionProvider", "CPUExecutionProvider"]
-        return ["CPUExecutionProvider"]
+        config = None
+        try:
+            from src.app.config import load_config
+
+            config = load_config()
+        except Exception:
+            config = None
+        return resolve_onnx_providers(prefer_gpu=prefer_gpu, config=config)
 
     def preprocess_into(self, img_bgr, out_chw):
         raise NotImplementedError
@@ -92,26 +102,32 @@ class OnnxVisionBatchMixin:
         return load_image_bgr(path)
 
     def encode_images(self, frames):
-        with INFERENCE_LOCK:
-            return self._encode_images_locked(frames)
-
-    def _encode_images_locked(self, frames):
-        self._ensure_feature_dim()
+        """Embed frames; CPU preprocess runs outside ``INFERENCE_LOCK``, ORT only under lock."""
+        batches = self._preprocess_frames_to_batches(frames)
+        if not batches:
+            feature_dim = int(self._feature_dim or 0)
+            return np.empty((0, feature_dim), dtype=np.float32)
 
         embeddings = []
+        with INFERENCE_LOCK:
+            self._ensure_feature_dim()
+            for blob in batches:
+                embeddings.append(self._run_visual_batch(blob))
+
+        if not embeddings:
+            feature_dim = int(self._feature_dim or 0)
+            return np.empty((0, feature_dim), dtype=np.float32)
+        return np.vstack(embeddings)
+
+    def _preprocess_frames_to_batches(self, frames):
+        """Load/preprocess frames into float32 NCHW batches without holding the inference lock."""
         batch_size = self.embedding_batch_size
         size = self.image_size
+        batches = []
         work = np.empty((batch_size, 3, size, size), dtype=np.float32)
         filled = 0
 
-        def flush():
-            nonlocal filled
-            if filled == 0:
-                return
-            embeddings.append(self._run_visual_batch(work[:filled]))
-            filled = 0
-
-        for frame in frames:
+        for frame in frames or []:
             image = self.imread_chinese(frame) if isinstance(frame, str) else frame
             if image is None:
                 continue
@@ -119,15 +135,13 @@ class OnnxVisionBatchMixin:
             filled += 1
             if filled < batch_size:
                 continue
-            flush()
+            batches.append(np.ascontiguousarray(work[:filled]))
+            filled = 0
+            work = np.empty((batch_size, 3, size, size), dtype=np.float32)
 
         if filled:
-            embeddings.append(self._run_visual_batch(work[:filled]))
-
-        if not embeddings:
-            feature_dim = int(self._feature_dim or 0)
-            return np.empty((0, feature_dim), dtype=np.float32)
-        return np.vstack(embeddings)
+            batches.append(np.ascontiguousarray(work[:filled]))
+        return batches
 
     def _ensure_feature_dim(self):
         if self._feature_dim is not None:
@@ -220,9 +234,10 @@ class OnnxVisionBatchMixin:
             sess_options=build_session_options(prefer_gpu),
             providers=self.visual_session_providers(),
         )
-        self._set_active_vision_providers(self.visual_session.get_providers())
-        self.using_gpu = "DmlExecutionProvider" in self.visual_session.get_providers()
-        self.backend_label = "GPU" if self.using_gpu else "CPU"
+        active = list(self.visual_session.get_providers())
+        self._set_active_vision_providers(active)
+        self.using_gpu = providers_indicate_gpu([active])
+        self.backend_label = gpu_backend_label([active]) if self.using_gpu else "CPU"
         self._on_visual_session_recreated()
 
     def _get_cpu_visual_session(self):

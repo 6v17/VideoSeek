@@ -63,6 +63,8 @@ class SettingsGuiMixin:
             sampling_rules = DEFAULT_CONFIG["sampling_fps_rules"]
         self.settings_page.set_sampling_fps_rules_text(sampling_rules)
         self.settings_page.input_top_k.setValue(config.get("search_top_k", DEFAULT_CONFIG["search_top_k"]))
+        lance_ann_enabled = bool(config.get("lance_ann_enabled", DEFAULT_CONFIG["lance_ann_enabled"]))
+        self.settings_page.input_lance_ann_enabled.setCurrentIndex(1 if lance_ann_enabled else 0)
         frame_neighbor_rerank_enabled = bool(
             config.get(
                 "frame_neighbor_rerank_enabled",
@@ -142,6 +144,9 @@ class SettingsGuiMixin:
         self.settings_page.input_embedding_batch_size.setValue(
             int(config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"]))
         )
+        self.settings_page.input_indexing_video_workers.setValue(
+            int(config.get("indexing_video_workers", DEFAULT_CONFIG["indexing_video_workers"]))
+        )
         from src.storage.config_store import get_image_search_mode
 
         if hasattr(self, "_refresh_search_panel_state"):
@@ -180,6 +185,9 @@ class SettingsGuiMixin:
         self.settings_page.sync_chunk_advanced_visibility()
         prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
         self.settings_page.input_prefer_gpu.setCurrentIndex(0 if prefer_gpu else 1)
+        inference_ep = str(config.get("inference_ep", DEFAULT_CONFIG["inference_ep"]) or "auto").strip().lower()
+        ep_index = self.settings_page.input_inference_ep.findData(inference_ep)
+        self.settings_page.input_inference_ep.setCurrentIndex(0 if ep_index < 0 else ep_index)
         experimental_hw_decode = bool(
             config.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"])
         )
@@ -647,6 +655,7 @@ class SettingsGuiMixin:
         editors = [
             self.settings_page.input_fps,
             self.settings_page.input_top_k,
+            self.settings_page.input_lance_ann_enabled,
             self.settings_page.input_frame_neighbor_rerank_enabled,
             self.settings_page.input_frame_neighbor_rerank_top_n,
             self.settings_page.input_frame_neighbor_rerank_window,
@@ -660,11 +669,13 @@ class SettingsGuiMixin:
             self.settings_page.input_thumb_height,
             self.settings_page.input_export_video_silent,
             self.settings_page.input_embedding_batch_size,
+            self.settings_page.input_indexing_video_workers,
             self.settings_page.input_chunk_policy,
             self.settings_page.input_similarity_threshold,
             self.settings_page.input_min_chunk_size,
             self.settings_page.input_min_chunk_duration,
             self.settings_page.input_prefer_gpu,
+            self.settings_page.input_inference_ep,
             self.settings_page.input_experimental_hw_decode,
             self.settings_page.input_gpu_probe_unknown_keep_gpu,
             self.settings_page.input_auto_cleanup_missing_files,
@@ -806,14 +817,23 @@ class SettingsGuiMixin:
             previous_embedding_batch_size = int(
                 config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"])
             )
+            previous_indexing_video_workers = int(
+                config.get("indexing_video_workers", DEFAULT_CONFIG["indexing_video_workers"])
+            )
             previous_min_chunk_size = int(config.get("min_chunk_size", DEFAULT_CONFIG["min_chunk_size"]))
             previous_min_chunk_duration = float(
                 config.get("min_chunk_duration", DEFAULT_CONFIG["min_chunk_duration"])
             )
             previous_chunk_policy = str(config.get("chunk_policy", DEFAULT_CONFIG.get("chunk_policy", "balanced")))
             previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
+            previous_inference_ep = str(
+                config.get("inference_ep", DEFAULT_CONFIG["inference_ep"]) or "auto"
+            ).strip().lower()
             previous_gpu_probe_unknown_keep_gpu = bool(
                 config.get("gpu_probe_unknown_keep_gpu", DEFAULT_CONFIG["gpu_probe_unknown_keep_gpu"])
+            )
+            previous_lance_ann_enabled = bool(
+                config.get("lance_ann_enabled", DEFAULT_CONFIG["lance_ann_enabled"])
             )
             previous_models = dict(config.get("models") or {})
             previous_active_profile_id = str(previous_models.get("active_profile", "") or "").strip()
@@ -849,6 +869,7 @@ class SettingsGuiMixin:
                 return
             new_similarity_threshold = float(self.settings_page.input_similarity_threshold.value())
             new_embedding_batch_size = int(self.settings_page.input_embedding_batch_size.value())
+            new_indexing_video_workers = int(self.settings_page.input_indexing_video_workers.value())
             new_min_chunk_size = int(self.settings_page.input_min_chunk_size.value())
             new_min_chunk_duration = float(self.settings_page.input_min_chunk_duration.value())
             new_chunk_policy = str(self.settings_page.get_chunk_policy_id())
@@ -858,6 +879,7 @@ class SettingsGuiMixin:
             # switching back to dynamic mode does not silently drop it.
             config["sampling_fps_rules"] = new_sampling_fps_rules
             config["search_top_k"] = self.settings_page.input_top_k.value()
+            config["lance_ann_enabled"] = bool(self.settings_page.input_lance_ann_enabled.currentData())
             config["frame_neighbor_rerank_enabled"] = bool(
                 self.settings_page.input_frame_neighbor_rerank_enabled.currentData()
             )
@@ -887,11 +909,15 @@ class SettingsGuiMixin:
             config["thumb_height"] = self.settings_page.input_thumb_height.value()
             config["export_video_silent"] = bool(self.settings_page.input_export_video_silent.currentData())
             config["embedding_batch_size"] = new_embedding_batch_size
+            config["indexing_video_workers"] = new_indexing_video_workers
             config["similarity_threshold"] = new_similarity_threshold
             config["min_chunk_size"] = new_min_chunk_size
             config["min_chunk_duration"] = new_min_chunk_duration
             config["chunk_policy"] = new_chunk_policy
             config["prefer_gpu"] = bool(self.settings_page.input_prefer_gpu.currentData())
+            config["inference_ep"] = str(
+                self.settings_page.input_inference_ep.currentData() or DEFAULT_CONFIG["inference_ep"]
+            ).strip().lower()
             config["experimental_hw_decode"] = bool(
                 self.settings_page.input_experimental_hw_decode.currentData()
             )
@@ -966,6 +992,25 @@ class SettingsGuiMixin:
                 else:
                     config.pop("pending_cleanup_data_root", None)
             save_config(config)
+            if previous_lance_ann_enabled != bool(config.get("lance_ann_enabled")):
+                try:
+                    from src.app.logging_utils import get_logger
+                    from src.storage.config_store import get_local_model_asset_dirs
+                    from src.storage.lance_store import (
+                        drop_lance_vector_indexes,
+                        ensure_lance_vector_indexes,
+                        is_lance_ann_enabled,
+                    )
+
+                    base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+                    if is_lance_ann_enabled(config):
+                        ensure_lance_vector_indexes(base_dir, config=config)
+                    else:
+                        drop_lance_vector_indexes(base_dir)
+                except Exception as exc:
+                    get_logger("gui_settings").warning(
+                        "ANN index maintain after settings save failed: %s", exc
+                    )
             self._refresh_pending_cleanup_actions(config)
             self.settings_page.input_data_root.setText(get_configured_data_root(config))
             effective_rules = new_sampling_fps_rules if new_sampling_fps_mode == "dynamic" else ""
@@ -982,6 +1027,7 @@ class SettingsGuiMixin:
             )
             if (
                 previous_prefer_gpu != config["prefer_gpu"]
+                or previous_inference_ep != config["inference_ep"]
                 or previous_gpu_probe_unknown_keep_gpu != config["gpu_probe_unknown_keep_gpu"]
                 or previous_embedding_batch_size != config["embedding_batch_size"]
                 or profile_switched
@@ -1220,6 +1266,9 @@ class SettingsGuiMixin:
             config = load_config()
             current_data_root = get_configured_data_root(config)
             previous_prefer_gpu = config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
+            previous_inference_ep = str(
+                config.get("inference_ep", DEFAULT_CONFIG["inference_ep"]) or "auto"
+            ).strip().lower()
             preserved_values = {
                 "theme": config.get("theme"),
                 "language": config.get("language"),
@@ -1248,7 +1297,11 @@ class SettingsGuiMixin:
             migration_result = None
             save_config(config)
             self._refresh_pending_cleanup_actions(config)
-            if previous_prefer_gpu != config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"]):
+            if (
+                previous_prefer_gpu != config.get("prefer_gpu", DEFAULT_CONFIG["prefer_gpu"])
+                or previous_inference_ep
+                != str(config.get("inference_ep", DEFAULT_CONFIG["inference_ep"]) or "auto").strip().lower()
+            ):
                 reset_engine()
             synced_model_dir = sync_model_dir_to_config()
             synced_path = sync_ffmpeg_path_to_config()

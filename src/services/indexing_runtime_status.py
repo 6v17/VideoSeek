@@ -13,17 +13,31 @@ _index_sync_progress_total = 0
 _index_sync_active_library_path: Optional[str] = None
 
 
-def set_index_sync_running(target_library_path: Optional[str] = None) -> None:
+class IndexSyncBusyError(RuntimeError):
+    """Raised when a second index update tries to run while one is already active."""
+
+
+def try_acquire_index_sync(target_library_path: Optional[str] = None) -> bool:
+    """Claim the process-wide index-sync slot. Returns False if already held."""
     with _lock:
         global _index_sync_in_progress, _index_sync_target_library_path
         global _index_sync_progress_current, _index_sync_progress_total
         global _index_sync_active_library_path
+        if _index_sync_in_progress:
+            return False
         _index_sync_in_progress = True
         target = str(target_library_path or "").strip()
         _index_sync_target_library_path = target or None
         _index_sync_progress_current = 0
         _index_sync_progress_total = 0
         _index_sync_active_library_path = target or None
+        return True
+
+
+def set_index_sync_running(target_library_path: Optional[str] = None) -> None:
+    """Compatibility wrapper: claim the sync slot or raise if busy."""
+    if not try_acquire_index_sync(target_library_path):
+        raise IndexSyncBusyError("An indexing task is already running.")
 
 
 def set_index_sync_progress(

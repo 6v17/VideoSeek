@@ -62,15 +62,20 @@ def build_indexed_video_lookup(meta) -> Dict[str, str]:
 def list_ready_video_paths_for_libraries(library_paths: Optional[Sequence[str]], config=None) -> List[str]:
     from src.storage.asset_store import load_model_metadata
     from src.app.config import load_config
+    from src.services.library_service import _lance_indexed_video_ids
 
-    meta = load_model_metadata(config=config or load_config())
+    cfg = config or load_config()
+    meta = load_model_metadata(config=cfg)
     roots = _normalized_library_roots(library_paths)
     if not roots:
         return []
+    lance_ids = _lance_indexed_video_ids(config=cfg)
     paths: List[str] = []
     seen: set[str] = set()
-    for abs_path, _video_id, info in iter_indexed_video_entries(meta):
+    for abs_path, video_id, info in iter_indexed_video_entries(meta):
         if str(info.get("asset_state", "")).strip().lower() != "ready":
+            continue
+        if lance_ids is not None and video_id not in lance_ids:
             continue
         if not any(video_path_under_library_root(abs_path, root) for root in roots):
             continue

@@ -2,6 +2,8 @@ import gc
 import hashlib
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Any
 
 import numpy as np
 
@@ -30,7 +32,34 @@ VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
 DISCOVER_CACHE_KEY = "discover_cache"
 INFORMATIONAL_INDEX_ISSUE_REASONS = frozenset({"path_reconciled"})
 _SKIP_VIDEO_ALREADY_INDEXED = object()
+_INDEX_VIDEO_WORKERS_MIN = 1
+_INDEX_VIDEO_WORKERS_MAX = 2
 logger = get_logger("indexing_service")
+
+
+def resolve_indexing_video_workers(config=None) -> int:
+    """How many videos may compute (decode/embed) in parallel during a scan.
+
+    Commits (meta / Lance) stay single-threaded. Env ``VIDEOSEEK_INDEX_VIDEO_WORKERS``
+    overrides config when set.
+    """
+    raw_env = os.environ.get("VIDEOSEEK_INDEX_VIDEO_WORKERS", "").strip()
+    if raw_env:
+        try:
+            return max(_INDEX_VIDEO_WORKERS_MIN, min(_INDEX_VIDEO_WORKERS_MAX, int(raw_env)))
+        except ValueError:
+            pass
+    try:
+        from src.app.config import DEFAULT_CONFIG
+
+        default = int(DEFAULT_CONFIG.get("indexing_video_workers", 2))
+    except Exception:
+        default = 2
+    try:
+        value = int((config or {}).get("indexing_video_workers", default))
+    except (TypeError, ValueError):
+        value = default
+    return max(_INDEX_VIDEO_WORKERS_MIN, min(_INDEX_VIDEO_WORKERS_MAX, value))
 
 
 def _sync_video_vectors_to_lance(
@@ -1082,6 +1111,406 @@ def cleanup_invalid_library_files(meta, config, target_lib=None, issue_callback=
             yield video_id
 
 
+def _index_video_compute(
+    abs_path,
+    rel_path,
+    saved,
+    config,
+    get_video_id,
+    library_path=None,
+    should_stop_callback=None,
+    progress_callback=None,
+    file_index=1,
+    file_total=1,
+    indexed_ids=None,
+) -> dict[str, Any]:
+    """Decode/embed (or decide reuse) without mutating meta or writing Lance.
+
+    Returns a result dict consumed by ``_index_video_commit``.
+    """
+    del get_video_id  # hash via get_video_hash; callback kept for call-site parity
+    video_name = os.path.basename(abs_path)
+    progress_reporter = (
+        IndexingProgressReporter(
+            progress_callback,
+            video_name=video_name,
+            file_index=file_index,
+            file_total=file_total,
+        )
+        if progress_callback
+        else None
+    )
+    rel_path = canonicalize_library_rel_path(rel_path)
+    saved = dict(saved or {})
+    had_saved_vid = bool(saved.get("vid"))
+    base = {
+        "abs_path": abs_path,
+        "rel_path": rel_path,
+        "library_path": library_path or "",
+        "had_saved_vid": had_saved_vid,
+        "file_index": file_index,
+        "file_total": file_total,
+    }
+
+    if progress_reporter is not None:
+        progress_reporter.emit("file", file_index, file_total, force=True)
+
+    if not _is_valid_video_source(abs_path, probe=False):
+        logger.warning("Skipping non-indexable video source: %s", abs_path)
+        return {
+            **base,
+            "kind": "invalid_source",
+            "detail": "Missing file or unsupported extension.",
+            "video_mod_time": None,
+        }
+
+    video_mod_time = os.path.getmtime(abs_path)
+    base["video_mod_time"] = video_mod_time
+    forced_failure = _get_debug_forced_failure()
+    if forced_failure is not None:
+        raise forced_failure
+
+    lance_cached = _try_reuse_lance_indexed_video(
+        abs_path,
+        saved,
+        config,
+        indexed_ids=indexed_ids,
+        library_path=library_path or "",
+    )
+    if lance_cached is not None:
+        video_id = lance_cached["canonical_vid"]
+        if progress_reporter is not None:
+            progress_reporter.emit("reuse", force=True)
+        logger.info(
+            "Per-video %s: reuse_lance_index %.2fs (vid=%s)",
+            video_name,
+            0.0,
+            video_id,
+        )
+        return {
+            **base,
+            "kind": "lance_reuse",
+            "video_id": video_id,
+        }
+
+    cached = _resolve_reusable_cached_vectors(abs_path, saved, config)
+    if cached is not None:
+        video_id = cached["canonical_vid"]
+        vectors = cached["vectors"]
+        timestamps = cached["timestamps"]
+        disk_vid = cached["disk_vid"]
+        t_reuse = time.perf_counter()
+        if progress_reporter is not None:
+            progress_reporter.emit("reuse", force=True)
+        reuse_s = time.perf_counter() - t_reuse
+        if disk_vid != video_id:
+            logger.info(
+                "Per-video %s: reuse_cached_vectors aligned id %s -> %s in %.2fs (%d frames)",
+                video_name,
+                disk_vid,
+                video_id,
+                reuse_s,
+                len(timestamps),
+            )
+        else:
+            logger.info(
+                "Per-video %s: reuse_cached_vectors %.2fs (%d frames)",
+                video_name,
+                reuse_s,
+                len(timestamps),
+            )
+        chunk_source_id = disk_vid if disk_vid != video_id else video_id
+        chunks, chunks_rebuilt, chunk_config = _ensure_video_chunks(
+            chunk_source_id,
+            vectors,
+            timestamps,
+            config,
+        )
+        return {
+            **base,
+            "kind": "cache_reuse",
+            "video_id": video_id,
+            "disk_vid": disk_vid,
+            "vectors": vectors,
+            "timestamps": timestamps,
+            "chunks": chunks,
+            "chunk_config": chunk_config,
+            "write_chunks": bool(chunks_rebuilt or disk_vid != video_id),
+        }
+
+    if not _is_valid_video_source(abs_path, probe=True):
+        logger.warning("Skipping non-indexable video source: %s", abs_path)
+        return {
+            **base,
+            "kind": "invalid_stream",
+            "detail": "Unreadable or unsupported video stream.",
+        }
+
+    video_id = get_video_hash(abs_path)
+    saved_vid = str(saved.get("vid", "") or "").strip()
+    logger.info(
+        "Reindexing %s (no reusable on-disk cache: saved_vid=%s current_vid=%s)",
+        video_name,
+        saved_vid or "-",
+        video_id,
+    )
+    logger.info("Indexing video %s", video_name)
+    model_dirs = get_local_model_asset_dirs(config=config)
+    os.makedirs(model_dirs["vector_dir"], exist_ok=True)
+    t_gen = time.perf_counter()
+    vectors, timestamps, _, chunks = generate_vectors_and_index_for_video(
+        abs_path,
+        video_id,
+        model_dirs["index_dir"],
+        model_dirs["vector_dir"],
+        should_stop_callback=should_stop_callback,
+        progress_callback=progress_callback,
+        file_index=file_index,
+        file_total=file_total,
+    )
+    gen_s = time.perf_counter() - t_gen
+    logger.info(
+        "Per-video %s: generate_vectors_and_index_for_video wall %.2fs",
+        video_name,
+        gen_s,
+    )
+    if not _has_usable_vectors(vectors, timestamps):
+        failure_reason = _classify_sync_failure_reason(abs_path, vectors, timestamps)
+        if vectors is None or timestamps is None:
+            logger.warning("Vector generation failed for %s and the file was marked sync_failed", abs_path)
+        elif len(vectors) == 0 or len(timestamps) == 0:
+            logger.warning("Vector generation returned empty data for %s and the file was marked sync_failed", abs_path)
+        else:
+            logger.warning(
+                "Vector/timestamp counts differ for %s; marked sync_failed: vectors=%s timestamps=%s",
+                abs_path,
+                len(vectors),
+                len(timestamps),
+            )
+        return {
+            **base,
+            "kind": "generate_failed",
+            "video_id": video_id,
+            "failure_reason": failure_reason,
+            "vectors": vectors,
+            "timestamps": timestamps,
+        }
+
+    return {
+        **base,
+        "kind": "generated",
+        "video_id": video_id,
+        "vectors": vectors,
+        "timestamps": timestamps,
+        "chunks": chunks,
+        "chunk_config": build_chunk_config(config),
+    }
+
+
+def _index_video_commit(
+    lib_files,
+    result: dict[str, Any],
+    *,
+    config,
+    issue_callback=None,
+    meta=None,
+) -> tuple[Any, Any, bool, bool]:
+    """Apply compute result: meta upsert + Lance write. Single-threaded only."""
+    if not isinstance(result, dict):
+        return None, None, False, False
+
+    kind = str(result.get("kind") or "")
+    abs_path = str(result.get("abs_path") or "")
+    rel_path = canonicalize_library_rel_path(result.get("rel_path") or "")
+    library_path = str(result.get("library_path") or "")
+    video_mod_time = result.get("video_mod_time")
+    had_saved_vid = bool(result.get("had_saved_vid"))
+    video_id = str(result.get("video_id") or "").strip()
+
+    if kind in {"invalid_source", "invalid_stream"}:
+        _emit_issue(
+            issue_callback,
+            library_path,
+            rel_path,
+            abs_path,
+            action="skipped",
+            reason="invalid_video_source",
+            detail=str(result.get("detail") or ""),
+        )
+        return None, None, False, False
+
+    if kind == "lance_reuse":
+        metadata_updated = _upsert_file_record(
+            lib_files,
+            rel_path,
+            video_id,
+            video_mod_time,
+            "ready",
+            **_fingerprint_kwargs(abs_path),
+        )
+        return _SKIP_VIDEO_ALREADY_INDEXED, None, metadata_updated, False
+
+    if kind == "cache_reuse":
+        vectors = result.get("vectors")
+        timestamps = result.get("timestamps")
+        disk_vid = str(result.get("disk_vid") or video_id)
+        chunks = result.get("chunks")
+        chunk_config = result.get("chunk_config")
+        write_chunks = bool(result.get("write_chunks"))
+        synced = _sync_video_vectors_to_lance(
+            video_id,
+            config,
+            library_path,
+            abs_path,
+            vectors=vectors,
+            timestamps=timestamps,
+            chunks=chunks if write_chunks else None,
+            chunk_config=chunk_config if write_chunks else None,
+        )
+        if not synced:
+            metadata_updated = _mark_lance_sync_failed(
+                lib_files,
+                rel_path,
+                video_id,
+                video_mod_time,
+                issue_callback=issue_callback,
+                library_path=library_path,
+                abs_path=abs_path,
+                detail=f"reuse sync failed (disk_vid={disk_vid})",
+            )
+            return None, None, metadata_updated, had_saved_vid
+        metadata_updated = _upsert_file_record(
+            lib_files,
+            rel_path,
+            video_id,
+            video_mod_time,
+            "ready",
+            **_fingerprint_kwargs(abs_path),
+        )
+        if disk_vid != video_id:
+            ref_meta = meta
+            if ref_meta is None:
+                from src.storage.asset_store import load_model_metadata
+
+                ref_meta = load_model_metadata(config=config)
+            _safe_delete_unreferenced_video_data(
+                ref_meta,
+                disk_vid,
+                config,
+                exclude_library_path=library_path,
+                exclude_rel_path=rel_path,
+                refresh_lance_state=True,
+            )
+        return vectors, timestamps, metadata_updated, False
+
+    if kind == "generate_failed":
+        failure_reason = str(result.get("failure_reason") or "sync_failed")
+        metadata_updated = _upsert_file_record(
+            lib_files,
+            rel_path,
+            video_id,
+            video_mod_time,
+            "sync_failed",
+            sync_failure_reason=failure_reason,
+        )
+        _emit_issue(
+            issue_callback,
+            library_path,
+            rel_path,
+            abs_path,
+            action="skipped",
+            reason=failure_reason,
+        )
+        return None, None, metadata_updated, had_saved_vid
+
+    if kind == "generated":
+        vectors = result.get("vectors")
+        timestamps = result.get("timestamps")
+        chunks = result.get("chunks")
+        chunk_config = result.get("chunk_config")
+        synced = _sync_video_vectors_to_lance(
+            video_id,
+            config,
+            library_path,
+            abs_path,
+            vectors=vectors,
+            timestamps=timestamps,
+            chunks=chunks,
+            chunk_config=chunk_config,
+        )
+        if not synced:
+            metadata_updated = _mark_lance_sync_failed(
+                lib_files,
+                rel_path,
+                video_id,
+                video_mod_time,
+                issue_callback=issue_callback,
+                library_path=library_path,
+                abs_path=abs_path,
+                detail="full index Lance sync failed",
+            )
+            return None, None, metadata_updated, had_saved_vid
+        metadata_updated = _upsert_file_record(
+            lib_files,
+            rel_path,
+            video_id,
+            video_mod_time,
+            "ready",
+            **_fingerprint_kwargs(abs_path),
+        )
+        health = assess_index_timestamp_health(abs_path, timestamps, config=config)
+        if health.get("warnings"):
+            _emit_issue(
+                issue_callback,
+                library_path,
+                rel_path,
+                abs_path,
+                action="warning",
+                reason="timestamp_drift",
+                detail=health.get("detail", ""),
+            )
+        return vectors, timestamps, metadata_updated, True
+
+    if kind == "error":
+        exc = result.get("exc")
+        failure_reason = str(
+            result.get("failure_reason")
+            or _classify_sync_failure_reason(abs_path, None, None, exc=exc if isinstance(exc, Exception) else None)
+        )
+        try:
+            if video_mod_time is None and abs_path:
+                video_mod_time = os.path.getmtime(abs_path)
+        except OSError:
+            video_mod_time = video_mod_time
+        if not video_id and abs_path:
+            try:
+                video_id = get_video_hash(abs_path)
+            except Exception:
+                video_id = ""
+        metadata_updated = False
+        if video_id and video_mod_time is not None:
+            metadata_updated = _upsert_file_record(
+                lib_files,
+                rel_path,
+                video_id,
+                video_mod_time,
+                "sync_failed",
+                sync_failure_reason=failure_reason,
+            )
+        _emit_issue(
+            issue_callback,
+            library_path,
+            rel_path,
+            abs_path,
+            action="skipped",
+            reason=failure_reason,
+            detail=str(result.get("detail") or ""),
+        )
+        return None, None, metadata_updated, had_saved_vid
+
+    return None, None, False, False
+
+
 def process_single_video(
     abs_path,
     rel_path,
@@ -1097,303 +1526,228 @@ def process_single_video(
     indexed_ids=None,
     meta=None,
 ):
-    video_name = os.path.basename(abs_path)
-    progress_reporter = (
-        IndexingProgressReporter(
-            progress_callback,
-            video_name=video_name,
-            file_index=file_index,
-            file_total=file_total,
-        )
-        if progress_callback
-        else None
-    )
+    """Index one video: compute then commit (serial API for tests and workers=1)."""
+    rel_path = canonicalize_library_rel_path(rel_path)
+    saved = dict(lib_files.get(rel_path, {}))
     try:
-        if progress_reporter is not None:
-            progress_reporter.emit("file", file_index, file_total, force=True)
-
-        # Extension/size only — defer stream probe until we must generate.
-        if not _is_valid_video_source(abs_path, probe=False):
-            logger.warning("Skipping non-indexable video source: %s", abs_path)
-            _emit_issue(
-                issue_callback,
-                library_path or "",
-                rel_path,
-                abs_path,
-                action="skipped",
-                reason="invalid_video_source",
-                detail="Missing file or unsupported extension.",
-            )
-            return None, None, False, False
-
-        video_mod_time = os.path.getmtime(abs_path)
-        rel_path = canonicalize_library_rel_path(rel_path)
-        saved = lib_files.get(rel_path, {})
-        forced_failure = _get_debug_forced_failure()
-        if forced_failure is not None:
-            raise forced_failure
-
-        # Cheap reuse before any ffprobe / content hash.
-        lance_cached = _try_reuse_lance_indexed_video(
+        result = _index_video_compute(
             abs_path,
+            rel_path,
             saved,
             config,
-            indexed_ids=indexed_ids,
-            library_path=library_path or "",
-        )
-        if lance_cached is not None:
-            video_id = lance_cached["canonical_vid"]
-            metadata_updated = _upsert_file_record(
-                lib_files,
-                rel_path,
-                video_id,
-                video_mod_time,
-                "ready",
-                **_fingerprint_kwargs(abs_path),
-            )
-            if progress_reporter is not None:
-                progress_reporter.emit("reuse", force=True)
-            logger.info(
-                "Per-video %s: reuse_lance_index %.2fs (vid=%s)",
-                os.path.basename(abs_path),
-                0.0,
-                video_id,
-            )
-            return _SKIP_VIDEO_ALREADY_INDEXED, None, metadata_updated, False
-
-        cached = _resolve_reusable_cached_vectors(abs_path, saved, config)
-        if cached is not None:
-            video_id = cached["canonical_vid"]
-            vectors = cached["vectors"]
-            timestamps = cached["timestamps"]
-            disk_vid = cached["disk_vid"]
-            t_reuse = time.perf_counter()
-            if progress_reporter is not None:
-                progress_reporter.emit("reuse", force=True)
-            reuse_s = time.perf_counter() - t_reuse
-            if disk_vid != video_id:
-                logger.info(
-                    "Per-video %s: reuse_cached_vectors aligned id %s -> %s in %.2fs (%d frames)",
-                    os.path.basename(abs_path),
-                    disk_vid,
-                    video_id,
-                    reuse_s,
-                    len(timestamps),
-                )
-            else:
-                logger.info(
-                    "Per-video %s: reuse_cached_vectors %.2fs (%d frames)",
-                    os.path.basename(abs_path),
-                    reuse_s,
-                    len(timestamps),
-                )
-            # Prefer chunks already stored under the source Lance id when re-keying.
-            chunk_source_id = disk_vid if disk_vid != video_id else video_id
-            chunks, chunks_rebuilt, chunk_config = _ensure_video_chunks(
-                chunk_source_id,
-                vectors,
-                timestamps,
-                config,
-            )
-            write_chunks = chunks_rebuilt or disk_vid != video_id
-            synced = _sync_video_vectors_to_lance(
-                video_id,
-                config,
-                library_path,
-                abs_path,
-                vectors=vectors,
-                timestamps=timestamps,
-                chunks=chunks if write_chunks else None,
-                chunk_config=chunk_config if write_chunks else None,
-            )
-            if not synced:
-                metadata_updated = _mark_lance_sync_failed(
-                    lib_files,
-                    rel_path,
-                    video_id,
-                    video_mod_time,
-                    issue_callback=issue_callback,
-                    library_path=library_path,
-                    abs_path=abs_path,
-                    detail=f"reuse sync failed (disk_vid={disk_vid})",
-                )
-                return None, None, metadata_updated, bool(saved.get("vid"))
-            metadata_updated = _upsert_file_record(
-                lib_files,
-                rel_path,
-                video_id,
-                video_mod_time,
-                "ready",
-                **_fingerprint_kwargs(abs_path),
-            )
-            if disk_vid != video_id:
-                # Re-key must not wipe another library still pointing at disk_vid.
-                ref_meta = meta
-                if ref_meta is None:
-                    from src.storage.asset_store import load_model_metadata
-
-                    ref_meta = load_model_metadata(config=config)
-                _safe_delete_unreferenced_video_data(
-                    ref_meta,
-                    disk_vid,
-                    config,
-                    exclude_library_path=library_path,
-                    exclude_rel_path=rel_path,
-                    refresh_lance_state=True,
-                )
-            return vectors, timestamps, metadata_updated, False
-
-        # About to generate — probe stream now (expensive).
-        if not _is_valid_video_source(abs_path, probe=True):
-            logger.warning("Skipping non-indexable video source: %s", abs_path)
-            _emit_issue(
-                issue_callback,
-                library_path or "",
-                rel_path,
-                abs_path,
-                action="skipped",
-                reason="invalid_video_source",
-                detail="Unreadable or unsupported video stream.",
-            )
-            return None, None, False, False
-
-        video_id = get_video_hash(abs_path)
-        saved_vid = str(saved.get("vid", "") or "").strip()
-        logger.info(
-            "Reindexing %s (no reusable on-disk cache: saved_vid=%s current_vid=%s)",
-            os.path.basename(abs_path),
-            saved_vid or "-",
-            video_id,
-        )
-        logger.info("Indexing video %s", os.path.basename(abs_path))
-        model_dirs = get_local_model_asset_dirs(config=config)
-        os.makedirs(model_dirs["vector_dir"], exist_ok=True)
-        t_gen = time.perf_counter()
-        vectors, timestamps, _, chunks = generate_vectors_and_index_for_video(
-            abs_path,
-            video_id,
-            model_dirs["index_dir"],
-            model_dirs["vector_dir"],
+            get_video_id,
+            library_path=library_path,
             should_stop_callback=should_stop_callback,
             progress_callback=progress_callback,
             file_index=file_index,
             file_total=file_total,
+            indexed_ids=indexed_ids,
         )
-        gen_s = time.perf_counter() - t_gen
-        logger.info(
-            "Per-video %s: generate_vectors_and_index_for_video wall %.2fs",
-            os.path.basename(abs_path),
-            gen_s,
-        )
-        if not _has_usable_vectors(vectors, timestamps):
-            failure_reason = _classify_sync_failure_reason(abs_path, vectors, timestamps)
-            metadata_updated = _upsert_file_record(
-                lib_files,
-                rel_path,
-                video_id,
-                video_mod_time,
-                "sync_failed",
-                sync_failure_reason=failure_reason,
-            )
-            _emit_issue(
-                issue_callback,
-                library_path or "",
-                rel_path,
-                abs_path,
-                action="skipped",
-                reason=failure_reason,
-            )
-            if vectors is None or timestamps is None:
-                logger.warning("Vector generation failed for %s and the file was marked sync_failed", abs_path)
-            elif len(vectors) == 0 or len(timestamps) == 0:
-                logger.warning("Vector generation returned empty data for %s and the file was marked sync_failed", abs_path)
-            else:
-                logger.warning(
-                    "Vector/timestamp counts differ for %s; marked sync_failed: vectors=%s timestamps=%s",
-                    abs_path,
-                    len(vectors),
-                    len(timestamps),
-                )
-            return None, None, metadata_updated, bool(saved.get("vid"))
-        synced = _sync_video_vectors_to_lance(
-            video_id,
-            config,
-            library_path,
-            abs_path,
-            vectors=vectors,
-            timestamps=timestamps,
-            chunks=chunks,
-            chunk_config=build_chunk_config(config),
-        )
-        if not synced:
-            metadata_updated = _mark_lance_sync_failed(
-                lib_files,
-                rel_path,
-                video_id,
-                video_mod_time,
-                issue_callback=issue_callback,
-                library_path=library_path,
-                abs_path=abs_path,
-                detail="full index Lance sync failed",
-            )
-            return None, None, metadata_updated, bool(saved.get("vid"))
-        metadata_updated = _upsert_file_record(
-            lib_files,
-            rel_path,
-            video_id,
-            video_mod_time,
-            "ready",
-            **_fingerprint_kwargs(abs_path),
-        )
-        health = assess_index_timestamp_health(abs_path, timestamps, config=config)
-        if health.get("warnings"):
-            _emit_issue(
-                issue_callback,
-                library_path or "",
-                rel_path,
-                abs_path,
-                action="warning",
-                reason="timestamp_drift",
-                detail=health.get("detail", ""),
-            )
-        return vectors, timestamps, metadata_updated, True
     except InterruptedError:
         raise
     except Exception as exc:
         logger.exception("Failed to process video %s", abs_path)
-        metadata_updated = False
-        search_assets_changed = False
         try:
-            saved = dict(lib_files.get(rel_path, {}))
-            video_id = get_video_id(abs_path)
             video_mod_time = os.path.getmtime(abs_path)
-            failure_reason = _classify_sync_failure_reason(abs_path, None, None, exc=exc)
-            metadata_updated = _upsert_file_record(
+        except OSError:
+            video_mod_time = None
+        try:
+            video_id = get_video_id(abs_path)
+        except Exception:
+            video_id = ""
+        result = {
+            "kind": "error",
+            "abs_path": abs_path,
+            "rel_path": rel_path,
+            "library_path": library_path or "",
+            "video_mod_time": video_mod_time,
+            "video_id": video_id,
+            "had_saved_vid": bool(saved.get("vid")),
+            "failure_reason": _classify_sync_failure_reason(abs_path, None, None, exc=exc),
+            "detail": _exception_detail(exc),
+            "exc": exc,
+        }
+    try:
+        return _index_video_commit(
+            lib_files,
+            result,
+            config=config,
+            issue_callback=issue_callback,
+            meta=meta,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist skipped indexing issue for %s: %s",
+            abs_path,
+            exc,
+            exc_info=True,
+        )
+        return None, None, False, bool(saved.get("vid"))
+
+
+def _run_planned_videos_with_prefetch(
+    planned_files,
+    *,
+    root_path,
+    lib_files,
+    config,
+    get_video_id,
+    issue_callback,
+    should_stop_callback,
+    progress_callback,
+    indexed_ids,
+    meta,
+    workers: int,
+    global_file_index_start: int,
+    total_files: int,
+    report_scan_progress,
+    queue_meta_persist,
+) -> tuple[list[str], bool, int]:
+    """Compute up to ``workers`` videos ahead; commit in plan order on this thread."""
+    failed_videos: list[str] = []
+    search_assets_changed = False
+    workers = max(_INDEX_VIDEO_WORKERS_MIN, min(_INDEX_VIDEO_WORKERS_MAX, int(workers or 1)))
+    global_file_index = int(global_file_index_start)
+
+    def _commit_one(abs_path: str, rel_path: str, file_index: int, result: dict[str, Any] | BaseException):
+        nonlocal search_assets_changed
+        report_scan_progress(file_index, total_files, library_path=root_path)
+        if isinstance(result, BaseException):
+            if isinstance(result, InterruptedError):
+                raise result
+            logger.exception("Failed to process video %s", abs_path, exc_info=result)
+            saved = dict(lib_files.get(rel_path, {}))
+            try:
+                video_mod_time = os.path.getmtime(abs_path)
+            except OSError:
+                video_mod_time = None
+            try:
+                video_id = get_video_id(abs_path)
+            except Exception:
+                video_id = ""
+            result = {
+                "kind": "error",
+                "abs_path": abs_path,
+                "rel_path": rel_path,
+                "library_path": root_path or "",
+                "video_mod_time": video_mod_time,
+                "video_id": video_id,
+                "had_saved_vid": bool(saved.get("vid")),
+                "failure_reason": _classify_sync_failure_reason(
+                    abs_path, None, None, exc=result if isinstance(result, Exception) else None
+                ),
+                "detail": _exception_detail(result) if isinstance(result, Exception) else str(result),
+                "exc": result if isinstance(result, Exception) else None,
+            }
+        vectors, _timestamps, metadata_updated, file_search_assets_changed = _index_video_commit(
+            lib_files,
+            result,
+            config=config,
+            issue_callback=issue_callback,
+            meta=meta,
+        )
+        search_assets_changed = search_assets_changed or file_search_assets_changed
+        if metadata_updated:
+            queue_meta_persist()
+        if vectors is _SKIP_VIDEO_ALREADY_INDEXED:
+            return
+        if vectors is None:
+            failed_videos.append(abs_path)
+
+    if workers <= 1:
+        for abs_path in planned_files:
+            if should_stop_callback and should_stop_callback():
+                raise IndexUpdateInterrupted(
+                    "Index update stopped before finishing current library",
+                    search_assets_changed=search_assets_changed,
+                )
+            rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
+            global_file_index += 1
+            report_scan_progress(global_file_index, total_files, library_path=root_path)
+            vectors, timestamps, metadata_updated, file_search_assets_changed = process_single_video(
+                abs_path,
+                rel_path,
                 lib_files,
-                rel_path,
-                video_id,
-                video_mod_time,
-                "sync_failed",
-                sync_failure_reason=failure_reason,
+                config,
+                get_video_id,
+                library_path=root_path,
+                issue_callback=issue_callback,
+                should_stop_callback=should_stop_callback,
+                progress_callback=progress_callback,
+                file_index=global_file_index,
+                file_total=total_files or 1,
+                indexed_ids=indexed_ids,
+                meta=meta,
             )
-            _emit_issue(
-                issue_callback,
-                library_path or "",
-                rel_path,
-                abs_path,
-                action="skipped",
-                reason=failure_reason,
-                detail=_exception_detail(exc),
-            )
-            search_assets_changed = bool(saved.get("vid"))
-        except Exception as exc:
-            logger.warning(
-                "Failed to persist skipped indexing issue for %s: %s",
-                abs_path,
-                exc,
-                exc_info=True,
-            )
-        return None, None, metadata_updated, search_assets_changed
+            search_assets_changed = search_assets_changed or file_search_assets_changed
+            if vectors is _SKIP_VIDEO_ALREADY_INDEXED:
+                if metadata_updated:
+                    queue_meta_persist()
+                continue
+            if metadata_updated:
+                queue_meta_persist()
+            if vectors is None:
+                failed_videos.append(abs_path)
+        return failed_videos, search_assets_changed, global_file_index
+
+    pending: list[tuple[str, str, int, Future]] = []
+    paths = list(planned_files)
+
+    def _submit(executor: ThreadPoolExecutor, abs_path: str, file_index: int) -> tuple[str, str, int, Future]:
+        rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
+        saved = dict(lib_files.get(rel_path, {}))
+        future = executor.submit(
+            _index_video_compute,
+            abs_path,
+            rel_path,
+            saved,
+            config,
+            get_video_id,
+            root_path,
+            should_stop_callback,
+            progress_callback,
+            file_index,
+            total_files or 1,
+            indexed_ids,
+        )
+        return abs_path, rel_path, file_index, future
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="VSIndexPrefetch") as executor:
+        path_iter = iter(paths)
+        try:
+            while True:
+                if should_stop_callback and should_stop_callback():
+                    for _a, _r, _i, fut in pending:
+                        fut.cancel()
+                    raise IndexUpdateInterrupted(
+                        "Index update stopped before finishing current library",
+                        search_assets_changed=search_assets_changed,
+                    )
+                while len(pending) < workers:
+                    try:
+                        abs_path = next(path_iter)
+                    except StopIteration:
+                        break
+                    global_file_index += 1
+                    pending.append(_submit(executor, abs_path, global_file_index))
+                if not pending:
+                    break
+                abs_path, rel_path, file_index, future = pending.pop(0)
+                try:
+                    result = future.result()
+                except InterruptedError:
+                    for _a, _r, _i, fut in pending:
+                        fut.cancel()
+                    raise
+                except Exception as exc:
+                    result = exc
+                _commit_one(abs_path, rel_path, file_index, result)
+        except BaseException:
+            for _a, _r, _i, fut in pending:
+                fut.cancel()
+            raise
+
+    return failed_videos, search_assets_changed, global_file_index
 
 
 def scan_target_libraries(
@@ -1534,40 +1888,33 @@ def scan_target_libraries(
                 root_path, lib_files, valid_files, selected_video_ids
             )
             try:
-                for abs_path in planned_files:
-                    if should_stop_callback and should_stop_callback():
-                        raise IndexUpdateInterrupted(
-                            "Index update stopped before finishing current library",
-                            search_assets_changed=search_assets_changed,
-                        )
-                    rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
-                    global_file_index += 1
-                    _report_scan_progress(global_file_index, total_files, library_path=root_path)
-
-                    vectors, timestamps, metadata_updated, file_search_assets_changed = process_single_video(
-                        abs_path,
-                        rel_path,
-                        lib_files,
-                        config,
-                        get_video_id,
-                        library_path=root_path,
-                        issue_callback=issue_callback,
-                        should_stop_callback=should_stop_callback,
-                        progress_callback=progress_callback,
-                        file_index=global_file_index,
-                        file_total=total_files or 1,
-                        indexed_ids=indexed_ids,
-                        meta=meta,
+                workers = resolve_indexing_video_workers(config)
+                if workers > 1:
+                    logger.info(
+                        "Index scan prefetch workers=%d for library %s (%d files)",
+                        workers,
+                        root_path,
+                        len(planned_files),
                     )
-                    search_assets_changed = search_assets_changed or file_search_assets_changed
-                    if vectors is _SKIP_VIDEO_ALREADY_INDEXED:
-                        if metadata_updated:
-                            _queue_meta_persist()
-                        continue
-                    if metadata_updated:
-                        _queue_meta_persist()
-                    if vectors is None:
-                        failed_videos.append(abs_path)
+                batch_failed, batch_changed, global_file_index = _run_planned_videos_with_prefetch(
+                    planned_files,
+                    root_path=root_path,
+                    lib_files=lib_files,
+                    config=config,
+                    get_video_id=get_video_id,
+                    issue_callback=issue_callback,
+                    should_stop_callback=should_stop_callback,
+                    progress_callback=progress_callback,
+                    indexed_ids=indexed_ids,
+                    meta=meta,
+                    workers=workers,
+                    global_file_index_start=global_file_index,
+                    total_files=total_files or 1,
+                    report_scan_progress=_report_scan_progress,
+                    queue_meta_persist=_queue_meta_persist,
+                )
+                failed_videos.extend(batch_failed)
+                search_assets_changed = search_assets_changed or batch_changed
 
                 lib_data["files"] = lib_files
                 if selected_video_ids is None:

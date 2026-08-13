@@ -28,6 +28,12 @@ class RuntimeGuiMixin:
         for target_dir in target_dirs:
             open_folder_in_explorer(target_dir)
 
+    def _is_gpu_backend_label(self, backend):
+        text = str(backend or "").strip().upper()
+        if not text or text == "CPU":
+            return False
+        return True
+
     def _update_inference_backend_hint(self, status=None):
         config = load_config()
         if status is None:
@@ -39,15 +45,16 @@ class RuntimeGuiMixin:
 
         if status["initialized"]:
             backend_text = status["backend"] or ""
+            is_gpu = self._is_gpu_backend_label(backend_text)
             if status["warning"]:
                 issue_text = self._build_runtime_issue_summary(status)
-                if str(status.get("backend") or "").upper() == "GPU":
+                if is_gpu:
                     backend_text = f"{backend_text} ({issue_text})".strip()
                 else:
                     backend_text = self.texts["setting_inference_cpu_issue"].format(issue=issue_text)
                 show_help_link = True
                 self.settings_page.hint_inference_backend.setProperty("state", "warn")
-            elif str(status["backend"]).upper() == "GPU":
+            elif is_gpu:
                 self.settings_page.hint_inference_backend.setProperty("state", "ok")
             else:
                 self.settings_page.hint_inference_backend.setProperty("state", "neutral")

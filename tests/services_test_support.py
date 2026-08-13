@@ -1,7 +1,11 @@
 """Shared helpers and import stubs for service-layer unit tests."""
 
+import os
 import sys
 import types
+
+# Hard isolation: Lance/storage mutation must never touch real AppData VideoSeek.
+os.environ.setdefault("VIDEOSEEK_TEST_MODE", "1")
 
 try:
     import cv2 as _real_cv2

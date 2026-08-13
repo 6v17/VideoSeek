@@ -333,7 +333,9 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
         register_library_videos(config=cfg)
     meta = load_model_metadata(config=cfg)
     libraries = _normalize_library_map(meta.get("libraries", {}))
+    lance_video_ids = _lance_indexed_video_ids(config=cfg)
     entries: list[dict] = []
+    demoted = 0
     for root_path, lib_data in libraries.items():
         if not isinstance(lib_data, dict):
             continue
@@ -349,19 +351,93 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
                 continue
             video_path = os.path.normpath(os.path.join(root_path, str(rel_path or "")))
             source_exists = os.path.isfile(video_path)
+            stored_state = str(info.get("asset_state", "") or "").strip().lower()
+            if lance_video_ids is None:
+                asset_state = stored_state
+            else:
+                lance_ready = video_id in lance_video_ids
+                asset_state = _effective_asset_state(
+                    info,
+                    source_exists,
+                    vector_exists=False,
+                    vector_ok=True,
+                    lance_ready=lance_ready,
+                )
+                # Persist stale ready→missing_asset so list and search scope stay honest.
+                if (
+                    stored_state == "ready"
+                    and asset_state == "missing_asset"
+                    and not get_index_sync_status().get("index_sync_in_progress")
+                ):
+                    info["asset_state"] = "missing_asset"
+                    demoted += 1
             entries.append(
                 {
                     "library_path": library_path,
                     "video_path": video_path,
                     "video_rel_path": str(rel_path or "").replace("\\", "/"),
                     "video_id": video_id,
-                    "asset_state": str(info.get("asset_state", "") or "").strip().lower(),
+                    "asset_state": asset_state,
                     "source_exists": source_exists,
                     "sync_failure_reason": str(info.get("sync_failure_reason", "") or "").strip().lower(),
                 }
             )
+    if demoted:
+        try:
+            save_model_metadata(meta, config=cfg)
+            get_logger("library_service").warning(
+                "Persisted %s stale ready→missing_asset demotions (Lance missing)",
+                demoted,
+            )
+        except Exception as exc:
+            get_logger("library_service").warning("Failed to persist Lance demotions: %s", exc)
     entries.sort(key=lambda item: (item["library_path"].lower(), item["video_rel_path"].lower()))
     return entries
+
+
+def _lance_indexed_video_ids(*, config=None):
+    """Return Lance video ids when the table is ready; ``None`` if Lance is unavailable."""
+    try:
+        from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
+
+        base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+        if not lance_search_is_ready(base_dir):
+            return None
+        return get_lance_indexed_video_ids(base_dir)
+    except Exception:
+        return None
+
+
+def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
+    """Demote meta ``ready`` rows that have no Lance vectors. Returns demotion count.
+
+    No-op when Lance is not ready, so empty/unavailable storage never mass-demotes meta.
+    """
+    if not isinstance(meta, dict):
+        return 0
+    lance_video_ids = _lance_indexed_video_ids(config=config)
+    if lance_video_ids is None:
+        return 0
+    demoted = 0
+    for lib_data in (meta.get("libraries") or {}).values():
+        if not isinstance(lib_data, dict):
+            continue
+        files = lib_data.get("files") or {}
+        if not isinstance(files, dict):
+            continue
+        for info in files.values():
+            if not isinstance(info, dict):
+                continue
+            video_id = str(info.get("vid", "") or "").strip()
+            if not video_id:
+                continue
+            if str(info.get("asset_state", "") or "").strip().lower() != "ready":
+                continue
+            if video_id in lance_video_ids:
+                continue
+            info["asset_state"] = "missing_asset"
+            demoted += 1
+    return demoted
 
 
 def remove_library(path, delete_video_data, progress_callback=None):

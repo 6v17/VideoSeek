@@ -5,7 +5,13 @@ import numpy as np
 import onnxruntime as ort
 
 from src.app.config import load_config
-from src.core.onnx_session import build_session_options, resolve_embedding_batch_size
+from src.core.onnx_session import (
+    build_session_options,
+    gpu_backend_label,
+    providers_indicate_gpu,
+    resolve_embedding_batch_size,
+    resolve_onnx_providers,
+)
 from src.core.onnx_vision_engine import INFERENCE_LOCK, OnnxVisionBatchMixin
 from src.storage.config_store import get_effective_prefer_gpu
 
@@ -29,10 +35,7 @@ class SigLIP2OnnxEngine(OnnxVisionBatchMixin):
             if not os.path.isfile(file_path):
                 raise RuntimeError(f"Missing SigLIP model file: {file_path}")
 
-        vision_providers = ["CPUExecutionProvider"]
-        if effective_prefer_gpu:
-            vision_providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
-
+        vision_providers = resolve_onnx_providers(prefer_gpu=effective_prefer_gpu, config=runtime_config)
         # Keep text on CPU by default for compatibility; make this configurable later if needed.
         text_providers = ["CPUExecutionProvider"]
 
@@ -50,15 +53,16 @@ class SigLIP2OnnxEngine(OnnxVisionBatchMixin):
             "visual": list(self.vision_session.get_providers()),
             "text": list(self.text_session.get_providers()),
         }
-        self.using_gpu = "DmlExecutionProvider" in self.active_providers["visual"]
+        self.using_gpu = providers_indicate_gpu([self.active_providers["visual"]])
         self.prefer_gpu = configured_prefer_gpu
         self.provider_id = "siglip2_onnx"
+        backend = gpu_backend_label([self.active_providers["visual"]]) if self.using_gpu else "CPU"
         self.init_vision_batch_state(
             visual_session=self.vision_session,
             embedding_batch_size=resolve_embedding_batch_size(runtime_config),
             image_size=self.image_size,
             using_gpu=self.using_gpu,
-            backend_label="GPU" if self.using_gpu else "CPU",
+            backend_label=backend,
             active_providers=self.active_providers,
         )
         self.runtime_issue = ""

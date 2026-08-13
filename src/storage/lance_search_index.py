@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 import numpy as np
@@ -14,9 +14,12 @@ from src.storage.lance_store import (
     CHUNKS_TABLE_NAME,
     FRAMES_TABLE_NAME,
     _connect_lance,
+    _lance_vector_index_status,
     _list_table_names,
     get_lance_dir,
     get_lance_state_file,
+    is_lance_ann_enabled,
+    resolve_lance_ann_refine_multiplier,
 )
 from src.storage.video_identity import canonicalize_library_path
 
@@ -179,13 +182,24 @@ class LanceSearchRow:
 class LanceTableSearchIndex:
     """Query Lance tables directly instead of materializing all vectors in RAM."""
 
-    def __init__(self, table, *, where: str = "", is_chunk: bool = False):
+    def __init__(self, table, *, where: str = "", is_chunk: bool = False, config=None):
         self._table = table
         self._where = str(where or "").strip()
         self._is_chunk = bool(is_chunk)
         self._ntotal = self._count_rows()
         self._d = self._read_dimension()
         self._last_rows: list[LanceSearchRow] = []
+        self._ann_enabled = is_lance_ann_enabled(config)
+        self._ann_refine_multiplier = resolve_lance_ann_refine_multiplier(config)
+        self._has_vector_index = self._detect_vector_index()
+
+    def _detect_vector_index(self) -> bool:
+        try:
+            has_index, unindexed = _lance_vector_index_status(self._table)
+            return bool(has_index) and int(unindexed or 0) <= 0
+        except Exception as exc:
+            logger.debug("Lance vector index probe failed: %s", exc)
+            return False
 
     def _count_rows(self) -> int:
         try:
@@ -219,7 +233,7 @@ class LanceTableSearchIndex:
     def last_rows(self) -> list[LanceSearchRow]:
         return list(self._last_rows)
 
-    def _build_vector_search(self, query_vector):
+    def _build_vector_search(self, query_vector, *, use_ann: bool = False):
         query = np.asarray(query_vector, dtype=np.float32)
         if query.ndim == 2:
             if query.shape[0] != 1:
@@ -228,10 +242,37 @@ class LanceTableSearchIndex:
         builder = self._table.search(np.asarray(query, dtype=np.float32).tolist()).metric("cosine")
         if self._where:
             builder = builder.where(self._where)
-        # IVF_PQ indexes trade recall for speed; prefer exact Lance vector search for CLIP ranking.
+        if use_ann:
+            # Prefer broader recall when ANN is on; exact refine re-ranks candidates.
+            nprobes = getattr(builder, "nprobes", None)
+            if callable(nprobes):
+                try:
+                    builder = nprobes(64)
+                except Exception:
+                    pass
+            return builder
+        # IVF_PQ indexes trade recall for speed; default path stays exact.
         if hasattr(builder, "bypass_vector_index"):
             builder = builder.bypass_vector_index()
         return builder
+
+    @staticmethod
+    def _refine_rows_exact_cosine(query_vector, rows: list[LanceSearchRow], top_k: int) -> list[LanceSearchRow]:
+        if not rows or top_k <= 0:
+            return []
+        query = np.asarray(query_vector, dtype=np.float32).reshape(1, -1)
+        query = _normalize_vectors(query)[0]
+        refined: list[LanceSearchRow] = []
+        for row in rows:
+            if row.vector is None:
+                refined.append(row)
+                continue
+            vector = np.asarray(row.vector, dtype=np.float32).reshape(1, -1)
+            vector = _normalize_vectors(vector)[0]
+            score = float(np.dot(query, vector))
+            refined.append(replace(row, score=score))
+        refined.sort(key=lambda item: float(item.score), reverse=True)
+        return refined[:top_k]
 
     def search_rows(self, query_vector, top_k: int) -> list[LanceSearchRow]:
         actual_k = min(max(int(top_k), 0), self._ntotal)
@@ -251,15 +292,31 @@ class LanceTableSearchIndex:
                 "Current model uses a different embedding space. Please rebuild the index for the active model."
             )
 
+        use_ann = bool(self._ann_enabled and self._has_vector_index)
+        fetch_k = actual_k
+        if use_ann:
+            fetch_k = min(self._ntotal, max(actual_k, actual_k * int(self._ann_refine_multiplier)))
+
+        arrow = None
         try:
-            arrow = self._build_vector_search(query).limit(actual_k).to_arrow()
+            arrow = self._build_vector_search(query, use_ann=use_ann).limit(fetch_k).to_arrow()
         except Exception as exc:
-            logger.error("Lance vector search failed: %s", exc)
-            self._last_rows = []
-            return []
+            if use_ann:
+                logger.warning("Lance ANN search failed; falling back to exact scan: %s", exc)
+                use_ann = False
+                try:
+                    arrow = self._build_vector_search(query, use_ann=False).limit(actual_k).to_arrow()
+                except Exception as exact_exc:
+                    logger.error("Lance vector search failed: %s", exact_exc)
+                    self._last_rows = []
+                    return []
+            else:
+                logger.error("Lance vector search failed: %s", exc)
+                self._last_rows = []
+                return []
 
         rows: list[LanceSearchRow] = []
-        if arrow.num_rows <= 0:
+        if arrow is None or arrow.num_rows <= 0:
             self._last_rows = rows
             return rows
 
@@ -287,6 +344,10 @@ class LanceTableSearchIndex:
                     vector=vector,
                 )
             )
+        if use_ann:
+            rows = self._refine_rows_exact_cosine(query, rows, actual_k)
+        elif len(rows) > actual_k:
+            rows = rows[:actual_k]
         self._last_rows = rows
         return rows
 

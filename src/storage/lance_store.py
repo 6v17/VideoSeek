@@ -31,9 +31,12 @@ _DIALOGUE_INDEX_STATES = {
     DIALOGUE_INDEX_STATE_FAILED,
 }
 LANCE_ANN_MIN_ROWS = 2000
-LANCE_ANN_ENABLED = False
+# Legacy test override: when tests patch this True/False, helpers honor it over config.
+LANCE_ANN_ENABLED = None
 _INDEX_BATCH_DEPTH: dict[str, int] = {}
 _INDEX_BATCH_PROGRESS: dict[str, ProgressCallback | None] = {}
+_UPSERT_JOURNAL_NAME = "upsert_journal.json"
+_RECOVERED_UPSERT_PROFILES: set[str] = set()
 # Compact meta flushes during scan; larger interval cuts I/O at 10k+ libraries.
 META_PERSIST_INTERVAL = 100
 
@@ -41,6 +44,70 @@ ProgressCallback = Callable[[int, str], None]
 
 _FRAME_ROW_META_BYTES = 72
 _CHUNK_ROW_META_BYTES = 64
+
+
+def _is_test_mode() -> bool:
+    return str(os.environ.get("VIDEOSEEK_TEST_MODE", "") or "").strip() in {"1", "true", "True", "yes"}
+
+
+def _assert_user_data_mutation_allowed(profile_base_dir: str, *, action: str) -> None:
+    """Block accidental writes to the real install data root while tests run."""
+    if not _is_test_mode():
+        return
+    if str(os.environ.get("VIDEOSEEK_ALLOW_USER_DATA_MUTATION", "") or "").strip() in {"1", "true", "True"}:
+        return
+    profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
+    if not profile_base_dir:
+        return
+    local_app = os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or ""
+    if not local_app:
+        return
+    protected_root = os.path.normcase(os.path.normpath(os.path.join(local_app, "VideoSeek")))
+    candidate = os.path.normcase(profile_base_dir)
+    if candidate == protected_root or candidate.startswith(protected_root + os.sep):
+        raise RuntimeError(
+            f"Refusing {action} on real VideoSeek user data during tests: {profile_base_dir}"
+        )
+
+
+def is_lance_ann_enabled(config=None) -> bool:
+    """Whether IVF_PQ ANN indexes should be built/used (default off for recall)."""
+    if LANCE_ANN_ENABLED is not None:
+        return bool(LANCE_ANN_ENABLED)
+    try:
+        from src.app.config import DEFAULT_CONFIG, load_config
+
+        runtime = dict(config) if config is not None else load_config()
+        default = bool(DEFAULT_CONFIG.get("lance_ann_enabled", False))
+        return bool(runtime.get("lance_ann_enabled", default))
+    except Exception:
+        return False
+
+
+def resolve_lance_ann_min_rows(config=None) -> int:
+    try:
+        from src.app.config import CONFIG_BOUNDS, DEFAULT_CONFIG, load_config
+
+        runtime = dict(config) if config is not None else load_config()
+        default = int(DEFAULT_CONFIG.get("lance_ann_min_rows", LANCE_ANN_MIN_ROWS))
+        value = int(runtime.get("lance_ann_min_rows", default))
+        lo, hi = CONFIG_BOUNDS.get("lance_ann_min_rows", (500, 100000))
+        return max(int(lo), min(int(hi), value))
+    except Exception:
+        return int(LANCE_ANN_MIN_ROWS)
+
+
+def resolve_lance_ann_refine_multiplier(config=None) -> int:
+    try:
+        from src.app.config import CONFIG_BOUNDS, DEFAULT_CONFIG, load_config
+
+        runtime = dict(config) if config is not None else load_config()
+        default = int(DEFAULT_CONFIG.get("lance_ann_refine_multiplier", 4))
+        value = int(runtime.get("lance_ann_refine_multiplier", default))
+        lo, hi = CONFIG_BOUNDS.get("lance_ann_refine_multiplier", (2, 16))
+        return max(int(lo), min(int(hi), value))
+    except Exception:
+        return 4
 
 
 def directory_size_bytes(path: str) -> int:
@@ -131,6 +198,10 @@ def begin_lance_index_batch(profile_base_dir: str, progress_callback: ProgressCa
     key = os.path.normpath(str(profile_base_dir or ""))
     if not key:
         return
+    try:
+        recover_interrupted_lance_upserts(key)
+    except Exception as exc:
+        logger.error("Lance upsert journal recovery failed at batch start: %s", exc, exc_info=True)
     _INDEX_BATCH_DEPTH[key] = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) + 1
     if progress_callback is not None:
         _INDEX_BATCH_PROGRESS[key] = progress_callback
@@ -147,8 +218,12 @@ def end_lance_index_batch(profile_base_dir: str) -> None:
         refresh_import_state(key)
         _invalidate_lance_search_caches(key)
         drop_lance_vector_indexes(key)
-        if LANCE_ANN_ENABLED:
-            ensure_lance_vector_indexes(key, progress_callback=progress_callback)
+        if is_lance_ann_enabled():
+            ensure_lance_vector_indexes(
+                key,
+                progress_callback=progress_callback,
+                min_rows=resolve_lance_ann_min_rows(),
+            )
         return
     _INDEX_BATCH_DEPTH[key] = depth - 1
 
@@ -200,10 +275,11 @@ def ensure_lance_vector_indexes(
     profile_base_dir: str,
     *,
     progress_callback: ProgressCallback | None = None,
-    min_rows: int = LANCE_ANN_MIN_ROWS,
+    min_rows: int | None = None,
+    config=None,
 ) -> dict:
     """Optional IVF_PQ index for speed; disabled by default because it reduces recall accuracy."""
-    if not LANCE_ANN_ENABLED:
+    if not is_lance_ann_enabled(config):
         return {"built": [], "skipped": ["disabled"]}
 
     from lancedb.index import IvfPq
@@ -211,6 +287,10 @@ def ensure_lance_vector_indexes(
     profile_base_dir = os.path.normpath(profile_base_dir)
     if not os.path.isdir(get_lance_dir(profile_base_dir)):
         return {"built": [], "skipped": []}
+
+    if min_rows is None:
+        min_rows = resolve_lance_ann_min_rows(config)
+    min_rows = max(int(min_rows or 0), 1)
 
     db = _connect_lance(profile_base_dir)
     built: list[str] = []
@@ -254,6 +334,7 @@ def ensure_lance_vector_indexes(
 def drop_lance_vector_indexes(profile_base_dir: str) -> dict:
     """Remove IVF/PQ ANN indexes so Lance falls back to exact vector search."""
     profile_base_dir = os.path.normpath(profile_base_dir)
+    _assert_user_data_mutation_allowed(profile_base_dir, action="drop Lance ANN indexes")
     if not os.path.isdir(get_lance_dir(profile_base_dir)):
         return {"dropped": []}
 
@@ -285,6 +366,8 @@ def drop_lance_vector_indexes(profile_base_dir: str) -> dict:
 
 
 def compact_lance_storage(profile_base_dir: str) -> None:
+    profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
+    _assert_user_data_mutation_allowed(profile_base_dir, action="compact Lance storage")
     profile_base_dir = os.path.normpath(profile_base_dir)
     if not os.path.isdir(get_lance_dir(profile_base_dir)):
         return
@@ -322,12 +405,23 @@ def garbage_collect_orphan_lance_videos(
 
     model_dirs = get_local_model_asset_dirs(config=config)
     profile_base_dir = os.path.normpath(model_dirs["base_dir"])
+    _assert_user_data_mutation_allowed(profile_base_dir, action="orphan Lance GC")
     if not lance_search_is_ready(profile_base_dir):
         return []
 
     valid_ids = collect_meta_video_ids(meta)
-    orphan_ids = sorted(get_lance_indexed_video_ids(profile_base_dir) - valid_ids)
+    indexed_ids = get_lance_indexed_video_ids(profile_base_dir)
+    orphan_ids = sorted(indexed_ids - valid_ids)
     if not orphan_ids:
+        return []
+    # Hard stop: empty meta must never mass-delete a populated Lance library.
+    if not valid_ids and indexed_ids:
+        logger.error(
+            "Refusing orphan Lance GC: meta has 0 video ids but Lance has %d indexed videos "
+            "(would wipe the library). profile=%s",
+            len(indexed_ids),
+            profile_base_dir,
+        )
         return []
 
     for video_id in orphan_ids:
@@ -495,9 +589,195 @@ def set_dialogue_index_state(
 def _connect_lance(profile_base_dir: str):
     import lancedb
 
+    profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
     lance_dir = get_lance_dir(profile_base_dir)
     os.makedirs(lance_dir, exist_ok=True)
+    if profile_base_dir and profile_base_dir not in _RECOVERED_UPSERT_PROFILES:
+        # Mark first so nested connects during recovery do not recurse.
+        _RECOVERED_UPSERT_PROFILES.add(profile_base_dir)
+        try:
+            recover_interrupted_lance_upserts(profile_base_dir)
+        except Exception as exc:
+            logger.error(
+                "Lance upsert journal recovery failed for %s: %s",
+                profile_base_dir,
+                exc,
+                exc_info=True,
+            )
     return lancedb.connect(lance_dir)
+
+
+def _upsert_journal_path(profile_base_dir: str) -> str:
+    return os.path.join(get_lance_dir(profile_base_dir), _UPSERT_JOURNAL_NAME)
+
+
+def _read_upsert_journal(profile_base_dir: str) -> dict | None:
+    path = _upsert_journal_path(profile_base_dir)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        logger.error("Unreadable Lance upsert journal %s: %s", path, exc)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_upsert_journal(profile_base_dir: str, payload: dict) -> None:
+    path = _upsert_journal_path(profile_base_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, path)
+
+
+def _clear_upsert_journal(profile_base_dir: str) -> None:
+    path = _upsert_journal_path(profile_base_dir)
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logger.warning("Failed to clear Lance upsert journal %s: %s", path, exc)
+
+
+def _table_version(db, table_name: str) -> int | None:
+    if table_name not in _list_table_names(db):
+        return None
+    try:
+        return int(db.open_table(table_name).version)
+    except Exception:
+        return None
+
+
+def _restore_table_to_version(db, table_name: str, pre_version: int | None) -> None:
+    names = _list_table_names(db)
+    if pre_version is None:
+        # Table did not exist before this upsert; drop a partially created one.
+        if table_name in names:
+            try:
+                db.drop_table(table_name)
+            except Exception as exc:
+                logger.error("Failed dropping partial Lance table %s: %s", table_name, exc)
+        return
+    if table_name not in names:
+        return
+    table = db.open_table(table_name)
+    current = int(getattr(table, "version", pre_version) or pre_version)
+    if current == int(pre_version):
+        return
+    table.restore(int(pre_version))
+
+
+def _restore_from_upsert_journal(profile_base_dir: str, db=None) -> bool:
+    journal = _read_upsert_journal(profile_base_dir)
+    if not journal:
+        return False
+    video_id = str(journal.get("video_id", "") or "")
+    tables = journal.get("tables") or []
+    if not isinstance(tables, list) or not tables:
+        _clear_upsert_journal(profile_base_dir)
+        return False
+    if db is None:
+        import lancedb
+
+        db = lancedb.connect(get_lance_dir(profile_base_dir))
+    logger.error(
+        "Restoring Lance tables after interrupted upsert video_id=%s tables=%s",
+        video_id or "-",
+        [item.get("table") for item in tables if isinstance(item, dict)],
+    )
+    for item in tables:
+        if not isinstance(item, dict):
+            continue
+        table_name = str(item.get("table", "") or "").strip()
+        if not table_name:
+            continue
+        pre_version = item.get("pre_version", None)
+        if pre_version is not None:
+            pre_version = int(pre_version)
+        try:
+            _restore_table_to_version(db, table_name, pre_version)
+        except Exception as exc:
+            logger.error(
+                "Failed restoring Lance table %s to version %s: %s",
+                table_name,
+                pre_version,
+                exc,
+                exc_info=True,
+            )
+            raise
+    _clear_upsert_journal(profile_base_dir)
+    _invalidate_lance_search_caches(profile_base_dir)
+    return True
+
+
+def recover_interrupted_lance_upserts(profile_base_dir: str) -> bool:
+    """Roll back a crash/kill mid-upsert using the on-disk version journal."""
+    profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
+    if not profile_base_dir or not os.path.isdir(get_lance_dir(profile_base_dir)):
+        return False
+    if not _read_upsert_journal(profile_base_dir):
+        return False
+    return _restore_from_upsert_journal(profile_base_dir)
+
+
+def _journaled_replace_video_tables(
+    profile_base_dir: str,
+    db,
+    video_id: str,
+    replacements: list[tuple[str, pa.Schema, list[dict]]],
+) -> None:
+    """Delete-then-append across one or more tables with crash-safe version journaling.
+
+    A durable journal records each table's pre-mutation Lance version. On exception or
+    process death before the journal is cleared, ``recover_interrupted_lance_upserts``
+    restores those versions so other videos in the table are not left half-written.
+    """
+    profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
+    if not profile_base_dir:
+        raise ValueError("profile_base_dir required for journaled Lance replace")
+    _assert_user_data_mutation_allowed(profile_base_dir, action="journaled Lance replace")
+    if _read_upsert_journal(profile_base_dir):
+        # Previous run died mid-upsert; restore before starting another mutation.
+        _restore_from_upsert_journal(profile_base_dir, db)
+
+    tables_meta = []
+    for table_name, _schema, _rows in replacements:
+        tables_meta.append(
+            {
+                "table": table_name,
+                "pre_version": _table_version(db, table_name),
+            }
+        )
+    _write_upsert_journal(
+        profile_base_dir,
+        {
+            "video_id": str(video_id or ""),
+            "tables": tables_meta,
+        },
+    )
+    try:
+        for table_name, schema, new_rows in replacements:
+            _delete_video_rows(db, table_name, video_id)
+            if new_rows:
+                _append_rows_to_table(db, table_name, schema, new_rows)
+        _clear_upsert_journal(profile_base_dir)
+    except Exception:
+        try:
+            _restore_from_upsert_journal(profile_base_dir, db)
+        except Exception as restore_exc:
+            logger.error(
+                "Lance journal restore failed for %s: %s",
+                video_id,
+                restore_exc,
+                exc_info=True,
+            )
+        raise
 
 
 def _video_id_from_vector_file(file_name: str) -> str:
@@ -648,6 +928,23 @@ def _delete_video_rows(db, table_name: str, video_id: str) -> None:
     table.delete(f"video_id = '{safe_id}'")
 
 
+def _replace_video_rows(
+    profile_base_dir: str,
+    db,
+    table_name: str,
+    schema: pa.Schema,
+    video_id: str,
+    new_rows: list[dict],
+) -> None:
+    """Journaled single-table replace (crash-safe)."""
+    _journaled_replace_video_tables(
+        profile_base_dir,
+        db,
+        video_id,
+        [(table_name, schema, new_rows)],
+    )
+
+
 def import_video_npy_to_lance(
     db,
     *,
@@ -717,14 +1014,26 @@ def import_video_npy_to_lance(
         return stats
 
     if replace_existing:
-        _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
-        _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
-
+        if not profile_base_dir:
+            stats["error"] = "missing profile_base_dir for journaled Lance replace"
+            return stats
+        _journaled_replace_video_tables(
+            profile_base_dir,
+            db,
+            video_id,
+            [
+                (FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows),
+                (CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows),
+            ],
+        )
+    else:
+        if frame_rows:
+            _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
+        if chunk_rows:
+            _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
     if frame_rows:
-        _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
         stats["frame_rows"] = len(frame_rows)
     if chunk_rows:
-        _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
         stats["chunk_rows"] = len(chunk_rows)
     chunk_config = data.get("chunk_config")
     if isinstance(chunk_config, dict) and profile_base_dir:
@@ -985,6 +1294,7 @@ def delete_profile_video_vectors(
         return
     model_dirs = get_local_model_asset_dirs(config=config)
     profile_base_dir = model_dirs["base_dir"]
+    _assert_user_data_mutation_allowed(profile_base_dir, action="delete Lance video vectors")
     if not os.path.isdir(get_lance_dir(profile_base_dir)):
         return
     db = _connect_lance(profile_base_dir)
@@ -1138,14 +1448,14 @@ def upsert_profile_dialogue_segments(
         )
 
     db = _connect_lance(base_dir)
-    _delete_video_rows(db, DIALOGUE_SEGMENTS_TABLE_NAME, video_id)
-    if rows:
-        _append_rows_to_table(
-            db,
-            DIALOGUE_SEGMENTS_TABLE_NAME,
-            dialogue_segments_table_schema(dimension),
-            rows,
-        )
+    _replace_video_rows(
+        base_dir,
+        db,
+        DIALOGUE_SEGMENTS_TABLE_NAME,
+        dialogue_segments_table_schema(dimension),
+        video_id,
+        rows,
+    )
     refresh_import_state(base_dir)
     _invalidate_lance_search_caches(base_dir)
     return {"video_id": video_id, "segment_rows": len(rows), "dimension": dimension}
@@ -1242,20 +1552,27 @@ def upsert_profile_video_vectors_from_arrays(
 
     db = _connect_lance(profile_base_dir)
     try:
-        _delete_video_rows(db, FRAMES_TABLE_NAME, video_id)
-        _delete_video_rows(db, CHUNKS_TABLE_NAME, video_id)
-        if frame_rows:
-            _append_rows_to_table(db, FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows)
-        if chunk_rows:
-            _append_rows_to_table(db, CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows)
+        _journaled_replace_video_tables(
+            profile_base_dir,
+            db,
+            video_id,
+            [
+                (FRAMES_TABLE_NAME, frames_table_schema(resolved_dimension), frame_rows),
+                (CHUNKS_TABLE_NAME, chunks_table_schema(resolved_dimension), chunk_rows),
+            ],
+        )
     except Exception as exc:
         logger.error(
-            "Lance delete/append failed for %s after validated row build; "
-            "table may be missing this video until the next successful sync: %s",
+            "Lance replace failed for %s after validated row build; "
+            "prior table versions were restored from the upsert journal when possible: %s",
             video_id,
             exc,
             exc_info=True,
         )
+        try:
+            _invalidate_lance_search_caches(profile_base_dir)
+        except Exception:
+            pass
         return {"error": str(exc), "video_id": video_id, "frame_rows": 0, "chunk_rows": 0}
 
     if isinstance(chunk_config, dict):

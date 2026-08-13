@@ -33,6 +33,9 @@ def _ensure_real_module(name: str) -> None:
 
 
 def pytest_configure(config) -> None:
+    import os
+
+    os.environ.setdefault("VIDEOSEEK_TEST_MODE", "1")
     for module_name in _PROTECTED_MODULES:
         _ensure_real_module(module_name)
 

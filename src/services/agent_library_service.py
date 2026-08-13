@@ -145,10 +145,12 @@ def _iter_library_video_rows(
     *,
     ready_only: bool,
     probe_source_exists: bool = False,
+    lance_ready_ids=None,
 ) -> Iterator[Dict[str, Any]]:
     """Yield video rows for one library.
 
     By default trusts meta ``asset_state`` for readiness (no per-file ``isfile``).
+    When ``lance_ready_ids`` is provided, meta ``ready`` without Lance is demoted.
     Set ``probe_source_exists=True`` only for rows that will be returned to clients.
     """
     files = library_data.get("files", {}) if isinstance(library_data, dict) else {}
@@ -165,6 +167,12 @@ def _iter_library_video_rows(
             continue
         abs_path = os.path.normpath(os.path.join(library_path, rel_text))
         asset_state = str(info.get("asset_state", "") or "").strip().lower() or "unknown"
+        if (
+            lance_ready_ids is not None
+            and asset_state == "ready"
+            and video_id not in lance_ready_ids
+        ):
+            asset_state = "missing_asset"
         if ready_only and asset_state != "ready":
             continue
         # Cheap existence: trust meta unless caller asks to probe the page rows.
@@ -211,12 +219,14 @@ def list_agent_videos(
     offset: int = 0,
     config=None,
 ) -> Dict[str, Any]:
-    from src.services.library_service import list_libraries
+    from src.services.library_service import _lance_indexed_video_ids, list_libraries
 
     libraries = list_libraries()
     video_id_text = str(video_id or "").strip()
     safe_limit = max(1, min(int(limit or _DEFAULT_VIDEO_PAGE_LIMIT), _MAX_VIDEO_PAGE_LIMIT))
     safe_offset = max(0, int(offset or 0))
+    lance_ready_ids = _lance_indexed_video_ids(config=config)
+    # None means Lance unavailable — keep meta trust; empty frozenset means ready-but-empty.
 
     if library_path:
         resolved_key = _resolve_library_key(library_path, libraries)
@@ -242,6 +252,7 @@ def list_agent_videos(
             libraries.get(resolved_key, {}),
             ready_only=ready_only,
             probe_source_exists=False,
+            lance_ready_ids=lance_ready_ids,
         ):
             if video_id_text and str(row.get("video_id") or "").strip() != video_id_text:
                 continue

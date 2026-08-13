@@ -634,9 +634,16 @@ class IndexUpdateWorker(QThread):
         except InterruptedError:
             self.finished_signal.emit(False, True, False, issues)
         except Exception as exc:
-            logger.exception("Index update worker failed")
-            self.error_signal.emit(str(exc))
-            self.finished_signal.emit(False, False, False, issues)
+            from src.services.indexing_runtime_status import IndexSyncBusyError
+
+            if isinstance(exc, IndexSyncBusyError):
+                logger.warning("Index update rejected: already running")
+                self.error_signal.emit(str(exc).strip() or "An indexing task is already running.")
+                self.finished_signal.emit(False, False, False, issues)
+            else:
+                logger.exception("Index update worker failed")
+                self.error_signal.emit(str(exc))
+                self.finished_signal.emit(False, False, False, issues)
         finally:
             if previous_gpu_debug is None:
                 os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)

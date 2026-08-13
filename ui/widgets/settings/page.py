@@ -133,6 +133,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_rules = QLineEdit(self)
         self.input_top_k = NoWheelSpinBox()
         self.input_top_k.setRange(1, 200)
+        self.input_lance_ann_enabled = NoWheelComboBox()
         self.input_frame_neighbor_rerank_enabled = NoWheelComboBox()
         self.input_frame_neighbor_rerank_top_n = NoWheelSpinBox()
         self.input_frame_neighbor_rerank_top_n.setRange(1, 100)
@@ -159,6 +160,8 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_thumb_height.setRange(45, 320)
         self.input_embedding_batch_size = NoWheelSpinBox()
         self.input_embedding_batch_size.setRange(1, 64)
+        self.input_indexing_video_workers = NoWheelSpinBox()
+        self.input_indexing_video_workers.setRange(1, 2)
         self.input_chunk_policy = NoWheelComboBox()
         self.input_similarity_threshold = NoWheelDoubleSpinBox()
         self.input_similarity_threshold.setRange(0.1, 1.0)
@@ -171,6 +174,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_min_chunk_duration.setSingleStep(0.5)
         self.input_min_chunk_duration.setDecimals(1)
         self.input_prefer_gpu = NoWheelComboBox()
+        self.input_inference_ep = NoWheelComboBox()
         self.input_experimental_hw_decode = NoWheelComboBox()
         self.input_gpu_probe_unknown_keep_gpu = NoWheelComboBox()
         self.input_auto_cleanup_missing_files = NoWheelComboBox()
@@ -274,6 +278,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.section_paths_title = QLabel()
         self.label_fps = ClickableLabel()
         self.label_top_k = ClickableLabel()
+        self.label_lance_ann_enabled = ClickableLabel()
         self.label_frame_neighbor_rerank_enabled = ClickableLabel()
         self.label_frame_neighbor_rerank_top_n = ClickableLabel()
         self.label_frame_neighbor_rerank_window = ClickableLabel()
@@ -287,11 +292,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_thumb_height = ClickableLabel()
         self.label_export_video_silent = ClickableLabel()
         self.label_embedding_batch_size = ClickableLabel()
+        self.label_indexing_video_workers = ClickableLabel()
         self.label_chunk_policy = ClickableLabel()
         self.label_similarity_threshold = ClickableLabel()
         self.label_min_chunk_size = ClickableLabel()
         self.label_min_chunk_duration = ClickableLabel()
         self.label_prefer_gpu = ClickableLabel()
+        self.label_inference_ep = ClickableLabel()
         self.label_experimental_hw_decode = ClickableLabel()
         self.label_gpu_probe_unknown_keep_gpu = ClickableLabel()
         self.label_auto_cleanup_missing_files = ClickableLabel()
@@ -309,6 +316,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.sampling_rules_summary = QLabel()
         self.btn_edit_sampling_rules = QPushButton()
         self.hint_top_k = QLabel()
+        self.hint_lance_ann_enabled = QLabel()
         self.hint_frame_neighbor_rerank_enabled = QLabel()
         self.hint_frame_neighbor_rerank_top_n = QLabel()
         self.hint_frame_neighbor_rerank_window = QLabel()
@@ -322,6 +330,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_thumb_height = QLabel()
         self.hint_export_video_silent = QLabel()
         self.hint_embedding_batch_size = QLabel()
+        self.hint_indexing_video_workers = QLabel()
         self.hint_indexing_note = QLabel()
         self.hint_chunk_policy = QLabel()
         self.btn_toggle_chunk_advanced = QPushButton()
@@ -336,6 +345,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_min_chunk_size = QLabel()
         self.hint_min_chunk_duration = QLabel()
         self.hint_prefer_gpu = QLabel()
+        self.hint_inference_ep = QLabel()
         self.hint_experimental_hw_decode = QLabel()
         self.hint_gpu_probe_unknown_keep_gpu = QLabel()
         self.hint_auto_cleanup_missing_files = QLabel()
@@ -359,6 +369,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_fps, width=94)
         self._configure_setting_input(self.input_sampling_fps_mode, width=136)
         self._configure_setting_input(self.input_top_k, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_lance_ann_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(
             self.input_frame_neighbor_rerank_enabled,
             width=COMPONENT_SIZES["settings_input_width"] + 36,
@@ -395,6 +406,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_thumb_width, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_thumb_height, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_embedding_batch_size, width=COMPONENT_SIZES["settings_input_width"])
+        self._configure_setting_input(self.input_indexing_video_workers, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(
             self.input_chunk_policy,
             width=COMPONENT_SIZES["settings_input_width"] + 36,
@@ -403,6 +415,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._configure_setting_input(self.input_min_chunk_size, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_min_chunk_duration, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_prefer_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
+        self._configure_setting_input(self.input_inference_ep, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_experimental_hw_decode, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_gpu_probe_unknown_keep_gpu, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(self.input_auto_cleanup_missing_files, width=COMPONENT_SIZES["settings_input_width"] + 36)
@@ -528,6 +541,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_top_k,
             self.hint_top_k,
         )
+        self._add_setting_row(
+            self.section_search_form,
+            1,
+            self.label_lance_ann_enabled,
+            self.input_lance_ann_enabled,
+            self.hint_lance_ann_enabled,
+        )
         self._add_section_note(self.section_fast_image_search_form, 0, self.hint_fast_image_search_section)
         self._add_setting_row(
             self.section_fast_image_search_form,
@@ -613,19 +633,26 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_embedding_batch_size,
             self.hint_embedding_batch_size,
         )
-        self._add_section_note(self.section_indexing_form, 2, self.hint_indexing_note)
+        self._add_setting_row(
+            self.section_indexing_form,
+            2,
+            self.label_indexing_video_workers,
+            self.input_indexing_video_workers,
+            self.hint_indexing_video_workers,
+        )
+        self._add_section_note(self.section_indexing_form, 3, self.hint_indexing_note)
         self._configure_setting_input(
             self.input_chunk_policy,
             width=COMPONENT_SIZES["settings_input_width"] + 36,
         )
         self._add_setting_row(
             self.section_indexing_form,
-            3,
+            4,
             self.label_chunk_policy,
             self.input_chunk_policy_bundle,
             self.hint_chunk_policy,
         )
-        self.section_indexing_form.addWidget(self.chunk_advanced_body, 4, 0, 1, 2)
+        self.section_indexing_form.addWidget(self.chunk_advanced_body, 5, 0, 1, 2)
         self._add_setting_row(
             self.chunk_advanced_form,
             0,
@@ -681,20 +708,27 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(
             self.section_model_gpu_form,
             1,
+            self.label_inference_ep,
+            self.input_inference_ep,
+            self.hint_inference_ep,
+        )
+        self._add_setting_row(
+            self.section_model_gpu_form,
+            2,
             self.label_experimental_hw_decode,
             self.input_experimental_hw_decode,
             self.hint_experimental_hw_decode,
         )
         self._add_setting_row(
             self.section_model_gpu_form,
-            2,
+            3,
             self.label_gpu_probe_unknown_keep_gpu,
             self.input_gpu_probe_unknown_keep_gpu,
             self.hint_gpu_probe_unknown_keep_gpu,
         )
         self._add_setting_row(
             self.section_model_gpu_form,
-            3,
+            4,
             self.label_active_model_profile,
             self.input_active_model_profile_bundle,
             self.hint_active_model_profile,
@@ -993,6 +1027,15 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_edit_sampling_rules.setText(texts["setting_sampling_fps_rules_edit"])
         self.refresh_sampling_rules_summary()
         self.label_top_k.setText(texts["setting_top_k"])
+        self.label_lance_ann_enabled.setText(texts["setting_lance_ann_enabled"])
+        current_lance_ann = self.input_lance_ann_enabled.currentData()
+        self.input_lance_ann_enabled.blockSignals(True)
+        self.input_lance_ann_enabled.clear()
+        self.input_lance_ann_enabled.addItem(texts["setting_lance_ann_enabled_option_off"], False)
+        self.input_lance_ann_enabled.addItem(texts["setting_lance_ann_enabled_option_on"], True)
+        restore_ann = self.input_lance_ann_enabled.findData(current_lance_ann)
+        self.input_lance_ann_enabled.setCurrentIndex(0 if restore_ann < 0 else restore_ann)
+        self.input_lance_ann_enabled.blockSignals(False)
         self.label_frame_neighbor_rerank_enabled.setText(texts["setting_frame_neighbor_rerank_enabled"])
         self.label_frame_neighbor_rerank_top_n.setText(texts["setting_frame_neighbor_rerank_top_n"])
         self.label_frame_neighbor_rerank_window.setText(texts["setting_frame_neighbor_rerank_window"])
@@ -1006,11 +1049,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.label_thumb_height.setText(texts["setting_thumb_height"])
         self.label_export_video_silent.setText(texts["setting_export_video_silent"])
         self.label_embedding_batch_size.setText(texts["setting_embedding_batch_size"])
+        self.label_indexing_video_workers.setText(texts["setting_indexing_video_workers"])
         self.label_chunk_policy.setText(texts["setting_chunk_policy"])
         self.label_similarity_threshold.setText(texts["setting_similarity_threshold"])
         self.label_min_chunk_size.setText(texts["setting_min_chunk_size"])
         self.label_min_chunk_duration.setText(texts["setting_min_chunk_duration"])
         self.label_prefer_gpu.setText(texts["setting_prefer_gpu"])
+        self.label_inference_ep.setText(texts["setting_inference_ep"])
         self.label_experimental_hw_decode.setText(texts["setting_experimental_hw_decode"])
         self.label_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu"])
         self.label_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files"])
@@ -1077,6 +1122,16 @@ class SettingsPage(QWidget, SettingsFormMixin):
         restore_index = self.input_prefer_gpu.findData(current_prefer_gpu)
         self.input_prefer_gpu.setCurrentIndex(0 if restore_index < 0 else restore_index)
         self.input_prefer_gpu.blockSignals(False)
+        current_inference_ep = self.input_inference_ep.currentData()
+        self.input_inference_ep.blockSignals(True)
+        self.input_inference_ep.clear()
+        self.input_inference_ep.addItem(texts["setting_inference_ep_option_auto"], "auto")
+        self.input_inference_ep.addItem(texts["setting_inference_ep_option_cuda"], "cuda")
+        self.input_inference_ep.addItem(texts["setting_inference_ep_option_dml"], "dml")
+        self.input_inference_ep.addItem(texts["setting_inference_ep_option_cpu"], "cpu")
+        restore_ep = self.input_inference_ep.findData(current_inference_ep)
+        self.input_inference_ep.setCurrentIndex(0 if restore_ep < 0 else restore_ep)
+        self.input_inference_ep.blockSignals(False)
         current_experimental_hw_decode = self.input_experimental_hw_decode.currentData()
         self.input_experimental_hw_decode.blockSignals(True)
         self.input_experimental_hw_decode.clear()
@@ -1160,6 +1215,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_sampling_fps_rules.setText(texts["setting_sampling_fps_rules_hint"])
         self.hint_sampling_fps_preview.setText(texts["setting_sampling_fps_preview"])
         self.hint_top_k.setText(texts["setting_top_k_hint"])
+        self.hint_lance_ann_enabled.setText(texts["setting_lance_ann_enabled_hint"])
         self.hint_frame_neighbor_rerank_enabled.setText(texts["setting_frame_neighbor_rerank_enabled_hint"])
         self.hint_frame_neighbor_rerank_top_n.setText(texts["setting_frame_neighbor_rerank_top_n_hint"])
         self.hint_frame_neighbor_rerank_window.setText(texts["setting_frame_neighbor_rerank_window_hint"])
@@ -1173,6 +1229,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_thumb_height.setText(texts["setting_thumb_height_hint"])
         self.hint_export_video_silent.setText(texts["setting_export_video_silent_hint"])
         self.hint_embedding_batch_size.setText(texts["setting_embedding_batch_size_hint"])
+        self.hint_indexing_video_workers.setText(texts["setting_indexing_video_workers_hint"])
         self.hint_indexing_note.setText(texts["setting_indexing_note"])
         self.hint_chunk_policy.setText(texts["setting_chunk_policy_hint"])
         self._refresh_chunk_advanced_visibility()
@@ -1180,6 +1237,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_min_chunk_size.setText(texts["setting_min_chunk_size_hint"])
         self.hint_min_chunk_duration.setText(texts["setting_min_chunk_duration_hint"])
         self.hint_prefer_gpu.setText(texts["setting_prefer_gpu_hint"])
+        self.hint_inference_ep.setText(texts["setting_inference_ep_hint"])
         self.hint_experimental_hw_decode.setText(texts["setting_experimental_hw_decode_hint"])
         self.hint_gpu_probe_unknown_keep_gpu.setText(texts["setting_gpu_probe_unknown_keep_gpu_hint"])
         self.hint_auto_cleanup_missing_files.setText(texts["setting_auto_cleanup_missing_files_hint"])
@@ -1222,6 +1280,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         for label in [
             self.label_fps,
             self.label_top_k,
+            self.label_lance_ann_enabled,
             self.label_frame_neighbor_rerank_enabled,
             self.label_frame_neighbor_rerank_top_n,
             self.label_frame_neighbor_rerank_window,
@@ -1235,11 +1294,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_thumb_height,
             self.label_export_video_silent,
             self.label_embedding_batch_size,
+            self.label_indexing_video_workers,
             self.label_chunk_policy,
             self.label_similarity_threshold,
             self.label_min_chunk_size,
             self.label_min_chunk_duration,
             self.label_prefer_gpu,
+            self.label_inference_ep,
             self.label_experimental_hw_decode,
             self.label_gpu_probe_unknown_keep_gpu,
             self.label_auto_cleanup_missing_files,
