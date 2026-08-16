@@ -25,9 +25,9 @@
 
 **存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db` / `dialogue_transcript_store`），关键词 / 模糊检索**只**走该库。Lance `dialogue_segments` 无产品读写（Whisper 台词未发布；语义字幕暂缓），删除字幕时仅作防御性清理。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
 
-**视频理解**为可选扩展，不阻塞搜索与索引；仅桌面「视频理解」页使用，**不**暴露给 Agent API。桌面 UI 说明见 [`docs/pyside6_ui_architecture.md`](pyside6_ui_architecture.md)。
+**视频理解**为可选扩展，不阻塞搜索与索引；仅桌面「视频理解」页使用，**不**暴露给 Agent API。
 
-`ui/` 与 `src/web/agent_api.py` 负责调度；搜索逻辑在 `search_service`，FastAPI 层不复制。Agent HTTP 契约见 `docs/for-agents.md`。已移除功能见 `docs/planned_features.md` §4。
+`ui/` 与 `src/web/agent_api/`（FastAPI 包）负责调度；搜索逻辑在 `search_service`，HTTP 层不复制。Agent 契约见 [`docs/for-agents.md`](for-agents.md)。工程硬规则见 [`docs/engineering.md`](engineering.md)。
 
 下文按实际调用关系说明。热路径与分层图不一致时，以 [热路径](#热路径) 为准。
 
@@ -44,7 +44,7 @@
 | 硬字幕搜索 | `from src.storage.lance_dialogue_search import keyword_search_dialogue` |
 | 视频总结生成 | `from src.services.understanding_service import generate_evidence_for_video` |
 | 理解资源就绪 | `from src.services.understanding_resource_service import get_understanding_resource_status` |
-| Agent HTTP | `src/web/agent_api.py` → `execute_agent_search`（直接调 `search_service`） |
+| Agent HTTP | `src/web/agent_api/` → `execute_agent_search`（直接调 `search_service`） |
 
 ## 热路径
 
@@ -60,7 +60,7 @@ flowchart TB
   SS["search_service.run_search()"]
   CE["clip_embedding.get_engine()"]
   RR["image_search_rerank / search_scope"]
-  DISK[("Lance + legacy npy")]
+  DISK[("Lance frames/chunks")]
 
   GUI --> SC --> SW --> SS
   SS --> CE
@@ -86,8 +86,11 @@ flowchart TB
   IC --> IW["IndexUpdateWorker"]
   IW --> WF["workflows/update_video"]
   WF --> IS["indexing_service"]
-  IS --> CE["clip_embedding + extract_frames + lance_store"]
+  IS --> CE["clip_embedding + extract_frames"]
+  IS --> LS["lance_store upsert（带版本日志）"]
 ```
+
+索引写入以 **Lance** 为准（`upsert_profile_video_vectors_from_arrays`）。默认可并行预取解码（`indexing_video_workers`，默认 2）；ONNX 推理仍串行持锁。可选实验开关 `lance_ann_enabled`（默认关）在同步结束时为大体量库建 IVF，查询仍做精确余弦重排。进程内同一时刻只允许一个索引更新任务。
 
 **视频理解 / 总结（可选，桌面手动触发）：**
 
@@ -117,7 +120,7 @@ flowchart TB
 | `clip_embedding.py` | ONNX session、批量编码、引擎单例 | **推理核心** |
 | `search_request_service.py` | 精度模式、内联图校验、预设/query 解析 | GUI + Agent 共用 |
 | `search_scope.py` | 当前范围、过滤、`resolve_effective_search_scope` | GUI + Agent 共用 |
-| `agent_api.py` | HTTP、预设/scope、超时 | 独立子系统；止于 `search_service` |
+| `agent_api/` | HTTP、预设/scope、超时 | 独立子系统；止于 `search_service` |
 | `understanding_service.py` | 单视频/批量生成、bundle 读写、历史列表 | **视频总结主逻辑** |
 | `understanding_resource_service.py` | manifest 扫描、profile、remote VLM 探测 | **理解资源层** |
 | `core/understanding/` | remote caption、pipeline（caption-only） | **理解推理** |
@@ -160,7 +163,7 @@ sequenceDiagram
   participant W as SearchWorker
   participant SS as search_service
   participant CE as clip_embedding
-  participant IX as Lance（内存 flat 检索）
+  participant IX as Lance（精确扫描；可选 ANN+重排）
   UI->>W: query + scope + precision
   W->>SS: run_search(...)
   SS->>CE: 查询向量（除非 preset 已带向量）
@@ -177,13 +180,12 @@ sequenceDiagram
 3. **限定库** → 按 `library_path` 过滤 Lance 行后检索
 4. **全库** → 加载当前 profile 的 Lance frame/chunk 表，必要时 over-fetch + `apply_search_scope`，再 rerank
 
-逐步细节见 `docs/ai/pipelines.md` Pipeline 4。
+遗留 `*_vectors.npy` / `*.faiss` 仅迁移与清理，不参与热路径读。
 
 ## 领域模型（`src/domain/`）
 
 - **`SearchHit`**：一条本地命中（`start_sec`、`end_sec`、`score`、`video_path`）。在 `search_service` 构造；返回给 UI 与 Agent。
-- **`RemoteSearchHit`**：远程库命中行；在 `remote_search_service` 构造。
-- **`EvidenceBundle`**：单视频视频总结（chunk 级 caption + 可选整片 summary；schema 仍可解析旧数据中的 `object_detection`）。在 `understanding_service` 读写；schema 见 `evidence_bundle.py`。
+- **`EvidenceBundle`**：单视频视频总结（chunk 级 caption + 可选整片 summary；schema 仍可解析旧数据中的 `object_detection`）。在 `understanding_service` 读写；schema 见 `evidence_bundle.py`。仅桌面理解页使用。
 
 **遗留：** `coerce_search_hit()` 仍在**视图边界**（`table_views`、`ThumbLoader`）接受旧 4-tuple。新代码只传 `SearchHit`；services 不要 emit tuple。
 
@@ -213,7 +215,7 @@ sequenceDiagram
 
 | 模块 | 用途 | 权重 |
 |------|------|------|
-| `agent_api.py` | 本机 Agent API（health、search、batch、presets） | **主要**自动化入口 |
+| `agent_api/` | 本机 Agent API（health、search、batch、presets、export） | **主要**自动化入口；见 `for-agents.md` |
 | `mobile_bridge.py` | 手机传图 | 可选；薄封装 |
 | `display_qr.py` | 手机配对二维码 | 可选 UI 辅助 |
 
@@ -222,12 +224,12 @@ sequenceDiagram
 ### 建索引
 
 1. UI → `IndexingController` → `IndexUpdateWorker`
-2. `workflows/update_video.update_videos_flow` 编排扫描、embedding、全局/分库索引
-3. `indexing_service` 调用 `clip_embedding`、`extract_frames`、`faiss_index`
+2. `workflows/update_video.update_videos_flow` 编排扫描与提交（进程内单飞；结束时 reconcile meta↔Lance）
+3. `indexing_service`：抽帧 → `clip_embedding` → `lance_store` 写入（崩溃用 upsert 版本日志回滚）
 
-### 远程库
+### 视频下载（可选）
 
-远程链接页 presenter/controller → `remote_library_service` 分阶段构建；检索走 `remote_search_service`。
+侧栏 **视频下载** → `video_download_service` 解析链接并下载到本地目录；下载完成后按普通视频库同步索引。不再有独立的「远程库向量检索」路径。
 
 ### 硬字幕搜索（可选）
 
@@ -252,31 +254,31 @@ sequenceDiagram
 main.py
 src/
   app/           配置、i18n、日志
-  domain/        SearchHit, RemoteSearchHit, EvidenceBundle
-  services/      search_service, indexing_service, understanding_*, search_scope, …
-  core/          clip_embedding, extract_frames, faiss_index, understanding/, …
-  storage/       config_store, asset_store, migration_runner
-  web/           agent_api, mobile_bridge, display_qr
+  domain/        SearchHit, EvidenceBundle
+  services/      search_service, indexing_service, understanding_*, search_scope, video_download_*, …
+  core/          clip_embedding, extract_frames, faiss_index（仅 legacy/迁移）, understanding/, …
+  storage/       config_store, lance_store, lance_search_index, migration_runner, …
+  web/           agent_api/（包）, mobile_bridge, display_qr
   workflows/     update_video
 ui/
-  windows/       gui + mixin（含 gui_understanding）
+  windows/       gui + mixin（含 gui_understanding、视频下载）
   controllers/   搜索、索引、理解、Agent、手机等线程生命周期
-  workers.py     QThread → services / workflows（含 UnderstandingResourceStatusWorker）
+  workers.py     QThread → services / workflows
 docs/
   architecture.md
-  pyside6_ui_architecture.md
+  engineering.md
   for-agents.md
-  ai/pipelines.md
-  ai/understanding_evidence.md
+  quickstart.md
 ```
 
 ## 变更记录
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-26 | 补充理解笔录模块：入口表、热路径、领域模型、`understanding_*` 服务与文档索引 |
+| 2026-08-16 | 对齐 Lance 主线：建索引段去掉 FAISS/远程库检索；`agent_api/` 包路径；去掉对私有/缺失文档的硬链 |
 | 2026-07-21 | 硬字幕仅 SQLite：去掉 Lance 文本兜底与空库导入；`dialogue_segments` 无产品读写；Lance 就绪后可手动清理遗留 npy/faiss |
 | 2026-07-19 | 硬字幕 SQLite + 模糊落点检索；视频理解改为 caption-only；文案「笔录」→「总结」 |
+| 2026-06-26 | 补充理解模块：入口表、热路径、领域模型、`understanding_*` 服务 |
 | 2026-06-12 | 全文改为中文；精简文首概览 |
 | 2026-06-10 | 增加文首中文概览 |
 | 2026-05-31 | Agent scope/query 收敛到 `search_scope` + `search_request_service` |

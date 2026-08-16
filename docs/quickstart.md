@@ -64,5 +64,5 @@ UI 相关测试需已安装 PySide6（`pip install -r requirements.txt` 即可�
 ## 附录 C：其它
 
 - **FFmpeg 路径**：也可放到 `%LOCALAPPDATA%\VideoSeek\bin\` 或系统 `PATH`。
-- **硬件解码（Windows 实验）**：设置 → 模型/GPU → D3D11VA；见 `docs/ai/pipelines.md` Pipeline 1。
+- **硬件解码（Windows 实验）**：设置 → 模型/GPU → D3D11VA。
 - **`app_meta.py` URL**：主要用于公告/版本/关于与「前往下载」；`model_manifest_url` 当前指向 123 云盘。应用内一键下载依赖该 manifest；若不可用，请改从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 手动下载后导入。

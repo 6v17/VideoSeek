@@ -12,9 +12,10 @@
 
 | 前提 | 动作 |
 |------|------|
-| VideoSeek 运行中 | 设置 → 通用 → **本机搜索接口** → 开启 → 保存 |
+| VideoSeek 运行中 | 设置 → **搜索接口** → 选 **本机 Agent API**（或旧项「本机搜索接口」开启）→ 保存 |
 | `index_ready: true` | 否则让用户在软件里同步索引 |
 | 基址 | `http://127.0.0.1:8765/api/v1`（仅 `127.0.0.1`，无鉴权） |
+| 与团队模式区分 | **服务机 / 用户机**走局域网共享检索，**不是**本文的本机 Agent HTTP；Agent 仍只连本机 `127.0.0.1` |
 
 **端点一览：**
 
@@ -567,4 +568,4 @@ print(json.loads(urllib.request.urlopen(req, timeout=120).read()))
 
 ---
 
-维护者：打包与实现见 `docs/ai/pipelines.md` § Agent API。
+维护者：实现见 `src/web/agent_api/`；打包与工程约定见 `docs/engineering.md`。
