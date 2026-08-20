@@ -286,7 +286,9 @@ QCheckBox:disabled {
 }
 #UnderstandingToolbar #PrimaryButton,
 #UnderstandingToolbar #GhostButton,
-#UnderstandingToolbar #DangerGhostButton {
+#UnderstandingToolbar #AccentGhostButton,
+#UnderstandingToolbar #DangerGhostButton,
+#UnderstandingToolbar #SuccessGhostButton {
     min-height: 34px;
     padding: 6px 14px;
     border-radius: 8px;

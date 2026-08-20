@@ -92,6 +92,7 @@ class ResourceTableDialog(VSDialogShell):
         self.toggle_issues = QCheckBox(self.texts["details_show_issues"])
         self.btn_reset_filter = QPushButton(self.texts["details_reset_filter"])
         self.btn_reset_filter.setObjectName("GhostButton")
+        self.btn_reset_filter.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_issues.setVisible(callable(self.issue_row_predicate))
         filter_row.addWidget(self.input_filter, 1)
         filter_row.addWidget(self.toggle_issues)
@@ -163,38 +164,63 @@ class ResourceTableDialog(VSDialogShell):
         self.content_layout.addWidget(status_card)
 
         self.clear_footer(keep_stretch=False)
-        self.btn_copy = QPushButton(self.texts["details_copy_json"])
-        self.btn_copy.setObjectName("GhostButton")
-        self.btn_export = QPushButton(self.texts["details_export_json"])
-        self.btn_export.setObjectName("GhostButton")
-        self.btn_copy_row = QPushButton(self._inline_text("复制选中行", "Copy Selected"))
-        self.btn_copy_row.setObjectName("GhostButton")
-        self.btn_cancel = QPushButton(self.texts["cancel"])
-        self.btn_cancel.setObjectName("GhostButton")
-        self.btn_close = QPushButton(self.texts["close"])
-        self.btn_close.setObjectName("PrimaryButton")
-
         if self.show_utility_actions:
-            self.footer_layout.addWidget(self.btn_copy)
-            self.footer_layout.addWidget(self.btn_export)
-            self.footer_layout.addWidget(self.btn_copy_row)
+            self.btn_copy = self.add_footer_button(
+                self.texts["details_copy_json"],
+                object_name="GhostButton",
+                on_click=self._copy_json,
+            )
+            self.btn_export = self.add_footer_button(
+                self.texts["details_export_json"],
+                object_name="GhostButton",
+                on_click=self._export_json,
+            )
+            self.btn_copy_row = self.add_footer_button(
+                self._inline_text("复制选中行", "Copy Selected"),
+                object_name="GhostButton",
+                on_click=self._copy_selected_row,
+            )
         else:
+            self.btn_copy = QPushButton(self.texts["details_copy_json"])
+            self.btn_export = QPushButton(self.texts["details_export_json"])
+            self.btn_copy_row = QPushButton(self._inline_text("复制选中行", "Copy Selected"))
             self.btn_copy.hide()
             self.btn_export.hide()
             self.btn_copy_row.hide()
         for action in self.extra_actions:
-            button = QPushButton(action.get("label", "Action"))
             object_name = str(action.get("object_name", "") or "").strip() or "GhostButton"
-            button.setObjectName(object_name)
-            button.clicked.connect(
-                lambda _, handler=action.get("handler"): handler(self) if callable(handler) else None
+            # Legacy callers used "Ghost"; map to the Fluent token.
+            if object_name == "Ghost":
+                object_name = "GhostButton"
+            self.add_footer_button(
+                action.get("label", "Action"),
+                object_name=object_name,
+                on_click=lambda _checked=False, handler=action.get("handler"): (
+                    handler(self) if callable(handler) else None
+                ),
             )
-            self.footer_layout.addWidget(button)
-        self.footer_layout.addStretch(1)
+        self.add_footer_stretch()
         if self.confirm_mode:
-            self.footer_layout.addWidget(self.btn_cancel)
-            self.btn_close.setText(self.confirm_text)
-        self.footer_layout.addWidget(self.btn_close)
+            self.btn_cancel = self.add_footer_button(
+                self.texts["cancel"],
+                object_name="GhostButton",
+                on_click=self.reject,
+            )
+            self.btn_close = self.add_footer_button(
+                self.confirm_text,
+                object_name="PrimaryButton",
+                on_click=self.accept,
+                default=True,
+            )
+        else:
+            self.btn_cancel = QPushButton(self.texts["cancel"])
+            self.btn_cancel.hide()
+            self.btn_close = self.add_footer_button(
+                self.texts["close"],
+                object_name="PrimaryButton",
+                on_click=self.accept,
+                default=True,
+            )
 
         self._refresh_rows()
         self._apply_column_layout()
@@ -205,12 +231,6 @@ class ResourceTableDialog(VSDialogShell):
         self.btn_reset_filter.clicked.connect(self.reset_filters)
         if callable(self.row_double_click_handler):
             self.table.itemDoubleClicked.connect(self._handle_item_double_click)
-        self.btn_copy.clicked.connect(self._copy_json)
-        self.btn_export.clicked.connect(self._export_json)
-        self.btn_copy_row.clicked.connect(self._copy_selected_row)
-        if self.confirm_mode:
-            self.btn_cancel.clicked.connect(self.reject)
-        self.btn_close.clicked.connect(self.accept)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
 

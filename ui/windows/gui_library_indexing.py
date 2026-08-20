@@ -1809,7 +1809,7 @@ class LibraryIndexingGuiMixin:
                         "cleanup_missing_vectors_exclude",
                         self.texts.get("details_exclude_selected", "从列表排除"),
                     ),
-                    "object_name": "Ghost",
+                    "object_name": "GhostButton",
                     "handler": self._exclude_cleanup_preview_selection,
                 }
             ],
@@ -2129,12 +2129,12 @@ class LibraryIndexingGuiMixin:
             extra_actions=[
                 {
                     "label": self.texts["details_open_selected"],
-                    "object_name": "Ghost",
+                    "object_name": "GhostButton",
                     "handler": self._open_selected_index_issue_path,
                 },
                 {
                     "label": self.texts["details_copy_selected"],
-                    "object_name": "Ghost",
+                    "object_name": "GhostButton",
                     "handler": self._copy_selected_index_issue_path,
                 },
             ],
@@ -2227,17 +2227,17 @@ class LibraryIndexingGuiMixin:
                 extra_actions=[
                     {
                         "label": self.texts["details_open_selected"],
-                        "object_name": "Ghost",
+                        "object_name": "GhostButton",
                         "handler": self._open_selected_vector_detail_path,
                     },
                     {
                         "label": self.texts["details_copy_selected"],
-                        "object_name": "Ghost",
+                        "object_name": "GhostButton",
                         "handler": self._copy_selected_vector_detail_path,
                     },
                     {
                         "label": self.texts["library_vectors_legacy_cleanup"],
-                        "object_name": "Ghost",
+                        "object_name": "GhostButton",
                         "handler": self._cleanup_legacy_vector_sidecars,
                     },
                 ],

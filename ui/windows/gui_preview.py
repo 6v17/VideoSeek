@@ -469,12 +469,12 @@ class PreviewGuiMixin:
             extra_actions=[
                 {
                     "label": self.texts["details_open_selected"],
-                    "object_name": "Ghost",
+                    "object_name": "GhostButton",
                     "handler": self._open_selected_preview_export_path,
                 },
                 {
                     "label": self.texts["details_copy_selected"],
-                    "object_name": "Ghost",
+                    "object_name": "GhostButton",
                     "handler": self._copy_selected_preview_export_path,
                 },
             ],
