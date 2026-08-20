@@ -1,4 +1,3 @@
-import cv2
 import os
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
@@ -10,18 +9,6 @@ from src.app.config import load_config
 from src.app.i18n import get_texts
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit, coerce_search_hit
-from src.services.about_service import get_about_payload
-from src.services.ffmpeg_service import download_ffmpeg
-from src.services.library_service import list_local_vector_details
-from src.services.model_package_service import import_model_package_zip, import_model_packages
-from src.services.understanding_import_service import classify_package_zip, import_understanding_component_zip
-from src.services.understanding_resource_service import SEARCH_MODEL_MANIFEST_FILENAME, UNDERSTANDING_MANIFEST_FILENAME
-from src.services.model_service import download_models
-from src.services.notice_service import get_notice_payload
-from src.services.video_download_service import download_video, probe_video_links
-from src.services.search_service import warmup_search_runtime
-from src.services.version_service import get_version_status
-from ui.playback.vlc_player import warmup_vlc_runtime
 
 logger = get_logger("workers")
 
@@ -291,6 +278,8 @@ class SearchWarmupWorker(QThread):
 
     def run(self):
         try:
+            from src.services.search_service import warmup_search_runtime
+
             warmup_search_runtime()
         except Exception as exc:
             logger.warning("Search warmup failed: %s", exc)
@@ -303,6 +292,8 @@ class PreviewWarmupWorker(QThread):
 
     def run(self):
         try:
+            from ui.playback.vlc_player import warmup_vlc_runtime
+
             warmup_vlc_runtime()
         except Exception as exc:
             logger.warning("Preview warmup failed: %s", exc)
@@ -919,6 +910,10 @@ class ThumbLoader(QThread):
                 self.thumb_ready.emit(table_row, None)
                 continue
 
+            import cv2
+            from src.app.logging_utils import apply_opencv_log_level
+
+            apply_opencv_log_level()
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             height, width, _ = rgb_frame.shape
             image = QImage(rgb_frame.data, width, height, width * 3, QImage.Format_RGB888).copy()
@@ -934,16 +929,22 @@ class ThumbLoader(QThread):
 
 class VersionCheckWorker(FetchWorkerBase):
     def _fetch_data(self):
+        from src.services.version_service import get_version_status
+
         return get_version_status(self.language)
 
 
 class NoticeFetchWorker(FetchWorkerBase):
     def _fetch_data(self):
+        from src.services.notice_service import get_notice_payload
+
         return get_notice_payload(self.language)
 
 
 class AboutFetchWorker(FetchWorkerBase):
     def _fetch_data(self):
+        from src.services.about_service import get_about_payload
+
         return get_about_payload(self.language)
 
 
@@ -959,6 +960,9 @@ class ResourceDownloadWorker(QThread):
 
     def run(self):
         try:
+            from src.services.ffmpeg_service import download_ffmpeg
+            from src.services.model_service import download_models
+
             result = {"model_dir": "", "ffmpeg_path": ""}
             if self.need_models and self.need_ffmpeg:
                 self.progress_signal.emit(0, "Preparing runtime resources")
@@ -998,6 +1002,8 @@ class VideoDownloadProbeWorker(QThread):
 
     def run(self):
         try:
+            from src.services.video_download_service import probe_video_links
+
             results = probe_video_links(self.links)
             self.result_ready.emit(results)
         except Exception as exc:
@@ -1079,6 +1085,8 @@ class LocalVectorDetailsWorker(QThread):
 
     def run(self):
         try:
+            from src.services.library_service import list_local_vector_details
+
             self.result_ready.emit(list_local_vector_details(validate_contents=True))
         except Exception as exc:
             logger.warning("local_vector_details_worker_failed: %s", exc)
@@ -1123,6 +1131,16 @@ class ModelPackageImportWorker(QThread):
 
     def run(self):
         try:
+            from src.services.model_package_service import import_model_package_zip, import_model_packages
+            from src.services.understanding_import_service import (
+                classify_package_zip,
+                import_understanding_component_zip,
+            )
+            from src.services.understanding_resource_service import (
+                SEARCH_MODEL_MANIFEST_FILENAME,
+                UNDERSTANDING_MANIFEST_FILENAME,
+            )
+
             zip_files = [path for path in self.selected_files if path.lower().endswith(".zip")]
             sha256_files = [path for path in self.selected_files if path.lower().endswith(".sha256")]
             if zip_files and not self.scan_only:

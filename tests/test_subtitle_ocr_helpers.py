@@ -101,7 +101,10 @@ class SubtitleOcrHelpersTests(unittest.TestCase):
         bands = crop_subtitle_rois(frame, include_top=True, top_ratio=0.20, bottom_ratio=0.40)
         self.assertEqual([b for b, _ in bands], ["top", "bottom"])
         self.assertEqual(bands[0][1].shape[0], 200)
+        # Top band drops 20% left + 20% right (middle 60%).
+        self.assertEqual(bands[0][1].shape[1], 480)
         self.assertEqual(bands[1][1].shape[0], 400)
+        self.assertEqual(bands[1][1].shape[1], 800)
 
 
 if __name__ == "__main__":

@@ -36,10 +36,6 @@ ProgressCallback = Callable[[float, str], None]
 OcrFn = Callable[[np.ndarray], str]
 OcrBatchFn = Callable[[Sequence[np.ndarray]], Sequence[str]]
 
-# Fingerprint can miss near-identical layouts with different glyphs; force OCR
-# every N consecutive "unchanged" hits so dense timeline probes still catch swaps.
-_FORCE_OCR_EVERY_UNCHANGED = 4
-
 
 def _use_overlap_reader() -> bool:
     v = os.environ.get("VIDEOSEEK_DISABLE_SUBTITLE_OCR_OVERLAP", "").strip().lower()
@@ -143,7 +139,6 @@ def collect_ocr_observations(
         if st is None:
             st = {
                 "fingerprint": None,
-                "unchanged_streak": 0,
                 "last_text": "",
                 "last_idx": -1,
             }
@@ -235,13 +230,9 @@ def collect_ocr_observations(
         st = _state_for(band)
         changed, fingerprint = roi_changed(roi, st["fingerprint"])
         if not changed:
-            st["unchanged_streak"] = int(st["unchanged_streak"]) + 1
-            if int(st["unchanged_streak"]) < _FORCE_OCR_EVERY_UNCHANGED:
-                stats["unchanged_skips"] += 1
-                _extend_band_observation(time_sec, band)
-                return
-            # Sticky plate: still OCR periodically in case glyphs swapped under the gate.
-        st["unchanged_streak"] = 0
+            stats["unchanged_skips"] += 1
+            _extend_band_observation(time_sec, band)
+            return
         st["fingerprint"] = fingerprint
         pending.append((float(time_sec), roi, str(band)))
         if len(pending) >= _active_batch_n():

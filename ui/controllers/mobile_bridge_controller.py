@@ -1,7 +1,5 @@
 from PySide6.QtCore import QObject, Signal
 
-from src.web.mobile_bridge import MobileBridgeService
-
 
 class MobileBridgeController(QObject):
     search_requested = Signal(dict)
@@ -14,6 +12,8 @@ class MobileBridgeController(QObject):
 
     def start(self):
         if self._service is None:
+            from src.web.mobile_bridge import MobileBridgeService
+
             self._service = MobileBridgeService(on_search_requested=self._handle_search_requested)
         if self.is_running():
             return self.get_access_url()

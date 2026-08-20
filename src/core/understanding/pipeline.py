@@ -10,7 +10,6 @@ from src.core.understanding.base import UnderstandingStoppedError
 from src.core.understanding.registry import build_understanding_component
 from src.services.understanding_paths import get_component_manifest_path
 from src.services.understanding_resource_service import is_component_installed, validate_component_manifest
-from src.utils import get_single_thumbnail
 
 logger = get_logger("understanding.pipeline")
 
@@ -146,6 +145,8 @@ class UnderstandingPipeline:
         start_sec = float(chunk.get("start", 0.0))
         end_sec = float(chunk.get("end", start_sec))
         timestamp_sec = self._sample_timestamp(start_sec, end_sec)
+        from src.media.thumbnail import get_single_thumbnail
+
         frame_bgr = get_single_thumbnail(video_path, timestamp_sec)
         evidence = {"vision": {}, "audio": {}}
         tags: list[str] = []

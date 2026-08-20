@@ -4,7 +4,6 @@ from PySide6.QtCore import QObject
 
 from src.app.logging_utils import get_logger
 from src.app.search_results_paging import SEARCH_RESULTS_PAGE_SIZE, slice_search_results_page
-from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
 from ui.threading_utils import shutdown_thread
 from ui.workers import SearchConfig, SearchWarmupWorker, SearchWorker, ThumbLoader
 
@@ -424,6 +423,8 @@ class SearchController(QObject):
             )
             return
         self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["search_failed"])
+        from src.core.clip_embedding import get_engine_runtime_status, get_engine_runtime_warning
+
         runtime_warning = get_engine_runtime_warning()
         if runtime_warning:
             if not self._gpu_warning_shown:

@@ -63,11 +63,19 @@ def cleanup_old_logs(
 
 
 def silence_native_media_logs() -> None:
-    """Quiet OpenCV / libavcodec chatter (e.g. h264 'Missing reference picture')."""
+    """Quiet OpenCV / libavcodec chatter (e.g. h264 'Missing reference picture').
+
+    Env vars only at startup — avoid importing cv2 before the UI window appears.
+    ``apply_opencv_log_level()`` can refine after OpenCV is first loaded.
+    """
     os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
     # FFmpeg AV_LOG_ERROR = 16; some OpenCV builds also honor OPENCV_FFMPEG_LOGLEVEL.
     os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "16")
     os.environ.setdefault("AV_LOG_FORCE_NOCOLOR", "1")
+
+
+def apply_opencv_log_level() -> None:
+    """Best-effort OpenCV log level after cv2 is already imported elsewhere."""
     try:
         import cv2
 

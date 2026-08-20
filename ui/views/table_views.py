@@ -18,7 +18,7 @@ from src.services.library_service import resolve_library_card_status
 from src.storage.asset_store import load_model_metadata
 from src.app.config import load_config
 from src.domain.search_hit import coerce_search_hit
-from src.services.search_service import (
+from src.services.search_locate import (
     format_clip_score_percent,
     resolve_clip_confidence_label,
     resolve_clip_confidence_tier_key,

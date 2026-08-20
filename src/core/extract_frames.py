@@ -8,14 +8,22 @@ import numpy as np
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from src.utils import (
-    get_ffmpeg_path,
-    get_video_duration_seconds,
-    get_video_stream_info,
-    resolve_sampling_fps,
-)
+from src.infra.ffmpeg_paths import get_ffmpeg_path
+from src.media.sampling_fps import resolve_sampling_fps
 
 logger = get_logger("extract_frames")
+
+
+def get_video_duration_seconds(path):
+    from src.media.probe import get_video_duration_seconds as _impl
+
+    return _impl(path)
+
+
+def get_video_stream_info(path):
+    from src.media.probe import get_video_stream_info as _impl
+
+    return _impl(path)
 
 # Software decode + CPU filters; FFmpeg outputs 224×224 BGR rawvideo on stdout.
 _VF_CPU = "fps={fps:.6f},scale=224:224:flags=fast_bilinear"

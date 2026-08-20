@@ -10,6 +10,7 @@ from src.core.understanding.base import UnderstandingComponent
 from src.services.understanding_paths import get_component_dir
 
 _REGISTRY: dict[str, Callable[..., UnderstandingComponent]] = {}
+_BUILTINS_REGISTERED = False
 
 
 def register_understanding_component(registry_key: str, factory: Callable[..., UnderstandingComponent]) -> None:
@@ -19,12 +20,23 @@ def register_understanding_component(registry_key: str, factory: Callable[..., U
     _REGISTRY[key] = factory
 
 
+def _ensure_builtin_components() -> None:
+    global _BUILTINS_REGISTERED
+    if _BUILTINS_REGISTERED:
+        return
+    from src.core.understanding.components.remote_vl_caption import RemoteVlCaptionComponent
+
+    register_understanding_component("vision.image_caption.qwen3_vl_remote", RemoteVlCaptionComponent)
+    _BUILTINS_REGISTERED = True
+
+
 def build_understanding_component(
     manifest: Mapping[str, Any],
     *,
     component_dir: str | None = None,
     params: Mapping[str, Any] | None = None,
 ) -> UnderstandingComponent:
+    _ensure_builtin_components()
     engine = dict(manifest.get("engine") or {})
     registry_key = str(engine.get("registry_key", "") or "").strip()
     factory = _REGISTRY.get(registry_key)
@@ -54,6 +66,7 @@ def infer_installed_component(
     model_dir: str | None = None,
     params: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    _ensure_builtin_components()
     from src.services.understanding_paths import get_component_manifest_path
     from src.services.understanding_resource_service import validate_component_manifest
 
@@ -66,12 +79,3 @@ def infer_installed_component(
         return component.infer(image_bgr)
     finally:
         component.close()
-
-
-def _register_builtin_components() -> None:
-    from src.core.understanding.components.remote_vl_caption import RemoteVlCaptionComponent
-
-    register_understanding_component("vision.image_caption.qwen3_vl_remote", RemoteVlCaptionComponent)
-
-
-_register_builtin_components()

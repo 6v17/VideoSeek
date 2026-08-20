@@ -18,7 +18,6 @@ from src.services.team_mode_service import (
     stop_team_server_media,
 )
 from src.services.team_paths import detect_lan_ip, find_available_tcp_port
-from src.web.agent_api import AgentApiService, is_agent_api_enabled
 
 logger = get_logger("team_mode_controller")
 
@@ -142,6 +141,8 @@ class TeamModeController(QObject):
 
         self._emit_progress(progress_callback, "starting_api")
         try:
+            from src.web.agent_api import AgentApiService
+
             self._api_service = AgentApiService(host=host, port=api_port)
             self._api_service.start()
         except Exception as exc:
@@ -151,6 +152,8 @@ class TeamModeController(QObject):
                 fallback = find_available_tcp_port(api_port + 1, host=host, skip={media_port})
                 logger.warning("Retrying team API on port %s after failure on %s", fallback, api_port)
                 self._emit_progress(progress_callback, "starting_api_retry")
+                from src.web.agent_api import AgentApiService
+
                 self._api_service = AgentApiService(host=host, port=fallback)
                 self._api_service.start()
                 api_port = fallback
@@ -201,13 +204,16 @@ class TeamModeController(QObject):
         # Restore normal agent API if enabled
         self._emit_progress(progress_callback, "restoring_agent")
         agent = getattr(self.parent_window, "agent_api_controller", None)
-        if agent is not None and is_agent_api_enabled():
-            # Only if not team server — caller should have set mode off/client
-            if get_team_mode() != "server":
-                try:
-                    agent.start()
-                except Exception:
-                    logger.exception("Failed to restore loopback agent API")
+        if agent is not None:
+            from src.web.agent_api import is_agent_api_enabled
+
+            if is_agent_api_enabled():
+                # Only if not team server — caller should have set mode off/client
+                if get_team_mode() != "server":
+                    try:
+                        agent.start()
+                    except Exception:
+                        logger.exception("Failed to restore loopback agent API")
         self._emit_progress(progress_callback, "ready")
         self.refresh_status()
 

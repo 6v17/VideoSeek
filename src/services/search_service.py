@@ -5,10 +5,8 @@ from __future__ import annotations
 import os
 from typing import List
 
-import faiss
 import numpy as np
 
-from src.core.clip_embedding import get_clip_embeddings_batch, get_engine, get_text_embedding
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
@@ -115,6 +113,9 @@ logger = get_logger("search_service")
 
 
 def build_query_vector(query_data, is_text=False):
+    import faiss
+    from src.core.clip_embedding import get_clip_embeddings_batch, get_text_embedding
+
     if is_text:
         query_vector = get_text_embedding(query_data)
     elif isinstance(query_data, str):
@@ -136,6 +137,8 @@ def build_query_vector(query_data, is_text=False):
 
 def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
     if query_vector is not None:
+        import faiss
+
         vector = np.asarray(query_vector, dtype=np.float32)
         if vector.ndim == 1:
             vector = vector.reshape(1, -1)
@@ -846,6 +849,8 @@ def run_chunk_search(
 
 
 def warmup_search_runtime():
+    from src.core.clip_embedding import get_engine
+
     get_engine()
 
 

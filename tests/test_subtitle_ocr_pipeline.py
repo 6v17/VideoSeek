@@ -139,36 +139,6 @@ class SubtitleOcrPipelineTests(unittest.TestCase):
         self.assertEqual(stats["unchanged_skips"], 2)
         self.assertGreaterEqual(float(rows[0]["end"]), 4.0)
 
-    def test_force_ocr_after_unchanged_streak(self):
-        plate = np.ones((40, 80, 3), dtype=np.uint8) * 120
-        plate[10:20, 10:70] = 20
-        frames = [(float(i), plate.copy()) for i in range(1, 6)]
-        ocr_calls = []
-
-        def fake_iter(_path, _times):
-            yield from frames
-
-        def fake_ocr(_roi):
-            ocr_calls.append(1)
-            return "固定字幕"
-
-        with mock.patch.object(ocr_pipeline, "iter_frames_at_times", side_effect=fake_iter), mock.patch.object(
-            ocr_pipeline, "roi_likely_blank", return_value=False
-        ), mock.patch.object(ocr_pipeline, "crop_subtitle_rois", side_effect=lambda frame, **_k: [("bottom", frame)]), mock.patch.dict(
-            os.environ, {"VIDEOSEEK_DISABLE_SUBTITLE_OCR_OVERLAP": "1"}, clear=False
-        ):
-            stats: dict[str, int] = {}
-            rows = ocr_pipeline.collect_ocr_observations(
-                "dummy.mp4",
-                [1.0, 2.0, 3.0, 4.0, 5.0],
-                ocr_fn=fake_ocr,
-                duration=10.0,
-                stats_out=stats,
-            )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(len(ocr_calls), 2)  # first + forced on 4th unchanged
-        self.assertEqual(stats["unchanged_skips"], 3)
-
     def test_top_and_bottom_bands_keep_separate_cues(self):
         top = np.ones((30, 80, 3), dtype=np.uint8) * 200
         bottom = np.ones((40, 80, 3), dtype=np.uint8) * 40

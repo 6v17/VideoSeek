@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from src.app.i18n import get_texts
 from src.services.shot_list_service import ShotListStore
-from src.services.search_service import format_clip_score_percent
+from src.services.search_locate import format_clip_score_percent
 from ui.dialogs.shell import VSDialogShell
 from ui.views.table_views import _format_time_range
 from ui.widgets.scaffold import VSCard

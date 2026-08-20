@@ -11,8 +11,6 @@ from PySide6.QtWidgets import QApplication
 
 from src.app.app_meta import get_app_meta
 from src.app.config import get_configured_data_root, load_config
-from src.core.clip_embedding import get_engine_runtime_status
-from src.core.extract_frames import get_frame_decode_status
 from src.utils import get_configured_model_dir, get_ffmpeg_status_text, open_folder_in_explorer
 from ui.dialogs import AppMessageDialog
 from ui.widgets.styles import set_runtime_banner_warn
@@ -35,6 +33,8 @@ class RuntimeGuiMixin:
         return True
 
     def _update_inference_backend_hint(self, status=None):
+        from src.core.clip_embedding import get_engine_runtime_status
+
         config = load_config()
         if status is None:
             status = get_engine_runtime_status()
@@ -101,6 +101,8 @@ class RuntimeGuiMixin:
         lines.append(f"Backend: {backend}")
         lines.append(f"Initialized: {bool(status.get('initialized'))}")
         lines.append(f"Prefer GPU: {bool(status.get('prefer_gpu'))}")
+        from src.core.extract_frames import get_frame_decode_status
+
         decode_status = get_frame_decode_status(load_config())
         lines.append(
             self.texts.get("setting_runtime_detail_frame_decode", "Frame decode: requested={requested}, d3d11va available={available}, last={last}").format(
@@ -183,6 +185,8 @@ class RuntimeGuiMixin:
         return self.texts.get(text_key, self.texts.get("setting_runtime_issue_unknown", "DirectML runtime"))
 
     def copy_runtime_diagnostics(self, status=None):
+        from src.core.clip_embedding import get_engine_runtime_status
+
         if status is None:
             status = get_engine_runtime_status()
         payload = self._build_runtime_diagnostics_payload(status)
@@ -195,6 +199,8 @@ class RuntimeGuiMixin:
         )
 
     def show_runtime_diagnostics(self):
+        from src.core.clip_embedding import get_engine_runtime_status
+
         status = get_engine_runtime_status()
         payload = self._build_runtime_diagnostics_payload(status)
         lines = []

@@ -11,7 +11,7 @@ from src.core.frame_hash import compute_dhash, dhash_similarity
 from src.domain.search_hit import SearchHit
 from src.services.search_profiling import add_profile_counter, add_profile_ms, profiling_active
 from src.services.search_scope import normalize_scope_path
-from src.utils import get_single_thumbnail, resolve_sampling_fps
+from src.media.sampling_fps import resolve_sampling_fps
 
 logger = get_logger("image_search_rerank")
 
@@ -163,6 +163,8 @@ class VideoThumbnailSession:
                     return frame
             except Exception:
                 pass
+        from src.media.thumbnail import get_single_thumbnail
+
         return get_single_thumbnail(path, time_sec)
 
     def close(self) -> None:
@@ -193,6 +195,8 @@ def _get_thumbnail_cached(
     if decode_session is not None:
         frame = decode_session.read(video_path, time_sec)
     else:
+        from src.media.thumbnail import get_single_thumbnail
+
         frame = get_single_thumbnail(video_path, time_sec)
     if profiling_active():
         add_profile_ms("pixel_decode", int((perf_counter() - started) * 1000))

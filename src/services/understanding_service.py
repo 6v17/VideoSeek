@@ -39,7 +39,8 @@ from src.services.understanding_resource_service import (
 )
 from src.storage.asset_store import load_model_metadata
 from src.storage.config_store import get_active_embedding_spec, get_active_model_profile
-from src.utils import canonicalize_library_path, format_timecode_range, get_video_duration_seconds
+from src.storage.video_identity import canonicalize_library_path
+from src.utils import format_timecode_range
 
 logger = get_logger("understanding.service")
 
@@ -619,7 +620,12 @@ def resolve_video_context(video_id: str, config=None, *, probe_duration: bool = 
             if str(info.get("vid", "") or "").strip() != video_text:
                 continue
             video_path = os.path.normpath(os.path.join(root, str(rel_path)))
-            duration_sec = get_video_duration_seconds(video_path) if probe_duration else None
+            if probe_duration:
+                from src.media.probe import get_video_duration_seconds
+
+                duration_sec = get_video_duration_seconds(video_path)
+            else:
+                duration_sec = None
             return {
                 "video_id": video_text,
                 "video_path": video_path,
@@ -633,7 +639,12 @@ def resolve_video_context(video_id: str, config=None, *, probe_duration: bool = 
     for abs_path, candidate_id, info in iter_indexed_video_entries(meta):
         if candidate_id != video_text:
             continue
-        duration_sec = get_video_duration_seconds(abs_path) if probe_duration else None
+        if probe_duration:
+            from src.media.probe import get_video_duration_seconds
+
+            duration_sec = get_video_duration_seconds(abs_path)
+        else:
+            duration_sec = None
         library_path = ""
         video_rel_path = ""
         for root, library_data in (meta.get("libraries") or {}).items():

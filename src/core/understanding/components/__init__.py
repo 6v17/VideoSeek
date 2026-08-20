@@ -1,5 +1,3 @@
-from src.core.understanding.components.remote_vl_caption import RemoteVlCaptionComponent
+"""Understanding vision components (lazy-loaded via registry)."""
 
-__all__ = [
-    "RemoteVlCaptionComponent",
-]
+__all__: list[str] = []

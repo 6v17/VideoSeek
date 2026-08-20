@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from src.services.search_preset_service import list_presets
-from ui.dialogs.search_preset_dialog import SearchPresetManageDialog
+from src.services.search_preset_model import list_presets
 
 
 class SearchPresetsGuiMixin:
@@ -69,6 +68,8 @@ class SearchPresetsGuiMixin:
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
             return
+        from ui.dialogs.search_preset_dialog import SearchPresetManageDialog
+
         dialog = SearchPresetManageDialog(self, language=self.language, is_dark=self.is_dark_mode)
         dialog.exec()
         self.refresh_search_presets_ui()

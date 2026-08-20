@@ -8,7 +8,6 @@ import shutil
 from PySide6.QtWidgets import QFileDialog
 
 from src.app.config import load_config, save_config
-from src.core.clip_embedding import reset_engine
 from src.services.model_package_service import (
     rediscover_model_profiles as run_rediscover_model_profiles,
     remove_model_profile,
@@ -32,6 +31,8 @@ class ModelPackagesGuiMixin:
             )
             return
         try:
+            from src.core.clip_embedding import reset_engine
+
             reset_engine()
         except Exception:
             pass
@@ -206,6 +207,8 @@ class ModelPackagesGuiMixin:
         checksum_verified_count = int(result.get("checksum_verified_count", 0))
         dialog = self._active_model_import_dialog()
         if imported or updated:
+            from src.core.clip_embedding import reset_engine
+
             reset_engine()
             self.load_settings_values()
             self.refresh_runtime_resource_ui(sync_dialog=True)
@@ -316,6 +319,8 @@ class ModelPackagesGuiMixin:
             return
         try:
             # Release ONNX handles before directory deletion (service also resets).
+            from src.core.clip_embedding import reset_engine
+
             reset_engine()
             result = remove_model_profile(selected_profile_id)
         except Exception as exc:
@@ -327,6 +332,8 @@ class ModelPackagesGuiMixin:
 
         refresh_error = ""
         try:
+            from src.core.clip_embedding import reset_engine
+
             reset_engine()
             self.load_settings_values()
             self.refresh_runtime_resource_ui(sync_dialog=False)

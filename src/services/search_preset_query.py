@@ -5,12 +5,10 @@ from __future__ import annotations
 import hashlib
 import os
 
-import faiss
 import numpy as np
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from src.core.faiss_index import atomic_save_numpy
 from src.storage.config_store import get_active_embedding_spec
 
 from src.services.search_preset_constants import PRESET_TYPE_MIXED
@@ -75,6 +73,8 @@ def invalidate_all_preset_query_caches(preset_id: str, config=None) -> None:
 
 
 def _normalize_query_vector(vector) -> np.ndarray:
+    import faiss
+
     query_vector = np.asarray(vector, dtype=np.float32)
     if query_vector.ndim == 1:
         query_vector = query_vector.reshape(1, -1)
@@ -113,6 +113,8 @@ def _load_cached_query_vector(preset: dict, config=None) -> np.ndarray | None:
 def _save_cached_query_vector(preset: dict, vector: np.ndarray, config=None) -> None:
     cache_path = query_cache_path(preset.get("id", ""), config=config)
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    from src.core.faiss_index import atomic_save_numpy
+
     payload = {
         "vector": _normalize_query_vector(vector),
         "embedding_spec": get_active_embedding_spec(config=config or load_config()),

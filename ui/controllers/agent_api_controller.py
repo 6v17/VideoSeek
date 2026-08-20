@@ -3,9 +3,13 @@ import os
 from PySide6.QtCore import QObject
 
 from src.app.logging_utils import get_logger
-from src.web.agent_api import DEFAULT_HOST, DEFAULT_PORT, AgentApiService, is_agent_api_enabled
 
 logger = get_logger("agent_api_controller")
+
+# Keep literals here so importing this controller does not execute agent_api.__init__
+# (which eagerly pulls FastAPI / search / ONNX).
+_DEFAULT_HOST = "127.0.0.1"
+_DEFAULT_PORT = 8765
 
 
 class AgentApiController(QObject):
@@ -15,11 +19,13 @@ class AgentApiController(QObject):
         self._service = None
 
     def start(self):
+        from src.web.agent_api import AgentApiService, DEFAULT_HOST, DEFAULT_PORT, is_agent_api_enabled
+
         if not is_agent_api_enabled():
             return None
         if self._service is None:
-            host = os.environ.get("VIDEOSEEK_AGENT_API_HOST", DEFAULT_HOST)
-            port = int(os.environ.get("VIDEOSEEK_AGENT_API_PORT", DEFAULT_PORT))
+            host = os.environ.get("VIDEOSEEK_AGENT_API_HOST", DEFAULT_HOST or _DEFAULT_HOST)
+            port = int(os.environ.get("VIDEOSEEK_AGENT_API_PORT", DEFAULT_PORT or _DEFAULT_PORT))
             self._service = AgentApiService(host=host, port=port)
         if self.is_running():
             return self.get_base_url()

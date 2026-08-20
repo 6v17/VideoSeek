@@ -6,8 +6,6 @@ import json
 import os
 import subprocess
 
-import cv2
-
 from src.infra.ffmpeg_paths import get_ffprobe_path
 
 
@@ -111,6 +109,10 @@ def _probe_video_duration_with_opencv(video_path):
 
 
 def _probe_video_stream_with_opencv(video_path):
+    import cv2
+    from src.app.logging_utils import apply_opencv_log_level
+
+    apply_opencv_log_level()
     path = os.fspath(video_path)
     capture = cv2.VideoCapture(path)
     if not capture.isOpened():

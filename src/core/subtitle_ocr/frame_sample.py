@@ -267,17 +267,28 @@ def crop_subtitle_top_roi(
     frame: np.ndarray,
     *,
     top_ratio: float = 0.20,
+    side_crop_ratio: float = 0.20,
     max_width: int = 960,
 ) -> np.ndarray:
-    """Keep the upper band for PV titles / character names."""
+    """Keep the upper band for PV titles / character names.
+
+    Horizontal side margins (default 20% each) drop corner watermarks / logos
+    that often sit in the top-left / top-right of anime/PV frames.
+    """
     if frame is None or not isinstance(frame, np.ndarray) or frame.ndim < 2:
         return frame
     height = int(frame.shape[0])
-    if height <= 1:
+    width = int(frame.shape[1]) if frame.ndim >= 2 else 0
+    if height <= 1 or width <= 1:
         return frame
     ratio = min(0.45, max(0.08, float(top_ratio)))
     y1 = max(1, int(round(height * ratio)))
-    return _downscale_roi_width(frame[0:y1, :, ...], max_width)
+    side = min(0.40, max(0.0, float(side_crop_ratio)))
+    x0 = int(round(width * side))
+    x1 = int(round(width * (1.0 - side)))
+    if x1 <= x0 + 1:
+        x0, x1 = 0, width
+    return _downscale_roi_width(frame[0:y1, x0:x1, ...], max_width)
 
 
 def crop_subtitle_rois(
@@ -285,17 +296,24 @@ def crop_subtitle_rois(
     *,
     include_top: bool = False,
     top_ratio: float = 0.20,
+    top_side_crop_ratio: float = 0.20,
     bottom_ratio: float = 0.40,
     max_width: int = 960,
 ) -> list[tuple[str, np.ndarray]]:
     """Return ``[(band, roi), ...]`` — bottom always; optional top title band.
 
     Band ids: ``top`` | ``bottom``. Top is intended for timeline/PV probing;
-    VAD/dialogue paths usually keep ``include_top=False``.
+    VAD/dialogue paths usually keep ``include_top=False``. Top band also drops
+    left/right margins (``top_side_crop_ratio``) to avoid corner logos.
     """
     bands: list[tuple[str, np.ndarray]] = []
     if include_top:
-        top = crop_subtitle_top_roi(frame, top_ratio=top_ratio, max_width=max_width)
+        top = crop_subtitle_top_roi(
+            frame,
+            top_ratio=top_ratio,
+            side_crop_ratio=top_side_crop_ratio,
+            max_width=max_width,
+        )
         if top is not None and isinstance(top, np.ndarray) and top.size > 0:
             bands.append(("top", top))
     bottom = crop_subtitle_roi(frame, bottom_ratio=bottom_ratio, max_width=max_width)

@@ -7,15 +7,19 @@ import os
 from typing import Callable
 
 import numpy as np
-import pyarrow as pa
 
 from src.app.logging_utils import get_logger
-from src.core.faiss_index import _normalize_vectors, load_vectors
-from src.core.semantic_chunking import unpack_chunks
 from src.storage.asset_store import load_metadata
 from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("lance_store")
+
+
+def _pa():
+    """Lazy pyarrow — importing it at module load costs seconds on cold packaged starts."""
+    import pyarrow as pa
+
+    return pa
 
 LANCE_DIR_NAME = "lance"
 FRAMES_TABLE_NAME = "frames"
@@ -473,11 +477,13 @@ def read_lance_profile_summary(profile_base_dir: str, *, include_dir_size: bool 
     return summary
 
 
-def _vector_field_name(dimension: int) -> pa.Field:
+def _vector_field_name(dimension: int):
+    pa = _pa()
     return pa.field("vector", pa.list_(pa.float32(), dimension))
 
 
-def frames_table_schema(dimension: int) -> pa.Schema:
+def frames_table_schema(dimension: int):
+    pa = _pa()
     return pa.schema(
         [
             pa.field("video_id", pa.string()),
@@ -490,7 +496,8 @@ def frames_table_schema(dimension: int) -> pa.Schema:
     )
 
 
-def chunks_table_schema(dimension: int) -> pa.Schema:
+def chunks_table_schema(dimension: int):
+    pa = _pa()
     return pa.schema(
         [
             pa.field("video_id", pa.string()),
@@ -503,7 +510,8 @@ def chunks_table_schema(dimension: int) -> pa.Schema:
     )
 
 
-def dialogue_segments_table_schema(dimension: int) -> pa.Schema:
+def dialogue_segments_table_schema(dimension: int):
+    pa = _pa()
     return pa.schema(
         [
             pa.field("video_id", pa.string()),
@@ -826,6 +834,8 @@ def _infer_vector_dimension(vectors) -> int:
 
 
 def _vectors_to_fixed_list(vectors, dimension: int) -> list[list[float]]:
+    from src.core.faiss_index import _normalize_vectors
+
     array = _normalize_vectors(vectors)
     if array.size == 0:
         return []
@@ -969,6 +979,8 @@ def import_video_npy_to_lance(
         return stats
 
     try:
+        from src.core.faiss_index import load_vectors
+
         data = load_vectors(vector_file)
     except Exception as exc:
         stats["error"] = str(exc)
@@ -994,6 +1006,8 @@ def import_video_npy_to_lance(
     video_path = str(location.get("video_path", "") or "")
 
     try:
+        from src.core.semantic_chunking import unpack_chunks
+
         frame_rows = _build_frame_rows(
             video_id,
             vectors,
@@ -1117,6 +1131,8 @@ def import_npy_to_lance(
         summary["chunk_rows"] += int(per_video.get("chunk_rows", 0))
         if not locked_dimension:
             try:
+                from src.core.faiss_index import load_vectors
+
                 data = load_vectors(vector_file)
                 locked_dimension = _infer_vector_dimension(data.get("vector"))
                 summary["dimension"] = locked_dimension

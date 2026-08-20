@@ -10,23 +10,31 @@ import numpy as np
 from src.app.indexing_progress import IndexingProgressReporter
 from src.app.logging_utils import get_logger
 from src.core.semantic_chunking import build_semantic_chunks, chunk_builder_kwargs, normalize_chunk_config_snapshot
-from src.core.clip_embedding import generate_vectors_and_index_for_video
 from src.core.extract_frames import FrameExtractionError
-from src.core.timestamp_health import assess_index_timestamp_health
 from src.storage.config_store import (
     build_chunk_config,
     get_active_embedding_spec,
     get_local_model_asset_dirs,
 )
-from src.utils import (
+from src.infra.paths import ensure_folder_exists
+from src.storage.video_identity import (
     canonicalize_library_path,
     canonicalize_library_rel_path,
-    ensure_folder_exists,
     get_legacy_video_hash,
-    get_video_duration_seconds,
     get_video_hash,
-    has_readable_video_stream,
 )
+
+
+def get_video_duration_seconds(path):
+    from src.media.probe import get_video_duration_seconds as _impl
+
+    return _impl(path)
+
+
+def has_readable_video_stream(path):
+    from src.media.probe import has_readable_video_stream as _impl
+
+    return _impl(path)
 
 VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
 DISCOVER_CACHE_KEY = "discover_cache"
@@ -1258,6 +1266,8 @@ def _index_video_compute(
     model_dirs = get_local_model_asset_dirs(config=config)
     os.makedirs(model_dirs["vector_dir"], exist_ok=True)
     t_gen = time.perf_counter()
+    from src.core.clip_embedding import generate_vectors_and_index_for_video
+
     vectors, timestamps, _, chunks = generate_vectors_and_index_for_video(
         abs_path,
         video_id,
@@ -1458,6 +1468,8 @@ def _index_video_commit(
             "ready",
             **_fingerprint_kwargs(abs_path),
         )
+        from src.core.timestamp_health import assess_index_timestamp_health
+
         health = assess_index_timestamp_health(abs_path, timestamps, config=config)
         if health.get("warnings"):
             _emit_issue(

@@ -6,13 +6,20 @@ import os
 import subprocess
 import sys
 
-import cv2
 import numpy as np
 
 from src.app.logging_utils import get_logger
 from src.infra.ffmpeg_paths import get_ffmpeg_path
 
 logger = get_logger("thumbnail")
+
+
+def _cv2():
+    import cv2
+    from src.app.logging_utils import apply_opencv_log_level
+
+    apply_opencv_log_level()
+    return cv2
 
 
 def _is_http_media_url(path: str) -> bool:
@@ -55,6 +62,7 @@ def _ffmpeg_capture_frame(video_path: str, time_sec: float, *, timeout_sec: floa
         )
         buffer = np.frombuffer(process.stdout, np.uint8)
         if len(buffer) > 0:
+            cv2 = _cv2()
             return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
     except Exception as exc:
         logger.warning("Thumbnail capture failed: %s", exc)
@@ -76,6 +84,7 @@ def get_single_thumbnail(video_path, time_sec):
         return _ffmpeg_capture_frame(path, safe_time, timeout_sec=8.0)
 
     # Fast path: keep one lightweight local decoder process.
+    cv2 = _cv2()
     capture = cv2.VideoCapture(path)
     try:
         if capture.isOpened():

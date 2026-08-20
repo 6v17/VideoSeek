@@ -4,14 +4,6 @@ from PySide6.QtCore import QTimer, QUrl
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
-from src.media.export_clip import (
-    _resolve_base_clip_window,
-    build_preview_cache_path,
-    create_preview_clip,
-    export_original_clip,
-    resolve_export_clip_window,
-    start_export_original_clip_process,
-)
 from ui.playback.vlc_player import (
     VlcPreviewPlayer,
     create_vlc_preview_instance,
@@ -32,6 +24,8 @@ class PreviewController:
         self._warmup_started = False
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
+        from src.media.export_clip import _resolve_base_clip_window
+
         return _resolve_base_clip_window(
             video_path,
             start_sec,
@@ -78,6 +72,8 @@ class PreviewController:
         # Team play_url: never ffmpeg-remux remote HTTP on the UI thread (can hang / crash).
         if is_http_media_url(video_path):
             return False
+
+        from src.media.export_clip import build_preview_cache_path, create_preview_clip
 
         cache_path = build_preview_cache_path(video_path, clip_start)
         result = create_preview_clip(video_path, clip_start, cache_path, duration_sec=clip_duration)
@@ -186,6 +182,8 @@ class PreviewController:
         return dict(self.current_preview_context) if self.current_preview_context else None
 
     def export_clip(self, video_path, start_sec, output_path, end_sec=None, encode_mode=None):
+        from src.media.export_clip import export_original_clip, resolve_export_clip_window
+
         cfg = load_config()
         silent = bool(cfg.get("export_video_silent", False))
         mode = encode_mode if encode_mode is not None else cfg.get("export_encode_mode", "original")
@@ -206,6 +204,8 @@ class PreviewController:
         )
 
     def start_export_process(self, video_path, start_sec, output_path, end_sec=None, encode_mode=None):
+        from src.media.export_clip import resolve_export_clip_window, start_export_original_clip_process
+
         cfg = load_config()
         silent = bool(cfg.get("export_video_silent", False))
         mode = encode_mode if encode_mode is not None else cfg.get("export_encode_mode", "original")

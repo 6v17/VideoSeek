@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.services.query_text_service import prepare_text_query
-from src.services.search_preset_service import resolve_preset_ref_paths
+from src.services.search_preset_storage import resolve_preset_ref_paths
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.styles import repolish_widget
 

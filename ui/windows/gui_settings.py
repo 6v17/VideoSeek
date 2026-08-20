@@ -18,7 +18,6 @@ from src.core.chunk_policy import (
     detect_chunk_policy,
     resolve_chunk_policy_values,
 )
-from src.core.clip_embedding import reset_engine
 from src.services.storage_service import (
     cleanup_old_data_root as cleanup_old_data_root_service,
     cleanup_old_model_dir as cleanup_old_model_dir_service,
@@ -1033,6 +1032,8 @@ class SettingsGuiMixin:
                 or profile_switched
                 or effective_model_dir_changed
             ):
+                from src.core.clip_embedding import reset_engine
+
                 reset_engine()
             if not config["model_dir"]:
                 synced_model_dir = sync_model_dir_to_config()
@@ -1302,6 +1303,8 @@ class SettingsGuiMixin:
                 or previous_inference_ep
                 != str(config.get("inference_ep", DEFAULT_CONFIG["inference_ep"]) or "auto").strip().lower()
             ):
+                from src.core.clip_embedding import reset_engine
+
                 reset_engine()
             synced_model_dir = sync_model_dir_to_config()
             synced_path = sync_ffmpeg_path_to_config()

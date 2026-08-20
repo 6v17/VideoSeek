@@ -1,18 +1,20 @@
 # main.py
 import sys
 from src.app.logging_utils import get_logger, setup_logging
-from src.core.clip_embedding import gpu_probe_cli_main
 
 if __name__ == "__main__":
     setup_logging()
     logger = get_logger("main")
+    logger.info("Application starting")
 
     if "--gpu-probe" in sys.argv:
+        # Heavy ONNX/cv2 import only for the isolated GPU probe child process.
+        from src.core.clip_embedding import gpu_probe_cli_main
+
         sys.exit(gpu_probe_cli_main())
 
     from PySide6.QtWidgets import QApplication
     from src.app.single_instance import SingleInstanceServer, try_activate_existing_instance
-    from ui.windows.gui import MainWindow
 
     app = QApplication(sys.argv)
     from ui.widgets.tooltip_utils import install_wrapped_tooltips
@@ -31,10 +33,12 @@ if __name__ == "__main__":
     font.setFamily("Microsoft YaHei UI")
     app.setFont(font)
 
-    logger.info("Application starting")
     from src.storage.migration_runner import ensure_config_schema_v2_bootstrap
 
     ensure_config_schema_v2_bootstrap()
+    logger.info("Loading main window")
+    from ui.windows.gui import MainWindow
+
     window = MainWindow()
     single_instance_server.set_activate_handler(window._show_main_window_from_tray)
     if getattr(window, "startup_cancelled", False):

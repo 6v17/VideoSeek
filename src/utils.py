@@ -35,23 +35,6 @@ from src.infra.paths import (
     get_resource_path,
     resolve_resource_path,
 )
-from src.media.export_clip import (
-    EXPORT_ENCODE_MODE_COPY,
-    EXPORT_ENCODE_MODE_ORIGINAL,
-    build_export_original_clip_command,
-    build_preview_cache_path,
-    create_preview_clip,
-    estimate_export_copy_duration_sec,
-    export_original_clip,
-    normalize_export_encode_mode,
-    resolve_export_clip_window,
-    start_export_original_clip_process,
-)
-from src.media.probe import (
-    get_video_duration_seconds,
-    get_video_stream_info,
-    has_readable_video_stream,
-)
 from src.media.sampling_fps import (
     ensure_sampling_fps_rules_open_tail,
     normalize_sampling_fps_mode,
@@ -61,7 +44,6 @@ from src.media.sampling_fps import (
     validate_sampling_fps_rules,
     validate_sampling_fps_rules_full_coverage,
 )
-from src.media.thumbnail import get_single_thumbnail
 from src.storage.meta_io import load_meta, save_meta
 from src.storage.video_identity import (
     canonicalize_library_path,
@@ -71,6 +53,59 @@ from src.storage.video_identity import (
 )
 
 logger = get_logger("utils")
+
+# Clip encode mode labels — keep as plain constants so UI imports do not load OpenCV.
+EXPORT_ENCODE_MODE_ORIGINAL = "original"
+EXPORT_ENCODE_MODE_COPY = "copy"
+
+# Heavy OpenCV / FFmpeg clip helpers — load on first attribute access so UI import
+# does not pay cv2 cost before the main window appears.
+_LAZY_MEDIA_EXPORT = {
+    "build_export_original_clip_command",
+    "build_preview_cache_path",
+    "create_preview_clip",
+    "estimate_export_copy_duration_sec",
+    "export_original_clip",
+    "normalize_export_encode_mode",
+    "resolve_export_clip_window",
+    "start_export_original_clip_process",
+}
+_LAZY_MEDIA_PROBE = {
+    "get_video_duration_seconds",
+    "get_video_stream_info",
+    "has_readable_video_stream",
+}
+_LAZY_MEDIA_THUMB = {"get_single_thumbnail"}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_MEDIA_EXPORT:
+        from src.media import export_clip as _export_clip
+
+        value = getattr(_export_clip, name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_MEDIA_PROBE:
+        from src.media import probe as _probe
+
+        value = getattr(_probe, name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_MEDIA_THUMB:
+        from src.media.thumbnail import get_single_thumbnail as _get_single_thumbnail
+
+        globals()["get_single_thumbnail"] = _get_single_thumbnail
+        return _get_single_thumbnail
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(
+        set(globals())
+        | _LAZY_MEDIA_EXPORT
+        | _LAZY_MEDIA_PROBE
+        | _LAZY_MEDIA_THUMB
+    )
 
 
 def format_timecode_seconds(seconds) -> str:
