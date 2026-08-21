@@ -8,6 +8,12 @@ from PySide6.QtWidgets import QFileDialog
 
 from src.domain.search_hit import SearchHit
 from src.services.agent_clip_service import _MAX_BATCH_EXPORT_CLIPS
+from src.services.jianying_draft_service import (
+    JianyingDraftError,
+    export_shot_list_to_jianying_draft,
+    is_jianying_draft_support_available,
+    resolve_jianying_drafts_dir,
+)
 from src.services.shot_list_export_service import export_shot_list_fcpxml, export_shot_list_manifest
 from src.utils import has_ffmpeg, open_folder_in_explorer
 from ui.dialogs.shot_list_dialog import ShotListDialog
@@ -87,11 +93,72 @@ class ShotListGuiMixin:
             on_locate=self.open_result_in_explorer,
             on_export_manifest=lambda: self._export_shot_list_manifest(),
             on_export_fcpxml=lambda: self._export_shot_list_fcpxml(),
+            on_export_jianying=lambda: self._export_shot_list_jianying(),
             on_batch_export=lambda: self._export_shot_list_clips(),
             ffmpeg_available=has_ffmpeg(),
+            jianying_available=is_jianying_draft_support_available(),
         )
         dialog.exec()
         self._update_shot_list_button()
+
+    def _export_shot_list_jianying(self) -> None:
+        items = self.shot_list.list_items()
+        if not items:
+            return
+        title = self.texts.get("shot_list_export_jianying_title", "导出剪映草稿")
+        if not is_jianying_draft_support_available():
+            self.show_error_dialog(
+                title,
+                self.texts.get(
+                    "shot_list_export_jianying_missing",
+                    "未安装 pyJianYingDraft。请在 VideoSeek 环境执行：pip install pyJianYingDraft",
+                ),
+            )
+            return
+
+        drafts_dir = resolve_jianying_drafts_dir()
+        if not drafts_dir or not os.path.isdir(drafts_dir):
+            drafts_dir = QFileDialog.getExistingDirectory(
+                self,
+                self.texts.get("shot_list_export_jianying_pick_dir", "选择剪映草稿根目录"),
+            )
+        if not drafts_dir:
+            return
+
+        try:
+            payload = export_shot_list_to_jianying_draft(items, drafts_dir=drafts_dir)
+            message = self.texts.get(
+                "shot_list_export_jianying_success",
+                "已导出剪映草稿「{name}」（{count} 个片段）：\n{path}\n\n请先关闭剪映再打开该草稿。帧命中已展开为约 6 秒，可在时间线上拉长缩短。",
+            ).format(
+                name=payload.get("draft_name") or "",
+                count=int(payload.get("exported_count") or 0),
+                path=payload.get("draft_path") or "",
+            )
+            skipped = int(payload.get("skipped_count") or 0)
+            if skipped:
+                message += "\n\n" + self.texts.get(
+                    "shot_list_export_jianying_skipped",
+                    "另有 {count} 条远程/缺失素材已跳过。",
+                ).format(count=skipped)
+            self.search_page.lbl_status.setText(
+                self.texts.get(
+                    "shot_list_export_jianying_status",
+                    "已导出剪映草稿「{name}」（{count} 个片段）",
+                ).format(
+                    name=payload.get("draft_name") or "",
+                    count=int(payload.get("exported_count") or 0),
+                )
+            )
+            self.show_info_dialog(title, message, kind="info")
+            draft_path = str(payload.get("draft_path") or "")
+            if draft_path and os.path.isdir(draft_path):
+                open_folder_in_explorer(draft_path)
+        except JianyingDraftError as exc:
+            detail = exc.detail or exc.summary
+            self.show_error_dialog(title, detail)
+        except Exception as exc:
+            self.show_error_dialog(title, str(exc))
 
     def _export_shot_list_manifest(self) -> None:
         items = self.shot_list.list_items()

@@ -148,6 +148,7 @@ DEFAULT_CONFIG = {
     "export_encode_mode": "original",
     "export_copy_extra_sec": 4,
     "export_copy_margin_sec": 2.0,
+    "jianying_drafts_dir": "",
     "agent_api_enabled": False,
     "agent_api_search_timeout_fast_sec": 90,
     "agent_api_search_timeout_precise_sec": 180,

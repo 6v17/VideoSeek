@@ -33,6 +33,9 @@ python-multipart
 # QR code for mobile bridge dialog — optional; UI works without it but QR image may be missing
 qrcode[pil]
 
+# Optional: append search hits into Jianying drafts (「加入」→剪映)
+pyJianYingDraft>=0.2.5
+
 # Dev / CI
 pytest>=9.0
 ruff>=0.11

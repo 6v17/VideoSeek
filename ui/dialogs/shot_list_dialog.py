@@ -33,8 +33,10 @@ class ShotListDialog(VSDialogShell):
         on_locate=None,
         on_export_manifest=None,
         on_export_fcpxml=None,
+        on_export_jianying=None,
         on_batch_export=None,
         ffmpeg_available: bool = True,
+        jianying_available: bool = True,
     ):
         self.store = store
         self.texts = get_texts(language)
@@ -42,8 +44,10 @@ class ShotListDialog(VSDialogShell):
         self.on_locate = on_locate
         self.on_export_manifest = on_export_manifest
         self.on_export_fcpxml = on_export_fcpxml
+        self.on_export_jianying = on_export_jianying
         self.on_batch_export = on_batch_export
         self.ffmpeg_available = bool(ffmpeg_available)
+        self.jianying_available = bool(jianying_available)
         self._selected_item_id = ""
 
         super().__init__(
@@ -94,6 +98,9 @@ class ShotListDialog(VSDialogShell):
         self.btn_export_fcpxml = QPushButton(
             self.texts.get("shot_list_export_fcpxml", "导出剪辑 XML")
         )
+        self.btn_export_jianying = QPushButton(
+            self.texts.get("shot_list_export_jianying", "导出剪映草稿")
+        )
         self.btn_batch_export = QPushButton(self.texts.get("shot_list_batch_export", "Batch export clips"))
         self.btn_export_manifest.setObjectName("GhostButton")
         self.btn_export_fcpxml.setObjectName("GhostButton")
@@ -103,14 +110,30 @@ class ShotListDialog(VSDialogShell):
                 "默认导出 Premiere / 达芬奇可用的 FCP7 XML（*.xml）；也可选 FCPXML 给达芬奇。需本地视频文件。",
             )
         )
+        self.btn_export_jianying.setObjectName("GhostButton")
+        self.btn_export_jianying.setToolTip(
+            self.texts.get(
+                "shot_list_export_jianying_tip",
+                "新建一份 VideoSeek 剪映草稿，按素材篮顺序铺到时间线。帧命中会展开为约 6 秒，便于在剪映里拉长缩短。",
+            )
+        )
         self.btn_batch_export.setObjectName("GhostButton")
         self.btn_batch_export.setEnabled(self.ffmpeg_available)
         if not self.ffmpeg_available:
             self.btn_batch_export.setToolTip(
                 self.texts.get("shot_list_batch_export_ffmpeg_required", "FFmpeg is required for clip export.")
             )
+        if not self.jianying_available:
+            self.btn_export_jianying.setEnabled(False)
+            self.btn_export_jianying.setToolTip(
+                self.texts.get(
+                    "shot_list_export_jianying_missing",
+                    "未安装 pyJianYingDraft。请在 VideoSeek 环境执行：pip install pyJianYingDraft",
+                )
+            )
         self.footer_layout.addWidget(self.btn_export_manifest)
         self.footer_layout.addWidget(self.btn_export_fcpxml)
+        self.footer_layout.addWidget(self.btn_export_jianying)
         self.footer_layout.addWidget(self.btn_batch_export)
 
         self.btn_move_up = QPushButton(self.texts.get("shot_list_move_up", "Move up"))
@@ -142,6 +165,7 @@ class ShotListDialog(VSDialogShell):
         self.btn_locate.clicked.connect(self._locate_selected)
         self.btn_export_manifest.clicked.connect(self._export_manifest)
         self.btn_export_fcpxml.clicked.connect(self._export_fcpxml)
+        self.btn_export_jianying.clicked.connect(self._export_jianying)
         self.btn_batch_export.clicked.connect(self._batch_export)
         self.btn_close.clicked.connect(self.accept)
 
@@ -204,6 +228,7 @@ class ShotListDialog(VSDialogShell):
         self.btn_clear.setEnabled(self.store.count() > 0)
         self.btn_export_manifest.setEnabled(self.store.count() > 0)
         self.btn_export_fcpxml.setEnabled(self.store.count() > 0)
+        self.btn_export_jianying.setEnabled(self.store.count() > 0 and self.jianying_available)
         self.btn_batch_export.setEnabled(self.store.count() > 0 and self.ffmpeg_available)
 
     def _export_manifest(self) -> None:
@@ -213,6 +238,10 @@ class ShotListDialog(VSDialogShell):
     def _export_fcpxml(self) -> None:
         if self.on_export_fcpxml is not None:
             self.on_export_fcpxml()
+
+    def _export_jianying(self) -> None:
+        if self.on_export_jianying is not None:
+            self.on_export_jianying()
 
     def _batch_export(self) -> None:
         if self.on_batch_export is not None:
