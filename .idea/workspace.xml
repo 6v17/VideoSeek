@@ -4,61 +4,31 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="加回图搜chunk">
+    <list default="true" id="9b1fded6-c71f-46c4-9f35-b98f0ce740c1" name="更改" comment="图片展示图移除">
+      <change beforePath="$PROJECT_DIR$/.idea/VideoSeek.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/VideoSeek.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/debug_chunk_split.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/debug_chunk_split.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/app_meta.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/app_meta.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/i18n.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/i18n.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/app/indexing_progress.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/indexing_progress.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/chunk_policy.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/chunk_policy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/clip_embedding.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/clip_embedding.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/core/semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/semantic_chunking.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/domain/search_hit.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/domain/search_hit.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/indexing_runtime_status.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_runtime_status.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/indexing_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/library_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/library_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_chunk_pipeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_chunk_pipeline.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_fetch_policy.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_fetch_policy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_frame_query.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_frame_query.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_index_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_index_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_neighbor_rerank.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_neighbor_rerank.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/services/search_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/asset_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/asset_store.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/config_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/config_store.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/lance_migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/lance_migration_runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/lance_search_index.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/lance_search_index.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/lance_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/lance_store.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/migration_runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/storage/video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/storage/video_id_migration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/web/agent_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/workflows/update_video.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/workflows/update_video.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_chunk_policy.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_chunk_policy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_chunk_timeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_chunk_timeline.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_lance_migration_runner.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_lance_migration_runner.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_lance_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_lance_search.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_search_index_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_index_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_semantic_chunking.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_semantic_chunking.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_services.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_video_id_migration.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_video_id_migration.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/controllers/search_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/search_controller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/views/table_views.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/views/table_views.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/chunk_timeline.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/chunk_timeline.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/components.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/layout.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/layout.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/preview_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/preview_panel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/result_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/result_view.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/search_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/search_panel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/widgets/styles.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/widgets/styles.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_library_indexing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/domain/evidence_bundle.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/domain/evidence_bundle.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/dialogue_index_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/dialogue_index_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/search_video_discovery.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/search_video_discovery.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/subtitle_index_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/subtitle_index_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/team_client_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/team_client_search.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/understanding_paths.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_paths.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/understanding_resource_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_resource_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/understanding_tags.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/understanding_tags.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api/schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api/schemas.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/web/agent_api/search.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/web/agent_api/search.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_evidence_bundle_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_evidence_bundle_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_lance_scope_where.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_lance_scope_where.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_paths.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_paths.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_understanding_tags.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_understanding_tags.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/controllers/understanding_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/controllers/understanding_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/dialogs/shot_list_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/dialogs/shot_list_dialog.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_panel_state.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_search_scope.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/windows/gui_understanding.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_understanding.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui/workers.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/workers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui/windows/gui_shot_list.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui/windows/gui_shot_list.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -118,7 +88,7 @@
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
     &quot;url&quot;: &quot;git@github.com:6v17/VideoSeek.git&quot;,
-    &quot;accountId&quot;: &quot;32fc49d4-fcb0-4bb7-b27a-3eaf6471599d&quot;
+    &quot;accountId&quot;: &quot;4fc3dbea-0d1d-42ed-b04a-aadaed89fd54&quot;
   }
 }</component>
   <component name="McpProjectServerCommands">
@@ -291,8 +261,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-31caf2ab9e3c-JavaScript-PY-261.26222.68" />
-        <option value="bundled-python-sdk-50341a9f1f9c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.26222.68" />
+        <option value="bundled-js-predefined-d6986cc7102b-4abd2a77f808-JavaScript-PY-262.8665.369" />
+        <option value="bundled-python-sdk-6fa658e1df1a-5bd6d13a2a75-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-262.8665.369" />
       </set>
     </attachedChunks>
   </component>
@@ -533,6 +503,12 @@
       <workItem from="1783398947232" duration="1396000" />
       <workItem from="1783485187992" duration="3024000" />
       <workItem from="1783571604499" duration="713000" />
+      <workItem from="1786621861849" duration="7213000" />
+      <workItem from="1786632856074" duration="302000" />
+      <workItem from="1786863036997" duration="3144000" />
+      <workItem from="1787020012035" duration="1311000" />
+      <workItem from="1787230878811" duration="5239000" />
+      <workItem from="1787308356976" duration="9408000" />
     </task>
     <task id="LOCAL-00105" summary="更新说明文件">
       <option name="closed" value="true" />
@@ -988,7 +964,7 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/src/utils.py</url>
-          <line>68</line>
+          <line>50</line>
           <option name="timeStamp" value="1" />
         </line-breakpoint>
       </breakpoints>

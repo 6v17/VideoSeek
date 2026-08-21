@@ -36,6 +36,16 @@ if __name__ == "__main__":
     from src.storage.migration_runner import ensure_config_schema_v2_bootstrap
 
     ensure_config_schema_v2_bootstrap()
+    logger.info("Loading plugins")
+    from src.app.plugins import load_plugins
+
+    try:
+        loaded = load_plugins()
+        if loaded.loaded_modules:
+            logger.info("Loaded plugins: %s", ", ".join(loaded.loaded_modules))
+    except Exception:
+        logger.exception("Failed to load plugins")
+        raise
     logger.info("Loading main window")
     from ui.windows.gui import MainWindow
 

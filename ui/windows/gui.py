@@ -26,6 +26,7 @@ from src.app.config import (
     save_config,
 )
 from src.app.i18n import get_texts
+from src.app.plugins import get_registry, resolve_nav_page_order
 from src.services.about_service import get_local_about_payload
 from src.services.donate_service import get_donate_payload
 from src.services.library_service import (
@@ -102,9 +103,12 @@ class MainWindow(
     SearchPanelStateMixin,
     ShotListGuiMixin,
 ):
-    """Sidebar / stacked widget order: local search → library → remote link → settings."""
+    """Sidebar / stacked widget order: local search → library → evidence → link → settings.
 
-    _NAV_PAGE_ORDER = ("search", "library", "understanding", "link", "settings")
+    Optional plugins may insert pages (e.g. after understanding) via ``src.app.plugins``.
+    """
+
+    _BUILTIN_NAV_PAGE_ORDER = ("search", "library", "understanding", "link", "settings")
 
     def __init__(self):
         super().__init__()
@@ -133,6 +137,9 @@ class MainWindow(
         self._last_index_issue_target = None
         self._search_indexing_notice_effect = None
         self._search_indexing_notice_animation = None
+        self._plugin_page_widgets = {}
+        self._plugin_page_specs = {}
+        self._nav_page_order = resolve_nav_page_order(self._BUILTIN_NAV_PAGE_ORDER)
         cfg = load_config()
         self._debug_tools_enabled = bool(cfg.get("show_debug_test_buttons", False))
         self.is_dark_mode = cfg.get("theme", "dark") == "dark"
@@ -143,6 +150,7 @@ class MainWindow(
         self.about_payload = get_local_about_payload(self.language)
 
         self.init_ui()
+        self._init_plugin_features()
         self.app_meta_controller = AppMetaController(self)
         self.app_meta_controller.version_ready.connect(self._update_version_info)
         self.app_meta_controller.notice_ready.connect(self._update_notice_payload)
@@ -230,11 +238,42 @@ class MainWindow(
         self.library_page = LibraryPage()
         self.understanding_page = UnderstandingEvidencePage()
         self.settings_page = SettingsPage()
-        self.pages.addWidget(self._build_scroll_page(self.search_page))
-        self.pages.addWidget(self._build_scroll_page(self.library_page))
-        self.pages.addWidget(self._build_scroll_page(self.understanding_page))
-        self.pages.addWidget(self._build_scroll_page(self.link_page))
-        self.pages.addWidget(self.settings_page)
+        self._plugin_page_widgets = {}
+        self._plugin_page_specs = {}
+        registry = get_registry()
+        self._nav_page_order = resolve_nav_page_order(self._BUILTIN_NAV_PAGE_ORDER, registry)
+        for spec in registry.pages:
+            widget = spec.factory()
+            self._plugin_page_widgets[spec.page_id] = widget
+            self._plugin_page_specs[spec.page_id] = spec
+            setattr(self, f"{spec.page_id}_page", widget)
+            label = self.texts.get(spec.label_key, spec.page_id)
+            button = self.sidebar.register_nav_page(
+                spec.page_id,
+                label,
+                insert_after=spec.insert_after,
+            )
+            button.clicked.connect(lambda _checked=False, name=spec.page_id: self.switch_page(name))
+
+        builtin_widgets = {
+            "search": lambda: self._build_scroll_page(self.search_page),
+            "library": lambda: self._build_scroll_page(self.library_page),
+            "understanding": lambda: self._build_scroll_page(self.understanding_page),
+            "link": lambda: self._build_scroll_page(self.link_page),
+            "settings": lambda: self.settings_page,
+        }
+        for page_id in self._nav_page_order:
+            if page_id in builtin_widgets:
+                self.pages.addWidget(builtin_widgets[page_id]())
+                continue
+            widget = self._plugin_page_widgets.get(page_id)
+            if widget is None:
+                continue
+            spec = self._plugin_page_specs.get(page_id)
+            if spec is None or spec.scrollable:
+                self.pages.addWidget(self._build_scroll_page(widget))
+            else:
+                self.pages.addWidget(widget)
         content_layout.addWidget(self.pages)
         main_layout.addWidget(self.content, 1)
 
@@ -440,15 +479,27 @@ class MainWindow(
         return True
 
     def _nav_page_index(self, page_name: str) -> int:
-        return self._NAV_PAGE_ORDER.index(page_name)
+        return self._nav_page_order.index(page_name)
+
+    def _init_plugin_features(self) -> None:
+        for feature in get_registry().features:
+            try:
+                feature.on_init(self)
+            except Exception:
+                raise
+        for feature in get_registry().features:
+            feature.wire_signals(self)
 
     def switch_page(self, page_name):
-        mapping = {name: i for i, name in enumerate(self._NAV_PAGE_ORDER)}
+        mapping = {name: i for i, name in enumerate(self._nav_page_order)}
+        if page_name not in mapping:
+            return
         prev_idx = self.pages.currentIndex()
         next_idx = mapping[page_name]
         self.pages.setCurrentIndex(next_idx)
         self.sidebar.set_current_page(page_name)
-        if prev_idx == mapping["search"] and next_idx != mapping["search"]:
+        search_idx = mapping.get("search")
+        if search_idx is not None and prev_idx == search_idx and next_idx != search_idx:
             if hasattr(self, "_collapse_preview_maximize"):
                 self._collapse_preview_maximize()
             self.preview_controller.stop_preview()
@@ -470,6 +521,8 @@ class MainWindow(
             self._settle_understanding_page_layout()
         if page_name == "link":
             self._settle_link_page_layout()
+        for feature in get_registry().features:
+            feature.on_page_shown(self, page_name)
 
     def _settle_understanding_page_layout(self) -> None:
         """Paint understanding chrome first; defer video-list/timeline (O(N) / disk)."""
@@ -531,6 +584,12 @@ class MainWindow(
         self.sidebar.btn_page_library.setText(t["nav_library"])
         self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
+        for page_id, spec in self._plugin_page_specs.items():
+            button = self.sidebar.nav_button(page_id)
+            if button is not None:
+                button.setText(t.get(spec.label_key, page_id))
+        for feature in get_registry().features:
+            feature.apply_texts(self)
         self.sidebar.btn_notice.setText(
             t["notice_short_update"]
             if self.version_info and self.version_info.get("has_update")
@@ -1892,6 +1951,7 @@ class MainWindow(
                     getattr(self, "understanding_controller", None)
                     and self.understanding_controller.is_running()
                 )
+                or any(feature.is_busy(self) for feature in get_registry().features)
             )
             and not self._force_application_quit
         ):

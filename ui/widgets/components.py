@@ -264,7 +264,8 @@ class NavigationSidebar(QWidget):
         self.setObjectName("NavSidebar")
         self.setFixedWidth(COMPONENT_SIZES["sidebar_width"])
 
-        layout = QVBoxLayout(self)
+        self._nav_layout = QVBoxLayout(self)
+        layout = self._nav_layout
         layout.setContentsMargins(12, 16, 12, 12)
         layout.setSpacing(8)
 
@@ -294,16 +295,21 @@ class NavigationSidebar(QWidget):
         hero_layout.addWidget(self.hero_body)
         layout.addWidget(self.hero_card)
 
+        self._nav_buttons: dict[str, QPushButton] = {}
         self.btn_page_search = self._build_nav_button("Search", checked=True)
         self.btn_page_library = self._build_nav_button("Libraries")
         self.btn_page_understanding = self._build_nav_button("Evidence")
         self.btn_page_link = self._build_nav_button("Link Match")
         self.btn_page_settings = self._build_nav_button("Settings")
-        layout.addWidget(self.btn_page_search)
-        layout.addWidget(self.btn_page_library)
-        layout.addWidget(self.btn_page_understanding)
-        layout.addWidget(self.btn_page_link)
-        layout.addWidget(self.btn_page_settings)
+        for page_id, button in (
+            ("search", self.btn_page_search),
+            ("library", self.btn_page_library),
+            ("understanding", self.btn_page_understanding),
+            ("link", self.btn_page_link),
+            ("settings", self.btn_page_settings),
+        ):
+            self._nav_buttons[page_id] = button
+            layout.addWidget(button)
         self.runtime_hint = QLabel("")
         self.runtime_hint.setObjectName("StatusLabel")
         self.runtime_hint.setWordWrap(True)
@@ -369,16 +375,37 @@ class NavigationSidebar(QWidget):
         button.setFixedHeight(COMPONENT_SIZES["nav_button_height"])
         return button
 
+    def register_nav_page(self, page_id: str, label: str, *, insert_after: str = "understanding"):
+        """Insert an optional nav button after ``insert_after`` (plugin pages)."""
+        page_id = str(page_id or "").strip()
+        if not page_id:
+            raise ValueError("page_id is required")
+        existing = self._nav_buttons.get(page_id)
+        if existing is not None:
+            return existing
+        button = self._build_nav_button(str(label or page_id))
+        self._nav_buttons[page_id] = button
+        setattr(self, f"btn_page_{page_id}", button)
+        anchor = self._nav_buttons.get(str(insert_after or "").strip())
+        if anchor is not None:
+            idx = self._nav_layout.indexOf(anchor)
+            self._nav_layout.insertWidget(idx + 1, button)
+        else:
+            settings_btn = self._nav_buttons.get("settings")
+            if settings_btn is not None:
+                idx = self._nav_layout.indexOf(settings_btn)
+                self._nav_layout.insertWidget(idx, button)
+            else:
+                self._nav_layout.insertWidget(self._nav_layout.count(), button)
+        return button
+
+    def nav_button(self, page_id: str):
+        return self._nav_buttons.get(str(page_id or "").strip())
+
     def set_current_page(self, page_name):
-        mapping = {
-            "search": self.btn_page_search,
-            "link": self.btn_page_link,
-            "library": self.btn_page_library,
-            "understanding": self.btn_page_understanding,
-            "settings": self.btn_page_settings,
-        }
-        for name, button in mapping.items():
-            button.setChecked(name == page_name)
+        target = str(page_name or "").strip()
+        for name, button in self._nav_buttons.items():
+            button.setChecked(name == target)
 
 
 class SearchPage(QWidget):

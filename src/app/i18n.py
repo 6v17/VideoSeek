@@ -2707,7 +2707,16 @@
 
 
 def get_texts(language):
-    selected = TEXTS.get(language, TEXTS["zh"])
+    selected = dict(TEXTS.get(language, TEXTS["zh"]))
     lang = language if language in TEXTS else "zh"
+    try:
+        from src.app.plugins import get_registry
+
+        for texts_zh, texts_en in get_registry().i18n_overlays:
+            overlay = texts_zh if lang == "zh" else texts_en
+            if overlay:
+                selected.update(overlay)
+    except Exception:
+        pass
     return apply_copy_overrides(selected, lang)
 from src.app.copy_overrides import apply_copy_overrides

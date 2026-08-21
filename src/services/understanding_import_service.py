@@ -55,6 +55,17 @@ def classify_package_zip(zip_path: str) -> str:
         return "understanding"
     if zip_contains_file_suffix(zip_path, SEARCH_MODEL_MANIFEST_FILENAME):
         return "search"
+    try:
+        from src.app.plugins import get_registry
+
+        for kind, spec in get_registry().package_kinds.items():
+            try:
+                if spec.detect_fn(zip_path):
+                    return kind
+            except Exception:
+                continue
+    except Exception:
+        pass
     return "unknown"
 
 _SHA256_PATTERN = re.compile(r"^[0-9A-F]{64}$")

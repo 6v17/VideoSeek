@@ -29,6 +29,7 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 | **Video understanding** | Desktop-only optional: per-chunk captions + whole-video summary via an OpenAI-compatible caption service (**not** exposed on the Agent API) |
 | **Localhost Agent API** | HTTP on `127.0.0.1`: semantic/subtitle search, list libraries/videos, export clips (see `docs/for-agents.md`; no understanding endpoints) |
 | **Video download** | Resolve page links, download into a local folder, then sync like a normal library |
+| **Optional plugins** | Load extension pages before startup via `VIDEOSEEK_PLUGINS` or `profile/plugins.json` (nav / package kinds / i18n). The open-source tree ships no third-party plugin code. |
 
 ## Who is it for?
 

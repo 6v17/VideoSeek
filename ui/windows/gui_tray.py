@@ -5,6 +5,7 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QStyle, QSystemTrayIcon
 
 from src.app.config import DEFAULT_CONFIG, load_config
+from src.app.plugins import get_registry
 from ui.dialogs.indexing_close_choice import IndexingCloseChoiceDialog
 
 
@@ -215,6 +216,11 @@ class TrayGuiMixin:
         self.indexing_controller.shutdown()
         if getattr(self, "understanding_controller", None):
             self.understanding_controller.shutdown()
+        for feature in get_registry().features:
+            try:
+                feature.shutdown(self)
+            except Exception:
+                pass
         self.app_meta_controller.shutdown()
         self.runtime_resource_controller.shutdown()
         self.preview_controller.shutdown()
