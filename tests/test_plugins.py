@@ -67,23 +67,24 @@ class PluginRegistryTests(unittest.TestCase):
                 "    registry.register_page('dummy', label_key='nav_dummy', factory=lambda: object())\n",
                 encoding="utf-8",
             )
-            with patch.dict(os.environ, {"VIDEOSEEK_PLUGINS": "videoseek_plugin_dummy"}):
+            with patch.dict(os.environ, {"VIDEOSEEK_PLUGINS": "videoseek_plugin_dummy"}, clear=False):
                 import sys
 
                 sys.path.insert(0, tmp)
                 try:
                     reset_registry_for_tests()
-                    loaded = load_plugins()
+                    loaded = load_plugins(["videoseek_plugin_dummy"])
                 finally:
                     sys.path.remove(tmp)
             self.assertIn("videoseek_plugin_dummy", loaded.loaded_modules)
-            self.assertEqual(len(loaded.pages), 1)
-            self.assertEqual(loaded.pages[0].page_id, "dummy")
+            self.assertTrue(any(p.page_id == "dummy" for p in loaded.pages))
 
     def test_discover_from_env(self):
-        with patch.dict(os.environ, {"VIDEOSEEK_PLUGINS": "a,b;c"}):
+        with patch.dict(os.environ, {"VIDEOSEEK_PLUGINS": "a,b;c"}, clear=False):
             with patch.object(plugin_mod, "_profile_plugins_path", return_value=""):
-                self.assertEqual(discover_plugin_module_names(), ["a", "b", "c"])
+                with patch.object(plugin_mod, "_module_importable", return_value=False):
+                    with patch.object(plugin_mod, "ensure_plugin_search_paths", return_value=[]):
+                        self.assertEqual(discover_plugin_module_names(), ["a", "b", "c"])
 
     def test_classify_uses_plugin_kind(self):
         from src.services.understanding_import_service import classify_package_zip

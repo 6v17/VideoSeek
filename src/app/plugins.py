@@ -1,15 +1,17 @@
-"""Thin optional plugin registry for VideoSeek host apps (e.g. Pro).
+"""Thin optional plugin registry for VideoSeek.
 
-OSS ships an empty registry by default. Hosts call ``load_plugins`` before
-creating ``MainWindow`` so pages, features, package kinds, and i18n overlays
-can register without forking shared UI files.
+OSS ships an empty registry by default. Call ``load_plugins`` before creating
+``MainWindow``. Private plugins (e.g. clone) can live in a sibling repo or be
+``pip install``-ed; they are never required for the open-source app.
 """
 
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -125,6 +127,13 @@ class PluginRegistry:
 
 _REGISTRY = PluginRegistry()
 
+# Sibling checkout names next to the VideoSeek app repo.
+_SIBLING_PLUGIN_ROOTS = (
+    "videoseek-plugin-clone",
+    "VideoSeek-plugin-clone",
+)
+_DEFAULT_PRIVATE_PLUGIN = "videoseek_plugin_clone"
+
 
 def get_registry() -> PluginRegistry:
     return _REGISTRY
@@ -158,20 +167,66 @@ def resolve_nav_page_order(
     return tuple(order)
 
 
+def _app_repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
 def _profile_plugins_path() -> str:
     local = str(os.environ.get("LOCALAPPDATA") or "").strip()
     if local:
         candidate = os.path.join(local, "VideoSeek", "profile", "plugins.json")
         if os.path.isfile(candidate):
             return candidate
-    # Dev checkout: <repo>/profile/plugins.json
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    candidate = os.path.join(root, "profile", "plugins.json")
+    candidate = os.path.join(_app_repo_root(), "profile", "plugins.json")
     return candidate if os.path.isfile(candidate) else ""
 
 
+def ensure_plugin_search_paths() -> List[str]:
+    """Put sibling plugin checkouts / explicit paths on ``sys.path``.
+
+    Returns paths that were newly inserted.
+    """
+    added: List[str] = []
+    seen: set[str] = {os.path.normcase(os.path.abspath(p)) for p in sys.path if p}
+
+    def _add_path(raw: str) -> None:
+        path = os.path.abspath(os.path.expanduser(str(raw or "").strip()))
+        if not path or not os.path.isdir(path):
+            return
+        key = os.path.normcase(path)
+        if key in seen:
+            return
+        sys.path.insert(0, path)
+        seen.add(key)
+        added.append(path)
+
+    for part in str(os.environ.get("VIDEOSEEK_PLUGIN_PATHS", "") or "").replace(";", ",").split(","):
+        _add_path(part)
+
+    parent = os.path.dirname(_app_repo_root())
+    for sibling in _SIBLING_PLUGIN_ROOTS:
+        root = os.path.join(parent, sibling)
+        if os.path.isdir(os.path.join(root, "videoseek_plugin_clone")):
+            _add_path(root)
+
+    # Legacy in-tree path (VideoSeek-Pro transitional checkout).
+    legacy = os.path.join(_app_repo_root(), "plugins", "clone")
+    if os.path.isdir(os.path.join(legacy, "videoseek_plugin_clone")):
+        _add_path(legacy)
+
+    return added
+
+
+def _module_importable(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
 def discover_plugin_module_names() -> List[str]:
-    """Resolve plugin module names from env and optional profile/plugins.json."""
+    """Resolve plugin module names from env, profile, and local installs."""
+    ensure_plugin_search_paths()
     names: List[str] = []
     seen: set[str] = set()
 
@@ -203,6 +258,11 @@ def discover_plugin_module_names() -> List[str]:
                     _add(str(item))
         except (OSError, json.JSONDecodeError, TypeError):
             pass
+
+    # Private clone plugin: load only when installed or checked out beside the app.
+    if _DEFAULT_PRIVATE_PLUGIN not in seen and _module_importable(_DEFAULT_PRIVATE_PLUGIN):
+        _add(_DEFAULT_PRIVATE_PLUGIN)
+
     return names
 
 
@@ -212,6 +272,7 @@ def load_plugins(module_names: Optional[Sequence[str]] = None) -> PluginRegistry
     ``module_names`` overrides discovery. Duplicate loads of the same module
     name in one process are skipped.
     """
+    ensure_plugin_search_paths()
     registry = get_registry()
     names = list(module_names) if module_names is not None else discover_plugin_module_names()
     for name in names:

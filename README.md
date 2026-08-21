@@ -29,7 +29,7 @@
 | **视频理解** | 桌面端可选：对已同步视频按语义 chunk 生成画面描述与整片总结（OpenAI 兼容描述服务；**不**经 Agent API 暴露） |
 | **本机 Agent API** | `127.0.0.1` HTTP：语义/字幕搜索、列库与视频、导出片段（见 `docs/for-agents.md`；不含视频理解） |
 | **视频下载** | 从网页链接解析并下载到本地文件夹，再按普通视频库同步索引 |
-| **可选插件** | 启动前可通过 `VIDEOSEEK_PLUGINS` 或 `profile/plugins.json` 加载扩展页（导航 / 模型包类型 / 文案），开源本体不含第三方插件代码 |
+| **可选插件** | 启动前可通过 `VIDEOSEEK_PLUGINS` / `profile/plugins.json`，或同级私有插件目录 / `pip install` 加载扩展页。开源本体不含第三方插件代码 |
 
 ## 适合谁
 
