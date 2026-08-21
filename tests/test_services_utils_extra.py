@@ -256,6 +256,59 @@ class UtilsTests(unittest.TestCase):
 
     @patch("src.media.export_clip.subprocess.run")
     @patch("src.media.export_clip.get_ffmpeg_path", return_value="ffmpeg")
+    @patch("src.media.export_clip.build_seekable_preview_proxy_path", return_value="D:/cache/seek_proxy/proxy_abc.mp4")
+    @patch("src.media.export_clip.os.path.isfile")
+    @patch("src.media.export_clip.os.path.getsize", return_value=50_000_000)
+    def test_ensure_seekable_preview_proxy_remuxes_mpg(
+        self,
+        _mock_getsize,
+        mock_isfile,
+        _mock_proxy_path,
+        _mock_get_ffmpeg,
+        mock_run,
+    ):
+        mock_isfile.side_effect = lambda path: str(path).endswith(".mpg")
+        mock_run.return_value = unittest.mock.Mock(returncode=0)
+
+        # After remux, treat proxy as present for the success path.
+        def _run(cmd, **_kwargs):
+            mock_isfile.side_effect = lambda path: True
+            return unittest.mock.Mock(returncode=0)
+
+        mock_run.side_effect = _run
+
+        out = utils.ensure_seekable_preview_proxy("D:/videos/show.mpg")
+        self.assertEqual(out, "D:/cache/seek_proxy/proxy_abc.mp4")
+        cmd = mock_run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("-c") + 1], "copy")
+        self.assertIn("+faststart", cmd)
+
+    def test_ensure_seekable_preview_proxy_skips_mp4(self):
+        self.assertEqual(utils.ensure_seekable_preview_proxy("D:/videos/clip.mp4"), "D:/videos/clip.mp4")
+
+    @patch("src.media.export_clip.ensure_seekable_preview_proxy", return_value="D:/cache/seek_proxy/proxy_abc.mp4")
+    @patch("src.media.export_clip.get_ffmpeg_path", return_value="ffmpeg")
+    @patch("src.media.export_clip.ensure_folder_exists")
+    @patch("src.media.export_clip.os.path.exists", return_value=False)
+    def test_export_command_uses_seekable_proxy_for_mpg(
+        self,
+        _mock_exists,
+        _mock_ensure_folder,
+        _mock_ffmpeg,
+        mock_proxy,
+    ):
+        cmd = utils.build_export_original_clip_command(
+            "D:/videos/show.mpg",
+            1022.0,
+            6.0,
+            "D:/out/clip.mp4",
+        )
+        mock_proxy.assert_called_once_with("D:/videos/show.mpg")
+        self.assertEqual(cmd[cmd.index("-i") + 1], "D:/cache/seek_proxy/proxy_abc.mp4")
+        self.assertEqual(cmd[cmd.index("-ss") + 1], "1022.000")
+
+    @patch("src.media.export_clip.subprocess.run")
+    @patch("src.media.export_clip.get_ffmpeg_path", return_value="ffmpeg")
     @patch("src.media.export_clip.ensure_folder_exists")
     @patch("src.media.export_clip.os.path.exists", return_value=False)
     def test_export_original_clip_reencode_mode(

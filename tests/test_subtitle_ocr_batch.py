@@ -20,7 +20,8 @@ class SubtitleOcrBatchTests(unittest.TestCase):
         self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 6}), 6)
         self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 0}), 1)
         self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": 99}), 6)
-        self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": "bad"}), 1)
+        self.assertEqual(resolve_subtitle_ocr_batch_size(config={"subtitle_ocr_batch_size": "bad"}), 6)
+        self.assertEqual(resolve_subtitle_ocr_batch_size(config={}), 6)
 
     def test_resolve_rapidocr_config_path_materializes_when_missing(self):
         import tempfile

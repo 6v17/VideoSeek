@@ -469,7 +469,10 @@ class PreviewDialog(QDialog):
             return
         self.update_timer.stop()
         player = self._ensure_player()
-        if not player.play(self.video_path, self.start_sec, stop_sec=self.end_sec):
+        from src.media.export_clip import ensure_seekable_preview_proxy
+
+        playback_path = ensure_seekable_preview_proxy(self.video_path)
+        if not player.play(playback_path, self.start_sec, stop_sec=self.end_sec):
             self._detail_error = self.texts.get("preview_failed", "Preview failed")
             self._apply_detail_label()
             self.play_button.setEnabled(False)

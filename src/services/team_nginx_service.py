@@ -180,16 +180,21 @@ def stop_nginx() -> None:
     global _process
     if not nginx_bundle_ready():
         return
-    try:
-        completed = _run_nginx(["-s", "stop"])
-        if completed.returncode != 0:
-            logger.warning("nginx stop: %s", (completed.stderr or completed.stdout or "").strip())
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("nginx stop failed: %s", exc)
-    # Windows: master may linger briefly; force-kill by pid file if still alive.
+    # Avoid ``nginx -s stop`` when nothing is running: Windows then logs
+    # OpenEvent("Global\\ngx_stop_<pid>") failed (2) for a stale pid file.
     if is_nginx_running():
-        _force_kill_nginx_pid()
-        time.sleep(0.2)
+        try:
+            completed = _run_nginx(["-s", "stop"])
+            if completed.returncode != 0:
+                logger.warning("nginx stop: %s", (completed.stderr or completed.stdout or "").strip())
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("nginx stop failed: %s", exc)
+        # Windows: master may linger briefly; force-kill by pid file if still alive.
+        if is_nginx_running():
+            _force_kill_nginx_pid()
+            time.sleep(0.2)
+    else:
+        _clear_stale_nginx_pid_file()
     if _process is not None:
         try:
             if _process.poll() is None:
@@ -197,6 +202,18 @@ def stop_nginx() -> None:
         except Exception:
             pass
     _process = None
+
+
+def _clear_stale_nginx_pid_file() -> None:
+    root = get_nginx_root()
+    pid_file = os.path.join(root, "logs", "nginx.pid")
+    if not os.path.isfile(pid_file):
+        return
+    try:
+        os.remove(pid_file)
+        logger.debug("Removed stale nginx pid file: %s", pid_file)
+    except OSError:
+        pass
 
 
 def _force_kill_nginx_pid() -> None:

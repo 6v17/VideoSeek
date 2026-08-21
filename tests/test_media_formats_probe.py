@@ -10,6 +10,7 @@ from src.media.formats import (
     VIDEO_EXTS,
     is_supported_video_path,
     is_transport_like_video_path,
+    needs_seekable_preview_proxy,
 )
 from src.media import probe as probe_mod
 
@@ -26,6 +27,13 @@ class VideoFormatsTests(unittest.TestCase):
         self.assertTrue(is_transport_like_video_path("a.mpeg"))
         self.assertFalse(is_transport_like_video_path("a.mp4"))
         self.assertFalse(is_transport_like_video_path("a.mkv"))
+
+    def test_seekable_proxy_needed_for_mpeg_program_streams(self):
+        self.assertTrue(needs_seekable_preview_proxy("a.mpg"))
+        self.assertTrue(needs_seekable_preview_proxy("a.MPEG"))
+        self.assertFalse(needs_seekable_preview_proxy("a.mp4"))
+        self.assertFalse(needs_seekable_preview_proxy("a.ts"))
+        self.assertFalse(needs_seekable_preview_proxy("a.m2ts"))
 
 
 class ProbeDurationTests(unittest.TestCase):

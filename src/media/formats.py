@@ -25,6 +25,9 @@ VIDEO_EXTS = (
 # MPEG transport / program streams often omit container duration; probe harder.
 _TRANSPORT_LIKE_EXTS = frozenset({".ts", ".m2ts", ".mts", ".mpg", ".mpeg"})
 
+# MPEG program streams: VLC :start-time often lands tens of seconds early.
+_MPEG_PROGRAM_STREAM_EXTS = frozenset({".mpg", ".mpeg"})
+
 
 def is_supported_video_path(path: str | os.PathLike[str]) -> bool:
     name = os.fspath(path).lower()
@@ -34,3 +37,9 @@ def is_supported_video_path(path: str | os.PathLike[str]) -> bool:
 def is_transport_like_video_path(path: str | os.PathLike[str]) -> bool:
     name = os.fspath(path).lower()
     return any(name.endswith(ext) for ext in _TRANSPORT_LIKE_EXTS)
+
+
+def needs_seekable_preview_proxy(path: str | os.PathLike[str]) -> bool:
+    """True when direct player seek on the source container is unreliable."""
+    name = os.fspath(path).lower()
+    return any(name.endswith(ext) for ext in _MPEG_PROGRAM_STREAM_EXTS)

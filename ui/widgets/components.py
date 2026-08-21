@@ -933,7 +933,7 @@ class LibraryPage(QWidget):
         self.input_subtitle_ocr_batch = NoWheelSpinBox()
         self.input_subtitle_ocr_batch.setRange(1, 6)
         self.input_subtitle_ocr_batch.setSingleStep(1)
-        self.input_subtitle_ocr_batch.setValue(1)
+        self.input_subtitle_ocr_batch.setValue(6)
         self.input_subtitle_ocr_batch.setMinimumWidth(64)
         self.input_subtitle_ocr_batch.setMaximumWidth(80)
         self.btn_stop_dialogue_index = QPushButton()

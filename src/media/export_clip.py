@@ -259,7 +259,8 @@ def build_export_original_clip_command(
     ffmpeg = get_ffmpeg_path()
     cfg = config or load_config()
     encode = _export_encode_settings(cfg)
-    input_path = os.fspath(input_path)
+    # MPEG-PS input -ss is coarse; reuse the seekable MP4 proxy when needed.
+    input_path = ensure_seekable_preview_proxy(os.fspath(input_path))
     output_path = os.fspath(output_path)
     start_sec = max(0.0, float(start_sec))
     duration_sec = max(0.1, float(duration_sec))
@@ -373,3 +374,88 @@ def build_preview_cache_path(video_path, start_sec):
     key = f"{video_path}|{int(start_sec)}|{uuid.uuid4().hex}"
     filename = f"preview_{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.mp4"
     return os.path.join(cache_dir, filename)
+
+
+def build_seekable_preview_proxy_path(video_path: str) -> str:
+    """Stable cache path for a full-file seekable remux of MPEG program streams."""
+    from src.app.config import get_data_storage_paths
+
+    path = os.fspath(video_path)
+    cache_dir = get_data_storage_paths().get("preview_cache_dir", "")
+    if not cache_dir:
+        cache_dir = os.path.join(get_app_data_dir(), "cache")
+    proxy_dir = os.path.join(cache_dir, "seek_proxy")
+    os.makedirs(proxy_dir, exist_ok=True)
+    try:
+        st = os.stat(path)
+        fingerprint = f"{path}|{int(st.st_mtime)}|{int(st.st_size)}"
+    except OSError:
+        fingerprint = path
+    digest = hashlib.sha1(fingerprint.encode("utf-8", errors="replace")).hexdigest()[:20]
+    return os.path.join(proxy_dir, f"proxy_{digest}.mp4")
+
+
+def ensure_seekable_preview_proxy(video_path: str) -> str:
+    """Return a seek-friendly local path for preview players.
+
+    ``.mpg`` / ``.mpeg`` often seek tens of seconds early under VLC ``:start-time``.
+    Stream-copy once into MP4 (faststart) so subsequent seeks land correctly.
+    """
+    from src.media.formats import needs_seekable_preview_proxy
+
+    path = os.fspath(video_path)
+    if not path or not needs_seekable_preview_proxy(path):
+        return path
+    lower = path.strip().lower()
+    if lower.startswith("http://") or lower.startswith("https://"):
+        return path
+    if not os.path.isfile(path):
+        return path
+
+    proxy_path = build_seekable_preview_proxy_path(path)
+    try:
+        src_size = int(os.path.getsize(path))
+    except OSError:
+        return path
+    if os.path.isfile(proxy_path):
+        try:
+            # Copied MP4 is usually within a few percent of the source size.
+            if os.path.getsize(proxy_path) >= max(1024, int(src_size * 0.5)):
+                return proxy_path
+        except OSError:
+            pass
+        try:
+            os.remove(proxy_path)
+        except OSError:
+            pass
+
+    ffmpeg = get_ffmpeg_path()
+    if not ffmpeg:
+        return path
+
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        path,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        proxy_path,
+    ]
+    try:
+        result = subprocess.run(cmd, startupinfo=_build_hidden_startupinfo(), capture_output=True)
+    except Exception:
+        return path
+    if result.returncode != 0 or not os.path.isfile(proxy_path):
+        try:
+            if os.path.exists(proxy_path):
+                os.remove(proxy_path)
+        except OSError:
+            pass
+        return path
+    return proxy_path

@@ -42,8 +42,13 @@ class PreviewController:
         clip_start, clip_duration = self.resolve_clip_window(video_path, start_sec, end_sec=end_sec)
         clip_end = clip_start + clip_duration
         self.cleanup_previous_preview()
+
+        from src.media.export_clip import ensure_seekable_preview_proxy
+
+        playback_path = ensure_seekable_preview_proxy(video_path)
         self.current_preview_context = {
             "video_path": video_path,
+            "playback_path": playback_path,
             "start_sec": clip_start,
             "end_sec": clip_end,
             "suggested_sec": float(start_sec),
@@ -66,7 +71,7 @@ class PreviewController:
             vlc_player.set_host_widget(self.parent_window.video_widget, force=True)
         except Exception as exc:
             logger.debug("Assert main preview host skipped: %s", exc)
-        if vlc_player.play(video_path, clip_start, stop_sec=clip_end):
+        if vlc_player.play(playback_path, clip_start, stop_sec=clip_end):
             return True
 
         # Team play_url: never ffmpeg-remux remote HTTP on the UI thread (can hang / crash).
@@ -76,7 +81,7 @@ class PreviewController:
         from src.media.export_clip import build_preview_cache_path, create_preview_clip
 
         cache_path = build_preview_cache_path(video_path, clip_start)
-        result = create_preview_clip(video_path, clip_start, cache_path, duration_sec=clip_duration)
+        result = create_preview_clip(playback_path, clip_start, cache_path, duration_sec=clip_duration)
         if result.returncode == 0:
             self.current_preview_path = cache_path
             media_player.setSource(QUrl.fromLocalFile(cache_path))

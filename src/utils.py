@@ -63,7 +63,9 @@ EXPORT_ENCODE_MODE_COPY = "copy"
 _LAZY_MEDIA_EXPORT = {
     "build_export_original_clip_command",
     "build_preview_cache_path",
+    "build_seekable_preview_proxy_path",
     "create_preview_clip",
+    "ensure_seekable_preview_proxy",
     "estimate_export_copy_duration_sec",
     "export_original_clip",
     "normalize_export_encode_mode",
