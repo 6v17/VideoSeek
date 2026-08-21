@@ -16,14 +16,14 @@ from src.services.search_index_schema import (
 )
 from src.services.indexing_runtime_status import get_index_sync_status, library_sync_in_progress
 
-_VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
+from src.media.formats import VIDEO_EXTS
 
 
 def _iter_library_video_paths(root_path: str):
     for current_root, dir_names, files in os.walk(root_path):
         dir_names[:] = [name for name in dir_names if name.lower() != "__macosx"]
         for filename in files:
-            if filename.lower().endswith(_VIDEO_EXTS):
+            if filename.lower().endswith(VIDEO_EXTS):
                 yield os.path.join(current_root, filename)
 
 

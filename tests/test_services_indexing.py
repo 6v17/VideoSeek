@@ -413,7 +413,14 @@ class IndexingServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "clip.mp4").write_bytes(b"")
+            (root / "phone.m4v").write_bytes(b"")
+            (root / "broadcast.ts").write_bytes(b"")
+            (root / "bluray.m2ts").write_bytes(b"")
+            (root / "cam.mts").write_bytes(b"")
+            (root / "legacy.mpg").write_bytes(b"")
+            (root / "legacy2.mpeg").write_bytes(b"")
             (root / "note.txt").write_text("ignore", encoding="utf-8")
+            (root / "audio.mp3").write_bytes(b"")
             nested = root / "nested"
             nested.mkdir()
             (nested / "scene.mkv").write_bytes(b"")
@@ -425,7 +432,16 @@ class IndexingServiceTests(unittest.TestCase):
 
         self.assertEqual(
             sorted(Path(path).name for path in result),
-            ["clip.mp4", "scene.mkv"],
+            [
+                "bluray.m2ts",
+                "broadcast.ts",
+                "cam.mts",
+                "clip.mp4",
+                "legacy.mpg",
+                "legacy2.mpeg",
+                "phone.m4v",
+                "scene.mkv",
+            ],
         )
 
     def test_load_library_video_file_list_reuses_cached_paths(self):

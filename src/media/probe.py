@@ -7,6 +7,7 @@ import os
 import subprocess
 
 from src.infra.ffmpeg_paths import get_ffprobe_path
+from src.media.formats import is_transport_like_video_path
 
 
 def get_video_duration_seconds(video_path):
@@ -18,29 +19,42 @@ def get_video_duration_seconds(video_path):
 
 
 def get_video_stream_info(video_path):
+    empty = {
+        "width": None,
+        "height": None,
+        "duration": None,
+        "codec_name": "",
+        "pix_fmt": "",
+        "bits_per_raw_sample": None,
+        "profile": "",
+    }
     ffprobe_path = get_ffprobe_path()
     if not ffprobe_path:
-        return {
-            "width": None,
-            "height": None,
-            "duration": None,
-            "codec_name": "",
-            "pix_fmt": "",
-            "bits_per_raw_sample": None,
-            "profile": "",
-        }
+        return dict(empty)
+
+    path = os.fspath(video_path)
+    transport_like = is_transport_like_video_path(path)
+    # TS/PS often need a larger probe window before duration/stream metadata appears.
+    analyze_duration = "100M" if transport_like else "10M"
+    probe_size = "50M" if transport_like else "5M"
+    timeout_sec = 20 if transport_like else 10
 
     command = [
         ffprobe_path,
         "-v",
         "error",
+        "-analyzeduration",
+        analyze_duration,
+        "-probesize",
+        probe_size,
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=width,height,codec_name,pix_fmt,bits_per_raw_sample,profile:format=duration",
+        "stream=width,height,codec_name,pix_fmt,bits_per_raw_sample,profile,duration"
+        ":format=duration",
         "-of",
         "json",
-        os.fspath(video_path),
+        path,
     ]
 
     run_kwargs = {}
@@ -56,43 +70,31 @@ def get_video_stream_info(video_path):
             command,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout_sec,
             **run_kwargs,
         )
         if result.returncode != 0:
-            return {
-                "width": None,
-                "height": None,
-                "duration": None,
-                "codec_name": "",
-                "pix_fmt": "",
-                "bits_per_raw_sample": None,
-                "profile": "",
-            }
+            return dict(empty)
 
         payload = json.loads(result.stdout or "{}")
         streams = payload.get("streams") or []
         stream = streams[0] if streams else {}
         format_payload = payload.get("format") or {}
+        duration = _pick_duration(
+            format_payload.get("duration"),
+            stream.get("duration"),
+        )
         return {
             "width": _safe_int(stream.get("width")),
             "height": _safe_int(stream.get("height")),
-            "duration": _safe_float(format_payload.get("duration")),
+            "duration": duration,
             "codec_name": str(stream.get("codec_name") or "").strip().lower(),
             "pix_fmt": str(stream.get("pix_fmt") or "").strip().lower(),
             "bits_per_raw_sample": _safe_int(stream.get("bits_per_raw_sample")),
             "profile": str(stream.get("profile") or "").strip().lower(),
         }
     except Exception:
-        return {
-            "width": None,
-            "height": None,
-            "duration": None,
-            "codec_name": "",
-            "pix_fmt": "",
-            "bits_per_raw_sample": None,
-            "profile": "",
-        }
+        return dict(empty)
 
 
 def has_readable_video_stream(video_path):
@@ -102,6 +104,15 @@ def has_readable_video_stream(video_path):
 
     fallback_info = _probe_video_stream_with_opencv(video_path)
     return bool(fallback_info.get("width") and fallback_info.get("height"))
+
+
+def _pick_duration(*candidates):
+    """Prefer the first positive duration; format then stream (TS often only has stream)."""
+    for value in candidates:
+        parsed = _safe_float(value)
+        if parsed is not None:
+            return parsed
+    return None
 
 
 def _probe_video_duration_with_opencv(video_path):

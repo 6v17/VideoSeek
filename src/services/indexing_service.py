@@ -17,6 +17,7 @@ from src.storage.config_store import (
     get_local_model_asset_dirs,
 )
 from src.infra.paths import ensure_folder_exists
+from src.media.formats import VIDEO_EXTS
 from src.storage.video_identity import (
     canonicalize_library_path,
     canonicalize_library_rel_path,
@@ -36,7 +37,6 @@ def has_readable_video_stream(path):
 
     return _impl(path)
 
-VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
 DISCOVER_CACHE_KEY = "discover_cache"
 INFORMATIONAL_INDEX_ISSUE_REASONS = frozenset({"path_reconciled"})
 _SKIP_VIDEO_ALREADY_INDEXED = object()
