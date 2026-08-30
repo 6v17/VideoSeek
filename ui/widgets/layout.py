@@ -18,6 +18,11 @@ WINDOW_SIZES = {
         "minimum": QSize(560, 420),
         "screen_margin": 96,
     },
+    "understanding_services_dialog": {
+        "preferred": QSize(920, 640),
+        "minimum": QSize(780, 520),
+        "screen_margin": 72,
+    },
     "donate_dialog": {
         "preferred": QSize(520, 720),
         "minimum": QSize(460, 640),
@@ -56,6 +61,7 @@ COMPONENT_SIZES = {
     "search_controls_group_gap": 12,
     "search_panel_card_margin": 12,
     "settings_path_input_width": 520,
+    "understanding_form_label_width": 96,
 }
 
 

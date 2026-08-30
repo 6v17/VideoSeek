@@ -61,6 +61,7 @@ class EvidenceObject:
 class ChunkSample:
     timestamp_sec: float
     strategy: str
+    timestamps_sec: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,27 @@ def _parse_chunk_tags(raw_value: object, field_name: str) -> tuple[str, ...]:
     return tuple(tags)
 
 
+def _parse_chunk_sample(sample_payload: Mapping[str, Any], field_name: str) -> ChunkSample:
+    timestamp_sec = _require_number(sample_payload.get("timestamp_sec"), f"{field_name}.timestamp_sec")
+    strategy = _require_text(sample_payload.get("strategy"), f"{field_name}.strategy")
+    raw_times = sample_payload.get("timestamps_sec")
+    if raw_times is None:
+        timestamps = (timestamp_sec,)
+    else:
+        values = _require_list(raw_times, f"{field_name}.timestamps_sec")
+        timestamps = tuple(
+            _require_number(value, f"{field_name}.timestamps_sec[{index}]")
+            for index, value in enumerate(values)
+        )
+        if not timestamps:
+            timestamps = (timestamp_sec,)
+    return ChunkSample(
+        timestamp_sec=timestamp_sec,
+        strategy=strategy,
+        timestamps_sec=timestamps,
+    )
+
+
 def _parse_chunk(raw_value: object, field_name: str) -> EvidenceChunk:
     payload = _require_mapping(raw_value, field_name)
     sample_payload = _require_mapping(payload.get("sample"), f"{field_name}.sample")
@@ -224,10 +246,7 @@ def _parse_chunk(raw_value: object, field_name: str) -> EvidenceChunk:
         chunk_index=_require_int(payload.get("chunk_index"), f"{field_name}.chunk_index"),
         start_sec=_require_number(payload.get("start_sec"), f"{field_name}.start_sec"),
         end_sec=_require_number(payload.get("end_sec"), f"{field_name}.end_sec"),
-        sample=ChunkSample(
-            timestamp_sec=_require_number(sample_payload.get("timestamp_sec"), f"{field_name}.sample.timestamp_sec"),
-            strategy=_require_text(sample_payload.get("strategy"), f"{field_name}.sample.strategy"),
-        ),
+        sample=_parse_chunk_sample(sample_payload, f"{field_name}.sample"),
         evidence=_parse_chunk_evidence(payload.get("evidence"), f"{field_name}.evidence"),
         tags=_parse_chunk_tags(payload.get("tags"), f"{field_name}.tags"),
     )
@@ -343,7 +362,11 @@ def evidence_bundle_to_dict(bundle: EvidenceBundle) -> dict[str, Any]:
                 "chunk_index": chunk.chunk_index,
                 "start_sec": chunk.start_sec,
                 "end_sec": chunk.end_sec,
-                "sample": asdict(chunk.sample),
+                "sample": {
+                    "timestamp_sec": chunk.sample.timestamp_sec,
+                    "strategy": chunk.sample.strategy,
+                    "timestamps_sec": list(chunk.sample.timestamps_sec or (chunk.sample.timestamp_sec,)),
+                },
                 "tags": list(chunk.tags),
                 "evidence": {
                     "vision": vision_payload,

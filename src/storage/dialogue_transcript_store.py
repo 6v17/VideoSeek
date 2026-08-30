@@ -22,7 +22,7 @@ from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("dialogue_transcript_store")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _IN_CHUNK = 400
 _WRITE_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
@@ -97,6 +97,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
           text_cf TEXT NOT NULL DEFAULT '',
           language TEXT NOT NULL DEFAULT '',
           asr_source TEXT NOT NULL DEFAULT '',
+          speaker TEXT NOT NULL DEFAULT '',
           PRIMARY KEY (video_id, seg_index),
           FOREIGN KEY (video_id) REFERENCES transcripts(video_id) ON DELETE CASCADE
         );
@@ -104,13 +105,26 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_segments_video_id ON segments(video_id);
         """
     )
+    columns = {
+        str(item[1])
+        for item in conn.execute("PRAGMA table_info(segments)").fetchall()
+    }
+    if "speaker" not in columns:
+        conn.execute(
+            "ALTER TABLE segments ADD COLUMN speaker TEXT NOT NULL DEFAULT ''"
+        )
     row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
     if row is None:
         conn.execute(
             "INSERT INTO meta(key, value) VALUES ('schema_version', ?)",
             (str(_SCHEMA_VERSION),),
         )
-        conn.commit()
+    elif str(row["value"] or "") != str(_SCHEMA_VERSION):
+        conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+            (str(_SCHEMA_VERSION),),
+        )
+    conn.commit()
 
 
 def dialogue_db_cache_token(*, config=None) -> tuple[str, float, int]:
@@ -128,6 +142,10 @@ def dialogue_db_cache_token(*, config=None) -> tuple[str, float, int]:
         except sqlite3.Error:
             count = 0
     return db_path, mtime, count
+
+
+def normalize_dialogue_speaker(value: Any) -> str:
+    return str(value or "").strip()[:40]
 
 
 def _normalize_segments(
@@ -150,9 +168,54 @@ def _normalize_segments(
                 "text": text,
                 "language": str(item.get("language", "") or "").strip(),
                 "asr_source": row_asr,
+                "speaker": normalize_dialogue_speaker(item.get("speaker")),
             }
         )
     return rows
+
+
+def inherit_segment_speakers(
+    previous: list[dict[str, Any]] | None,
+    new_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy speaker labels onto overlapping re-extracted ASR rows."""
+    labeled: list[dict[str, Any]] = []
+    for item in previous or []:
+        speaker = normalize_dialogue_speaker(item.get("speaker"))
+        if not speaker:
+            continue
+        labeled.append(
+            {
+                "start": float(item.get("start", 0.0) or 0.0),
+                "end": float(item.get("end", 0.0) or 0.0),
+                "speaker": speaker,
+            }
+        )
+    if not labeled:
+        return new_rows
+    used: set[int] = set()
+    for row in new_rows:
+        if normalize_dialogue_speaker(row.get("speaker")):
+            continue
+        start = float(row.get("start", 0.0) or 0.0)
+        end = float(row.get("end", start) or start)
+        duration = max(0.05, end - start)
+        best_index = -1
+        best_overlap = 0.0
+        for index, old in enumerate(labeled):
+            if index in used:
+                continue
+            overlap = max(0.0, min(end, float(old["end"])) - max(start, float(old["start"])))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_index = index
+        if best_index < 0:
+            continue
+        old_duration = max(0.05, float(labeled[best_index]["end"]) - float(labeled[best_index]["start"]))
+        if best_overlap >= 0.35 * min(duration, old_duration) or best_overlap >= 0.45:
+            row["speaker"] = labeled[best_index]["speaker"]
+            used.add(best_index)
+    return new_rows
 
 
 def save_dialogue_transcript(
@@ -180,6 +243,26 @@ def save_dialogue_transcript(
         with _db(config=config) as conn:
             try:
                 conn.execute("BEGIN")
+                previous = conn.execute(
+                    """
+                    SELECT start_sec, end_sec, speaker
+                    FROM segments
+                    WHERE video_id = ?
+                    ORDER BY seg_index
+                    """,
+                    (video_id,),
+                ).fetchall()
+                rows = inherit_segment_speakers(
+                    [
+                        {
+                            "start": float(item["start_sec"] or 0.0),
+                            "end": float(item["end_sec"] or 0.0),
+                            "speaker": item["speaker"],
+                        }
+                        for item in previous
+                    ],
+                    rows,
+                )
                 conn.execute(
                     """
                     INSERT INTO transcripts(
@@ -199,8 +282,8 @@ def save_dialogue_transcript(
                     conn.executemany(
                         """
                         INSERT INTO segments(
-                          video_id, seg_index, start_sec, end_sec, text, text_cf, language, asr_source
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                          video_id, seg_index, start_sec, end_sec, text, text_cf, language, asr_source, speaker
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             (
@@ -212,6 +295,7 @@ def save_dialogue_transcript(
                                 item["text"].casefold(),
                                 item["language"],
                                 item["asr_source"],
+                                item["speaker"],
                             )
                             for index, item in enumerate(rows)
                         ],
@@ -224,6 +308,43 @@ def save_dialogue_transcript(
     return {"ok": True, "path": db_path, "segment_count": len(rows)}
 
 
+def update_dialogue_segment_speaker(
+    video_id: str,
+    seg_index: int,
+    speaker: str,
+    *,
+    config=None,
+) -> bool:
+    """Set the speaker label on one saved cue. Empty string clears it."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return False
+    try:
+        index = int(seg_index)
+    except (TypeError, ValueError):
+        return False
+    label = normalize_dialogue_speaker(speaker)
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            cur = conn.execute(
+                """
+                UPDATE segments
+                SET speaker = ?
+                WHERE video_id = ? AND seg_index = ?
+                """,
+                (label, video_id, index),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return False
+            conn.execute(
+                "UPDATE transcripts SET updated_at = ? WHERE video_id = ?",
+                (time.time(), video_id),
+            )
+            conn.commit()
+            return True
+
+
 def _payload_from_rows(
     meta: sqlite3.Row | None,
     segment_rows: list[sqlite3.Row],
@@ -232,13 +353,15 @@ def _payload_from_rows(
         return None
     segments = [
         {
+            "seg_index": int(row["seg_index"] if "seg_index" in row.keys() else index),
             "start": float(row["start_sec"] or 0.0),
             "end": float(row["end_sec"] or 0.0),
             "text": str(row["text"] or ""),
             "language": str(row["language"] or ""),
             "asr_source": str(row["asr_source"] or ""),
+            "speaker": normalize_dialogue_speaker(row["speaker"] if "speaker" in row.keys() else ""),
         }
-        for row in segment_rows
+        for index, row in enumerate(segment_rows)
     ]
     return {
         "video_id": str(meta["video_id"] or ""),
@@ -264,7 +387,7 @@ def load_dialogue_transcript(video_id: str, *, config=None) -> dict[str, Any] | 
                 return None
             segment_rows = conn.execute(
                 """
-                SELECT start_sec, end_sec, text, language, asr_source
+                SELECT seg_index, start_sec, end_sec, text, language, asr_source, speaker
                 FROM segments
                 WHERE video_id = ?
                 ORDER BY seg_index
@@ -450,7 +573,7 @@ def iter_shared_transcript_segment_rows(
             default_asr = str(meta["asr_source"] or "")
             segment_rows = conn.execute(
                 """
-                SELECT start_sec, end_sec, text, language, asr_source
+                SELECT start_sec, end_sec, text, language, asr_source, speaker
                 FROM segments
                 WHERE video_id = ?
                 ORDER BY start_sec, end_sec, seg_index
@@ -470,6 +593,7 @@ def iter_shared_transcript_segment_rows(
                     "text": text,
                     "language": str(item["language"] or "").strip(),
                     "asr_source": str(item["asr_source"] or default_asr).strip(),
+                    "speaker": normalize_dialogue_speaker(item["speaker"]),
                 }
 
 
@@ -585,6 +709,7 @@ def iter_matching_transcript_segment_rows(
           s.text AS text,
           s.language AS language,
           COALESCE(NULLIF(s.asr_source, ''), t.asr_source) AS asr_source,
+          s.speaker AS speaker,
           s.text_cf AS text_cf
         FROM segments s
         JOIN transcripts t ON t.video_id = s.video_id
@@ -600,6 +725,7 @@ def iter_matching_transcript_segment_rows(
             "text": str(row["text"] or "").strip(),
             "language": str(row["language"] or "").strip(),
             "asr_source": str(row["asr_source"] or "").strip(),
+            "speaker": normalize_dialogue_speaker(row["speaker"] if "speaker" in row.keys() else ""),
             "score": float(score),
             "match_mode": mode,
         }

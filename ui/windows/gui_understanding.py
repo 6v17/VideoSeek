@@ -7,7 +7,8 @@ import os
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QScrollArea, QFileDialog
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QFileDialog
 
 from src.app.config import load_config, save_config, DEFAULT_CONFIG
 from src.app.indexing_progress import format_progress_text
@@ -39,14 +40,32 @@ from ui.widgets.chunk_timeline import ChunkTimelineSegment
 from ui.workers import RemoteVlmConnectionTestWorker
 
 
+class _UnderstandingConfigHost:
+    """VLM fields live on the services dialog; mode/language stay on the page."""
+
+    __slots__ = ("_window",)
+
+    def __init__(self, window):
+        self._window = window
+
+    def __getattr__(self, name):
+        window = self._window
+        dialog = getattr(window, "understanding_services_dialog", None)
+        form = getattr(dialog, "vlm_form", None) if dialog is not None else None
+        page = getattr(window, "understanding_page", None)
+        for owner in (form, dialog, page):
+            if owner is not None and hasattr(owner, name):
+                return getattr(owner, name)
+        raise AttributeError(name)
+
+
 class UnderstandingGuiMixin:
     """Sidebar page for manual understanding evidence generation."""
 
     def _understanding_config_widgets(self):
-        page = getattr(self, "understanding_page", None)
-        if page is None:
+        if getattr(self, "understanding_page", None) is None:
             return None
-        return page
+        return _UnderstandingConfigHost(self)
 
     def load_understanding_settings(self, *, refresh_status: bool = True):
         page = self._understanding_config_widgets()
@@ -94,8 +113,13 @@ class UnderstandingGuiMixin:
         page.input_custom_summary_prompt.setPlainText(
             str(remote_vlm.get("custom_summary_prompt", "") or "")
         )
+        page.input_custom_motion_prompt.setPlainText(
+            str(remote_vlm.get("custom_motion_prompt", "") or "")
+        )
         self._sync_custom_prompt_fields_visible()
         self._sync_understanding_mode_ui()
+        self._load_llm_settings(config)
+        self._load_asr_settings(config)
         if refresh_status:
             self._refresh_understanding_settings_status()
 
@@ -104,6 +128,7 @@ class UnderstandingGuiMixin:
         if page is None:
             return
         from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
             UNDERSTANDING_MODE_SUMMARY,
             UNDERSTANDING_MODE_TAGS,
             normalize_understanding_mode,
@@ -115,6 +140,7 @@ class UnderstandingGuiMixin:
         combo.clear()
         combo.addItem(self.texts.get("understanding_mode_tags", "标签"), UNDERSTANDING_MODE_TAGS)
         combo.addItem(self.texts.get("understanding_mode_summary", "总结"), UNDERSTANDING_MODE_SUMMARY)
+        combo.addItem(self.texts.get("understanding_mode_motion", "运动"), UNDERSTANDING_MODE_MOTION)
         index = combo.findData(active)
         combo.setCurrentIndex(0 if index < 0 else index)
         combo.blockSignals(False)
@@ -134,49 +160,68 @@ class UnderstandingGuiMixin:
         page = self._understanding_config_widgets()
         if page is None:
             return
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_SUMMARY,
+        )
 
         mode = self._current_understanding_mode()
         is_summary = mode == UNDERSTANDING_MODE_SUMMARY
-        page.btn_generate_evidence.setText(
-            self.texts.get(
-                "understanding_generate_summary_button" if is_summary else "understanding_generate_selected_video",
-                "Generate summary" if is_summary else "Generate tags",
-            )
-        )
-        page.btn_generate_batch.setText(
-            self.texts.get(
-                "understanding_generate_batch_summary" if is_summary else "understanding_generate_batch_tags",
-                "Batch summary" if is_summary else "Batch tags",
-            )
-        )
+        is_motion = mode == UNDERSTANDING_MODE_MOTION
+        if is_summary:
+            generate_key, generate_fallback = "understanding_generate_summary_button", "Generate summary"
+            batch_key, batch_fallback = "understanding_generate_batch_summary", "Batch summary"
+            detail_key, detail_fallback = "understanding_chunk_detail_title_summary", "Segment description"
+            history_key, history_fallback = "library_evidence_detail_summary", "Summary history"
+        elif is_motion:
+            generate_key, generate_fallback = "understanding_generate_motion_button", "Generate motion"
+            batch_key, batch_fallback = "understanding_generate_batch_motion", "Batch motion"
+            detail_key, detail_fallback = "understanding_chunk_detail_title_motion", "Segment motion"
+            history_key, history_fallback = "library_evidence_detail_motion", "Motion history"
+        else:
+            generate_key, generate_fallback = "understanding_generate_selected_video", "Generate tags"
+            batch_key, batch_fallback = "understanding_generate_batch_tags", "Batch tags"
+            detail_key, detail_fallback = "understanding_chunk_detail_title", "Segment tags"
+            history_key, history_fallback = "library_evidence_detail_tags", "Tag history"
+        page.btn_generate_evidence.setText(self.texts.get(generate_key, generate_fallback))
+        page.btn_generate_batch.setText(self.texts.get(batch_key, batch_fallback))
         page.btn_generate_batch.setToolTip(
             self.texts.get(
                 "understanding_generate_batch_tip",
                 "Queue videos in the current scope that are still missing results for this mode. Processes one video at a time.",
             )
         )
-        page.chunk_detail_title.setText(
-            self.texts.get(
-                "understanding_chunk_detail_title_summary" if is_summary else "understanding_chunk_detail_title",
-                "Segment description" if is_summary else "Segment tags",
-            )
-        )
+        page.chunk_detail_title.setText(self.texts.get(detail_key, detail_fallback))
         page.btn_evidence_details.setText(
             self.texts.get(
-                "library_evidence_detail_summary" if is_summary else "library_evidence_detail_tags",
-                self.texts.get(
-                    "library_evidence_detail",
-                    "Summary history" if is_summary else "Tag history",
-                ),
+                history_key,
+                self.texts.get("library_evidence_detail", history_fallback),
             )
         )
         page.video_summary_title.setText(
             self.texts.get("understanding_video_summary_title", "Video summary")
         )
         page.video_summary_card.setVisible(is_summary)
-        # Keep layout from reserving empty space when hidden.
-        page.video_summary_card.setMaximumWidth(16777215 if is_summary else 0)
+        page.video_summary_card.setMaximumWidth(16777215)
+        if hasattr(page, "export_card"):
+            page.export_card.setVisible(is_motion)
+        if hasattr(page, "generate_hint"):
+            if is_motion:
+                hint_key, hint_fallback = (
+                    "understanding_step_generate_hint_motion",
+                    "Use the vision model to write visible changes per segment.",
+                )
+            elif is_summary:
+                hint_key, hint_fallback = (
+                    "understanding_step_generate_hint_summary",
+                    "Write per-segment descriptions, then a whole-video summary.",
+                )
+            else:
+                hint_key, hint_fallback = (
+                    "understanding_step_generate_hint_tags",
+                    "Tag each segment of the current video.",
+                )
+            page.generate_hint.setText(self.texts.get(hint_key, hint_fallback))
         if not is_summary:
             self._set_understanding_readonly_text(page.video_summary_text, "")
             page.video_summary_meta_label.setText("")
@@ -185,13 +230,67 @@ class UnderstandingGuiMixin:
             (not (getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()))
             and self._current_video_has_exportable_evidence()
         )
+        if hasattr(page, "btn_export_recap"):
+            page.btn_export_recap.setVisible(is_motion)
+        if hasattr(page, "btn_recap_jianying"):
+            page.btn_recap_jianying.setVisible(is_motion)
+        if hasattr(page, "btn_recap_fcpxml"):
+            page.btn_recap_fcpxml.setVisible(is_motion)
+        self._refresh_understanding_dialogue_step()
+        self._sync_recap_export_button()
+        if hasattr(page, "export_hint"):
+            page.export_hint.setText(
+                self.texts.get(
+                    "understanding_step_export_hint" if is_motion else "understanding_step_export_hint_notes",
+                    "",
+                )
+            )
         if reload_timeline:
             self._load_understanding_video_timeline()
         elif is_summary:
             self._refresh_understanding_video_summary()
+        if hasattr(page, "chunk_sample_frames"):
+            page.chunk_sample_frames.setVisible(is_motion)
 
     def _on_understanding_mode_changed(self, *_args):
+        self._persist_understanding_job_options()
         self._sync_understanding_mode_ui(reload_timeline=True)
+
+    def _on_understanding_caption_language_changed(self, *_args):
+        self._persist_understanding_job_options()
+
+    def _persist_understanding_job_options(self) -> None:
+        """Write mode + caption language without requiring Save on the service form."""
+        page = self._understanding_config_widgets()
+        if page is None:
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        try:
+            config = load_config()
+            understanding = config.get("understanding")
+            if not isinstance(understanding, dict):
+                understanding = {}
+                config["understanding"] = understanding
+            remote_vlm = dict(
+                understanding.get("remote_vlm") or DEFAULT_CONFIG["understanding"]["remote_vlm"]
+            )
+            from src.services.understanding_resource_service import (
+                finalize_remote_vlm_settings,
+                normalize_caption_language,
+            )
+
+            remote_vlm["caption_language"] = normalize_caption_language(
+                page.input_caption_language.currentData()
+            )
+            remote_vlm["understanding_mode"] = self._current_understanding_mode()
+            understanding["remote_vlm"] = finalize_remote_vlm_settings(remote_vlm)
+            config["understanding"] = understanding
+            save_config(config)
+        except Exception as exc:
+            from src.app.logging_utils import get_logger
+
+            get_logger("understanding.ui").warning("Failed to persist understanding job options: %s", exc)
 
     def _populate_understanding_caption_language_options(self, active_language=None):
         page = self._understanding_config_widgets()
@@ -396,7 +495,24 @@ class UnderstandingGuiMixin:
             "Connection failed: {error}",
         ).format(error=str(probe.get("error", "") or "unknown error"))
 
+    def test_understanding_service_connection(self):
+        dialog = getattr(self, "understanding_services_dialog", None)
+        nav_id = ""
+        if dialog is not None and getattr(dialog, "current_nav_id", None):
+            nav_id = str(dialog.current_nav_id() or "")
+        if nav_id == "llm":
+            self.test_understanding_llm_connection()
+            return
+        if nav_id == "asr":
+            self.test_understanding_asr_connection()
+            return
+        self.test_understanding_vlm_connection()
+
     def test_understanding_vlm_connection(self):
+        dialog = getattr(self, "understanding_services_dialog", None)
+        if dialog is not None and getattr(dialog, "current_nav_id", None) and dialog.current_nav_id() == "llm":
+            self.test_understanding_llm_connection()
+            return
         page = self._understanding_config_widgets()
         if page is None:
             return
@@ -544,8 +660,11 @@ class UnderstandingGuiMixin:
             remote_vlm["custom_caption_prompt"] = remote_vlm["custom_tag_prompt"]
             remote_vlm["custom_description_prompt"] = page.input_custom_description_prompt.toPlainText().strip()
             remote_vlm["custom_summary_prompt"] = page.input_custom_summary_prompt.toPlainText().strip()
+            remote_vlm["custom_motion_prompt"] = page.input_custom_motion_prompt.toPlainText().strip()
             remote_vlm["concurrency"] = int(page.input_caption_concurrency.value())
             understanding["remote_vlm"] = finalize_remote_vlm_settings(remote_vlm)
+            self._commit_llm_settings_to_understanding(understanding)
+            self._commit_asr_settings_to_understanding(understanding)
             config["understanding"] = understanding
             save_config(config)
             self._clear_cached_vlm_connection_probe()
@@ -572,6 +691,20 @@ class UnderstandingGuiMixin:
         page.chk_use_custom_prompts.setEnabled(enabled)
         page.btn_test_vlm_connection.setEnabled(enabled)
         page.btn_save_config.setEnabled(enabled)
+        form = self._llm_form() if hasattr(self, "_llm_form") else None
+        if form is not None:
+            form.input_llm_provider_mode.setEnabled(enabled)
+            form.input_llm_provider_preset.setEnabled(enabled)
+            form.input_remote_llm_base_url.setEnabled(enabled)
+            form.input_remote_llm_api_key.setEnabled(enabled)
+            form.input_remote_llm_model.setEnabled(enabled)
+        asr_form = self._asr_form() if hasattr(self, "_asr_form") else None
+        if asr_form is not None:
+            asr_form.input_asr_provider_mode.setEnabled(enabled)
+            asr_form.input_asr_provider_preset.setEnabled(enabled)
+            asr_form.input_remote_asr_base_url.setEnabled(enabled)
+            asr_form.input_remote_asr_api_key.setEnabled(enabled)
+            asr_form.input_remote_asr_model.setEnabled(enabled)
         self._sync_custom_prompt_fields_visible(config_enabled=enabled)
 
     def _sync_custom_prompt_fields_visible(self, *, config_enabled: bool | None = None):
@@ -583,15 +716,22 @@ class UnderstandingGuiMixin:
         show_fields = bool(page.chk_use_custom_prompts.isChecked())
         page.custom_prompt_fields.setVisible(show_fields)
         editors_on = bool(config_enabled and show_fields)
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_SUMMARY,
+        )
 
         is_summary = self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
-        page.label_custom_caption_prompt.setVisible(show_fields and not is_summary)
-        page.input_custom_caption_prompt.setVisible(show_fields and not is_summary)
-        page.input_custom_caption_prompt.setEnabled(editors_on and not is_summary)
+        is_motion = self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
+        page.label_custom_caption_prompt.setVisible(show_fields and not is_summary and not is_motion)
+        page.input_custom_caption_prompt.setVisible(show_fields and not is_summary and not is_motion)
+        page.input_custom_caption_prompt.setEnabled(editors_on and not is_summary and not is_motion)
         page.label_custom_description_prompt.setVisible(show_fields and is_summary)
         page.input_custom_description_prompt.setVisible(show_fields and is_summary)
         page.input_custom_description_prompt.setEnabled(editors_on and is_summary)
+        page.label_custom_motion_prompt.setVisible(show_fields and is_motion)
+        page.input_custom_motion_prompt.setVisible(show_fields and is_motion)
+        page.input_custom_motion_prompt.setEnabled(editors_on and is_motion)
         page.label_custom_summary_prompt.setVisible(show_fields and is_summary)
         page.input_custom_summary_prompt.setVisible(show_fields and is_summary)
         page.input_custom_summary_prompt.setEnabled(editors_on and is_summary)
@@ -604,8 +744,9 @@ class UnderstandingGuiMixin:
         if checked:
             caption = page.input_custom_caption_prompt.toPlainText().strip()
             description = page.input_custom_description_prompt.toPlainText().strip()
+            motion = page.input_custom_motion_prompt.toPlainText().strip()
             summary = page.input_custom_summary_prompt.toPlainText().strip()
-            if not caption and not description and not summary:
+            if not caption and not description and not motion and not summary:
                 self._fill_custom_prompts_with_language_defaults()
         self._sync_custom_prompt_fields_visible()
 
@@ -615,6 +756,7 @@ class UnderstandingGuiMixin:
             return
         from src.services.understanding_resource_service import (
             get_description_prompt_for_language,
+            get_motion_prompt_for_language,
             get_tag_prompt_for_language,
             get_video_summary_prompt_for_language,
             normalize_caption_language,
@@ -623,13 +765,11 @@ class UnderstandingGuiMixin:
         language = normalize_caption_language(page.input_caption_language.currentData())
         page.input_custom_caption_prompt.setPlainText(get_tag_prompt_for_language(language))
         page.input_custom_description_prompt.setPlainText(get_description_prompt_for_language(language))
+        page.input_custom_motion_prompt.setPlainText(get_motion_prompt_for_language(language))
         page.input_custom_summary_prompt.setPlainText(get_video_summary_prompt_for_language(language))
 
     def _on_reset_custom_prompts_clicked(self):
         self._fill_custom_prompts_with_language_defaults()
-
-    def _on_understanding_mode_changed(self, *_args):
-        self._sync_understanding_mode_ui()
 
     def _is_current_page(self, page_name: str) -> bool:
         return self.pages.currentIndex() == self._nav_page_index(page_name)
@@ -732,7 +872,10 @@ class UnderstandingGuiMixin:
 
         payload = dict(getattr(self, "_understanding_chunk_payloads", {}).get(chunk_index) or {})
         sample = dict(payload.get("sample") or {})
-        if sample.get("timestamp_sec") is not None:
+        stamps = list(sample.get("timestamps_sec") or [])
+        if stamps:
+            suggested_sec = float(stamps[0])
+        elif sample.get("timestamp_sec") is not None:
             suggested_sec = float(sample.get("timestamp_sec"))
         else:
             suggested_sec = (start_sec + end_sec) / 2.0
@@ -885,6 +1028,8 @@ class UnderstandingGuiMixin:
             self._understanding_video_context = {}
             self._refresh_understanding_video_summary(None)
             self._refresh_understanding_video_meta(None)
+            self._refresh_understanding_dialogue_step()
+            self._sync_recap_export_button()
             return
 
         config = load_config()
@@ -937,9 +1082,95 @@ class UnderstandingGuiMixin:
             )
             self._refresh_understanding_video_summary(evidence)
 
+        self._refresh_understanding_dialogue_step()
+        self._sync_recap_export_button()
+
+    def _pixmap_from_bgr_frame(self, frame, *, height: int = 96):
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return QPixmap()
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return QPixmap()
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb = np.ascontiguousarray(rgb)
+        h, w, channels = rgb.shape
+        image = QImage(rgb.data, w, h, channels * w, QImage.Format.Format_RGB888).copy()
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull() or height <= 0:
+            return pixmap
+        return pixmap.scaledToHeight(int(height), Qt.TransformationMode.SmoothTransformation)
+
+    def _clear_understanding_sample_frames(self):
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "chunk_frame_start"):
+            return
+        page.chunk_frame_start.clear()
+        page.chunk_frame_end.clear()
+        page.chunk_frame_start.setText("")
+        page.chunk_frame_end.setText("")
+
+    def _update_understanding_sample_frames(self, payload: dict | None):
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "chunk_sample_frames"):
+            return
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        is_motion = self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
+        page.chunk_sample_frames.setVisible(is_motion)
+        if not is_motion:
+            self._clear_understanding_sample_frames()
+            return
+        sample = dict((payload or {}).get("sample") or {})
+        stamps = [float(item) for item in list(sample.get("timestamps_sec") or []) if item is not None]
+        if not stamps and sample.get("timestamp_sec") is not None:
+            stamps = [float(sample.get("timestamp_sec"))]
+        context = dict(getattr(self, "_understanding_video_context", {}) or {})
+        video_path = str(context.get("video_path", "") or "").strip()
+        if not video_path or not stamps:
+            self._clear_understanding_sample_frames()
+            return
+        from src.media.thumbnail import get_single_thumbnail
+
+        start_pix = self._pixmap_from_bgr_frame(get_single_thumbnail(video_path, stamps[0]))
+        end_stamp = stamps[1] if len(stamps) > 1 else stamps[0]
+        end_pix = self._pixmap_from_bgr_frame(get_single_thumbnail(video_path, end_stamp))
+        page.chunk_frame_start.setPixmap(start_pix)
+        page.chunk_frame_end.setPixmap(end_pix)
+
+    def _overlapping_dialogue_text(self, start_sec: float, end_sec: float) -> str:
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return ""
+        try:
+            from src.storage.dialogue_transcript_store import iter_shared_transcript_segment_rows
+
+            lines: list[str] = []
+            for row in iter_shared_transcript_segment_rows(video_id=video_id):
+                cue_start = float(row.get("start", 0.0) or 0.0)
+                cue_end = float(row.get("end", cue_start) or cue_start)
+                if cue_end < start_sec or cue_start > end_sec:
+                    continue
+                text = str(row.get("text") or "").strip()
+                if not text:
+                    continue
+                speaker = str(row.get("speaker") or "").strip()
+                lines.append(f"{speaker}：{text}" if speaker else text)
+                if len(lines) >= 12:
+                    break
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
     def _show_understanding_chunk_detail(self, index: int, payload=None):
         if not hasattr(self, "understanding_page"):
             return
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_TAGS,
+        )
+
         page = self.understanding_page
         page.chunk_timeline.set_selected_index(int(index))
         if payload is None:
@@ -948,16 +1179,30 @@ class UnderstandingGuiMixin:
             index_chunks = getattr(self, "_understanding_index_chunks", []) or []
             if int(index) < len(index_chunks):
                 chunk = index_chunks[int(index)]
+                start_sec = float(chunk.get("start", 0.0))
+                end_sec = float(chunk.get("end", 0.0))
                 page.chunk_time_label.setText(
                     self.texts.get("understanding_chunk_time", "Segment {index}: {range}").format(
                         index=int(index) + 1,
-                        range=format_timecode_range(float(chunk.get("start", 0.0)), float(chunk.get("end", 0.0))),
+                        range=format_timecode_range(start_sec, end_sec),
                     )
                 )
-                self._set_understanding_readonly_text(
-                    page.chunk_caption_text,
-                    self.texts.get("understanding_chunk_pending", "Not generated yet."),
-                )
+                pending = self.texts.get("understanding_chunk_pending", "Not generated yet.")
+                dialogue = self._overlapping_dialogue_text(start_sec, end_sec)
+                if dialogue:
+                    pending = (
+                        pending
+                        + "\n\n"
+                        + self.texts.get("understanding_chunk_dialogue_heading", "Dialogue")
+                        + "\n"
+                        + dialogue
+                    )
+                self._set_understanding_readonly_text(page.chunk_caption_text, pending)
+                self._clear_understanding_sample_frames()
+                if hasattr(page, "chunk_sample_frames"):
+                    page.chunk_sample_frames.setVisible(
+                        self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
+                    )
                 return
         if not payload:
             return
@@ -975,16 +1220,34 @@ class UnderstandingGuiMixin:
         if not tags:
             nested = dict(vision.get("image_caption") or {}).get("tags") or []
             tags = [str(item).strip() for item in list(nested) if str(item or "").strip()]
-        if tags:
-            from src.services.understanding_tags import format_tags_for_display
+        mode = self._current_understanding_mode()
+        if mode == UNDERSTANDING_MODE_TAGS:
+            if tags:
+                from src.services.understanding_tags import format_tags_for_display
 
-            display = format_tags_for_display(tags)
+                display = format_tags_for_display(tags)
+            else:
+                display = caption
         else:
             display = caption
+            if tags:
+                from src.services.understanding_tags import format_tags_for_display
+
+                display = (display + "\n\n" if display else "") + format_tags_for_display(tags)
+        dialogue = self._overlapping_dialogue_text(start_sec, end_sec)
+        if dialogue:
+            display = (
+                (display or self.texts.get("understanding_chunk_no_caption", "No caption."))
+                + "\n\n"
+                + self.texts.get("understanding_chunk_dialogue_heading", "Dialogue")
+                + "\n"
+                + dialogue
+            )
         self._set_understanding_readonly_text(
             page.chunk_caption_text,
             display or self.texts.get("understanding_chunk_no_caption", "No caption."),
         )
+        self._update_understanding_sample_frames(payload)
 
     def _handle_understanding_chunk_completed(self, index, total, payload):
         if not hasattr(self, "understanding_page"):
@@ -1123,6 +1386,8 @@ class UnderstandingGuiMixin:
         page.btn_export_video_json.setEnabled(
             not understanding_running and self._current_video_has_exportable_evidence()
         )
+        self._refresh_understanding_dialogue_step()
+        self._sync_recap_export_button(running=understanding_running)
         page.scope_combo.setEnabled(not understanding_running)
         page.video_combo.setEnabled(not understanding_running)
         self._set_understanding_config_enabled(not understanding_running)
@@ -1149,11 +1414,14 @@ class UnderstandingGuiMixin:
 
     def open_understanding_settings(self):
         self.switch_page("understanding")
-        if hasattr(self.understanding_page, "expand_config_panel"):
-            self.understanding_page.expand_config_panel()
-        scroll = self.pages.widget(self._nav_page_index("understanding"))
-        if isinstance(scroll, QScrollArea):
-            scroll.ensureWidgetVisible(self.understanding_page.config_card, 48)
+        dialog = getattr(self, "understanding_services_dialog", None)
+        if dialog is None:
+            return
+        if dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog.exec()
 
     def _remote_vlm_status_line(self, status=None) -> str:
         cached_probe = getattr(self, "_cached_vlm_connection_probe", None)
@@ -1265,6 +1533,11 @@ class UnderstandingGuiMixin:
             page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
         page.btn_export_video_json.setEnabled(False)
+        self._sync_recap_export_button(running=True)
+        if hasattr(page, "btn_extract_asr"):
+            page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_export_dialogue_json"):
+            page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
         page.video_combo.setEnabled(False)
         self._set_understanding_config_enabled(False)
@@ -1314,7 +1587,10 @@ class UnderstandingGuiMixin:
 
         mode = self._current_understanding_mode()
         target_lib = self._selected_understanding_target_lib() or None
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_SUMMARY,
+        )
         from src.services.understanding_service import evidence_exists_for_video, list_ready_video_entries
 
         entries = list_ready_video_entries(library_path=target_lib or "", config=load_config())
@@ -1347,7 +1623,11 @@ class UnderstandingGuiMixin:
             ).format(
                 count=len(pending),
                 mode=self.texts.get(
-                    "understanding_mode_summary" if mode == UNDERSTANDING_MODE_SUMMARY else "understanding_mode_tags",
+                    "understanding_mode_summary"
+                    if mode == UNDERSTANDING_MODE_SUMMARY
+                    else "understanding_mode_motion"
+                    if mode == UNDERSTANDING_MODE_MOTION
+                    else "understanding_mode_tags",
                     mode,
                 ),
             ),
@@ -1363,6 +1643,11 @@ class UnderstandingGuiMixin:
             page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
         page.btn_export_video_json.setEnabled(False)
+        self._sync_recap_export_button(running=True)
+        if hasattr(page, "btn_extract_asr"):
+            page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_export_dialogue_json"):
+            page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
         page.video_combo.setEnabled(False)
         self._set_understanding_config_enabled(False)
@@ -1420,7 +1705,30 @@ class UnderstandingGuiMixin:
                 page.input_understanding_mode.setCurrentIndex(index)
             self._sync_understanding_mode_ui()
         self.start_generate_understanding_evidence(video_id=video_id)
+
     def stop_understanding_generation(self):
+        recap_worker = getattr(self, "_recap_worker", None)
+        if recap_worker is not None:
+            recap_worker.stop()
+            page = self.understanding_page
+            page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            page.btn_stop.setEnabled(False)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(
+                    self.texts.get("understanding_stop_requested", "Stopping…")
+                )
+            return
+        worker = getattr(self, "_asr_worker", None)
+        if worker is not None:
+            worker.stop()
+            page = self.understanding_page
+            page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            page.btn_stop.setEnabled(False)
+            if hasattr(page, "btn_stop_asr"):
+                page.btn_stop_asr.setEnabled(False)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            return
         if not getattr(self, "understanding_controller", None) or not self.understanding_controller.is_running():
             return
         if self.understanding_controller.request_stop():
@@ -1430,8 +1738,19 @@ class UnderstandingGuiMixin:
     def _update_understanding_progress(self, value, text):
         if hasattr(self, "_sync_tray_stop_action"):
             self._sync_tray_stop_action()
-        self.understanding_page.progress_bar.setValue(value)
-        self.understanding_page.lbl_status.setText(format_progress_text(text, self.texts))
+        page = self.understanding_page
+        label = format_progress_text(text, self.texts)
+        page.progress_bar.setVisible(True)
+        page.progress_bar.setValue(value)
+        page.lbl_status.setText(label)
+        if getattr(self, "_asr_worker", None) is not None:
+            if hasattr(page, "dialogue_progress_bar"):
+                page.dialogue_progress_bar.setVisible(True)
+                page.dialogue_progress_bar.setValue(value)
+            if hasattr(page, "dialogue_progress_status"):
+                page.dialogue_progress_status.set_status_text(label)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(label)
 
     def _finish_understanding_generation(self, success, target, stopped=False, result=None):
         result = dict(result or {})
@@ -1444,6 +1763,8 @@ class UnderstandingGuiMixin:
             page.btn_generate_summary.hide()
         page.btn_evidence_details.setEnabled(True)
         page.btn_export_video_json.setEnabled(self._current_video_has_exportable_evidence())
+        self._refresh_understanding_dialogue_step()
+        self._sync_recap_export_button(running=False)
         page.scope_combo.setEnabled(True)
         page.video_combo.setEnabled(True)
         self._set_understanding_config_enabled(True)
@@ -1531,6 +1852,274 @@ class UnderstandingGuiMixin:
             return
         self.show_error_dialog(self.texts.get("understanding_generation_failed", "Failed."), detail)
 
+    def _current_video_has_motion_evidence(self) -> bool:
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return False
+        return (
+            load_evidence_bundle(
+                video_id,
+                config=load_config(),
+                mode=UNDERSTANDING_MODE_MOTION,
+            )
+            is not None
+        )
+
+    def _current_video_recap_dialogue_status(self) -> dict:
+        from src.services.recap_service import recap_dialogue_status
+
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return {"ready": False, "count": 0, "source": ""}
+        return recap_dialogue_status(video_id, config=load_config())
+
+    def _current_video_has_recap_dialogue(self) -> bool:
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is not None:
+            return table.rowCount() > 0
+        return bool(self._current_video_recap_dialogue_status().get("ready"))
+
+    def _current_video_can_export_recap(self) -> bool:
+        return self._current_video_has_motion_evidence() and self._current_video_has_recap_dialogue()
+
+    def _current_video_has_recap_beats(self) -> bool:
+        from src.services.recap_service import load_recap_beats
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return False
+        evidence = load_evidence_bundle(
+            video_id,
+            config=load_config(),
+            mode=UNDERSTANDING_MODE_MOTION,
+        )
+        video_path = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        if not video_path:
+            return False
+        return load_recap_beats(video_path) is not None
+
+    def _current_video_has_recap_cuts(self) -> bool:
+        from src.services.recap_service import load_recap_cuts
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return False
+        evidence = load_evidence_bundle(
+            video_id,
+            config=load_config(),
+            mode=UNDERSTANDING_MODE_MOTION,
+        )
+        video_path = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        if not video_path:
+            return False
+        return load_recap_cuts(video_path) is not None
+
+    def _dialogue_source_label(self, source: str) -> str:
+        text = str(source or "").strip().lower()
+        if "ocr" in text or text in {"subtitle", "subtitles"}:
+            return self.texts.get("understanding_dialogue_source_ocr", "Hard-sub OCR")
+        return self.texts.get("understanding_dialogue_source_asr", "Speech ASR")
+
+    def _refresh_understanding_dialogue_step(self) -> None:
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "dialogue_card"):
+            return
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        is_motion = self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
+        page.dialogue_card.setVisible(is_motion)
+        if not is_motion:
+            self._populate_understanding_dialogue_table([])
+            self._sync_asr_extract_button()
+            return
+        video_id = self._selected_understanding_video_id()
+        cues = []
+        if video_id:
+            from src.services.recap_service import list_speech_dialogue_cues
+
+            cues = list_speech_dialogue_cues(video_id, config=load_config())
+        self._populate_understanding_dialogue_table(cues)
+        source = self._dialogue_source_label(str((cues[0] or {}).get("asr_source") or "") if cues else "")
+        if cues:
+            page.dialogue_status.setText(
+                self.texts.get(
+                    "understanding_step_dialogue_ready",
+                    "Showing {count} cues from this video ({source}). Double-click Speaker to name who said it.",
+                ).format(count=len(cues), source=source)
+            )
+        else:
+            page.dialogue_status.setText(
+                self.texts.get(
+                    "understanding_step_dialogue_empty",
+                    "No subtitles for this video yet. Extract hard-sub OCR in Libraries, or extract speech here.",
+                )
+            )
+        self._sync_asr_extract_button()
+
+    def _populate_understanding_dialogue_table(self, cues: list) -> None:
+        from PySide6.QtWidgets import QTableWidgetItem
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return
+        rows = list(cues or [])
+        table.blockSignals(True)
+        table.setRowCount(len(rows))
+        for index, cue in enumerate(rows):
+            start = float(cue.get("start") or 0.0)
+            end = float(cue.get("end") or start)
+            try:
+                seg_index = int(cue.get("seg_index", index))
+            except (TypeError, ValueError):
+                seg_index = index
+            time_item = QTableWidgetItem(format_timecode_range(start, end))
+            time_item.setData(Qt.ItemDataRole.UserRole, start)
+            time_item.setData(Qt.ItemDataRole.UserRole + 1, seg_index)
+            time_item.setFlags(time_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            speaker_item = QTableWidgetItem(str(cue.get("speaker") or "").strip())
+            speaker_item.setData(Qt.ItemDataRole.UserRole, seg_index)
+            speaker_item.setFlags(
+                speaker_item.flags()
+                | Qt.ItemFlag.ItemIsEditable
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsEnabled
+            )
+            text_item = QTableWidgetItem(str(cue.get("text") or "").strip())
+            text_item.setFlags(text_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            text_item.setToolTip(text_item.text())
+            table.setItem(index, 0, time_item)
+            table.setItem(index, 1, speaker_item)
+            table.setItem(index, 2, text_item)
+        table.blockSignals(False)
+
+    def _on_understanding_dialogue_speaker_changed(self, item) -> None:
+        from PySide6.QtCore import Qt
+
+        if item is None or int(item.column()) != 1:
+            return
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return
+        try:
+            seg_index = int(item.data(Qt.ItemDataRole.UserRole))
+        except (TypeError, ValueError):
+            return
+        from src.storage.dialogue_transcript_store import (
+            normalize_dialogue_speaker,
+            update_dialogue_segment_speaker,
+        )
+
+        speaker = normalize_dialogue_speaker(item.text())
+        if speaker != str(item.text() or ""):
+            table = item.tableWidget()
+            if table is not None:
+                table.blockSignals(True)
+            item.setText(speaker)
+            if table is not None:
+                table.blockSignals(False)
+        update_dialogue_segment_speaker(video_id, seg_index, speaker, config=load_config())
+
+    def _on_understanding_dialogue_cell_clicked(self, row: int, _column: int) -> None:
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return
+        item = table.item(int(row), 0)
+        if item is None:
+            return
+        try:
+            start = float(item.data(Qt.ItemDataRole.UserRole))
+        except (TypeError, ValueError):
+            return
+        self._select_understanding_chunk_at(start)
+
+    def _select_understanding_chunk_at(self, timestamp_sec: float) -> None:
+        chunks = list(getattr(self, "_understanding_index_chunks", []) or [])
+        if not chunks:
+            return
+        target = float(timestamp_sec)
+        match = 0
+        for index, chunk in enumerate(chunks):
+            start = float(chunk.get("start", 0.0) or 0.0)
+            end = float(chunk.get("end", start) or start)
+            if start <= target <= end or (index == 0 and target < start):
+                match = index
+                break
+            if target >= start:
+                match = index
+        page = self.understanding_page
+        page.chunk_timeline.set_selected_index(match)
+        self._show_understanding_chunk_detail(match)
+
+    def _sync_recap_export_button(self, *, running: bool | None = None) -> None:
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "btn_export_recap"):
+            return
+        if running is None:
+            running = bool(
+                getattr(self, "understanding_controller", None)
+                and self.understanding_controller.is_running()
+            ) or getattr(self, "_recap_worker", None) is not None or getattr(
+                self, "_asr_worker", None
+            ) is not None
+        can = (not running) and self._current_video_can_export_recap()
+        has_cuts = self._current_video_has_recap_cuts()
+        can_sidecar = (not running) and has_cuts
+        page.btn_export_recap.setEnabled(can)
+        if hasattr(page, "btn_recap_jianying"):
+            page.btn_recap_jianying.setEnabled(can_sidecar)
+        if hasattr(page, "btn_recap_fcpxml"):
+            page.btn_recap_fcpxml.setEnabled(can_sidecar)
+        if hasattr(page, "input_recap_prompt"):
+            page.input_recap_prompt.setEnabled(not running)
+        if hasattr(page, "input_recap_plan_prompt"):
+            page.input_recap_plan_prompt.setEnabled(not running)
+        if hasattr(page, "input_recap_caption_prompt"):
+            page.input_recap_caption_prompt.setEnabled(not running)
+        if hasattr(page, "btn_reset_recap_prompt"):
+            page.btn_reset_recap_prompt.setEnabled(not running)
+        if hasattr(page, "input_recap_start"):
+            page.input_recap_start.setEnabled(not running)
+        if hasattr(page, "recap_prompt_tabs"):
+            page.recap_prompt_tabs.setEnabled(not running)
+        if can:
+            page.btn_export_recap.setToolTip(self.texts.get("understanding_export_recap_tip", ""))
+        elif not self._current_video_has_motion_evidence():
+            page.btn_export_recap.setToolTip(
+                self.texts.get("understanding_export_recap_empty", "Generate motion notes first.")
+            )
+        else:
+            page.btn_export_recap.setToolTip(
+                self.texts.get(
+                    "understanding_export_recap_dialogue_missing",
+                    "Extract speech ASR here first. Recap does not use hard-sub OCR.",
+                )
+            )
+        missing_cuts = self.texts.get(
+            "understanding_recap_export_missing",
+            "Generate recap cuts first.",
+        )
+        if hasattr(page, "btn_recap_jianying"):
+            page.btn_recap_jianying.setToolTip(
+                self.texts.get("understanding_recap_jianying_tip", "") if has_cuts else missing_cuts
+            )
+        if hasattr(page, "btn_recap_fcpxml"):
+            page.btn_recap_fcpxml.setToolTip(
+                self.texts.get("understanding_recap_fcpxml_tip", "") if has_cuts else missing_cuts
+            )
+
+    def open_subtitle_library_for_recap(self) -> None:
+        self.switch_page("library")
+        page = getattr(self, "library_page", None)
+        if page is not None:
+            page.set_library_mode(1)
+
     def _current_video_has_exportable_evidence(self) -> bool:
         video_id = self._selected_understanding_video_id()
         if not video_id:
@@ -1545,16 +2134,21 @@ class UnderstandingGuiMixin:
         )
 
     def _default_understanding_export_name(self, evidence: dict) -> str:
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_SUMMARY,
+        )
 
         video = dict(evidence.get("video") or {})
         rel_path = str(video.get("video_rel_path") or video.get("video_id") or "video").strip()
         stem = os.path.splitext(os.path.basename(rel_path))[0] or "video"
-        suffix = (
-            "summary"
-            if self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
-            else "tags"
-        )
+        mode = self._current_understanding_mode()
+        if mode == UNDERSTANDING_MODE_SUMMARY:
+            suffix = "summary"
+        elif mode == UNDERSTANDING_MODE_MOTION:
+            suffix = "motion"
+        else:
+            suffix = "tags"
         return f"{stem}_{suffix}.json"
 
     def export_current_video_understanding_json(self):
@@ -1609,13 +2203,19 @@ class UnderstandingGuiMixin:
         yes_text = self.texts["details_yes"]
         no_text = self.texts["details_no"]
         rows, payloads = self._build_local_evidence_detail_rows(detail, yes_text=yes_text, no_text=no_text)
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_SUMMARY
-
-        is_summary = self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
-        title = self.texts.get(
-            "library_evidence_title_summary" if is_summary else "library_evidence_title_tags",
-            self.texts["library_evidence_title"],
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_SUMMARY,
         )
+
+        mode = self._current_understanding_mode()
+        if mode == UNDERSTANDING_MODE_SUMMARY:
+            title_key = "library_evidence_title_summary"
+        elif mode == UNDERSTANDING_MODE_MOTION:
+            title_key = "library_evidence_title_motion"
+        else:
+            title_key = "library_evidence_title_tags"
+        title = self.texts.get(title_key, self.texts["library_evidence_title"])
         subtitle = self.texts["library_evidence_subtitle"].format(
             total=detail["total_entries"],
             evidence_dir=detail["evidence_dir"],

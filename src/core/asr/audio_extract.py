@@ -153,3 +153,63 @@ def extract_audio_wav(
     if progress_callback:
         progress_callback(1.0, "extract_audio")
     return dest
+
+
+def encode_asr_upload_bytes(
+    wav_path: str,
+    *,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
+) -> tuple[bytes, str, str]:
+    """Prefer a compact MP3 upload; fall back to the WAV file."""
+    source = str(wav_path or "").strip()
+    if not source or not os.path.isfile(source):
+        raise FileNotFoundError(f"wav path is required: {wav_path!r}")
+    wav_bytes = _read_bytes(source)
+    wav_name = os.path.basename(source) or "clip.wav"
+    if not has_ffmpeg():
+        return wav_bytes, wav_name, "audio/wav"
+    mp3_path = os.path.splitext(source)[0] + ".mp3"
+    ffmpeg = get_ffmpeg_path()
+    result = _run_ffmpeg(
+        [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            source,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(int(sample_rate)),
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "48k",
+            mp3_path,
+        ]
+    )
+    if result.returncode == 0 and os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
+        try:
+            payload = _read_bytes(mp3_path)
+        finally:
+            try:
+                os.remove(mp3_path)
+            except OSError:
+                pass
+        if payload:
+            return payload, os.path.basename(mp3_path) or "clip.mp3", "audio/mpeg"
+    if os.path.isfile(mp3_path):
+        try:
+            os.remove(mp3_path)
+        except OSError:
+            pass
+    return wav_bytes, wav_name, "audio/wav"
+
+
+def _read_bytes(path: str) -> bytes:
+    with open(path, "rb") as handle:
+        return handle.read()

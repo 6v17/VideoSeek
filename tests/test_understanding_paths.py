@@ -104,6 +104,7 @@ class UnderstandingPathsTests(unittest.TestCase):
     @patch("src.services.understanding_paths.get_data_storage_paths")
     def test_evidence_paths(self, mock_get_data_storage_paths):
         from src.services.understanding_paths import (
+            get_evidence_motion_dir,
             get_evidence_summaries_dir,
             get_evidence_tags_dir,
             get_legacy_evidence_path,
@@ -129,12 +130,20 @@ class UnderstandingPathsTests(unittest.TestCase):
             os.path.join(self.config["data_root"], "data", "evidence", "summaries"),
         )
         self.assertEqual(
+            get_evidence_motion_dir(config=self.config),
+            os.path.join(self.config["data_root"], "data", "evidence", "motion"),
+        )
+        self.assertEqual(
             get_evidence_path("abc123", config=self.config, mode="tags"),
             os.path.join(self.config["data_root"], "data", "evidence", "tags", "abc123.json"),
         )
         self.assertEqual(
             get_evidence_path("abc123", config=self.config, mode="summary"),
             os.path.join(self.config["data_root"], "data", "evidence", "summaries", "abc123.json"),
+        )
+        self.assertEqual(
+            get_evidence_path("abc123", config=self.config, mode="motion"),
+            os.path.join(self.config["data_root"], "data", "evidence", "motion", "abc123.json"),
         )
         self.assertEqual(
             get_legacy_evidence_path("abc123", config=self.config),

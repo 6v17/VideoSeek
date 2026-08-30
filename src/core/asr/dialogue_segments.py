@@ -30,11 +30,13 @@ def merge_adjacent_transcripts(
         duration = float(next_row["end"]) - float(current["start"])
         combined_text = _join_text(str(current.get("text", "") or ""), str(next_row.get("text", "") or ""))
         same_language = _same_language(current.get("language"), next_row.get("language"))
+        same_speaker = _same_speaker(current.get("speaker"), next_row.get("speaker"))
         if (
             gap <= float(max_gap_sec)
             and duration <= float(max_merged_duration_sec)
             and len(combined_text) <= int(max_merged_chars)
             and same_language
+            and same_speaker
         ):
             current["end"] = float(next_row["end"])
             current["text"] = combined_text
@@ -42,6 +44,8 @@ def merge_adjacent_transcripts(
                 current["language"] = next_row.get("language")
             if not current.get("asr_source") and next_row.get("asr_source"):
                 current["asr_source"] = next_row.get("asr_source")
+            if not current.get("speaker") and next_row.get("speaker"):
+                current["speaker"] = next_row.get("speaker")
             continue
         merged.append(current)
         current = next_row
@@ -57,7 +61,12 @@ def _copy_row(row: dict[str, Any]) -> dict[str, Any]:
         "text": str(row.get("text", "") or "").strip(),
         "language": str(row.get("language", "") or "").strip(),
         "asr_source": str(row.get("asr_source", "") or "").strip(),
+        "speaker": str(row.get("speaker", "") or "").strip()[:40],
     }
+
+
+def _same_speaker(left: Any, right: Any) -> bool:
+    return str(left or "").strip() == str(right or "").strip()
 
 
 def _join_text(left: str, right: str) -> str:

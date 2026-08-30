@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Mapping, Sequence
 
 from src.services.shot_list_service import ShotListItem
 
 
 _VIDEOSEEK_TRACK_NAME = "VideoSeek"
+_VIDEOSEEK_TEXT_TRACK_NAME = "VideoSeek旁白"
 _DEFAULT_COLLECT_DRAFT_PREFIX = "VideoSeek导入"
+_RECAP_DRAFT_PREFIX = "VideoSeek解说"
 
 
 class JianyingDraftError(RuntimeError):
@@ -115,6 +118,84 @@ def list_jianying_drafts(drafts_dir: str | None = None, *, config=None) -> List[
             )
         )
     return items
+
+
+def allocate_unique_draft_name(root: str, prefix: str) -> str:
+    stamp = datetime.now().strftime("%m%d-%H%M")
+    base = str(prefix or "").strip() or _DEFAULT_COLLECT_DRAFT_PREFIX
+    candidate = f"{base}-{stamp}"
+    index = 1
+    while os.path.isdir(os.path.join(root, candidate)):
+        index += 1
+        candidate = f"{base}-{stamp}-{index}"
+    return candidate
+
+
+def _safe_draft_slug(text: str, *, fallback: str = "解说", max_len: int = 36) -> str:
+    body = re.sub(r'[<>:"/\\|?*]', "_", str(text or "").strip())
+    body = re.sub(r"\s+", " ", body).strip(" .")
+    if not body:
+        body = fallback
+    return body[:max_len].rstrip(" .") or fallback
+
+
+def recap_export_clip_spans(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """One timeline: picture duration is the source span we will place."""
+    items: list[dict[str, Any]] = []
+    for clip in clips:
+        src_in = float(clip.get("src_in") or 0.0)
+        src_out = float(clip.get("src_out") or 0.0)
+        duration = src_out - src_in
+        if duration <= 0.05:
+            continue
+        items.append(
+            {
+                "src_in": src_in,
+                "duration": duration,
+                "vo": str(clip.get("vo") or "").strip(),
+            }
+        )
+    return items
+
+
+def merge_recap_captions(spans: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Lock captions to the picture timeline: same start, same duration.
+
+    Empty follow shots keep the current line on screen. The next spoken line
+    starts when its shot starts. Do not use a second TTS clock.
+    """
+    from src.services.recap_service import _vo_covers, _vo_needs_more_picture
+
+    captions: list[dict[str, Any]] = []
+    cursor = 0.0
+    for item in spans:
+        duration = float(item.get("duration") or 0.0)
+        if duration <= 0:
+            continue
+        vo = str(item.get("vo") or "").strip()
+        if vo:
+            if captions and _vo_covers(captions[-1]["text"], vo):
+                captions[-1]["duration"] += duration
+            elif captions and _vo_covers(vo, captions[-1]["text"]):
+                captions[-1]["text"] = vo
+                captions[-1]["duration"] += duration
+            else:
+                captions.append({"start": cursor, "duration": duration, "text": vo})
+        elif captions and _vo_needs_more_picture(captions[-1]["text"], captions[-1]["duration"]):
+            captions[-1]["duration"] += duration
+        cursor += duration
+    return captions
+
+
+def _draft_canvas(*, width: int = 1920, height: int = 1080, fps: float = 30) -> tuple[int, int, int]:
+    canvas_w = max(320, int(width or 1920))
+    canvas_h = max(240, int(height or 1080))
+    fps_i = int(round(float(fps or 30)))
+    if fps_i < 12:
+        fps_i = 30
+    if fps_i > 120:
+        fps_i = 60
+    return canvas_w, canvas_h, fps_i
 
 
 def _normalize_clip_span(
@@ -378,13 +459,7 @@ def export_shot_list_to_jianying_draft(
 
     name = str(draft_name or "").strip()
     if not name:
-        stamp = datetime.now().strftime("%m%d-%H%M")
-        base = _DEFAULT_COLLECT_DRAFT_PREFIX
-        name = f"{base}-{stamp}"
-        index = 1
-        while os.path.isdir(os.path.join(root, name)):
-            index += 1
-            name = f"{base}-{stamp}-{index}"
+        name = allocate_unique_draft_name(root, _DEFAULT_COLLECT_DRAFT_PREFIX)
 
     folder = draft.DraftFolder(root)
     try:
@@ -452,6 +527,120 @@ def export_shot_list_to_jianying_draft(
     }
 
 
+def export_recap_to_jianying_draft(
+    clips: Sequence[Mapping[str, Any]],
+    *,
+    video_path: str,
+    drafts_dir: str | None = None,
+    draft_name: str | None = None,
+    title: str = "",
+    fps: float = 30,
+    width: int = 1920,
+    height: int = 1080,
+    config=None,
+) -> Dict[str, Any]:
+    """Create a plaintext recap draft: video clips + bottom VO captions."""
+    if not is_jianying_draft_support_available():
+        raise JianyingDraftError(
+            "未安装 pyJianYingDraft",
+            detail="请在 VideoSeek 环境执行：pip install pyJianYingDraft",
+        )
+
+    media = os.path.abspath(os.path.expanduser(str(video_path or "").strip()))
+    if not media or not os.path.isfile(media):
+        raise JianyingDraftError("找不到视频文件", detail=media or "(empty)")
+
+    from src.services.recap_service import stretch_recap_clips_for_vo, _probe_media as probe_recap_media
+
+    media_duration = 0.0
+    try:
+        media_duration = float(probe_recap_media(media).get("duration") or 0.0)
+    except Exception:
+        media_duration = 0.0
+    prepared = stretch_recap_clips_for_vo(clips, media_duration=media_duration)
+    spans = recap_export_clip_spans(prepared)
+    if not spans:
+        raise JianyingDraftError("没有可写入剪映的镜头")
+
+    root = str(drafts_dir or resolve_jianying_drafts_dir(config=config) or "").strip()
+    if not root or not os.path.isdir(root):
+        raise JianyingDraftError(
+            "找不到剪映草稿目录",
+            detail="请选择剪映工程里的草稿根目录（含各草稿子文件夹的那一层）。",
+        )
+    root = os.path.abspath(root)
+
+    name = str(draft_name or "").strip()
+    if not name:
+        slug = _safe_draft_slug(title)
+        name = allocate_unique_draft_name(root, f"{_RECAP_DRAFT_PREFIX}-{slug}")
+
+    import pyJianYingDraft as draft
+
+    canvas_w, canvas_h, fps_i = _draft_canvas(width=width, height=height, fps=fps)
+    folder = draft.DraftFolder(root)
+    try:
+        script = folder.create_draft(name, canvas_w, canvas_h, fps=fps_i, allow_replace=False)
+        script.append_track(draft.TrackSpec(draft.TrackType.video, name=_VIDEOSEEK_TRACK_NAME))
+        captions = merge_recap_captions(spans)
+        text_ref = None
+        if captions:
+            text_ref = script.append_track(
+                draft.TrackSpec(draft.TrackType.text, name=_VIDEOSEEK_TEXT_TRACK_NAME)
+            )
+    except FileExistsError as exc:
+        raise JianyingDraftError("同名草稿已存在", detail=name) from exc
+    except Exception as exc:
+        raise JianyingDraftError("创建剪映草稿失败", detail=str(exc)) from exc
+
+    try:
+        for item in spans:
+            start = float(item["src_in"])
+            duration = float(item["duration"])
+            _append_clip_onto_script(
+                script,
+                draft,
+                video_path=media,
+                start_sec=start,
+                end_sec=start + duration,
+                match_kind="clip",
+            )
+        if text_ref is not None:
+            last_end_us = 0
+            for cap in captions:
+                start_us = max(int(round(float(cap["start"]) * 1_000_000)), last_end_us)
+                end_us = int(round((float(cap["start"]) + float(cap["duration"])) * 1_000_000))
+                if end_us <= start_us:
+                    continue
+                text_seg = draft.TextSegment(
+                    str(cap["text"]),
+                    draft.trange(start_us, end_us - start_us),
+                    style=draft.TextStyle(
+                        size=7.0,
+                        align=1,
+                        auto_wrapping=True,
+                        max_line_width=0.86,
+                    ),
+                    clip_settings=draft.ClipSettings(transform_y=-0.8),
+                    border=draft.TextBorder(width=40.0),
+                )
+                script.add_segment(text_seg, text_ref)
+                last_end_us = end_us
+        script.save()
+    except JianyingDraftError:
+        raise
+    except Exception as exc:
+        raise JianyingDraftError("写入剪映草稿失败", detail=str(exc)) from exc
+
+    return {
+        "draft_name": name,
+        "drafts_dir": root,
+        "draft_path": os.path.join(root, name),
+        "exported_count": len(spans),
+        "caption_count": len(captions),
+    }
+
+
 def create_jianying_draft(
     *,
     drafts_dir: str,
@@ -490,13 +679,7 @@ def create_jianying_draft(
 def create_videoseek_collect_draft(*, drafts_dir: str, prefix: str = _DEFAULT_COLLECT_DRAFT_PREFIX) -> str:
     """Create a fresh plaintext draft dedicated to VideoSeek appends."""
     root = os.path.abspath(str(drafts_dir or "").strip())
-    stamp = datetime.now().strftime("%m%d-%H%M")
-    base = str(prefix or _DEFAULT_COLLECT_DRAFT_PREFIX).strip() or _DEFAULT_COLLECT_DRAFT_PREFIX
-    candidate = f"{base}-{stamp}"
-    index = 1
-    while os.path.isdir(os.path.join(root, candidate)):
-        index += 1
-        candidate = f"{base}-{stamp}-{index}"
+    candidate = allocate_unique_draft_name(root, prefix)
     return create_jianying_draft(drafts_dir=root, draft_name=candidate)
 
 

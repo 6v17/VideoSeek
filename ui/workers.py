@@ -1118,6 +1118,221 @@ class RemoteVlmConnectionTestWorker(QThread):
             self.finished.emit()
 
 
+class RemoteLlmConnectionTestWorker(QThread):
+    result_ready = Signal(dict)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(self, remote_llm: dict, *, timeout_sec: float = 8.0, parent=None):
+        super().__init__(parent)
+        self.remote_llm = dict(remote_llm or {})
+        self.timeout_sec = float(timeout_sec)
+
+    def run(self):
+        try:
+            from src.services.llm_settings import probe_remote_llm_draft
+
+            result = probe_remote_llm_draft(self.remote_llm, timeout_sec=self.timeout_sec)
+            self.result_ready.emit(dict(result or {}))
+        except Exception as exc:
+            logger.warning("remote_llm_connection_test_failed: %s", exc)
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class RecapTimelineWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        video_id: str,
+        dest_dir: str,
+        *,
+        system_prompt: str = "",
+        plan_prompt: str = "",
+        caption_prompt: str = "",
+        start_from: str = "plan",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.video_id = str(video_id or "").strip()
+        self.dest_dir = str(dest_dir or "").strip()
+        self.system_prompt = str(system_prompt or "")
+        self.plan_prompt = str(plan_prompt or "")
+        self.caption_prompt = str(caption_prompt or "")
+        self.start_from = str(start_from or "plan")
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.recap_service import generate_recap_timeline
+
+            config = load_config()
+            texts = get_texts(config.get("language", "zh"))
+            stage_keys = {
+                "planning": "understanding_export_recap_planning",
+                "matching": "understanding_export_recap_matching",
+                "closing": "understanding_export_recap_closing",
+                "plot_gaps": "understanding_export_recap_plot_gaps",
+                "captions": "understanding_export_recap_captions",
+                "gaps": "understanding_export_recap_gaps",
+                "writing": "understanding_export_recap_writing",
+            }
+
+            def _on_progress(value, stage):
+                key = stage_keys.get(str(stage), "understanding_export_recap_running")
+                self.progress_signal.emit(
+                    max(1, min(99, int(value))),
+                    texts.get(key, str(stage)),
+                )
+
+            start_keys = {"plan": "planning", "match": "matching", "captions": "captions"}
+            _on_progress(8, start_keys.get(self.start_from, "planning"))
+            result = generate_recap_timeline(
+                self.video_id,
+                self.dest_dir,
+                config=config,
+                system_prompt=self.system_prompt,
+                plan_prompt=self.plan_prompt,
+                caption_prompt=self.caption_prompt,
+                start_from=self.start_from,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                progress_callback=_on_progress,
+            )
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
+            self.finished_signal.emit(True, False, dict(result or {}))
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(False, True, {"video_id": self.video_id, "stopped": True})
+                return
+            logger.exception("Recap timeline worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+        finally:
+            self.finished.emit()
+
+
+class RemoteAsrConnectionTestWorker(QThread):
+    result_ready = Signal(dict)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(self, remote_asr: dict, *, timeout_sec: float = 8.0, parent=None):
+        super().__init__(parent)
+        self.remote_asr = dict(remote_asr or {})
+        self.timeout_sec = float(timeout_sec)
+
+    def run(self):
+        try:
+            from src.services.asr_settings import probe_remote_asr_draft
+
+            result = probe_remote_asr_draft(self.remote_asr, timeout_sec=self.timeout_sec)
+            self.result_ready.emit(dict(result or {}))
+        except Exception as exc:
+            logger.warning("remote_asr_connection_test_failed: %s", exc)
+            self.error_signal.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
+class AsrTranscriptWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        video_id: str,
+        *,
+        video_path: str = "",
+        library_path: str = "",
+        force: bool = True,
+        language: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.video_id = str(video_id or "").strip()
+        self.video_path = str(video_path or "").strip()
+        self.library_path = str(library_path or "").strip()
+        self.force = bool(force)
+        self.language = str(language or "").strip()
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.asr_index_service import transcribe_video_asr
+
+            config = load_config()
+            texts = get_texts(config.get("language", "zh"))
+            self.progress_signal.emit(
+                5,
+                texts.get("understanding_asr_extract_running", "Extracting speech…"),
+            )
+
+            def _on_progress(value, stage, texts=texts):
+                label = texts.get("understanding_asr_extract_running", "Extracting speech…")
+                token = str(stage or "")
+                if token == "extract_audio":
+                    label = texts.get("understanding_asr_extract_audio", "Extracting audio…")
+                elif token == "vad":
+                    label = texts.get("understanding_asr_extract_vad", "Detecting speech…")
+                elif token.startswith("asr_window:"):
+                    parts = token.split(":")
+                    if len(parts) >= 3:
+                        label = texts.get(
+                            "understanding_asr_extract_window",
+                            "Transcribing speech {current}/{total}…",
+                        ).format(current=parts[1], total=parts[2])
+                self.progress_signal.emit(max(5, min(99, int(round(float(value) * 100)))), label)
+
+            result = transcribe_video_asr(
+                self.video_id,
+                video_path=self.video_path,
+                library_path=self.library_path,
+                force=self.force,
+                language=self.language,
+                config=config,
+                progress_callback=_on_progress,
+                stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+            )
+            if not dict(result or {}).get("ok"):
+                raise RuntimeError(str(dict(result or {}).get("error") or "ASR failed"))
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
+            self.finished_signal.emit(True, False, dict(result or {}))
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(False, True, {"video_id": self.video_id, "stopped": True})
+                return
+            logger.exception("ASR transcript worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+        finally:
+            self.finished.emit()
+
+
 class ModelPackageImportWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(dict)

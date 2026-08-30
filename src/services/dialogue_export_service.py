@@ -39,6 +39,9 @@ def render_dialogue_srt(segments: list[dict[str, Any]]) -> str:
         text = str((item or {}).get("text", "") or "").strip()
         if not text:
             continue
+        speaker = str((item or {}).get("speaker") or "").strip()
+        if speaker:
+            text = f"{speaker}：{text}"
         start = float((item or {}).get("start", 0.0) or 0.0)
         end = float((item or {}).get("end", start) or start)
         if end < start:
@@ -59,9 +62,12 @@ def render_dialogue_txt(segments: list[dict[str, Any]], *, include_timestamps: b
         if include_timestamps:
             start = float((item or {}).get("start", 0.0) or 0.0)
             end = float((item or {}).get("end", start) or start)
-            lines.append(f"[{start:08.3f} --> {end:08.3f}] {text}")
+            speaker = str((item or {}).get("speaker") or "").strip()
+            line = f"{speaker}：{text}" if speaker else text
+            lines.append(f"[{start:08.3f} --> {end:08.3f}] {line}")
         else:
-            lines.append(text)
+            speaker = str((item or {}).get("speaker") or "").strip()
+            lines.append(f"{speaker}：{text}" if speaker else text)
     return "\n".join(lines) + ("\n" if lines else "")
 
 
@@ -143,3 +149,21 @@ def export_dialogue_transcripts(
         "output_dir": out_dir,
         "error": "; ".join(errors) if errors and not files else "",
     }
+
+
+def export_dialogue_json_to_path(video_id: str, dest_path: str, *, config=None) -> dict[str, Any]:
+    vid = str(video_id or "").strip()
+    path = os.path.normpath(str(dest_path or "").strip())
+    if not vid:
+        return {"ok": False, "error": "missing video_id", "path": ""}
+    if not path:
+        return {"ok": False, "error": "missing dest_path", "path": ""}
+    record = load_dialogue_transcript(vid, config=config)
+    if not record:
+        return {"ok": False, "error": "no shared dialogue transcript", "path": ""}
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(render_dialogue_json(record))
+    return {"ok": True, "path": path, "segment_count": int(record.get("segment_count") or 0)}

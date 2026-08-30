@@ -35,5 +35,25 @@ class MergeAdjacentTranscriptsTests(unittest.TestCase):
         self.assertEqual(len(merged), 2)
 
 
+    def test_does_not_merge_different_speakers(self):
+        rows = [
+            {"start": 1.0, "end": 1.4, "text": "甲", "language": "zh", "speaker": "柜台职员"},
+            {"start": 1.5, "end": 1.9, "text": "乙", "language": "zh", "speaker": "红衣女人"},
+        ]
+        merged = merge_adjacent_transcripts(rows, max_gap_sec=0.65)
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]["speaker"], "柜台职员")
+
+    def test_merges_same_speaker(self):
+        rows = [
+            {"start": 1.0, "end": 1.4, "text": "你", "language": "zh", "speaker": "红衣女人"},
+            {"start": 1.5, "end": 1.9, "text": "好", "language": "zh", "speaker": "红衣女人"},
+        ]
+        merged = merge_adjacent_transcripts(rows, max_gap_sec=0.65)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["text"], "你好")
+        self.assertEqual(merged[0]["speaker"], "红衣女人")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -58,3 +58,20 @@ def _resample_linear(samples: np.ndarray, source_sr: int, target_sr: int) -> np.
     target_length = max(1, int(round(duration * target_sr)))
     source_positions = np.linspace(0.0, samples.shape[0] - 1, num=target_length, dtype=np.float64)
     return np.interp(source_positions, np.arange(samples.shape[0], dtype=np.float64), samples).astype(np.float32)
+
+
+def write_wav_mono_f32(path: str, samples: np.ndarray, *, sample_rate: int = 16000) -> str:
+    """Write float32 mono [-1, 1] as 16-bit PCM WAV."""
+    dest = str(path or "").strip()
+    if not dest:
+        raise ValueError("wav path is required")
+    waveform = np.asarray(samples, dtype=np.float32).reshape(-1)
+    clipped = np.clip(waveform, -1.0, 1.0)
+    pcm = (clipped * 32767.0).astype(np.int16)
+    with wave.open(dest, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(int(sample_rate))
+        handle.writeframes(pcm.tobytes())
+    return dest
+

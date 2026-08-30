@@ -72,6 +72,24 @@ DEFAULT_UNDERSTANDING_CONFIG = {
         "max_tokens": 128,
         "concurrency": 2,
     },
+    "remote_llm": {
+        "provider_mode": "cloud",
+        "provider_preset": "deepseek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-flash",
+        "api_keys": {},
+        "timeout_sec": 180,
+        "max_tokens": 4096,
+    },
+    "remote_asr": {
+        "provider_mode": "cloud",
+        "provider_preset": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "model": "whisper-1",
+        "api_keys": {},
+        "timeout_sec": 120,
+        "language": "",
+    },
 }
 
 DEFAULT_CONFIG = {
@@ -491,11 +509,21 @@ def _sanitize_understanding_settings(config):
     from src.services.understanding_resource_service import finalize_remote_vlm_settings
 
     remote_vlm = finalize_remote_vlm_settings(raw_remote_vlm)
+    from src.services.llm_settings import finalize_remote_llm_settings
+
+    raw_remote_llm = raw_understanding.get("remote_llm")
+    remote_llm = finalize_remote_llm_settings(raw_remote_llm if isinstance(raw_remote_llm, dict) else {})
+    from src.services.asr_settings import finalize_remote_asr_settings
+
+    raw_remote_asr = raw_understanding.get("remote_asr")
+    remote_asr = finalize_remote_asr_settings(raw_remote_asr if isinstance(raw_remote_asr, dict) else {})
 
     sanitized["understanding"] = {
         "active_profile": active_profile,
         "profiles": normalized_profiles,
         "remote_vlm": remote_vlm,
+        "remote_llm": remote_llm,
+        "remote_asr": remote_asr,
     }
     return sanitized
 

@@ -13,6 +13,7 @@ EVIDENCE_DIR_NAME = "evidence"
 EVIDENCE_VIDEOS_DIR_NAME = "videos"  # legacy combined store
 EVIDENCE_TAGS_DIR_NAME = "tags"
 EVIDENCE_SUMMARIES_DIR_NAME = "summaries"
+EVIDENCE_MOTION_DIR_NAME = "motion"
 BUILTIN_PROFILES_RELPATH = os.path.join("resources", "understanding_profiles")
 BUILTIN_COMPONENTS_RELPATH = os.path.join("resources", "understanding_components")
 COMPONENT_ID_PATTERN = re.compile(
@@ -147,8 +148,13 @@ def get_evidence_summaries_dir(config=None) -> str:
     return os.path.join(get_evidence_root(config=config), EVIDENCE_SUMMARIES_DIR_NAME)
 
 
+def get_evidence_motion_dir(config=None) -> str:
+    return os.path.join(get_evidence_root(config=config), EVIDENCE_MOTION_DIR_NAME)
+
+
 def get_evidence_mode_dir(mode: str | None = None, config=None) -> str:
     from src.services.understanding_resource_service import (
+        UNDERSTANDING_MODE_MOTION,
         UNDERSTANDING_MODE_SUMMARY,
         UNDERSTANDING_MODE_TAGS,
         normalize_understanding_mode,
@@ -157,6 +163,8 @@ def get_evidence_mode_dir(mode: str | None = None, config=None) -> str:
     resolved = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
     if resolved == UNDERSTANDING_MODE_SUMMARY:
         return get_evidence_summaries_dir(config=config)
+    if resolved == UNDERSTANDING_MODE_MOTION:
+        return get_evidence_motion_dir(config=config)
     return get_evidence_tags_dir(config=config)
 
 
@@ -172,25 +180,21 @@ def get_legacy_evidence_path(video_id: str, config=None) -> str:
 
 
 def iter_evidence_candidate_paths(video_id: str, config=None, *, mode: str | None = None) -> list[str]:
-    """Mode store first, then the other mode, then legacy combined store."""
+    """Mode store first, then sibling split stores, then legacy combined store."""
     from src.services.understanding_resource_service import (
-        UNDERSTANDING_MODE_SUMMARY,
+        SPLIT_UNDERSTANDING_MODES,
         UNDERSTANDING_MODE_TAGS,
         normalize_understanding_mode,
     )
 
     normalized_id = _normalize_video_id(video_id)
     primary = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
-    secondary = (
-        UNDERSTANDING_MODE_SUMMARY
-        if primary == UNDERSTANDING_MODE_TAGS
-        else UNDERSTANDING_MODE_TAGS
-    )
-    paths = [
-        get_evidence_path(normalized_id, config=config, mode=primary),
-        get_evidence_path(normalized_id, config=config, mode=secondary),
-        get_legacy_evidence_path(normalized_id, config=config),
-    ]
+    paths = [get_evidence_path(normalized_id, config=config, mode=primary)]
+    for sibling in SPLIT_UNDERSTANDING_MODES:
+        if sibling == primary:
+            continue
+        paths.append(get_evidence_path(normalized_id, config=config, mode=sibling))
+    paths.append(get_legacy_evidence_path(normalized_id, config=config))
     # Preserve order while dropping duplicates.
     ordered: list[str] = []
     seen: set[str] = set()

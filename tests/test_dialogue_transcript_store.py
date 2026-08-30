@@ -173,6 +173,52 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 payload = load_dialogue_transcript("v")
                 self.assertEqual(payload["segment_count"], 1)
                 self.assertEqual(payload["segments"][0]["text"], "new only")
+                self.assertEqual(payload["segments"][0].get("speaker") or "", "")
+
+    def test_speaker_roundtrip_update_and_inherit_on_overlap(self):
+        from src.storage.dialogue_transcript_store import (
+            inherit_segment_speakers,
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+            update_dialogue_segment_speaker,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "v",
+                    [
+                        {"start": 1.0, "end": 3.0, "text": "开考", "asr_source": "asr"},
+                        {"start": 8.0, "end": 9.0, "text": "过场", "asr_source": "asr"},
+                    ],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                self.assertTrue(update_dialogue_segment_speaker("v", 0, "柜台职员"))
+                payload = load_dialogue_transcript("v")
+                self.assertEqual(payload["segments"][0]["speaker"], "柜台职员")
+                save_dialogue_transcript(
+                    "v",
+                    [
+                        {"start": 1.1, "end": 2.8, "text": "现在开考", "asr_source": "asr"},
+                        {"start": 8.0, "end": 9.0, "text": "过场", "asr_source": "asr"},
+                    ],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                payload = load_dialogue_transcript("v")
+                self.assertEqual(payload["segments"][0]["speaker"], "柜台职员")
+                self.assertEqual(payload["segments"][1].get("speaker") or "", "")
+
+        carried = inherit_segment_speakers(
+            [{"start": 10.0, "end": 12.0, "speaker": "红衣女人"}],
+            [{"start": 0.0, "end": 1.0, "text": "别处", "speaker": ""}],
+        )
+        self.assertEqual(carried[0].get("speaker") or "", "")
 
 
 if __name__ == "__main__":

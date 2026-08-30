@@ -1056,13 +1056,13 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     font-weight: 600;
     padding: 0 2px 0 0;
 }
-#SearchQueryTabs::pane {
+#SearchQueryTabs::pane, #RecapPromptTabs::pane {
     border: 1px solid __LINE__;
     border-radius: 8px;
     background: __FIELD__;
     top: -1px;
 }
-#SearchQueryTabs QTabBar::tab {
+#SearchQueryTabs QTabBar::tab, #RecapPromptTabs QTabBar::tab {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE__;
     border-bottom: none;
@@ -1073,12 +1073,12 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     color: __MUTED__;
     font-weight: 600;
 }
-#SearchQueryTabs QTabBar::tab:selected {
+#SearchQueryTabs QTabBar::tab:selected, #RecapPromptTabs QTabBar::tab:selected {
     background: __FIELD__;
     color: __TEXT__;
     border-color: __LINE_STRONG__;
 }
-#SearchQueryTabs QTabBar::tab:hover {
+#SearchQueryTabs QTabBar::tab:hover, #RecapPromptTabs QTabBar::tab:hover {
     background: __BUTTON_SOFT_HOVER__;
 }
 #LibraryTabs::pane {
@@ -1877,6 +1877,33 @@ QListWidget#ModelFileList::item:selected {
     background: __FIELD__;
     color: __HEADLINE__;
     border-color: __ACCENT__;
+}
+QListWidget#UnderstandingServiceNav {
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    background: __PANEL__;
+    padding: 6px;
+    outline: 0;
+}
+QListWidget#UnderstandingServiceNav::item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin: 2px 0;
+    border: 1px solid transparent;
+    color: __TEXT__;
+}
+QListWidget#UnderstandingServiceNav::item:hover {
+    background: __FIELD__;
+    border-color: __LINE__;
+}
+QListWidget#UnderstandingServiceNav::item:selected {
+    background: __FIELD__;
+    color: __HEADLINE__;
+    border-color: __ACCENT__;
+}
+QScrollArea#DialogScroll {
+    background: transparent;
+    border: none;
 }
 QListWidget#DialogueLibraryList {
     border: none;

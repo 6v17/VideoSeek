@@ -47,10 +47,10 @@ from ui.widgets.components import (
     LinkSearchPage,
     NavigationSidebar,
     SearchPage,
-    UnderstandingEvidencePage,
 )
+from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
-from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog
+from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, UnderstandingServicesDialog
 from ui.dialogs.html_links import open_html_link
 from ui.widgets.sidebar_icons import (
     bilibili_toolbar_icon,
@@ -74,6 +74,8 @@ from ui.windows.gui_settings import SettingsGuiMixin
 from ui.windows.gui_preview import PreviewGuiMixin
 from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
 from ui.windows.gui_understanding import UnderstandingGuiMixin
+from ui.windows.gui_understanding_asr import UnderstandingAsrGuiMixin
+from ui.windows.gui_understanding_llm import UnderstandingLlmGuiMixin
 from ui.windows.gui_video_download import VideoDownloadGuiMixin
 from ui.windows.gui_runtime import RuntimeGuiMixin
 from ui.windows.gui_model_packages import ModelPackagesGuiMixin
@@ -94,6 +96,8 @@ class MainWindow(
     PreviewGuiMixin,
     LibraryIndexingGuiMixin,
     UnderstandingGuiMixin,
+    UnderstandingLlmGuiMixin,
+    UnderstandingAsrGuiMixin,
     VideoDownloadGuiMixin,
     RuntimeGuiMixin,
     AppUiStateMixin,
@@ -237,6 +241,11 @@ class MainWindow(
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
         self.understanding_page = UnderstandingEvidencePage()
+        self.understanding_services_dialog = UnderstandingServicesDialog(
+            self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+        )
         self.settings_page = SettingsPage()
         self._plugin_page_widgets = {}
         self._plugin_page_specs = {}
@@ -379,15 +388,54 @@ class MainWindow(
         self.understanding_page.btn_generate_batch.clicked.connect(self.start_generate_understanding_batch)
         self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
         self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
+        self.understanding_page.btn_export_recap.clicked.connect(self.export_current_video_recap)
+        if hasattr(self.understanding_page, "btn_recap_jianying"):
+            self.understanding_page.btn_recap_jianying.clicked.connect(self.export_current_recap_jianying)
+        if hasattr(self.understanding_page, "btn_recap_fcpxml"):
+            self.understanding_page.btn_recap_fcpxml.clicked.connect(self.export_current_recap_fcpxml)
+        if hasattr(self.understanding_page, "btn_open_subtitle_library"):
+            self.understanding_page.btn_open_subtitle_library.clicked.connect(
+                self.open_subtitle_library_for_recap
+            )
+        if hasattr(self.understanding_page, "btn_extract_asr"):
+            self.understanding_page.btn_extract_asr.clicked.connect(self.extract_current_video_asr)
+        if hasattr(self.understanding_page, "btn_export_dialogue_json"):
+            self.understanding_page.btn_export_dialogue_json.clicked.connect(
+                self.export_current_video_dialogue_json
+            )
+        if hasattr(self.understanding_page, "btn_reset_recap_prompt"):
+            self.understanding_page.btn_reset_recap_prompt.clicked.connect(self.reset_recap_prompt)
+        if hasattr(self.understanding_page, "dialogue_table"):
+            self.understanding_page.dialogue_table.cellClicked.connect(
+                self._on_understanding_dialogue_cell_clicked
+            )
+            self.understanding_page.dialogue_table.itemChanged.connect(
+                self._on_understanding_dialogue_speaker_changed
+            )
         self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
+        self.understanding_page.btn_open_services.clicked.connect(self.open_understanding_settings)
         self.understanding_page.btn_stop.clicked.connect(self.stop_understanding_generation)
-        self.understanding_page.btn_save_config.clicked.connect(self.save_understanding_settings)
-        self.understanding_page.btn_test_vlm_connection.clicked.connect(self.test_understanding_vlm_connection)
-        self.understanding_page.chk_use_custom_prompts.toggled.connect(self._on_use_custom_prompts_toggled)
-        self.understanding_page.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
+        if hasattr(self.understanding_page, "btn_stop_asr"):
+            self.understanding_page.btn_stop_asr.clicked.connect(self.stop_understanding_generation)
+        self.understanding_services_dialog.btn_save_config.clicked.connect(self.save_understanding_settings)
+        self.understanding_services_dialog.btn_test_vlm_connection.clicked.connect(
+            self.test_understanding_service_connection
+        )
+        form = self.understanding_services_dialog.vlm_form
+        form.chk_use_custom_prompts.toggled.connect(self._on_use_custom_prompts_toggled)
+        form.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
         self.understanding_page.input_understanding_mode.currentIndexChanged.connect(self._on_understanding_mode_changed)
-        self.understanding_page.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
-        self.understanding_page.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
+        self.understanding_page.input_caption_language.currentIndexChanged.connect(
+            self._on_understanding_caption_language_changed
+        )
+        form.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
+        form.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
+        llm_form = self.understanding_services_dialog.llm_form
+        llm_form.input_llm_provider_mode.currentIndexChanged.connect(self._on_llm_provider_mode_changed)
+        llm_form.input_llm_provider_preset.currentIndexChanged.connect(self._on_llm_provider_preset_changed)
+        asr_form = self.understanding_services_dialog.asr_form
+        asr_form.input_asr_provider_mode.currentIndexChanged.connect(self._on_asr_provider_mode_changed)
+        asr_form.input_asr_provider_preset.currentIndexChanged.connect(self._on_asr_provider_preset_changed)
         self.understanding_page.scope_combo.currentIndexChanged.connect(self._on_understanding_scope_changed)
         self.understanding_page.video_combo.currentIndexChanged.connect(self._on_understanding_video_changed)
         self.understanding_page.chunk_timeline.chunk_clicked.connect(self._on_understanding_chunk_clicked)
@@ -796,23 +844,92 @@ class MainWindow(
             )
         )
         self.understanding_page.header.subtitle.setText(t["understanding_page_desc"])
-        self.understanding_page.config_title.setText(t["understanding_config_title"])
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
-        self.understanding_page.label_vlm_provider_mode.setText(t["understanding_vlm_provider_mode_label"])
-        self.understanding_page.input_vlm_provider_mode.setToolTip(t["understanding_vlm_provider_mode_hint"])
-        current_vlm_mode = self.understanding_page.input_vlm_provider_mode.currentData()
+        if hasattr(self.understanding_page, "select_hint"):
+            self.understanding_page.select_hint.setText(
+                t.get("understanding_step_select_hint", "")
+            )
+        if hasattr(self.understanding_page, "generate_title"):
+            self.understanding_page.generate_title.setText(
+                t.get("understanding_step_generate_title", "2. Generate notes")
+            )
+        if hasattr(self.understanding_page, "export_title"):
+            self.understanding_page.export_title.setText(
+                t.get("understanding_step_export_title", "4. Recap cuts and export")
+            )
+        if hasattr(self.understanding_page, "export_hint"):
+            self.understanding_page.export_hint.setText(
+                t.get("understanding_step_export_hint", "")
+            )
+        if hasattr(self.understanding_page, "dialogue_title"):
+            self.understanding_page.dialogue_title.setText(
+                t.get("understanding_step_dialogue_title", "3. Dialogue / subtitles")
+            )
+        if hasattr(self.understanding_page, "dialogue_hint"):
+            self.understanding_page.dialogue_hint.setText(
+                t.get("understanding_step_dialogue_hint", "")
+            )
+        if hasattr(self.understanding_page, "btn_open_subtitle_library"):
+            self.understanding_page.btn_open_subtitle_library.setText(
+                t.get("understanding_step_dialogue_open", "Extract subtitles")
+            )
+        if hasattr(self.understanding_page, "btn_extract_asr"):
+            self.understanding_page.btn_extract_asr.setText(
+                t.get("understanding_step_dialogue_extract_asr", "Extract speech")
+            )
+        if hasattr(self.understanding_page, "btn_export_dialogue_json"):
+            self.understanding_page.btn_export_dialogue_json.setText(
+                t.get("understanding_step_dialogue_export_json", "Export JSON")
+            )
+        if hasattr(self.understanding_page, "recap_prompt_label"):
+            self.understanding_page.recap_prompt_label.setText(
+                t.get("understanding_recap_prompt_label", "Recap prompts")
+            )
+        if hasattr(self.understanding_page, "recap_prompt_hint"):
+            self.understanding_page.recap_prompt_hint.setText(
+                t.get("understanding_recap_prompt_hint", "")
+            )
+        if hasattr(self.understanding_page, "btn_reset_recap_prompt"):
+            self.understanding_page.btn_reset_recap_prompt.setText(
+                t.get("understanding_recap_prompt_reset", "Restore this default")
+            )
+        if hasattr(self.understanding_page, "recap_prompt_tabs"):
+            tabs = self.understanding_page.recap_prompt_tabs
+            tabs.setTabText(0, t.get("understanding_recap_prompt_tab_plan", "1. Plan"))
+            tabs.setTabText(1, t.get("understanding_recap_prompt_tab_match", "2. Match shots"))
+            tabs.setTabText(2, t.get("understanding_recap_prompt_tab_captions", "3. Captions"))
+        if hasattr(self.understanding_page, "recap_start_label"):
+            self.understanding_page.recap_start_label.setText(
+                t.get("understanding_recap_start_label", "Start from")
+            )
+        if hasattr(self, "_populate_recap_start_options"):
+            current = None
+            if hasattr(self.understanding_page, "input_recap_start"):
+                current = self.understanding_page.input_recap_start.currentData()
+            self._populate_recap_start_options(current)
+        if hasattr(self, "_ensure_recap_prompt_default"):
+            self._ensure_recap_prompt_default()
+        if hasattr(self.understanding_page, "dialogue_table"):
+            self.understanding_page.dialogue_table.apply_header_labels(t)
+        cfg = self._understanding_config_widgets()
+        dialog = getattr(self, "understanding_services_dialog", None)
+        if dialog is not None:
+            dialog.apply_texts(t)
+        cfg.label_vlm_provider_mode.setText(t["understanding_vlm_provider_mode_label"])
+        cfg.input_vlm_provider_mode.setToolTip(t["understanding_vlm_provider_mode_hint"])
+        current_vlm_mode = cfg.input_vlm_provider_mode.currentData()
         self._populate_vlm_provider_mode_options(current_vlm_mode or "local")
-        self.understanding_page.label_vlm_provider_preset.setText(t["understanding_vlm_provider_preset_label"])
-        self.understanding_page.input_vlm_provider_preset.setToolTip(t["understanding_vlm_provider_preset_hint"])
-        current_vlm_preset = self.understanding_page.input_vlm_provider_preset.currentData()
+        cfg.label_vlm_provider_preset.setText(t["understanding_vlm_provider_preset_label"])
+        cfg.input_vlm_provider_preset.setToolTip(t["understanding_vlm_provider_preset_hint"])
+        current_vlm_preset = cfg.input_vlm_provider_preset.currentData()
         self._populate_vlm_provider_preset_options(current_vlm_mode or "local", current_vlm_preset or "lm_studio")
         self._sync_vlm_provider_ui()
-        self.understanding_page.label_remote_vlm_base_url.setText(t["setting_remote_vlm_base_url"])
-        self.understanding_page.input_remote_vlm_base_url.setToolTip(t["setting_remote_vlm_base_url_hint"])
-        self.understanding_page.label_remote_vlm_api_key.setText(t["setting_remote_vlm_api_key"])
-        self.understanding_page.input_remote_vlm_api_key.setToolTip(t["setting_remote_vlm_api_key_hint"])
-        self.understanding_page.label_remote_vlm_model.setText(t["setting_remote_vlm_model"])
-        self.understanding_page.input_remote_vlm_model.setToolTip(t["setting_remote_vlm_model_hint"])
+        cfg.label_remote_vlm_base_url.setText(t["setting_remote_vlm_base_url"])
+        cfg.input_remote_vlm_base_url.setToolTip(t["setting_remote_vlm_base_url_hint"])
+        cfg.label_remote_vlm_api_key.setText(t["setting_remote_vlm_api_key"])
+        cfg.input_remote_vlm_api_key.setToolTip(t["setting_remote_vlm_api_key_hint"])
+        cfg.label_remote_vlm_model.setText(t["setting_remote_vlm_model"])
+        cfg.input_remote_vlm_model.setToolTip(t["setting_remote_vlm_model_hint"])
         self.understanding_page.label_caption_language.setText(t["understanding_caption_language_label"])
         current_language = self.understanding_page.input_caption_language.currentData()
         self._populate_understanding_caption_language_options(current_language or "zh")
@@ -828,34 +945,56 @@ class MainWindow(
                 "Tags: chunk tagging only. Summary: chunk descriptions then whole-video summary.",
             )
         )
-        self.understanding_page.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
-        self.understanding_page.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
-        self.understanding_page.chk_use_custom_prompts.setText(t["understanding_use_custom_prompts"])
-        self.understanding_page.hint_custom_prompts.setText(t["understanding_custom_prompts_hint"])
-        self.understanding_page.label_custom_caption_prompt.setText(
+        cfg.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
+        cfg.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
+        cfg.chk_use_custom_prompts.setText(t["understanding_use_custom_prompts"])
+        cfg.hint_custom_prompts.setText(t["understanding_custom_prompts_hint"])
+        cfg.label_custom_caption_prompt.setText(
             t.get("understanding_custom_tag_prompt_label", t["understanding_custom_caption_prompt_label"])
         )
-        self.understanding_page.label_custom_description_prompt.setText(
+        cfg.label_custom_description_prompt.setText(
             t.get("understanding_custom_description_prompt_label", "Segment description prompt")
         )
-        self.understanding_page.label_custom_summary_prompt.setText(
+        cfg.label_custom_motion_prompt.setText(
+            t.get("understanding_custom_motion_prompt_label", "Segment motion prompt")
+        )
+        cfg.label_custom_summary_prompt.setText(
             t["understanding_custom_summary_prompt_label"]
         )
-        self.understanding_page.btn_reset_custom_prompts.setText(t["understanding_reset_custom_prompts"])
-        self.understanding_page.btn_save_config.setText(t["understanding_save_config"])
-        self.understanding_page.btn_test_vlm_connection.setText(t["understanding_test_vlm_connection"])
-        self.understanding_page.btn_test_vlm_connection.setToolTip(t["understanding_test_vlm_connection_hint"])
+        cfg.btn_reset_custom_prompts.setText(t["understanding_reset_custom_prompts"])
+        self.understanding_page.btn_open_services.setText(
+            t.get("understanding_open_services", t.get("understanding_config_title", "Model services"))
+        )
         self.understanding_page.scope_label.setText(t["understanding_scope_label"])
         self.understanding_page.video_label.setText(t["understanding_video_label"])
         self.understanding_page.timeline_label.setText(t["understanding_timeline_label"])
         self.understanding_page.timeline_hint.setText(t["understanding_timeline_hint"])
-        self.understanding_page.chunk_detail_title.setText(t["understanding_chunk_detail_title"])
         self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
-        self._sync_understanding_mode_ui()
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
+        self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "Generate recap cuts"))
+        self.understanding_page.btn_export_recap.setToolTip(
+            t.get("understanding_export_recap_tip", "")
+        )
+        if hasattr(self.understanding_page, "btn_recap_jianying"):
+            self.understanding_page.btn_recap_jianying.setText(
+                t.get("understanding_recap_jianying", "Generate Jianying draft")
+            )
+            self.understanding_page.btn_recap_jianying.setToolTip(
+                t.get("understanding_recap_jianying_tip", "")
+            )
+        if hasattr(self.understanding_page, "btn_recap_fcpxml"):
+            self.understanding_page.btn_recap_fcpxml.setText(
+                t.get("understanding_recap_fcpxml", "Export FCPXML")
+            )
+            self.understanding_page.btn_recap_fcpxml.setToolTip(
+                t.get("understanding_recap_fcpxml_tip", "")
+            )
         self.understanding_page.btn_understanding_setup.setText(t["understanding_setup_action"])
         self.understanding_page.btn_stop.setText(t["stop"])
+        if hasattr(self.understanding_page, "btn_stop_asr"):
+            self.understanding_page.btn_stop_asr.setText(t["stop"])
+        self._sync_understanding_mode_ui()
         if self._is_current_page("understanding"):
             if hasattr(self, "_refresh_understanding_page_fast"):
                 self._refresh_understanding_page_fast()

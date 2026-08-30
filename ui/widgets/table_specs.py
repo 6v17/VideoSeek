@@ -61,3 +61,14 @@ LOCAL_SEARCH_TABLE_SPEC = TableSpec(
         TableColumnSpec("actions", width=360),
     ),
 )
+
+UNDERSTANDING_DIALOGUE_TABLE_SPEC = TableSpec(
+    texts_header_key="understanding_dialogue_headers",
+    row_height=36,
+    object_name="DataTable",
+    columns=(
+        TableColumnSpec("range", width=118),
+        TableColumnSpec("speaker", width=108),
+        TableColumnSpec("text", resize="stretch"),
+    ),
+)

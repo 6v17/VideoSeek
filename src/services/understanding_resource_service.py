@@ -62,6 +62,7 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "custom_caption_prompt": "",
     "custom_tag_prompt": "",
     "custom_description_prompt": "",
+    "custom_motion_prompt": "",
     "custom_summary_prompt": "",
     "prompt": (
         "为这一视频帧提取简洁中文标签。只输出 JSON："
@@ -111,7 +112,18 @@ SUPPORTED_CAPTION_LANGUAGES = {CAPTION_LANGUAGE_ZH, CAPTION_LANGUAGE_EN}
 
 UNDERSTANDING_MODE_TAGS = "tags"
 UNDERSTANDING_MODE_SUMMARY = "summary"
-SUPPORTED_UNDERSTANDING_MODES = {UNDERSTANDING_MODE_TAGS, UNDERSTANDING_MODE_SUMMARY}
+UNDERSTANDING_MODE_MOTION = "motion"
+SUPPORTED_UNDERSTANDING_MODES = {
+    UNDERSTANDING_MODE_TAGS,
+    UNDERSTANDING_MODE_SUMMARY,
+    UNDERSTANDING_MODE_MOTION,
+}
+SPLIT_UNDERSTANDING_MODES = (
+    UNDERSTANDING_MODE_TAGS,
+    UNDERSTANDING_MODE_SUMMARY,
+    UNDERSTANDING_MODE_MOTION,
+)
+# Recap / VO / FCPXML uses a separate LLM job (see recap_service), not these vision modes.
 
 # Tag mode: chunk tags only.
 TAG_LANGUAGE_PROMPTS = {
@@ -140,6 +152,41 @@ DESCRIPTION_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_EN: (
         "Describe this video frame in one or two concise sentences. "
         "Only what is visible. No analysis steps, no markdown."
+    ),
+}
+# Motion mode: stitched earlier/later frames from the same chunk. Describe change only; optional tags.
+MOTION_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: (
+        "这是一张视频时间片段拼接图。\n"
+        "\n"
+        "左侧帧早于右侧帧，图片中有时间标注。\n"
+        "请比较两帧之间的变化，只描述该时间段内实际可见的变化。\n"
+        "\n"
+        "要求：\n"
+        "1. 用2-4句中文描述发生了什么变化。\n"
+        "2. 描述可见的人物、动作、物体、环境、表情和镜头变化。\n"
+        "3. 可以判断镜头类型或片段用途（如对话、动作、场景展示、情绪反应、过渡），"
+        "但不要编造剧情、人物关系、背景原因或画外信息。\n"
+        "4. 不要输出故事总结，不要 Markdown。\n"
+        "\n"
+        "最后，如果可以提取，请单独输出 JSON：\n"
+        '{"tags":["人物/动作/场景/镜头/情绪等短标签"]}'
+    ),
+    CAPTION_LANGUAGE_EN: (
+        "This is a stitched image of two frames from the same video span.\n"
+        "\n"
+        "The left frame is earlier than the right. The image is time-labeled.\n"
+        "Compare the two frames and describe only changes that are actually visible in this span.\n"
+        "\n"
+        "Requirements:\n"
+        "1. Describe what changed in 2-4 English sentences.\n"
+        "2. Cover visible people, actions, objects, setting, expressions, and camera change.\n"
+        "3. You may label the shot type or beat (dialogue, action, establishing, reaction, transition), "
+        "but do not invent plot, relationships, off-screen causes, or unseen information.\n"
+        "4. No story summary. No markdown.\n"
+        "\n"
+        "Finally, if you can extract them, output JSON on its own:\n"
+        '{"tags":["short tags for people/action/scene/shot/emotion"]}'
     ),
 }
 VIDEO_SUMMARY_LANGUAGE_PROMPTS = {
@@ -172,6 +219,8 @@ def normalize_understanding_mode(value, *, default: str = UNDERSTANDING_MODE_TAG
         return UNDERSTANDING_MODE_TAGS
     if text in {"caption", "captions", "describe", "description", "descriptions"}:
         return UNDERSTANDING_MODE_SUMMARY
+    if text in {"motion", "movement", "change", "changes"}:
+        return UNDERSTANDING_MODE_MOTION
     fallback = str(default or UNDERSTANDING_MODE_TAGS).strip().lower()
     return fallback if fallback in SUPPORTED_UNDERSTANDING_MODES else UNDERSTANDING_MODE_TAGS
 
@@ -192,6 +241,10 @@ def get_description_prompt_for_language(language: str) -> str:
 
 def get_video_summary_prompt_for_language(language: str) -> str:
     return VIDEO_SUMMARY_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def get_motion_prompt_for_language(language: str) -> str:
+    return MOTION_LANGUAGE_PROMPTS[normalize_caption_language(language)]
 
 
 def normalize_use_custom_prompts(value) -> bool:
@@ -228,12 +281,23 @@ def resolve_description_prompt(settings: Mapping[str, Any] | None) -> str:
     return get_description_prompt_for_language(language)
 
 
+def resolve_motion_prompt(settings: Mapping[str, Any] | None) -> str:
+    raw = dict(settings or {})
+    language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
+    custom = normalize_custom_prompt_text(raw.get("custom_motion_prompt"))
+    if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
+        return custom
+    return get_motion_prompt_for_language(language)
+
+
 def resolve_caption_prompt(settings: Mapping[str, Any] | None) -> str:
-    """Chunk VLM prompt for the active understanding mode (tags or descriptions)."""
+    """Chunk VLM prompt for the active understanding mode."""
     raw = dict(settings or {})
     mode = normalize_understanding_mode(raw.get("understanding_mode", UNDERSTANDING_MODE_TAGS))
     if mode == UNDERSTANDING_MODE_SUMMARY:
         return resolve_description_prompt(raw)
+    if mode == UNDERSTANDING_MODE_MOTION:
+        return resolve_motion_prompt(raw)
     return resolve_tag_prompt(raw)
 
 
@@ -438,6 +502,9 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
     remote_vlm["custom_summary_prompt"] = normalize_custom_prompt_text(
         raw_remote_vlm.get("custom_summary_prompt", "")
     )
+    remote_vlm["custom_motion_prompt"] = normalize_custom_prompt_text(
+        raw_remote_vlm.get("custom_motion_prompt", "")
+    )
     remote_vlm["custom_caption_prompt"] = remote_vlm["custom_tag_prompt"]
     remote_vlm["prompt"] = resolve_caption_prompt(remote_vlm)
     try:
@@ -470,6 +537,8 @@ DEFAULT_UNDERSTANDING_CONFIG = {
     "active_profile": "vision_baseline_v1",
     "profiles": list(DEFAULT_UNDERSTANDING_PROFILES),
     "remote_vlm": dict(DEFAULT_REMOTE_VLM_CONFIG),
+    "remote_llm": {},
+    "remote_asr": {},
 }
 
 
@@ -659,11 +728,19 @@ def normalize_understanding_config(config: Mapping[str, Any] | None = None) -> d
 
     raw_remote_vlm = raw_understanding.get("remote_vlm")
     remote_vlm = finalize_remote_vlm_settings(raw_remote_vlm)
+    from src.services.llm_settings import DEFAULT_REMOTE_LLM_CONFIG, finalize_remote_llm_settings
+
+    remote_llm = finalize_remote_llm_settings(raw_understanding.get("remote_llm"))
+    from src.services.asr_settings import DEFAULT_REMOTE_ASR_CONFIG, finalize_remote_asr_settings
+
+    remote_asr = finalize_remote_asr_settings(raw_understanding.get("remote_asr"))
 
     understanding = {
         "active_profile": active_profile,
         "profiles": normalized_profiles,
         "remote_vlm": remote_vlm,
+        "remote_llm": remote_llm or dict(DEFAULT_REMOTE_LLM_CONFIG),
+        "remote_asr": remote_asr or dict(DEFAULT_REMOTE_ASR_CONFIG),
     }
     cfg["understanding"] = understanding
     return cfg

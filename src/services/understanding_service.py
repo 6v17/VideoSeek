@@ -19,6 +19,7 @@ from src.domain.evidence_bundle import (
     validate_evidence_bundle,
 )
 from src.services.understanding_paths import (
+    get_evidence_motion_dir,
     get_evidence_path,
     get_evidence_root,
     get_evidence_summaries_dir,
@@ -28,6 +29,8 @@ from src.services.understanding_paths import (
     iter_evidence_candidate_paths,
 )
 from src.services.understanding_resource_service import (
+    SPLIT_UNDERSTANDING_MODES,
+    UNDERSTANDING_MODE_MOTION,
     UNDERSTANDING_MODE_SUMMARY,
     UNDERSTANDING_MODE_TAGS,
     get_active_understanding_profile,
@@ -992,19 +995,15 @@ def load_evidence_bundle(
 ) -> dict[str, Any] | None:
     """Load mode-specific evidence.
 
-    Tags and summaries are sibling stores. Legacy ``evidence/videos`` is only used
-    when neither split store has a file yet (pre-migration data).
+    Tags, summaries, and motion notes are sibling stores. Legacy ``evidence/videos``
+    is only used when no split store has a file yet (pre-migration data).
+    Motion never falls back to legacy (old midpoint tags are not motion evidence).
     """
     cfg = dict(config or load_config())
     resolved_mode = normalize_understanding_mode(
         mode
         or dict(dict(cfg.get("understanding") or {}).get("remote_vlm") or {}).get("understanding_mode")
         or UNDERSTANDING_MODE_TAGS
-    )
-    other_mode = (
-        UNDERSTANDING_MODE_SUMMARY
-        if resolved_mode == UNDERSTANDING_MODE_TAGS
-        else UNDERSTANDING_MODE_TAGS
     )
     primary_path = get_evidence_path(video_id, config=cfg, mode=resolved_mode)
     payload = _read_evidence_json_file(primary_path)
@@ -1018,13 +1017,16 @@ def load_evidence_bundle(
                 return payload
         return None
 
-    other_path = get_evidence_path(video_id, config=cfg, mode=other_mode)
-    legacy_path = get_legacy_evidence_path(video_id, config=cfg)
-    # Once either split folder exists for this video, do not fall back to legacy
-    # (avoids tags/summary both showing the same old combined JSON).
-    if os.path.isfile(other_path):
+    if resolved_mode == UNDERSTANDING_MODE_MOTION:
         return None
-    return _read_evidence_json_file(legacy_path)
+
+    if any(
+        os.path.isfile(get_evidence_path(video_id, config=cfg, mode=sibling))
+        for sibling in SPLIT_UNDERSTANDING_MODES
+        if sibling != resolved_mode
+    ):
+        return None
+    return _read_evidence_json_file(get_legacy_evidence_path(video_id, config=cfg))
 
 def evidence_exists_for_video(
     video_id: str,
@@ -1034,20 +1036,21 @@ def evidence_exists_for_video(
 ) -> bool:
     """Return True when this mode already has usable evidence on disk.
 
-    Mirrors ``load_evidence_bundle``: prefer the mode-specific file; if the other
+    Mirrors ``load_evidence_bundle``: prefer the mode-specific file; if another
     split store exists, do not treat legacy as covering this mode; only fall back
-    to legacy when neither split file exists yet.
+    to legacy when no split file exists yet. Motion never uses legacy.
     """
     cfg = dict(config or load_config())
     resolved_mode = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
-    other_mode = (
-        UNDERSTANDING_MODE_SUMMARY
-        if resolved_mode == UNDERSTANDING_MODE_TAGS
-        else UNDERSTANDING_MODE_TAGS
-    )
     if os.path.isfile(get_evidence_path(video_id, config=cfg, mode=resolved_mode)):
         return True
-    if os.path.isfile(get_evidence_path(video_id, config=cfg, mode=other_mode)):
+    if resolved_mode == UNDERSTANDING_MODE_MOTION:
+        return False
+    if any(
+        os.path.isfile(get_evidence_path(video_id, config=cfg, mode=sibling))
+        for sibling in SPLIT_UNDERSTANDING_MODES
+        if sibling != resolved_mode
+    ):
         return False
     return os.path.isfile(get_legacy_evidence_path(video_id, config=cfg))
 
@@ -1361,12 +1364,15 @@ def list_local_evidence_details(*, config=None, mode: str | None = None) -> dict
     evidence_dirs = [
         ("tags", os.path.normpath(get_evidence_tags_dir(config=cfg))),
         ("summaries", os.path.normpath(get_evidence_summaries_dir(config=cfg))),
+        ("motion", os.path.normpath(get_evidence_motion_dir(config=cfg))),
         ("legacy", os.path.normpath(get_evidence_videos_dir(config=cfg))),
     ]
     if mode_filter == UNDERSTANDING_MODE_TAGS:
-        evidence_dirs = [evidence_dirs[0], evidence_dirs[2]]
+        evidence_dirs = [evidence_dirs[0], evidence_dirs[3]]
     elif mode_filter == UNDERSTANDING_MODE_SUMMARY:
-        evidence_dirs = [evidence_dirs[1], evidence_dirs[2]]
+        evidence_dirs = [evidence_dirs[1], evidence_dirs[3]]
+    elif mode_filter == UNDERSTANDING_MODE_MOTION:
+        evidence_dirs = [evidence_dirs[2]]
     library_by_video_id: dict[str, dict[str, Any]] = {}
     for item in list_local_vector_details(validate_contents=False).get("entries") or []:
         video_id = str(item.get("video_id", "") or "").strip()
@@ -1397,7 +1403,7 @@ def list_local_evidence_details(*, config=None, mode: str | None = None) -> dict
             if dedupe_key in seen_keys:
                 continue
             seen_keys.add(dedupe_key)
-            if store_kind in {"tags", "summaries"} and video_id:
+            if store_kind in {"tags", "summaries", "motion"} and video_id:
                 split_video_ids.add(video_id)
             library_item = library_by_video_id.get(video_id, {})
 
@@ -1449,9 +1455,10 @@ def list_local_evidence_details(*, config=None, mode: str | None = None) -> dict
 
 def _evidence_file_paths(video_id: str, *, config=None) -> list[str]:
     paths: list[str] = []
-    for base_path in iter_evidence_candidate_paths(video_id, config=config, mode=UNDERSTANDING_MODE_TAGS):
-        paths.append(base_path)
-        paths.append(f"{base_path}.tmp")
+    for mode in SPLIT_UNDERSTANDING_MODES:
+        for base_path in iter_evidence_candidate_paths(video_id, config=config, mode=mode):
+            paths.append(base_path)
+            paths.append(f"{base_path}.tmp")
     return [os.path.normpath(path) for path in paths]
 
 

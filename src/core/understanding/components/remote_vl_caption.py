@@ -78,7 +78,7 @@ class RemoteVlCaptionComponent(UnderstandingComponent):
     def bind_should_stop_callback(self, should_stop_callback: Callable[[], bool] | None) -> None:
         self._should_stop_callback = should_stop_callback
 
-    def infer(self, image_bgr: np.ndarray) -> dict[str, Any]:
+    def infer(self, image_bgr: np.ndarray, prompt_suffix: str = "") -> dict[str, Any]:
         if image_bgr is None or getattr(image_bgr, "size", 0) == 0:
             return {"text": ""}
 
@@ -101,6 +101,9 @@ class RemoteVlCaptionComponent(UnderstandingComponent):
             or self._params.get("prompt")
             or "Describe this video frame in one or two concise sentences."
         ).strip()
+        extra = str(prompt_suffix or "").strip()
+        if extra:
+            prompt = f"{prompt}\n\n{extra}"
         timeout_sec = float(settings.get("timeout_sec", 120) or 120)
         max_tokens = int(settings.get("max_tokens", self._params.get("max_tokens", 128)) or 128)
         jpeg_quality = int(self._params.get("jpeg_quality", 85) or 85)

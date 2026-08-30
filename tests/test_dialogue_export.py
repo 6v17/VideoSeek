@@ -13,10 +13,10 @@ class DialogueExportServiceTests(unittest.TestCase):
         )
 
         srt = render_dialogue_srt(
-            [{"start": 1.5, "end": 3.0, "text": "hello world"}]
+            [{"start": 1.5, "end": 3.0, "text": "hello world", "speaker": "店长"}]
         )
         self.assertIn("00:00:01,500 --> 00:00:03,000", srt)
-        self.assertIn("hello world", srt)
+        self.assertIn("店长：hello world", srt)
 
         txt = render_dialogue_txt(
             [{"start": 1.5, "end": 3.0, "text": "hello world"}]
@@ -50,6 +50,31 @@ class DialogueExportServiceTests(unittest.TestCase):
             with open(result["files"][0], "r", encoding="utf-8") as handle:
                 body = handle.read()
             self.assertIn("台词一行", body)
+
+    def test_export_json_to_path(self):
+        from src.services.dialogue_export_service import export_dialogue_json_to_path
+        from src.storage.dialogue_transcript_store import save_dialogue_transcript
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            dest = os.path.join(tmp, "clip_dialogue.json")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "vid1",
+                    [{"start": 0.0, "end": 1.0, "text": "hello"}],
+                    video_path=os.path.join(tmp, "clip.mp4"),
+                    library_path=tmp,
+                )
+                result = export_dialogue_json_to_path("vid1", dest)
+            self.assertTrue(result["ok"])
+            with open(dest, "r", encoding="utf-8") as handle:
+                body = handle.read()
+            self.assertIn("hello", body)
+            self.assertIn("vid1", body)
 
 
 if __name__ == "__main__":

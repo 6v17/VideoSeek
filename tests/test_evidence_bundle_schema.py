@@ -91,6 +91,21 @@ class EvidenceBundleSchemaTests(unittest.TestCase):
         self.assertIsNotNone(chunk.evidence.vision.image_caption)
         self.assertEqual(chunk.evidence.vision.image_caption.text, "person · table")
         self.assertEqual(chunk.tags, ("person", "table"))
+        self.assertEqual(chunk.sample.timestamps_sec, (2.25,))
+
+    def test_start_end_sample_round_trip(self):
+        payload = sample_evidence_bundle_payload()
+        payload["provenance"]["keyframe_strategy"] = "start_end"
+        payload["chunks"][0]["sample"] = {
+            "timestamp_sec": 0.15,
+            "strategy": "start_end",
+            "timestamps_sec": [0.15, 4.35],
+        }
+        bundle = validate_evidence_bundle(payload)
+        self.assertEqual(bundle.chunks[0].sample.strategy, "start_end")
+        self.assertEqual(bundle.chunks[0].sample.timestamps_sec, (0.15, 4.35))
+        restored = validate_evidence_bundle(evidence_bundle_to_dict(bundle))
+        self.assertEqual(restored.chunks[0].sample.timestamps_sec, (0.15, 4.35))
 
     def test_round_trip_to_dict(self):
         payload = sample_evidence_bundle_payload()
