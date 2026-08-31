@@ -304,7 +304,7 @@ class UnderstandingLlmGuiMixin:
 
     def export_current_video_recap(self):
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
-        from src.services.understanding_service import load_evidence_bundle
+        from src.services.understanding_service import load_evidence_bundle, resolve_current_media_path
 
         if getattr(self, "_recap_worker", None) is not None:
             return
@@ -342,7 +342,8 @@ class UnderstandingLlmGuiMixin:
                 kind="warning",
             )
             return
-        video_path = str((evidence.get("video") or {}).get("video_path") or "")
+        stored = str((evidence.get("video") or {}).get("video_path") or "")
+        video_path = resolve_current_media_path(video_id, stored=stored, config=load_config())
         dest = os.path.dirname(video_path) or ""
         if not dest:
             dest = QFileDialog.getExistingDirectory(
@@ -382,6 +383,8 @@ class UnderstandingLlmGuiMixin:
         }.get(start_from, "understanding_export_recap_planning")
         page.lbl_status.setText(self.texts.get(start_status, "Generating recap…"))
         self._sync_recap_export_button(running=True)
+        if hasattr(self, "_sync_asr_extract_button"):
+            self._sync_asr_extract_button()
         page.btn_stop.setVisible(True)
         page.btn_stop.setEnabled(True)
         page.progress_bar.setVisible(True)
@@ -445,10 +448,14 @@ class UnderstandingLlmGuiMixin:
             if not (
                 getattr(self, "understanding_controller", None)
                 and self.understanding_controller.is_running()
-            ) and getattr(self, "_asr_worker", None) is None:
+            ) and getattr(self, "_asr_worker", None) is None and getattr(
+                self, "_speaker_cluster_worker", None
+            ) is None:
                 active_page.btn_stop.setEnabled(False)
                 active_page.btn_stop.setVisible(False)
             self._sync_recap_export_button(running=False)
+            if hasattr(self, "_sync_asr_extract_button"):
+                self._sync_asr_extract_button()
             if hasattr(self, "_sync_tray_stop_action"):
                 self._sync_tray_stop_action()
             try:
@@ -487,13 +494,14 @@ class UnderstandingLlmGuiMixin:
 
     def _current_recap_video_path(self) -> str:
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
-        from src.services.understanding_service import load_evidence_bundle
+        from src.services.understanding_service import load_evidence_bundle, resolve_current_media_path
 
         video_id = self._selected_understanding_video_id()
         if not video_id:
             return ""
         evidence = load_evidence_bundle(video_id, config=load_config(), mode=UNDERSTANDING_MODE_MOTION)
-        return str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        stored = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        return resolve_current_media_path(video_id, stored=stored, config=load_config())
 
     def _load_current_recap_cuts(self):
         from src.services.recap_service import load_recap_cuts
@@ -501,7 +509,7 @@ class UnderstandingLlmGuiMixin:
         video_path = self._current_recap_video_path()
         if not video_path:
             return None
-        return load_recap_cuts(video_path)
+        return load_recap_cuts(video_path, video_id=self._selected_understanding_video_id())
 
     def export_current_recap_jianying(self):
         from src.services.jianying_draft_service import (
@@ -531,6 +539,13 @@ class UnderstandingLlmGuiMixin:
             )
             return
         video_path = str(payload.get("video") or self._current_recap_video_path() or "")
+        from src.services.understanding_service import resolve_current_media_path
+
+        video_path = resolve_current_media_path(
+            self._selected_understanding_video_id(),
+            stored=video_path,
+            config=load_config(),
+        )
         if not video_path or not os.path.isfile(video_path):
             self.show_error_dialog(title, f"找不到原片：{video_path or '(空路径)'}")
             return
@@ -578,6 +593,13 @@ class UnderstandingLlmGuiMixin:
             )
             return
         video_path = str(payload.get("video") or self._current_recap_video_path() or "")
+        from src.services.understanding_service import resolve_current_media_path
+
+        video_path = resolve_current_media_path(
+            self._selected_understanding_video_id(),
+            stored=video_path,
+            config=load_config(),
+        )
         stem = os.path.splitext(os.path.basename(video_path or "recap"))[0] or "recap"
         dest, _ = QFileDialog.getSaveFileName(
             self,
@@ -607,7 +629,7 @@ class UnderstandingLlmGuiMixin:
         )
 
     def reset_recap_prompt(self):
-        from src.services.recap_service import RECAP_GAP_SYSTEM, RECAP_PLAN_SYSTEM, RECAP_SYSTEM
+        from src.services.recap_service import RECAP_CAPTION_SYSTEM, RECAP_PLAN_SYSTEM, RECAP_SYSTEM
 
         page = getattr(self, "understanding_page", None)
         if page is None or not hasattr(page, "input_recap_prompt"):
@@ -618,7 +640,7 @@ class UnderstandingLlmGuiMixin:
         editors = (
             (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
             (page.input_recap_prompt, RECAP_SYSTEM),
-            (getattr(page, "input_recap_caption_prompt", None), RECAP_GAP_SYSTEM),
+            (getattr(page, "input_recap_caption_prompt", None), RECAP_CAPTION_SYSTEM),
         )
         if index < 0 or index >= len(editors):
             index = 1
@@ -627,20 +649,24 @@ class UnderstandingLlmGuiMixin:
             editor.setPlainText(default)
 
     def _ensure_recap_prompt_default(self):
-        from src.services.recap_service import RECAP_GAP_SYSTEM, RECAP_PLAN_SYSTEM, RECAP_SYSTEM
+        from src.services.recap_service import RECAP_CAPTION_SYSTEM, RECAP_GAP_SYSTEM, RECAP_PLAN_SYSTEM, RECAP_SYSTEM
 
         page = getattr(self, "understanding_page", None)
         if page is None:
             return
+        caption_editor = getattr(page, "input_recap_caption_prompt", None)
         pairs = (
             (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
             (getattr(page, "input_recap_prompt", None), RECAP_SYSTEM),
-            (getattr(page, "input_recap_caption_prompt", None), RECAP_GAP_SYSTEM),
+            (caption_editor, RECAP_CAPTION_SYSTEM),
         )
         for editor, default in pairs:
             if editor is None:
                 continue
-            if not str(editor.toPlainText() or "").strip():
+            body = str(editor.toPlainText() or "").strip()
+            if not body or (
+                editor is caption_editor and body == str(RECAP_GAP_SYSTEM).strip()
+            ):
                 editor.setPlainText(default)
 
     def _populate_recap_start_options(self, active=None):

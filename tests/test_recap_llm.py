@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,7 @@ from src.services.recap_service import (
     compact_motion_chunks,
     compact_ocr_cues,
     people_from_dialogue_speakers,
+    build_recap_pack,
     export_saved_recap_fcpxml,
     fit_recap_captions_to_tts,
     load_recap_cuts,
@@ -41,8 +43,11 @@ from src.services.recap_service import (
     pack_captions_for_tts,
     _join_vo,
     pad_cuts_for_tts,
+    coalesce_recap_cuts,
+    clamp_recap_vo_to_picture,
     restore_recap_vo_text,
     stretch_recap_clips_for_vo,
+    fit_recap_vo_picture,
     parse_caption_cues,
     parse_cut_list,
     parse_story_beats,
@@ -66,6 +71,7 @@ from src.services.recap_service import (
     tts_char_budget,
     vo_needed_sec,
     vo_sec,
+    RECAP_CAPTION_SYSTEM,
     RECAP_GAP_SYSTEM,
     RECAP_PLAN_SYSTEM,
     RECAP_SYSTEM,
@@ -222,11 +228,13 @@ class RecapPackTests(unittest.TestCase):
         self.assertAlmostEqual(vo_sec("一二三四五"), round(5.0 / (5.0 * TTS_SPEED), 2))
         self.assertAlmostEqual(TTS_SPEED, 1.35)
 
-    def test_tts_budget_keeps_more_at_1_35(self):
-        vo = "一二三四五" * 5 + "一二三"  # 28 counted chars
+    def test_tts_budget_keeps_whole_sentences(self):
+        vo = "一二三四五" * 5 + "一二三"
         self.assertEqual(trim_vo_to_budget(vo, tts_char_budget(6.0)), vo)
-        trimmed = trim_vo_to_budget(vo, tts_char_budget(6.0, speed=1.0))
-        self.assertLess(len(trimmed), len(vo))
+        long = "监考官宣布考试开始。全场瞬间安静下来。她没有动笔。"
+        trimmed = trim_vo_to_budget(long, 8)
+        self.assertEqual(trimmed, "监考官宣布考试开始。")
+        self.assertTrue(trimmed.endswith("。"))
 
     def test_pack_captions_span_empty_follow_shots(self):
         vo = "一二三四五" * 8  # longer than the first 4s shot
@@ -254,7 +262,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertAlmostEqual(captions[0]["tl_out"], 6.0)
         self.assertEqual(captions[1]["from"], 3)
         self.assertAlmostEqual(captions[1]["tl_in"], 11.0)
-        self.assertLessEqual(vo_needed_sec("监考官宣布考试开始。"), 6.0 * 0.8)
+        self.assertLessEqual(vo_needed_sec("监考官宣布考试开始。"), 6.0 * 0.87)
 
     def test_pack_captions_keeps_distinct_vo_shots(self):
         clips = [
@@ -348,6 +356,167 @@ class RecapPackTests(unittest.TestCase):
         self.assertGreater(recap_cuts_duration(out), 12.0)
         self.assertGreaterEqual(recap_cuts_duration(out), vo_needed_sec(vo) - 0.35)
 
+    def test_coalesce_cuts_to_overlapping_closeup(self):
+        cuts = [
+            {
+                "name": "教室",
+                "beat_id": 1,
+                "src_in": 100.0,
+                "src_out": 108.0,
+                "vo": "教室里突然安静下来。",
+            },
+            {
+                "name": "特写",
+                "beat_id": 1,
+                "reason": "特写",
+                "src_in": 105.0,
+                "src_out": 114.0,
+                "vo": "",
+            },
+        ]
+        out = coalesce_recap_cuts(cuts)
+        self.assertEqual(len(out), 2)
+        self.assertAlmostEqual(out[0]["src_in"], 100.0)
+        self.assertAlmostEqual(out[0]["src_out"], 105.0)
+        self.assertAlmostEqual(out[1]["src_in"], 105.0)
+        self.assertAlmostEqual(out[1]["src_out"], 114.0)
+        self.assertEqual(out[0]["vo"], "教室里突然安静下来。")
+        self.assertEqual(out[1]["name"], "特写")
+
+    def test_coalesce_keeps_separate_closeup_cut(self):
+        cuts = [
+            {
+                "name": "动作",
+                "beat_id": 1,
+                "src_in": 100.0,
+                "src_out": 108.0,
+                "vo": "她把支票拍在柜台上。",
+            },
+            {
+                "name": "特写",
+                "beat_id": 1,
+                "reason": "表情特写",
+                "src_in": 109.0,
+                "src_out": 116.0,
+                "vo": "",
+            },
+        ]
+        out = coalesce_recap_cuts(cuts)
+        self.assertEqual(len(out), 2)
+        self.assertAlmostEqual(out[0]["src_out"], 108.0)
+        self.assertAlmostEqual(out[1]["src_in"], 109.0)
+        self.assertEqual(out[1]["name"], "特写")
+
+    def test_coalesce_absorbs_short_insert_between_neighbors(self):
+        cuts = [
+            {
+                "name": "01",
+                "beat_id": 1,
+                "src_in": 100.0,
+                "src_out": 108.0,
+                "vo": "监考官宣布考试开始。",
+            },
+            {
+                "name": "闪一下",
+                "beat_id": 2,
+                "src_in": 108.4,
+                "src_out": 110.0,
+                "vo": "她愣住了。",
+            },
+            {
+                "name": "03",
+                "beat_id": 3,
+                "src_in": 110.2,
+                "src_out": 118.0,
+                "vo": "全场瞬间安静下来。",
+            },
+        ]
+        out = coalesce_recap_cuts(cuts)
+        self.assertEqual(len(out), 2)
+        self.assertAlmostEqual(out[0]["src_in"], 100.0)
+        self.assertAlmostEqual(out[0]["src_out"], 110.0)
+        self.assertIn("她愣住了。", out[0]["vo"])
+        self.assertEqual(out[1]["vo"], "全场瞬间安静下来。")
+        self.assertGreaterEqual(out[1]["src_in"], 110.0)
+
+    def test_coalesce_attaches_isolated_short_vo_to_previous(self):
+        cuts = [
+            {
+                "name": "01",
+                "beat_id": 1,
+                "src_in": 20.0,
+                "src_out": 28.0,
+                "vo": "监考官宣布考试开始。",
+            },
+            {
+                "name": "碎镜头",
+                "beat_id": 2,
+                "src_in": 80.0,
+                "src_out": 81.6,
+                "vo": "他没有回答。",
+            },
+            {
+                "name": "03",
+                "beat_id": 3,
+                "src_in": 140.0,
+                "src_out": 148.0,
+                "vo": "全场瞬间安静下来。",
+            },
+        ]
+        out = coalesce_recap_cuts(cuts)
+        self.assertEqual(len(out), 2)
+        self.assertIn("他没有回答。", out[0]["vo"])
+        self.assertEqual(out[1]["vo"], "全场瞬间安静下来。")
+        self.assertAlmostEqual(out[0]["src_out"], 28.0)
+        self.assertAlmostEqual(out[1]["src_in"], 140.0)
+
+    def test_coalesce_keeps_separated_full_shots(self):
+        cuts = [
+            {
+                "name": "01",
+                "beat_id": 1,
+                "src_in": 20.0,
+                "src_out": 28.0,
+                "vo": "监考官宣布考试开始。",
+            },
+            {
+                "name": "02",
+                "beat_id": 2,
+                "src_in": 40.0,
+                "src_out": 48.0,
+                "vo": "全场瞬间安静下来。",
+            },
+        ]
+        out = coalesce_recap_cuts(cuts)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0]["vo"], "监考官宣布考试开始。")
+        self.assertEqual(out[1]["vo"], "全场瞬间安静下来。")
+
+    def test_pack_captions_folds_flash_vo_into_neighbor(self):
+        clips = [
+            {"tl_in": 0.0, "tl_out": 6.0, "vo": "监考官宣布考试开始。", "beat_id": 1},
+            {"tl_in": 6.0, "tl_out": 7.5, "vo": "她愣住了。", "beat_id": 2},
+            {"tl_in": 7.5, "tl_out": 13.0, "vo": "全场瞬间安静下来。", "beat_id": 3},
+        ]
+        captions = pack_captions_for_tts(clips)
+        self.assertEqual(len(captions), 2)
+        self.assertIn("她愣住了。", captions[0]["text"])
+        self.assertEqual(captions[0]["to"], 2)
+        self.assertAlmostEqual(captions[0]["tl_out"], 7.5)
+        self.assertEqual(captions[1]["text"], "全场瞬间安静下来。")
+
+    def test_parse_gap_fills_skips_flash_clips(self):
+        clips = [
+            {"tl_in": 0.0, "tl_out": 6.0, "vo": "开场。"},
+            {"tl_in": 6.0, "tl_out": 7.4, "vo": ""},
+        ]
+        fills = parse_gap_fills(
+            '{"fills":[{"i":2,"text":"他直接出手了。"}]}',
+            clips,
+            allowed={1},
+        )
+        self.assertEqual(fills, [])
+
     def test_pack_captions_keeps_full_line(self):
         vo = "监考官宣布考试开始。" + "全场瞬间安静下来。" * 3
         clips = [
@@ -369,6 +538,37 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(captions[0]["from"], 1)
         self.assertEqual(captions[0]["to"], 2)
         self.assertEqual(_join_vo(line, line), line)
+
+    def test_join_vo_keeps_two_sentences(self):
+        self.assertEqual(_join_vo("教室安静下来", "她没有动笔。"), "教室安静下来。她没有动笔。")
+
+    def test_clamp_does_not_chop_match_vo(self):
+        vo = "监考官宣布考试开始。" + "全场瞬间安静下来。" * 6
+        clips = [
+            {
+                "src_in": 10.0,
+                "src_out": 16.0,
+                "vo": vo,
+                "vo_draft": vo,
+                "beat_id": 1,
+            }
+        ]
+        out = clamp_recap_vo_to_picture(clips)
+        self.assertEqual(out[0]["vo"], vo)
+
+    def test_fit_does_not_edit_match_vo(self):
+        vo = "一二三四五" * 11
+        clips = [
+            {
+                "src_in": 10.0,
+                "src_out": 32.0,
+                "vo": vo,
+                "beat_id": 1,
+            }
+        ]
+        out = fit_recap_vo_picture(clips)
+        self.assertEqual(out[0]["vo"], vo)
+        self.assertAlmostEqual(out[0]["src_out"], 32.0)
 
     def test_stretch_prefers_untrimmed_draft(self):
         clips = [
@@ -439,24 +639,28 @@ class RecapPackTests(unittest.TestCase):
         )
         self.assertEqual(fills, [])
 
-    def test_fit_recap_fills_gaps_via_llm(self):
+    def test_fit_recap_rewrites_captions_via_llm(self):
         clips = [
             {"tl_in": 0.0, "tl_out": 6.0, "vo": "开场。", "beat_id": 1, "reason": "开场"},
             {"tl_in": 6.0, "tl_out": 10.0, "vo": "", "beat_id": 1, "reason": "关键动作"},
         ]
         with patch(
             "src.services.recap_service.call_remote_llm",
-            return_value='{"fills":[{"i":2,"text":"他出手了。"}]}',
+            return_value='{"captions":[{"text":"考试开始，全场安静下来。","from":1,"to":2}]}',
         ) as mock_llm:
             out = fit_recap_captions_to_tts(clips)
         mock_llm.assert_called_once()
-        self.assertEqual(out[1]["vo"], "他出手了。")
+        self.assertEqual(out[0]["vo"], "考试开始，全场安静下来。")
+        self.assertEqual(out[1]["vo"], "")
+        self.assertEqual(out[0]["vo_draft"], "开场。")
 
-    def test_fit_recap_skips_llm_when_no_gaps(self):
+    def test_fit_recap_keeps_seed_when_llm_fails(self):
         clips = [{"tl_in": 0.0, "tl_out": 6.0, "vo": "开场。", "beat_id": 1}]
-        with patch("src.services.recap_service.call_remote_llm") as mock_llm:
+        with patch(
+            "src.services.recap_service.call_remote_llm",
+            side_effect=RuntimeError("boom"),
+        ):
             out = fit_recap_captions_to_tts(clips)
-        mock_llm.assert_not_called()
         self.assertEqual(out[0]["vo"], "开场。")
 
     def test_recap_prompt_asks_for_narration_not_translation(self):
@@ -476,9 +680,10 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("收尾", RECAP_SYSTEM)
         self.assertIn("片头曲", RECAP_PLAN_SYSTEM)
         self.assertIn("叙事真相", RECAP_SYSTEM)
-        self.assertIn("2–4 句", RECAP_SYSTEM)
+        self.assertIn("85–90%", RECAP_SYSTEM)
+        self.assertIn("特写", RECAP_SYSTEM)
         self.assertIn("新的视觉信息", RECAP_SYSTEM)
-        self.assertIn("反应或设定", RECAP_SYSTEM)
+        self.assertIn("单独切一刀", RECAP_SYSTEM)
         self.assertIn("不要单独一刀", RECAP_SYSTEM)
         self.assertIn("duration", RECAP_SYSTEM)
         self.assertIn("1.35", RECAP_SYSTEM)
@@ -492,7 +697,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("asr[].speaker", recap_plan_user_prompt({"duration_sec": 100.0, "chunks": [], "ocr": []}))
         self.assertIn("同一个「他」", RECAP_GAP_SYSTEM)
         self.assertIn("禁止男主", RECAP_GAP_SYSTEM)
-        for body in (RECAP_PLAN_SYSTEM, RECAP_SYSTEM, RECAP_GAP_SYSTEM):
+        for body in (RECAP_PLAN_SYSTEM, RECAP_SYSTEM, RECAP_GAP_SYSTEM, RECAP_CAPTION_SYSTEM):
             self.assertNotIn("考号", body)
             self.assertNotIn("特别待遇", body)
             self.assertNotIn("监考", body)
@@ -507,6 +712,9 @@ class RecapPackTests(unittest.TestCase):
         )
         self.assertIn("1.35", cap_prompt)
         self.assertIn("seed", cap_prompt)
+        self.assertIn("禁止半截话", cap_prompt)
+        self.assertIn("完整句子", RECAP_CAPTION_SYSTEM)
+        self.assertIn("禁止半句", RECAP_CAPTION_SYSTEM)
         gap_prompt = recap_gap_user_prompt(
             [
                 {"name": "01", "tl_in": 0.0, "tl_out": 6.0, "vo": "开场。", "beat_id": 1, "reason": "开场"},
@@ -530,7 +738,8 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("四连魔法", prompt)
         self.assertIn("5 分半", prompt)
         self.assertIn("片头曲", prompt)
-        self.assertIn("2–4 句", prompt)
+        self.assertIn("85–90%", prompt)
+        self.assertIn("特写", prompt)
         self.assertIn("叙事真相", prompt)
         self.assertIn("people", prompt)
         self.assertIn("同一个他", prompt)
@@ -538,7 +747,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("禁止男主", prompt)
         self.assertIn("红衣女人", prompt)
         self.assertNotIn("考号", prompt)
-        self.assertIn("高权重才加", prompt)
+        self.assertIn("单独一刀", prompt)
 
     def test_apply_recap_duration_fills_beat_budget(self):
         pack = {
@@ -859,6 +1068,65 @@ class RecapPackTests(unittest.TestCase):
             self.assertEqual(loaded["beats"][0]["event"], "开场")
             self.assertEqual(loaded["people"][0]["label"], "监考官")
             self.assertEqual(loaded["stage"], "plan")
+
+    def test_load_recap_beats_finds_old_stem_after_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_video = Path(tmp) / "old.mp4"
+            new_video = Path(tmp) / "renamed.mp4"
+            new_video.write_bytes(b"x")
+            write_recap_beats_file(
+                recap_beats_path_for_video(str(old_video)),
+                title="旧名规划",
+                video_id="vid-1",
+                allocated=[{"id": 1, "event": "开场", "budget_sec": 12.0, "t": [0.0, 8.0]}],
+            )
+            loaded = load_recap_beats(str(new_video), video_id="vid-1")
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded["title"], "旧名规划")
+
+    def test_build_recap_pack_uses_living_path_after_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            living = Path(tmp) / "renamed.mp4"
+            living.write_bytes(b"x")
+            stale = str(Path(tmp) / "old.mp4")
+            evidence = {
+                "video": {"video_path": stale, "duration_sec": 12.0},
+                "chunks": [
+                    {
+                        "chunk_index": 0,
+                        "start_sec": 0.0,
+                        "end_sec": 2.0,
+                        "evidence": {"vision": {"image_caption": {"text": "教室"}}},
+                    }
+                ],
+            }
+            with (
+                patch("src.services.understanding_service.load_evidence_bundle", return_value=evidence),
+                patch(
+                    "src.services.recap_service.compact_ocr_cues",
+                    return_value=[{"start": 0.0, "end": 1.0, "text": "开考", "asr_source": "asr"}],
+                ),
+                patch(
+                    "src.services.understanding_service.resolve_current_media_path",
+                    return_value=str(living),
+                ),
+            ):
+                pack = build_recap_pack("vid-1")
+            self.assertEqual(os.path.normcase(pack["video_path"]), os.path.normcase(str(living)))
+
+    def test_generate_timeline_resolves_renamed_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            living = Path(tmp) / "renamed.mp4"
+            living.write_bytes(b"x")
+            pack = {"video_path": str(Path(tmp) / "old.mp4"), "duration_sec": 20.0, "chunks": []}
+            with patch("src.services.recap_service.get_remote_llm_settings", return_value={"model": "x"}):
+                with patch("src.services.recap_service.build_recap_pack", return_value=pack):
+                    with patch(
+                        "src.services.understanding_service.resolve_current_media_path",
+                        return_value=str(living),
+                    ):
+                        with self.assertRaisesRegex(RuntimeError, "剧情规划"):
+                            generate_recap_timeline("vid", tmp, start_from="match")
 
     def test_generate_resume_requires_saved_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

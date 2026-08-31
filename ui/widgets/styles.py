@@ -279,39 +279,47 @@ QCheckBox:disabled {
 #UnderstandingConfigHeader:hover {
     background: __BUTTON_SOFT__;
 }
-#UnderstandingToolbar {
-    background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 10px;
+#UnderstandingCommandBar {
+    background: transparent;
+    border: none;
 }
-#UnderstandingToolbar #PrimaryButton,
-#UnderstandingToolbar #GhostButton,
-#UnderstandingToolbar #AccentGhostButton,
-#UnderstandingToolbar #DangerGhostButton,
-#UnderstandingToolbar #SuccessGhostButton {
-    min-height: 34px;
-    padding: 6px 14px;
-    border-radius: 8px;
+#UnderstandingCommandBar #PrimaryButton,
+#UnderstandingCommandBar #GhostButton,
+#UnderstandingCommandBar #AccentGhostButton,
+#UnderstandingCommandBar #DangerGhostButton,
+#UnderstandingCommandBar #SuccessGhostButton {
+    min-height: 32px;
+    padding: 5px 14px;
+    border-radius: 6px;
 }
 #UnderstandingTimelineBlock {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 8px;
 }
 #ChunkTimelineScroll {
     background: transparent;
     border: none;
 }
-#UnderstandingDetailPanel {
+#UnderstandingSection {
+    background: transparent;
+    border: none;
+}
+#UnderstandingSampleFrame {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 8px;
+    color: __MUTED__;
+}
+#UnderstandingDetailPanel {
+    background: transparent;
+    border: none;
 }
 #UnderstandingDetailPanel #CardTitle {
     font-size: 14px;
 }
 QPlainTextEdit#UnderstandingOutput {
-    background: __PANEL__;
+    background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 8px;
     padding: 8px 10px;
@@ -325,10 +333,9 @@ QPlainTextEdit#UnderstandingOutput:focus {
     color: __MUTED__;
     font-size: 12px;
     font-weight: 500;
-    background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 8px;
-    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    padding: 0;
 }
 QPushButton {
     border-radius: 7px;
@@ -1062,7 +1069,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: __FIELD__;
     top: -1px;
 }
-#SearchQueryTabs QTabBar::tab, #RecapPromptTabs QTabBar::tab {
+#SearchQueryTabs QTabBar::tab {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE__;
     border-bottom: none;
@@ -1073,13 +1080,31 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     color: __MUTED__;
     font-weight: 600;
 }
-#SearchQueryTabs QTabBar::tab:selected, #RecapPromptTabs QTabBar::tab:selected {
+#SearchQueryTabs QTabBar::tab:selected {
     background: __FIELD__;
     color: __TEXT__;
     border-color: __LINE_STRONG__;
 }
-#SearchQueryTabs QTabBar::tab:hover, #RecapPromptTabs QTabBar::tab:hover {
+#SearchQueryTabs QTabBar::tab:hover {
     background: __BUTTON_SOFT_HOVER__;
+}
+#RecapPromptTabs QTabBar::tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 7px 14px;
+    margin-right: 2px;
+    color: __MUTED__;
+    font-weight: 600;
+}
+#RecapPromptTabs QTabBar::tab:selected {
+    background: transparent;
+    color: __TEXT__;
+    border-bottom: 2px solid __ACCENT__;
+}
+#RecapPromptTabs QTabBar::tab:hover {
+    background: __BUTTON_SOFT__;
+    color: __TEXT__;
 }
 #LibraryTabs::pane {
     border: none;

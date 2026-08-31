@@ -8,7 +8,7 @@ import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QFileDialog
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QFileDialog, QScrollArea
 
 from src.app.config import load_config, save_config, DEFAULT_CONFIG
 from src.app.indexing_progress import format_progress_text
@@ -890,9 +890,8 @@ class UnderstandingGuiMixin:
             return
         start_sec, end_sec, suggested_sec = playback_times
 
-        context = dict(getattr(self, "_understanding_video_context", {}) or {})
-        video_path = str(context.get("video_path", "") or "").strip()
-        if not video_path or not bool(context.get("source_exists")):
+        video_path = self._current_understanding_preview_path()
+        if not video_path:
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get("understanding_chunk_preview_no_video", "Video file not found."),
@@ -1536,6 +1535,10 @@ class UnderstandingGuiMixin:
         self._sync_recap_export_button(running=True)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_cluster_speakers"):
+            page.btn_cluster_speakers.setEnabled(False)
+        if hasattr(page, "btn_rename_speakers"):
+            page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -1646,6 +1649,10 @@ class UnderstandingGuiMixin:
         self._sync_recap_export_button(running=True)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_cluster_speakers"):
+            page.btn_cluster_speakers.setEnabled(False)
+        if hasattr(page, "btn_rename_speakers"):
+            page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -1729,6 +1736,17 @@ class UnderstandingGuiMixin:
             if hasattr(page, "dialogue_status"):
                 page.dialogue_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
             return
+        cluster_worker = getattr(self, "_speaker_cluster_worker", None)
+        if cluster_worker is not None:
+            cluster_worker.stop()
+            page = self.understanding_page
+            page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            page.btn_stop.setEnabled(False)
+            if hasattr(page, "btn_stop_asr"):
+                page.btn_stop_asr.setEnabled(False)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            return
         if not getattr(self, "understanding_controller", None) or not self.understanding_controller.is_running():
             return
         if self.understanding_controller.request_stop():
@@ -1743,7 +1761,9 @@ class UnderstandingGuiMixin:
         page.progress_bar.setVisible(True)
         page.progress_bar.setValue(value)
         page.lbl_status.setText(label)
-        if getattr(self, "_asr_worker", None) is not None:
+        if getattr(self, "_asr_worker", None) is not None or getattr(
+            self, "_speaker_cluster_worker", None
+        ) is not None:
             if hasattr(page, "dialogue_progress_bar"):
                 page.dialogue_progress_bar.setVisible(True)
                 page.dialogue_progress_bar.setValue(value)
@@ -1888,6 +1908,7 @@ class UnderstandingGuiMixin:
     def _current_video_has_recap_beats(self) -> bool:
         from src.services.recap_service import load_recap_beats
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+        from src.services.understanding_service import load_evidence_bundle, resolve_current_media_path
 
         video_id = self._selected_understanding_video_id()
         if not video_id:
@@ -1897,14 +1918,16 @@ class UnderstandingGuiMixin:
             config=load_config(),
             mode=UNDERSTANDING_MODE_MOTION,
         )
-        video_path = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        stored = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        video_path = resolve_current_media_path(video_id, stored=stored, config=load_config())
         if not video_path:
             return False
-        return load_recap_beats(video_path) is not None
+        return load_recap_beats(video_path, video_id=video_id) is not None
 
     def _current_video_has_recap_cuts(self) -> bool:
         from src.services.recap_service import load_recap_cuts
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+        from src.services.understanding_service import load_evidence_bundle, resolve_current_media_path
 
         video_id = self._selected_understanding_video_id()
         if not video_id:
@@ -1914,10 +1937,11 @@ class UnderstandingGuiMixin:
             config=load_config(),
             mode=UNDERSTANDING_MODE_MOTION,
         )
-        video_path = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        stored = str(((evidence or {}).get("video") or {}).get("video_path") or "")
+        video_path = resolve_current_media_path(video_id, stored=stored, config=load_config())
         if not video_path:
             return False
-        return load_recap_cuts(video_path) is not None
+        return load_recap_cuts(video_path, video_id=video_id) is not None
 
     def _dialogue_source_label(self, source: str) -> str:
         text = str(source or "").strip().lower()
@@ -1981,6 +2005,7 @@ class UnderstandingGuiMixin:
             time_item = QTableWidgetItem(format_timecode_range(start, end))
             time_item.setData(Qt.ItemDataRole.UserRole, start)
             time_item.setData(Qt.ItemDataRole.UserRole + 1, seg_index)
+            time_item.setData(Qt.ItemDataRole.UserRole + 2, end)
             time_item.setFlags(time_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             speaker_item = QTableWidgetItem(str(cue.get("speaker") or "").strip())
             speaker_item.setData(Qt.ItemDataRole.UserRole, seg_index)
@@ -2024,6 +2049,8 @@ class UnderstandingGuiMixin:
             if table is not None:
                 table.blockSignals(False)
         update_dialogue_segment_speaker(video_id, seg_index, speaker, config=load_config())
+        if hasattr(self, "_sync_asr_extract_button"):
+            self._sync_asr_extract_button()
 
     def _on_understanding_dialogue_cell_clicked(self, row: int, _column: int) -> None:
         page = getattr(self, "understanding_page", None)
@@ -2038,6 +2065,78 @@ class UnderstandingGuiMixin:
         except (TypeError, ValueError):
             return
         self._select_understanding_chunk_at(start)
+
+    def _on_understanding_dialogue_cell_double_clicked(self, row: int, column: int) -> None:
+        if int(column) == 1:
+            return
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return
+        item = table.item(int(row), 0)
+        if item is None:
+            return
+        try:
+            start = float(item.data(Qt.ItemDataRole.UserRole))
+        except (TypeError, ValueError):
+            return
+        try:
+            end = float(item.data(Qt.ItemDataRole.UserRole + 2))
+        except (TypeError, ValueError):
+            end = start
+        self._select_understanding_chunk_at(start)
+        self._play_understanding_range(start, end)
+
+    def _current_understanding_preview_path(self) -> str:
+        context = dict(getattr(self, "_understanding_video_context", {}) or {})
+        path = str(context.get("video_path") or "").strip()
+        if path and os.path.isfile(path):
+            return path
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            return ""
+        try:
+            from src.services.understanding_service import resolve_video_context
+
+            context = resolve_video_context(video_id, config=load_config(), probe_duration=False)
+            self._understanding_video_context = context
+            path = str(context.get("video_path") or "").strip()
+            if path and os.path.isfile(path):
+                return path
+        except Exception:
+            pass
+        return ""
+
+    def _play_understanding_range(self, start_sec: float, end_sec: float) -> None:
+        page = getattr(self, "understanding_page", None)
+        video_path = self._current_understanding_preview_path()
+        if not video_path:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_chunk_preview_no_video", "Video file not found."),
+                kind="warning",
+            )
+            return
+        start_sec = float(start_sec)
+        end_sec = float(end_sec)
+        if end_sec <= start_sec:
+            end_sec = start_sec + 0.1
+        opened = self.open_floating_preview_dialog(
+            video_path,
+            start_sec,
+            end_sec,
+            suggested_sec=start_sec,
+            on_status=None if page is None else page.lbl_status.setText,
+        )
+        if not opened or page is None:
+            return
+        message = self.texts.get(
+            "understanding_dialogue_play_started",
+            "Playing line {range}",
+        ).format(range=format_timecode_range(start_sec, end_sec))
+        page.lbl_status.setText(message)
+        if hasattr(page, "dialogue_status"):
+            page.dialogue_status.setText(message)
 
     def _select_understanding_chunk_at(self, timestamp_sec: float) -> None:
         chunks = list(getattr(self, "_understanding_index_chunks", []) or [])
@@ -2055,7 +2154,24 @@ class UnderstandingGuiMixin:
                 match = index
         page = self.understanding_page
         page.chunk_timeline.set_selected_index(match)
+        self._ensure_understanding_timeline_on_screen()
+        QTimer.singleShot(0, lambda idx=match: page.chunk_timeline.set_selected_index(idx))
         self._show_understanding_chunk_detail(match)
+
+    def _ensure_understanding_timeline_on_screen(self) -> None:
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return
+        target = getattr(page, "chunk_timeline_scroll", None) or getattr(page, "chunk_timeline", None)
+        if target is None:
+            return
+        widget = page
+        while widget is not None:
+            parent = widget.parentWidget()
+            if isinstance(parent, QScrollArea) and parent.widget() is not None:
+                parent.ensureWidgetVisible(target, 12, 28)
+                return
+            widget = parent
 
     def _sync_recap_export_button(self, *, running: bool | None = None) -> None:
         page = getattr(self, "understanding_page", None)
@@ -2067,7 +2183,7 @@ class UnderstandingGuiMixin:
                 and self.understanding_controller.is_running()
             ) or getattr(self, "_recap_worker", None) is not None or getattr(
                 self, "_asr_worker", None
-            ) is not None
+            ) is not None or getattr(self, "_speaker_cluster_worker", None) is not None
         can = (not running) and self._current_video_can_export_recap()
         has_cuts = self._current_video_has_recap_cuts()
         can_sidecar = (not running) and has_cuts

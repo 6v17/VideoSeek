@@ -399,6 +399,10 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "btn_extract_asr"):
             self.understanding_page.btn_extract_asr.clicked.connect(self.extract_current_video_asr)
+        if hasattr(self.understanding_page, "btn_cluster_speakers"):
+            self.understanding_page.btn_cluster_speakers.clicked.connect(self.cluster_current_video_speakers)
+        if hasattr(self.understanding_page, "btn_rename_speakers"):
+            self.understanding_page.btn_rename_speakers.clicked.connect(self.rename_current_video_speakers)
         if hasattr(self.understanding_page, "btn_export_dialogue_json"):
             self.understanding_page.btn_export_dialogue_json.clicked.connect(
                 self.export_current_video_dialogue_json
@@ -408,6 +412,9 @@ class MainWindow(
         if hasattr(self.understanding_page, "dialogue_table"):
             self.understanding_page.dialogue_table.cellClicked.connect(
                 self._on_understanding_dialogue_cell_clicked
+            )
+            self.understanding_page.dialogue_table.cellDoubleClicked.connect(
+                self._on_understanding_dialogue_cell_double_clicked
             )
             self.understanding_page.dialogue_table.itemChanged.connect(
                 self._on_understanding_dialogue_speaker_changed
@@ -876,6 +883,26 @@ class MainWindow(
         if hasattr(self.understanding_page, "btn_extract_asr"):
             self.understanding_page.btn_extract_asr.setText(
                 t.get("understanding_step_dialogue_extract_asr", "Extract speech")
+            )
+        if hasattr(self.understanding_page, "btn_cluster_speakers"):
+            self.understanding_page.btn_cluster_speakers.setText(
+                t.get("understanding_step_dialogue_cluster", "Cluster speakers")
+            )
+            self.understanding_page.btn_cluster_speakers.setToolTip(
+                t.get(
+                    "understanding_step_dialogue_cluster_tip",
+                    "Fill empty Speaker cells from local CAM++ voice clusters. Manual names are kept.",
+                )
+            )
+        if hasattr(self.understanding_page, "btn_rename_speakers"):
+            self.understanding_page.btn_rename_speakers.setText(
+                t.get("understanding_step_dialogue_rename", "Rename speakers")
+            )
+            self.understanding_page.btn_rename_speakers.setToolTip(
+                t.get(
+                    "understanding_step_dialogue_rename_tip",
+                    "Rename every line that shares a speaker label, such as 声线1 → a character name.",
+                )
             )
         if hasattr(self.understanding_page, "btn_export_dialogue_json"):
             self.understanding_page.btn_export_dialogue_json.setText(

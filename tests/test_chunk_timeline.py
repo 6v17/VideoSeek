@@ -104,6 +104,22 @@ class ChunkTimelineLayoutTests(unittest.TestCase):
         self.assertEqual(right_edge, target)
         self.assertTrue(all(width >= 14 for _left, width in placements))
 
+    def test_horizontal_scroll_to_rect_moves_offscreen_segment(self):
+        from ui.widgets.chunk_timeline import horizontal_scroll_to_rect
+
+        self.assertEqual(
+            horizontal_scroll_to_rect(20, 40, 200, current=0, maximum=800),
+            0,
+        )
+        self.assertGreater(
+            horizontal_scroll_to_rect(500, 40, 200, current=0, maximum=800),
+            0,
+        )
+        self.assertEqual(
+            horizontal_scroll_to_rect(500, 40, 200, current=480, maximum=800),
+            480,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

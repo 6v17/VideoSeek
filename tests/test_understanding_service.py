@@ -107,15 +107,80 @@ class UnderstandingServiceTests(unittest.TestCase):
         config = {"meta_file": "D:/VideoSeek/data/meta.json"}
         with (
             patch("src.services.understanding_service.load_model_metadata", return_value=meta),
-            patch("src.services.understanding_service.get_video_duration_seconds", return_value=3600.0),
             patch("src.services.understanding_service.os.path.isfile", return_value=True),
         ):
-            context = resolve_video_context("abc123", config=config)
+            context = resolve_video_context("abc123", config=config, probe_duration=False)
 
         self.assertEqual(context["video_id"], "abc123")
         self.assertEqual(context["video_path"], os.path.normpath("D:/Videos/AnimeS1/ep01.mp4"))
         self.assertEqual(context["video_rel_path"], "ep01.mp4")
         self.assertEqual(context["library_path"], os.path.normpath("D:/Videos/AnimeS1"))
+
+    def test_resolve_video_context_prefers_existing_file_after_rename(self):
+        meta = {
+            "libraries": {
+                "D:/Videos/AnimeS1": {
+                    "files": {
+                        "old.mp4": {"vid": "abc123", "asset_state": "ready"},
+                        "renamed.mp4": {"vid": "abc123", "asset_state": "ready"},
+                    }
+                }
+            }
+        }
+        living = os.path.normpath("D:/Videos/AnimeS1/renamed.mp4")
+        missing = os.path.normpath("D:/Videos/AnimeS1/old.mp4")
+
+        def fake_isfile(path):
+            return os.path.normcase(os.path.normpath(path)) == os.path.normcase(living)
+
+        with (
+            patch("src.services.understanding_service.load_model_metadata", return_value=meta),
+            patch("src.services.understanding_service.os.path.isfile", side_effect=fake_isfile),
+        ):
+            context = resolve_video_context("abc123", config={"meta_file": "x"}, probe_duration=False)
+
+        self.assertEqual(context["video_path"], living)
+        self.assertEqual(context["video_rel_path"], "renamed.mp4")
+        self.assertTrue(context["source_exists"])
+        self.assertNotEqual(context["video_path"], missing)
+
+    def test_resolve_current_media_path_skips_missing_stored_file(self):
+        from src.services.understanding_service import resolve_current_media_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            living = os.path.join(tmp, "new.mp4")
+            Path(living).write_bytes(b"x")
+            stale = os.path.join(tmp, "old.mp4")
+            with patch(
+                "src.services.understanding_service.resolve_video_context",
+                return_value={"video_path": living, "source_exists": True},
+            ):
+                resolved = resolve_current_media_path("vid", stored=stale)
+            self.assertEqual(os.path.normcase(resolved), os.path.normcase(living))
+
+    def test_collapse_duplicate_ready_video_entries_drops_missing_path(self):
+        from src.services.understanding_service import _collapse_duplicate_ready_video_entries
+
+        with tempfile.TemporaryDirectory() as tmp:
+            living = os.path.join(tmp, "new.mp4")
+            Path(living).write_bytes(b"x")
+            entries = [
+                {
+                    "library_path": tmp,
+                    "video_rel_path": "old.mp4",
+                    "video_id": "vid",
+                    "video_path": os.path.join(tmp, "old.mp4"),
+                },
+                {
+                    "library_path": tmp,
+                    "video_rel_path": "new.mp4",
+                    "video_id": "vid",
+                    "video_path": living,
+                },
+            ]
+            collapsed = _collapse_duplicate_ready_video_entries(entries)
+        self.assertEqual(len(collapsed), 1)
+        self.assertEqual(collapsed[0]["video_rel_path"], "new.mp4")
 
     def test_build_and_write_evidence_bundle(self):
         video_context = {

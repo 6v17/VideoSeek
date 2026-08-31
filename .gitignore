@@ -28,6 +28,10 @@ Thumbs.db
 # Bundled VLC runtime (local / packaging; do not commit DLLs)
 vlc_lib/
 
+# Local CAM++ weights (export zip; do not commit ~30MB)
+resources/asr/campplus.onnx
+resources/asr/campplus.onnx.data
+
 # Build / packaging
 dist/
 build/

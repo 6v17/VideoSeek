@@ -144,8 +144,16 @@ def dialogue_db_cache_token(*, config=None) -> tuple[str, float, int]:
     return db_path, mtime, count
 
 
+_AUTO_SPEAKER_RE = re.compile(r"^(声线|voice)\s*\d+$", flags=re.IGNORECASE)
+
+
 def normalize_dialogue_speaker(value: Any) -> str:
     return str(value or "").strip()[:40]
+
+
+def is_auto_speaker_label(value: Any) -> bool:
+    """True for clustered placeholders like 声线1 / Voice 2 (safe to re-cluster)."""
+    return bool(_AUTO_SPEAKER_RE.match(normalize_dialogue_speaker(value)))
 
 
 def _normalize_segments(
@@ -343,6 +351,120 @@ def update_dialogue_segment_speaker(
             )
             conn.commit()
             return True
+
+
+def update_dialogue_segment_speakers(
+    video_id: str,
+    assignments: dict[int, str],
+    *,
+    config=None,
+) -> int:
+    """Set speaker labels for many cues. Empty string clears a label."""
+    video_id = str(video_id or "").strip()
+    if not video_id or not assignments:
+        return 0
+    rows: list[tuple[str, str, int]] = []
+    for raw_index, raw_label in assignments.items():
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        rows.append((normalize_dialogue_speaker(raw_label), video_id, index))
+    if not rows:
+        return 0
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            updated = int(len(rows))
+            conn.executemany(
+                """
+                UPDATE segments
+                SET speaker = ?
+                WHERE video_id = ? AND seg_index = ?
+                """,
+                rows,
+            )
+            if updated > 0:
+                conn.execute(
+                    "UPDATE transcripts SET updated_at = ? WHERE video_id = ?",
+                    (time.time(), video_id),
+                )
+            conn.commit()
+            return updated
+
+
+def update_dialogue_transcript_location(
+    video_id: str,
+    *,
+    video_path: str = "",
+    library_path: str = "",
+    config=None,
+) -> bool:
+    """Point a saved transcript at the current media path after a rename/move."""
+    video_id = str(video_id or "").strip()
+    media = os.path.normpath(str(video_path or "").strip())
+    if not video_id or not media:
+        return False
+    lib = canonicalize_library_path(library_path) if library_path else ""
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            row = conn.execute(
+                "SELECT video_path, library_path FROM transcripts WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            old_media = os.path.normpath(str(row["video_path"] or ""))
+            old_lib = str(row["library_path"] or "").strip()
+            same_media = os.path.normcase(old_media) == os.path.normcase(media)
+            same_lib = (not lib) or (
+                canonicalize_library_path(old_lib) == lib if old_lib else False
+            )
+            if same_media and same_lib:
+                return False
+            next_lib = lib or old_lib
+            conn.execute(
+                """
+                UPDATE transcripts
+                SET video_path = ?, library_path = ?, updated_at = ?
+                WHERE video_id = ?
+                """,
+                (media, next_lib, time.time(), video_id),
+            )
+            conn.commit()
+            return True
+
+
+def rename_dialogue_speakers(
+    video_id: str,
+    old_speaker: str,
+    new_speaker: str,
+    *,
+    config=None,
+) -> int:
+    """Rename every cue with ``old_speaker`` to ``new_speaker``. Returns rows changed."""
+    video_id = str(video_id or "").strip()
+    source = normalize_dialogue_speaker(old_speaker)
+    target = normalize_dialogue_speaker(new_speaker)
+    if not video_id or not source or source == target:
+        return 0
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            cur = conn.execute(
+                """
+                UPDATE segments
+                SET speaker = ?
+                WHERE video_id = ? AND speaker = ?
+                """,
+                (target, video_id, source),
+            )
+            updated = int(cur.rowcount or 0)
+            if updated > 0:
+                conn.execute(
+                    "UPDATE transcripts SET updated_at = ? WHERE video_id = ?",
+                    (time.time(), video_id),
+                )
+            conn.commit()
+            return updated
 
 
 def _payload_from_rows(

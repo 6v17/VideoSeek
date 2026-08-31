@@ -948,7 +948,7 @@ def reconcile_library_file_paths(root_path, lib_files, *, known_abs_paths=None):
 
     identity_by_rel = _orphan_identity_map(root_path, lib_files, known_abs_paths=known_abs_paths)
     if not identity_by_rel:
-        return 0
+        return collapse_duplicate_library_file_rows(root_path, lib_files)
 
     used_candidates = set()
     reconciled = 0
@@ -967,7 +967,44 @@ def reconcile_library_file_paths(root_path, lib_files, *, known_abs_paths=None):
             str(info.get("vid", "") or "").strip(),
         )
 
-    return reconciled
+    collapsed = collapse_duplicate_library_file_rows(root_path, lib_files)
+    return reconciled + collapsed
+
+
+def collapse_duplicate_library_file_rows(root_path, lib_files) -> int:
+    """Drop missing-source rows when the same video_id already has a living file.
+
+    ``register_library_videos`` can add the renamed path before reconcile runs, so the
+    new file is no longer an orphan and the old key would otherwise stay forever.
+    """
+    if not root_path or not isinstance(lib_files, dict):
+        return 0
+    by_vid: dict[str, list[str]] = {}
+    for rel_path, info in list(lib_files.items()):
+        if not isinstance(info, dict):
+            continue
+        video_id = str(info.get("vid", "") or "").strip()
+        if not video_id:
+            continue
+        by_vid.setdefault(video_id, []).append(str(rel_path))
+    dropped = 0
+    for rels in by_vid.values():
+        if len(rels) < 2:
+            continue
+        ready = [rel for rel in rels if _file_record_source_ready(root_path, rel)]
+        if not ready:
+            continue
+        for rel in rels:
+            if rel in ready:
+                continue
+            if _pop_library_rel_path(lib_files, rel):
+                dropped += 1
+                logger.info(
+                    "Dropped stale library path %s (video_id still at %s)",
+                    rel,
+                    ready[0],
+                )
+    return dropped
 
 
 def _library_files_dict(meta, library_path: str):

@@ -20,7 +20,7 @@ from src.services.asr_settings import (
     normalize_remote_asr_provider_mode,
     set_remote_asr_api_key_for_preset,
 )
-from ui.workers import AsrTranscriptWorker, RemoteAsrConnectionTestWorker
+from ui.workers import AsrTranscriptWorker, RemoteAsrConnectionTestWorker, SpeakerClusterWorker
 
 
 class UnderstandingAsrGuiMixin:
@@ -301,7 +301,10 @@ class UnderstandingAsrGuiMixin:
         self.show_error_dialog(text)
 
     def _asr_job_running(self) -> bool:
-        return getattr(self, "_asr_worker", None) is not None
+        return (
+            getattr(self, "_asr_worker", None) is not None
+            or getattr(self, "_speaker_cluster_worker", None) is not None
+        )
 
     def extract_current_video_asr(self):
         from src.services.asr_index_service import is_hardsub_ocr_source
@@ -387,6 +390,10 @@ class UnderstandingAsrGuiMixin:
             page.video_combo.setEnabled(False)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_cluster_speakers"):
+            page.btn_cluster_speakers.setEnabled(False)
+        if hasattr(page, "btn_rename_speakers"):
+            page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -487,8 +494,278 @@ class UnderstandingAsrGuiMixin:
             and bool(self._selected_understanding_video_id())
         )
         page.btn_extract_asr.setEnabled(can)
+        if hasattr(page, "btn_cluster_speakers"):
+            page.btn_cluster_speakers.setEnabled(can and self._current_video_has_recap_dialogue())
+        if hasattr(page, "btn_rename_speakers"):
+            page.btn_rename_speakers.setEnabled(
+                (not running) and bool(self._current_video_speaker_labels())
+            )
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled((not running) and self._current_video_has_recap_dialogue())
+
+    def cluster_current_video_speakers(self):
+        from src.core.asr.campplus_onnx import resolve_campplus_model_path
+        from src.utils import has_ffmpeg
+
+        if self._asr_job_running():
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        page = getattr(self, "understanding_page", None)
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        if not self._current_video_has_recap_dialogue():
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_speaker_cluster_empty",
+                    "No speech dialogue to cluster. Extract speech first.",
+                ),
+                kind="warning",
+            )
+            return
+        if not has_ffmpeg():
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_asr_missing_ffmpeg",
+                    "FFmpeg is required for speech extraction. Configure it in Settings.",
+                ),
+                kind="warning",
+            )
+            return
+        if not resolve_campplus_model_path():
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_speaker_cluster_missing_model",
+                    "CAM++ model not found. Put campplus.onnx and campplus.onnx.data in resources/asr.",
+                ),
+                kind="warning",
+            )
+            return
+        context = getattr(self, "_understanding_video_context", None) or {}
+        if str(context.get("video_id") or "") != video_id:
+            from src.services.understanding_service import resolve_video_context
+
+            try:
+                context = resolve_video_context(video_id, config=load_config(), probe_duration=False)
+            except Exception:
+                context = {}
+        running_text = self.texts.get("understanding_speaker_cluster_running", "Clustering speakers…")
+        if page is not None:
+            page.lbl_status.setText(running_text)
+            page.progress_bar.setVisible(True)
+            page.progress_bar.setValue(5)
+            page.btn_stop.setVisible(True)
+            page.btn_stop.setEnabled(True)
+            if hasattr(page, "btn_stop_asr"):
+                page.btn_stop_asr.setVisible(True)
+                page.btn_stop_asr.setEnabled(True)
+            if hasattr(page, "dialogue_progress_bar"):
+                page.dialogue_progress_bar.setVisible(True)
+                page.dialogue_progress_bar.setValue(5)
+            if hasattr(page, "dialogue_progress_status"):
+                page.dialogue_progress_status.set_status_text(running_text)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(running_text)
+            page.btn_generate_evidence.setEnabled(False)
+            if hasattr(page, "btn_generate_batch"):
+                page.btn_generate_batch.setEnabled(False)
+            page.scope_combo.setEnabled(False)
+            page.video_combo.setEnabled(False)
+        if hasattr(page, "btn_extract_asr"):
+            page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_cluster_speakers"):
+            page.btn_cluster_speakers.setEnabled(False)
+        if hasattr(page, "btn_rename_speakers"):
+            page.btn_rename_speakers.setEnabled(False)
+        if hasattr(page, "btn_export_dialogue_json"):
+            page.btn_export_dialogue_json.setEnabled(False)
+        self._sync_recap_export_button(running=True)
+        worker = SpeakerClusterWorker(
+            video_id,
+            video_path=str(context.get("video_path") or ""),
+            parent=self,
+        )
+        self._speaker_cluster_worker = worker
+
+        def _finish(active_worker=worker):
+            if getattr(self, "_speaker_cluster_worker", None) is active_worker:
+                self._speaker_cluster_worker = None
+            if page is not None:
+                page.progress_bar.setVisible(False)
+                if hasattr(page, "dialogue_progress_bar"):
+                    page.dialogue_progress_bar.setVisible(False)
+                generating = bool(
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                )
+                if not generating:
+                    page.btn_stop.setEnabled(False)
+                    page.btn_stop.setVisible(False)
+                    if hasattr(page, "btn_stop_asr"):
+                        page.btn_stop_asr.setEnabled(False)
+                        page.btn_stop_asr.setVisible(False)
+                    page.btn_generate_evidence.setEnabled(True)
+                    if hasattr(page, "btn_generate_batch"):
+                        page.btn_generate_batch.setEnabled(True)
+                    page.scope_combo.setEnabled(True)
+                    page.video_combo.setEnabled(True)
+            self._sync_asr_extract_button()
+            self._sync_recap_export_button(running=False)
+            try:
+                active_worker.deleteLater()
+            except Exception:
+                pass
+
+        worker.progress_signal.connect(self._update_understanding_progress)
+        worker.finished_signal.connect(self._finish_speaker_cluster)
+        worker.error_signal.connect(
+            lambda message: self.show_error_dialog(
+                self.texts.get("understanding_speaker_cluster_failed", "Speaker clustering failed"),
+                Exception(message),
+            )
+        )
+        worker.finished.connect(_finish)
+        worker.start()
+
+    def _finish_speaker_cluster(self, ok: bool, stopped: bool, payload: object):
+        page = getattr(self, "understanding_page", None)
+        self._refresh_understanding_dialogue_step()
+        if stopped or not ok:
+            if page is not None and stopped:
+                page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+                if hasattr(page, "dialogue_status"):
+                    page.dialogue_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            return
+        result = dict(payload or {})
+        labeled = int(result.get("labeled") or 0)
+        speakers = int(result.get("speakers") or 0)
+        skipped = int(result.get("skipped") or 0)
+        if labeled <= 0:
+            message = self.texts.get(
+                "understanding_speaker_cluster_none",
+                "Too few or too short cues to cluster.",
+            )
+            if page is not None:
+                page.lbl_status.setText(message)
+                if hasattr(page, "dialogue_status"):
+                    page.dialogue_status.setText(message)
+            self.show_info_dialog(self.texts.get("warning_title", "Warning"), message, kind="warning")
+            return
+        message = self.texts.get(
+            "understanding_speaker_cluster_done",
+            "Labeled {labeled} cues ({speakers} voices). Left {skipped} manual names unchanged.",
+        ).format(labeled=labeled, speakers=speakers, skipped=skipped)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+
+    def _current_video_speaker_labels(self) -> list[tuple[str, int]]:
+        from src.storage.dialogue_transcript_store import normalize_dialogue_speaker
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        counts: dict[str, int] = {}
+        if table is None:
+            return []
+        for row in range(table.rowCount()):
+            item = table.item(row, 1)
+            name = normalize_dialogue_speaker(item.text() if item is not None else "")
+            if not name:
+                continue
+            counts[name] = counts.get(name, 0) + 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+    def _selected_dialogue_speaker(self) -> str:
+        from src.storage.dialogue_transcript_store import normalize_dialogue_speaker
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return ""
+        row = table.currentRow()
+        if row < 0:
+            return ""
+        item = table.item(row, 1)
+        return normalize_dialogue_speaker(item.text() if item is not None else "")
+
+    def rename_current_video_speakers(self):
+        from src.storage.dialogue_transcript_store import rename_dialogue_speakers
+        from ui.dialogs.rename_speakers import prompt_rename_speakers
+
+        if self._asr_job_running():
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        labels = self._current_video_speaker_labels()
+        if not labels:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_speaker_rename_empty",
+                    "No named speakers yet. Cluster voices first, or double-click Speaker to name one.",
+                ),
+                kind="warning",
+            )
+            return
+        picked = prompt_rename_speakers(
+            self,
+            self.texts,
+            labels=labels,
+            current=self._selected_dialogue_speaker(),
+        )
+        if not picked:
+            return
+        old_speaker, new_speaker = picked
+        try:
+            updated = rename_dialogue_speakers(
+                video_id,
+                old_speaker,
+                new_speaker,
+                config=load_config(),
+            )
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("understanding_speaker_rename_failed", "Could not rename speakers"),
+                exc,
+            )
+            return
+        self._refresh_understanding_dialogue_step()
+        if updated <= 0:
+            message = self.texts.get(
+                "understanding_speaker_rename_none",
+                "No dialogue lines needed renaming.",
+            )
+            self.show_info_dialog(self.texts.get("warning_title", "Warning"), message, kind="warning")
+            return
+        message = self.texts.get(
+            "understanding_speaker_rename_done",
+            'Renamed "{old}" to "{new}" ({count} lines).',
+        ).format(old=old_speaker, new=new_speaker, count=updated)
+        page = getattr(self, "understanding_page", None)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
 
     def export_current_video_dialogue_json(self):
         from src.app.config import load_config

@@ -220,6 +220,88 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
         )
         self.assertEqual(carried[0].get("speaker") or "", "")
 
+    def test_update_dialogue_transcript_location_after_rename(self):
+        from src.storage.dialogue_transcript_store import (
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+            update_dialogue_transcript_location,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            old_path = os.path.join(tmp, "old.mp4")
+            new_path = os.path.join(tmp, "new.mp4")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "v",
+                    [{"start": 1.0, "end": 2.0, "text": "hi", "asr_source": "asr"}],
+                    library_path=tmp,
+                    video_path=old_path,
+                    asr_source="asr",
+                )
+                self.assertTrue(
+                    update_dialogue_transcript_location(
+                        "v",
+                        video_path=new_path,
+                        library_path=tmp,
+                    )
+                )
+                payload = load_dialogue_transcript("v")
+                self.assertEqual(os.path.normcase(payload["video_path"]), os.path.normcase(new_path))
+                self.assertFalse(
+                    update_dialogue_transcript_location(
+                        "v",
+                        video_path=new_path,
+                        library_path=tmp,
+                    )
+                )
+
+    def test_rename_dialogue_speakers_bulk_merge_and_scope(self):
+        from src.storage.dialogue_transcript_store import (
+            load_dialogue_transcript,
+            rename_dialogue_speakers,
+            save_dialogue_transcript,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "v1",
+                    [
+                        {"start": 1.0, "end": 2.0, "text": "a", "speaker": "声线1", "asr_source": "asr"},
+                        {"start": 2.0, "end": 3.0, "text": "b", "speaker": "声线1", "asr_source": "asr"},
+                        {"start": 3.0, "end": 4.0, "text": "c", "speaker": "声线2", "asr_source": "asr"},
+                        {"start": 4.0, "end": 5.0, "text": "d", "speaker": "", "asr_source": "asr"},
+                    ],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                save_dialogue_transcript(
+                    "v2",
+                    [{"start": 1.0, "end": 2.0, "text": "other", "speaker": "声线1", "asr_source": "asr"}],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                self.assertEqual(rename_dialogue_speakers("v1", "声线1", "店长"), 2)
+                payload = load_dialogue_transcript("v1")
+                speakers = [row.get("speaker") or "" for row in payload["segments"]]
+                self.assertEqual(speakers, ["店长", "店长", "声线2", ""])
+                other = load_dialogue_transcript("v2")
+                self.assertEqual(other["segments"][0]["speaker"], "声线1")
+                self.assertEqual(rename_dialogue_speakers("v1", "声线2", "店长"), 1)
+                payload = load_dialogue_transcript("v1")
+                speakers = [row.get("speaker") or "" for row in payload["segments"]]
+                self.assertEqual(speakers, ["店长", "店长", "店长", ""])
+                self.assertEqual(rename_dialogue_speakers("v1", "店长", "店长"), 0)
+                self.assertEqual(rename_dialogue_speakers("v1", "", "旁白"), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

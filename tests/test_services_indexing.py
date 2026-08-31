@@ -1187,6 +1187,62 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(lib_files["new/clip.mp4"]["vid"], "vid_a")
 
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    @patch("src.services.indexing_service.os.path.exists")
+    def test_collapse_duplicate_library_file_rows_drops_missing_alias(
+        self,
+        mock_exists,
+        _mock_valid_source,
+    ):
+        root_path = "D:\\videos"
+        lib_files = {
+            "old.mp4": {"vid": "vid_a", "asset_state": "ready"},
+            "renamed.mp4": {"vid": "vid_a", "asset_state": "ready"},
+        }
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized.endswith("/renamed.mp4"):
+                return True
+            if normalized.endswith("/old.mp4"):
+                return False
+            return normalized == "D:/videos"
+
+        mock_exists.side_effect = fake_exists
+        dropped = indexing_service.collapse_duplicate_library_file_rows(root_path, lib_files)
+        self.assertEqual(dropped, 1)
+        self.assertNotIn("old.mp4", lib_files)
+        self.assertIn("renamed.mp4", lib_files)
+
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    @patch("src.services.indexing_service.discover_video_files", return_value=["D:\\videos\\renamed.mp4"])
+    @patch("src.services.indexing_service.os.path.exists")
+    def test_reconcile_drops_stale_row_when_renamed_path_already_registered(
+        self,
+        mock_exists,
+        _mock_discover,
+        _mock_valid_source,
+    ):
+        root_path = "D:\\videos"
+        lib_files = {
+            "old.mp4": {"vid": "vid_a", "asset_state": "ready"},
+            "renamed.mp4": {"vid": "vid_a", "asset_state": "ready"},
+        }
+
+        def fake_exists(path):
+            normalized = str(path).replace("\\", "/")
+            if normalized.endswith("/renamed.mp4"):
+                return True
+            if normalized.endswith("/old.mp4"):
+                return False
+            return normalized == "D:/videos"
+
+        mock_exists.side_effect = fake_exists
+        result = indexing_service.reconcile_library_file_paths(root_path, lib_files)
+        self.assertGreaterEqual(result, 1)
+        self.assertNotIn("old.mp4", lib_files)
+        self.assertIn("renamed.mp4", lib_files)
+
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_new")
     @patch("src.services.indexing_service.discover_video_files", return_value=["D:\\videos\\new\\clip.mp4"])

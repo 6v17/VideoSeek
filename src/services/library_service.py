@@ -285,9 +285,21 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
             lib_files = {}
             lib_data["files"] = lib_files
 
+        discovered: list[str] = []
         for abs_path in _iter_library_video_paths(root_path):
-            if not os.path.isfile(abs_path):
-                continue
+            if os.path.isfile(abs_path):
+                discovered.append(abs_path)
+
+        lib_changed = False
+        try:
+            from src.services.indexing_service import reconcile_library_file_paths
+
+            if reconcile_library_file_paths(root_path, lib_files, known_abs_paths=discovered):
+                lib_changed = True
+        except Exception as exc:
+            get_logger("library_service").warning("Library path reconcile failed for %s: %s", root_path, exc)
+
+        for abs_path in discovered:
             rel_path = canonicalize_library_rel_path(os.path.relpath(abs_path, root_path))
             try:
                 video_mod_time = os.path.getmtime(abs_path)
@@ -317,13 +329,51 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
             if next_info != previous:
                 lib_files[rel_path] = next_info
                 updated += 1
-                changed = True
+                lib_changed = True
 
         lib_data["files"] = lib_files
+        try:
+            from src.services.indexing_service import collapse_duplicate_library_file_rows
+
+            if collapse_duplicate_library_file_rows(root_path, lib_files):
+                lib_changed = True
+        except Exception as exc:
+            get_logger("library_service").warning(
+                "Library duplicate-path cleanup failed for %s: %s", root_path, exc
+            )
+        if lib_changed:
+            changed = True
+            _sync_dialogue_paths_for_library(root_path, lib_files, config=cfg)
 
     if changed:
         save_model_metadata(meta, config=cfg)
+        try:
+            from src.services.understanding_service import invalidate_ready_video_entries_cache
+
+            invalidate_ready_video_entries_cache()
+        except Exception:
+            pass
     return {"registered": registered, "updated": updated, "changed": changed}
+
+
+def _sync_dialogue_paths_for_library(root_path, lib_files, *, config=None) -> None:
+    from src.storage.dialogue_transcript_store import update_dialogue_transcript_location
+
+    for rel_path, info in list((lib_files or {}).items()):
+        if not isinstance(info, dict):
+            continue
+        video_id = str(info.get("vid", "") or "").strip()
+        if not video_id:
+            continue
+        abs_path = os.path.normpath(os.path.join(str(root_path), str(rel_path or "")))
+        if not os.path.isfile(abs_path):
+            continue
+        update_dialogue_transcript_location(
+            video_id,
+            video_path=abs_path,
+            library_path=root_path,
+            config=config,
+        )
 
 
 def list_library_video_entries(*, config=None, register: bool = True) -> list[dict]:

@@ -131,6 +131,35 @@ def distribute_segment_widths(
     return [min_each + extras[index] for index in range(count)]
 
 
+def horizontal_scroll_to_rect(
+    x: int,
+    width: int,
+    viewport_w: int,
+    *,
+    current: int = 0,
+    maximum: int = 0,
+    margin: int = 16,
+) -> int:
+    """Scrollbar value that brings ``[x, x+width]`` into a horizontal viewport."""
+    viewport_w = max(1, int(viewport_w))
+    x = int(x)
+    width = max(1, int(width))
+    margin = max(0, int(margin))
+    left = x - margin
+    right = x + width + margin
+    visible_left = int(current)
+    visible_right = visible_left + viewport_w
+    if left >= visible_left and right <= visible_right:
+        return int(current)
+    if width + margin * 2 >= viewport_w:
+        target = left
+    elif left < visible_left:
+        target = left
+    else:
+        target = right - viewport_w
+    return max(0, min(int(maximum), target))
+
+
 class ChunkTimelineWidget(QWidget):
     chunk_clicked = Signal(int)
     chunk_double_clicked = Signal(int)
@@ -204,10 +233,11 @@ class ChunkTimelineWidget(QWidget):
 
     def set_selected_index(self, index: int):
         index = int(index)
-        if index == self._selected_index:
-            return
+        changed = index != self._selected_index
         self._selected_index = index
-        self.update()
+        if changed:
+            self.update()
+        self._scroll_index_into_view_if_needed(index)
 
     def selected_index(self) -> int:
         return self._selected_index
@@ -385,9 +415,19 @@ class ChunkTimelineWidget(QWidget):
             self._segment_rects = self._compute_segment_rects(self._track_rect())
         if index >= len(self._segment_rects):
             return
-        x, y, width, height = self._segment_rects[index]
-        margin = 16
-        scroll_area.ensureVisible(x - margin, y, width + margin * 2, height)
+        x, _y, width, _height = self._segment_rects[index]
+        bar = scroll_area.horizontalScrollBar()
+        if bar is None:
+            return
+        bar.setValue(
+            horizontal_scroll_to_rect(
+                x,
+                width,
+                scroll_area.viewport().width(),
+                current=int(bar.value()),
+                maximum=int(bar.maximum()),
+            )
+        )
 
     def _segment_color(self, segment: ChunkTimelineSegment, index: int) -> QColor:
         if segment.state == "ready":

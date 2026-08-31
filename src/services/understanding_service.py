@@ -610,6 +610,7 @@ def resolve_video_context(video_id: str, config=None, *, probe_duration: bool = 
 
     cfg = dict(config or load_config())
     meta = load_model_metadata(config=cfg)
+    matches: list[dict[str, Any]] = []
     for library_path, library_data in (meta.get("libraries") or {}).items():
         if not isinstance(library_data, dict):
             continue
@@ -623,21 +624,26 @@ def resolve_video_context(video_id: str, config=None, *, probe_duration: bool = 
             if str(info.get("vid", "") or "").strip() != video_text:
                 continue
             video_path = os.path.normpath(os.path.join(root, str(rel_path)))
-            if probe_duration:
-                from src.media.probe import get_video_duration_seconds
+            matches.append(
+                {
+                    "video_id": video_text,
+                    "video_path": video_path,
+                    "video_rel_path": str(rel_path),
+                    "library_path": root,
+                    "asset_state": str(info.get("asset_state", "") or "").strip().lower(),
+                    "source_exists": os.path.isfile(video_path),
+                }
+            )
+    chosen = _prefer_existing_video_match(matches)
+    if chosen is not None:
+        if probe_duration:
+            from src.media.probe import get_video_duration_seconds
 
-                duration_sec = get_video_duration_seconds(video_path)
-            else:
-                duration_sec = None
-            return {
-                "video_id": video_text,
-                "video_path": video_path,
-                "video_rel_path": str(rel_path),
-                "library_path": root,
-                "duration_sec": float(duration_sec) if duration_sec is not None else None,
-                "source_exists": os.path.isfile(video_path),
-                "asset_state": str(info.get("asset_state", "") or "").strip().lower(),
-            }
+            duration_sec = get_video_duration_seconds(chosen["video_path"])
+        else:
+            duration_sec = None
+        chosen["duration_sec"] = float(duration_sec) if duration_sec is not None else None
+        return chosen
 
     for abs_path, candidate_id, info in iter_indexed_video_entries(meta):
         if candidate_id != video_text:
@@ -670,6 +676,43 @@ def resolve_video_context(video_id: str, config=None, *, probe_duration: bool = 
         }
 
     raise UnderstandingGenerationError(f"Video not found in library metadata: {video_text}")
+
+
+def resolve_current_media_path(
+    video_id: str,
+    *,
+    stored: str = "",
+    config=None,
+) -> str:
+    """Return a path that still exists after the library file was renamed or moved."""
+    preferred = os.path.normpath(str(stored or "").strip())
+    if preferred and os.path.isfile(preferred):
+        return preferred
+    vid = str(video_id or "").strip()
+    if not vid:
+        return preferred
+    try:
+        context = resolve_video_context(vid, config=config, probe_duration=False)
+    except Exception:
+        return preferred
+    living = os.path.normpath(str(context.get("video_path") or "").strip())
+    if living and os.path.isfile(living):
+        return living
+    return preferred
+
+
+def _prefer_existing_video_match(matches: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not matches:
+        return None
+    living = [item for item in matches if item.get("source_exists")]
+    pool = living or matches
+    pool.sort(
+        key=lambda item: (
+            os.path.isabs(str(item.get("video_rel_path") or "")),
+            len(str(item.get("video_rel_path") or "")),
+        )
+    )
+    return dict(pool[0])
 
 
 _READY_VIDEO_ENTRIES_CACHE: dict[tuple, tuple[float, tuple[dict[str, Any], ...]]] = {}
@@ -736,9 +779,28 @@ def list_ready_video_entries(
                     "video_path": video_path,
                 }
             )
+    ready_entries = _collapse_duplicate_ready_video_entries(ready_entries)
     ready_entries.sort(key=lambda item: (item["library_path"], item["video_rel_path"]))
     _READY_VIDEO_ENTRIES_CACHE[cache_key] = (float(state_mtime), tuple(dict(item) for item in ready_entries))
     return ready_entries
+
+
+def _collapse_duplicate_ready_video_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep living files when the same video_id still has a renamed/missing row."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        video_id = str(entry.get("video_id") or "").strip()
+        if not video_id:
+            continue
+        grouped.setdefault(video_id, []).append(entry)
+    collapsed: list[dict[str, Any]] = []
+    for items in grouped.values():
+        if len(items) <= 1:
+            collapsed.extend(items)
+            continue
+        living = [item for item in items if os.path.isfile(str(item.get("video_path") or ""))]
+        collapsed.extend(living or items)
+    return collapsed
 
 
 def _extract_chunk_caption_text(chunk_payload: Mapping[str, Any]) -> str:

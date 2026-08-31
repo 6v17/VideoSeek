@@ -1333,6 +1333,80 @@ class AsrTranscriptWorker(QThread):
             self.finished.emit()
 
 
+class SpeakerClusterWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        video_id: str,
+        *,
+        video_path: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.video_id = str(video_id or "").strip()
+        self.video_path = str(video_path or "").strip()
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.speaker_cluster_service import cluster_video_speakers
+
+            config = load_config()
+            texts = get_texts(config.get("language", "zh"))
+            self.progress_signal.emit(
+                5,
+                texts.get("understanding_speaker_cluster_running", "Clustering speakers…"),
+            )
+
+            def _on_progress(value, stage, texts=texts):
+                label = texts.get("understanding_speaker_cluster_running", "Clustering speakers…")
+                token = str(stage or "")
+                if token == "extract_audio":
+                    label = texts.get("understanding_speaker_cluster_audio", "Extracting audio…")
+                elif token.startswith("embed:"):
+                    parts = token.split(":")
+                    if len(parts) >= 3:
+                        label = texts.get(
+                            "understanding_speaker_cluster_embed",
+                            "Extracting voiceprints {current}/{total}…",
+                        ).format(current=parts[1], total=parts[2])
+                self.progress_signal.emit(max(5, min(99, int(round(float(value) * 100)))), label)
+
+            result = cluster_video_speakers(
+                self.video_id,
+                video_path=self.video_path,
+                config=config,
+                progress_callback=_on_progress,
+                stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+            )
+            if not dict(result or {}).get("ok"):
+                raise RuntimeError(str(dict(result or {}).get("error") or "speaker cluster failed"))
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
+            self.finished_signal.emit(True, False, dict(result or {}))
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(False, True, {"video_id": self.video_id, "stopped": True})
+                return
+            logger.exception("speaker cluster worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+        finally:
+            self.finished.emit()
+
+
 class ModelPackageImportWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(dict)
