@@ -52,6 +52,7 @@ _TEXTURE_BEAT_RE = re.compile(
 )
 _OP_ED_RE = re.compile(
     r"(片头曲|片尾曲|片頭曲|オープニング|エンディング|opening\s*theme|ending\s*theme|"
+    r"作词|作曲|编曲|作詞|作曲|編曲|主题曲|主題曲|主题歌|主題歌|"
     r"演职员表|演職員表|制作委员会|製作委員会|下集预告|下一集预告|下集預告|"
     r"to\s*be\s*continued|\bending\s*credits\b)",
     re.IGNORECASE,
@@ -71,7 +72,8 @@ people 里已经有的说话人称呼必须沿用。
 
 RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划，只规划故事节拍，不写剪辑表、不写口播。
 
-根据 Chunk 视觉事件和对白时间轴，列出能讲清这一集的 beats，通常 14–20 条，最多 24 条。
+对白时间轴是叙事骨架。Chunk 有 cap 才是视觉证据；没有 cap 时不要编造看见了什么，把还需要的画面写在 needed_visual。
+列出能讲清这一集的 beats，通常 14–20 条，最多 24 条。
 因果必须连续，宁多勿跳：每一次对峙、每一次身份/目标变化、每一个关键发现都要单独成条。
 禁止把两次同类事件并成一条；禁止从「出事」直接跳到「结果」——中间过程必须有自己的 beat。
 必须覆盖正片开场、中段推进、以及正片收束。不要把全部 beats 堆在中后段。
@@ -208,7 +210,7 @@ RECAP_CAPTION_SYSTEM = """你是影视解说的口播员。画面已经锁定，
 口播时长盖住该段画面的 85–90%。
 
 event 是叙事真相：发生了什么、谁对谁做了什么。
-reason、画面描述、VLM/运动说明只是剪辑备忘，禁止照读，禁止扩写成看图说话。
+reason、画面描述、VLM/变化说明只是剪辑备忘，禁止照读，禁止扩写成看图说话。
 错误：「一个穿红衣服的女人走进店里，柜台后面站着职员。」
 正确：「红衣女人进店。柜台职员拒收。」
 
@@ -362,6 +364,205 @@ def compact_motion_chunks(evidence: Mapping[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return chunks
+
+
+def compact_index_chunks(raw_chunks: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_chunks or []):
+        if not isinstance(raw, Mapping):
+            continue
+        try:
+            start = float(raw.get("start", raw.get("start_sec", 0.0)) or 0.0)
+            end = float(raw.get("end", raw.get("end_sec", start)) or start)
+        except (TypeError, ValueError):
+            continue
+        if end < start:
+            start, end = end, start
+        try:
+            chunk_i = int(raw.get("i", raw.get("chunk_index", index)))
+        except (TypeError, ValueError):
+            chunk_i = index
+        out.append(
+            {
+                "i": chunk_i,
+                "t": [round(start, 2), round(end, 2)],
+                "dur": round(max(0.0, end - start), 2),
+                "tags": [],
+                "cap": "",
+                "skip": "",
+            }
+        )
+    return out
+
+
+def overlay_motion_captions(
+    chunks: Sequence[Mapping[str, Any]],
+    motion_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    by_i: dict[int, Mapping[str, Any]] = {}
+    for row in motion_rows or []:
+        try:
+            by_i[int(row.get("i"))] = row
+        except (TypeError, ValueError):
+            continue
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for row in chunks or []:
+        item = dict(row)
+        try:
+            chunk_i = int(item.get("i"))
+        except (TypeError, ValueError):
+            chunk_i = None
+        extra = by_i.get(chunk_i) if chunk_i is not None else None
+        if extra:
+            if str(extra.get("cap") or "").strip():
+                item["cap"] = extra.get("cap") or ""
+            if extra.get("tags"):
+                item["tags"] = list(extra.get("tags") or [])
+            if str(extra.get("skip") or "").strip():
+                item["skip"] = str(extra.get("skip") or "").strip()
+        if chunk_i is not None:
+            seen.add(chunk_i)
+        out.append(item)
+    for extra in motion_rows or []:
+        try:
+            chunk_i = int(extra.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if chunk_i in seen:
+            continue
+        out.append(dict(extra))
+    out.sort(key=lambda row: (float((row.get("t") or [0.0])[0] or 0.0), int(row.get("i") or 0)))
+    return out
+
+
+def apply_recap_skip_marks(
+    chunks: Sequence[Mapping[str, Any]],
+    asr: Sequence[Mapping[str, Any]] | None,
+    duration_sec: float,
+) -> list[dict[str, Any]]:
+    cues = list(asr or [])
+    _start, story_end = recap_story_window(duration_sec)
+    out: list[dict[str, Any]] = []
+    for row in chunks or []:
+        item = dict(row)
+        if str(item.get("skip") or "").strip():
+            out.append(item)
+            continue
+        span = _time_span(item.get("t"))
+        if not span:
+            out.append(item)
+            continue
+        lo, _hi = span
+        if float(duration_sec or 0.0) >= 360 and lo >= story_end:
+            item["skip"] = "op_ed"
+            out.append(item)
+            continue
+        blob = " ".join(
+            str(cue.get("text") or "")
+            for cue in cues
+            if _overlap_sec(
+                (float(cue.get("start") or 0.0), float(cue.get("end") or cue.get("start") or 0.0)),
+                span,
+            )
+            > 0.35
+        )
+        if looks_like_op_ed_text(blob):
+            item["skip"] = "op_ed"
+        out.append(item)
+    return out
+
+
+def recap_motion_gap_chunk_indices(
+    pack: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]] | None,
+    *,
+    pad_sec: float = 24.0,
+) -> list[int]:
+    pad = max(0.0, float(pad_sec or 0.0))
+    windows = []
+    for beat in beats or []:
+        span = _time_span(beat.get("t"))
+        if not span:
+            continue
+        windows.append((span[0] - pad, span[1] + pad))
+    if not windows:
+        return []
+    indices: list[int] = []
+    for chunk in pack.get("chunks") or []:
+        if str(chunk.get("skip") or "").strip() or str(chunk.get("cap") or "").strip():
+            continue
+        span = _time_span(chunk.get("t"))
+        if not span:
+            continue
+        if not any(_overlap_sec(span, window) > 0.4 for window in windows):
+            continue
+        try:
+            indices.append(int(chunk.get("i")))
+        except (TypeError, ValueError):
+            continue
+    return indices
+
+
+def fill_recap_motion_for_beats(
+    video_id: str,
+    pack: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]] | None,
+    *,
+    config=None,
+    should_stop_callback: Callable[[], bool] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+    chunk_completed_callback: Callable[..., None] | None = None,
+) -> tuple[dict[str, Any], list[str], int]:
+    """VLM only beat windows that still lack motion captions. Skip OP/ED."""
+    indices = recap_motion_gap_chunk_indices(pack, beats)
+    if not indices:
+        return dict(pack), [], 0
+    from src.core.understanding.base import UnderstandingStoppedError
+    from src.services.understanding_service import generate_evidence_for_video
+
+    wanted = set()
+    for raw in indices:
+        try:
+            wanted.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    done = {"n": 0}
+
+    def _on_chunk(chunk_index, _total, _payload) -> None:
+        try:
+            index = int(chunk_index)
+        except (TypeError, ValueError):
+            return
+        if index not in wanted:
+            return
+        done["n"] += 1
+        if on_progress:
+            on_progress(done["n"], len(indices))
+        if chunk_completed_callback:
+            chunk_completed_callback(index, len(indices), _payload)
+
+    if on_progress:
+        on_progress(0, len(indices))
+    try:
+        generate_evidence_for_video(
+            video_id,
+            config=config,
+            mode=UNDERSTANDING_MODE_MOTION,
+            chunk_indices=indices,
+            should_stop_callback=should_stop_callback,
+            chunk_completed_callback=_on_chunk,
+        )
+    except UnderstandingStoppedError:
+        raise
+    except Exception:
+        return dict(pack), ["recap_warn_motion_gaps"], done["n"]
+    refreshed = build_recap_pack(video_id, config=config)
+    if pack.get("people"):
+        refreshed["people"] = list(pack.get("people") or [])
+    leftover = recap_motion_gap_chunk_indices(refreshed, beats)
+    filled = max(0, len(indices) - len(leftover))
+    return refreshed, [], filled
 
 
 def _normalize_ocr_text(text: str) -> str:
@@ -524,26 +725,43 @@ def ensure_recap_dialogue_cues(cues: list[dict[str, Any]] | None) -> list[dict[s
 
 
 def build_recap_pack(video_id: str, *, config=None) -> dict[str, Any]:
-    from src.services.understanding_service import load_evidence_bundle
+    from src.services.indexing_service import load_video_chunks_by_id
+    from src.services.understanding_service import (
+        load_evidence_bundle,
+        resolve_current_media_path,
+        resolve_video_context,
+    )
 
     cfg = config if config is not None else load_config()
-    evidence = load_evidence_bundle(video_id, config=cfg, mode=UNDERSTANDING_MODE_MOTION)
-    if not evidence:
-        raise RuntimeError("没有运动说明证据。请先在理解页生成运动说明。")
+    evidence = load_evidence_bundle(video_id, config=cfg, mode=UNDERSTANDING_MODE_MOTION) or {}
     video = dict(evidence.get("video") or {})
-    chunks = compact_motion_chunks(evidence)
-    if not chunks:
-        raise RuntimeError("运动说明里没有可用分段。")
+    duration = float(video.get("duration_sec") or 0.0)
+    stored = str(video.get("video_path") or "")
+    video_path = resolve_current_media_path(video_id, stored=stored, config=cfg)
+    if not duration or not video_path:
+        try:
+            context = resolve_video_context(video_id, config=cfg, probe_duration=not duration)
+        except Exception:
+            context = {}
+        if not video_path:
+            video_path = str(context.get("video_path") or "")
+        if not duration:
+            duration = float(context.get("duration_sec") or 0.0)
     ocr = compact_ocr_cues(video_id, config=cfg, limit=RECAP_OCR_LIMIT)
     ensure_recap_dialogue_cues(ocr)
-    stored = str(video.get("video_path") or "")
-    from src.services.understanding_service import resolve_current_media_path
-
-    video_path = resolve_current_media_path(video_id, stored=stored, config=cfg)
+    index_rows = compact_index_chunks(load_video_chunks_by_id(video_id, cfg))
+    motion_rows = compact_motion_chunks(evidence) if evidence else []
+    if index_rows:
+        chunks = overlay_motion_captions(index_rows, motion_rows)
+    else:
+        chunks = motion_rows
+    if not chunks:
+        raise RuntimeError("没有可用分段。请先索引该视频。")
+    chunks = apply_recap_skip_marks(chunks, ocr, duration)
     return {
         "video_id": video_id,
         "video_path": video_path,
-        "duration_sec": float(video.get("duration_sec") or 0.0),
+        "duration_sec": duration,
         "chunks": chunks,
         "ocr": ocr,
         "ocr_source": "asr",
@@ -561,8 +779,7 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
         f"因果必须连续：每一次对峙、身份/目标变化、关键发现都要各自成条，中间过程不要跳。成片目标约 {target:.0f} 秒（按原片比例，约 3–8 分钟），用压缩过场控时长，不要删因果。\n"
         "先列 people（稳定称呼），event 里用这些称呼。禁止男主/女主。不要用同一个他指两个人。\n"
         "必须有冷开场或片头曲之后的第一场戏，不要因为去 OP 把开头剧情切掉。\n"
-        "不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。skip=op_ed 的不要用。\n"
-        "chunks 是视觉事件：i=chunk_index，t=[start,end]，dur=秒，cap=看得见的变化。\n"
+        "不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。asr 是叙事骨架。chunks 可能只有时间没有 cap；有 cap 才是看见的变化。skip=op_ed 不要用。\n"
         "asr[].speaker 非空=谁在说，当事实。不要把这句安到别人身上。空的才用画面特征称呼。\n"
         "对白只确认说过的话。人名只有自报或当面称呼才能用，且整集只绑同一个人。\n"
         "必须包含设定/空间、角色侧面，以及主线换场时的过渡；过渡只写看得见的场面，不要编新冲突。\n"
@@ -2939,7 +3156,7 @@ def _try_story_plan_llm(
 
 def normalize_recap_start_from(value: str | None) -> str:
     key = str(value or RECAP_START_PLAN).strip().lower()
-    if key in {RECAP_START_MATCH, "matching", "2"}:
+    if key in {RECAP_START_MATCH, "matching", "match_only", "match-only", "2"}:
         return RECAP_START_MATCH
     if key in {RECAP_START_CAPTIONS, "caption", "gaps", "3"}:
         return RECAP_START_CAPTIONS
@@ -3148,7 +3365,8 @@ def generate_recap_timeline(
     caption_prompt: str | None = None,
     start_from: str | None = None,
     should_stop_callback: Callable[[], bool] | None = None,
-    progress_callback: Callable[[int, str], None] | None = None,
+    progress_callback: Callable[..., None] | None = None,
+    chunk_completed_callback: Callable[..., None] | None = None,
 ) -> dict[str, Any]:
     cfg = config if config is not None else load_config()
     llm = get_remote_llm_settings(cfg)
@@ -3166,8 +3384,13 @@ def generate_recap_timeline(
     if not video_path or not os.path.isfile(video_path):
         raise RuntimeError(f"找不到原片：{video_path or '(空路径)'}")
 
-    def _progress(value: int, stage: str) -> None:
-        if progress_callback:
+    def _progress(value: int, stage: str, extra: Mapping[str, Any] | None = None) -> None:
+        if not progress_callback:
+            return
+        payload = dict(extra or {})
+        try:
+            progress_callback(int(value), str(stage), payload)
+        except TypeError:
             progress_callback(int(value), str(stage))
 
     def _raise_if_stopped() -> None:
@@ -3196,6 +3419,9 @@ def generate_recap_timeline(
     people: list[dict[str, Any]] = []
     pack = dict(pack)
     warnings: list[str] = []
+    motion_needed = 0
+    motion_filled = 0
+    motion_checked = False
     target_sec = recap_target_sec(duration)
 
     if stage == RECAP_START_CAPTIONS:
@@ -3348,7 +3574,35 @@ def generate_recap_timeline(
                     "cuts_path": "",
                     "srt_path": "",
                     "warnings": list(warnings),
+                    "motion_needed": 0,
+                    "motion_filled": 0,
+                    "motion_checked": False,
                 }
+
+        motion_checked = True
+        gap_indices = recap_motion_gap_chunk_indices(pack, allocated)
+        motion_needed = len(gap_indices)
+        if gap_indices:
+            _raise_if_stopped()
+            _progress(44, "motion_gaps", {"done": 0, "total": motion_needed})
+
+            def _on_motion_progress(done: int, total: int) -> None:
+                pct = 44 + int(round(3.0 * float(done) / float(max(total, 1))))
+                _progress(min(47, pct), "motion_gaps", {"done": int(done), "total": int(total)})
+
+            pack, motion_warns, motion_filled = fill_recap_motion_for_beats(
+                video_id,
+                pack,
+                allocated,
+                config=cfg,
+                should_stop_callback=should_stop_callback,
+                on_progress=_on_motion_progress,
+                chunk_completed_callback=chunk_completed_callback,
+            )
+            warnings.extend(motion_warns)
+            pack["video_path"] = video_path
+        else:
+            _progress(46, "motion_gaps_skip")
 
         cuts = []
         match_title = plan_title
@@ -3400,7 +3654,7 @@ def generate_recap_timeline(
         _raise_if_stopped()
         info = _probe_media(video_path)
         laid_match = layout_clips_on_timeline(cuts, fps=float(info.get("fps") or 24.0))
-        write_recap_cuts_file(
+        cuts_path = write_recap_cuts_file(
             cuts_path,
             title=title,
             video_path=video_path,
@@ -3411,6 +3665,22 @@ def generate_recap_timeline(
             stage=RECAP_START_MATCH,
         )
         cuts = laid_match
+        if stage == RECAP_START_MATCH:
+            _progress(90, "writing")
+            return {
+                "title": title,
+                "video_id": video_id,
+                "stage": RECAP_START_MATCH,
+                "clip_count": len(laid_match),
+                "duration_sec": laid_match[-1]["tl_out"] if laid_match else 0,
+                "beats_path": str(beats_path),
+                "cuts_path": str(cuts_path),
+                "srt_path": "",
+                "warnings": list(warnings),
+                "motion_needed": int(motion_needed),
+                "motion_filled": int(motion_filled),
+                "motion_checked": bool(motion_checked),
+            }
 
     _raise_if_stopped()
     if info is None:
@@ -3449,6 +3719,9 @@ def generate_recap_timeline(
         "cuts_path": str(cuts_path),
         "srt_path": str(srt_path),
         "warnings": list(warnings),
+        "motion_needed": int(motion_needed),
+        "motion_filled": int(motion_filled),
+        "motion_checked": bool(motion_checked),
     }
 
 

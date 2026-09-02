@@ -283,6 +283,43 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
         )
         self.assertEqual(carried[0].get("speaker") or "", "")
 
+    def test_update_dialogue_segment_time_text_and_speaker(self):
+        from src.storage.dialogue_transcript_store import (
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+            update_dialogue_segment,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "v",
+                    [{"start": 1.0, "end": 3.0, "text": "开考", "asr_source": "asr"}],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                self.assertTrue(
+                    update_dialogue_segment(
+                        "v",
+                        0,
+                        start=4.0,
+                        end=6.5,
+                        text="现在开考",
+                        speaker="柜台职员",
+                    )
+                )
+                payload = load_dialogue_transcript("v")
+                row = payload["segments"][0]
+                self.assertEqual(row["start"], 4.0)
+                self.assertEqual(row["end"], 6.5)
+                self.assertEqual(row["text"], "现在开考")
+                self.assertEqual(row["speaker"], "柜台职员")
+                self.assertFalse(update_dialogue_segment("v", 0, text="   "))
+
     def test_update_dialogue_transcript_location_after_rename(self):
         from src.storage.dialogue_transcript_store import (
             load_dialogue_transcript,

@@ -388,7 +388,21 @@ class MainWindow(
         self.understanding_page.btn_generate_batch.clicked.connect(self.start_generate_understanding_batch)
         self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
         self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
-        self.understanding_page.btn_export_recap.clicked.connect(self.export_current_video_recap)
+        self.understanding_page.btn_export_recap.clicked.connect(
+            lambda *_args: self.export_current_video_recap("plan")
+        )
+        if hasattr(self.understanding_page, "btn_recap_step_plan"):
+            self.understanding_page.btn_recap_step_plan.clicked.connect(
+                lambda *_args: self.export_current_video_recap("plan_only")
+            )
+        if hasattr(self.understanding_page, "btn_recap_step_match"):
+            self.understanding_page.btn_recap_step_match.clicked.connect(
+                lambda *_args: self.export_current_video_recap("match")
+            )
+        if hasattr(self.understanding_page, "btn_recap_step_captions"):
+            self.understanding_page.btn_recap_step_captions.clicked.connect(
+                lambda *_args: self.export_current_video_recap("captions")
+            )
         if hasattr(self.understanding_page, "btn_edit_recap_beats"):
             self.understanding_page.btn_edit_recap_beats.clicked.connect(self.edit_current_recap_beats)
         if hasattr(self.understanding_page, "btn_recap_jianying"):
@@ -432,7 +446,6 @@ class MainWindow(
         )
         form = self.understanding_services_dialog.vlm_form
         self.understanding_page.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
-        self.understanding_page.input_understanding_mode.currentIndexChanged.connect(self._on_understanding_mode_changed)
         self.understanding_page.input_caption_language.currentIndexChanged.connect(
             self._on_understanding_caption_language_changed
         )
@@ -851,27 +864,29 @@ class MainWindow(
                 "Test feature: APIs and storage may still change.",
             )
         )
-        self.understanding_page.header.subtitle.setText(t["understanding_page_desc"])
+        self.understanding_page.header.subtitle.setText(
+            t.get("understanding_page_desc_motion", t["understanding_page_desc"])
+        )
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
         if hasattr(self.understanding_page, "select_hint"):
             self.understanding_page.select_hint.setText(
-                t.get("understanding_step_select_hint", "")
+                t.get("understanding_step_select_hint_motion", t.get("understanding_step_select_hint", ""))
             )
         if hasattr(self.understanding_page, "generate_title"):
             self.understanding_page.generate_title.setText(
-                t.get("understanding_step_generate_title", "2. Generate notes")
+                t.get("understanding_step_generate_title_motion", "4. Optional full-video change notes")
             )
         if hasattr(self.understanding_page, "export_title"):
             self.understanding_page.export_title.setText(
-                t.get("understanding_step_export_title", "4. Recap cuts and export")
+                t.get("understanding_step_export_title_motion", "3. Recap cuts")
             )
         if hasattr(self.understanding_page, "export_hint"):
             self.understanding_page.export_hint.setText(
-                t.get("understanding_step_export_hint", "")
+                t.get("understanding_step_export_hint_motion", t.get("understanding_step_export_hint", ""))
             )
         if hasattr(self.understanding_page, "dialogue_title"):
             self.understanding_page.dialogue_title.setText(
-                t.get("understanding_step_dialogue_title", "3. Dialogue / subtitles")
+                t.get("understanding_step_dialogue_title_motion", "2. Extract speech")
             )
         if hasattr(self.understanding_page, "dialogue_hint"):
             self.understanding_page.dialogue_hint.setText(
@@ -926,15 +941,13 @@ class MainWindow(
             tabs.setTabText(0, t.get("understanding_recap_prompt_tab_plan", "1. Plan"))
             tabs.setTabText(1, t.get("understanding_recap_prompt_tab_match", "2. Match shots"))
             tabs.setTabText(2, t.get("understanding_recap_prompt_tab_captions", "3. Captions"))
-        if hasattr(self.understanding_page, "recap_start_label"):
-            self.understanding_page.recap_start_label.setText(
-                t.get("understanding_recap_start_label", "Start from")
+        if hasattr(self.understanding_page, "recap_start_hint"):
+            self.understanding_page.recap_start_hint.setText(
+                t.get(
+                    "understanding_recap_start_hint",
+                    "One-click runs all three steps. The step buttons generate or redo that step only.",
+                )
             )
-        if hasattr(self, "_populate_recap_start_options"):
-            current = None
-            if hasattr(self.understanding_page, "input_recap_start"):
-                current = self.understanding_page.input_recap_start.currentData()
-            self._populate_recap_start_options(current)
         if hasattr(self, "_ensure_recap_prompt_default"):
             self._ensure_recap_prompt_default()
         if hasattr(self.understanding_page, "dialogue_table"):
@@ -962,17 +975,6 @@ class MainWindow(
         current_language = self.understanding_page.input_caption_language.currentData()
         self._populate_understanding_caption_language_options(current_language or "zh")
         self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
-        self.understanding_page.label_understanding_mode.setText(
-            t.get("understanding_mode_label", "Mode")
-        )
-        current_mode = self.understanding_page.input_understanding_mode.currentData()
-        self._populate_understanding_mode_options(current_mode)
-        self.understanding_page.input_understanding_mode.setToolTip(
-            t.get(
-                "understanding_mode_hint",
-                "Tags: chunk tagging only. Summary: chunk descriptions then whole-video summary.",
-            )
-        )
         cfg.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
         cfg.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
         if hasattr(self.understanding_page, "vlm_prompt_label"):
@@ -1010,7 +1012,7 @@ class MainWindow(
                 2,
                 t.get(
                     "understanding_vlm_prompt_tab_motion",
-                    t.get("understanding_custom_motion_prompt_label", "Segment motion"),
+                    t.get("understanding_custom_motion_prompt_label", "Segment change"),
                 ),
             )
             tabs.setTabText(
@@ -1030,10 +1032,31 @@ class MainWindow(
         self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
-        self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "Generate recap cuts"))
+        self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "One-click recap"))
         self.understanding_page.btn_export_recap.setToolTip(
             t.get("understanding_export_recap_tip", "")
         )
+        if hasattr(self.understanding_page, "btn_recap_step_plan"):
+            self.understanding_page.btn_recap_step_plan.setText(
+                t.get("understanding_recap_step_plan", "Plan outline")
+            )
+            self.understanding_page.btn_recap_step_plan.setToolTip(
+                t.get("understanding_recap_step_plan_tip", "")
+            )
+        if hasattr(self.understanding_page, "btn_recap_step_match"):
+            self.understanding_page.btn_recap_step_match.setText(
+                t.get("understanding_recap_step_match", "Match shots")
+            )
+            self.understanding_page.btn_recap_step_match.setToolTip(
+                t.get("understanding_recap_step_match_tip", "")
+            )
+        if hasattr(self.understanding_page, "btn_recap_step_captions"):
+            self.understanding_page.btn_recap_step_captions.setText(
+                t.get("understanding_recap_step_captions", "Pack captions")
+            )
+            self.understanding_page.btn_recap_step_captions.setToolTip(
+                t.get("understanding_recap_step_captions_tip", "")
+            )
         if hasattr(self.understanding_page, "btn_edit_recap_beats"):
             self.understanding_page.btn_edit_recap_beats.setText(
                 t.get("understanding_recap_edit_beats", "Edit plan")

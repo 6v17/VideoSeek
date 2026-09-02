@@ -1,4 +1,4 @@
-"""Understanding page: select → generate → export, stacked top to bottom."""
+"""Understanding page: stacked workflow cards (tags/summary vs ASR-first recap)."""
 
 from __future__ import annotations
 
@@ -65,9 +65,9 @@ def _stack_field(label: QLabel, field: QWidget) -> QWidget:
     return host
 
 
-def _command_bar() -> tuple[QWidget, QHBoxLayout]:
+def _command_bar(object_name: str = "UnderstandingCommandBar") -> tuple[QWidget, QHBoxLayout]:
     bar = QWidget()
-    bar.setObjectName("UnderstandingCommandBar")
+    bar.setObjectName(object_name)
     row = QHBoxLayout(bar)
     row.setContentsMargins(0, 2, 0, 2)
     row.setSpacing(8)
@@ -161,10 +161,23 @@ class UnderstandingEvidencePage(QWidget):
         _add_step_header(self.export_card.content_layout, self.export_title, self.export_hint)
         self._build_export_step(self.export_card.content_layout)
         page_body.addWidget(self.export_card)
-        self.dialogue_card.hide()
-        self.export_card.hide()
         self.video_summary_card.hide()
         page_body.addStretch(1)
+        self.order_workflow_cards(recap_first=True)
+
+    def order_workflow_cards(self, *, recap_first: bool) -> None:
+        layout = self.scaffold.content_layout
+        if recap_first:
+            cards = (self.workspace_card, self.dialogue_card, self.export_card, self.generate_card)
+        else:
+            cards = (self.workspace_card, self.generate_card, self.dialogue_card, self.export_card)
+        for card in cards:
+            layout.removeWidget(card)
+        insert_at = layout.indexOf(self.understanding_notice) + 1
+        if insert_at <= 0:
+            insert_at = 0
+        for offset, card in enumerate(cards):
+            layout.insertWidget(insert_at + offset, card)
 
     def _build_select_step(self, layout: QVBoxLayout) -> None:
         self.picker_strip = QWidget()
@@ -185,11 +198,6 @@ class UnderstandingEvidencePage(QWidget):
         self.video_combo = SearchableIdCombo()
         self.video_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        self.label_understanding_mode = _field_label()
-        self.input_understanding_mode = NoWheelComboBox()
-        self.input_understanding_mode.setObjectName("SearchModeSelect")
-        self.input_understanding_mode.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
         self.label_caption_language = _field_label()
         self.input_caption_language = NoWheelComboBox()
         self.input_caption_language.setObjectName("SearchModeSelect")
@@ -197,8 +205,7 @@ class UnderstandingEvidencePage(QWidget):
 
         grid.addWidget(_stack_field(self.scope_label, self.scope_combo), 0, 0)
         grid.addWidget(_stack_field(self.video_label, self.video_combo), 0, 1)
-        grid.addWidget(_stack_field(self.label_understanding_mode, self.input_understanding_mode), 1, 0)
-        grid.addWidget(_stack_field(self.label_caption_language, self.input_caption_language), 1, 1)
+        grid.addWidget(_stack_field(self.label_caption_language, self.input_caption_language), 1, 0)
         layout.addWidget(self.picker_strip)
 
         self.lbl_understanding_hint = _status_hint()
@@ -241,10 +248,8 @@ class UnderstandingEvidencePage(QWidget):
         layout.addWidget(self.vlm_prompt_tabs)
 
         actions, row = _command_bar()
-        self.btn_generate_evidence = _action_button("PrimaryButton")
+        self.btn_generate_evidence = _action_button("GhostButton")
         self.btn_generate_batch = _action_button("GhostButton")
-        self.btn_generate_summary = _action_button("GhostButton")
-        self.btn_generate_summary.hide()
         self.btn_export_video_json = _action_button("GhostButton")
         self.btn_evidence_details = _action_button("GhostButton")
         self.btn_stop = _action_button("DangerGhostButton")
@@ -252,7 +257,6 @@ class UnderstandingEvidencePage(QWidget):
         self.btn_stop.setVisible(False)
         row.addWidget(self.btn_generate_evidence, 0)
         row.addWidget(self.btn_generate_batch, 0)
-        row.addWidget(self.btn_generate_summary, 0)
         row.addStretch(1)
         row.addWidget(self.btn_export_video_json, 0)
         row.addWidget(self.btn_evidence_details, 0)
@@ -392,10 +396,7 @@ class UnderstandingEvidencePage(QWidget):
         self.dialogue_progress_bar.setVisible(False)
         layout.addWidget(self.dialogue_progress_status)
         self.dialogue_table = DataTable(spec=UNDERSTANDING_DIALOGUE_TABLE_SPEC)
-        self.dialogue_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.DoubleClicked
-            | QAbstractItemView.EditTrigger.EditKeyPressed
-        )
+        self.dialogue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dialogue_table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.dialogue_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.dialogue_table.setMinimumHeight(200)
@@ -435,20 +436,19 @@ class UnderstandingEvidencePage(QWidget):
         self.recap_prompt_tabs.addTab(self.input_recap_caption_prompt, "")
         layout.addWidget(self.recap_prompt_tabs)
 
-        start_host = QWidget()
-        start_row = QHBoxLayout(start_host)
-        start_row.setContentsMargins(0, 0, 0, 0)
-        start_row.setSpacing(10)
-        self.recap_start_label = _field_label()
-        self.input_recap_start = NoWheelComboBox()
-        self.input_recap_start.setObjectName("SearchModeSelect")
-        self.input_recap_start.setMinimumWidth(240)
-        self.input_recap_start.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        start_row.addWidget(self.recap_start_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        start_row.addWidget(self.input_recap_start, 1)
-        layout.addWidget(start_host)
+        steps, step_row = _command_bar("UnderstandingStepBar")
+        self.recap_step_bar = steps
+        self.btn_recap_step_plan = _action_button("GhostButton")
+        self.btn_recap_step_match = _action_button("GhostButton")
+        self.btn_recap_step_captions = _action_button("GhostButton")
+        step_row.addWidget(self.btn_recap_step_plan, 0)
+        step_row.addWidget(self.btn_recap_step_match, 0)
+        step_row.addWidget(self.btn_recap_step_captions, 0)
+        step_row.addStretch(1)
+        layout.addWidget(steps)
 
         actions, row = _command_bar()
+        self.recap_main_bar = actions
         self.btn_export_recap = _action_button("PrimaryButton")
         self.btn_edit_recap_beats = _action_button("GhostButton")
         self.btn_recap_jianying = _action_button("GhostButton")
@@ -459,6 +459,8 @@ class UnderstandingEvidencePage(QWidget):
         row.addWidget(self.btn_recap_jianying, 0)
         row.addWidget(self.btn_recap_fcpxml, 0)
         layout.addWidget(actions)
+        self.recap_start_hint = _step_hint()
+        layout.addWidget(self.recap_start_hint)
         self.recap_progress_status = VSProgressStatusRow()
         self.recap_progress_bar = self.recap_progress_status.progress_bar
         self.recap_progress_bar.setVisible(False)

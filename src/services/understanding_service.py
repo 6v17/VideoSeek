@@ -7,7 +7,7 @@ import time
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from src.app.config import load_config
 from src.app.logging_utils import get_logger
@@ -248,8 +248,13 @@ def _run_pending_chunks(
     generated_at: str | None,
     should_stop_callback=None,
     chunk_completed_callback=None,
+    only_indices: set[int] | None = None,
 ) -> str:
-    pending_indices = [index for index in range(total) if index not in completed]
+    pending_indices = [
+        index
+        for index in range(total)
+        if index not in completed and (only_indices is None or index in only_indices)
+    ]
     if not pending_indices:
         return ""
 
@@ -930,6 +935,7 @@ def _run_video_evidence_generation(
     should_stop_callback=None,
     chunk_completed_callback=None,
     mode: str | None = None,
+    chunk_indices: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     cfg = _config_with_understanding_mode(config, mode)
     output_mode = normalize_understanding_mode(
@@ -940,6 +946,28 @@ def _run_video_evidence_generation(
     generated_at = str(dict(existing_bundle.get("provenance") or {}).get("generated_at", "") or "").strip() or None
     completed = _load_resumable_chunk_payloads(existing_bundle, chunks)
     resumed_count = len(completed)
+    only_indices: set[int] | None = None
+    if chunk_indices:
+        only_indices = set()
+        for raw_index in chunk_indices:
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < total:
+                only_indices.add(index)
+        if not only_indices:
+            return {
+                "video_id": video_id,
+                "evidence_path": "",
+                "chunk_count": 0,
+                "chunk_total": 0,
+                "understanding_profile_id": profile_id,
+                "understanding_mode": output_mode,
+                "stopped": False,
+                "resumed_from": resumed_count,
+                "partial": True,
+            }
 
     if resumed_count:
         logger.info(
@@ -968,9 +996,36 @@ def _run_video_evidence_generation(
             generated_at=generated_at,
             should_stop_callback=should_stop_callback,
             chunk_completed_callback=chunk_completed_callback,
+            only_indices=only_indices,
         )
 
         saved_count = len(completed)
+        if only_indices is not None:
+            missing_requested = [index for index in sorted(only_indices) if index not in completed]
+            if saved_count > 0 and not output_path:
+                output_path = _checkpoint_evidence_bundle(
+                    video_id,
+                    video_context=video_context,
+                    profile_id=profile_id,
+                    pipeline=pipeline,
+                    completed=completed,
+                    chunk_total=total,
+                    config=cfg,
+                    generation_status="in_progress",
+                    generated_at=generated_at,
+                    mode=output_mode,
+                )
+            return {
+                "video_id": video_id,
+                "evidence_path": output_path,
+                "chunk_count": len(only_indices) - len(missing_requested),
+                "chunk_total": len(only_indices),
+                "understanding_profile_id": profile_id,
+                "understanding_mode": output_mode,
+                "stopped": bool(missing_requested) or bool(should_stop_callback and should_stop_callback()),
+                "resumed_from": resumed_count,
+                "partial": True,
+            }
         stopped = bool(should_stop_callback and should_stop_callback()) or saved_count < total
         if stopped:
             if saved_count > 0 and not output_path:
@@ -1124,6 +1179,7 @@ def generate_evidence_for_video(
     should_stop_callback=None,
     chunk_completed_callback=None,
     mode: str | None = None,
+    chunk_indices: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     from src.services.indexing_service import load_video_chunks_by_id
 
@@ -1158,6 +1214,7 @@ def generate_evidence_for_video(
         should_stop_callback=should_stop_callback,
         chunk_completed_callback=chunk_completed_callback,
         mode=mode,
+        chunk_indices=chunk_indices,
     )
 
 

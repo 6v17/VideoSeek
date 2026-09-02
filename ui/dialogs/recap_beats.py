@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from src.services.recap_service import format_recap_clock, parse_recap_clock
 from ui.dialogs.shell import VSDialogShell
+from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
 
@@ -63,13 +64,17 @@ class RecapBeatsDialog(VSDialogShell):
             parent,
             title=str(self.texts.get("understanding_recap_edit_beats_title", "Edit story plan")),
             body=body,
-            minimum_width=880,
+            minimum_width=WINDOW_SIZES["recap_beats_dialog"]["minimum"].width(),
             outer_margins=(14, 14, 14, 14),
             card_margins=(18, 16, 18, 14),
             card_spacing=12,
         )
-        self.setMinimumSize(880, 560)
-        self.resize(960, 640)
+        apply_dialog_size(
+            self,
+            WINDOW_SIZES["recap_beats_dialog"]["preferred"],
+            WINDOW_SIZES["recap_beats_dialog"]["minimum"],
+            WINDOW_SIZES["recap_beats_dialog"]["screen_margin"],
+        )
 
         title_host = QWidget()
         title_row = QHBoxLayout(title_host)
@@ -107,7 +112,7 @@ class RecapBeatsDialog(VSDialogShell):
         self.people_table.verticalHeader().setVisible(False)
         self.people_table.setShowGrid(False)
         self.people_table.setAlternatingRowColors(False)
-        self.people_table.setMaximumHeight(140)
+        self.people_table.setMaximumHeight(200)
         self.people_table.setHorizontalHeaderLabels(
             list(
                 self.texts.get("understanding_recap_people_headers", ["Name", "Look"])

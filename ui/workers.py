@@ -1143,6 +1143,7 @@ class RemoteLlmConnectionTestWorker(QThread):
 
 class RecapTimelineWorker(QThread):
     progress_signal = Signal(int, str)
+    chunk_completed = Signal(int, int, object)
     finished_signal = Signal(bool, bool, object)
     error_signal = Signal(str)
     finished = Signal()
@@ -1189,20 +1190,41 @@ class RecapTimelineWorker(QThread):
                 "plan_head_failed": "recap_warn_plan_head",
                 "plan_tail_failed": "recap_warn_plan_tail",
                 "match_close_failed": "recap_warn_match_close",
+                "motion_gaps": "understanding_export_recap_motion_gaps",
+                "motion_gaps_skip": "understanding_export_recap_motion_gaps_skip",
                 "captions": "understanding_export_recap_captions",
                 "gaps": "understanding_export_recap_gaps",
                 "writing": "understanding_export_recap_writing",
             }
 
-            def _on_progress(value, stage):
-                key = stage_keys.get(str(stage), "understanding_export_recap_running")
+            def _on_progress(value, stage, extra=None):
+                extra = extra if isinstance(extra, dict) else {}
+                token = str(stage)
+                key = stage_keys.get(token, "understanding_export_recap_running")
+                if token == "motion_gaps" and extra.get("total"):
+                    key = "understanding_export_recap_motion_gaps_progress"
+                label = texts.get(key, token)
+                try:
+                    label = str(label).format(**extra)
+                except (KeyError, IndexError, ValueError):
+                    pass
                 self.progress_signal.emit(
                     max(1, min(99, int(value))),
-                    texts.get(key, str(stage)),
+                    label,
                 )
 
-            start_keys = {"plan": "planning", "plan_only": "planning", "match": "matching", "captions": "captions"}
+            start_keys = {
+                "plan": "planning",
+                "plan_only": "planning",
+                "match": "matching",
+                "match_only": "matching",
+                "captions": "captions",
+            }
             _on_progress(8, start_keys.get(self.start_from, "planning"))
+
+            def _on_chunk(index, total, payload):
+                self.chunk_completed.emit(int(index), int(total), dict(payload or {}))
+
             result = generate_recap_timeline(
                 self.video_id,
                 self.dest_dir,
@@ -1213,6 +1235,7 @@ class RecapTimelineWorker(QThread):
                 start_from=self.start_from,
                 should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
                 progress_callback=_on_progress,
+                chunk_completed_callback=_on_chunk,
             )
             self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
             self.finished_signal.emit(True, False, dict(result or {}))

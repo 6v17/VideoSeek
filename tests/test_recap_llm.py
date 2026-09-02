@@ -156,6 +156,125 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(chunks[0]["cap"], "考官微笑特写。")
         self.assertEqual(chunks[0]["tags"], ["对话"])
 
+    def test_apply_recap_skip_marks_op_ed_from_asr_and_tail(self):
+        from src.services.recap_service import apply_recap_skip_marks
+
+        chunks = [
+            {"i": 0, "t": [0.0, 20.0], "cap": "", "skip": ""},
+            {"i": 1, "t": [90.0, 140.0], "cap": "对峙", "skip": ""},
+            {"i": 2, "t": [1360.0, 1440.0], "cap": "", "skip": ""},
+        ]
+        asr = [
+            {"start": 2.0, "end": 8.0, "text": "片头曲 作词 作曲"},
+            {"start": 100.0, "end": 104.0, "text": "把支票放下"},
+        ]
+        out = apply_recap_skip_marks(chunks, asr, 1440.0)
+        self.assertEqual(out[0]["skip"], "op_ed")
+        self.assertEqual(out[1]["skip"], "")
+        self.assertEqual(out[2]["skip"], "op_ed")
+
+    def test_recap_motion_gap_indices_skip_op_ed_and_existing_cap(self):
+        from src.services.recap_service import recap_motion_gap_chunk_indices
+
+        pack = {
+            "chunks": [
+                {"i": 0, "t": [0.0, 20.0], "cap": "", "skip": "op_ed"},
+                {"i": 1, "t": [90.0, 140.0], "cap": "对峙", "skip": ""},
+                {"i": 2, "t": [200.0, 240.0], "cap": "", "skip": ""},
+                {"i": 3, "t": [800.0, 840.0], "cap": "", "skip": ""},
+            ]
+        }
+        beats = [{"id": 1, "t": [90.0, 230.0]}]
+        self.assertEqual(recap_motion_gap_chunk_indices(pack, beats), [2])
+        padded = {
+            "chunks": pack["chunks"]
+            + [{"i": 4, "t": [68.0, 86.0], "cap": "", "skip": ""}]
+        }
+        self.assertEqual(recap_motion_gap_chunk_indices(padded, beats), [2, 4])
+        self.assertEqual(recap_motion_gap_chunk_indices(padded, beats, pad_sec=0.0), [2])
+
+    def test_fill_recap_motion_for_beats_skips_when_no_gaps(self):
+        from src.services.recap_service import fill_recap_motion_for_beats
+
+        pack = {
+            "chunks": [
+                {"i": 1, "t": [90.0, 140.0], "cap": "对峙", "skip": ""},
+            ]
+        }
+        beats = [{"id": 1, "t": [90.0, 140.0]}]
+        with patch("src.services.understanding_service.generate_evidence_for_video") as generate:
+            out, warns, filled = fill_recap_motion_for_beats("v", pack, beats)
+        generate.assert_not_called()
+        self.assertEqual(warns, [])
+        self.assertEqual(filled, 0)
+        self.assertEqual(out["chunks"][0]["cap"], "对峙")
+
+    def test_fill_recap_motion_for_beats_emits_chunk_progress(self):
+        from src.services.recap_service import fill_recap_motion_for_beats
+
+        pack = {
+            "chunks": [
+                {"i": 2, "t": [200.0, 240.0], "cap": "", "skip": ""},
+            ]
+        }
+        beats = [{"id": 1, "t": [200.0, 240.0]}]
+        seen: list[tuple[int, int]] = []
+
+        def fake_generate(*_args, chunk_completed_callback=None, chunk_indices=None, **_kwargs):
+            for index in list(chunk_indices or []):
+                if chunk_completed_callback:
+                    chunk_completed_callback(index, 99, {})
+            return {}
+
+        filled_pack = {
+            "chunks": [
+                {"i": 2, "t": [200.0, 240.0], "cap": "补上了", "skip": ""},
+            ]
+        }
+        with (
+            patch("src.services.understanding_service.generate_evidence_for_video", side_effect=fake_generate),
+            patch("src.services.recap_service.build_recap_pack", return_value=filled_pack),
+        ):
+            out, warns, filled = fill_recap_motion_for_beats(
+                "v",
+                pack,
+                beats,
+                on_progress=lambda done, total: seen.append((done, total)),
+            )
+        self.assertEqual(warns, [])
+        self.assertEqual(filled, 1)
+        self.assertEqual(out["chunks"][0]["cap"], "补上了")
+        self.assertEqual(seen[0], (0, 1))
+        self.assertEqual(seen[-1], (1, 1))
+
+    def test_build_recap_pack_without_motion_uses_index_and_asr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            living = Path(tmp) / "ep.mp4"
+            living.write_bytes(b"x")
+            with (
+                patch("src.services.understanding_service.load_evidence_bundle", return_value=None),
+                patch(
+                    "src.services.indexing_service.load_video_chunks_by_id",
+                    return_value=[{"start": 0.0, "end": 12.0}, {"start": 12.0, "end": 24.0}],
+                ),
+                patch(
+                    "src.services.recap_service.compact_ocr_cues",
+                    return_value=[{"start": 1.0, "end": 2.0, "text": "开考", "asr_source": "asr"}],
+                ),
+                patch(
+                    "src.services.understanding_service.resolve_current_media_path",
+                    return_value=str(living),
+                ),
+                patch(
+                    "src.services.understanding_service.resolve_video_context",
+                    return_value={"video_path": str(living), "duration_sec": 24.0},
+                ),
+            ):
+                pack = build_recap_pack("vid-1")
+            self.assertEqual(len(pack["chunks"]), 2)
+            self.assertEqual(pack["chunks"][0]["cap"], "")
+            self.assertEqual(pack["ocr"][0]["text"], "开考")
+
     def test_normalize_trims_long_clip_to_vo(self):
         pack = {
             "duration_sec": 200.0,
@@ -801,6 +920,8 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("换场", RECAP_PLAN_SYSTEM)
         self.assertIn("importance", RECAP_PLAN_SYSTEM)
         self.assertIn("片尾", RECAP_PLAN_SYSTEM)
+        self.assertIn("叙事骨架", RECAP_PLAN_SYSTEM)
+        self.assertIn("needed_visual", RECAP_PLAN_SYSTEM)
         self.assertIn("收尾", RECAP_SYSTEM)
         self.assertIn("片头曲", RECAP_PLAN_SYSTEM)
         self.assertIn("叙事真相", RECAP_SYSTEM)
@@ -907,6 +1028,9 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("不要写 vo", prompt)
         self.assertNotIn("85–90%", prompt)
         self.assertIn("特写", prompt)
+        self.assertIn("叙事骨架", recap_plan_user_prompt(
+            {"duration_sec": 100.0, "chunks": [], "ocr": []},
+        ))
         self.assertIn("叙事真相", prompt)
         self.assertIn("people", prompt)
         self.assertIn("同一个他", prompt)
@@ -1247,6 +1371,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(resolve_recap_prompt("", RECAP_PLAN_SYSTEM), RECAP_PLAN_SYSTEM)
         self.assertEqual(resolve_recap_prompt("自定义规划", RECAP_PLAN_SYSTEM), "自定义规划")
         self.assertEqual(normalize_recap_start_from("matching"), "match")
+        self.assertEqual(normalize_recap_start_from("match_only"), "match")
         self.assertEqual(normalize_recap_start_from("3"), "captions")
         self.assertEqual(normalize_recap_start_from("plan_only"), "plan_only")
         self.assertEqual(normalize_recap_start_from(""), "plan")
@@ -1361,6 +1486,10 @@ class RecapPackTests(unittest.TestCase):
             }
             with (
                 patch("src.services.understanding_service.load_evidence_bundle", return_value=evidence),
+                patch(
+                    "src.services.indexing_service.load_video_chunks_by_id",
+                    return_value=[],
+                ),
                 patch(
                     "src.services.recap_service.compact_ocr_cues",
                     return_value=[{"start": 0.0, "end": 1.0, "text": "开考", "asr_source": "asr"}],
@@ -1542,6 +1671,13 @@ class RecapPackTests(unittest.TestCase):
                     return_value=str(video),
                 ),
             ):
+                if start_from in {"match", "captions"}:
+                    generate_recap_timeline("vid", tmp, start_from="plan_only")
+                    systems.clear()
+                if start_from == "captions":
+                    generate_recap_timeline("vid", tmp, start_from="match")
+                    systems.clear()
+                    caption_in.clear()
                 result = generate_recap_timeline("vid", tmp, start_from=start_from)
             return result, systems, caption_in
 
@@ -1575,6 +1711,16 @@ class RecapPackTests(unittest.TestCase):
         self.assertFalse(result.get("cuts_path"))
         self.assertIn(RECAP_PLAN_GAP_SYSTEM, systems)
         self.assertNotIn(RECAP_SYSTEM, systems)
+        self.assertEqual(caption_in, [])
+
+    def test_generate_match_stops_before_captions(self):
+        result, systems, caption_in = self._generate_long_recap(start_from="match")
+        self.assertEqual(result.get("stage"), "match")
+        self.assertTrue(result.get("cuts_path"))
+        self.assertFalse(result.get("srt_path"))
+        self.assertGreaterEqual(int(result.get("clip_count") or 0), 1)
+        self.assertIn(RECAP_SYSTEM, systems)
+        self.assertNotIn(RECAP_PLAN_SYSTEM, systems)
         self.assertEqual(caption_in, [])
 
     def test_recap_requires_dialogue_cues(self):

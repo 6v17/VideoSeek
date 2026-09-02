@@ -302,25 +302,16 @@ class UnderstandingLlmGuiMixin:
         form.hint_llm_status.setText(text)
         self.show_error_dialog(text)
 
-    def export_current_video_recap(self):
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
-        from src.services.understanding_service import load_evidence_bundle, resolve_current_media_path
-
+    def export_current_video_recap(self, start_from: str = "plan"):
         if getattr(self, "_recap_worker", None) is not None:
             return
+        if not isinstance(start_from, str):
+            start_from = "plan"
         video_id = self._selected_understanding_video_id()
         if not video_id:
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get("understanding_video_select_hint", "Select an indexed video."),
-                kind="warning",
-            )
-            return
-        evidence = load_evidence_bundle(video_id, config=load_config(), mode=UNDERSTANDING_MODE_MOTION)
-        if not evidence:
-            self.show_info_dialog(
-                self.texts.get("warning_title", "Warning"),
-                self.texts.get("understanding_export_recap_empty", "Generate motion notes first."),
                 kind="warning",
             )
             return
@@ -342,8 +333,7 @@ class UnderstandingLlmGuiMixin:
                 kind="warning",
             )
             return
-        stored = str((evidence.get("video") or {}).get("video_path") or "")
-        video_path = resolve_current_media_path(video_id, stored=stored, config=load_config())
+        video_path = self._current_recap_video_path()
         dest = os.path.dirname(video_path) or ""
         if not dest:
             dest = QFileDialog.getExistingDirectory(
@@ -354,9 +344,6 @@ class UnderstandingLlmGuiMixin:
         if not dest:
             return
         page = self.understanding_page
-        start_from = "plan"
-        if hasattr(page, "input_recap_start"):
-            start_from = str(page.input_recap_start.currentData() or "plan")
         if start_from in {"plan", "plan_only"}:
             from src.services.recap_service import list_speech_dialogue_cues, recap_speaker_stats
 
@@ -373,7 +360,7 @@ class UnderstandingLlmGuiMixin:
                 confirm_text=self.texts.get("understanding_recap_speakers_continue", "Continue"),
             ):
                 return
-        if start_from == "match" and not self._current_video_has_recap_beats():
+        if start_from in {"match", "match_only"} and not self._current_video_has_recap_beats():
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get(
@@ -395,6 +382,7 @@ class UnderstandingLlmGuiMixin:
             return
         start_status = {
             "match": "understanding_export_recap_matching",
+            "match_only": "understanding_export_recap_matching",
             "captions": "understanding_export_recap_captions",
         }.get(start_from, "understanding_export_recap_planning")
         page.lbl_status.setText(self.texts.get(start_status, "Generating recap…"))
@@ -421,6 +409,10 @@ class UnderstandingLlmGuiMixin:
             plan_prompt = str(page.input_recap_plan_prompt.toPlainText() or "")
         if hasattr(page, "input_recap_caption_prompt"):
             caption_prompt = str(page.input_recap_caption_prompt.toPlainText() or "")
+        self._recap_motion_timeline_shown = False
+        if hasattr(self, "_prepare_understanding_timeline_for_generation"):
+            self._prepare_understanding_timeline_for_generation()
+            page.chunk_timeline.set_generating_index(-1)
         worker = RecapTimelineWorker(
             video_id,
             dest,
@@ -454,8 +446,8 @@ class UnderstandingLlmGuiMixin:
                 active_page.input_recap_caption_prompt.setEnabled(True)
             if hasattr(active_page, "btn_reset_recap_prompt"):
                 active_page.btn_reset_recap_prompt.setEnabled(True)
-            if hasattr(active_page, "input_recap_start"):
-                active_page.input_recap_start.setEnabled(True)
+            if hasattr(active_page, "chunk_timeline"):
+                active_page.chunk_timeline.set_generating_index(-1)
             if hasattr(active_page, "recap_prompt_tabs"):
                 active_page.recap_prompt_tabs.setEnabled(True)
             active_page.progress_bar.setVisible(False)
@@ -479,7 +471,11 @@ class UnderstandingLlmGuiMixin:
             except Exception:
                 pass
 
+        def _on_motion_chunk(index, total, payload):
+            self._handle_recap_motion_chunk(index, total, payload)
+
         worker.progress_signal.connect(_on_progress)
+        worker.chunk_completed.connect(_on_motion_chunk)
         worker.finished_signal.connect(self._finish_recap_export)
         worker.error_signal.connect(
             lambda message: self.show_error_dialog(
@@ -507,6 +503,15 @@ class UnderstandingLlmGuiMixin:
                 duration=float(result.get("duration_sec") or 0.0),
                 path=str(result.get("beats_path") or ""),
             )
+        elif stage == "match":
+            message = self.texts.get(
+                "understanding_export_recap_match_done",
+                "Matched {count} shots / {duration:.0f}s\n{path}\nThen pack captions, or export a Jianying draft / FCPXML.",
+            ).format(
+                count=int(result.get("clip_count") or 0),
+                duration=float(result.get("duration_sec") or 0.0),
+                path=str(result.get("cuts_path") or ""),
+            )
         else:
             message = self.texts.get(
                 "understanding_export_recap_done",
@@ -517,6 +522,23 @@ class UnderstandingLlmGuiMixin:
                 path=str(result.get("cuts_path") or result.get("srt_path") or ""),
             )
         warn_lines = []
+        needed = int(result.get("motion_needed") or 0)
+        filled = int(result.get("motion_filled") or 0)
+        if result.get("motion_checked"):
+            if needed > 0:
+                warn_lines.append(
+                    self.texts.get(
+                        "understanding_export_recap_motion_filled",
+                        "Filled change notes on {filled}/{needed} beat-window segments before matching.",
+                    ).format(filled=filled, needed=needed)
+                )
+            else:
+                warn_lines.append(
+                    self.texts.get(
+                        "understanding_export_recap_motion_none",
+                        "No beat-window change notes were needed before matching.",
+                    )
+                )
         for key in result.get("warnings") or []:
             line = str(self.texts.get(str(key), "") or "").strip() or str(key).strip()
             if line:
@@ -603,11 +625,6 @@ class UnderstandingLlmGuiMixin:
         ).format(count=count)
         self.understanding_page.lbl_status.setText(f"{message} {written.name}")
         self._sync_recap_export_button()
-        page = self.understanding_page
-        if hasattr(page, "input_recap_start"):
-            index = page.input_recap_start.findData("match")
-            if index >= 0:
-                page.input_recap_start.setCurrentIndex(index)
 
     def _current_recap_video_path(self) -> str:
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
@@ -616,7 +633,7 @@ class UnderstandingLlmGuiMixin:
         video_id = self._selected_understanding_video_id()
         if not video_id:
             return ""
-        evidence = load_evidence_bundle(video_id, config=load_config(), mode=UNDERSTANDING_MODE_MOTION)
+        evidence = load_evidence_bundle(video_id, config=load_config(), mode=UNDERSTANDING_MODE_MOTION) or {}
         stored = str(((evidence or {}).get("video") or {}).get("video_path") or "")
         return resolve_current_media_path(video_id, stored=stored, config=load_config())
 
@@ -794,19 +811,3 @@ class UnderstandingLlmGuiMixin:
             )
             if not body or stale_caption or stale_match:
                 editor.setPlainText(default)
-
-    def _populate_recap_start_options(self, active=None):
-        page = getattr(self, "understanding_page", None)
-        if page is None or not hasattr(page, "input_recap_start"):
-            return
-        combo = page.input_recap_start
-        current = str(active or combo.currentData() or "plan")
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem(self.texts.get("understanding_recap_start_plan", "Stage 1"), "plan")
-        combo.addItem(self.texts.get("understanding_recap_start_plan_only", "Stage 1 only"), "plan_only")
-        combo.addItem(self.texts.get("understanding_recap_start_match", "Stage 2"), "match")
-        combo.addItem(self.texts.get("understanding_recap_start_captions", "Stage 3"), "captions")
-        index = combo.findData(current)
-        combo.setCurrentIndex(0 if index < 0 else index)
-        combo.blockSignals(False)

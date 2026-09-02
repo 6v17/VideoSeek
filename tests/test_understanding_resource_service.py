@@ -353,7 +353,12 @@ class UnderstandingResourceServiceTests(unittest.TestCase):
 class UnderstandingCaptionLanguageTests(unittest.TestCase):
     def test_finalize_remote_vlm_settings_uses_chinese_prompt(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
-            {"caption_language": "zh", "base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
+            {
+                "understanding_mode": "tags",
+                "caption_language": "zh",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "model": "qwen3-vl-8b-instruct",
+            }
         )
         self.assertEqual(settings["caption_language"], "zh")
         self.assertIn("标签", settings["prompt"])
@@ -361,7 +366,12 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
 
     def test_finalize_remote_vlm_settings_uses_english_prompt(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
-            {"caption_language": "en", "base_url": "http://127.0.0.1:1234/v1", "model": "qwen3-vl-8b-instruct"}
+            {
+                "understanding_mode": "tags",
+                "caption_language": "en",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "model": "qwen3-vl-8b-instruct",
+            }
         )
         self.assertEqual(settings["caption_language"], "en")
         self.assertTrue(settings["prompt"].startswith("Extract concise English tags"))
@@ -408,6 +418,7 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
     def test_finalize_uses_custom_prompts_when_enabled(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
             {
+                "understanding_mode": "tags",
                 "caption_language": "zh",
                 "use_custom_prompts": True,
                 "custom_caption_prompt": "  Custom caption only.  ",
@@ -426,6 +437,7 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
     def test_custom_prompt_empty_falls_back_to_language_default(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
             {
+                "understanding_mode": "tags",
                 "caption_language": "en",
                 "use_custom_prompts": True,
                 "custom_caption_prompt": "",

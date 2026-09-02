@@ -353,6 +353,77 @@ def update_dialogue_segment_speaker(
             return True
 
 
+def update_dialogue_segment(
+    video_id: str,
+    seg_index: int,
+    *,
+    start: float | None = None,
+    end: float | None = None,
+    text: str | None = None,
+    speaker: str | None = None,
+    config=None,
+) -> bool:
+    """Update time, text, and/or speaker on one saved cue."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return False
+    try:
+        index = int(seg_index)
+    except (TypeError, ValueError):
+        return False
+    next_text = None if text is None else str(text or "").strip()
+    if text is not None and not next_text:
+        return False
+    has_time = start is not None or end is not None
+    if text is None and speaker is None and not has_time:
+        return False
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            row = conn.execute(
+                """
+                SELECT start_sec, end_sec
+                FROM segments
+                WHERE video_id = ? AND seg_index = ?
+                """,
+                (video_id, index),
+            ).fetchone()
+            if row is None:
+                return False
+            next_start = float(row["start_sec"] or 0.0) if start is None else max(0.0, float(start))
+            next_end = float(row["end_sec"] or 0.0) if end is None else max(0.0, float(end))
+            if next_end <= next_start:
+                next_end = next_start + 0.2
+            assignments: list[str] = []
+            values: list[Any] = []
+            if has_time:
+                assignments.extend(["start_sec = ?", "end_sec = ?"])
+                values.extend([next_start, next_end])
+            if next_text is not None:
+                assignments.extend(["text = ?", "text_cf = ?"])
+                values.extend([next_text, next_text.casefold()])
+            if speaker is not None:
+                assignments.append("speaker = ?")
+                values.append(normalize_dialogue_speaker(speaker))
+            values.extend([video_id, index])
+            cur = conn.execute(
+                f"""
+                UPDATE segments
+                SET {", ".join(assignments)}
+                WHERE video_id = ? AND seg_index = ?
+                """,
+                tuple(values),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return False
+            conn.execute(
+                "UPDATE transcripts SET updated_at = ? WHERE video_id = ?",
+                (time.time(), video_id),
+            )
+            conn.commit()
+            return True
+
+
 def update_dialogue_segment_speakers(
     video_id: str,
     assignments: dict[int, str],

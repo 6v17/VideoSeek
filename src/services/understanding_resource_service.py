@@ -57,7 +57,7 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "model": "qwen3-vl-8b-instruct",
     "api_keys": {},
     "caption_language": "zh",
-    "understanding_mode": "tags",
+    "understanding_mode": "motion",
     "use_custom_prompts": False,
     "custom_caption_prompt": "",
     "custom_tag_prompt": "",

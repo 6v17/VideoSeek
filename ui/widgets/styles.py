@@ -292,6 +292,21 @@ QCheckBox:disabled {
     padding: 5px 14px;
     border-radius: 6px;
 }
+#UnderstandingStepBar {
+    background: transparent;
+    border: none;
+}
+#UnderstandingStepBar #GhostButton {
+    min-height: 24px;
+    max-height: 26px;
+    padding: 1px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+}
+#UnderstandingStepBar #GhostButton:pressed {
+    padding-top: 2px;
+    padding-bottom: 0px;
+}
 #UnderstandingTimelineBlock {
     background: __FIELD__;
     border: 1px solid __LINE__;

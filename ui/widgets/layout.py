@@ -23,6 +23,11 @@ WINDOW_SIZES = {
         "minimum": QSize(780, 520),
         "screen_margin": 72,
     },
+    "recap_beats_dialog": {
+        "preferred": QSize(1280, 820),
+        "minimum": QSize(1040, 680),
+        "screen_margin": 72,
+    },
     "donate_dialog": {
         "preferred": QSize(520, 720),
         "minimum": QSize(460, 640),
