@@ -140,13 +140,76 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 self.assertTrue(fuzzy_dialogue_accepts(tight, "都杀了"))
                 self.assertAlmostEqual(tight, 1.0, places=5)
                 self.assertGreater(tight, loose)
-                # Order does not matter.
+                # Order does not matter for scatter score; ranking prefers complete spans.
                 scrambled = fuzzy_dialogue_match_score("了杀都在这里", "都杀了")
                 self.assertAlmostEqual(scrambled, 1.0, places=5)
 
                 self.assertTrue(delete_dialogue_transcript("vid1"))
                 self.assertIsNone(load_dialogue_transcript("vid1"))
                 self.assertFalse(has_any_dialogue_transcript())
+
+    def test_fuzzy_ranks_complete_subfield_before_scatter(self):
+        from src.storage.dialogue_transcript_store import (
+            _fuzzy_dialogue_rank,
+            iter_matching_transcript_segment_rows,
+            save_dialogue_transcript,
+        )
+
+        complete_len, complete_score = _fuzzy_dialogue_rank("全都杀了", "都杀了")
+        scrambled_len, scrambled_score = _fuzzy_dialogue_rank("了杀都在这里", "都杀了")
+        partial_len, partial_score = _fuzzy_dialogue_rank("我都知道了", "都杀了")
+        self.assertEqual(complete_len, 3)
+        self.assertEqual(scrambled_len, 1)
+        self.assertEqual(partial_len, 1)
+        self.assertAlmostEqual(complete_score, 1.0, places=5)
+        self.assertAlmostEqual(scrambled_score, 1.0, places=5)
+        self.assertAlmostEqual(partial_score, 2.0 / 3.0, places=5)
+        self.assertGreater(complete_len, scrambled_len)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "vid1",
+                    [
+                        {
+                            "start": 1.0,
+                            "end": 2.0,
+                            "text": "了杀都在这里",
+                            "language": "zh",
+                        },
+                        {
+                            "start": 3.0,
+                            "end": 4.0,
+                            "text": "全都杀了",
+                            "language": "zh",
+                        },
+                        {
+                            "start": 0.0,
+                            "end": 0.5,
+                            "text": "我都知道了",
+                            "language": "zh",
+                        },
+                    ],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "a.mp4"),
+                    asr_source="ocr",
+                )
+                ranked = list(
+                    iter_matching_transcript_segment_rows(
+                        "都杀了",
+                        video_ids=["vid1"],
+                        match_mode="fuzzy",
+                    )
+                )
+                self.assertEqual(
+                    [item["text"] for item in ranked],
+                    ["全都杀了", "了杀都在这里", "我都知道了"],
+                )
 
     def test_overwrite_replaces_segments(self):
         from src.storage.dialogue_transcript_store import (

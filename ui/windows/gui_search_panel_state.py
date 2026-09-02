@@ -323,7 +323,7 @@ class SearchPanelStateMixin:
         if mode == "fuzzy":
             fallback = texts.get(
                 "search_dialogue_match_fuzzy_hint",
-                "Fuzzy match tolerates short OCR typos in subtitle text.",
+                "Fuzzy match: complete query spans first, then single-char hit rate.",
             )
             ready_key = "search_dialogue_match_fuzzy_hint_ready"
         else:

@@ -357,6 +357,22 @@ class UnderstandingLlmGuiMixin:
         start_from = "plan"
         if hasattr(page, "input_recap_start"):
             start_from = str(page.input_recap_start.currentData() or "plan")
+        if start_from in {"plan", "plan_only"}:
+            from src.services.recap_service import list_speech_dialogue_cues, recap_speaker_stats
+
+            speaker_stats = recap_speaker_stats(
+                list_speech_dialogue_cues(video_id, config=load_config())
+            )
+            unnamed = int(speaker_stats.get("unnamed") or 0)
+            if unnamed > 0 and not self.show_confirm_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_speakers_unnamed_confirm",
+                    "{count} dialogue lines are still unnamed. Continue anyway?",
+                ).format(count=unnamed),
+                confirm_text=self.texts.get("understanding_recap_speakers_continue", "Continue"),
+            ):
+                return
         if start_from == "match" and not self._current_video_has_recap_beats():
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
@@ -480,17 +496,118 @@ class UnderstandingLlmGuiMixin:
         if stopped or not ok:
             return
         result = dict(payload or {})
-        message = self.texts.get(
-            "understanding_export_recap_done",
-            "Generated {count} shots / {duration:.0f}s\n{path}\nThen export a Jianying draft or FCPXML.",
-        ).format(
-            count=int(result.get("clip_count") or 0),
-            duration=float(result.get("duration_sec") or 0.0),
-            path=str(result.get("cuts_path") or result.get("srt_path") or ""),
+        stage = str(result.get("stage") or "")
+        if stage == "plan" and not result.get("cuts_path"):
+            message = self.texts.get(
+                "understanding_export_recap_plan_done",
+                "Saved plan with {count} beats / target {duration:.0f}s\n{path}",
+            ).format(
+                count=int(result.get("beat_count") or result.get("clip_count") or 0)
+                or self._count_saved_recap_beats(),
+                duration=float(result.get("duration_sec") or 0.0),
+                path=str(result.get("beats_path") or ""),
+            )
+        else:
+            message = self.texts.get(
+                "understanding_export_recap_done",
+                "Generated {count} shots / {duration:.0f}s\n{path}\nThen export a Jianying draft or FCPXML.",
+            ).format(
+                count=int(result.get("clip_count") or 0),
+                duration=float(result.get("duration_sec") or 0.0),
+                path=str(result.get("cuts_path") or result.get("srt_path") or ""),
+            )
+        warn_lines = []
+        for key in result.get("warnings") or []:
+            line = str(self.texts.get(str(key), "") or "").strip() or str(key).strip()
+            if line:
+                warn_lines.append(line)
+        if warn_lines:
+            message = message + "\n" + "\n".join(warn_lines)
+        self.understanding_page.lbl_status.setText(
+            (message.split("\n", 1)[0] + (" · " + warn_lines[0] if warn_lines else ""))
         )
-        self.understanding_page.lbl_status.setText(message.split("\n", 1)[0])
         self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
         self._sync_recap_export_button()
+        if stage == "plan" and not result.get("cuts_path"):
+            self.edit_current_recap_beats()
+
+    def _count_saved_recap_beats(self) -> int:
+        from src.services.recap_service import load_recap_beats
+
+        video_path = self._current_recap_video_path()
+        if not video_path:
+            return 0
+        saved = load_recap_beats(video_path, video_id=self._selected_understanding_video_id()) or {}
+        return len(list(saved.get("beats") or []))
+
+    def edit_current_recap_beats(self):
+        from src.services.recap_service import load_recap_beats, recap_target_sec, save_recap_plan_edits
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+        from src.services.understanding_service import load_evidence_bundle
+        from ui.dialogs.recap_beats import RecapBeatsDialog
+
+        video_id = self._selected_understanding_video_id()
+        video_path = self._current_recap_video_path()
+        if not video_id or not video_path:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        saved = load_recap_beats(video_path, video_id=video_id)
+        if not saved:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_beats_missing",
+                    "No story plan yet. Start from stage 1.",
+                ),
+                kind="warning",
+            )
+            return
+        evidence = load_evidence_bundle(video_id, config=load_config(), mode=UNDERSTANDING_MODE_MOTION) or {}
+        duration = float(((evidence.get("video") or {}).get("duration_sec") or saved.get("duration_sec") or 0.0))
+        target = float(saved.get("target_sec") or recap_target_sec(duration))
+        dialog = RecapBeatsDialog(
+            self,
+            texts=self.texts,
+            title=str(saved.get("title") or ""),
+            beats=list(saved.get("beats") or []),
+            people=list(saved.get("people") or []),
+            target_sec=target,
+        )
+        if dialog.exec() != RecapBeatsDialog.DialogCode.Accepted:
+            return
+        payload = dialog.result_payload() or {}
+        try:
+            written = save_recap_plan_edits(
+                video_path,
+                video_id=video_id,
+                title=str(payload.get("title") or saved.get("title") or ""),
+                beats=list(payload.get("beats") or []),
+                people=list(payload.get("people") or []),
+                duration_sec=duration,
+                target_sec=target,
+            )
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("understanding_export_recap_failed", "Recap export failed"),
+                exc,
+            )
+            return
+        count = len(list(payload.get("beats") or []))
+        message = self.texts.get(
+            "understanding_recap_edit_saved",
+            "Saved {count} beats.",
+        ).format(count=count)
+        self.understanding_page.lbl_status.setText(f"{message} {written.name}")
+        self._sync_recap_export_button()
+        page = self.understanding_page
+        if hasattr(page, "input_recap_start"):
+            index = page.input_recap_start.findData("match")
+            if index >= 0:
+                page.input_recap_start.setCurrentIndex(index)
 
     def _current_recap_video_path(self) -> str:
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
@@ -655,18 +772,27 @@ class UnderstandingLlmGuiMixin:
         if page is None:
             return
         caption_editor = getattr(page, "input_recap_caption_prompt", None)
+        match_editor = getattr(page, "input_recap_prompt", None)
         pairs = (
             (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
-            (getattr(page, "input_recap_prompt", None), RECAP_SYSTEM),
+            (match_editor, RECAP_SYSTEM),
             (caption_editor, RECAP_CAPTION_SYSTEM),
         )
         for editor, default in pairs:
             if editor is None:
                 continue
             body = str(editor.toPlainText() or "").strip()
-            if not body or (
-                editor is caption_editor and body == str(RECAP_GAP_SYSTEM).strip()
-            ):
+            stale_caption = editor is caption_editor and (
+                body == str(RECAP_GAP_SYSTEM).strip()
+                or "按 reason、beat 和 people 写旁白" in body
+                or "连续空镜特写可以并进前一句" in body
+            )
+            stale_match = editor is match_editor and (
+                "不要写 vo" in body
+                and "换场能并进" in body
+                and '"role":"insert"' not in body.replace(" ", "")
+            )
+            if not body or stale_caption or stale_match:
                 editor.setPlainText(default)
 
     def _populate_recap_start_options(self, active=None):
@@ -678,6 +804,7 @@ class UnderstandingLlmGuiMixin:
         combo.blockSignals(True)
         combo.clear()
         combo.addItem(self.texts.get("understanding_recap_start_plan", "Stage 1"), "plan")
+        combo.addItem(self.texts.get("understanding_recap_start_plan_only", "Stage 1 only"), "plan_only")
         combo.addItem(self.texts.get("understanding_recap_start_match", "Stage 2"), "match")
         combo.addItem(self.texts.get("understanding_recap_start_captions", "Stage 3"), "captions")
         index = combo.findData(current)

@@ -739,7 +739,7 @@ def _dialogue_query_compact(needle: str) -> str:
 
 
 def build_dialogue_scatter_keys(query: str) -> list[str]:
-    """Unique single-char scatter points (order ignored; hit-rate ranking)."""
+    """Unique single-char scatter points (order ignored)."""
     compact = _dialogue_query_compact(query)
     keys: list[str] = []
     seen: set[str] = set()
@@ -759,20 +759,42 @@ def _scatter_hit_count(hay: str, hay_compact: str, keys: list[str]) -> tuple[int
     return hits, len(keys)
 
 
-def fuzzy_dialogue_match_score(text: str, query: str) -> float:
-    """Unordered single-char hit rate: more landings ⇒ higher rank."""
+def _longest_query_subfield_len(hay: str, hay_compact: str, compact: str) -> int:
+    """Longest contiguous query span that appears in the subtitle."""
+    n = len(compact)
+    if n == 0:
+        return 0
+    if compact in hay or compact in hay_compact:
+        return n
+    for length in range(n - 1, 0, -1):
+        for index in range(0, n - length + 1):
+            span = compact[index : index + length]
+            if span in hay or span in hay_compact:
+                return length
+    return 0
+
+
+def _fuzzy_dialogue_rank(text: str, query: str) -> tuple[int, float]:
+    """(longest complete query subfield length, unordered scatter hit rate)."""
     needle = normalize_dialogue_query(query)
     if not needle:
-        return 0.0
+        return 0, 0.0
     hay = _nfkc_casefold(text)
     if not hay:
-        return 0.0
+        return 0, 0.0
     keys = build_dialogue_scatter_keys(needle)
     if not keys:
-        return 0.0
+        return 0, 0.0
     hay_compact = _strip_noise(hay)
+    compact = _dialogue_query_compact(needle)
     hits, total = _scatter_hit_count(hay, hay_compact, keys)
-    return float(hits / float(total)) if total else 0.0
+    scatter = float(hits / float(total)) if total else 0.0
+    return _longest_query_subfield_len(hay, hay_compact, compact), scatter
+
+
+def fuzzy_dialogue_match_score(text: str, query: str) -> float:
+    """Unordered single-char hit rate (tie-break after complete subfields)."""
+    return _fuzzy_dialogue_rank(text, query)[1]
 
 
 def fuzzy_dialogue_accepts(score: float, query: str) -> bool:
@@ -800,7 +822,7 @@ def iter_matching_transcript_segment_rows(
 
     ``match_mode``:
     - ``exact`` / ``segment`` / ``keyword``: contiguous casefolded substring (SQL INSTR)
-    - ``fuzzy``: unordered single-char scatter hit-rate ranking
+    - ``fuzzy``: complete query subfields first, then unordered scatter hit-rate
     """
     needle = normalize_dialogue_query(query)
     if not needle:
@@ -901,7 +923,7 @@ def iter_matching_transcript_segment_rows(
             yield from _emit_exact(sql, [needle])
             return
 
-        # Fuzzy: OR any scatter char, then rank by unordered hit rate.
+        # Fuzzy: OR any scatter char; complete subfields first, then hit rate.
         probes = _fuzzy_probe_needles(needle)
         if not probes:
             return
@@ -912,7 +934,7 @@ def iter_matching_transcript_segment_rows(
         or_parts = [f"instr(s.text_cf, ?) > 0" for _ in probes]
         where_params: list[Any] = list(probes)
         where_sql = "(" + " OR ".join(or_parts) + ")"
-        scored: list[dict[str, Any]] = []
+        scored: list[tuple[int, dict[str, Any]]] = []
         seen_keys: set[tuple[str, float, float, str]] = set()
 
         def _collect(sql: str, params: list[Any]) -> None:
@@ -925,7 +947,7 @@ def iter_matching_transcript_segment_rows(
                 if not text:
                     continue
                 text_cf = str(row["text_cf"] or "").strip() or text.casefold()
-                score = fuzzy_dialogue_match_score(text_cf, needle)
+                subfield_len, score = _fuzzy_dialogue_rank(text_cf, needle)
                 if not fuzzy_dialogue_accepts(score, needle):
                     continue
                 key = (
@@ -937,7 +959,7 @@ def iter_matching_transcript_segment_rows(
                 if key in seen_keys:
                     continue
                 seen_keys.add(key)
-                scored.append(_row_dict(row, score=score))
+                scored.append((subfield_len, _row_dict(row, score=score)))
 
         order_sql = " ORDER BY t.video_id, s.start_sec, s.end_sec, s.seg_index"
 
@@ -983,14 +1005,15 @@ def iter_matching_transcript_segment_rows(
 
         scored.sort(
             key=lambda item: (
-                -float(item.get("score") or 0.0),
-                str(item.get("video_id") or ""),
-                float(item.get("start") or 0.0),
+                -int(item[0] or 0),
+                -float(item[1].get("score") or 0.0),
+                str(item[1].get("video_id") or ""),
+                float(item[1].get("start") or 0.0),
             )
         )
         if max_hits is not None:
             scored = scored[: max(1, max_hits)]
-        yield from scored
+        yield from (item[1] for item in scored)
 
 
 def list_shared_transcript_segments(

@@ -21,8 +21,9 @@ MIN_CLIP_SEC = 4.0
 MAX_CLIP_SEC = 12.0
 MAX_TTS_CLIP_SEC = 36.0
 TARGET_RECAP_SEC = 330
-MIN_RECAP_SEC = 300
-MAX_RECAP_SEC = 390
+MIN_RECAP_SEC = 180
+MAX_RECAP_SEC = 480
+RECAP_STORY_RATIO = 0.18
 VO_FILL_RATIO = 0.87
 VO_COVER_RATIO = 0.87
 MIN_VO_FILL = 0.85
@@ -31,6 +32,7 @@ MIN_BEAT_BUDGET_SEC = 8.0
 MAX_BEAT_BUDGET_SEC = 24.0
 HARD_MIN_BEAT_SEC = 6.0
 RECAP_START_PLAN = "plan"
+RECAP_START_PLAN_ONLY = "plan_only"
 RECAP_START_MATCH = "match"
 RECAP_START_CAPTIONS = "captions"
 MATCH_BEATS_PER_WAVE = 7
@@ -73,7 +75,7 @@ RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划，只规划故事节拍
 因果必须连续，宁多勿跳：每一次对峙、每一次身份/目标变化、每一个关键发现都要单独成条。
 禁止把两次同类事件并成一条；禁止从「出事」直接跳到「结果」——中间过程必须有自己的 beat。
 必须覆盖正片开场、中段推进、以及正片收束。不要把全部 beats 堆在中后段。
-成片目标约 5 分半：因果一条不删，用压缩过渡和低权重镜头控时长，不要靠删剧情来缩短。
+成片时长按原片比例夹在约 3–8 分钟：因果一条不删，短片少注水，长集压缩过场，不要靠删剧情来缩短。
 主线因果是骨架，质感点到为止，不要为了细把过场拆成一串独立 beat：
 - 1–2 条设定/空间/规则展示（importance 0.25–0.45）
 - 1–2 条角色侧面（表情、习惯、态度、关系，不是新冲突）
@@ -144,7 +146,7 @@ RECAP_SYSTEM = """你是影视解说剪辑 Agent 的镜头规划节点。
 
 beats 决定「讲什么」，是叙事真相来源。
 Chunk 决定「看什么」，是视觉证据来源。
-people 是人物称呼表。口播必须用表里的稳定称呼，不要把两个人写成同一个他。
+people 是人物称呼表。reason 里用表里的稳定称呼，不要把两个人写成同一个他。
 对白只确认台词内容；asr[].speaker 非空时就是谁在说，不要改。
 不要把对白里的名字随便安到出镜人身上。
 
@@ -153,44 +155,34 @@ people 是人物称呼表。口播必须用表里的稳定称呼，不要把两�
 错误：beat 是「这人发现钥匙」，Chunk 是「拿起杯子」，却写成「发现隐藏线索」。
 正确：找不到钥匙画面就换 Chunk，或明说画面只是相关反应，不要改写事件。
 
-【旁白规则】
-1. vo 必须是第三人称影视解说口吻，像 B 站影视速看。
-2. 一句一个事实，不要用超长从句把两件事拧成一句。句子数量按画面时长来，不要只丢一句把画面晾着。
-3. 口播时长必须盖住该镜画面的 85–90%（1.35 倍约每秒 6 字）。8 秒镜大约 2–3 句，12 秒大约 3–4 句。
-   主镜口播按「主镜 + 后续空镜特写」合计时长写够；特写 clip 的 vo 可空。
-4. 不要把已经讲完的因果再注水，也不要只写半句。
-5. 可以短吐槽，但不要改变事实。
-6. 禁止复制 ASR 长句、禁止第一人称角色独白、禁止编造关系。
-错误：「我是店长，现在开始盘点。」
-正确：「柜台后的店长宣布开始盘点。」
-7. """ + RECAP_NAME_POLICY + """口播跟 beat / people 的称呼走，不要改成另一个人。
-错误：职员在说话，写成「女人说拒收」或「女主说拒收」。
-正确：「柜台职员当众拒收。」
-8. 引用原对白只能极短，用「」包裹。对白里的人名若不是在称呼当前这个人，不要拿来当他的名字。
+【口播】
+不要写 vo。正式旁白由下一阶段「铺字幕」完成。JSON 里不要带 vo 字段。
 
 【镜头规则】
-1. 每个 beat 已有 budget_sec（成片配额）和 shots（建议刀数）。高权重多讲、多留证据镜；低权重少讲或一刀带过。
+1. 每个 beat 已有 budget_sec（成片配额）和 shots（建议刀数）。高权重多留证据镜；低权重少留或一刀带过。
 2. Chunk 是基本单位。优先用 cap 视觉事件判断画面。
 3. 一个 beat 可用相邻 Chunk：建立、动作、反应、特写。不要为了碎而碎。
 4. 每个镜头至少一种作用：推进剧情、关键动作、情绪强化、必要过渡、重要细节。
 5. 同一个 beat 内，相邻 clip 必须提供新的视觉信息。禁止用多个近似镜头重复描述同一事件。
-6. 普通镜头 5–12 秒，过程镜头不要 3 秒闪过去。口播跟这镜画面走，不要写下一镜才发生的事。
+6. 普通镜头 5–12 秒，过程镜头不要 3 秒闪过去。
 7. src_in/src_out 必须落在对应 Chunk 时间范围内。可同时给 duration（秒）。同一连续动作可以略微连到相邻 Chunk。
-8. 成片目标约 5 分半。高权重尽量用满 budget_sec，低权重宁可短不要注水。不要为了赶时间跳过因果。
+8. 成片时长按原片比例约 3–8 分钟。高权重尽量用满 budget_sec，低权重宁可短不要注水。不要为了赶时间跳过因果。
 9. 不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。时间最早的开场 beat 必须留下画面；冷开场要，片头曲不要。
 10. 给定的每一条 beat 都必须至少有一刀。正片收尾不得省略。剧情过程要讲连贯，不要只留高潮闪回。
-11. 关键动作之后该切特写、反应、表情就单独切一刀，不要和主线粘成一条长镜头。特写不要再用已经剪过的原片时段。
-12. 换场能并进主线就不要单独一刀。必须加时 vo 只交代场面，不要发明新事件，不要认错人。
+11. 关键动作之后该切特写、反应、表情就单独切一刀，不要为了省时间并进主线。shots>=2 时，后几刀常常是特写/反应，role 填 insert。特写不要再用已经剪过的原片时段。
+12. 换场能并进主线就不要单独一刀。必须加时 reason 只交代场面，不要发明新事件，不要认错人。换场不要标 insert。
+13. """ + RECAP_NAME_POLICY + """reason 跟 beat / people 的称呼走。
 
-每个 clip 写 beat_id、reason、duration。reason 说明这个画面如何证明该 beat。同一句若需补特写，第二刀 vo 可空。
+每个 clip 写 beat_id、reason、duration。特写/反应再写 role。reason 说明这个画面如何证明该 beat。
 
 JSON schema:
-{"title":"...","clips":[{"name":"01 短名","beat_id":1,"chunk_index":0,"src_in":0.0,"src_out":8.5,"duration":8.5,"vo":"第三人称解说旁白","reason":"该镜包含 beat 所需的人物反应"}]}
+{"title":"...","clips":[{"name":"01 柜台","beat_id":1,"chunk_index":0,"src_in":0.0,"src_out":8.5,"duration":8.5,"reason":"该镜包含 beat 所需的动作"},{"name":"02 特写","beat_id":1,"chunk_index":1,"src_in":9.0,"src_out":12.5,"duration":3.5,"role":"insert","reason":"拍下支票后的表情反应"}]}
 """
 
 RECAP_GAP_SYSTEM = """你是影视解说的查漏员。画面已经锁定，已有字幕不要改，只补漏掉的解说。
 
-任务：找出「画面在讲事，但这条镜头没有字幕」的漏镜，按该镜时长补口播，盖住约 85–90% 画面。
+任务：找出「这条节拍在讲事，但这条镜头没有字幕」的漏镜，按该镜时长补口播，盖住约 85–90% 画面。
+口播讲 beat 的事件，不要朗读画面描述、reason、VLM 说明。
 
 【语速】
 1. 按 1.0 倍约每秒 5 个汉字/字母，1.35 倍约每秒 6.75 个。实际可用按 fill=0.9，约每秒 6 个。
@@ -198,33 +190,43 @@ RECAP_GAP_SYSTEM = """你是影视解说的查漏员。画面已经锁定，已�
 
 【规则】
 1. 不要改画面，不要改已有 captions，不要发明剧情，不要翻译对白。
-2. 只处理 gaps 里的镜头。过渡镜填 skip。特写/反应对着这镜补口播，不要空着。
+2. 只处理 gaps 里的镜头。换场/过场空镜填 skip。特写/反应对着这镜补口播，不要 skip，不要空着。
 3. 推进剧情、关键动作、必要信息的镜头不能空着。空着就是漏。
 4. 新口播要接上前后句，第三人称影视解说口吻。不要超长从句。不要重复前后句已经讲过的事实。
 5. """ + RECAP_NAME_POLICY + """不要把配角对白安成别人在说。
 6. 引用原对白只能极短，用「」包裹。对白里的人名也不要拿来称呼画面人物。
+7. 禁止看图说话：不要说「画面中可以看到」「一个穿红衣服的女人走进店」。要说「红衣女人进店」。
 
 只输出 JSON，不要 markdown。
 JSON schema:
 {"fills":[{"i":3,"text":"第三人称解说","skip":false}]}
 """
 
-RECAP_CAPTION_SYSTEM = """你是影视解说的口播整理员。画面已经锁定，不要改镜头，只重写旁白。
+RECAP_CAPTION_SYSTEM = """你是影视解说的口播员。画面已经锁定，不要改镜头。
 
-任务：按每条 caption 覆盖的画面时长，把 seed 里的解说整理成能在 1.35 倍语速下说完的完整旁白。
+任务：按每条 caption 覆盖的画面时长，用第三人称把 beat 的事件讲成能听的解说，并在 1.35 倍语速下说完。
 口播时长盖住该段画面的 85–90%。
+
+event 是叙事真相：发生了什么、谁对谁做了什么。
+reason、画面描述、VLM/运动说明只是剪辑备忘，禁止照读，禁止扩写成看图说话。
+错误：「一个穿红衣服的女人走进店里，柜台后面站着职员。」
+正确：「红衣女人进店。柜台职员拒收。」
+
+seed 若已有解说，整理成完整旁白，不要改成画面描述。
+seed 为空时只根据 event 和 people 写旁白，不要编新剧情，不要翻译对白。
 
 【语速】
 1. 1.0 倍约每秒 5 个汉字/字母，1.35 倍约每秒 6.75 个。可用字数按 fill=0.87，约每秒 6 个。
 2. 每条 caption 的字数对照 clips 的 budget：不要少于约 85%，也不要超过 100%。
 
 【规则】
-1. 不要改画面。from/to 用 clip 的 i。连续空镜特写可以并进前一句。
+1. 不要改画面。from/to 用 clip 的 i。换场/过场空镜可以并进前一句。role=insert（特写/反应）必须单独一句，讲这镜对剧情的反应或结果，不要讲构图、脸、镜头运动。
 2. 必须写完整句子，以。！？收尾。禁止半句，禁止把一句话从中间截断。
-3. 保留 seed 的事实和人物称呼，不要发明剧情，不要翻译对白。
+3. 保留 seed / event 的事实和人物称呼，不要发明剧情，不要翻译对白。
 4. 一句一个事实，不要超长从句，但该讲完的句子必须讲完。
-5. """ + RECAP_NAME_POLICY + """口播跟 people / seed 的称呼走。
+5. """ + RECAP_NAME_POLICY + """口播跟 people 的称呼走。
 6. 引用原对白只能极短，用「」包裹。
+7. 不要报服装、站位、镜头运动，除非这件事本身改变剧情。
 
 只输出 JSON，不要 markdown。
 JSON schema:
@@ -247,6 +249,73 @@ def recap_story_window(duration_sec: float) -> tuple[float, float]:
     skip = 90.0 if duration >= 900 else 50.0
     end = max(30.0, duration - skip)
     return 0.0, round(end, 2)
+
+
+def recap_target_sec(duration_sec: float) -> float:
+    """Scale recap length to the story window, clamped to about 3–8 minutes."""
+    _start, story_end = recap_story_window(duration_sec)
+    raw = max(0.0, float(story_end or 0.0)) * RECAP_STORY_RATIO
+    return round(min(MAX_RECAP_SEC, max(MIN_RECAP_SEC, raw or TARGET_RECAP_SEC)), 1)
+
+
+def recap_duration_bounds(target_sec: float) -> tuple[float, float]:
+    target = max(MIN_RECAP_SEC, float(target_sec or TARGET_RECAP_SEC))
+    return (
+        round(max(MIN_RECAP_SEC, target * 0.9), 1),
+        round(min(MAX_RECAP_SEC, max(target, target * 1.15)), 1),
+    )
+
+
+def format_recap_clock(sec: float) -> str:
+    total = max(0.0, float(sec or 0.0))
+    minutes = int(total // 60)
+    seconds = int(round(total - minutes * 60.0))
+    if seconds >= 60:
+        minutes += 1
+        seconds = 0
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def parse_recap_clock(text: str) -> float:
+    body = str(text or "").strip().replace("，", ".").replace("：", ":")
+    if not body:
+        return 0.0
+    if ":" in body:
+        parts = [part.strip() for part in body.split(":")]
+        if len(parts) == 2:
+            return max(0.0, float(parts[0] or 0.0) * 60.0 + float(parts[1] or 0.0))
+        if len(parts) == 3:
+            return max(
+                0.0,
+                float(parts[0] or 0.0) * 3600.0
+                + float(parts[1] or 0.0) * 60.0
+                + float(parts[2] or 0.0),
+            )
+    return max(0.0, float(body))
+
+
+def recap_speaker_stats(cues: Sequence[Mapping[str, Any]] | None) -> dict[str, Any]:
+    from src.storage.dialogue_transcript_store import is_auto_speaker_label
+
+    blank = 0
+    auto = 0
+    named = 0
+    for row in cues or []:
+        label = str(row.get("speaker") or "").strip()
+        if not label:
+            blank += 1
+        elif is_auto_speaker_label(label):
+            auto += 1
+        else:
+            named += 1
+    unnamed = blank + auto
+    return {
+        "blank": blank,
+        "auto": auto,
+        "named": named,
+        "unnamed": unnamed,
+        "needs_naming": unnamed > 0,
+    }
 
 
 def opening_deadline_sec(duration_sec: float) -> float:
@@ -430,11 +499,13 @@ def recap_dialogue_status(video_id: str, *, config=None) -> dict[str, Any]:
 
 def people_from_dialogue_speakers(cues: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
     """Seed the recap people table from labeled ASR speakers."""
+    from src.storage.dialogue_transcript_store import is_auto_speaker_label
+
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in cues or []:
         label = str(row.get("speaker") or "").strip()[:40]
-        if not label or label in seen:
+        if not label or label in seen or is_auto_speaker_label(label):
             continue
         seen.add(label)
         out.append({"id": f"s{len(out) + 1}", "label": label, "look": "对白说话人"})
@@ -483,10 +554,11 @@ def build_recap_pack(video_id: str, *, config=None) -> dict[str, Any]:
 def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
     duration = float(pack.get("duration_sec") or 0.0)
     _story_start, story_end = recap_story_window(duration)
+    target = recap_target_sec(duration)
     return (
         f"原片时长 {duration:.0f} 秒。请规划 14–20 条因果 beats（最多 24），不要写 clips。\n"
         f"从 0 秒开始覆盖开场，正片在大约 {story_end:.0f} 秒结束（片尾曲之前）。\n"
-        "因果必须连续：每一次对峙、身份/目标变化、关键发现都要各自成条，中间过程不要跳。成片目标约 5 分半，用压缩过场控时长，不要删因果。\n"
+        f"因果必须连续：每一次对峙、身份/目标变化、关键发现都要各自成条，中间过程不要跳。成片目标约 {target:.0f} 秒（按原片比例，约 3–8 分钟），用压缩过场控时长，不要删因果。\n"
         "先列 people（稳定称呼），event 里用这些称呼。禁止男主/女主。不要用同一个他指两个人。\n"
         "必须有冷开场或片头曲之后的第一场戏，不要因为去 OP 把开头剧情切掉。\n"
         "不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。skip=op_ed 的不要用。\n"
@@ -511,21 +583,21 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
 def recap_user_prompt(pack: Mapping[str, Any], beats: list[Mapping[str, Any]] | None = None) -> str:
     duration = float(pack.get("duration_sec") or 0.0)
     planned = list(beats or [])
+    target = recap_target_sec(duration)
     return (
-        f"原片时长 {duration:.0f} 秒。成片目标约 5 分半。本段 beats 全部都要剪进去。\n"
+        f"原片时长 {duration:.0f} 秒。成片目标约 {target:.0f} 秒（按原片比例，约 3–8 分钟）。本段 beats 全部都要剪进去。\n"
         f"本段 beats 配额合计 {sum(float(item.get('budget_sec') or 0.0) for item in planned):.0f} 秒，clips 合计时长必须接近这个数：高权重用满，低权重一刀带过，不要漏拍也不要注水。\n"
         "先按 beats 讲故事：id、event、importance、budget_sec=这拍成片配额、shots=建议刀数、needed_visual、t=原片范围。\n"
         "beats 是叙事真相，Chunk 是视觉证据。禁止改写 beat 事件去迁就画面。\n"
-        "口播时长必须盖住该镜画面的 85–90%（1.35 倍约每秒 6 字）。一句一个事实，不要超长从句，但句子要写够，不要画面一大截只丢一句。\n"
+        "不要写 vo，正式口播由铺字幕阶段完成。\n"
         "同一 beat 的相邻镜头必须有新的视觉信息，不要用近似镜头重复同一事件，也不要把两刀粘成一条长镜头。\n"
-        "关键动作后该切特写/反应就单独一刀；特写 vo 可空，但主镜口播要按主镜+特写合计时长写够。不要再用已经剪过的原片时段。\n"
-        "换场能并进主线就不要单独一刀，vo 只交代场面，不要编新剧情。\n"
+        "shots>=2 时后几刀优先特写/反应，role=insert，不要为了赶时间并进主线。不要再用已经剪过的原片时段。\n"
+        "换场能并进主线就不要单独一刀，reason 只交代场面，不要编新剧情。\n"
         "每条 beat 的 clips 时长合计要接近 budget_sec。每个 clip 给 duration。\n"
         "时间最早的 beat 是开场，必须剪进去。不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。skip=op_ed 的 chunk 不要用。只输出这些 beats 的 clips。\n"
         "chunks 是视觉证据：i=chunk_index，t=[start,end]，cap=看得见的变化。\n"
-        "口播必须用 people 里的稳定称呼，不要把两个人写成同一个他。禁止男主/女主。每个 clip 必须带 beat_id 和 reason。\n"
-        "asr[].speaker 非空=谁在说，当事实。口播正确：「柜台职员当众拒收。红衣女人报了警。」\n"
-        "口播错误：「他拒收，他又报了警。」「女主说拒收。」「把带 speaker 的台词安到别人身上。」\n\n"
+        "reason 必须用 people 里的稳定称呼，不要把两个人写成同一个他。禁止男主/女主。每个 clip 必须带 beat_id 和 reason。\n"
+        "asr[].speaker 非空=谁在说，当事实。\n\n"
         + json.dumps(
             {
                 "duration_sec": round(duration, 2),
@@ -1336,14 +1408,16 @@ def recap_caption_user_prompt(
     clips: list[Mapping[str, Any]],
     people: Sequence[Mapping[str, Any]] | None = None,
     prev_caption: str = "",
+    beats: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
-    rows = _caption_clip_rows(clips)
-    seed = pack_captions_for_tts(clips, use_draft=True)
+    rows = _caption_clip_rows(clips, beats=beats)
+    seed = pack_captions_for_tts(clips, use_draft=False)
     total = sum(float(row.get("dur") or 0.0) for row in rows)
     return (
         f"画面已锁定，本段 {total:.0f} 秒。TTS 预设 {TTS_SPEED:.2f} 倍，不要真去合成语音。\n"
         f"1.0 倍约 {BASE_CHARS_PER_SEC:.0f} 字/秒，当前约 {CHARS_PER_SEC:.2f} 字/秒，fill={VO_FILL_RATIO}。\n"
-        "按每条 clip 的 budget 重写 seed 口播。必须是完整句子，禁止半截话。\n"
+        "按每条 clip 的 budget 写完整旁白。seed 为空时根据 event 写影视解说，禁止朗读 reason 或画面描述。\n"
+        "role=insert 必须单独一句反应口播；换场/过场空镜可并进前一句。\n"
         "口播盖住该段画面的 85–90%。from/to 用 clip 的 i。只输出 captions。\n"
         + (f"上一句旁白：{prev_caption}\n" if str(prev_caption or "").strip() else "")
         + "\n"
@@ -1363,15 +1437,17 @@ def recap_gap_user_prompt(
     captions: Sequence[Mapping[str, Any]],
     gap_indices: Sequence[int],
     people: Sequence[Mapping[str, Any]] | None = None,
+    beats: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
-    rows = _caption_clip_rows(clips)
+    rows = _caption_clip_rows(clips, beats=beats)
     gaps = [index + 1 for index in gap_indices]
     for row in rows:
         row["gap"] = int(row["i"]) in gaps
     total = sum(float(row.get("dur") or 0.0) for row in rows)
     return (
         f"画面已锁定，成片 {total:.0f} 秒。TTS 预设 {TTS_SPEED:.2f} 倍。已有字幕不要改。\n"
-        "gaps 是目前没有字幕盖住的镜头。只给确实漏解说的镜头补 fills，特写/反应/过渡填 skip。\n"
+        "gaps 是目前没有字幕盖住的镜头。只给确实漏解说的镜头补 fills。换场/过场空镜填 skip；特写/反应对着这镜补口播，不要 skip。\n"
+        "按 event 写第三人称解说。禁止朗读画面描述或 reason。\n"
         "口播跟 people 里的稳定称呼走，不要把两个人写成同一个他。\n\n"
         + json.dumps(
             {
@@ -1385,26 +1461,61 @@ def recap_gap_user_prompt(
     )
 
 
-def _caption_clip_rows(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _beats_by_id(beats: Sequence[Mapping[str, Any]] | None) -> dict[int, dict[str, Any]]:
+    out: dict[int, dict[str, Any]] = {}
+    for beat in beats or []:
+        if not isinstance(beat, Mapping):
+            continue
+        try:
+            beat_id = int(beat.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if beat_id > 0:
+            out[beat_id] = dict(beat)
+    return out
+
+
+def _caption_visual_role(clip: Mapping[str, Any]) -> str:
+    """Discrete shot role for captions. Never pass raw VLM / reason text."""
+    if _looks_like_insert_cut(clip):
+        return "insert"
+    if _clip_role(clip) == "bridge":
+        return "bridge"
+    blob = f"{clip.get('name') or ''} {clip.get('reason') or ''}"
+    if re.search(r"换场|过场|过渡", blob):
+        return "bridge"
+    return ""
+
+
+def _caption_clip_rows(
+    clips: Sequence[Mapping[str, Any]],
+    beats: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    by_id = _beats_by_id(beats)
     rows = []
     for index, clip in enumerate(clips, 1):
         start = float(clip.get("tl_in") or 0.0)
         end = float(clip.get("tl_out") or 0.0)
         dur = max(0.0, end - start)
-        rows.append(
-            {
-                "i": index,
-                "name": str(clip.get("name") or f"{index:02d}"),
-                "tl": [round(start, 3), round(end, 3)],
-                "dur": round(dur, 3),
-                "budget": tts_char_budget(dur),
-                "need": round(vo_needed_sec(str(clip.get("vo_draft") or clip.get("vo") or "")), 2),
-                "beat_id": clip.get("beat_id"),
-                "reason": str(clip.get("reason") or ""),
-                "vo": str(clip.get("vo") or "").strip(),
-                "vo_draft": str(clip.get("vo_draft") or clip.get("vo") or "").strip(),
-            }
-        )
+        try:
+            beat_id = int(clip.get("beat_id"))
+        except (TypeError, ValueError):
+            beat_id = None
+        beat = by_id.get(beat_id or 0) or {}
+        event = str(clip.get("event") or beat.get("event") or "").strip()
+        role = _caption_visual_role(clip)
+        row = {
+            "i": index,
+            "name": str(clip.get("name") or f"{index:02d}"),
+            "tl": [round(start, 3), round(end, 3)],
+            "dur": round(dur, 3),
+            "budget": tts_char_budget(dur),
+            "beat_id": beat_id,
+            "event": event,
+        }
+        if role:
+            row["role"] = role
+        rows.append(row)
     return rows
 
 
@@ -1613,7 +1724,10 @@ def _clip_vo_text(clip: Mapping[str, Any], *, use_draft: bool = False) -> str:
     return str(clip.get("vo") or clip.get("vo_draft") or "").strip()
 
 
-def _fold_short_captions(captions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _fold_short_captions(
+    captions: Sequence[Mapping[str, Any]],
+    clips: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Join flash-length captions into the previous (or next) line instead of chopping them."""
     items = [dict(cap) for cap in captions if str(cap.get("text") or "").strip()]
     if len(items) < 2:
@@ -1622,16 +1736,28 @@ def _fold_short_captions(captions: Sequence[Mapping[str, Any]]) -> list[dict[str
     def _dur(cap: Mapping[str, Any]) -> float:
         return max(0.0, float(cap.get("tl_out") or 0.0) - float(cap.get("tl_in") or 0.0))
 
+    def _is_insert_cap(cap: Mapping[str, Any]) -> bool:
+        if not clips:
+            return False
+        try:
+            start = int(cap.get("from") or 1) - 1
+            end = int(cap.get("to") or start + 1) - 1
+        except (TypeError, ValueError):
+            return False
+        if start < 0 or end >= len(clips) or start > end:
+            return False
+        return all(_looks_like_insert_cut(clips[index]) for index in range(start, end + 1))
+
     out: list[dict[str, Any]] = [items[0]]
     for cap in items[1:]:
-        if _dur(cap) < MIN_STANDALONE_CLIP_SEC:
+        if _dur(cap) < MIN_STANDALONE_CLIP_SEC and not _is_insert_cap(cap):
             prev = out[-1]
             prev["text"] = _join_vo(str(prev.get("text") or ""), str(cap.get("text") or ""))
             prev["to"] = cap.get("to", prev.get("to"))
             prev["tl_out"] = round(float(cap.get("tl_out") or prev.get("tl_out") or 0.0), 3)
             continue
         out.append(cap)
-    if len(out) >= 2 and _dur(out[0]) < MIN_STANDALONE_CLIP_SEC:
+    if len(out) >= 2 and _dur(out[0]) < MIN_STANDALONE_CLIP_SEC and not _is_insert_cap(out[0]):
         head, nxt = out[0], out[1]
         nxt["text"] = _join_vo(str(head.get("text") or ""), str(nxt.get("text") or ""))
         nxt["from"] = head.get("from", nxt.get("from"))
@@ -1685,6 +1811,8 @@ def pack_captions_for_tts(
                     cursor += 1
                     continue
                 break
+            if _looks_like_insert_cut(items[cursor]):
+                break
             if not _vo_needs_more_picture(text, covered):
                 break
             covered += _caption_clip_sec(items[cursor])
@@ -1706,7 +1834,7 @@ def pack_captions_for_tts(
                 }
             )
         index = end_i + 1
-    return _fold_short_captions(captions)
+    return _fold_short_captions(captions, items)
 
 
 def parse_caption_cues(text: str, clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -1825,13 +1953,12 @@ def fit_recap_captions_to_tts(
     config=None,
     system_prompt: str | None = None,
     people: Sequence[Mapping[str, Any]] | None = None,
+    beats: Sequence[Mapping[str, Any]] | None = None,
     should_stop_callback: Callable[[], bool] | None = None,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> list[dict[str, Any]]:
     laid = [dict(clip) for clip in clips]
-    for clip in laid:
-        clip.setdefault("vo_draft", str(clip.get("vo") or "").strip())
-    packed = pack_captions_for_tts(laid, use_draft=True)
+    packed = pack_captions_for_tts(laid, use_draft=False)
     work = apply_caption_cues(laid, packed) if packed else laid
     if not laid:
         return work
@@ -1845,7 +1972,12 @@ def fit_recap_captions_to_tts(
         for wave in waves:
             text = call_remote_llm(
                 system=resolve_recap_prompt(system_prompt, RECAP_CAPTION_SYSTEM),
-                user=recap_caption_user_prompt(wave, people=people, prev_caption=prev),
+                user=recap_caption_user_prompt(
+                    wave,
+                    people=people,
+                    prev_caption=prev,
+                    beats=beats,
+                ),
                 config=config,
                 temperature=0.3,
                 max_tokens=4096,
@@ -1930,7 +2062,9 @@ def parse_gap_fills(
         if not body:
             continue
         picture = _caption_clip_sec(items[index])
-        if picture < MIN_STANDALONE_CLIP_SEC:
+        if picture < MIN_STANDALONE_CLIP_SEC and not _looks_like_insert_cut(items[index]):
+            continue
+        if picture < 1.6:
             continue
         prev = ""
         nxt = ""
@@ -2025,7 +2159,10 @@ def normalize_cut_list(raw: Mapping[str, Any], pack: Mapping[str, Any]) -> list[
         span = src_out - src_in
         vo_need = vo_needed_sec(vo) if vo else 0.0
         max_keep = max(MAX_CLIP_SEC, min(MAX_TTS_CLIP_SEC, vo_need)) if vo else MAX_CLIP_SEC
+        insert = _looks_like_insert_cut(item)
         floor = MIN_CLIP_SEC if vo else min(MIN_CLIP_SEC, max(2.4, span))
+        if insert:
+            floor = min(floor, max(2.0, span if span >= 2.0 else 2.0))
         if span > max_keep + 0.15:
             # Keep the later part of the window (the beat), not the establishing head.
             src_in = round(src_out - max_keep, 2)
@@ -2049,20 +2186,36 @@ def normalize_cut_list(raw: Mapping[str, Any], pack: Mapping[str, Any]) -> list[
             beat_id = int(beat_raw)
         except (TypeError, ValueError):
             beat_id = None
-        out.append(
-            {
-                "name": name[:40],
-                "beat_id": beat_id,
-                "chunk_index": chunk_index_i,
-                "src_in": round(src_in, 3),
-                "src_out": round(src_out, 3),
-                "duration": round(src_out - src_in, 3),
-                "vo": vo,
-                "reason": reason,
-            }
-        )
+        role = _clip_role(item)
+        if not role and insert:
+            role = "insert"
+        row = {
+            "name": name[:40],
+            "beat_id": beat_id,
+            "chunk_index": chunk_index_i,
+            "src_in": round(src_in, 3),
+            "src_out": round(src_out, 3),
+            "duration": round(src_out - src_in, 3),
+            "vo": vo,
+            "reason": reason,
+        }
+        if role:
+            row["role"] = role
+        out.append(row)
     if not out:
         raise RuntimeError("LLM 剪辑表没有可用镜头。")
+    return out
+
+
+def stash_match_vo_as_draft(cuts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Keep accidental match VO as caption seed; official narration is written later."""
+    out: list[dict[str, Any]] = []
+    for clip in cuts or []:
+        item = dict(clip)
+        seed = str(item.get("vo_draft") or item.get("vo") or "").strip()
+        item["vo_draft"] = seed
+        item["vo"] = ""
+        out.append(item)
     return out
 
 
@@ -2236,21 +2389,32 @@ def _trim_group_to_budget(
     extra = sum(_clip_len(clip) for clip in group) - budget
     if extra <= 0.25:
         return
-    empties = [clip for clip in group if not str(clip.get("vo") or "").strip()]
+
+    def _has_vo(clip: Mapping[str, Any]) -> bool:
+        return bool(str(clip.get("vo") or clip.get("vo_draft") or "").strip())
+
+    inserts = [clip for clip in group if _looks_like_insert_cut(clip)]
+    masters = [clip for clip in group if clip not in inserts]
+    empties = [clip for clip in masters if not _has_vo(clip)]
+    voiced = [clip for clip in masters if _has_vo(clip)]
+    for clip in sorted(empties, key=_clip_len, reverse=True):
+        if extra <= 0.05:
+            return
+        extra -= _shrink_clip(clip, extra, min_len=2.4)
+    for clip in sorted(voiced, key=_clip_len, reverse=True):
+        if extra <= 0.05:
+            return
+        extra -= _shrink_clip(clip, extra, min_len=MIN_CLIP_SEC)
+    for clip in inserts:
+        if extra <= 0.05:
+            return
+        extra -= _shrink_clip(clip, extra, min_len=2.0)
     while extra > 0.25 and len(group) > 1 and empties:
         victim = max(empties, key=_clip_len)
         extra -= _clip_len(victim)
         empties.remove(victim)
         group.remove(victim)
         out.remove(victim)
-    order = sorted(
-        group,
-        key=lambda clip: (1 if str(clip.get("vo") or "").strip() else 0, -_clip_len(clip)),
-    )
-    for clip in order:
-        if extra <= 0.05:
-            break
-        extra -= _shrink_clip(clip, extra)
 
 
 def _make_tts_bridge_clip(
@@ -2460,7 +2624,32 @@ def _source_adjacent_clips(
     return _source_gap_sec(left, right) <= max(0.0, float(gap_sec))
 
 
+_INSERT_ROLES = {
+    "insert",
+    "closeup",
+    "close-up",
+    "cu",
+    "reaction",
+    "特写",
+    "反应",
+    "近景",
+    "表情",
+}
+_BRIDGE_ROLES = {"bridge", "transition", "换场", "过场", "过渡"}
+
+
+def _clip_role(clip: Mapping[str, Any]) -> str:
+    raw = str(clip.get("role") or "").strip().lower()
+    if raw in _INSERT_ROLES:
+        return "insert"
+    if raw in _BRIDGE_ROLES:
+        return "bridge"
+    return raw
+
+
 def _looks_like_insert_cut(clip: Mapping[str, Any]) -> bool:
+    if _clip_role(clip) == "insert":
+        return True
     blob = f"{clip.get('name') or ''} {clip.get('reason') or ''}"
     return bool(re.search(r"特写|近景|反应|表情|眼神|脸|细节", blob))
 
@@ -2529,6 +2718,13 @@ def _cut_to_next_shot(prev: dict[str, Any], clip: Mapping[str, Any]) -> dict[str
     c_in, c_out = _clip_src_span(clip)
     if c_in >= p_out - 0.04:
         return dict(clip)
+    insert = _looks_like_insert_cut(clip)
+    if insert:
+        if c_in >= p_in + 0.8:
+            prev["src_out"] = round(min(c_in, p_out), 3)
+            prev["duration"] = round(float(prev["src_out"]) - p_in, 3)
+            return dict(clip)
+        return dict(clip)
     if c_in <= p_in + 0.25 and c_out <= p_out + 0.25:
         return None
     if c_in >= p_in + 0.35 and (c_in - p_in) >= 1.6:
@@ -2550,6 +2746,8 @@ def _should_merge_source_clips(left: Mapping[str, Any], right: Mapping[str, Any]
     overlap = _source_overlap_sec(left, right)
     adjacent = overlap >= SOURCE_OVERLAP_MERGE_SEC or _source_adjacent_clips(left, right)
     if not adjacent:
+        return False
+    if _looks_like_insert_cut(left) or _looks_like_insert_cut(right):
         return False
     if _is_flash_cut(left) or _is_flash_cut(right):
         return True
@@ -2716,12 +2914,37 @@ def resolve_recap_system_prompt(text: str | None) -> str:
     return resolve_recap_prompt(text, RECAP_SYSTEM)
 
 
+def _try_story_plan_llm(
+    *,
+    system: str,
+    user: str,
+    config,
+    should_stop_callback: Callable[[], bool] | None,
+    temperature: float,
+    max_tokens: int,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]] | None:
+    try:
+        text = call_remote_llm(
+            system=system,
+            user=user,
+            config=config,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            should_stop_callback=should_stop_callback,
+        )
+        return parse_story_plan(text)
+    except RuntimeError:
+        return None
+
+
 def normalize_recap_start_from(value: str | None) -> str:
     key = str(value or RECAP_START_PLAN).strip().lower()
     if key in {RECAP_START_MATCH, "matching", "2"}:
         return RECAP_START_MATCH
     if key in {RECAP_START_CAPTIONS, "caption", "gaps", "3"}:
         return RECAP_START_CAPTIONS
+    if key in {RECAP_START_PLAN_ONLY, "plan-only", "planonly"}:
+        return RECAP_START_PLAN_ONLY
     return RECAP_START_PLAN
 
 
@@ -2831,6 +3054,34 @@ def write_recap_beats_file(
     return path
 
 
+def save_recap_plan_edits(
+    video_path: str,
+    *,
+    video_id: str,
+    title: str,
+    beats: Sequence[Mapping[str, Any]],
+    people: Sequence[Mapping[str, Any]] | None = None,
+    duration_sec: float = 0.0,
+    chunks: Sequence[Mapping[str, Any]] | None = None,
+    target_sec: float | None = None,
+) -> Path:
+    duration = float(duration_sec or 0.0)
+    target = float(target_sec) if target_sec is not None else recap_target_sec(duration)
+    allocated = allocate_beat_budgets(
+        list(beats),
+        chunks=list(chunks or []),
+        target_sec=target,
+        duration_sec=duration,
+    )
+    return write_recap_beats_file(
+        recap_beats_path_for_video(video_path),
+        title=str(title or "").strip() or "解说剪辑",
+        video_id=str(video_id or "").strip(),
+        allocated=allocated,
+        people=normalize_story_people({"people": list(people or [])}),
+    )
+
+
 def _recap_clip_records(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for clip in clips:
@@ -2852,6 +3103,7 @@ def _recap_clip_records(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, An
                 "vo_tl_in": clip.get("vo_tl_in"),
                 "vo_tl_out": clip.get("vo_tl_out"),
                 "reason": str(clip.get("reason") or ""),
+                "role": str(clip.get("role") or "").strip(),
             }
         )
     return rows
@@ -2943,6 +3195,8 @@ def generate_recap_timeline(
     title = plan_title
     people: list[dict[str, Any]] = []
     pack = dict(pack)
+    warnings: list[str] = []
+    target_sec = recap_target_sec(duration)
 
     if stage == RECAP_START_CAPTIONS:
         saved_cuts = load_recap_cuts(video_path, video_id=video_id)
@@ -2954,6 +3208,7 @@ def generate_recap_timeline(
             plan_title = str(saved_beats.get("title") or plan_title)
             beats_path = recap_beats_path_for_video(video_path)
             people = normalize_story_people(saved_beats)
+            allocated = list(saved_beats.get("beats") or [])
         cuts = restore_recap_vo_text(list(saved_cuts.get("clips") or []))
         cuts = refine_recap_cuts(cuts, pack)
         pack["people"] = people
@@ -2969,7 +3224,7 @@ def generate_recap_timeline(
             allocated = allocate_beat_budgets(
                 beats,
                 chunks=list(pack.get("chunks") or []),
-                target_sec=float(saved.get("target_sec") or TARGET_RECAP_SEC),
+                target_sec=float(saved.get("target_sec") or target_sec),
                 duration_sec=duration,
             )
             beats_path = write_recap_beats_file(
@@ -3003,22 +3258,23 @@ def generate_recap_timeline(
                 _raise_if_stopped()
                 _progress(22, "planning")
                 head_pack = filter_pack_to_span(pack, 0.0, first_start, pad_sec=12.0)
-                try:
-                    head_text = call_remote_llm(
-                        system=RECAP_PLAN_HEAD_SYSTEM,
-                        user=recap_plan_head_user_prompt(head_pack, beats),
-                        config=cfg,
-                        temperature=0.3,
-                        max_tokens=2048,
-                        should_stop_callback=should_stop_callback,
-                    )
-                    _head_title, head_beats, head_people = parse_story_plan(head_text)
+                head_parsed = _try_story_plan_llm(
+                    system=RECAP_PLAN_HEAD_SYSTEM,
+                    user=recap_plan_head_user_prompt(head_pack, beats),
+                    config=cfg,
+                    should_stop_callback=should_stop_callback,
+                    temperature=0.3,
+                    max_tokens=2048,
+                )
+                if head_parsed is None:
+                    warnings.append("recap_warn_plan_head")
+                    _progress(22, "plan_head_failed")
+                else:
+                    _head_title, head_beats, head_people = head_parsed
                     del _head_title
                     beats = drop_op_ed_beats(merge_story_beats(head_beats, beats), duration)
                     people = merge_story_people(head_people, people)
                     pack["people"] = people
-                except RuntimeError:
-                    pass
             if duration > 1.0 and not beats_cover_ending(beats, duration):
                 last_end = 0.0
                 for beat in beats:
@@ -3028,26 +3284,48 @@ def generate_recap_timeline(
                 _raise_if_stopped()
                 _progress(32, "closing")
                 tail_pack = filter_pack_to_span(pack, last_end, story_end, pad_sec=8.0)
-                try:
-                    tail_text = call_remote_llm(
-                        system=RECAP_PLAN_TAIL_SYSTEM,
-                        user=recap_plan_tail_user_prompt(tail_pack, beats),
-                        config=cfg,
-                        temperature=0.3,
-                        max_tokens=2048,
-                        should_stop_callback=should_stop_callback,
-                    )
-                    _tail_title, tail_beats, tail_people = parse_story_plan(tail_text)
+                tail_parsed = _try_story_plan_llm(
+                    system=RECAP_PLAN_TAIL_SYSTEM,
+                    user=recap_plan_tail_user_prompt(tail_pack, beats),
+                    config=cfg,
+                    should_stop_callback=should_stop_callback,
+                    temperature=0.3,
+                    max_tokens=2048,
+                )
+                if tail_parsed is None:
+                    warnings.append("recap_warn_plan_tail")
+                    _progress(32, "plan_tail_failed")
+                else:
+                    _tail_title, tail_beats, tail_people = tail_parsed
                     del _tail_title
                     beats = drop_op_ed_beats(merge_story_beats(beats, tail_beats), duration)
                     people = merge_story_people(people, tail_people)
-                except RuntimeError:
-                    pass
+            gaps = story_beat_gaps(beats, duration) if duration > 1.0 else []
+            if gaps:
+                _raise_if_stopped()
+                _progress(38, "plot_gaps")
+                gap_pack = filter_pack_to_spans(pack, gaps, pad_sec=16.0)
+                gap_parsed = _try_story_plan_llm(
+                    system=RECAP_PLAN_GAP_SYSTEM,
+                    user=recap_plan_gap_user_prompt(gap_pack, beats, gaps),
+                    config=cfg,
+                    should_stop_callback=should_stop_callback,
+                    temperature=0.3,
+                    max_tokens=2048,
+                )
+                if gap_parsed is None:
+                    warnings.append("recap_warn_plan_gaps")
+                    _progress(38, "plot_gaps_failed")
+                else:
+                    _gap_title, gap_beats, gap_people = gap_parsed
+                    del _gap_title
+                    beats = drop_op_ed_beats(merge_story_beats(beats, gap_beats), duration)
+                    people = merge_story_people(people, gap_people)
             pack["people"] = people
             allocated = allocate_beat_budgets(
                 beats,
                 chunks=list(pack.get("chunks") or []),
-                target_sec=TARGET_RECAP_SEC,
+                target_sec=target_sec,
                 duration_sec=duration,
             )
             _raise_if_stopped()
@@ -3058,6 +3336,19 @@ def generate_recap_timeline(
                 allocated=allocated,
                 people=people,
             )
+            if stage == RECAP_START_PLAN_ONLY:
+                return {
+                    "title": plan_title,
+                    "video_id": video_id,
+                    "stage": RECAP_START_PLAN,
+                    "clip_count": 0,
+                    "beat_count": len(allocated),
+                    "duration_sec": round(sum(float(item.get("budget_sec") or 0.0) for item in allocated), 1),
+                    "beats_path": str(beats_path),
+                    "cuts_path": "",
+                    "srt_path": "",
+                    "warnings": list(warnings),
+                }
 
         cuts = []
         match_title = plan_title
@@ -3081,7 +3372,7 @@ def generate_recap_timeline(
         leftover = missing_match_beats(allocated, cuts)
         if leftover:
             _raise_if_stopped()
-            _progress(82, "closing")
+            _progress(82, "matching")
             close_pack = pack_for_beats(pack, leftover)
             try:
                 close_text = call_remote_llm(
@@ -3096,9 +3387,12 @@ def generate_recap_timeline(
                 del _close_title
                 cuts.extend(close_cuts)
             except RuntimeError:
-                pass
+                warnings.append("recap_warn_match_close")
+                _progress(82, "match_close_failed")
         cuts.sort(key=lambda item: (float(item.get("src_in") or 0.0), int(item.get("beat_id") or 0)))
-        cuts = apply_recap_duration(cuts, pack, allocated)
+        cuts = stash_match_vo_as_draft(cuts)
+        min_sec, _max_sec = recap_duration_bounds(target_sec)
+        cuts = apply_recap_duration(cuts, pack, allocated, target_sec=target_sec, min_sec=min_sec)
         cuts = refine_recap_cuts(cuts, pack, allocated)
         title = str(match_title or "").strip() or plan_title
         if title == "解说剪辑" and plan_title and plan_title != "解说剪辑":
@@ -3128,6 +3422,7 @@ def generate_recap_timeline(
         config=cfg,
         system_prompt=caption_system,
         people=people,
+        beats=allocated,
         should_stop_callback=should_stop_callback,
         progress_callback=progress_callback,
     )
@@ -3153,6 +3448,7 @@ def generate_recap_timeline(
         "beats_path": str(beats_path),
         "cuts_path": str(cuts_path),
         "srt_path": str(srt_path),
+        "warnings": list(warnings),
     }
 
 

@@ -389,6 +389,8 @@ class MainWindow(
         self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
         self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
         self.understanding_page.btn_export_recap.clicked.connect(self.export_current_video_recap)
+        if hasattr(self.understanding_page, "btn_edit_recap_beats"):
+            self.understanding_page.btn_edit_recap_beats.clicked.connect(self.edit_current_recap_beats)
         if hasattr(self.understanding_page, "btn_recap_jianying"):
             self.understanding_page.btn_recap_jianying.clicked.connect(self.export_current_recap_jianying)
         if hasattr(self.understanding_page, "btn_recap_fcpxml"):
@@ -429,8 +431,7 @@ class MainWindow(
             self.test_understanding_service_connection
         )
         form = self.understanding_services_dialog.vlm_form
-        form.chk_use_custom_prompts.toggled.connect(self._on_use_custom_prompts_toggled)
-        form.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
+        self.understanding_page.btn_reset_custom_prompts.clicked.connect(self._on_reset_custom_prompts_clicked)
         self.understanding_page.input_understanding_mode.currentIndexChanged.connect(self._on_understanding_mode_changed)
         self.understanding_page.input_caption_language.currentIndexChanged.connect(
             self._on_understanding_caption_language_changed
@@ -974,21 +975,51 @@ class MainWindow(
         )
         cfg.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
         cfg.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
-        cfg.chk_use_custom_prompts.setText(t["understanding_use_custom_prompts"])
-        cfg.hint_custom_prompts.setText(t["understanding_custom_prompts_hint"])
-        cfg.label_custom_caption_prompt.setText(
-            t.get("understanding_custom_tag_prompt_label", t["understanding_custom_caption_prompt_label"])
-        )
-        cfg.label_custom_description_prompt.setText(
-            t.get("understanding_custom_description_prompt_label", "Segment description prompt")
-        )
-        cfg.label_custom_motion_prompt.setText(
-            t.get("understanding_custom_motion_prompt_label", "Segment motion prompt")
-        )
-        cfg.label_custom_summary_prompt.setText(
-            t["understanding_custom_summary_prompt_label"]
-        )
-        cfg.btn_reset_custom_prompts.setText(t["understanding_reset_custom_prompts"])
+        if hasattr(self.understanding_page, "vlm_prompt_label"):
+            self.understanding_page.vlm_prompt_label.setText(
+                t.get("understanding_vlm_prompt_label", t.get("understanding_use_custom_prompts", "Vision prompts"))
+            )
+        if hasattr(self.understanding_page, "vlm_prompt_hint"):
+            self.understanding_page.vlm_prompt_hint.setText(
+                t.get("understanding_vlm_prompt_hint", t.get("understanding_custom_prompts_hint", ""))
+            )
+        if hasattr(self.understanding_page, "btn_reset_custom_prompts"):
+            self.understanding_page.btn_reset_custom_prompts.setText(
+                t.get(
+                    "understanding_vlm_prompt_reset",
+                    t.get("understanding_reset_custom_prompts", "Restore this default"),
+                )
+            )
+        if hasattr(self.understanding_page, "vlm_prompt_tabs"):
+            tabs = self.understanding_page.vlm_prompt_tabs
+            tabs.setTabText(
+                0,
+                t.get(
+                    "understanding_vlm_prompt_tab_tag",
+                    t.get("understanding_custom_tag_prompt_label", t["understanding_custom_caption_prompt_label"]),
+                ),
+            )
+            tabs.setTabText(
+                1,
+                t.get(
+                    "understanding_vlm_prompt_tab_description",
+                    t.get("understanding_custom_description_prompt_label", "Segment description"),
+                ),
+            )
+            tabs.setTabText(
+                2,
+                t.get(
+                    "understanding_vlm_prompt_tab_motion",
+                    t.get("understanding_custom_motion_prompt_label", "Segment motion"),
+                ),
+            )
+            tabs.setTabText(
+                3,
+                t.get(
+                    "understanding_vlm_prompt_tab_summary",
+                    t["understanding_custom_summary_prompt_label"],
+                ),
+            )
         self.understanding_page.btn_open_services.setText(
             t.get("understanding_open_services", t.get("understanding_config_title", "Model services"))
         )
@@ -1003,6 +1034,13 @@ class MainWindow(
         self.understanding_page.btn_export_recap.setToolTip(
             t.get("understanding_export_recap_tip", "")
         )
+        if hasattr(self.understanding_page, "btn_edit_recap_beats"):
+            self.understanding_page.btn_edit_recap_beats.setText(
+                t.get("understanding_recap_edit_beats", "Edit plan")
+            )
+            self.understanding_page.btn_edit_recap_beats.setToolTip(
+                t.get("understanding_recap_edit_beats_tip", "")
+            )
         if hasattr(self.understanding_page, "btn_recap_jianying"):
             self.understanding_page.btn_recap_jianying.setText(
                 t.get("understanding_recap_jianying", "Generate Jianying draft")

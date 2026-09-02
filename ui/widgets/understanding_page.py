@@ -205,6 +205,41 @@ class UnderstandingEvidencePage(QWidget):
         layout.addWidget(self.lbl_understanding_hint)
 
     def _build_generate_step(self, layout: QVBoxLayout) -> None:
+        prompt_row = QHBoxLayout()
+        prompt_row.setContentsMargins(0, 0, 0, 0)
+        prompt_row.setSpacing(8)
+        self.vlm_prompt_label = QLabel()
+        self.vlm_prompt_label.setObjectName("InlineFieldLabel")
+        self.btn_reset_custom_prompts = _action_button("GhostButton")
+        prompt_row.addWidget(self.vlm_prompt_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        prompt_row.addStretch(1)
+        prompt_row.addWidget(self.btn_reset_custom_prompts, 0)
+        layout.addLayout(prompt_row)
+        self.vlm_prompt_hint = _step_hint()
+        layout.addWidget(self.vlm_prompt_hint)
+
+        self.vlm_prompt_tabs = QTabWidget()
+        self.vlm_prompt_tabs.setObjectName("RecapPromptTabs")
+        self.input_custom_caption_prompt = QPlainTextEdit()
+        self.input_custom_description_prompt = QPlainTextEdit()
+        self.input_custom_motion_prompt = QPlainTextEdit()
+        self.input_custom_summary_prompt = QPlainTextEdit()
+        for editor in (
+            self.input_custom_caption_prompt,
+            self.input_custom_description_prompt,
+            self.input_custom_motion_prompt,
+            self.input_custom_summary_prompt,
+        ):
+            editor.setObjectName("UnderstandingOutput")
+            editor.setMinimumHeight(112)
+            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            editor.setTabChangesFocus(True)
+        self.vlm_prompt_tabs.addTab(self.input_custom_caption_prompt, "")
+        self.vlm_prompt_tabs.addTab(self.input_custom_description_prompt, "")
+        self.vlm_prompt_tabs.addTab(self.input_custom_motion_prompt, "")
+        self.vlm_prompt_tabs.addTab(self.input_custom_summary_prompt, "")
+        layout.addWidget(self.vlm_prompt_tabs)
+
         actions, row = _command_bar()
         self.btn_generate_evidence = _action_button("PrimaryButton")
         self.btn_generate_batch = _action_button("GhostButton")
@@ -415,9 +450,11 @@ class UnderstandingEvidencePage(QWidget):
 
         actions, row = _command_bar()
         self.btn_export_recap = _action_button("PrimaryButton")
+        self.btn_edit_recap_beats = _action_button("GhostButton")
         self.btn_recap_jianying = _action_button("GhostButton")
         self.btn_recap_fcpxml = _action_button("GhostButton")
         row.addWidget(self.btn_export_recap, 0)
+        row.addWidget(self.btn_edit_recap_beats, 0)
         row.addStretch(1)
         row.addWidget(self.btn_recap_jianying, 0)
         row.addWidget(self.btn_recap_fcpxml, 0)

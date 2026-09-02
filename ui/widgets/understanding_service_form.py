@@ -4,14 +4,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QFormLayout,
     QFrame,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
@@ -38,7 +34,7 @@ def _configure_line(field: QLineEdit, *, width: int):
 
 
 class UnderstandingServiceForm(QWidget):
-    """Caption / VLM connection + custom prompts for the current generation mode."""
+    """Caption / VLM connection fields for the model-services dialog."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -138,86 +134,6 @@ class UnderstandingServiceForm(QWidget):
         config_form.addRow(self.label_caption_concurrency, self.input_caption_concurrency)
 
         inner_layout.addWidget(form_host)
-
-        self.prompt_advanced = QFrame()
-        self.prompt_advanced.setObjectName("UnderstandingPromptAdvanced")
-        prompt_adv_layout = QVBoxLayout(self.prompt_advanced)
-        prompt_adv_layout.setContentsMargins(0, 4, 0, 0)
-        prompt_adv_layout.setSpacing(8)
-
-        self.chk_use_custom_prompts = QCheckBox()
-        prompt_adv_layout.addWidget(self.chk_use_custom_prompts, 0)
-
-        self.custom_prompt_fields = QWidget()
-        custom_fields_layout = QVBoxLayout(self.custom_prompt_fields)
-        custom_fields_layout.setContentsMargins(0, 0, 0, 0)
-        custom_fields_layout.setSpacing(8)
-
-        self.hint_custom_prompts = QLabel()
-        self.hint_custom_prompts.setObjectName("CardHint")
-        self.hint_custom_prompts.setWordWrap(True)
-        custom_fields_layout.addWidget(self.hint_custom_prompts)
-
-        self.label_custom_caption_prompt = _field_label()
-        self.label_custom_caption_prompt.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        custom_fields_layout.addWidget(self.label_custom_caption_prompt)
-        self.input_custom_caption_prompt = QPlainTextEdit()
-        self.input_custom_caption_prompt.setObjectName("SearchInput")
-        self.input_custom_caption_prompt.setFixedHeight(72)
-        self.input_custom_caption_prompt.setTabChangesFocus(True)
-        custom_fields_layout.addWidget(self.input_custom_caption_prompt)
-
-        self.label_custom_description_prompt = _field_label()
-        self.label_custom_description_prompt.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        custom_fields_layout.addWidget(self.label_custom_description_prompt)
-        self.input_custom_description_prompt = QPlainTextEdit()
-        self.input_custom_description_prompt.setObjectName("SearchInput")
-        self.input_custom_description_prompt.setFixedHeight(72)
-        self.input_custom_description_prompt.setTabChangesFocus(True)
-        custom_fields_layout.addWidget(self.input_custom_description_prompt)
-
-        self.label_custom_motion_prompt = _field_label()
-        self.label_custom_motion_prompt.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        custom_fields_layout.addWidget(self.label_custom_motion_prompt)
-        self.input_custom_motion_prompt = QPlainTextEdit()
-        self.input_custom_motion_prompt.setObjectName("SearchInput")
-        self.input_custom_motion_prompt.setFixedHeight(72)
-        self.input_custom_motion_prompt.setTabChangesFocus(True)
-        custom_fields_layout.addWidget(self.input_custom_motion_prompt)
-
-        self.label_custom_summary_prompt = _field_label()
-        self.label_custom_summary_prompt.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        custom_fields_layout.addWidget(self.label_custom_summary_prompt)
-        self.input_custom_summary_prompt = QPlainTextEdit()
-        self.input_custom_summary_prompt.setObjectName("SearchInput")
-        self.input_custom_summary_prompt.setFixedHeight(72)
-        self.input_custom_summary_prompt.setTabChangesFocus(True)
-        custom_fields_layout.addWidget(self.input_custom_summary_prompt)
-
-        reset_row = QHBoxLayout()
-        reset_row.setContentsMargins(0, 0, 0, 0)
-        reset_row.setSpacing(8)
-        self.btn_reset_custom_prompts = QPushButton()
-        self.btn_reset_custom_prompts.setObjectName("GhostButton")
-        self.btn_reset_custom_prompts.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_reset_custom_prompts.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-        reset_row.addWidget(self.btn_reset_custom_prompts, 0)
-        reset_row.addStretch(1)
-        custom_fields_layout.addLayout(reset_row)
-
-        self.custom_prompt_fields.hide()
-        prompt_adv_layout.addWidget(self.custom_prompt_fields)
-        inner_layout.addWidget(self.prompt_advanced)
 
         self.hint_understanding_status = QLabel()
         self.hint_understanding_status.setObjectName("StatusHint")

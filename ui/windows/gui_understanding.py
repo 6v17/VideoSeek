@@ -41,7 +41,7 @@ from ui.workers import RemoteVlmConnectionTestWorker
 
 
 class _UnderstandingConfigHost:
-    """VLM fields live on the services dialog; mode/language stay on the page."""
+    """VLM connection fields live on the services dialog; mode/language/prompts stay on the page."""
 
     __slots__ = ("_window",)
 
@@ -101,22 +101,7 @@ class UnderstandingGuiMixin:
         page.input_caption_concurrency.setValue(
             max(1, min(4, int(remote_vlm.get("concurrency", 2) or 2)))
         )
-        page.chk_use_custom_prompts.blockSignals(True)
-        page.chk_use_custom_prompts.setChecked(bool(remote_vlm.get("use_custom_prompts")))
-        page.chk_use_custom_prompts.blockSignals(False)
-        page.input_custom_caption_prompt.setPlainText(
-            str(remote_vlm.get("custom_tag_prompt") or remote_vlm.get("custom_caption_prompt", "") or "")
-        )
-        page.input_custom_description_prompt.setPlainText(
-            str(remote_vlm.get("custom_description_prompt", "") or "")
-        )
-        page.input_custom_summary_prompt.setPlainText(
-            str(remote_vlm.get("custom_summary_prompt", "") or "")
-        )
-        page.input_custom_motion_prompt.setPlainText(
-            str(remote_vlm.get("custom_motion_prompt", "") or "")
-        )
-        self._sync_custom_prompt_fields_visible()
+        self._load_vlm_prompt_editors(remote_vlm)
         self._sync_understanding_mode_ui()
         self._load_llm_settings(config)
         self._load_asr_settings(config)
@@ -225,13 +210,15 @@ class UnderstandingGuiMixin:
         if not is_summary:
             self._set_understanding_readonly_text(page.video_summary_text, "")
             page.video_summary_meta_label.setText("")
-        self._sync_custom_prompt_fields_visible()
+        self._sync_vlm_prompt_tab_for_mode()
         page.btn_export_video_json.setEnabled(
             (not (getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()))
             and self._current_video_has_exportable_evidence()
         )
         if hasattr(page, "btn_export_recap"):
             page.btn_export_recap.setVisible(is_motion)
+        if hasattr(page, "btn_edit_recap_beats"):
+            page.btn_edit_recap_beats.setVisible(is_motion)
         if hasattr(page, "btn_recap_jianying"):
             page.btn_recap_jianying.setVisible(is_motion)
         if hasattr(page, "btn_recap_fcpxml"):
@@ -257,6 +244,7 @@ class UnderstandingGuiMixin:
         self._sync_understanding_mode_ui(reload_timeline=True)
 
     def _on_understanding_caption_language_changed(self, *_args):
+        self._refresh_vlm_prompt_editors_for_language()
         self._persist_understanding_job_options()
 
     def _persist_understanding_job_options(self) -> None:
@@ -284,6 +272,7 @@ class UnderstandingGuiMixin:
                 page.input_caption_language.currentData()
             )
             remote_vlm["understanding_mode"] = self._current_understanding_mode()
+            self._apply_vlm_prompts_from_page(remote_vlm)
             understanding["remote_vlm"] = finalize_remote_vlm_settings(remote_vlm)
             config["understanding"] = understanding
             save_config(config)
@@ -655,12 +644,7 @@ class UnderstandingGuiMixin:
             language = normalize_caption_language(page.input_caption_language.currentData())
             remote_vlm["caption_language"] = language
             remote_vlm["understanding_mode"] = self._current_understanding_mode()
-            remote_vlm["use_custom_prompts"] = bool(page.chk_use_custom_prompts.isChecked())
-            remote_vlm["custom_tag_prompt"] = page.input_custom_caption_prompt.toPlainText().strip()
-            remote_vlm["custom_caption_prompt"] = remote_vlm["custom_tag_prompt"]
-            remote_vlm["custom_description_prompt"] = page.input_custom_description_prompt.toPlainText().strip()
-            remote_vlm["custom_summary_prompt"] = page.input_custom_summary_prompt.toPlainText().strip()
-            remote_vlm["custom_motion_prompt"] = page.input_custom_motion_prompt.toPlainText().strip()
+            self._apply_vlm_prompts_from_page(remote_vlm)
             remote_vlm["concurrency"] = int(page.input_caption_concurrency.value())
             understanding["remote_vlm"] = finalize_remote_vlm_settings(remote_vlm)
             self._commit_llm_settings_to_understanding(understanding)
@@ -688,9 +672,23 @@ class UnderstandingGuiMixin:
         page.input_caption_language.setEnabled(enabled)
         page.input_understanding_mode.setEnabled(enabled)
         page.input_caption_concurrency.setEnabled(enabled)
-        page.chk_use_custom_prompts.setEnabled(enabled)
         page.btn_test_vlm_connection.setEnabled(enabled)
         page.btn_save_config.setEnabled(enabled)
+        understanding_page = getattr(self, "understanding_page", None)
+        if understanding_page is not None:
+            if hasattr(understanding_page, "vlm_prompt_tabs"):
+                understanding_page.vlm_prompt_tabs.setEnabled(enabled)
+            if hasattr(understanding_page, "btn_reset_custom_prompts"):
+                understanding_page.btn_reset_custom_prompts.setEnabled(enabled)
+            for name in (
+                "input_custom_caption_prompt",
+                "input_custom_description_prompt",
+                "input_custom_motion_prompt",
+                "input_custom_summary_prompt",
+            ):
+                editor = getattr(understanding_page, name, None)
+                if editor is not None:
+                    editor.setEnabled(enabled)
         form = self._llm_form() if hasattr(self, "_llm_form") else None
         if form is not None:
             form.input_llm_provider_mode.setEnabled(enabled)
@@ -705,71 +703,104 @@ class UnderstandingGuiMixin:
             asr_form.input_remote_asr_base_url.setEnabled(enabled)
             asr_form.input_remote_asr_api_key.setEnabled(enabled)
             asr_form.input_remote_asr_model.setEnabled(enabled)
-        self._sync_custom_prompt_fields_visible(config_enabled=enabled)
 
-    def _sync_custom_prompt_fields_visible(self, *, config_enabled: bool | None = None):
-        page = self._understanding_config_widgets()
-        if page is None:
-            return
-        if config_enabled is None:
-            config_enabled = page.chk_use_custom_prompts.isEnabled()
-        show_fields = bool(page.chk_use_custom_prompts.isChecked())
-        page.custom_prompt_fields.setVisible(show_fields)
-        editors_on = bool(config_enabled and show_fields)
-        from src.services.understanding_resource_service import (
-            UNDERSTANDING_MODE_MOTION,
-            UNDERSTANDING_MODE_SUMMARY,
-        )
-
-        is_summary = self._current_understanding_mode() == UNDERSTANDING_MODE_SUMMARY
-        is_motion = self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
-        page.label_custom_caption_prompt.setVisible(show_fields and not is_summary and not is_motion)
-        page.input_custom_caption_prompt.setVisible(show_fields and not is_summary and not is_motion)
-        page.input_custom_caption_prompt.setEnabled(editors_on and not is_summary and not is_motion)
-        page.label_custom_description_prompt.setVisible(show_fields and is_summary)
-        page.input_custom_description_prompt.setVisible(show_fields and is_summary)
-        page.input_custom_description_prompt.setEnabled(editors_on and is_summary)
-        page.label_custom_motion_prompt.setVisible(show_fields and is_motion)
-        page.input_custom_motion_prompt.setVisible(show_fields and is_motion)
-        page.input_custom_motion_prompt.setEnabled(editors_on and is_motion)
-        page.label_custom_summary_prompt.setVisible(show_fields and is_summary)
-        page.input_custom_summary_prompt.setVisible(show_fields and is_summary)
-        page.input_custom_summary_prompt.setEnabled(editors_on and is_summary)
-        page.btn_reset_custom_prompts.setEnabled(editors_on)
-
-    def _on_use_custom_prompts_toggled(self, checked: bool):
-        page = self._understanding_config_widgets()
-        if page is None:
-            return
-        if checked:
-            caption = page.input_custom_caption_prompt.toPlainText().strip()
-            description = page.input_custom_description_prompt.toPlainText().strip()
-            motion = page.input_custom_motion_prompt.toPlainText().strip()
-            summary = page.input_custom_summary_prompt.toPlainText().strip()
-            if not caption and not description and not motion and not summary:
-                self._fill_custom_prompts_with_language_defaults()
-        self._sync_custom_prompt_fields_visible()
-
-    def _fill_custom_prompts_with_language_defaults(self):
-        page = self._understanding_config_widgets()
-        if page is None:
-            return
+    def _vlm_prompt_getter_pairs(self):
         from src.services.understanding_resource_service import (
             get_description_prompt_for_language,
             get_motion_prompt_for_language,
             get_tag_prompt_for_language,
             get_video_summary_prompt_for_language,
-            normalize_caption_language,
         )
 
-        language = normalize_caption_language(page.input_caption_language.currentData())
-        page.input_custom_caption_prompt.setPlainText(get_tag_prompt_for_language(language))
-        page.input_custom_description_prompt.setPlainText(get_description_prompt_for_language(language))
-        page.input_custom_motion_prompt.setPlainText(get_motion_prompt_for_language(language))
-        page.input_custom_summary_prompt.setPlainText(get_video_summary_prompt_for_language(language))
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return ()
+        return (
+            (getattr(page, "input_custom_caption_prompt", None), get_tag_prompt_for_language),
+            (getattr(page, "input_custom_description_prompt", None), get_description_prompt_for_language),
+            (getattr(page, "input_custom_motion_prompt", None), get_motion_prompt_for_language),
+            (getattr(page, "input_custom_summary_prompt", None), get_video_summary_prompt_for_language),
+        )
+
+    def _vlm_prompt_language(self) -> str:
+        from src.services.understanding_resource_service import normalize_caption_language
+
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return "zh"
+        return normalize_caption_language(page.input_caption_language.currentData())
+
+    def _apply_vlm_prompts_from_page(self, remote_vlm: dict) -> None:
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "input_custom_caption_prompt"):
+            return
+        tag = str(page.input_custom_caption_prompt.toPlainText() or "").strip()
+        description = str(page.input_custom_description_prompt.toPlainText() or "").strip()
+        motion = str(page.input_custom_motion_prompt.toPlainText() or "").strip()
+        summary = str(page.input_custom_summary_prompt.toPlainText() or "").strip()
+        remote_vlm["use_custom_prompts"] = True
+        remote_vlm["custom_tag_prompt"] = tag
+        remote_vlm["custom_caption_prompt"] = tag
+        remote_vlm["custom_description_prompt"] = description
+        remote_vlm["custom_motion_prompt"] = motion
+        remote_vlm["custom_summary_prompt"] = summary
+
+    def _load_vlm_prompt_editors(self, remote_vlm: dict) -> None:
+        language = self._vlm_prompt_language()
+        use_custom = bool(remote_vlm.get("use_custom_prompts"))
+        saved = (
+            str(remote_vlm.get("custom_tag_prompt") or remote_vlm.get("custom_caption_prompt", "") or "").strip(),
+            str(remote_vlm.get("custom_description_prompt", "") or "").strip(),
+            str(remote_vlm.get("custom_motion_prompt", "") or "").strip(),
+            str(remote_vlm.get("custom_summary_prompt", "") or "").strip(),
+        )
+        for (editor, getter), text in zip(self._vlm_prompt_getter_pairs(), saved):
+            if editor is None:
+                continue
+            if use_custom and text:
+                editor.setPlainText(text)
+            else:
+                editor.setPlainText(getter(language))
+
+    def _refresh_vlm_prompt_editors_for_language(self) -> None:
+        language = self._vlm_prompt_language()
+        builtin_langs = ("zh", "en")
+        for editor, getter in self._vlm_prompt_getter_pairs():
+            if editor is None:
+                continue
+            current = str(editor.toPlainText() or "").strip()
+            if not current or any(current == str(getter(item) or "").strip() for item in builtin_langs):
+                editor.setPlainText(getter(language))
+
+    def _sync_vlm_prompt_tab_for_mode(self) -> None:
+        page = getattr(self, "understanding_page", None)
+        tabs = getattr(page, "vlm_prompt_tabs", None) if page is not None else None
+        if tabs is None:
+            return
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_SUMMARY,
+        )
+
+        mode = self._current_understanding_mode()
+        if mode == UNDERSTANDING_MODE_SUMMARY:
+            tabs.setCurrentIndex(1)
+        elif mode == UNDERSTANDING_MODE_MOTION:
+            tabs.setCurrentIndex(2)
+        else:
+            tabs.setCurrentIndex(0)
 
     def _on_reset_custom_prompts_clicked(self):
-        self._fill_custom_prompts_with_language_defaults()
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "vlm_prompt_tabs"):
+            return
+        index = int(page.vlm_prompt_tabs.currentIndex())
+        pairs = self._vlm_prompt_getter_pairs()
+        if index < 0 or index >= len(pairs):
+            index = 0
+        editor, getter = pairs[index]
+        if editor is not None:
+            editor.setPlainText(getter(self._vlm_prompt_language()))
 
     def _is_current_page(self, page_name: str) -> bool:
         return self.pages.currentIndex() == self._nav_page_index(page_name)
@@ -1523,6 +1554,7 @@ class UnderstandingGuiMixin:
             )
             return
 
+        self._persist_understanding_job_options()
         page = self.understanding_page
         self.switch_page("understanding")
         page.btn_generate_evidence.setEnabled(False)
@@ -1638,6 +1670,7 @@ class UnderstandingGuiMixin:
         ):
             return
 
+        self._persist_understanding_job_options()
         page = self.understanding_page
         self.switch_page("understanding")
         page.btn_generate_evidence.setEnabled(False)
@@ -1970,12 +2003,23 @@ class UnderstandingGuiMixin:
         self._populate_understanding_dialogue_table(cues)
         source = self._dialogue_source_label(str((cues[0] or {}).get("asr_source") or "") if cues else "")
         if cues:
-            page.dialogue_status.setText(
-                self.texts.get(
-                    "understanding_step_dialogue_ready",
-                    "Showing {count} cues from this video ({source}). Double-click Speaker to name who said it.",
-                ).format(count=len(cues), source=source)
-            )
+            from src.services.recap_service import recap_speaker_stats
+
+            unnamed = int(recap_speaker_stats(cues).get("unnamed") or 0)
+            if unnamed > 0:
+                page.dialogue_status.setText(
+                    self.texts.get(
+                        "understanding_step_dialogue_unnamed",
+                        "{count} cues ({source}); {unnamed} still unnamed.",
+                    ).format(count=len(cues), source=source, unnamed=unnamed)
+                )
+            else:
+                page.dialogue_status.setText(
+                    self.texts.get(
+                        "understanding_step_dialogue_ready",
+                        "Showing {count} cues from this video ({source}). Double-click Speaker to name who said it.",
+                    ).format(count=len(cues), source=source)
+                )
         else:
             page.dialogue_status.setText(
                 self.texts.get(
@@ -2186,8 +2230,11 @@ class UnderstandingGuiMixin:
             ) is not None or getattr(self, "_speaker_cluster_worker", None) is not None
         can = (not running) and self._current_video_can_export_recap()
         has_cuts = self._current_video_has_recap_cuts()
+        has_beats = self._current_video_has_recap_beats()
         can_sidecar = (not running) and has_cuts
         page.btn_export_recap.setEnabled(can)
+        if hasattr(page, "btn_edit_recap_beats"):
+            page.btn_edit_recap_beats.setEnabled((not running) and has_beats)
         if hasattr(page, "btn_recap_jianying"):
             page.btn_recap_jianying.setEnabled(can_sidecar)
         if hasattr(page, "btn_recap_fcpxml"):
@@ -2228,6 +2275,15 @@ class UnderstandingGuiMixin:
         if hasattr(page, "btn_recap_fcpxml"):
             page.btn_recap_fcpxml.setToolTip(
                 self.texts.get("understanding_recap_fcpxml_tip", "") if has_cuts else missing_cuts
+            )
+        if hasattr(page, "btn_edit_recap_beats"):
+            page.btn_edit_recap_beats.setToolTip(
+                self.texts.get("understanding_recap_edit_beats_tip", "")
+                if has_beats
+                else self.texts.get(
+                    "understanding_recap_beats_missing",
+                    "No story plan yet. Start from stage 1.",
+                )
             )
 
     def open_subtitle_library_for_recap(self) -> None:

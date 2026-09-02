@@ -1185,6 +1185,10 @@ class RecapTimelineWorker(QThread):
                 "matching": "understanding_export_recap_matching",
                 "closing": "understanding_export_recap_closing",
                 "plot_gaps": "understanding_export_recap_plot_gaps",
+                "plot_gaps_failed": "recap_warn_plan_gaps",
+                "plan_head_failed": "recap_warn_plan_head",
+                "plan_tail_failed": "recap_warn_plan_tail",
+                "match_close_failed": "recap_warn_match_close",
                 "captions": "understanding_export_recap_captions",
                 "gaps": "understanding_export_recap_gaps",
                 "writing": "understanding_export_recap_writing",
@@ -1197,7 +1201,7 @@ class RecapTimelineWorker(QThread):
                     texts.get(key, str(stage)),
                 )
 
-            start_keys = {"plan": "planning", "match": "matching", "captions": "captions"}
+            start_keys = {"plan": "planning", "plan_only": "planning", "match": "matching", "captions": "captions"}
             _on_progress(8, start_keys.get(self.start_from, "planning"))
             result = generate_recap_timeline(
                 self.video_id,

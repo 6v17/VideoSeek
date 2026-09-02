@@ -159,8 +159,8 @@ def keyword_search_dialogue(
 ) -> list[DialogueSearchHit]:
     """Match shared SQLite OCR transcripts (not bound to CLIP).
 
-    ``match_mode`` ``exact`` uses SQLite INSTR substring match; ``fuzzy`` allows
-    short OCR typos via n-gram / near-substring scoring.
+    ``match_mode`` ``exact`` uses SQLite INSTR substring match; ``fuzzy`` ranks
+    complete query subfields first, then typo-tolerant scatter hit rate.
     Pass ``video_ids`` (or ``video_id`` / ``library_path``) to avoid scanning the
     whole shared store when the UI search scope is narrowed.
 
@@ -365,7 +365,7 @@ def search_dialogue(
 
     ``match_mode``:
     - ``exact`` / ``segment`` / ``keyword``: contiguous substring on OCR/ASR text
-    - ``fuzzy``: typo-tolerant keyword match on OCR/ASR text
+    - ``fuzzy``: complete query subfields first, then typo-tolerant scatter
     - ``semantic`` / ``vector``: deferred — returns empty hits (no vector search)
     - ``auto``: exact keyword only (no vector fallback)
 

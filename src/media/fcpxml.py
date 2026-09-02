@@ -195,6 +195,8 @@ def layout_clips_on_timeline(
             "chunk_index": raw.get("chunk_index"),
             "beat_id": raw.get("beat_id"),
             "reason": str(raw.get("reason") or "").strip(),
+            "vo_draft": str(raw.get("vo_draft") or "").strip(),
+            "role": str(raw.get("role") or "").strip(),
         }
         built.append(item)
         tl += dur_f
