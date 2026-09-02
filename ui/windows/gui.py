@@ -490,7 +490,7 @@ class MainWindow(
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
-        for page in (self.search_page, self.link_page, self.library_page, self.understanding_page, self.settings_page):
+        for page in self._iter_runtime_banner_pages():
             page.header.runtime_banner_action.clicked.connect(self.open_runtime_resource_dialog)
 
     def _build_scroll_page(self, page_widget):

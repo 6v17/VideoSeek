@@ -46,26 +46,29 @@ def zip_contains_file_suffix(zip_path: str, suffix: str) -> bool:
 
 
 def classify_package_zip(zip_path: str) -> str:
+    """Return a single package kind, or raise if a zip matches more than one."""
+    hits: list[str] = []
     if zip_has_root_file(zip_path, UNDERSTANDING_MANIFEST_FILENAME):
-        if zip_contains_file_suffix(zip_path, SEARCH_MODEL_MANIFEST_FILENAME):
-            raise RuntimeError(
-                f"Package {os.path.basename(zip_path)} contains both "
-                f"{UNDERSTANDING_MANIFEST_FILENAME} and {SEARCH_MODEL_MANIFEST_FILENAME}"
-            )
-        return "understanding"
+        hits.append("understanding")
     if zip_contains_file_suffix(zip_path, SEARCH_MODEL_MANIFEST_FILENAME):
-        return "search"
+        hits.append("search")
     try:
         from src.app.plugins import get_registry
 
         for kind, spec in get_registry().package_kinds.items():
             try:
-                if spec.detect_fn(zip_path):
-                    return kind
+                if spec.detect_fn(zip_path) and kind not in hits:
+                    hits.append(kind)
             except Exception:
                 continue
     except Exception:
         pass
+    if len(hits) > 1:
+        raise RuntimeError(
+            f"Package {os.path.basename(zip_path)} contains mixed kinds: {', '.join(hits)}"
+        )
+    if hits:
+        return hits[0]
     return "unknown"
 
 _SHA256_PATTERN = re.compile(r"^[0-9A-F]{64}$")

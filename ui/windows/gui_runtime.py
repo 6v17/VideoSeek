@@ -19,6 +19,36 @@ from ui.widgets.styles import set_runtime_banner_warn
 class RuntimeGuiMixin:
     """Inference hint, diagnostics clipboard/dialog, resource controller entry points, banners."""
 
+    def _iter_runtime_banner_pages(self):
+        """Pages whose ``PageHeader`` shows the shared runtime-resource banner.
+
+        Includes plugin pages (clone, etc.) so optional nav surfaces get the same
+        FFmpeg / model warning as search and library.
+        """
+        seen: set[int] = set()
+        pages = [
+            getattr(self, "search_page", None),
+            getattr(self, "link_page", None),
+            getattr(self, "library_page", None),
+            getattr(self, "understanding_page", None),
+            getattr(self, "settings_page", None),
+        ]
+        for page in getattr(self, "_plugin_page_widgets", {}).values():
+            pages.append(page)
+        for page in pages:
+            if page is None:
+                continue
+            marker = id(page)
+            if marker in seen:
+                continue
+            header = getattr(page, "header", None)
+            if header is None:
+                continue
+            if getattr(header, "runtime_banner_action", None) is None:
+                continue
+            seen.add(marker)
+            yield page
+
     def open_runtime_resource_folder(self):
         from src.services.runtime_resource_service import ensure_runtime_resource_dirs
 
@@ -385,7 +415,7 @@ class RuntimeGuiMixin:
             missing_text = self.texts.get("models_missing_generic_unknown", "Runtime resources are incomplete.")
         banner_text = self.texts.get("runtime_banner_missing", "Runtime resources are not ready: {missing}").format(missing=missing_text)
         action_text = self.texts.get("runtime_banner_open_import", "Go Import")
-        for page in (self.search_page, self.link_page, self.library_page, self.settings_page):
+        for page in self._iter_runtime_banner_pages():
             banner = page.header.runtime_banner
             banner_label = page.header.runtime_banner_text
             banner_btn = page.header.runtime_banner_action

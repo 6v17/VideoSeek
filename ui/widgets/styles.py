@@ -279,7 +279,7 @@ QCheckBox:disabled {
 #UnderstandingConfigHeader:hover {
     background: __BUTTON_SOFT__;
 }
-#UnderstandingCommandBar {
+#UnderstandingCommandBar, #CloneCommandBar {
     background: transparent;
     border: none;
 }
@@ -287,7 +287,12 @@ QCheckBox:disabled {
 #UnderstandingCommandBar #GhostButton,
 #UnderstandingCommandBar #AccentGhostButton,
 #UnderstandingCommandBar #DangerGhostButton,
-#UnderstandingCommandBar #SuccessGhostButton {
+#UnderstandingCommandBar #SuccessGhostButton,
+#CloneCommandBar #PrimaryButton,
+#CloneCommandBar #GhostButton,
+#CloneCommandBar #AccentGhostButton,
+#CloneCommandBar #DangerGhostButton,
+#CloneCommandBar #SuccessGhostButton {
     min-height: 32px;
     padding: 5px 14px;
     border-radius: 6px;

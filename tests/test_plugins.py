@@ -104,6 +104,16 @@ class PluginRegistryTests(unittest.TestCase):
             self.assertEqual(classify_package_zip("foo-clone.zip"), "clone")
             self.assertEqual(classify_package_zip("other.zip"), "unknown")
 
+        with patch(
+            "src.services.understanding_import_service.zip_has_root_file",
+            return_value=True,
+        ), patch(
+            "src.services.understanding_import_service.zip_contains_file_suffix",
+            return_value=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                classify_package_zip("foo-clone.zip")
+
     def test_get_texts_merges_overlay(self):
         from src.app.i18n import get_texts
 

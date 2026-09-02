@@ -17,6 +17,12 @@ _VIDEOSEEK_TRACK_NAME = "VideoSeek"
 _VIDEOSEEK_TEXT_TRACK_NAME = "VideoSeek旁白"
 _DEFAULT_COLLECT_DRAFT_PREFIX = "VideoSeek导入"
 _RECAP_DRAFT_PREFIX = "VideoSeek解说"
+_CLONE_DRAFT_PREFIX = "VideoSeek克隆"
+_CLONE_TRACK_NAMES = {
+    1: "VideoSeek V1",
+    2: "VideoSeek V2",
+    3: "VideoSeek V3",
+}
 
 
 class JianyingDraftError(RuntimeError):
@@ -638,6 +644,168 @@ def export_recap_to_jianying_draft(
         "draft_path": os.path.join(root, name),
         "exported_count": len(spans),
         "caption_count": len(captions),
+    }
+
+
+def _place_clip_onto_track(
+    script,
+    draft_mod,
+    track_ref,
+    *,
+    video_path: str,
+    timeline_start_sec: float,
+    source_start_sec: float,
+    duration_sec: float,
+) -> None:
+    """Place a source range onto ``track_ref`` at the query timeline offset."""
+    media = os.path.abspath(os.path.expanduser(str(video_path or "").strip()))
+    if not media or not os.path.isfile(media):
+        raise JianyingDraftError("找不到视频文件", detail=media or "(empty)")
+    duration = max(float(duration_sec or 0.0), 0.05)
+    start_us = max(int(round(float(timeline_start_sec or 0.0) * 1_000_000)), 0)
+    clip_start = max(float(source_start_sec or 0.0), 0.0)
+    segment = _make_video_segment(
+        draft_mod,
+        media,
+        timeline_start_us=start_us,
+        clip_start=clip_start,
+        duration=duration,
+    )
+    script.add_segment(segment, track_ref)
+
+
+def _remove_draft_folder(root: str, name: str) -> None:
+    import shutil
+
+    draft_path = os.path.join(root, name)
+    try:
+        if os.path.isdir(draft_path):
+            shutil.rmtree(draft_path)
+    except OSError:
+        pass
+
+
+def export_clone_match_to_jianying_draft(
+    segments: Sequence[Mapping[str, Any]],
+    *,
+    drafts_dir: str | None = None,
+    draft_name: str | None = None,
+    title: str = "",
+    timeline_fps: float = 24.0,
+    export_mode: str | None = None,
+    query_path: str = "",
+    config=None,
+) -> Dict[str, Any]:
+    """Create a plaintext clone-match draft: query-aligned V1/V2/V3 video tracks."""
+    if not is_jianying_draft_support_available():
+        raise JianyingDraftError(
+            "未安装 pyJianYingDraft",
+            detail="请在 VideoSeek 环境执行：pip install pyJianYingDraft",
+        )
+    rows = [dict(item or {}) for item in (segments or [])]
+    if not rows:
+        raise JianyingDraftError("没有可写入剪映的匹配片段")
+
+    from src.services.nle_timeline_export import _prepare_clone_timeline_clips
+
+    by_track, media_cache, _max_end = _prepare_clone_timeline_clips(
+        rows,
+        timeline_fps=max(float(timeline_fps or 24.0), 1.0),
+        export_mode=export_mode,
+    )
+    if not by_track:
+        raise JianyingDraftError("没有可写入剪映的匹配片段")
+
+    root = str(drafts_dir or resolve_jianying_drafts_dir(config=config) or "").strip()
+    if not root or not os.path.isdir(root):
+        raise JianyingDraftError(
+            "找不到剪映草稿目录",
+            detail="请选择剪映工程里的草稿根目录（含各草稿子文件夹的那一层）。",
+        )
+    root = os.path.abspath(root)
+
+    name = str(draft_name or "").strip()
+    if not name:
+        slug_src = title or os.path.splitext(os.path.basename(str(query_path or "").strip()))[0]
+        slug = _safe_draft_slug(slug_src, fallback="匹配")
+        name = allocate_unique_draft_name(root, f"{_CLONE_DRAFT_PREFIX}-{slug}")
+
+    width, height, fps = 1920, 1080, 24
+    if media_cache:
+        first = next(iter(media_cache.values()))
+        width = int(first.get("width") or 1920)
+        height = int(first.get("height") or 1080)
+        probed_fps = float(first.get("fps") or 0.0)
+        if probed_fps >= 12:
+            fps = probed_fps
+    canvas_w, canvas_h, fps_i = _draft_canvas(width=width, height=height, fps=fps)
+
+    import pyJianYingDraft as draft
+    from pyJianYingDraft.exceptions import SegmentOverlap
+
+    folder = draft.DraftFolder(root)
+    try:
+        script = folder.create_draft(name, canvas_w, canvas_h, fps=fps_i, allow_replace=False)
+        track_refs: dict[int, Any] = {}
+        for track_id in sorted(by_track):
+            label = _CLONE_TRACK_NAMES.get(int(track_id), f"VideoSeek V{int(track_id)}")
+            track_refs[int(track_id)] = script.append_track(
+                draft.TrackSpec(draft.TrackType.video, name=label)
+            )
+    except FileExistsError as exc:
+        raise JianyingDraftError("同名草稿已存在", detail=name) from exc
+    except Exception as exc:
+        raise JianyingDraftError("创建剪映草稿失败", detail=str(exc)) from exc
+
+    exported = 0
+    skipped: List[Dict[str, str]] = []
+    try:
+        for track_id, clips in sorted(by_track.items()):
+            ref = track_refs.get(int(track_id))
+            if ref is None:
+                continue
+            ordered = sorted(clips, key=lambda item: float(item.get("query_start") or 0.0))
+            for clip in ordered:
+                path = str(clip.get("path") or "").strip()
+                if not path or not os.path.isfile(path):
+                    skipped.append({"path": path or "(empty)", "reason": "missing"})
+                    continue
+                try:
+                    _place_clip_onto_track(
+                        script,
+                        draft,
+                        ref,
+                        video_path=path,
+                        timeline_start_sec=float(clip.get("query_start") or 0.0),
+                        source_start_sec=float(clip.get("source_start") or 0.0),
+                        duration_sec=float(clip.get("duration_sec") or 0.0),
+                    )
+                    exported += 1
+                except SegmentOverlap:
+                    skipped.append({"path": path, "reason": "overlap"})
+                except JianyingDraftError as exc:
+                    skipped.append({"path": path, "reason": exc.summary})
+                except Exception as exc:
+                    skipped.append({"path": path, "reason": str(exc)})
+        if exported <= 0:
+            _remove_draft_folder(root, name)
+            detail = skipped[0]["reason"] if skipped else "no clips"
+            raise JianyingDraftError("没有可写入剪映的本地片段", detail=detail)
+        script.save()
+    except JianyingDraftError:
+        raise
+    except Exception as exc:
+        _remove_draft_folder(root, name)
+        raise JianyingDraftError("写入剪映草稿失败", detail=str(exc)) from exc
+
+    return {
+        "draft_name": name,
+        "drafts_dir": root,
+        "draft_path": os.path.join(root, name),
+        "exported_count": exported,
+        "skipped_count": len(skipped),
+        "skipped": skipped,
+        "track_count": len(track_refs),
     }
 
 

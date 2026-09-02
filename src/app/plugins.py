@@ -1,8 +1,9 @@
 """Thin optional plugin registry for VideoSeek.
 
 OSS ships an empty registry by default. Call ``load_plugins`` before creating
-``MainWindow``. Private plugins (e.g. clone) can live in a sibling repo or be
-``pip install``-ed; they are never required for the open-source app.
+``MainWindow``. Private plugins (e.g. clone) can live in a sibling repo, be
+``pip install``-ed, or be pointed at with ``VIDEOSEEK_PLUGIN_PATHS`` when the
+checkout is not next to VideoSeek; they are never required for the open-source app.
 """
 
 from __future__ import annotations

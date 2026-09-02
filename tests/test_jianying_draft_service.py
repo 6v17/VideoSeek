@@ -374,6 +374,103 @@ class JianyingDraftServiceTests(unittest.TestCase):
         cap_end = captions[-1]["start"] + captions[-1]["duration"]
         self.assertAlmostEqual(video_end, cap_end, places=2)
 
+    @patch("src.services.jianying_draft_service.is_jianying_draft_support_available", return_value=True)
+    def test_clone_export_requires_segments(self, _mock_avail):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(jy.JianyingDraftError):
+                jy.export_clone_match_to_jianying_draft([], drafts_dir=tmp)
+
+    def test_clone_export_places_query_aligned_tracks(self):
+        if not jy.is_jianying_draft_support_available():
+            self.skipTest("pyJianYingDraft not installed")
+
+        import json
+        import subprocess
+
+        ffmpeg = _resolve_ffmpeg()
+        if not ffmpeg:
+            self.skipTest("ffmpeg unavailable for sample media")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            media = os.path.join(tmp, "sample.mp4")
+            try:
+                subprocess.run(
+                    [
+                        ffmpeg,
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "color=c=black:s=320x240:d=20",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "anullsrc=r=44100:cl=stereo",
+                        "-shortest",
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-c:a",
+                        "aac",
+                        media,
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+            except (OSError, subprocess.CalledProcessError):
+                self.skipTest("ffmpeg failed to create sample media")
+
+            segments = [
+                {
+                    "track": 3,
+                    "layer": "strong",
+                    "query_start": 2.0,
+                    "query_end": 5.0,
+                    "source_start": 8.0,
+                    "source_end": 11.0,
+                    "source_video_path": media,
+                    "score": 0.9,
+                },
+                {
+                    "track": 2,
+                    "layer": "soft",
+                    "query_start": 2.0,
+                    "query_end": 5.0,
+                    "source_start": 12.0,
+                    "source_end": 15.0,
+                    "source_video_path": media,
+                    "score": 0.6,
+                },
+            ]
+            payload = jy.export_clone_match_to_jianying_draft(
+                segments,
+                drafts_dir=tmp,
+                draft_name="clone-test",
+                title="clone-test",
+                export_mode="balanced",
+            )
+            self.assertEqual(payload.get("exported_count"), 2)
+            self.assertEqual(payload.get("track_count"), 2)
+            content_path = os.path.join(payload["draft_path"], "draft_content.json")
+            with open(content_path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            video_tracks = [track for track in data.get("tracks", []) if track.get("type") == "video"]
+            self.assertEqual(len(video_tracks), 2, video_tracks)
+            names = [str(track.get("name") or "") for track in video_tracks]
+            self.assertIn("VideoSeek V2", names)
+            self.assertIn("VideoSeek V3", names)
+            starts = []
+            source_starts = []
+            for track in video_tracks:
+                segs = track.get("segments") or []
+                self.assertEqual(len(segs), 1)
+                starts.append(int(segs[0]["target_timerange"]["start"]))
+                source_starts.append(int(segs[0]["source_timerange"]["start"]))
+            self.assertTrue(all(abs(value / 1_000_000 - 2.0) < 0.05 for value in starts))
+            self.assertTrue(any(abs(value / 1_000_000 - 8.0) < 0.05 for value in source_starts))
+            self.assertTrue(any(abs(value / 1_000_000 - 12.0) < 0.05 for value in source_starts))
+
 
 if __name__ == "__main__":
     unittest.main()
