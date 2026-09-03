@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -458,18 +459,93 @@ class JianyingDraftServiceTests(unittest.TestCase):
             video_tracks = [track for track in data.get("tracks", []) if track.get("type") == "video"]
             self.assertEqual(len(video_tracks), 2, video_tracks)
             names = [str(track.get("name") or "") for track in video_tracks]
-            self.assertIn("VideoSeek V2", names)
-            self.assertIn("VideoSeek V3", names)
+            self.assertEqual(names, ["VideoSeek V2", "VideoSeek V3"])
+            self.assertFalse(bool((data.get("config") or {}).get("maintrack_adsorb", True)))
             starts = []
             source_starts = []
+            render_indexes = []
+            track_render_indexes = []
             for track in video_tracks:
                 segs = track.get("segments") or []
                 self.assertEqual(len(segs), 1)
                 starts.append(int(segs[0]["target_timerange"]["start"]))
                 source_starts.append(int(segs[0]["source_timerange"]["start"]))
+                render_indexes.append(int(segs[0].get("render_index") or 0))
+                track_render_indexes.append(int(segs[0].get("track_render_index") or 0))
             self.assertTrue(all(abs(value / 1_000_000 - 2.0) < 0.05 for value in starts))
             self.assertTrue(any(abs(value / 1_000_000 - 8.0) < 0.05 for value in source_starts))
             self.assertTrue(any(abs(value / 1_000_000 - 12.0) < 0.05 for value in source_starts))
+            self.assertLess(render_indexes[0], render_indexes[1])
+            self.assertLess(track_render_indexes[0], track_render_indexes[1])
+
+    def test_clone_track_stack_puts_v3_above_v1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            draft = os.path.join(tmp, "clone-stack")
+            os.makedirs(draft)
+            content_path = os.path.join(draft, "draft_content.json")
+            with open(content_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "config": {"maintrack_adsorb": True},
+                        "tracks": [
+                            {
+                                "type": "video",
+                                "name": "VideoSeek V3",
+                                "segments": [{"render_index": 0, "track_render_index": 0}],
+                            },
+                            {
+                                "type": "video",
+                                "name": "VideoSeek V1",
+                                "segments": [{"render_index": 1, "track_render_index": 0}],
+                            },
+                            {
+                                "type": "video",
+                                "name": "VideoSeek V2",
+                                "segments": [{"render_index": 2, "track_render_index": 0}],
+                            },
+                        ],
+                    },
+                    handle,
+                )
+            jy._apply_clone_jianying_track_stack(draft)
+            with open(content_path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            names = [track["name"] for track in data["tracks"]]
+            self.assertEqual(names, ["VideoSeek V1", "VideoSeek V2", "VideoSeek V3"])
+            ranks = [
+                (seg["render_index"], seg["track_render_index"])
+                for track in data["tracks"]
+                for seg in track["segments"]
+            ]
+            self.assertEqual(ranks, [(0, 0), (1, 1), (2, 2)])
+            self.assertFalse(data["config"]["maintrack_adsorb"])
+            self.assertTrue(data["render_index_track_mode_on"])
+
+    def test_clone_clip_timerange_uses_snapped_frames(self):
+        start, source, duration = jy._clone_clip_timerange_sec(
+            {"start": 48, "duration": 24, "in": 96, "query_start": 1.9, "source_start": 3.9, "duration_sec": 0.9},
+            24.0,
+        )
+        self.assertAlmostEqual(start, 2.0)
+        self.assertAlmostEqual(source, 4.0)
+        self.assertAlmostEqual(duration, 1.0)
+
+
+class NleTimelineSnapTests(unittest.TestCase):
+    def test_snap_trims_one_frame_overlap(self):
+        from src.services.nle_timeline_export import _snap_packed_timeline_clips
+
+        clips = _snap_packed_timeline_clips(
+            [
+                {"start": 0, "end": 11, "in": 0, "duration": 11, "out": 11},
+                {"start": 10, "end": 20, "in": 40, "duration": 10, "out": 50},
+            ],
+            max_snap_frames=3,
+        )
+        self.assertEqual(len(clips), 2)
+        self.assertEqual(clips[0]["end"], 10)
+        self.assertEqual(clips[0]["duration"], 10)
+        self.assertEqual(clips[1]["start"], 10)
 
 
 if __name__ == "__main__":

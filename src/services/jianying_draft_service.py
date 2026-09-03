@@ -23,6 +23,7 @@ _CLONE_TRACK_NAMES = {
     2: "VideoSeek V2",
     3: "VideoSeek V3",
 }
+_CLONE_TRACK_NAME_TO_ID = {name: track_id for track_id, name in _CLONE_TRACK_NAMES.items()}
 
 
 class JianyingDraftError(RuntimeError):
@@ -647,6 +648,63 @@ def export_recap_to_jianying_draft(
     }
 
 
+def _clone_track_stack_rank(name: str) -> int:
+    """V1=bottom, V3=top — same stacking as FCPXML lanes."""
+    return int(_CLONE_TRACK_NAME_TO_ID.get(str(name or "").strip(), 99))
+
+
+def _clone_clip_timerange_sec(clip: Mapping[str, Any], timeline_fps: float) -> tuple[float, float, float]:
+    """Use snapped sequence frames so Jianying matches FCP7/FCPXML placement."""
+    fps = max(float(timeline_fps or 24.0), 1e-6)
+    start_f = clip.get("start")
+    dur_f = clip.get("duration")
+    in_f = clip.get("in")
+    if start_f is not None and dur_f is not None:
+        timeline_start = max(int(start_f or 0), 0) / fps
+        duration = max(int(dur_f or 0), 1) / fps
+        if in_f is not None:
+            source_start = max(int(in_f or 0), 0) / fps
+        else:
+            source_start = max(float(clip.get("source_start") or 0.0), 0.0)
+        return timeline_start, source_start, duration
+    return (
+        float(clip.get("query_start") or 0.0),
+        float(clip.get("source_start") or 0.0),
+        float(clip.get("duration_sec") or 0.0),
+    )
+
+
+def _apply_clone_jianying_track_stack(draft_path: str) -> None:
+    """Force V1→V3 JSON order and increasing render_index after pyJianYingDraft save.
+
+    pyJianYingDraft writes ``track_render_index = 0`` on every segment, so Jianying
+    treats all video tracks as the same layer and the timeline looks scrambled.
+    """
+    content_path = os.path.join(str(draft_path or "").strip(), "draft_content.json")
+    if not content_path or not os.path.isfile(content_path):
+        return
+    with open(content_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    tracks = list(data.get("tracks") or [])
+    video = [track for track in tracks if track.get("type") == "video"]
+    other = [track for track in tracks if track.get("type") != "video"]
+    video.sort(key=lambda track: _clone_track_stack_rank(str(track.get("name") or "")))
+    for index, track in enumerate(video):
+        for segment in track.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            segment["render_index"] = index
+            segment["track_render_index"] = index
+    data["tracks"] = video + other
+    if len(video) > 1:
+        data["render_index_track_mode_on"] = True
+    config = data.get("config")
+    if isinstance(config, dict):
+        config["maintrack_adsorb"] = False
+    with open(content_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=4)
+
+
 def _place_clip_onto_track(
     script,
     draft_mod,
@@ -739,17 +797,27 @@ def export_clone_match_to_jianying_draft(
         if probed_fps >= 12:
             fps = probed_fps
     canvas_w, canvas_h, fps_i = _draft_canvas(width=width, height=height, fps=fps)
+    sequence_fps = max(float(timeline_fps or 24.0), 1.0)
 
     import pyJianYingDraft as draft
     from pyJianYingDraft.exceptions import SegmentOverlap
 
     folder = draft.DraftFolder(root)
     try:
-        script = folder.create_draft(name, canvas_w, canvas_h, fps=fps_i, allow_replace=False)
+        # Magnet snapping on 主轨 would pack V1 end-to-end and break query alignment.
+        script = folder.create_draft(
+            name,
+            canvas_w,
+            canvas_h,
+            fps=fps_i,
+            maintrack_adsorb=False,
+            allow_replace=False,
+        )
         track_refs: dict[int, Any] = {}
-        for track_id in sorted(by_track):
-            label = _CLONE_TRACK_NAMES.get(int(track_id), f"VideoSeek V{int(track_id)}")
-            track_refs[int(track_id)] = script.append_track(
+        # Bottom → top (V1, V2, V3), same as FCP7 / FCPXML lanes.
+        for track_id in sorted(int(key) for key in by_track):
+            label = _CLONE_TRACK_NAMES.get(track_id, f"VideoSeek V{track_id}")
+            track_refs[track_id] = script.append_track(
                 draft.TrackSpec(draft.TrackType.video, name=label)
             )
     except FileExistsError as exc:
@@ -760,25 +828,34 @@ def export_clone_match_to_jianying_draft(
     exported = 0
     skipped: List[Dict[str, str]] = []
     try:
-        for track_id, clips in sorted(by_track.items()):
-            ref = track_refs.get(int(track_id))
+        for track_id in sorted(int(key) for key in by_track):
+            ref = track_refs.get(track_id)
             if ref is None:
                 continue
-            ordered = sorted(clips, key=lambda item: float(item.get("query_start") or 0.0))
+            ordered = sorted(
+                by_track.get(track_id) or [],
+                key=lambda item: (
+                    int(item.get("start", 0) or 0),
+                    float(item.get("query_start") or 0.0),
+                ),
+            )
             for clip in ordered:
                 path = str(clip.get("path") or "").strip()
                 if not path or not os.path.isfile(path):
                     skipped.append({"path": path or "(empty)", "reason": "missing"})
                     continue
+                timeline_start, source_start, duration = _clone_clip_timerange_sec(
+                    clip, sequence_fps
+                )
                 try:
                     _place_clip_onto_track(
                         script,
                         draft,
                         ref,
                         video_path=path,
-                        timeline_start_sec=float(clip.get("query_start") or 0.0),
-                        source_start_sec=float(clip.get("source_start") or 0.0),
-                        duration_sec=float(clip.get("duration_sec") or 0.0),
+                        timeline_start_sec=timeline_start,
+                        source_start_sec=source_start,
+                        duration_sec=duration,
                     )
                     exported += 1
                 except SegmentOverlap:
@@ -792,6 +869,7 @@ def export_clone_match_to_jianying_draft(
             detail = skipped[0]["reason"] if skipped else "no clips"
             raise JianyingDraftError("没有可写入剪映的本地片段", detail=detail)
         script.save()
+        _apply_clone_jianying_track_stack(os.path.join(root, name))
     except JianyingDraftError:
         raise
     except Exception as exc:

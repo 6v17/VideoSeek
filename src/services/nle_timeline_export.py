@@ -228,12 +228,24 @@ def _snap_packed_timeline_clips(
     for index in range(len(ordered) - 1):
         curr = ordered[index]
         nxt = ordered[index + 1]
-        gap = int(nxt.get("start", 0) or 0) - int(curr.get("end", 0) or 0)
-        if 0 < gap <= snap:
-            curr["end"] = int(nxt.get("start", 0) or 0)
-            curr["duration"] = max(1, int(curr["end"]) - int(curr.get("start", 0) or 0))
+        curr_end = int(curr.get("end", 0) or 0)
+        next_start = int(nxt.get("start", 0) or 0)
+        gap = next_start - curr_end
+        if gap < 0 or (0 < gap <= snap):
+            # Trim 1–N frame overlaps from rounding, and close tiny seams.
+            curr["end"] = next_start
+            curr["duration"] = max(0, int(curr["end"]) - int(curr.get("start", 0) or 0))
             curr["out"] = int(curr.get("in", 0) or 0) + int(curr["duration"])
-    return ordered
+    kept: list[dict[str, Any]] = []
+    for clip in ordered:
+        start = int(clip.get("start", 0) or 0)
+        end = int(clip.get("end", 0) or 0)
+        if end <= start:
+            continue
+        clip["duration"] = end - start
+        clip["out"] = int(clip.get("in", 0) or 0) + int(clip["duration"])
+        kept.append(clip)
+    return kept
 
 
 def build_clone_match_export_payload(
