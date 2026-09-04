@@ -1927,7 +1927,7 @@ class UnderstandingGuiMixin:
                 page.dialogue_status.setText(
                     self.texts.get(
                         "understanding_step_dialogue_ready",
-                        "Showing {count} cues from this video ({source}). Double-click Speaker to name who said it.",
+                        "Showing {count} cues from this video ({source}). Double-click to play that speech span; Edit to rename.",
                     ).format(count=len(cues), source=source)
                 )
         else:
@@ -2045,9 +2045,6 @@ class UnderstandingGuiMixin:
                 try:
                     if int(time_item.data(Qt.ItemDataRole.UserRole + 1)) == seg_index:
                         table.selectRow(index)
-                        self._select_understanding_chunk_at(
-                            float(time_item.data(Qt.ItemDataRole.UserRole) or 0.0)
-                        )
                         break
                 except (TypeError, ValueError):
                     continue
@@ -2083,21 +2080,12 @@ class UnderstandingGuiMixin:
         if hasattr(self, "_sync_asr_extract_button"):
             self._sync_asr_extract_button()
 
-    def _on_understanding_dialogue_cell_clicked(self, row: int, _column: int) -> None:
-        page = getattr(self, "understanding_page", None)
-        table = getattr(page, "dialogue_table", None) if page is not None else None
-        if table is None:
-            return
-        item = table.item(int(row), 0)
-        if item is None:
-            return
-        try:
-            start = float(item.data(Qt.ItemDataRole.UserRole))
-        except (TypeError, ValueError):
-            return
-        self._select_understanding_chunk_at(start)
+    def _on_understanding_dialogue_cell_clicked(self, row: int, column: int) -> None:
+        # Keep row selection only — do not jump to the VLM chunk timeline.
+        _ = (row, column)
 
     def _on_understanding_dialogue_cell_double_clicked(self, row: int, column: int) -> None:
+        """Play this ASR cue's video span (not the overlapping VLM chunk)."""
         if int(column) == 3:
             return
         page = getattr(self, "understanding_page", None)
@@ -2115,7 +2103,6 @@ class UnderstandingGuiMixin:
             end = float(item.data(Qt.ItemDataRole.UserRole + 2))
         except (TypeError, ValueError):
             end = start
-        self._select_understanding_chunk_at(start)
         self._play_understanding_range(start, end)
 
     def _current_understanding_preview_path(self) -> str:
