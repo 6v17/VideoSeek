@@ -39,7 +39,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 - **群测：** `1.0.88-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.88-beta.1.zip`；**不要**写入公开 `version.json`。
 - **正式：** `1.0.88`；打 tag `v1.0.88`；再更新 OSS `version.json`。
 - 比较规则：同基线时 `beta` **小于** 正式版（`1.0.88-beta.1` < `1.0.88`）。
-- 打包：本地 `build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选，Inno Setup 二次打包可不加）。
+- 打包：本地 `.\scripts\build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选）。OSS 默认包；带克隆页用 `-WithClonePlugin`（读同级 `videoseek-plugin-clone`）。剪映导出依赖已打进包，无需再靠用户 `pip install`。
 
 ---
 

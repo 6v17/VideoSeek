@@ -169,7 +169,10 @@ def resolve_nav_page_order(
 
 
 def _app_repo_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    # Packaged builds must use the exe directory, not a compiled module path.
+    from src.infra.paths import get_app_install_dir
+
+    return get_app_install_dir()
 
 
 def _profile_plugins_path() -> str:

@@ -1,6 +1,6 @@
 [project]
 name = "VideoSeek"
-version = "1.0.88"
+version = "1.0.89-beta.1"
 requires-python = ">=3.10"
 description = "Local semantic video search desktop app"
 

@@ -39,7 +39,6 @@ build/
 *.spec
 main.build/
 main.dist/
-scripts/build_release.ps1
 
 # Local Lance / profile scratch (do not add new artifacts)
 profile/lance/
