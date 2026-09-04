@@ -16,7 +16,7 @@
 | `search_preset*` | 混合搜索预设：JSON 存储、记录规范化、query 向量缓存、CRUD、搜索 plan（由 `search_preset_service` 门面 re-export） |
 | `indexing_service.py` | 索引构建与复用、库内路径对齐、写 Lance |
 | `clip_embedding.py` | ONNX 推理（`clip_onnx` / `siglip2_onnx` / `chinese_clip_onnx`；换模型须重建索引） |
-| `lance_dialogue_search.py` / `dialogue_transcript_store.py` | 硬字幕（OCR）关键词检索；SQLite 字幕库；精确 / 模糊（单字落点命中率） |
+| `lance_dialogue_search.py` / `dialogue_transcript_store.py` | 硬字幕（OCR）关键词检索；SQLite 字幕库；精确 / 模糊（**完整子集优先，再散落命中率**） |
 | `understanding_service.py` | 视频总结生成、读盘/写盘、`EvidenceBundle` 编排 |
 | `understanding_resource_service.py` | profile 扫描、描述服务探测、`understanding_ready`（caption-only） |
 | `src/infra/` | 路径 / FFmpeg 等基础设施（从 `utils` 拆出；见 [`engineering.md`](engineering.md)） |
@@ -235,7 +235,7 @@ sequenceDiagram
 
 1. 侧栏 **视频库 → 字幕库** → 勾选视频提取画面字幕（OCR）
 2. 字幕段落写入 SQLite（`dialogue_transcript_store` / `transcripts.db`）
-3. 搜索页 **字幕** 标签 → `keyword_search_dialogue`：`exact` 子串，或 `fuzzy` 单字落点命中率排序（仅 SQLite；不读 Lance）
+3. 搜索页 **字幕** 标签 → `keyword_search_dialogue`：`exact` 子串，或 `fuzzy`（优先完整查询子集命中，再比散落命中率；仅 SQLite；不读 Lance）
 4. 结果列表对命中字做 UI 高亮（`ui/views/dialogue_highlight.py`，仅当前页渲染）
 
 ### 视频理解 / 总结（可选）
@@ -275,6 +275,7 @@ docs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-09-04 | 模糊搜索排序：完整子集优先于散落命中；CAM++ 权重入库；剪映 / 解说剪辑文档对齐 |
 | 2026-08-16 | 对齐 Lance 主线：建索引段去掉 FAISS/远程库检索；`agent_api/` 包路径；去掉对私有/缺失文档的硬链 |
 | 2026-07-21 | 硬字幕仅 SQLite：去掉 Lance 文本兜底与空库导入；`dialogue_segments` 无产品读写；Lance 就绪后可手动清理遗留 npy/faiss |
 | 2026-07-19 | 硬字幕 SQLite + 模糊落点检索；视频理解改为 caption-only；文案「笔录」→「总结」 |

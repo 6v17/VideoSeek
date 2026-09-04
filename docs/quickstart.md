@@ -36,10 +36,11 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 ### 版本号（正式 / QQ 群测）
 
 - **唯一真相源：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。
-- **群测：** `1.0.88-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.88-beta.1.zip`；**不要**写入公开 `version.json`。
-- **正式：** `1.0.88`；打 tag `v1.0.88`；再更新 OSS `version.json`。
-- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.88-beta.1` < `1.0.88`）。
+- **群测：** `1.0.89-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.89-beta.1.zip`；**不要**写入公开 `version.json`。
+- **正式：** `1.0.89`；打 tag `v1.0.89`；再更新 OSS `version.json`。
+- 比较规则：同基线时 `beta` **小于** 正式版（`1.0.89-beta.1` < `1.0.89`）。
 - 打包：本地 `.\scripts\build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选）。OSS 默认包；带克隆页用 `-WithClonePlugin`（读同级 `videoseek-plugin-clone`）。剪映导出依赖已打进包，无需再靠用户 `pip install`。
+- **CAM++：** 仓库已带 `resources/asr/campplus.onnx` + `.onnx.data`（解说对白声线聚类）；也可从桌面资源包 `cam++.zip` 导入。
 
 ---
 

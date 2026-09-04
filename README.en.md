@@ -17,7 +17,7 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 | **Local libraries** | Add folders, sync to extract frames and build embeddings |
 | **Text search** | Describe a scene; get time ranges in indexed videos |
 | **Image / screenshot search** | Find similar shots from a reference or cropped frame |
-| **Hard-subtitle search** | OCR on-screen subtitles, then keyword search by time; exact match or fuzzy (unordered single-char hit-rate ranking with result highlighting) |
+| **Hard-subtitle search** | OCR on-screen subtitles, then keyword search by time; exact match, or fuzzy (**complete query spans first, then scatter hit-rate**, with highlighting) |
 | **Scope & presets** | All libraries, selected libraries/videos; saved search presets |
 | **frame / chunk modes** | Per-frame hits or semantic chunk aggregation |
 | **Preview & export** | Timeline preview; export mp4 segments |
@@ -26,7 +26,8 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 
 | Feature | Description |
 |---------|-------------|
-| **Video understanding** | Desktop-only optional: per-chunk captions + whole-video summary via an OpenAI-compatible caption service (**not** exposed on the Agent API) |
+| **Video understanding** | Desktop-only optional: per-chunk captions + whole-video summary; **recap cuts** (plan → match shots → captions); local **CAM++** speaker clustering (`resources/asr/campplus.*`) |
+| **Jianying drafts** | Export shot lists / recap cuts to Jianying; installer bundles the dependency |
 | **Localhost Agent API** | HTTP on `127.0.0.1`: semantic/subtitle search, list libraries/videos, export clips (see `docs/for-agents.md`; no understanding endpoints) |
 | **Video download** | Resolve page links, download into a local folder, then sync like a normal library |
 | **Optional plugins** | Load extension pages before startup via `VIDEOSEEK_PLUGINS` or `profile/plugins.json` (nav / package kinds / i18n). The open-source tree ships no third-party plugin code. |
