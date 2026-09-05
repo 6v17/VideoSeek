@@ -430,6 +430,9 @@ class ChunkTimelineWidget(QWidget):
         )
 
     def _segment_color(self, segment: ChunkTimelineSegment, index: int) -> QColor:
+        # Selection fill must read clearly against ready green / pending amber.
+        if index == self._selected_index:
+            return QColor("#3B9EFF")
         if segment.state == "ready":
             return self._qcolor("SUCCESS", "#3DAA6D")
         if segment.state == "pending" or segment.state == "generating":
@@ -467,7 +470,7 @@ class ChunkTimelineWidget(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRoundedRect(segment_rect.adjusted(1, 1, -1, -1), self._INNER_RADIUS, self._INNER_RADIUS)
             elif index == self._selected_index:
-                painter.setPen(QPen(self._qcolor("ACCENT", "#FFFFFF"), 2))
+                painter.setPen(QPen(QColor("#EAF4FF"), 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRoundedRect(segment_rect.adjusted(1, 1, -1, -1), self._INNER_RADIUS, self._INNER_RADIUS)
 

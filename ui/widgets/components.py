@@ -440,6 +440,8 @@ class SearchPage(QWidget):
         self.dialogue_search = self.search_panel.dialogue_search
         self.search_mode = self.search_panel.search_mode
         self.search_mode_label = self.search_panel.search_mode_label
+        self.text_search_enhance = self.search_panel.text_search_enhance
+        self.text_search_enhance_label = self.search_panel.text_search_enhance_label
         self.image_search_mode = self.search_panel.image_search_mode
         self.image_search_mode_label = self.search_panel.image_search_mode_label
         self.image_search_mode_cluster = self.search_panel.image_search_mode_cluster

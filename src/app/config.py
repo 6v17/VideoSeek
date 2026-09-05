@@ -97,6 +97,7 @@ DEFAULT_CONFIG = {
     "sampling_fps_mode": "dynamic",
     "sampling_fps_rules": "0-10m=2; 10m-=1",
     "search_top_k": 100,
+    "text_search_enhance_enabled": False,
     "frame_neighbor_rerank_enabled": False,
     "frame_neighbor_rerank_top_n": 10,
     "frame_neighbor_rerank_window": 2,
@@ -576,6 +577,13 @@ def _sanitize_general_settings(config):
     sanitized["lance_ann_enabled"] = _coerce_bool(
         sanitized.get("lance_ann_enabled", DEFAULT_CONFIG["lance_ann_enabled"]),
         DEFAULT_CONFIG["lance_ann_enabled"],
+    )
+    sanitized["text_search_enhance_enabled"] = _coerce_bool(
+        sanitized.get(
+            "text_search_enhance_enabled",
+            DEFAULT_CONFIG["text_search_enhance_enabled"],
+        ),
+        DEFAULT_CONFIG["text_search_enhance_enabled"],
     )
     sanitized["experimental_hw_decode"] = _coerce_bool(
         sanitized.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"]),

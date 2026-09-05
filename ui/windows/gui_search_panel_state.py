@@ -173,6 +173,60 @@ class SearchPanelStateMixin:
             page.search_mode.setCurrentIndex(target_index)
         page.search_mode.blockSignals(False)
 
+    def _populate_text_search_enhance_combo(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        page = self.search_page
+        combo = getattr(page, "text_search_enhance", None)
+        label = getattr(page, "text_search_enhance_label", None)
+        if combo is None:
+            return
+        texts = getattr(self, "texts", {}) or {}
+        from src.storage.config_store import get_text_search_enhance_enabled
+
+        enabled = bool(get_text_search_enhance_enabled())
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(
+            texts.get("setting_text_search_enhance_enabled_option_off", "Off"),
+            False,
+        )
+        combo.addItem(
+            texts.get("setting_text_search_enhance_enabled_option_on", "On"),
+            True,
+        )
+        restore = combo.findData(enabled)
+        combo.setCurrentIndex(0 if restore < 0 else restore)
+        combo.blockSignals(False)
+        if label is not None:
+            label.setText(
+                texts.get(
+                    "search_text_enhance_label",
+                    texts.get("setting_text_search_enhance_enabled", ""),
+                )
+            )
+        hint = texts.get(
+            "search_text_enhance_hint",
+            texts.get("setting_text_search_enhance_enabled_hint", ""),
+        )
+        if label is not None:
+            label.setToolTip(hint)
+        combo.setToolTip(hint)
+
+    def _set_text_search_enhance_ui(self, enabled: bool) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        combo = getattr(self.search_page, "text_search_enhance", None)
+        if combo is None:
+            return
+        if combo.count() <= 0:
+            self._populate_text_search_enhance_combo()
+        combo.blockSignals(True)
+        index = combo.findData(bool(enabled))
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+
     def _populate_image_search_mode_combo(self) -> None:
         if not hasattr(self, "search_page"):
             return
@@ -284,6 +338,25 @@ class SearchPanelStateMixin:
             hint = texts.get("search_text_mode_hint", texts.get("search_mode_hint", ""))
             page.search_mode_label.setToolTip(hint)
             page.search_mode.setToolTip(hint)
+            enhance_combo = getattr(page, "text_search_enhance", None)
+            enhance_label = getattr(page, "text_search_enhance_label", None)
+            show_enhance = active_tab in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}
+            if enhance_combo is not None:
+                enhance_combo.setVisible(show_enhance)
+            if enhance_label is not None:
+                enhance_label.setVisible(show_enhance)
+            cluster = getattr(page, "text_granularity_cluster", None)
+            panel = getattr(page, "search_panel", None)
+            if cluster is not None and panel is not None:
+                width = (
+                    getattr(panel, "_text_options_width_with_enhance", None)
+                    if show_enhance
+                    else getattr(panel, "_text_options_width_mode_only", None)
+                )
+                if width:
+                    cluster.setFixedWidth(int(width))
+            if show_enhance:
+                self._populate_text_search_enhance_combo()
 
         if active_tab == self.SEARCH_TAB_IMAGE:
             page.image_search_mode_label.setText(texts.get("search_image_mode_label", texts.get("setting_search_mode", "")))
@@ -411,6 +484,10 @@ class SearchPanelStateMixin:
 
     def _on_search_mode_changed(self) -> None:
         self._save_search_mode()
+        self._refresh_search_panel_state()
+
+    def _on_text_search_enhance_changed(self) -> None:
+        self._save_text_search_enhance()
         self._refresh_search_panel_state()
 
     def _on_image_search_mode_changed(self) -> None:

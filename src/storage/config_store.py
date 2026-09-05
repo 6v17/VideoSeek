@@ -256,6 +256,15 @@ def get_search_mode(config=None) -> str:
     return mode if mode in allowed else str(DEFAULT_CONFIG["search_mode"])
 
 
+def get_text_search_enhance_enabled(config=None) -> bool:
+    return bool(
+        _app_cfg(config).get(
+            "text_search_enhance_enabled",
+            DEFAULT_CONFIG["text_search_enhance_enabled"],
+        )
+    )
+
+
 def get_image_search_mode(config=None) -> str:
     cfg = _app_cfg(config)
     mode = str(cfg.get("image_search_mode", DEFAULT_CONFIG["image_search_mode"]) or "").strip().lower()

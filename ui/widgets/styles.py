@@ -100,7 +100,7 @@ QMenu::separator {
     border-top-right-radius: 10px;
 }
 #SettingsSectionHeader #CardTitle {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     color: __HEADLINE__;
 }
@@ -990,7 +990,7 @@ QComboBox QAbstractItemView {
     outline: 0;
 }
 QLabel[settingLabel="true"] {
-    color: __HEADLINE__;
+    color: __TEXT__;
     font-weight: 600;
     line-height: 1.35em;
 }
@@ -1000,6 +1000,7 @@ QLabel[settingLabel="true"] {
 }
 QLabel[settingLabel="true"][detailActive="true"] {
     color: __ACCENT__;
+    font-weight: 700;
 }
 #SettingHintButton {
     min-width: 18px;

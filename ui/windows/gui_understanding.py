@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import contextmanager
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
@@ -104,6 +105,7 @@ class UnderstandingGuiMixin:
         self._sync_understanding_mode_ui()
         self._load_llm_settings(config)
         self._load_asr_settings(config)
+        self._understanding_settings_applied = True
         if refresh_status:
             self._refresh_understanding_settings_status()
 
@@ -112,7 +114,7 @@ class UnderstandingGuiMixin:
 
         return UNDERSTANDING_MODE_MOTION
 
-    def _sync_understanding_mode_ui(self, *, reload_timeline: bool = False):
+    def _sync_understanding_mode_ui(self, *, reload_timeline: bool = False, reload_dialogue: bool = False):
         page = self._understanding_config_widgets()
         if page is None:
             return
@@ -132,6 +134,7 @@ class UnderstandingGuiMixin:
             self.texts.get("understanding_chunk_detail_title_motion", "Segment change")
         )
         if hasattr(page, "order_workflow_cards"):
+            # Layout order is fixed at page build; do not reshuffle on every label sync.
             page.order_workflow_cards(recap_first=True)
         if hasattr(page, "generate_title"):
             page.generate_title.setText(
@@ -204,7 +207,7 @@ class UnderstandingGuiMixin:
                 bar.setVisible(True)
         if hasattr(page, "recap_start_hint"):
             page.recap_start_hint.setVisible(True)
-        self._refresh_understanding_dialogue_step()
+        # Dialogue table is filled by timeline / ASR handlers — not on every label sync.
         self._sync_recap_export_button()
         if hasattr(page, "export_hint"):
             page.export_hint.setText(
@@ -212,6 +215,8 @@ class UnderstandingGuiMixin:
             )
         if reload_timeline:
             self._load_understanding_video_timeline()
+        elif reload_dialogue:
+            self._refresh_understanding_dialogue_step()
         if hasattr(page, "chunk_sample_frames"):
             page.chunk_sample_frames.setVisible(True)
 
@@ -790,6 +795,7 @@ class UnderstandingGuiMixin:
                     break
         combo.setCurrentIndex(restore_index)
         combo.blockSignals(False)
+        self._understanding_page_warm = True
         self._refresh_understanding_video_options()
 
     def _refresh_understanding_video_options(self):
@@ -1009,6 +1015,10 @@ class UnderstandingGuiMixin:
     def _load_understanding_video_timeline(self):
         if not hasattr(self, "understanding_page"):
             return
+        with self._freeze_understanding_page_scroll():
+            self._load_understanding_video_timeline_impl()
+
+    def _load_understanding_video_timeline_impl(self):
         page = self.understanding_page
         video_id = self._selected_understanding_video_id()
         self._understanding_chunk_payloads = {}
@@ -1067,7 +1077,7 @@ class UnderstandingGuiMixin:
         self._refresh_understanding_video_summary(evidence)
         if segments:
             page.chunk_timeline.set_selected_index(0)
-            self._show_understanding_chunk_detail(0)
+            self._show_understanding_chunk_detail_impl(0)
         else:
             page.chunk_time_label.setText("")
             self._set_understanding_readonly_text(
@@ -1154,6 +1164,10 @@ class UnderstandingGuiMixin:
     def _show_understanding_chunk_detail(self, index: int, payload=None):
         if not hasattr(self, "understanding_page"):
             return
+        with self._freeze_understanding_page_scroll():
+            self._show_understanding_chunk_detail_impl(index, payload)
+
+    def _show_understanding_chunk_detail_impl(self, index: int, payload=None):
         page = self.understanding_page
         page.chunk_timeline.set_selected_index(int(index))
         if payload is None:
@@ -1306,19 +1320,29 @@ class UnderstandingGuiMixin:
         return status
 
     def _deferred_understanding_page_refresh(self) -> None:
+        self._understanding_page_refresh_pending = False
         if not self._is_current_page("understanding"):
+            return
+        # Subsequent visits: keep last video list / timeline / dialogue as-is.
+        # Library/indexing/ASR handlers invalidate via _refresh_understanding_scope_options
+        # or explicit dialogue/timeline reloads.
+        if getattr(self, "_understanding_page_warm", False):
             return
         page = getattr(self, "understanding_page", None)
         if page is not None and hasattr(page, "lbl_status"):
             page.lbl_status.setText(
                 self.texts.get("understanding_loading_videos", "Loading indexed videos…")
             )
+        if not getattr(self, "_understanding_settings_applied", False):
+            if hasattr(self, "load_understanding_settings"):
+                self.load_understanding_settings(refresh_status=False)
+            self._understanding_settings_applied = True
         if hasattr(self, "_refresh_understanding_scope_options"):
             self._refresh_understanding_scope_options()
-        # Bootstrap copies run once after startup; avoid redoing them on every page visit.
+        else:
+            self._understanding_page_warm = True
         self._refresh_understanding_page_fast(install_bootstrap=False)
         if page is not None and hasattr(page, "lbl_status"):
-            # Timeline load may have set a more specific status; only clear our placeholder.
             current = str(page.lbl_status.text() or "")
             if current == self.texts.get("understanding_loading_videos", "Loading indexed videos…"):
                 page.lbl_status.setText("")
@@ -1373,7 +1397,6 @@ class UnderstandingGuiMixin:
         page.btn_export_video_json.setEnabled(
             not understanding_running and self._current_video_has_exportable_evidence()
         )
-        self._refresh_understanding_dialogue_step()
         self._sync_recap_export_button(running=understanding_running)
         page.scope_combo.setEnabled(not understanding_running)
         page.video_combo.setEnabled(not understanding_running)
@@ -1397,7 +1420,8 @@ class UnderstandingGuiMixin:
             page.btn_generate_evidence.setToolTip(tip)
         else:
             page.btn_generate_evidence.setToolTip("")
-        self._sync_understanding_mode_ui()
+        # Labels / workflow chrome are owned by load_understanding_settings /
+        # language refresh — do not re-run _sync_understanding_mode_ui here.
 
     def open_understanding_settings(self):
         self.switch_page("understanding")
@@ -1903,41 +1927,42 @@ class UnderstandingGuiMixin:
         page = getattr(self, "understanding_page", None)
         if page is None or not hasattr(page, "dialogue_card"):
             return
-        page.dialogue_card.setVisible(True)
-        video_id = self._selected_understanding_video_id()
-        cues = []
-        if video_id:
-            from src.services.recap_service import list_speech_dialogue_cues
+        with self._freeze_understanding_page_scroll():
+            page.dialogue_card.setVisible(True)
+            video_id = self._selected_understanding_video_id()
+            cues = []
+            if video_id:
+                from src.services.recap_service import list_speech_dialogue_cues
 
-            cues = list_speech_dialogue_cues(video_id, config=load_config())
-        self._populate_understanding_dialogue_table(cues)
-        source = self._dialogue_source_label(str((cues[0] or {}).get("asr_source") or "") if cues else "")
-        if cues:
-            from src.services.recap_service import recap_speaker_stats
+                cues = list_speech_dialogue_cues(video_id, config=load_config())
+            self._populate_understanding_dialogue_table(cues)
+            source = self._dialogue_source_label(str((cues[0] or {}).get("asr_source") or "") if cues else "")
+            if cues:
+                from src.services.recap_service import recap_speaker_stats
 
-            unnamed = int(recap_speaker_stats(cues).get("unnamed") or 0)
-            if unnamed > 0:
-                page.dialogue_status.setText(
-                    self.texts.get(
-                        "understanding_step_dialogue_unnamed",
-                        "{count} cues ({source}); {unnamed} still unnamed.",
-                    ).format(count=len(cues), source=source, unnamed=unnamed)
-                )
+                unnamed = int(recap_speaker_stats(cues).get("unnamed") or 0)
+                if unnamed > 0:
+                    page.dialogue_status.setText(
+                        self.texts.get(
+                            "understanding_step_dialogue_unnamed",
+                            "{count} cues ({source}); {unnamed} still unnamed.",
+                        ).format(count=len(cues), source=source, unnamed=unnamed)
+                    )
+                else:
+                    page.dialogue_status.setText(
+                        self.texts.get(
+                            "understanding_step_dialogue_ready",
+                            "Showing {count} cues from this video ({source}). Double-click to play that speech span; Edit to rename.",
+                        ).format(count=len(cues), source=source)
+                    )
             else:
                 page.dialogue_status.setText(
                     self.texts.get(
-                        "understanding_step_dialogue_ready",
-                        "Showing {count} cues from this video ({source}). Double-click to play that speech span; Edit to rename.",
-                    ).format(count=len(cues), source=source)
+                        "understanding_step_dialogue_empty",
+                        "No speech dialogue for this video yet. Extract speech here.",
+                    )
                 )
-        else:
-            page.dialogue_status.setText(
-                self.texts.get(
-                    "understanding_step_dialogue_empty",
-                    "No speech dialogue for this video yet. Extract speech here.",
-                )
-            )
-        self._sync_asr_extract_button()
+            self._sync_asr_extract_button()
 
     def _populate_understanding_dialogue_table(self, cues: list) -> None:
         from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTableWidgetItem, QWidget
@@ -1976,6 +2001,9 @@ class UnderstandingGuiMixin:
             button.setProperty("class", "TableBtn")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setFixedHeight(28)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.setAutoDefault(False)
+            button.setDefault(False)
             button.clicked.connect(lambda _checked=False, r=index: self._edit_understanding_dialogue_cue(r))
             host = QWidget()
             row_layout = QHBoxLayout(host)
@@ -2156,6 +2184,28 @@ class UnderstandingGuiMixin:
         if hasattr(page, "dialogue_status"):
             page.dialogue_status.setText(message)
 
+    def _understanding_outer_scroll(self) -> QScrollArea | None:
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return None
+        viewport = page.parentWidget()
+        if viewport is None:
+            return None
+        parent = viewport.parentWidget()
+        return parent if isinstance(parent, QScrollArea) else None
+
+    @contextmanager
+    def _freeze_understanding_page_scroll(self):
+        """Keep the page viewport still across layout/visibility churn."""
+        scroll = self._understanding_outer_scroll()
+        bar = scroll.verticalScrollBar() if scroll is not None else None
+        pos = int(bar.value()) if bar is not None else 0
+        try:
+            yield
+        finally:
+            if bar is not None:
+                bar.setValue(pos)
+
     def _select_understanding_chunk_at(self, timestamp_sec: float) -> None:
         chunks = list(getattr(self, "_understanding_index_chunks", []) or [])
         if not chunks:
@@ -2172,24 +2222,15 @@ class UnderstandingGuiMixin:
                 match = index
         page = self.understanding_page
         page.chunk_timeline.set_selected_index(match)
-        self._ensure_understanding_timeline_on_screen()
         QTimer.singleShot(0, lambda idx=match: page.chunk_timeline.set_selected_index(idx))
         self._show_understanding_chunk_detail(match)
 
     def _ensure_understanding_timeline_on_screen(self) -> None:
-        page = getattr(self, "understanding_page", None)
-        if page is None:
-            return
-        target = getattr(page, "chunk_timeline_scroll", None) or getattr(page, "chunk_timeline", None)
-        if target is None:
-            return
-        widget = page
-        while widget is not None:
-            parent = widget.parentWidget()
-            if isinstance(parent, QScrollArea) and parent.widget() is not None:
-                parent.ensureWidgetVisible(target, 12, 28)
-                return
-            widget = parent
+        # Intentionally no-op for the page QScrollArea.
+        # ensureWidgetVisible used to yank the whole understanding page to the
+        # timeline whenever recap/selection updated — felt like every click jumped.
+        # ChunkTimelineWidget already scrolls horizontally to the selected segment.
+        return
 
     def _sync_recap_export_button(self, *, running: bool | None = None) -> None:
         page = getattr(self, "understanding_page", None)
@@ -2297,13 +2338,22 @@ class UnderstandingGuiMixin:
         video_id = self._selected_understanding_video_id()
         if not video_id:
             return False
-        return (
-            load_evidence_bundle(
+        # Prefer in-memory timeline payloads when already loaded for this video.
+        payloads = getattr(self, "_understanding_chunk_payloads", None) or {}
+        context = getattr(self, "_understanding_video_context", None) or {}
+        if payloads and str(context.get("video_id") or "").strip() == video_id:
+            return any(
+                isinstance(payload, dict) and self._chunk_payload_has_evidence(payload)
+                for payload in payloads.values()
+            )
+        from src.services.understanding_service import evidence_exists_for_video
+
+        return bool(
+            evidence_exists_for_video(
                 video_id,
                 config=load_config(),
                 mode=self._current_understanding_mode(),
             )
-            is not None
         )
 
     def _default_understanding_export_name(self, evidence: dict) -> str:

@@ -21,8 +21,14 @@ class SettingsFormMixin:
     """Grid rows, detail popups, and section shells for SettingsPage."""
 
     def _configure_setting_input(self, widget, width, expanding=False):
-        widget.setMinimumWidth(width)
-        widget.setMaximumWidth(16777215 if expanding else width + 44)
+        if expanding:
+            # Path fields must shrink with the viewport; a fixed 520px min overflows
+            # default content width and clips right-aligned header buttons.
+            widget.setMinimumWidth(160)
+            widget.setMaximumWidth(16777215)
+        else:
+            widget.setMinimumWidth(width)
+            widget.setMaximumWidth(width + 44)
         widget.setMinimumHeight(32)
         widget.setSizePolicy(QSizePolicy.Expanding if expanding else QSizePolicy.Fixed, QSizePolicy.Fixed)
         widget.setProperty("settingField", True)
@@ -52,10 +58,12 @@ class SettingsFormMixin:
         title_wrap_layout.addStretch()
         layout.addWidget(title_wrap)
         form = QGridLayout()
-        form.setContentsMargins(14, 2, 14, 6)
+        # Indent rows under the section title so parameters don't sit flush with the header.
+        form.setContentsMargins(28, 4, 14, 8)
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(0)
-        form.setColumnMinimumWidth(0, 260)
+        # Keep label column modest so the page can shrink to the scroll viewport.
+        form.setColumnMinimumWidth(0, 200)
         form.setColumnStretch(0, 0)
         form.setColumnStretch(1, 1)
         layout.addLayout(form)
@@ -80,7 +88,7 @@ class SettingsFormMixin:
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setHorizontalSpacing(16)
         row_layout.setVerticalSpacing(0)
-        row_layout.setColumnMinimumWidth(0, 260)
+        row_layout.setColumnMinimumWidth(0, 200)
         row_layout.setColumnStretch(0, 0)
         row_layout.setColumnStretch(1, 1)
         label_alignment = Qt.AlignLeft | (Qt.AlignVCenter if label_vcenter else Qt.AlignTop)

@@ -107,7 +107,13 @@ from src.services.search_video_discovery import (
     _top_video_paths_from_hits,
     _use_video_discovery_results,
 )
-from src.storage.config_store import get_active_model_profile, get_global_model_asset_paths, get_search_mode, get_search_top_k
+from src.storage.config_store import (
+    get_active_model_profile,
+    get_global_model_asset_paths,
+    get_search_mode,
+    get_search_top_k,
+    get_text_search_enhance_enabled,
+)
 
 logger = get_logger("search_service")
 
@@ -418,6 +424,7 @@ def run_search(
     profile: bool | None = None,
     progress_callback=None,
     video_discovery_enabled: bool | None = None,
+    text_enhance: bool | None = None,
 ) -> List[SearchHit]:
     config = load_config()
     precise_image = _use_precise_image_pipeline(is_text, config, search_precision_mode)
@@ -439,6 +446,41 @@ def run_search(
     _reset_search_index_steps()
     set_search_progress_callback(progress_callback)
     try:
+        enhance_on = (
+            bool(get_text_search_enhance_enabled(config))
+            if text_enhance is None
+            else bool(text_enhance)
+        )
+        from src.services.text_search_enhance import should_enhance_text_query
+
+        if should_enhance_text_query(
+            is_text=is_text,
+            query_data=query_data,
+            query_vector=query_vector,
+            enabled=enhance_on,
+        ):
+            enhanced = _run_enhanced_text_search(
+                query_data=str(query_data),
+                top_k=top_k,
+                search_mode=mode,
+                scope_video_paths=scope_video_paths,
+                scope_library_paths=scope_library_paths,
+                search_precision_mode=search_precision_mode,
+                pixel_query_data=pixel_query_data,
+                preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
+                profile=profile_enabled,
+                progress_callback=progress_callback,
+                video_discovery_enabled=video_discovery_enabled,
+                config=config,
+            )
+            if enhanced is not None:
+                from src.services.search_scope import filter_hits_with_existing_sources, load_searchable_path_index
+
+                path_index = load_searchable_path_index(config=config)
+                return filter_hits_with_existing_sources(enhanced, path_index=path_index, config=config)
+
         results = _run_search_impl(
             query_data=query_data,
             is_text=is_text,
@@ -464,6 +506,153 @@ def run_search(
         return filter_hits_with_existing_sources(results, path_index=path_index, config=config)
     finally:
         clear_search_progress_callback()
+
+
+def _run_enhanced_text_search(
+    *,
+    query_data: str,
+    top_k,
+    search_mode: str,
+    scope_video_paths,
+    scope_library_paths,
+    search_precision_mode,
+    pixel_query_data,
+    preview_anchor_sec,
+    locate_anchor_score,
+    locate_score_margin,
+    profile,
+    progress_callback,
+    video_discovery_enabled,
+    config,
+) -> List[SearchHit] | None:
+    """Multi-route text ANN + RRF. Returns None when only one route (caller falls back)."""
+    _ = progress_callback
+    from src.services.text_search_enhance import (
+        default_text_embed_fn,
+        rrf_fuse_search_hits,
+        select_text_search_routes,
+    )
+
+    routes = select_text_search_routes(query_data, embed_fn=default_text_embed_fn)
+    if len(routes) <= 1:
+        return None
+    resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(config)
+    precise_image = _use_precise_image_pipeline(True, config, search_precision_mode)
+    profile_enabled = bool(profile) if profile is not None else is_profiling_enabled(config)
+    profile_meta = build_profile_meta_from_config(
+        config,
+        precise_image=precise_image,
+        search_precision_mode=search_precision_mode,
+    )
+    route_lists: List[List[SearchHit]] = []
+    logger.info("Text search enhance routes=%s", routes)
+    for route in routes:
+        query_vector = build_query_vector(route, is_text=True)
+        route_lists.append(
+            _run_search_impl(
+                query_data=route,
+                is_text=True,
+                top_k=resolved_top_k,
+                scope_video_paths=scope_video_paths,
+                scope_library_paths=scope_library_paths,
+                query_vector=query_vector,
+                precise_image=precise_image,
+                mode=search_mode,
+                config=config,
+                profile_enabled=profile_enabled,
+                profile_meta=profile_meta,
+                search_precision_mode=search_precision_mode,
+                pixel_query_data=pixel_query_data,
+                preview_anchor_sec=preview_anchor_sec,
+                locate_anchor_score=locate_anchor_score,
+                locate_score_margin=locate_score_margin,
+                video_discovery_enabled=video_discovery_enabled,
+            )
+        )
+    return rrf_fuse_search_hits(route_lists, resolved_top_k)
+
+
+def run_mixed_query_search(
+    *,
+    query: str = "",
+    source_image_paths=None,
+    fusion=None,
+    top_k=None,
+    search_mode=None,
+    scope_video_paths=None,
+    scope_library_paths=None,
+    search_precision_mode=None,
+    pixel_query_data=None,
+    preview_anchor_sec: float | None = None,
+    locate_anchor_score: float | None = None,
+    locate_score_margin: float | None = None,
+    profile: bool | None = None,
+    progress_callback=None,
+    video_discovery_enabled: bool | None = None,
+    text_enhance: bool | None = None,
+) -> List[SearchHit]:
+    """Compose / mixed search. Optional text-enhance multi-route when description is present."""
+    from src.services.search_preset_query import (
+        _resolve_compose_ref_paths,
+        encode_mixed_query_vector,
+    )
+    from src.services.text_search_enhance import (
+        default_text_embed_fn,
+        rrf_fuse_search_hits,
+        select_text_search_routes,
+    )
+
+    cfg = load_config()
+    text = str(query or "").strip()
+    refs = _resolve_compose_ref_paths(source_image_paths)
+    if not text and not refs:
+        raise RuntimeError("Compose query must include text and/or reference images")
+
+    enhance_on = (
+        bool(get_text_search_enhance_enabled(cfg))
+        if text_enhance is None
+        else bool(text_enhance)
+    )
+    mode = str(search_mode or get_search_mode(cfg)).strip().lower()
+    if mode not in {"frame", "chunk"}:
+        mode = get_search_mode(cfg)
+    resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
+    pixel = pixel_query_data if pixel_query_data is not None else (refs[0] if refs else None)
+
+    def _one(route_text: str):
+        vector = encode_mixed_query_vector(
+            query=route_text,
+            source_image_paths=refs,
+            fusion=fusion,
+            config=cfg,
+        )
+        is_text = bool(route_text) and not refs
+        query_data = route_text or (refs[0] if refs else "")
+        return run_search(
+            query_data,
+            is_text=is_text,
+            top_k=resolved_top_k,
+            search_mode=mode,
+            scope_video_paths=scope_video_paths,
+            scope_library_paths=scope_library_paths,
+            query_vector=vector,
+            search_precision_mode=search_precision_mode or "fast",
+            pixel_query_data=pixel,
+            preview_anchor_sec=preview_anchor_sec,
+            locate_anchor_score=locate_anchor_score,
+            locate_score_margin=locate_score_margin,
+            profile=profile,
+            progress_callback=progress_callback,
+            video_discovery_enabled=video_discovery_enabled,
+            text_enhance=False,
+        )
+
+    if enhance_on and text:
+        routes = select_text_search_routes(text, embed_fn=default_text_embed_fn)
+        if len(routes) > 1:
+            logger.info("Compose text-search enhance routes=%s", routes)
+            return rrf_fuse_search_hits([_one(route) for route in routes], resolved_top_k)
+    return _one(text)
 
 
 def _run_search_impl(
@@ -963,6 +1152,7 @@ __all__ = [
     "resolve_clip_confidence_tier_key",
     "run_chunk_search",
     "run_dialogue_search",
+    "run_mixed_query_search",
     "run_search",
     "warmup_search_runtime",
 ]

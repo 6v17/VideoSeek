@@ -65,7 +65,7 @@ COMPONENT_SIZES = {
     "search_field_gap": 4,
     "search_controls_group_gap": 12,
     "search_panel_card_margin": 12,
-    "settings_path_input_width": 520,
+    "settings_path_input_width": 160,
     "understanding_form_label_width": 96,
 }
 

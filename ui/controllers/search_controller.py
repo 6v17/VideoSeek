@@ -65,6 +65,9 @@ class SearchController(QObject):
         locate_anchor_score=None,
         locate_score_margin=None,
         video_discovery_enabled=None,
+        compose_text=None,
+        compose_image_paths=None,
+        compose_fusion=None,
     ):
         self._stop_active_search_worker()
         self.stop_thumbnail_loading()
@@ -91,6 +94,9 @@ class SearchController(QObject):
                 locate_anchor_score=locate_anchor_score,
                 locate_score_margin=locate_score_margin,
                 video_discovery_enabled=video_discovery_enabled,
+                compose_text=compose_text,
+                compose_image_paths=list(compose_image_paths or []) if compose_image_paths is not None else None,
+                compose_fusion=compose_fusion,
             )
         )
         self.worker.result_ready.connect(self._display_results)

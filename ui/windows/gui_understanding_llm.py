@@ -389,17 +389,25 @@ class UnderstandingLlmGuiMixin:
         self._sync_recap_export_button(running=True)
         if hasattr(self, "_sync_asr_extract_button"):
             self._sync_asr_extract_button()
-        page.btn_stop.setVisible(True)
-        page.btn_stop.setEnabled(True)
-        page.progress_bar.setVisible(True)
-        page.progress_bar.setValue(8)
-        if hasattr(page, "recap_progress_bar"):
-            page.recap_progress_bar.setVisible(True)
-            page.recap_progress_bar.setValue(8)
-        if hasattr(page, "recap_progress_status"):
-            page.recap_progress_status.set_status_text(
-                self.texts.get(start_status, "Generating recap…")
-            )
+        from contextlib import nullcontext
+
+        freeze_cm = (
+            self._freeze_understanding_page_scroll()
+            if hasattr(self, "_freeze_understanding_page_scroll")
+            else nullcontext()
+        )
+        with freeze_cm:
+            page.btn_stop.setVisible(True)
+            page.btn_stop.setEnabled(True)
+            page.progress_bar.setVisible(True)
+            page.progress_bar.setValue(8)
+            if hasattr(page, "recap_progress_bar"):
+                page.recap_progress_bar.setVisible(True)
+                page.recap_progress_bar.setValue(8)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(
+                    self.texts.get(start_status, "Generating recap…")
+                )
         system_prompt = ""
         plan_prompt = ""
         caption_prompt = ""

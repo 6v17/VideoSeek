@@ -9,8 +9,8 @@ from src.services import search_service
 
 
 class SearchServiceTests(unittest.TestCase):
-    @patch("src.services.search_service.faiss.normalize_L2", create=True)
-    @patch("src.services.search_service.get_text_embedding")
+    @patch("faiss.normalize_L2")
+    @patch("src.core.clip_embedding.get_text_embedding")
     def test_build_query_vector_for_text(self, mock_text_embedding, mock_normalize):
         mock_text_embedding.return_value = np.array([[1.0, 2.0]], dtype=np.float32)
 
@@ -18,6 +18,7 @@ class SearchServiceTests(unittest.TestCase):
 
         self.assertEqual(result.dtype, np.float32)
         mock_normalize.assert_called_once()
+        mock_text_embedding.assert_called_once_with("cat on sofa")
 
     @patch("src.services.search_service.load_search_assets")
     @patch("src.services.search_service.build_query_vector")

@@ -30,6 +30,9 @@ class SearchConfig:
     locate_anchor_score: Optional[float] = None
     locate_score_margin: Optional[float] = None
     video_discovery_enabled: Optional[bool] = None
+    compose_text: Optional[str] = None
+    compose_image_paths: Optional[List[str]] = None
+    compose_fusion: Optional[dict] = None
 
 
 class FetchWorkerBase(QThread):
@@ -236,25 +239,49 @@ class SearchWorker(QThread):
                 return
 
             mode = str(config.search_mode or "").strip().lower()
-            base_kwargs = {
-                "query_data": config.query,
-                "is_text": config.is_text,
-                "top_k": config.top_k,
-                "scope_video_paths": config.scope_video_paths or None,
-                "scope_library_paths": config.scope_library_paths or None,
-                "query_vector": config.query_vector,
-            }
-            results = run_search(
-                search_mode=mode or None,
-                search_precision_mode=config.search_precision_mode,
-                pixel_query_data=config.pixel_query_data,
-                preview_anchor_sec=config.preview_anchor_sec,
-                locate_anchor_score=config.locate_anchor_score,
-                locate_score_margin=config.locate_score_margin,
-                video_discovery_enabled=config.video_discovery_enabled,
-                progress_callback=self._emit_progress,
-                **base_kwargs,
+            compose_paths = list(config.compose_image_paths or [])
+            is_compose = str(config.search_kind or "").strip().lower() == "compose" or (
+                config.compose_text is not None or config.compose_image_paths is not None
             )
+            if is_compose:
+                from src.services.search_service import run_mixed_query_search
+
+                results = run_mixed_query_search(
+                    query=str(config.compose_text if config.compose_text is not None else ""),
+                    source_image_paths=compose_paths,
+                    fusion=config.compose_fusion,
+                    top_k=config.top_k,
+                    search_mode=mode or None,
+                    scope_video_paths=config.scope_video_paths or None,
+                    scope_library_paths=config.scope_library_paths or None,
+                    search_precision_mode=config.search_precision_mode or "fast",
+                    pixel_query_data=config.pixel_query_data,
+                    preview_anchor_sec=config.preview_anchor_sec,
+                    locate_anchor_score=config.locate_anchor_score,
+                    locate_score_margin=config.locate_score_margin,
+                    video_discovery_enabled=config.video_discovery_enabled,
+                    progress_callback=self._emit_progress,
+                )
+            else:
+                base_kwargs = {
+                    "query_data": config.query,
+                    "is_text": config.is_text,
+                    "top_k": config.top_k,
+                    "scope_video_paths": config.scope_video_paths or None,
+                    "scope_library_paths": config.scope_library_paths or None,
+                    "query_vector": config.query_vector,
+                }
+                results = run_search(
+                    search_mode=mode or None,
+                    search_precision_mode=config.search_precision_mode,
+                    pixel_query_data=config.pixel_query_data,
+                    preview_anchor_sec=config.preview_anchor_sec,
+                    locate_anchor_score=config.locate_anchor_score,
+                    locate_score_margin=config.locate_score_margin,
+                    video_discovery_enabled=config.video_discovery_enabled,
+                    progress_callback=self._emit_progress,
+                    **base_kwargs,
+                )
             results = filter_hits_by_min_score(results, config.min_score)
             from src.services.search_service import locate_crop_confidence_warning_key
 

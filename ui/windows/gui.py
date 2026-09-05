@@ -326,6 +326,10 @@ class MainWindow(
         self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
+        if hasattr(self.search_page, "text_search_enhance"):
+            self.search_page.text_search_enhance.currentIndexChanged.connect(
+                self._on_text_search_enhance_changed
+            )
         self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
         if hasattr(self.search_page, "dialogue_search_mode"):
             self.search_page.dialogue_search_mode.currentIndexChanged.connect(
@@ -501,6 +505,8 @@ class MainWindow(
         # Reserve the vertical scrollbar gutter so first open does not shrink
         # content width when AsNeeded suddenly shows a bar.
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        # Focused children (buttons/tables) must not yank the viewport.
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll.setWidget(page_widget)
         return scroll
 
@@ -594,19 +600,12 @@ class MainWindow(
             feature.on_page_shown(self, page_name)
 
     def _settle_understanding_page_layout(self) -> None:
-        """Paint understanding chrome first; defer video-list/timeline (O(N) / disk)."""
-        page = getattr(self, "understanding_page", None)
-        if page is None:
+        """Switch instantly; defer settings/status/video-list/timeline/dialogue."""
+        # Do not touch widgets here — any sync work before the event loop paints
+        # makes the sidebar click feel stuck (unlike search/settings/library).
+        if getattr(self, "_understanding_page_refresh_pending", False):
             return
-        page.setUpdatesEnabled(False)
-        try:
-            if hasattr(self, "load_understanding_settings"):
-                self.load_understanding_settings(refresh_status=False)
-            if hasattr(self, "_refresh_understanding_page_fast"):
-                self._refresh_understanding_page_fast(install_bootstrap=False)
-        finally:
-            page.setUpdatesEnabled(True)
-        # Heavy: list_ready_video_entries + chunks/evidence. Keep off the first paint.
+        self._understanding_page_refresh_pending = True
         QTimer.singleShot(0, self._deferred_understanding_page_refresh)
 
     def _settle_link_page_layout(self) -> None:
@@ -1082,7 +1081,9 @@ class MainWindow(
         self.understanding_page.btn_stop.setText(t["stop"])
         if hasattr(self.understanding_page, "btn_stop_asr"):
             self.understanding_page.btn_stop_asr.setText(t["stop"])
-        self._sync_understanding_mode_ui()
+        self._sync_understanding_mode_ui(
+            reload_dialogue=self._is_current_page("understanding")
+        )
         if self._is_current_page("understanding"):
             if hasattr(self, "_refresh_understanding_page_fast"):
                 self._refresh_understanding_page_fast()
@@ -1565,13 +1566,17 @@ class MainWindow(
             plan["is_text"],
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
-            query_vector=plan["query_vector"],
+            query_vector=None,
             search_mode=compose_mode,
+            search_kind="compose",
             top_k=plan.get("top_k"),
             min_score=plan.get("min_score"),
             search_precision_mode="fast",
             pixel_query_data=plan.get("pixel_query_data"),
             video_discovery_enabled=False,
+            compose_text=query,
+            compose_image_paths=paths,
+            compose_fusion=effective_fusion,
         )
         return True
 
@@ -1826,6 +1831,16 @@ class MainWindow(
             config = load_config()
             search_mode = str(self.search_page.search_mode.currentData() or DEFAULT_CONFIG["search_mode"])
             config["search_mode"] = search_mode
+            save_config(config)
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _save_text_search_enhance(self):
+        try:
+            config = load_config()
+            combo = getattr(self.search_page, "text_search_enhance", None)
+            enabled = bool(combo.currentData()) if combo is not None else False
+            config["text_search_enhance_enabled"] = enabled
             save_config(config)
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)

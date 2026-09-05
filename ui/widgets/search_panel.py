@@ -148,14 +148,39 @@ class SearchPanel(VSCard):
         self.search_mode.setFixedWidth(mode_combo_width)
         self.search_mode.setFixedHeight(options_combo_height)
         self.search_mode.setSizePolicy(combo_policy)
+
+        self.text_search_enhance_label = QLabel()
+        self.text_search_enhance_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.text_search_enhance_label)
+        enhance_combo_width = max(64, min(72, mode_combo_width - 28))
+        self.text_search_enhance = QComboBox()
+        self.text_search_enhance.setObjectName("SearchModeSelect")
+        self.text_search_enhance.setFixedWidth(enhance_combo_width)
+        self.text_search_enhance.setFixedHeight(options_combo_height)
+        self.text_search_enhance.setSizePolicy(combo_policy)
+
         self.text_granularity_cluster = QWidget()
         text_granularity_row = QHBoxLayout(self.text_granularity_cluster)
         text_granularity_row.setContentsMargins(0, 2, 0, 2)
         text_granularity_row.setSpacing(field_gap)
         text_granularity_row.addWidget(self.search_mode_label, 0)
         text_granularity_row.addWidget(self.search_mode, 0)
+        text_granularity_row.addSpacing(group_gap)
+        text_granularity_row.addWidget(self.text_search_enhance_label, 0)
+        text_granularity_row.addWidget(self.text_search_enhance, 0)
         text_granularity_row.addStretch(1)
-        _configure_field_group(self.text_granularity_cluster, width=mode_cluster_width)
+        text_options_width = (
+            field_label_width
+            + field_gap
+            + mode_combo_width
+            + group_gap
+            + field_label_width
+            + field_gap
+            + enhance_combo_width
+        )
+        self._text_options_width_with_enhance = text_options_width
+        self._text_options_width_mode_only = mode_cluster_width
+        _configure_field_group(self.text_granularity_cluster, width=text_options_width)
         self.text_granularity_cluster.setFixedHeight(options_row_height)
         self.search_granularity_cluster = self.text_granularity_cluster
 

@@ -32,6 +32,35 @@ from ui.widgets.settings.form import SettingsFormMixin
 from ui.widgets.styles import repolish_widget
 
 
+class _ViewportWidthScrollArea(QScrollArea):
+    """Vertical-only scroll: pin content width to the viewport.
+
+    Otherwise a tall settings form's horizontal sizeHint can exceed the viewport;
+    with the horizontal bar disabled, right-edge controls (Diagnostics / Refresh)
+    get clipped even when a right margin is present.
+    """
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._pin_content_width()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._pin_content_width()
+
+    def _pin_content_width(self) -> None:
+        content = self.widget()
+        if content is None:
+            return
+        width = int(self.viewport().width())
+        if width <= 0:
+            return
+        if content.minimumWidth() != 0:
+            content.setMinimumWidth(0)
+        if content.width() != width:
+            content.setFixedWidth(width)
+
+
 class SettingsPage(QWidget, SettingsFormMixin):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,16 +73,19 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.header = self.scaffold.header
         shell_layout = self.scaffold.content_layout
 
-        self.scroll = QScrollArea()
+        self.scroll = _ViewportWidthScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         shell_layout.addWidget(self.scroll, 1)
 
         self.scroll_content = QWidget()
+        self.scroll_content.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.scroll.setWidget(self.scroll_content)
         content_layout = QVBoxLayout(self.scroll_content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        # Small gutter between card edge and the always-on scrollbar track.
+        content_layout.setContentsMargins(0, 0, 10, 0)
         content_layout.setSpacing(10)
 
         self.general_title = QLabel()
@@ -74,15 +106,19 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_show_runtime_diagnostics = QPushButton()
         self.btn_show_runtime_diagnostics.setObjectName("AccentGhostButton")
         self.btn_show_runtime_diagnostics.setMinimumHeight(30)
-        self.btn_show_runtime_diagnostics.setMinimumWidth(150)
+        self.btn_show_runtime_diagnostics.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
         self.runtime_status_ffmpeg = QLabel()
         self.runtime_status_ffmpeg.setObjectName("StatusHint")
         self.runtime_status_ffmpeg.setWordWrap(True)
         self.runtime_status_data = QLabel()
         self.runtime_status_data.setObjectName("StatusHint")
         self.runtime_status_data.setWordWrap(True)
-        runtime_status_header_layout.addWidget(self.runtime_status_title, 0)
-        runtime_status_header_layout.addStretch(1)
+        self.runtime_status_title.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        runtime_status_header_layout.addWidget(self.runtime_status_title, 1)
         runtime_status_header_layout.addWidget(self.btn_show_runtime_diagnostics, 0)
 
         self.search_telemetry_title = QLabel()
@@ -98,14 +134,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_refresh_search_telemetry = QPushButton()
         self.btn_refresh_search_telemetry.setObjectName("AccentGhostButton")
         self.btn_refresh_search_telemetry.setMinimumHeight(30)
-        self.btn_refresh_search_telemetry.setMinimumWidth(120)
+        self.btn_refresh_search_telemetry.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
         self.search_telemetry_body = QLabel()
         self.search_telemetry_body.setObjectName("StatusHint")
         self.search_telemetry_body.setWordWrap(True)
         self.search_telemetry_body.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.search_telemetry_hint = QLabel()
-        self.search_telemetry_hint.setObjectName("StatusHint")
-        self.search_telemetry_hint.setWordWrap(True)
         self.search_telemetry_file = QLabel()
         self.search_telemetry_file.setObjectName("StatusHint")
         self.search_telemetry_file.setWordWrap(True)
@@ -115,11 +150,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         search_telemetry_body_layout.setContentsMargins(0, 0, 0, 0)
         search_telemetry_body_layout.setSpacing(8)
         search_telemetry_body_layout.addWidget(self.search_telemetry_body)
-        search_telemetry_body_layout.addWidget(self.search_telemetry_hint)
         search_telemetry_body_layout.addWidget(self.search_telemetry_file)
+        self.search_telemetry_title.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
         search_telemetry_header_layout.addWidget(self.btn_search_telemetry_collapse, 0)
-        search_telemetry_header_layout.addWidget(self.search_telemetry_title, 0)
-        search_telemetry_header_layout.addStretch(1)
+        search_telemetry_header_layout.addWidget(self.search_telemetry_title, 1)
         search_telemetry_header_layout.addWidget(self.btn_refresh_search_telemetry, 0)
         self.btn_search_telemetry_collapse.clicked.connect(self._toggle_search_telemetry_panel)
         self._search_telemetry_expanded = False
@@ -269,9 +305,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_migrate_model_dir = QPushButton()
         self.section_search_title = QLabel()
         self.section_fast_image_search_title = QLabel()
-        self.hint_fast_image_search_section = QLabel()
         self.section_precise_search_title = QLabel()
-        self.hint_precise_search_section = QLabel()
         self.section_preview_title = QLabel()
         self.section_indexing_title = QLabel()
         self.section_model_gpu_title = QLabel()
@@ -331,7 +365,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_export_video_silent = QLabel()
         self.hint_embedding_batch_size = QLabel()
         self.hint_indexing_video_workers = QLabel()
-        self.hint_indexing_note = QLabel()
         self.hint_chunk_policy = QLabel()
         self.btn_toggle_chunk_advanced = QPushButton()
         self.btn_toggle_chunk_advanced.setObjectName("LinkUtilityButton")
@@ -443,6 +476,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_migrate_model_dir.setMinimumHeight(34)
 
         self.input_data_root_bundle = QWidget()
+        self.input_data_root_bundle.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         input_data_root_bundle_layout = QHBoxLayout(self.input_data_root_bundle)
         input_data_root_bundle_layout.setContentsMargins(0, 0, 0, 0)
         input_data_root_bundle_layout.setSpacing(8)
@@ -450,6 +486,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         input_data_root_bundle_layout.addWidget(self.btn_browse_data_root, 0)
 
         self.input_ffmpeg_path_bundle = QWidget()
+        self.input_ffmpeg_path_bundle.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         input_ffmpeg_path_bundle_layout = QHBoxLayout(self.input_ffmpeg_path_bundle)
         input_ffmpeg_path_bundle_layout.setContentsMargins(0, 0, 0, 0)
         input_ffmpeg_path_bundle_layout.setSpacing(8)
@@ -457,6 +496,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         input_ffmpeg_path_bundle_layout.addWidget(self.btn_browse_ffmpeg_path, 0)
 
         self.input_model_dir_bundle = QWidget()
+        self.input_model_dir_bundle.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         input_model_dir_bundle_layout = QHBoxLayout(self.input_model_dir_bundle)
         input_model_dir_bundle_layout.setContentsMargins(0, 0, 0, 0)
         input_model_dir_bundle_layout.setSpacing(8)
@@ -470,6 +512,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         input_model_dir_bundle_layout.addWidget(self.model_dir_buttons_row, 0)
 
         self.input_active_model_profile_bundle = QWidget()
+        self.input_active_model_profile_bundle.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         active_model_profile_bundle_layout = QHBoxLayout(self.input_active_model_profile_bundle)
         active_model_profile_bundle_layout.setContentsMargins(0, 0, 0, 0)
         active_model_profile_bundle_layout.setSpacing(8)
@@ -518,20 +563,20 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.section_preview_card, self.section_preview_form = self._create_settings_section(self.section_preview_title)
         self.section_indexing_card, self.section_indexing_form = self._create_settings_section(self.section_indexing_title)
         self.chunk_advanced_form = QGridLayout(self.chunk_advanced_body)
-        self.chunk_advanced_form.setContentsMargins(12, 8, 12, 10)
+        self.chunk_advanced_form.setContentsMargins(20, 8, 12, 10)
         self.chunk_advanced_form.setHorizontalSpacing(16)
         self.chunk_advanced_form.setVerticalSpacing(0)
-        self.chunk_advanced_form.setColumnMinimumWidth(0, 260)
+        self.chunk_advanced_form.setColumnMinimumWidth(0, 248)
         self.chunk_advanced_form.setColumnStretch(0, 0)
         self.chunk_advanced_form.setColumnStretch(1, 1)
         self.section_model_gpu_card, self.section_model_gpu_form = self._create_settings_section(self.section_model_gpu_title)
         self.section_paths_card, self.section_paths_form = self._create_settings_section(self.section_paths_title)
         self.section_general_form_host = QWidget()
         self.section_general_form = QGridLayout(self.section_general_form_host)
-        self.section_general_form.setContentsMargins(0, 0, 0, 0)
+        self.section_general_form.setContentsMargins(14, 0, 0, 0)
         self.section_general_form.setHorizontalSpacing(16)
         self.section_general_form.setVerticalSpacing(0)
-        self.section_general_form.setColumnMinimumWidth(0, 260)
+        self.section_general_form.setColumnMinimumWidth(0, 248)
         self.section_general_form.setColumnStretch(0, 0)
         self.section_general_form.setColumnStretch(1, 1)
         self._add_setting_row(
@@ -548,60 +593,58 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_lance_ann_enabled,
             self.hint_lance_ann_enabled,
         )
-        self._add_section_note(self.section_fast_image_search_form, 0, self.hint_fast_image_search_section)
         self._add_setting_row(
             self.section_fast_image_search_form,
-            1,
+            0,
             self.label_frame_neighbor_rerank_enabled,
             self.input_frame_neighbor_rerank_enabled,
             self.hint_frame_neighbor_rerank_enabled,
         )
         self.frame_neighbor_rerank_top_n_row = self._add_setting_row(
             self.section_fast_image_search_form,
-            2,
+            1,
             self.label_frame_neighbor_rerank_top_n,
             self.input_frame_neighbor_rerank_top_n,
             self.hint_frame_neighbor_rerank_top_n,
         )
         self.frame_neighbor_rerank_window_row = self._add_setting_row(
             self.section_fast_image_search_form,
-            3,
+            2,
             self.label_frame_neighbor_rerank_window,
             self.input_frame_neighbor_rerank_window,
             self.hint_frame_neighbor_rerank_window,
         )
-        self._add_section_note(self.section_precise_search_form, 0, self.hint_precise_search_section)
         self._add_setting_row(
             self.section_precise_search_form,
-            1,
+            0,
             self.label_image_search_fetch_multiplier,
             self.input_image_search_fetch_multiplier,
             self.hint_image_search_fetch_multiplier,
         )
         self._add_setting_row(
             self.section_precise_search_form,
-            2,
+            1,
             self.label_image_pixel_rerank_top_n,
             self.input_image_pixel_rerank_top_n,
             self.hint_image_pixel_rerank_top_n,
         )
         self._add_setting_row(
             self.section_precise_search_form,
-            3,
+            2,
             self.label_image_pixel_rerank_probe_mode,
             self.input_image_pixel_rerank_probe_mode,
             self.hint_image_pixel_rerank_probe_mode,
         )
         self.image_pixel_rerank_time_window_row = self._add_setting_row(
             self.section_precise_search_form,
-            4,
+            3,
             self.label_image_pixel_rerank_time_window_sec,
             self.input_image_pixel_rerank_time_window_sec,
             self.hint_image_pixel_rerank_time_window_sec,
         )
         self.image_pixel_rerank_probe_step_row = self._add_setting_row(
             self.section_precise_search_form,
-            5,
+            4,
             self.label_image_pixel_rerank_probe_step_sec,
             self.input_image_pixel_rerank_probe_step_sec,
             self.hint_image_pixel_rerank_probe_step_sec,
@@ -640,19 +683,18 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.input_indexing_video_workers,
             self.hint_indexing_video_workers,
         )
-        self._add_section_note(self.section_indexing_form, 3, self.hint_indexing_note)
         self._configure_setting_input(
             self.input_chunk_policy,
             width=COMPONENT_SIZES["settings_input_width"] + 36,
         )
         self._add_setting_row(
             self.section_indexing_form,
-            4,
+            3,
             self.label_chunk_policy,
             self.input_chunk_policy_bundle,
             self.hint_chunk_policy,
         )
-        self.section_indexing_form.addWidget(self.chunk_advanced_body, 5, 0, 1, 2)
+        self.section_indexing_form.addWidget(self.chunk_advanced_body, 4, 0, 1, 2)
         self._add_setting_row(
             self.chunk_advanced_form,
             0,
@@ -974,45 +1016,27 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._current_texts = texts
         self.section_search_title.setText(_fallback_text(texts, "settings_section_search", "检索", "Search"))
         self.section_fast_image_search_title.setText(
-            _fallback_text(texts, "settings_section_fast_image_search", "快速图搜", "Fast Image Search")
-        )
-        self.hint_fast_image_search_section.setText(
-            texts.get(
-                "settings_section_fast_image_search_note",
-                "Applies when Deep search is OFF on the search page.",
-            )
+            _fallback_text(texts, "settings_section_fast_image_search", "快速图搜", "Fast image search")
         )
         self.section_precise_search_title.setText(
-            _fallback_text(texts, "settings_section_precise_search", "图搜精搜", "Precise Image Search")
+            _fallback_text(texts, "settings_section_precise_search", "图搜精搜", "Precise image search")
         )
-        self.hint_precise_search_section.setText(
-            texts.get(
-                "settings_section_precise_search_note",
-                "Applies when Deep search is ON. Cropped queries skip pixel rerank.",
-            )
-        )
-        self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview & Thumbnails"))
+        self.section_preview_title.setText(_fallback_text(texts, "settings_section_preview", "预览与缩略图", "Preview"))
         self.section_indexing_title.setText(
-            _fallback_text(texts, "settings_section_indexing", "视频索引", "Video Indexing")
+            _fallback_text(texts, "settings_section_indexing", "视频索引", "Indexing")
         )
         self.section_model_gpu_title.setText(
             _fallback_text(texts, "settings_section_model_gpu", "模型与 GPU", "Model & GPU")
         )
         self.section_paths_title.setText(
-            _fallback_text(texts, "settings_section_paths", "路径管理", "Path Management")
+            _fallback_text(texts, "settings_section_paths", "路径管理", "Paths")
         )
-        self.runtime_status_title.setText(_fallback_text(texts, "settings_runtime_status", "当前运行状态", "Current Runtime"))
+        self.runtime_status_title.setText(_fallback_text(texts, "settings_runtime_status", "当前运行状态", "Runtime"))
         self.search_telemetry_title.setText(
             _fallback_text(texts, "search_telemetry_panel_title", "截图搜索诊断", "Screenshot Search Stats")
         )
         self.btn_refresh_search_telemetry.setText(
-            texts.get("search_telemetry_panel_refresh", "Refresh stats")
-        )
-        self.search_telemetry_hint.setText(
-            texts.get(
-                "search_telemetry_panel_hint",
-                "Read-only product metrics from local screenshot searches. Use playback bias first when judging accuracy.",
-            )
+            texts.get("search_telemetry_panel_refresh", "Refresh")
         )
         self.label_fps.setText(texts["setting_fps"])
         current_mode = self.get_sampling_fps_mode()
@@ -1230,7 +1254,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_export_video_silent.setText(texts["setting_export_video_silent_hint"])
         self.hint_embedding_batch_size.setText(texts["setting_embedding_batch_size_hint"])
         self.hint_indexing_video_workers.setText(texts["setting_indexing_video_workers_hint"])
-        self.hint_indexing_note.setText(texts["setting_indexing_note"])
         self.hint_chunk_policy.setText(texts["setting_chunk_policy_hint"])
         self._refresh_chunk_advanced_visibility()
         self.hint_similarity_threshold.setText(texts["setting_similarity_threshold_hint"])
@@ -1267,7 +1290,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             texts["setting_inference_backend"].format(backend=texts["setting_inference_uninitialized"])
         )
         self.hint_inference_backend.setProperty("state", "neutral")
-        self.btn_show_runtime_diagnostics.setText(texts.get("setting_show_runtime_diagnostics", "Show diagnostics"))
+        self.btn_show_runtime_diagnostics.setText(texts.get("setting_show_runtime_diagnostics", "Diagnostics"))
         self.hint_gpu_runtime.setText(texts["setting_gpu_runtime_link_only"])
         self.hint_gpu_runtime.setOpenExternalLinks(True)
         self.hint_gpu_runtime.setTextFormat(Qt.RichText)

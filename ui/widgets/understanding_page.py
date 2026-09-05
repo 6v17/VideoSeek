@@ -31,6 +31,10 @@ def _action_button(object_name: str) -> QPushButton:
     button.setObjectName(object_name)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    # Mouse activates without taking focus — avoids QScrollArea yanking to the button.
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.setAutoDefault(False)
+    button.setDefault(False)
     return button
 
 
@@ -171,11 +175,20 @@ class UnderstandingEvidencePage(QWidget):
             cards = (self.workspace_card, self.dialogue_card, self.export_card, self.generate_card)
         else:
             cards = (self.workspace_card, self.generate_card, self.dialogue_card, self.export_card)
-        for card in cards:
-            layout.removeWidget(card)
         insert_at = layout.indexOf(self.understanding_notice) + 1
         if insert_at <= 0:
             insert_at = 0
+        # Reshuffling an already-correct order rebuilds geometry and jumps the page scroll.
+        already = True
+        for offset, card in enumerate(cards):
+            item = layout.itemAt(insert_at + offset)
+            if item is None or item.widget() is not card:
+                already = False
+                break
+        if already:
+            return
+        for card in cards:
+            layout.removeWidget(card)
         for offset, card in enumerate(cards):
             layout.insertWidget(insert_at + offset, card)
 
