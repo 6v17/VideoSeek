@@ -100,10 +100,15 @@ REMOTE_VLM_PRESETS: dict[str, dict[str, str]] = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-vl-max",
     },
+    "siliconflow": {
+        "mode": REMOTE_VLM_MODE_CLOUD,
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "Qwen/Qwen2.5-VL-32B-Instruct",
+    },
 }
 
 LOCAL_VLM_PRESET_IDS = ("lm_studio", "ollama", REMOTE_VLM_PRESET_CUSTOM)
-CLOUD_VLM_PRESET_IDS = ("openai", "dashscope", REMOTE_VLM_PRESET_CUSTOM)
+CLOUD_VLM_PRESET_IDS = ("openai", "dashscope", "siliconflow", REMOTE_VLM_PRESET_CUSTOM)
 REMOTE_VLM_API_KEY_PRESET_IDS = frozenset(CLOUD_VLM_PRESET_IDS)
 
 CAPTION_LANGUAGE_ZH = "zh"
@@ -522,6 +527,21 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
     mode, preset = resolve_remote_vlm_provider_settings(raw_remote_vlm)
     remote_vlm["provider_mode"] = mode
     remote_vlm["provider_preset"] = preset
+    if preset != REMOTE_VLM_PRESET_CUSTOM:
+        defaults = get_remote_vlm_preset_defaults(preset)
+        if defaults.get("base_url"):
+            # Prefer the preset endpoint unless the user explicitly overrode base_url
+            # while staying on a named preset (legacy configs may still store defaults).
+            raw_base = str(raw_remote_vlm.get("base_url", "") or "").strip()
+            if not raw_base or raw_base == str(DEFAULT_REMOTE_VLM_CONFIG.get("base_url") or "").strip():
+                remote_vlm["base_url"] = defaults["base_url"]
+            else:
+                remote_vlm["base_url"] = raw_base
+        raw_model = str(raw_remote_vlm.get("model", "") or "").strip()
+        if raw_model:
+            remote_vlm["model"] = raw_model
+        elif defaults.get("model"):
+            remote_vlm["model"] = defaults["model"]
 
     remote_vlm["api_keys"] = normalize_remote_vlm_api_keys(raw_remote_vlm.get("api_keys"))
     return remote_vlm
@@ -860,36 +880,39 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     model = str(settings.get("model", "") or "").strip()
     provider_mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
     api_key = get_active_remote_vlm_api_key(settings)
+
+    def _result(**payload: Any) -> dict[str, Any]:
+        out = dict(payload)
+        out.setdefault("base_url", base_url)
+        out.setdefault("configured_model", model)
+        out.setdefault("available_models", [])
+        return out
+
     if not base_url:
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "base_url_missing",
-            "error": "base_url is not configured",
-            "configured_model": model,
-            "available_models": [],
-        }
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="base_url_missing",
+            error="base_url is not configured",
+        )
     if not model:
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "model_missing",
-            "error": "model is not configured",
-            "configured_model": "",
-            "available_models": [],
-        }
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="model_missing",
+            error="model is not configured",
+            configured_model="",
+        )
     if provider_mode == REMOTE_VLM_MODE_CLOUD and not api_key:
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "cloud_api_key_required",
-            "error": "API Key is required for cloud providers",
-            "configured_model": model,
-            "available_models": [],
-        }
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="cloud_api_key_required",
+            error="API Key is required for cloud providers",
+        )
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1" if not base_url.endswith("/v1/") else base_url.rstrip("/")
 
@@ -904,58 +927,48 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
         if exc.code in {401, 403}:
-            return {
-                "reachable": False,
-                "model_available": False,
-                "auth_ok": False,
-                "error_code": "auth_failed",
-                "error": f"HTTP {exc.code}: API Key invalid or unauthorized",
-                "configured_model": model,
-                "available_models": [],
-                "http_status": int(exc.code),
-                "http_detail": detail[:240],
-            }
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "http_error",
-            "error": f"HTTP {exc.code}: {detail[:240] or exc.reason}",
-            "configured_model": model,
-            "available_models": [],
-            "http_status": int(exc.code),
-            "http_detail": detail[:240],
-        }
+            return _result(
+                reachable=False,
+                model_available=False,
+                auth_ok=False,
+                error_code="auth_failed",
+                error=f"HTTP {exc.code}: API Key invalid or unauthorized",
+                http_status=int(exc.code),
+                http_detail=detail[:240],
+            )
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="http_error",
+            error=f"HTTP {exc.code}: {detail[:240] or exc.reason}",
+            http_status=int(exc.code),
+            http_detail=detail[:240],
+        )
     except urllib.error.URLError as exc:
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "unreachable",
-            "error": str(getattr(exc, "reason", exc) or exc),
-            "configured_model": model,
-            "available_models": [],
-        }
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="unreachable",
+            error=str(getattr(exc, "reason", exc) or exc),
+        )
     except TimeoutError:
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "timeout",
-            "error": f"timed out after {timeout_sec:.0f}s",
-            "configured_model": model,
-            "available_models": [],
-        }
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="timeout",
+            error=f"timed out after {timeout_sec:.0f}s",
+        )
     except json.JSONDecodeError as exc:
-        return {
-            "reachable": False,
-            "model_available": False,
-            "auth_ok": False,
-            "error_code": "invalid_json",
-            "error": f"invalid JSON from /models: {exc}",
-            "configured_model": model,
-            "available_models": [],
-        }
+        return _result(
+            reachable=False,
+            model_available=False,
+            auth_ok=False,
+            error_code="invalid_json",
+            error=f"invalid JSON from /models: {exc}",
+        )
 
     model_ids = {
         str(item.get("id", "") or "").strip()
@@ -969,24 +982,22 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
         suffix = f" Available: {sample_models}" if sample_models else ""
         if len(available_models) > 8:
             suffix += f" (+{len(available_models) - 8} more)"
-        return {
-            "reachable": True,
-            "model_available": False,
-            "auth_ok": True,
-            "error_code": "model_not_found",
-            "error": f"model {model!r} not listed by server.{suffix}",
-            "configured_model": model,
-            "available_models": available_models,
-        }
-    return {
-        "reachable": True,
-        "model_available": True,
-        "auth_ok": True,
-        "error_code": "",
-        "error": "",
-        "configured_model": model,
-        "available_models": available_models,
-    }
+        return _result(
+            reachable=True,
+            model_available=False,
+            auth_ok=True,
+            error_code="model_not_found",
+            error=f"model {model!r} not listed by server.{suffix}",
+            available_models=available_models,
+        )
+    return _result(
+        reachable=True,
+        model_available=True,
+        auth_ok=True,
+        error_code="",
+        error="",
+        available_models=available_models,
+    )
 
 
 def build_remote_vlm_probe_config(remote_vlm: Mapping[str, Any]) -> dict[str, Any]:

@@ -38,6 +38,11 @@ REMOTE_ASR_PRESETS: dict[str, dict[str, str]] = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-audio-3.0-asr-flash",
     },
+    "siliconflow": {
+        "mode": REMOTE_ASR_MODE_CLOUD,
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "FunAudioLLM/SenseVoiceSmall",
+    },
     "custom": {
         "mode": REMOTE_ASR_MODE_LOCAL,
         "base_url": "http://127.0.0.1:9000/v1",
@@ -46,7 +51,7 @@ REMOTE_ASR_PRESETS: dict[str, dict[str, str]] = {
 }
 
 LOCAL_ASR_PRESET_IDS = (REMOTE_ASR_PRESET_CUSTOM,)
-CLOUD_ASR_PRESET_IDS = ("openai", "groq", "dashscope", REMOTE_ASR_PRESET_CUSTOM)
+CLOUD_ASR_PRESET_IDS = ("openai", "groq", "dashscope", "siliconflow", REMOTE_ASR_PRESET_CUSTOM)
 REMOTE_ASR_API_KEY_PRESET_IDS = frozenset(CLOUD_ASR_PRESET_IDS)
 
 
@@ -247,12 +252,14 @@ def _probe_openai_compatible(settings: Mapping[str, Any], *, timeout_sec: float 
         "error": "",
         "configured_model": model,
         "available_models": [],
+        "base_url": "",
     }
     try:
         base_url = _normalize_base_url(str(settings.get("base_url", "") or ""))
     except ValueError as exc:
         empty.update({"error_code": "base_url_missing", "error": str(exc)})
         return empty
+    empty["base_url"] = base_url
     if not model:
         empty.update({"error_code": "model_missing", "error": "model is not configured"})
         return empty
@@ -296,4 +303,5 @@ def _probe_openai_compatible(settings: Mapping[str, Any], *, timeout_sec: float 
         "error": "" if model_available else f"model {model} not in /v1/models",
         "configured_model": model,
         "available_models": models,
+        "base_url": base_url,
     }

@@ -284,6 +284,7 @@ class UnderstandingGuiMixin:
             "ollama": "Ollama",
             "openai": "OpenAI",
             "dashscope": "DashScope (Qwen)",
+            "siliconflow": "SiliconFlow",
             REMOTE_VLM_PRESET_CUSTOM: "Custom",
         }
         return self.texts.get(key, defaults.get(preset_id, preset_id))
@@ -332,28 +333,32 @@ class UnderstandingGuiMixin:
         page.input_remote_vlm_api_key.setVisible(is_cloud)
         page.label_remote_vlm_base_url.setVisible(is_custom)
         page.input_remote_vlm_base_url.setVisible(is_custom)
-        page.label_remote_vlm_model.setVisible(is_custom)
-        page.input_remote_vlm_model.setVisible(is_custom)
+        page.label_remote_vlm_model.setVisible(True)
+        page.input_remote_vlm_model.setVisible(True)
 
         if is_custom:
             page.hint_vlm_preset_summary.hide()
             return
 
-        model = str(preset_defaults.get("model", "") or page.input_remote_vlm_model.text() or "").strip()
-        preset_label = self._vlm_provider_preset_label(preset_id)
-        if model:
-            page.input_remote_vlm_base_url.setText(str(preset_defaults.get("base_url", "") or ""))
+        if preset_defaults.get("base_url"):
+            page.input_remote_vlm_base_url.setText(str(preset_defaults.get("base_url") or ""))
+        current = str(page.input_remote_vlm_model.text() or "").strip()
+        model = current or str(preset_defaults.get("model", "") or "").strip()
+        if model and not current:
             page.input_remote_vlm_model.setText(model)
+        preset_label = self._vlm_provider_preset_label(preset_id)
+        endpoint = str(preset_defaults.get("base_url", "") or page.input_remote_vlm_base_url.text() or "").strip()
+        if model:
             if is_cloud:
                 summary = self.texts.get(
                     "understanding_vlm_preset_model_summary_cloud",
-                    "Preset {preset} uses model {model}. After you enter an API Key, requests go to this model (not auto-detected from the key).",
-                ).format(preset=preset_label, model=model)
+                    "Preset {preset}: {model} via {base_url}. Enter an API Key; change the model id if your account list differs.",
+                ).format(preset=preset_label, model=model, base_url=endpoint or "—")
             else:
                 summary = self.texts.get(
                     "understanding_vlm_preset_model_summary_local",
-                    "Preset {preset} uses model {model}. Load a compatible vision model in your local server.",
-                ).format(preset=preset_label, model=model)
+                    "Preset {preset}: {model} via {base_url}. Load a compatible vision model in your local server.",
+                ).format(preset=preset_label, model=model, base_url=endpoint or "—")
             page.hint_vlm_preset_summary.setText(summary)
             page.hint_vlm_preset_summary.show()
         else:
@@ -406,7 +411,7 @@ class UnderstandingGuiMixin:
         if provider_preset != REMOTE_VLM_PRESET_CUSTOM:
             defaults = get_remote_vlm_preset_defaults(provider_preset)
             base_url = str(defaults.get("base_url", "") or page.input_remote_vlm_base_url.text() or "").strip()
-            model = str(defaults.get("model", "") or page.input_remote_vlm_model.text() or "").strip()
+            model = page.input_remote_vlm_model.text().strip() or str(defaults.get("model", "") or "").strip()
         else:
             base_url = page.input_remote_vlm_base_url.text().strip()
             model = page.input_remote_vlm_model.text().strip()
@@ -426,8 +431,14 @@ class UnderstandingGuiMixin:
     def _format_vlm_probe_status(self, probe: dict) -> str:
         probe = dict(probe or {})
         model = str(probe.get("configured_model", "") or "").strip()
+        base_url = str(probe.get("base_url", "") or "").strip()
         error_code = str(probe.get("error_code", "") or "").strip()
         if probe.get("reachable") and probe.get("model_available"):
+            if base_url:
+                return self.texts.get(
+                    "understanding_test_connection_success_with_endpoint",
+                    "Connected. Model {model} is available at {base_url}.",
+                ).format(model=model or "?", base_url=base_url)
             return self.texts.get(
                 "understanding_test_vlm_success",
                 "Connection OK. Model {model} is available.",
@@ -461,6 +472,15 @@ class UnderstandingGuiMixin:
             "Connection failed: {error}",
         ).format(error=str(probe.get("error", "") or "unknown error"))
 
+    def _probe_status_state(self, probe: dict) -> str:
+        probe = dict(probe or {})
+        if probe.get("reachable") and probe.get("model_available"):
+            return "ok"
+        error_code = str(probe.get("error_code", "") or "").strip()
+        if error_code in {"cloud_api_key_required", "model_not_found"}:
+            return "warn"
+        return "error"
+
     def test_understanding_service_connection(self):
         dialog = getattr(self, "understanding_services_dialog", None)
         nav_id = ""
@@ -489,8 +509,13 @@ class UnderstandingGuiMixin:
 
         draft = self._build_remote_vlm_draft_from_page(page)
         hint = getattr(page, "hint_understanding_status", None)
-        if hint is not None:
-            hint.setText(self.texts.get("understanding_test_vlm_testing", "Testing description service…"))
+        from ui.widgets.understanding_form_common import set_status_hint
+
+        set_status_hint(
+            hint,
+            self.texts.get("understanding_test_vlm_testing", "Testing description service…"),
+            state="neutral",
+        )
 
         worker = RemoteVlmConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
         self._vlm_connection_test_worker = worker
@@ -515,10 +540,15 @@ class UnderstandingGuiMixin:
         worker.start()
 
     def _finish_vlm_connection_test(self, probe, page, hint):
+        from ui.widgets.understanding_form_common import set_status_hint
+
         self._cached_vlm_connection_probe = dict(probe or {})
         message = self._format_vlm_probe_status(probe)
-        if hint is not None:
-            hint.setText(message)
+        set_status_hint(hint, message, state=self._probe_status_state(probe))
+        live = str(dict(probe or {}).get("configured_model") or "").strip()
+        if live and dict(probe or {}).get("reachable"):
+            page.input_remote_vlm_model.setText(live)
+            self._sync_vlm_provider_ui()
         self._refresh_understanding_settings_status()
         if dict(probe or {}).get("reachable") and dict(probe or {}).get("model_available"):
             self.show_info_dialog(
@@ -530,6 +560,8 @@ class UnderstandingGuiMixin:
             self.show_error_dialog(message)
 
     def _fail_vlm_connection_test(self, message, page, hint):
+        from ui.widgets.understanding_form_common import set_status_hint
+
         text = self.texts.get(
             "understanding_test_vlm_failed",
             "Connection failed: {error}",
@@ -539,8 +571,7 @@ class UnderstandingGuiMixin:
             "model_available": False,
             "error": str(message or "unknown error"),
         }
-        if hint is not None:
-            hint.setText(text)
+        set_status_hint(hint, text, state="error")
         self._refresh_understanding_settings_status()
         self.show_error_dialog(text)
 

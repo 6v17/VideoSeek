@@ -156,6 +156,13 @@ class UnderstandingServicesDialog(VSDialogShell):
             texts.get("understanding_test_vlm_connection_hint", "")
         )
         self.btn_save_config.setText(texts.get("understanding_save_config", "Save"))
+        vlm = self.vlm_form
+        vlm.hint_vlm_body.setText(
+            texts.get(
+                "understanding_vlm_form_body",
+                "Vision model for frame captions. Prefer a VL model id from GET /v1/models.",
+            )
+        )
         form = self.llm_form
         form.hint_llm_body.setText(
             texts.get(

@@ -55,10 +55,20 @@ REMOTE_LLM_PRESETS: dict[str, dict[str, str]] = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-plus",
     },
+    "siliconflow": {
+        "mode": REMOTE_LLM_MODE_CLOUD,
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "deepseek-ai/DeepSeek-V3",
+    },
+    "moonshot": {
+        "mode": REMOTE_LLM_MODE_CLOUD,
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "moonshot-v1-auto",
+    },
 }
 
 LOCAL_LLM_PRESET_IDS = ("lm_studio", "ollama", REMOTE_LLM_PRESET_CUSTOM)
-CLOUD_LLM_PRESET_IDS = ("deepseek", "openai", "dashscope", REMOTE_LLM_PRESET_CUSTOM)
+CLOUD_LLM_PRESET_IDS = ("deepseek", "openai", "dashscope", "siliconflow", "moonshot", REMOTE_LLM_PRESET_CUSTOM)
 REMOTE_LLM_API_KEY_PRESET_IDS = frozenset(CLOUD_LLM_PRESET_IDS)
 
 
@@ -285,12 +295,14 @@ def _probe_openai_compatible(settings: Mapping[str, Any], *, timeout_sec: float)
         "error": "",
         "configured_model": model,
         "available_models": [],
+        "base_url": "",
     }
     try:
         base_url = _normalize_base_url(str(settings.get("base_url", "") or ""))
     except ValueError as exc:
         empty.update({"error_code": "base_url_missing", "error": str(exc)})
         return empty
+    empty["base_url"] = base_url
     if not model:
         empty.update({"error_code": "model_missing", "error": "model is not configured"})
         return empty
@@ -333,6 +345,7 @@ def _probe_openai_compatible(settings: Mapping[str, Any], *, timeout_sec: float)
         "error": "" if model_available else f"model {model} not in /v1/models",
         "configured_model": model,
         "available_models": models,
+        "base_url": base_url,
     }
 
 

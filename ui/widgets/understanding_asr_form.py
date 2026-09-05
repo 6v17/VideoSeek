@@ -9,27 +9,12 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.widgets.components import NoWheelComboBox
-from ui.widgets.layout import COMPONENT_SIZES
-
-
-def _field_label(text=""):
-    label = QLabel(text)
-    label.setObjectName("CardHint")
-    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    label.setFixedWidth(COMPONENT_SIZES.get("understanding_form_label_width", 96))
-    return label
-
-
-def _configure_line(field: QLineEdit, *, width: int):
-    field.setMinimumWidth(width)
-    field.setMaximumWidth(width)
-    field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+from ui.widgets.understanding_form_common import configure_expanding_line, field_label
 
 
 class UnderstandingAsrForm(QWidget):
@@ -64,40 +49,43 @@ class UnderstandingAsrForm(QWidget):
         config_form.setVerticalSpacing(10)
         config_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         config_form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        config_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+        config_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         config_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
 
-        self.label_asr_provider_mode = _field_label()
+        self.label_asr_provider_mode = field_label()
         self.input_asr_provider_mode = NoWheelComboBox()
         self.input_asr_provider_mode.setObjectName("SearchModeSelect")
         self.input_asr_provider_mode.setMinimumWidth(180)
-        self.input_asr_provider_mode.setMaximumWidth(260)
+        self.input_asr_provider_mode.setMaximumWidth(320)
         config_form.addRow(self.label_asr_provider_mode, self.input_asr_provider_mode)
 
-        self.label_asr_provider_preset = _field_label()
+        self.label_asr_provider_preset = field_label()
         self.input_asr_provider_preset = NoWheelComboBox()
         self.input_asr_provider_preset.setObjectName("SearchModeSelect")
         self.input_asr_provider_preset.setMinimumWidth(180)
-        self.input_asr_provider_preset.setMaximumWidth(260)
+        self.input_asr_provider_preset.setMaximumWidth(360)
         config_form.addRow(self.label_asr_provider_preset, self.input_asr_provider_preset)
 
-        self.label_remote_asr_api_key = _field_label()
+        self.label_remote_asr_api_key = field_label()
         self.input_remote_asr_api_key = QLineEdit()
         self.input_remote_asr_api_key.setObjectName("SearchInput")
         self.input_remote_asr_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        _configure_line(self.input_remote_asr_api_key, width=260)
+        self.input_remote_asr_api_key.setPlaceholderText("sk-…")
+        configure_expanding_line(self.input_remote_asr_api_key)
         config_form.addRow(self.label_remote_asr_api_key, self.input_remote_asr_api_key)
 
-        self.label_remote_asr_base_url = _field_label()
+        self.label_remote_asr_base_url = field_label()
         self.input_remote_asr_base_url = QLineEdit()
         self.input_remote_asr_base_url.setObjectName("SearchInput")
-        _configure_line(self.input_remote_asr_base_url, width=260)
+        self.input_remote_asr_base_url.setPlaceholderText("https://…/v1")
+        configure_expanding_line(self.input_remote_asr_base_url)
         config_form.addRow(self.label_remote_asr_base_url, self.input_remote_asr_base_url)
 
-        self.label_remote_asr_model = _field_label()
+        self.label_remote_asr_model = field_label()
         self.input_remote_asr_model = QLineEdit()
         self.input_remote_asr_model.setObjectName("SearchInput")
-        _configure_line(self.input_remote_asr_model, width=260)
+        self.input_remote_asr_model.setPlaceholderText("whisper-1")
+        configure_expanding_line(self.input_remote_asr_model, min_width=220)
         config_form.addRow(self.label_remote_asr_model, self.input_remote_asr_model)
 
         inner_layout.addWidget(form_host)
@@ -110,6 +98,7 @@ class UnderstandingAsrForm(QWidget):
         self.hint_asr_status = QLabel()
         self.hint_asr_status.setObjectName("StatusHint")
         self.hint_asr_status.setWordWrap(True)
+        self.hint_asr_status.setProperty("state", "neutral")
         inner_layout.addWidget(self.hint_asr_status)
         inner_layout.addStretch(1)
 

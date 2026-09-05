@@ -61,6 +61,7 @@ class UnderstandingAsrGuiMixin:
             "openai": "OpenAI Whisper",
             "groq": "Groq",
             "dashscope": "DashScope (Qwen-ASR)",
+            "siliconflow": "SiliconFlow",
             REMOTE_ASR_PRESET_CUSTOM: "Custom",
         }
         return self.texts.get(key, defaults.get(preset_id, preset_id))
@@ -123,8 +124,12 @@ class UnderstandingAsrGuiMixin:
             form.hint_asr_preset_summary.setText(
                 self.texts.get(
                     "understanding_asr_preset_model_hint",
-                    "Preset {preset} uses {model}. Change the id if your account list differs.",
-                ).format(preset=self._asr_provider_preset_label(preset_id), model=model)
+                    "Preset {preset}: {model} via {base_url}. Change the id if your account list differs.",
+                ).format(
+                    preset=self._asr_provider_preset_label(preset_id),
+                    model=model,
+                    base_url=str(preset_defaults.get("base_url", "") or form.input_remote_asr_base_url.text() or "—"),
+                )
             )
             form.hint_asr_preset_summary.show()
         else:
@@ -238,7 +243,13 @@ class UnderstandingAsrGuiMixin:
             "model": model,
             "api_keys": dict(getattr(self, "_remote_asr_api_keys", {}) or {}),
         }
-        form.hint_asr_status.setText(self.texts.get("understanding_test_vlm_testing", "Testing…"))
+        from ui.widgets.understanding_form_common import set_status_hint
+
+        set_status_hint(
+            form.hint_asr_status,
+            self.texts.get("understanding_test_asr_testing", "Testing speech model…"),
+            state="neutral",
+        )
         worker = RemoteAsrConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
         self._asr_connection_test_worker = worker
         page.btn_test_vlm_connection.setEnabled(False)
@@ -259,6 +270,7 @@ class UnderstandingAsrGuiMixin:
 
     def _finish_asr_connection_test(self, probe, form):
         from src.services.asr_settings import pick_available_asr_model
+        from ui.widgets.understanding_form_common import set_status_hint
 
         probe = dict(probe or {})
         configured = str(probe.get("configured_model", "") or "").strip()
@@ -271,7 +283,7 @@ class UnderstandingAsrGuiMixin:
                     "understanding_test_asr_model_switched",
                     "Connected. {old} is not on this account; filled in {model}. Save, then test again.",
                 ).format(old=configured or "?", model=suggested)
-                form.hint_asr_status.setText(message)
+                set_status_hint(form.hint_asr_status, message, state="warn")
                 self.show_info_dialog(
                     self.texts.get("understanding_test_vlm_title", "Connection test"),
                     message,
@@ -279,7 +291,7 @@ class UnderstandingAsrGuiMixin:
                 )
                 return
         message = self._format_vlm_probe_status(probe)
-        form.hint_asr_status.setText(message)
+        set_status_hint(form.hint_asr_status, message, state=self._probe_status_state(probe))
         if probe.get("reachable") and probe.get("model_available"):
             live = str(probe.get("configured_model") or "").strip()
             if live:
@@ -294,10 +306,12 @@ class UnderstandingAsrGuiMixin:
             self.show_error_dialog(message)
 
     def _fail_asr_connection_test(self, message, form):
+        from ui.widgets.understanding_form_common import set_status_hint
+
         text = self.texts.get("understanding_test_vlm_failed", "Connection failed: {error}").format(
             error=str(message or "unknown error")
         )
-        form.hint_asr_status.setText(text)
+        set_status_hint(form.hint_asr_status, text, state="error")
         self.show_error_dialog(text)
 
     def _asr_job_running(self) -> bool:

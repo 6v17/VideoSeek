@@ -61,6 +61,8 @@ class UnderstandingLlmGuiMixin:
             "deepseek": "DeepSeek",
             "openai": "OpenAI",
             "dashscope": "DashScope (Qwen)",
+            "siliconflow": "SiliconFlow",
+            "moonshot": "Moonshot (Kimi)",
             "lm_studio": "LM Studio",
             "ollama": "Ollama",
             REMOTE_LLM_PRESET_CUSTOM: "Custom",
@@ -125,8 +127,12 @@ class UnderstandingLlmGuiMixin:
             form.hint_llm_preset_summary.setText(
                 self.texts.get(
                     "understanding_llm_preset_model_hint",
-                    "Preset {preset} uses {model}. Change the id if your account list differs (use a text model, not vision).",
-                ).format(preset=self._llm_provider_preset_label(preset_id), model=model)
+                    "Preset {preset}: {model} via {base_url}. Change the id if your account list differs (text model, not vision).",
+                ).format(
+                    preset=self._llm_provider_preset_label(preset_id),
+                    model=model,
+                    base_url=str(preset_defaults.get("base_url", "") or form.input_remote_llm_base_url.text() or "—"),
+                )
             )
             form.hint_llm_preset_summary.show()
         else:
@@ -240,7 +246,13 @@ class UnderstandingLlmGuiMixin:
             "model": model,
             "api_keys": dict(getattr(self, "_remote_llm_api_keys", {}) or {}),
         }
-        form.hint_llm_status.setText(self.texts.get("understanding_test_vlm_testing", "Testing…"))
+        from ui.widgets.understanding_form_common import set_status_hint
+
+        set_status_hint(
+            form.hint_llm_status,
+            self.texts.get("understanding_test_llm_testing", "Testing language model…"),
+            state="neutral",
+        )
         worker = RemoteLlmConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
         self._llm_connection_test_worker = worker
         page.btn_test_vlm_connection.setEnabled(False)
@@ -261,6 +273,7 @@ class UnderstandingLlmGuiMixin:
 
     def _finish_llm_connection_test(self, probe, form):
         from src.services.llm_settings import pick_available_text_llm_model
+        from ui.widgets.understanding_form_common import set_status_hint
 
         probe = dict(probe or {})
         configured = str(probe.get("configured_model", "") or "").strip()
@@ -273,7 +286,7 @@ class UnderstandingLlmGuiMixin:
                     "understanding_test_llm_model_switched",
                     "Connected. {old} is not on this account; filled in {model}. Save, then test again.",
                 ).format(old=configured or "?", model=suggested)
-                form.hint_llm_status.setText(message)
+                set_status_hint(form.hint_llm_status, message, state="warn")
                 self.show_info_dialog(
                     self.texts.get("understanding_test_vlm_title", "Connection test"),
                     message,
@@ -281,7 +294,7 @@ class UnderstandingLlmGuiMixin:
                 )
                 return
         message = self._format_vlm_probe_status(probe)
-        form.hint_llm_status.setText(message)
+        set_status_hint(form.hint_llm_status, message, state=self._probe_status_state(probe))
         if probe.get("reachable") and probe.get("model_available"):
             live = str(probe.get("configured_model") or "").strip()
             if live:
@@ -296,10 +309,12 @@ class UnderstandingLlmGuiMixin:
             self.show_error_dialog(message)
 
     def _fail_llm_connection_test(self, message, form):
+        from ui.widgets.understanding_form_common import set_status_hint
+
         text = self.texts.get("understanding_test_vlm_failed", "Connection failed: {error}").format(
             error=str(message or "unknown error")
         )
-        form.hint_llm_status.setText(text)
+        set_status_hint(form.hint_llm_status, text, state="error")
         self.show_error_dialog(text)
 
     def export_current_video_recap(self, start_from: str = "plan"):
