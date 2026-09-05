@@ -50,6 +50,7 @@ from src.services.recap_service import (
     pad_cuts_for_tts,
     coalesce_recap_cuts,
     clamp_recap_vo_to_picture,
+    clamp_insert_cuts_to_beat,
     restore_recap_vo_text,
     stretch_recap_clips_for_vo,
     fit_recap_vo_picture,
@@ -933,11 +934,26 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("role=insert", RECAP_CAPTION_SYSTEM)
         self.assertIn("单独一句", RECAP_CAPTION_SYSTEM)
         self.assertIn("换场/过场空镜可以并进前一句", RECAP_CAPTION_SYSTEM)
+        self.assertIn("即时反应", RECAP_CAPTION_SYSTEM)
+        self.assertIn("禁止提前口述", RECAP_CAPTION_SYSTEM)
+        self.assertNotIn("反应或结果", RECAP_CAPTION_SYSTEM)
+        self.assertIn("禁止发明", RECAP_CAPTION_SYSTEM)
+        self.assertIn("拔剑", RECAP_CAPTION_SYSTEM)
+        self.assertIn("他说", RECAP_CAPTION_SYSTEM)
+        self.assertIn("对白复读机", RECAP_CAPTION_SYSTEM)
+        self.assertIn("自相矛盾", RECAP_CAPTION_SYSTEM)
+        self.assertIn("谁的东西", RECAP_CAPTION_SYSTEM)
+        self.assertIn("拔剑", RECAP_PLAN_SYSTEM)
+        self.assertIn("XX说", RECAP_PLAN_SYSTEM)
+        self.assertIn("自相矛盾", RECAP_PLAN_SYSTEM)
         self.assertIn("特写", RECAP_SYSTEM)
         self.assertIn('"role":"insert"', RECAP_SYSTEM.replace(" ", ""))
         self.assertIn("新的视觉信息", RECAP_SYSTEM)
         self.assertIn("单独切一刀", RECAP_SYSTEM)
         self.assertIn("不要单独一刀", RECAP_SYSTEM)
+        self.assertIn("紧挨着的反应特写", RECAP_SYSTEM)
+        self.assertIn("远晚于该 beat.t", RECAP_SYSTEM)
+        self.assertNotIn("特写不要再用已经剪过的原片时段", RECAP_SYSTEM)
         self.assertIn("duration", RECAP_SYSTEM)
         self.assertIn("1.35", RECAP_CAPTION_SYSTEM)
         self.assertIn("同一个「他」", RECAP_SYSTEM)
@@ -980,6 +996,11 @@ class RecapPackTests(unittest.TestCase):
         self.assertNotIn("红衣女人走进店里，柜台后面站着职员。", cap_prompt)
         self.assertIn("禁止朗读 reason", cap_prompt)
         self.assertIn("role=insert", cap_prompt)
+        self.assertIn("不得提前口述", cap_prompt)
+        self.assertIn("即时反应", cap_prompt)
+        self.assertIn("禁止发明", cap_prompt)
+        self.assertIn("他说", cap_prompt)
+        self.assertIn("自相矛盾", cap_prompt)
         cap_insert = recap_caption_user_prompt(
             [
                 {
@@ -1040,6 +1061,99 @@ class RecapPackTests(unittest.TestCase):
         self.assertNotIn("考号", prompt)
         self.assertIn("单独一刀", prompt)
         self.assertIn("role=insert", prompt)
+        self.assertIn("紧挨着的反应特写", prompt)
+        self.assertIn("远晚于该 beat.t", prompt)
+        self.assertNotIn("不要再用已经剪过的原片时段", prompt)
+
+    def test_clamp_insert_keeps_nearby_and_snaps_or_drops_drift(self):
+        pack = {
+            "duration_sec": 200.0,
+            "chunks": [
+                {"i": 0, "t": [10.0, 40.0], "skip": "", "cap": "柜台争吵"},
+                {"i": 1, "t": [40.0, 70.0], "skip": "", "cap": "离开店铺"},
+                {"i": 2, "t": [120.0, 150.0], "skip": "", "cap": "后期对峙"},
+            ],
+        }
+        beats = [{"id": 1, "event": "柜台拒收", "t": [10.0, 45.0]}]
+        nearby = [
+            {
+                "name": "动作",
+                "beat_id": 1,
+                "chunk_index": 0,
+                "src_in": 12.0,
+                "src_out": 20.0,
+                "vo": "",
+            },
+            {
+                "name": "特写",
+                "beat_id": 1,
+                "chunk_index": 0,
+                "role": "insert",
+                "reason": "表情反应",
+                "src_in": 20.5,
+                "src_out": 23.5,
+                "vo": "",
+            },
+        ]
+        kept = clamp_insert_cuts_to_beat(nearby, pack, beats)
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(kept[1].get("role"), "insert")
+        self.assertAlmostEqual(float(kept[1]["src_in"]), 20.5, places=2)
+
+        drifted = [
+            {
+                "name": "动作",
+                "beat_id": 1,
+                "chunk_index": 0,
+                "src_in": 12.0,
+                "src_out": 20.0,
+                "vo": "",
+            },
+            {
+                "name": "后期特写",
+                "beat_id": 1,
+                "chunk_index": 2,
+                "role": "insert",
+                "reason": "表情反应",
+                "src_in": 130.0,
+                "src_out": 133.0,
+                "vo": "",
+            },
+        ]
+        fixed = clamp_insert_cuts_to_beat(drifted, pack, beats)
+        self.assertEqual(len(fixed), 2)
+        insert = next(clip for clip in fixed if clip.get("role") == "insert")
+        self.assertLess(float(insert["src_in"]), 45.0)
+        self.assertGreaterEqual(float(insert["src_in"]), 20.0)
+
+        no_room_pack = {
+            "duration_sec": 40.0,
+            "chunks": [{"i": 0, "t": [10.0, 21.5], "skip": "", "cap": "短窗"}],
+        }
+        no_room_beats = [{"id": 1, "event": "短戏", "t": [10.0, 21.5]}]
+        orphan = [
+            {
+                "name": "动作",
+                "beat_id": 1,
+                "chunk_index": 0,
+                "src_in": 12.0,
+                "src_out": 20.0,
+                "vo": "",
+            },
+            {
+                "name": "飞走特写",
+                "beat_id": 1,
+                "chunk_index": 0,
+                "role": "insert",
+                "reason": "表情",
+                "src_in": 55.0,
+                "src_out": 58.0,
+                "vo": "",
+            },
+        ]
+        dropped = clamp_insert_cuts_to_beat(orphan, no_room_pack, no_room_beats)
+        self.assertEqual(len(dropped), 1)
+        self.assertNotEqual(dropped[0].get("role"), "insert")
 
     def test_apply_recap_duration_fills_beat_budget(self):
         pack = {

@@ -46,6 +46,8 @@ SOURCE_OVERLAP_MERGE_SEC = 0.2
 MIN_FLASH_CLIP_SEC = 2.4
 MIN_STANDALONE_CLIP_SEC = 2.4
 MAX_VO_SENTENCE_CHARS = 34
+INSERT_MAX_GAP_FROM_MASTER_SEC = 25.0
+MIN_INSERT_CLIP_SEC = 2.0
 
 _TEXTURE_BEAT_RE = re.compile(
     r"(设定|世界观|规则说明|能力说明|教室|空间|角色侧面|性格|态度|习惯|表情|换场|过渡|气氛|环境)"
@@ -70,6 +72,30 @@ people 里已经有的说话人称呼必须沿用。
 正确：「柜台职员拒收。红衣女人报了警。」
 """
 
+RECAP_FACT_POLICY = """【主谓宾】每一条 event / 口播必须分清：谁做了、对谁做、发现/得到的是谁的东西。
+两个人各自做的事禁止并成一句「他们找到了……」。
+错误：「找到了男主和女主的名字」——把两人结果并成一件事。
+错误：先说「两人名字都找到了」，后又说「男主没找到自己的名字」——自相矛盾。
+正确（若证据如此）：「红衣女人只看到自己的名字。黑发少年没找到自己的名字。」
+同一事实整集口径一致：前面写「没找到」，后面禁止改成「找到了」，反之亦然。
+禁止用男主/女主糊弄主语；用 people 里的稳定称呼。
+"""
+
+RECAP_EVIDENCE_POLICY = """【证据】event / 口播只能写 asr 对白或 chunk.cap 里已经出现的事实。
+asr 与 cap 都没写的道具、招式、身份、动机、背景，一律禁止发明。
+错误：台词和画面都没剑，却写「拔剑去挑战」。
+正确：只写证据里有的对峙、拒绝、离开、报警等动作。
+拿不准就写得更短、更贴证据，不要脑补热闹。
+"""
+
+RECAP_VO_STYLE_POLICY = """【口播风格】讲第三人称事件和关系变化，不要当对白复读机。
+禁止「他说/她说/XX说/男主说/女主说」再转述整句台词。观众能自己听原片。
+错误：「男主说我要拔剑挑战你。」「她说你骗我。」
+正确：「黑发少年提出对决。红衣女人当场拆穿。」
+引用原对白只能极短关键词，用「」包裹，整句转述一律禁止。
+禁止男主/女主/主角称呼。
+"""
+
 RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划，只规划故事节拍，不写剪辑表、不写口播。
 
 对白时间轴是叙事骨架。Chunk 有 cap 才是视觉证据；没有 cap 时不要编造看见了什么，把还需要的画面写在 needed_visual。
@@ -90,7 +116,8 @@ RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划，只规划故事节拍
 正片收束是片尾曲之前的最后剧情，不是 ED。
 最后一条 beat 必须落在正片后段、片尾曲之前。
 不要编造对白里没有的人物关系、动机、背景。
-""" + RECAP_NAME_POLICY + """
+event 写成「谁对谁做了什么」的动作结果，不要写成「XX说……」的台词转述。
+""" + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + RECAP_NAME_POLICY + """
 importance 是剧情重要性 0.05–1.0，不是原片时长。精彩短镜头可以很高，注水长镜头必须很低。
 
 只输出 JSON，不要 markdown。
@@ -171,7 +198,7 @@ people 是人物称呼表。reason 里用表里的稳定称呼，不要把两个
 8. 成片时长按原片比例约 3–8 分钟。高权重尽量用满 budget_sec，低权重宁可短不要注水。不要为了赶时间跳过因果。
 9. 不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。时间最早的开场 beat 必须留下画面；冷开场要，片头曲不要。
 10. 给定的每一条 beat 都必须至少有一刀。正片收尾不得省略。剧情过程要讲连贯，不要只留高潮闪回。
-11. 关键动作之后该切特写、反应、表情就单独切一刀，不要为了省时间并进主线。shots>=2 时，后几刀常常是特写/反应，role 填 insert。特写不要再用已经剪过的原片时段。
+11. 关键动作之后该切特写、反应、表情就单独切一刀，不要为了省时间并进主线。shots>=2 时，后几刀常常是特写/反应，role 填 insert。insert 必须贴着同一 beat 的主线动作：优先同 chunk 或紧邻 chunk，紧跟主镜之后，落在该 beat 的 t 附近。禁止整段复用同一 src_in/src_out；允许动作后紧挨着的反应特写，哪怕和主镜在同一 chunk。禁止为了凑 insert 去选远晚于该 beat.t 的表情/特写。
 12. 换场能并进主线就不要单独一刀。必须加时 reason 只交代场面，不要发明新事件，不要认错人。换场不要标 insert。
 13. """ + RECAP_NAME_POLICY + """reason 跟 beat / people 的称呼走。
 
@@ -196,8 +223,10 @@ RECAP_GAP_SYSTEM = """你是影视解说的查漏员。画面已经锁定，已�
 3. 推进剧情、关键动作、必要信息的镜头不能空着。空着就是漏。
 4. 新口播要接上前后句，第三人称影视解说口吻。不要超长从句。不要重复前后句已经讲过的事实。
 5. """ + RECAP_NAME_POLICY + """不要把配角对白安成别人在说。
-6. 引用原对白只能极短，用「」包裹。对白里的人名也不要拿来称呼画面人物。
-7. 禁止看图说话：不要说「画面中可以看到」「一个穿红衣服的女人走进店」。要说「红衣女人进店」。
+6. """ + RECAP_VO_STYLE_POLICY + """
+7. """ + RECAP_EVIDENCE_POLICY + """
+8. """ + RECAP_FACT_POLICY + """补句不得与已有 captions 自相矛盾。
+9. 禁止看图说话：不要说「画面中可以看到」「一个穿红衣服的女人走进店」。要说「红衣女人进店」。
 
 只输出 JSON，不要 markdown。
 JSON schema:
@@ -214,7 +243,7 @@ reason、画面描述、VLM/变化说明只是剪辑备忘，禁止照读，禁�
 错误：「一个穿红衣服的女人走进店里，柜台后面站着职员。」
 正确：「红衣女人进店。柜台职员拒收。」
 
-seed 若已有解说，整理成完整旁白，不要改成画面描述。
+seed 若已有解说，整理成完整旁白，不要改成画面描述，也不要把 seed 扩写成对白转述。
 seed 为空时只根据 event 和 people 写旁白，不要编新剧情，不要翻译对白。
 
 【语速】
@@ -222,13 +251,16 @@ seed 为空时只根据 event 和 people 写旁白，不要编新剧情，不要
 2. 每条 caption 的字数对照 clips 的 budget：不要少于约 85%，也不要超过 100%。
 
 【规则】
-1. 不要改画面。from/to 用 clip 的 i。换场/过场空镜可以并进前一句。role=insert（特写/反应）必须单独一句，讲这镜对剧情的反应或结果，不要讲构图、脸、镜头运动。
+1. 不要改画面。from/to 用 clip 的 i。换场/过场空镜可以并进前一句。role=insert（特写/反应）必须单独一句，只讲此刻可见的即时反应（震惊、愣住、对上眼），禁止讲尚未在本 beat 发生的剧情结果或揭秘，不要讲构图、脸、镜头运动。
 2. 必须写完整句子，以。！？收尾。禁止半句，禁止把一句话从中间截断。
 3. 保留 seed / event 的事实和人物称呼，不要发明剧情，不要翻译对白。
 4. 一句一个事实，不要超长从句，但该讲完的句子必须讲完。
 5. """ + RECAP_NAME_POLICY + """口播跟 people 的称呼走。
-6. 引用原对白只能极短，用「」包裹。
-7. 不要报服装、站位、镜头运动，除非这件事本身改变剧情。
+6. """ + RECAP_VO_STYLE_POLICY + """
+7. """ + RECAP_EVIDENCE_POLICY + """event 里没有的道具动作不要补；宁可短，不要编。
+8. """ + RECAP_FACT_POLICY + """与上一句旁白、本波已有 event 不得自相矛盾。
+9. 不要报服装、站位、镜头运动，除非这件事本身改变剧情。
+10. 【时序】每句只讲该 caption 覆盖 clips 自己的 event。禁止把后面 clips、更高 beat_id、更晚 tl 的事实写成前面的前提、动机或结果。禁止提前口述后面才会发生的事。
 
 只输出 JSON，不要 markdown。
 JSON schema:
@@ -782,6 +814,8 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
         "不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。asr 是叙事骨架。chunks 可能只有时间没有 cap；有 cap 才是看见的变化。skip=op_ed 不要用。\n"
         "asr[].speaker 非空=谁在说，当事实。不要把这句安到别人身上。空的才用画面特征称呼。\n"
         "对白只确认说过的话。人名只有自报或当面称呼才能用，且整集只绑同一个人。\n"
+        "event 只写 asr/cap 已有事实，禁止发明证据里没有的道具动作；写成谁对谁做了什么，禁止「XX说……」整句转述。\n"
+        "分清主语宾语：谁找到谁的名字必须写清；禁止并成「找到了两人名字」又自相矛盾。\n"
         "必须包含设定/空间、角色侧面，以及主线换场时的过渡；过渡只写看得见的场面，不要编新冲突。\n"
         "t 填该 beat 在原片中大约落在哪一段。\n\n"
         + json.dumps(
@@ -808,7 +842,10 @@ def recap_user_prompt(pack: Mapping[str, Any], beats: list[Mapping[str, Any]] | 
         "beats 是叙事真相，Chunk 是视觉证据。禁止改写 beat 事件去迁就画面。\n"
         "不要写 vo，正式口播由铺字幕阶段完成。\n"
         "同一 beat 的相邻镜头必须有新的视觉信息，不要用近似镜头重复同一事件，也不要把两刀粘成一条长镜头。\n"
-        "shots>=2 时后几刀优先特写/反应，role=insert，不要为了赶时间并进主线。不要再用已经剪过的原片时段。\n"
+        "shots>=2 时后几刀优先特写/反应，role=insert，不要为了赶时间并进主线。"
+        "insert 必须贴着同一 beat 的主线动作与 beat.t：优先同 chunk/紧邻 chunk，紧跟主镜之后。"
+        "禁止整段复用同一 src_in/src_out；允许动作后紧挨着的反应特写（可与主镜同 chunk）。"
+        "禁止为了凑 insert 去选远晚于该 beat.t 的表情/特写。\n"
         "换场能并进主线就不要单独一刀，reason 只交代场面，不要编新剧情。\n"
         "每条 beat 的 clips 时长合计要接近 budget_sec。每个 clip 给 duration。\n"
         "时间最早的 beat 是开场，必须剪进去。不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。skip=op_ed 的 chunk 不要用。只输出这些 beats 的 clips。\n"
@@ -1634,7 +1671,11 @@ def recap_caption_user_prompt(
         f"画面已锁定，本段 {total:.0f} 秒。TTS 预设 {TTS_SPEED:.2f} 倍，不要真去合成语音。\n"
         f"1.0 倍约 {BASE_CHARS_PER_SEC:.0f} 字/秒，当前约 {CHARS_PER_SEC:.2f} 字/秒，fill={VO_FILL_RATIO}。\n"
         "按每条 clip 的 budget 写完整旁白。seed 为空时根据 event 写影视解说，禁止朗读 reason 或画面描述。\n"
-        "role=insert 必须单独一句反应口播；换场/过场空镜可并进前一句。\n"
+        "只写 event 已有事实，禁止发明台词/画面都没有的道具动作（例如无剑却写拔剑）。\n"
+        "禁止「他说/她说/XX说/男主说」转述对白；讲动作与关系变化。引用原对白只能极短「」。\n"
+        "分清谁做了、发现的是谁的东西；禁止把两人结果并成「他们找到了」；禁止前后自相矛盾。\n"
+        "role=insert 必须单独一句即时反应口播，禁止讲尚未发生的剧情结果；换场/过场空镜可并进前一句。\n"
+        "本波 JSON 里后面的 event 只作连贯参考，不得提前口述，禁止把后面事实写成前面前提。\n"
         "口播盖住该段画面的 85–90%。from/to 用 clip 的 i。只输出 captions。\n"
         + (f"上一句旁白：{prev_caption}\n" if str(prev_caption or "").strip() else "")
         + "\n"
@@ -3047,8 +3088,133 @@ def refine_recap_cuts(
 ) -> list[dict[str, Any]]:
     """Keep cuts and grow picture if the match VO still needs time. Do not edit the script."""
     out = coalesce_recap_cuts(list(cuts or []))
+    out = clamp_insert_cuts_to_beat(out, pack, beats)
     out = pad_cuts_for_tts(out, pack, beats)
     return coalesce_recap_cuts(out)
+
+
+def clamp_insert_cuts_to_beat(
+    cuts: Sequence[Mapping[str, Any]],
+    pack: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]] | None = None,
+    *,
+    max_gap_sec: float = INSERT_MAX_GAP_FROM_MASTER_SEC,
+) -> list[dict[str, Any]]:
+    """Pull drifting insert cuts back next to the same-beat master, or drop them.
+
+    Inserts more than ``max_gap_sec`` after the master, or completely outside the
+    beat ``t`` window with no overlap, are snapped into the post-master window
+    when possible. Otherwise they are discarded so late close-ups do not land
+    on earlier beats.
+    """
+    items = [dict(clip) for clip in cuts or []]
+    if not items:
+        return items
+    by_id = _beats_by_id(beats)
+    groups: dict[Any, list[int]] = {}
+    for index, clip in enumerate(items):
+        groups.setdefault(clip.get("beat_id"), []).append(index)
+
+    drop: set[int] = set()
+    for beat_id, indices in groups.items():
+        masters = [items[i] for i in indices if not _looks_like_insert_cut(items[i])]
+        inserts = [i for i in indices if _looks_like_insert_cut(items[i])]
+        if not inserts:
+            continue
+        if not masters:
+            # No A-roll to anchor against — keep inserts as-is.
+            continue
+        master = max(masters, key=lambda clip: float(clip.get("src_out") or 0.0))
+        master_end = float(master.get("src_out") or 0.0)
+        beat = None
+        if beat_id is not None:
+            try:
+                beat = by_id.get(int(beat_id))
+            except (TypeError, ValueError):
+                beat = None
+        beat_span = _time_span((beat or {}).get("t"))
+        for index in inserts:
+            clip = items[index]
+            try:
+                src_in = float(clip.get("src_in") or 0.0)
+                src_out = float(clip.get("src_out") or 0.0)
+            except (TypeError, ValueError):
+                drop.add(index)
+                continue
+            span = max(0.0, src_out - src_in)
+            far_after = src_in > master_end + float(max_gap_sec)
+            outside_beat = False
+            if beat_span:
+                pad = float(max_gap_sec)
+                expanded = (beat_span[0] - pad, beat_span[1] + pad)
+                outside_beat = _overlap_sec((src_in, src_out), expanded) <= 0.05
+            if not far_after and not outside_beat:
+                continue
+            placed = _place_insert_after_master(
+                clip,
+                pack,
+                master=master,
+                beat_span=beat_span,
+                want_sec=max(MIN_INSERT_CLIP_SEC, min(span or MIN_INSERT_CLIP_SEC, MAX_CLIP_SEC)),
+            )
+            if placed is None:
+                drop.add(index)
+            else:
+                items[index] = placed
+    return [clip for index, clip in enumerate(items) if index not in drop]
+
+
+def _place_insert_after_master(
+    clip: Mapping[str, Any],
+    pack: Mapping[str, Any],
+    *,
+    master: Mapping[str, Any],
+    beat_span: tuple[float, float] | None,
+    want_sec: float,
+) -> dict[str, Any] | None:
+    """Snap an insert into the source window right after the master shot."""
+    master_end = float(master.get("src_out") or 0.0)
+    window = _neighbor_source_window(
+        pack,
+        master.get("chunk_index"),
+        beat_span,
+        strict=False,
+    )
+    if not window:
+        window = _chunk_window(pack, int(master.get("chunk_index") or 0)) if master.get("chunk_index") is not None else None
+    if not window:
+        return None
+    lo, hi = window
+    lo, hi = _clamp_window_away_from_op_ed(
+        pack,
+        lo,
+        hi,
+        src_in=master_end,
+        src_out=master_end,
+    )
+    start = max(lo, master_end)
+    if beat_span:
+        start = max(start, beat_span[0])
+        hi = min(hi, beat_span[1] + 2.0)
+    avail = hi - start
+    if avail < MIN_INSERT_CLIP_SEC:
+        return None
+    dur = min(max(MIN_INSERT_CLIP_SEC, float(want_sec or MIN_INSERT_CLIP_SEC)), avail, MAX_CLIP_SEC)
+    end = start + dur
+    if _source_hits_op_ed(pack, start, end):
+        return None
+    out = dict(clip)
+    out["src_in"] = round(start, 3)
+    out["src_out"] = round(end, 3)
+    out["duration"] = round(end - start, 3)
+    out["role"] = "insert"
+    if out.get("chunk_index") is None and master.get("chunk_index") is not None:
+        out["chunk_index"] = master.get("chunk_index")
+    out.pop("tl_in", None)
+    out.pop("tl_out", None)
+    out.pop("vo_tl_in", None)
+    out.pop("vo_tl_out", None)
+    return out
 
 
 def apply_recap_duration(
