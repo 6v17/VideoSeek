@@ -59,29 +59,24 @@ def write_srt(clips: Sequence[Mapping[str, Any]], path: str | Path) -> Path:
 
 
 def merge_vo_cues(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Build SRT cues from TTS span times, falling back to empty-VO clip merging."""
+    """Build SRT cues from TTS span times. One shot, one cue — do not let empty clips extend prior VO."""
     cues: list[dict[str, Any]] = []
-    lock_extend = False
     for clip in clips:
         start = float(clip.get("tl_in") or 0.0)
         end = float(clip.get("tl_out") or 0.0)
         if end <= start:
             continue
         vo = str(clip.get("vo") or "").strip()
+        if not vo:
+            continue
         explicit_start = clip.get("vo_tl_in")
         explicit_end = clip.get("vo_tl_out")
-        if vo:
-            if explicit_start is not None and explicit_end is not None:
-                start = float(explicit_start)
-                end = float(explicit_end)
-                if end <= start:
-                    continue
-                lock_extend = True
-            else:
-                lock_extend = False
-            cues.append({"tl_in": start, "tl_out": end, "text": vo})
-        elif cues and explicit_start is None and explicit_end is None and not lock_extend:
-            cues[-1]["tl_out"] = end
+        if explicit_start is not None and explicit_end is not None:
+            start = float(explicit_start)
+            end = float(explicit_end)
+            if end <= start:
+                continue
+        cues.append({"tl_in": start, "tl_out": end, "text": vo})
     return cues
 
 
@@ -179,6 +174,10 @@ def layout_clips_on_timeline(
         if src_out_f <= src_in_f:
             src_out_f = src_in_f + max(1, quantize_frames(1.0, num, den))
         dur_f = src_out_f - src_in_f
+        old_tl_in = float(raw.get("tl_in") or 0.0)
+        new_tl_in = tl * den / num
+        new_tl_out = (tl + dur_f) * den / num
+        shift = new_tl_in - old_tl_in
         item = {
             "name": str(raw.get("name") or f"{index:02d}"),
             "vo": str(raw.get("vo") or "").strip(),
@@ -187,8 +186,8 @@ def layout_clips_on_timeline(
             "dur_f": dur_f,
             "tl_in_f": tl,
             "tl_out_f": tl + dur_f,
-            "tl_in": tl * den / num,
-            "tl_out": (tl + dur_f) * den / num,
+            "tl_in": new_tl_in,
+            "tl_out": new_tl_out,
             "src_in": src_in_f * den / num,
             "src_out": src_out_f * den / num,
             "duration": (src_out_f - src_in_f) * den / num,
@@ -198,6 +197,36 @@ def layout_clips_on_timeline(
             "vo_draft": str(raw.get("vo_draft") or "").strip(),
             "role": str(raw.get("role") or "").strip(),
         }
+        match_status = str(raw.get("match_status") or "").strip()
+        if match_status:
+            item["match_status"] = match_status
+        if raw.get("match_score") is not None:
+            try:
+                item["match_score"] = round(float(raw.get("match_score")), 3)
+            except (TypeError, ValueError):
+                pass
+        support = raw.get("evidence_support")
+        if isinstance(support, Mapping):
+            item["evidence_support"] = dict(support)
+        for key in ("visual_score", "asr_score", "vlm_score", "character_score"):
+            if raw.get(key) is None:
+                continue
+            try:
+                item[key] = round(float(raw.get(key)), 3)
+            except (TypeError, ValueError):
+                pass
+        # Keep VO speaking spans aligned when the recap clock shifts (e.g. single-beat rematch).
+        vo_tl_in = raw.get("vo_tl_in")
+        vo_tl_out = raw.get("vo_tl_out")
+        if vo_tl_in is not None and vo_tl_out is not None:
+            try:
+                start = float(vo_tl_in) + shift
+                end = float(vo_tl_out) + shift
+            except (TypeError, ValueError):
+                start = end = None
+            if start is not None and end is not None and end > start:
+                item["vo_tl_in"] = round(max(new_tl_in, min(start, new_tl_out)), 3)
+                item["vo_tl_out"] = round(max(item["vo_tl_in"], min(end, new_tl_out)), 3)
         built.append(item)
         tl += dur_f
     return built

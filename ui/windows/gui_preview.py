@@ -108,6 +108,7 @@ class PreviewGuiMixin:
         end_sec,
         *,
         suggested_sec=None,
+        caption_text=None,
         on_status=None,
     ) -> bool:
         """Open a floating PreviewDialog without leaving the current page."""
@@ -137,6 +138,7 @@ class PreviewGuiMixin:
         suggested = float(
             suggested_sec if suggested_sec is not None else (start_sec + end_sec) / 2.0
         )
+        caption = str(caption_text or "").strip() or None
 
         self._preview_dialog_opening = True
         self._preview_dialog_cooldown_until = now + 0.35
@@ -164,6 +166,7 @@ class PreviewGuiMixin:
                     end_sec,
                     self.texts,
                     suggested_sec=suggested,
+                    caption_text=caption,
                     shared_instance=shared_instance,
                 )
                 dialog.export_requested.connect(self._queue_preview_export)
@@ -177,6 +180,7 @@ class PreviewGuiMixin:
                     start_sec,
                     end_sec,
                     suggested_sec=suggested,
+                    caption_text=caption,
                 )
             dialog.show()
             dialog.raise_()

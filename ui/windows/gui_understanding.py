@@ -138,7 +138,7 @@ class UnderstandingGuiMixin:
             page.order_workflow_cards(recap_first=True)
         if hasattr(page, "generate_title"):
             page.generate_title.setText(
-                self.texts.get("understanding_step_generate_title_motion", "4. Optional full-video change notes")
+                self.texts.get("understanding_step_generate_title_motion", "3. Optional full-video change notes")
             )
         if hasattr(page, "dialogue_title"):
             page.dialogue_title.setText(
@@ -146,7 +146,7 @@ class UnderstandingGuiMixin:
             )
         if hasattr(page, "export_title"):
             page.export_title.setText(
-                self.texts.get("understanding_step_export_title_motion", "3. Recap cuts")
+                self.texts.get("understanding_step_export_title_motion", "4. Recap cuts")
             )
         if hasattr(page, "select_hint"):
             page.select_hint.setText(
@@ -180,7 +180,7 @@ class UnderstandingGuiMixin:
             page.generate_hint.setText(
                 self.texts.get(
                     "understanding_step_generate_hint_motion",
-                    "Optional: caption every segment now. Recap can fill beat windows later.",
+                    "Generate full-video change notes before recap when you can. If you skip, recap still fills beat-window notes.",
                 )
             )
         self._sync_vlm_prompt_tab_for_mode()
@@ -209,6 +209,8 @@ class UnderstandingGuiMixin:
             page.recap_start_hint.setVisible(True)
         # Dialogue table is filled by timeline / ASR handlers — not on every label sync.
         self._sync_recap_export_button()
+        if hasattr(self, "_refresh_recap_review_panel"):
+            self._refresh_recap_review_panel()
         if hasattr(page, "export_hint"):
             page.export_hint.setText(
                 self.texts.get("understanding_step_export_hint_motion", "")
@@ -1065,6 +1067,8 @@ class UnderstandingGuiMixin:
             self._refresh_understanding_video_meta(None)
             self._refresh_understanding_dialogue_step()
             self._sync_recap_export_button()
+            if hasattr(self, "_refresh_recap_review_panel"):
+                self._refresh_recap_review_panel()
             return
 
         config = load_config()
@@ -1119,6 +1123,8 @@ class UnderstandingGuiMixin:
 
         self._refresh_understanding_dialogue_step()
         self._sync_recap_export_button()
+        if hasattr(self, "_refresh_recap_review_panel"):
+            self._refresh_recap_review_panel()
 
     def _pixmap_from_bgr_frame(self, frame, *, height: int = 96):
         if frame is None or getattr(frame, "size", 0) == 0:
@@ -1583,6 +1589,8 @@ class UnderstandingGuiMixin:
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
             page.btn_rename_speakers.setEnabled(False)
+        if hasattr(page, "btn_reset_speakers"):
+            page.btn_reset_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -1687,6 +1695,8 @@ class UnderstandingGuiMixin:
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
             page.btn_rename_speakers.setEnabled(False)
+        if hasattr(page, "btn_reset_speakers"):
+            page.btn_reset_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -1739,6 +1749,39 @@ class UnderstandingGuiMixin:
         self.start_generate_understanding_evidence(video_id=video_id)
 
     def stop_understanding_generation(self):
+        weak_worker = getattr(self, "_recap_rematch_weak_worker", None)
+        if weak_worker is not None:
+            weak_worker.stop()
+            page = self.understanding_page
+            page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            page.btn_stop.setEnabled(False)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(
+                    self.texts.get("understanding_stop_requested", "Stopping…")
+                )
+            return
+        rematch_worker = getattr(self, "_recap_rematch_beat_worker", None)
+        if rematch_worker is not None:
+            rematch_worker.stop()
+            page = self.understanding_page
+            page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            page.btn_stop.setEnabled(False)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(
+                    self.texts.get("understanding_stop_requested", "Stopping…")
+                )
+            return
+        clip_worker = getattr(self, "_recap_clip_caption_worker", None)
+        if clip_worker is not None:
+            clip_worker.stop()
+            page = self.understanding_page
+            page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            page.btn_stop.setEnabled(False)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(
+                    self.texts.get("understanding_stop_requested", "Stopping…")
+                )
+            return
         recap_worker = getattr(self, "_recap_worker", None)
         if recap_worker is not None:
             recap_worker.stop()
@@ -2184,7 +2227,13 @@ class UnderstandingGuiMixin:
             pass
         return ""
 
-    def _play_understanding_range(self, start_sec: float, end_sec: float) -> None:
+    def _play_understanding_range(
+        self,
+        start_sec: float,
+        end_sec: float,
+        *,
+        caption_text=None,
+    ) -> None:
         page = getattr(self, "understanding_page", None)
         video_path = self._current_understanding_preview_path()
         if not video_path:
@@ -2203,6 +2252,7 @@ class UnderstandingGuiMixin:
             start_sec,
             end_sec,
             suggested_sec=start_sec,
+            caption_text=caption_text,
             on_status=None if page is None else page.lbl_status.setText,
         )
         if not opened or page is None:
@@ -2272,6 +2322,12 @@ class UnderstandingGuiMixin:
                 getattr(self, "understanding_controller", None)
                 and self.understanding_controller.is_running()
             ) or getattr(self, "_recap_worker", None) is not None or getattr(
+                self, "_recap_clip_caption_worker", None
+            ) is not None or getattr(
+                self, "_recap_rematch_beat_worker", None
+            ) is not None or getattr(
+                self, "_recap_rematch_weak_worker", None
+            ) is not None or getattr(
                 self, "_asr_worker", None
             ) is not None or getattr(self, "_speaker_cluster_worker", None) is not None
         can = (not running) and self._current_video_can_export_recap()
@@ -2358,6 +2414,8 @@ class UnderstandingGuiMixin:
                     "No story plan yet. Start from stage 1.",
                 )
             )
+        if hasattr(self, "_sync_recap_review_rewrite_button"):
+            self._sync_recap_review_rewrite_button()
 
     def open_subtitle_library_for_recap(self) -> None:
         self.switch_page("library")

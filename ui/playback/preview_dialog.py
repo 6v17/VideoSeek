@@ -129,6 +129,7 @@ class PreviewDialog(QDialog):
         texts,
         suggested_sec=None,
         *,
+        caption_text=None,
         shared_player=None,
         shared_instance=None,
         on_release_shared_player=None,
@@ -154,6 +155,7 @@ class PreviewDialog(QDialog):
         self._detail_error = None
         self._detail_notice = None
         self._segment_line_override = None
+        self._caption_text = ""
         self._play_token = 0
         self._duration_cache = {}
         # Prefer shared_instance + dedicated MediaPlayer (no HWND thrash with main preview).
@@ -173,6 +175,13 @@ class PreviewDialog(QDialog):
         self.video_host = _PreviewVideoHost()
         self.video_host.setMinimumHeight(480)
         layout.addWidget(self.video_host, 1)
+
+        self.caption_label = QLabel("")
+        self.caption_label.setObjectName("PreviewCaption")
+        self.caption_label.setWordWrap(True)
+        self.caption_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self.caption_label.setVisible(False)
+        layout.addWidget(self.caption_label)
 
         self.detail_label = QLabel("")
         self.detail_label.setObjectName("Hint")
@@ -261,7 +270,13 @@ class PreviewDialog(QDialog):
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
-        self.load_preview(video_path, start_sec, end_sec, suggested_sec=suggested_sec)
+        self.load_preview(
+            video_path,
+            start_sec,
+            end_sec,
+            suggested_sec=suggested_sec,
+            caption_text=caption_text,
+        )
 
     def closeEvent(self, event):
         # Always hide immediately so the user is never trapped behind a busy/frozen dialog.
@@ -277,7 +292,7 @@ class PreviewDialog(QDialog):
     def is_export_running(self):
         return False
 
-    def load_preview(self, video_path, start_sec, end_sec, suggested_sec=None):
+    def load_preview(self, video_path, start_sec, end_sec, suggested_sec=None, *, caption_text=None):
         self._closing = False
         self._close_requested = False
         self._close_after_export = False
@@ -287,6 +302,7 @@ class PreviewDialog(QDialog):
         self._detail_error = None
         self._detail_notice = None
         self._segment_line_override = None
+        self._set_caption_text(caption_text)
         self.update_timer.stop()
         self._play_token += 1
         play_token = self._play_token
@@ -616,6 +632,12 @@ class PreviewDialog(QDialog):
             "preview_dialog_unlocked",
             "Full video unlocked. You can scrub and continue playback freely.",
         )
+
+    def _set_caption_text(self, caption_text=None):
+        text = str(caption_text or "").strip()
+        self._caption_text = text
+        self.caption_label.setText(text)
+        self.caption_label.setVisible(bool(text))
 
     def _apply_detail_label(self):
         if self._detail_notice:

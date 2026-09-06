@@ -73,3 +73,18 @@ UNDERSTANDING_DIALOGUE_TABLE_SPEC = TableSpec(
         TableColumnSpec("actions", width=72),
     ),
 )
+
+UNDERSTANDING_RECAP_REVIEW_TABLE_SPEC = TableSpec(
+    texts_header_key="understanding_recap_review_headers",
+    row_height=36,
+    object_name="DataTable",
+    columns=(
+        TableColumnSpec("index", width=40),
+        TableColumnSpec("tl", width=100),
+        TableColumnSpec("src", width=100),
+        TableColumnSpec("beat", width=44),
+        TableColumnSpec("vo", resize="stretch"),
+        TableColumnSpec("status", width=88),
+        TableColumnSpec("actions", width=88),
+    ),
+)

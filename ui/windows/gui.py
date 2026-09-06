@@ -423,6 +423,8 @@ class MainWindow(
             self.understanding_page.btn_cluster_speakers.clicked.connect(self.cluster_current_video_speakers)
         if hasattr(self.understanding_page, "btn_rename_speakers"):
             self.understanding_page.btn_rename_speakers.clicked.connect(self.rename_current_video_speakers)
+        if hasattr(self.understanding_page, "btn_reset_speakers"):
+            self.understanding_page.btn_reset_speakers.clicked.connect(self.reset_current_video_speakers)
         if hasattr(self.understanding_page, "btn_export_dialogue_json"):
             self.understanding_page.btn_export_dialogue_json.clicked.connect(
                 self.export_current_video_dialogue_json
@@ -438,6 +440,25 @@ class MainWindow(
             )
             self.understanding_page.dialogue_table.itemChanged.connect(
                 self._on_understanding_dialogue_speaker_changed
+            )
+        if hasattr(self.understanding_page, "recap_review_table"):
+            self.understanding_page.recap_review_table.cellClicked.connect(
+                self._on_recap_review_cell_clicked
+            )
+            self.understanding_page.recap_review_table.cellDoubleClicked.connect(
+                self._on_recap_review_cell_double_clicked
+            )
+        if hasattr(self.understanding_page, "btn_rewrite_recap_vo"):
+            self.understanding_page.btn_rewrite_recap_vo.clicked.connect(
+                self.rewrite_selected_recap_vo
+            )
+        if hasattr(self.understanding_page, "btn_rematch_recap_beat"):
+            self.understanding_page.btn_rematch_recap_beat.clicked.connect(
+                self.rematch_selected_recap_beat
+            )
+        if hasattr(self.understanding_page, "btn_rematch_weak_beats"):
+            self.understanding_page.btn_rematch_weak_beats.clicked.connect(
+                self.rematch_weak_recap_beats
             )
         self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
         self.understanding_page.btn_open_services.clicked.connect(self.open_understanding_settings)
@@ -873,11 +894,11 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "generate_title"):
             self.understanding_page.generate_title.setText(
-                t.get("understanding_step_generate_title_motion", "4. Optional full-video change notes")
+                t.get("understanding_step_generate_title_motion", "3. Optional full-video change notes")
             )
         if hasattr(self.understanding_page, "export_title"):
             self.understanding_page.export_title.setText(
-                t.get("understanding_step_export_title_motion", "3. Recap cuts")
+                t.get("understanding_step_export_title_motion", "4. Recap cuts")
             )
         if hasattr(self.understanding_page, "export_hint"):
             self.understanding_page.export_hint.setText(
@@ -919,6 +940,16 @@ class MainWindow(
                     "Rename every line that shares a speaker label, such as 声线1 → a character name.",
                 )
             )
+        if hasattr(self.understanding_page, "btn_reset_speakers"):
+            self.understanding_page.btn_reset_speakers.setText(
+                t.get("understanding_step_dialogue_reset_speakers", "Reset speakers")
+            )
+            self.understanding_page.btn_reset_speakers.setToolTip(
+                t.get(
+                    "understanding_step_dialogue_reset_speakers_tip",
+                    "Clear every speaker label on this video (including manual names) so you can cluster again.",
+                )
+            )
         if hasattr(self.understanding_page, "btn_export_dialogue_json"):
             self.understanding_page.btn_export_dialogue_json.setText(
                 t.get("understanding_step_dialogue_export_json", "Export JSON")
@@ -951,6 +982,37 @@ class MainWindow(
             self._ensure_recap_prompt_default()
         if hasattr(self.understanding_page, "dialogue_table"):
             self.understanding_page.dialogue_table.apply_header_labels(t)
+        if hasattr(self.understanding_page, "recap_review_title"):
+            self.understanding_page.recap_review_title.setText(
+                t.get("understanding_recap_review_title", "Recap review")
+            )
+        if hasattr(self.understanding_page, "recap_review_hint"):
+            self.understanding_page.recap_review_hint.setText(
+                t.get("understanding_recap_review_hint", "")
+            )
+        if hasattr(self.understanding_page, "btn_rewrite_recap_vo"):
+            self.understanding_page.btn_rewrite_recap_vo.setText(
+                t.get("understanding_recap_review_rewrite", "Rewrite this VO")
+            )
+            self.understanding_page.btn_rewrite_recap_vo.setToolTip(
+                t.get("understanding_recap_review_rewrite_tip", "")
+            )
+        if hasattr(self.understanding_page, "btn_rematch_recap_beat"):
+            self.understanding_page.btn_rematch_recap_beat.setText(
+                t.get("understanding_recap_review_rematch", "Rematch this beat")
+            )
+            self.understanding_page.btn_rematch_recap_beat.setToolTip(
+                t.get("understanding_recap_review_rematch_tip", "")
+            )
+        if hasattr(self.understanding_page, "btn_rematch_weak_beats"):
+            self.understanding_page.btn_rematch_weak_beats.setText(
+                t.get("understanding_recap_review_rematch_weak", "Rematch all weak beats")
+            )
+            self.understanding_page.btn_rematch_weak_beats.setToolTip(
+                t.get("understanding_recap_review_rematch_weak_tip", "")
+            )
+        if hasattr(self.understanding_page, "recap_review_table"):
+            self.understanding_page.recap_review_table.apply_header_labels(t)
         cfg = self._understanding_config_widgets()
         dialog = getattr(self, "understanding_services_dialog", None)
         if dialog is not None:

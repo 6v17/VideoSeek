@@ -575,6 +575,8 @@ class UnderstandingLlmGuiMixin:
         self._sync_recap_export_button()
         if stage == "plan" and not result.get("cuts_path"):
             self.edit_current_recap_beats()
+        else:
+            self._refresh_recap_review_panel()
 
     def _count_saved_recap_beats(self) -> int:
         from src.services.recap_service import load_recap_beats
@@ -667,6 +669,902 @@ class UnderstandingLlmGuiMixin:
         if not video_path:
             return None
         return load_recap_cuts(video_path, video_id=self._selected_understanding_video_id())
+
+    def _refresh_recap_review_panel(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QPushButton, QTableWidgetItem
+
+        from src.services.recap_service import (
+            format_recap_clock_range,
+            load_recap_beats,
+            recap_clip_review_rows,
+        )
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if page is None or table is None:
+            return
+        widgets = (
+            getattr(page, "recap_review_title", None),
+            getattr(page, "recap_review_hint", None),
+            getattr(page, "recap_review_status", None),
+            getattr(page, "recap_review_detail", None),
+            getattr(page, "recap_review_action_bar", None),
+            table,
+        )
+        payload = self._load_current_recap_cuts()
+        clips = list((payload or {}).get("clips") or [])
+        show = bool(clips)
+        for widget in widgets:
+            if widget is not None:
+                widget.setVisible(show)
+        if not show:
+            table.setRowCount(0)
+            if hasattr(page, "recap_review_detail"):
+                page.recap_review_detail.setText("")
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(
+                    self.texts.get(
+                        "understanding_recap_review_empty",
+                        "No shot list yet. Run Match shots or one-click recap first.",
+                    )
+                )
+            return
+
+        video_path = self._current_recap_video_path()
+        beats_payload = load_recap_beats(video_path, video_id=self._selected_understanding_video_id()) or {}
+        beats = list(beats_payload.get("beats") or [])
+        people = list(beats_payload.get("people") or [])
+        # Re-score on open so old cuts / stricter QC show weak flags without a full rematch.
+        try:
+            from src.app.config import load_config
+            from src.services.recap_service import annotate_recap_match_quality, build_recap_pack, write_recap_cuts_file
+
+            video_id = self._selected_understanding_video_id()
+            cfg = load_config()
+            pack = build_recap_pack(video_id, config=cfg) if video_id else None
+            if pack is not None:
+                pack = dict(pack)
+                pack["video_path"] = video_path or pack.get("video_path") or ""
+            scored = annotate_recap_match_quality(
+                clips,
+                beats,
+                pack,
+                people,
+                config=cfg,
+            )
+            # Keep existing VO / timeline clocks; only refresh QC fields.
+            by_src = {
+                (
+                    round(float(row.get("src_in") or 0.0), 3),
+                    round(float(row.get("src_out") or 0.0), 3),
+                    int(row.get("beat_id") or 0),
+                ): row
+                for row in scored
+            }
+            refreshed: list[dict] = []
+            changed = False
+            for clip in clips:
+                row = dict(clip)
+                key = (
+                    round(float(row.get("src_in") or 0.0), 3),
+                    round(float(row.get("src_out") or 0.0), 3),
+                    int(row.get("beat_id") or 0),
+                )
+                fresh = by_src.get(key)
+                if fresh:
+                    for field in (
+                        "match_status",
+                        "match_score",
+                        "match_threshold",
+                        "visual_score",
+                        "asr_score",
+                        "vlm_score",
+                        "character_score",
+                        "evidence_support",
+                    ):
+                        if row.get(field) != fresh.get(field):
+                            changed = True
+                        row[field] = fresh.get(field)
+                refreshed.append(row)
+            clips = refreshed
+            if changed and video_path:
+                from src.services.recap_service import recap_cuts_path_for_video
+
+                info = {
+                    "fps": float((payload or {}).get("fps") or 24.0),
+                    "width": int((payload or {}).get("width") or 1920),
+                    "height": int((payload or {}).get("height") or 1080),
+                }
+                write_recap_cuts_file(
+                    recap_cuts_path_for_video(video_path),
+                    title=str((payload or {}).get("title") or ""),
+                    video_path=video_path,
+                    video_id=str((payload or {}).get("video_id") or video_id or ""),
+                    info=info,
+                    laid_out=clips,
+                    beats_path=str((payload or {}).get("beats_path") or ""),
+                    stage=str((payload or {}).get("stage") or "captions"),
+                )
+        except Exception:
+            pass
+        rows = recap_clip_review_rows(clips, beats=beats)
+        flag_labels = {
+            "underfill": self.texts.get("understanding_recap_review_flag_underfill", "short VO"),
+            "empty_vo": self.texts.get("understanding_recap_review_flag_empty_vo", "no VO"),
+            "insert": self.texts.get("understanding_recap_review_flag_insert", "insert"),
+            "bridge": self.texts.get("understanding_recap_review_flag_bridge", "bridge"),
+            "weak_match": self.texts.get("understanding_recap_review_flag_weak_match", "weak match"),
+            "asr": self.texts.get("understanding_recap_review_flag_asr", "ASR✓"),
+            "vlm": self.texts.get("understanding_recap_review_flag_vlm", "VLM✓"),
+            "character": self.texts.get("understanding_recap_review_flag_character", "cast✓"),
+            "thin": self.texts.get("understanding_recap_review_flag_thin", "thin evidence"),
+        }
+        edit_label = self.texts.get("understanding_recap_review_edit", "Edit")
+        running = self._recap_review_busy()
+        table.blockSignals(True)
+        table.setRowCount(0)
+        table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            src_in = float(row.get("src_in") or 0.0)
+            src_out = float(row.get("src_out") or src_in)
+            tl_in = float(row.get("tl_in") or 0.0)
+            tl_out = float(row.get("tl_out") or tl_in)
+            clip_index = int(row.get("index") or 0)
+            idx_item = QTableWidgetItem(str(clip_index + 1))
+            idx_item.setData(Qt.ItemDataRole.UserRole, src_in)
+            idx_item.setData(Qt.ItemDataRole.UserRole + 1, src_out)
+            idx_item.setData(Qt.ItemDataRole.UserRole + 2, clip_index)
+            idx_item.setData(Qt.ItemDataRole.UserRole + 3, dict(row))
+            idx_item.setFlags(idx_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            tl_item = QTableWidgetItem(format_recap_clock_range(tl_in, tl_out))
+            tl_item.setFlags(tl_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            src_item = QTableWidgetItem(format_recap_clock_range(src_in, src_out))
+            src_item.setFlags(src_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            beat_id = row.get("beat_id")
+            beat_item = QTableWidgetItem("" if not beat_id else str(beat_id))
+            beat_item.setFlags(beat_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            vo = str(row.get("vo") or "").strip()
+            vo_item = QTableWidgetItem(vo or "—")
+            vo_item.setFlags(vo_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            vo_item.setToolTip(vo)
+            status_parts = [flag_labels.get(flag, flag) for flag in list(row.get("flags") or [])]
+            status_parts.extend(
+                flag_labels.get(flag, flag) for flag in list(row.get("evidence_flags") or [])
+            )
+            status_item = QTableWidgetItem(" · ".join(status_parts) if status_parts else "OK")
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row_index, 0, idx_item)
+            table.setItem(row_index, 1, tl_item)
+            table.setItem(row_index, 2, src_item)
+            table.setItem(row_index, 3, beat_item)
+            table.setItem(row_index, 4, vo_item)
+            table.setItem(row_index, 5, status_item)
+            button = QPushButton(edit_label)
+            button.setProperty("class", "TableBtn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedHeight(28)
+            button.setMinimumWidth(56)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.setAutoDefault(False)
+            button.setDefault(False)
+            button.setEnabled(not running)
+            # Queued: table selection finishes before the modal opens (avoids swallowed clicks).
+            button.clicked.connect(
+                lambda *_args, r=row_index: self._queue_edit_recap_review_vo(r)
+            )
+            table.setCellWidget(row_index, 6, button)
+            try:
+                from ui.widgets.styles import repolish_widget
+
+                repolish_widget(button)
+            except Exception:
+                pass
+        table.blockSignals(False)
+        page.recap_review_status.setText(
+            self.texts.get(
+                "understanding_recap_review_ready",
+                "{count} shots · weak {weak} · empty VO {empty}. Double-click to preview.",
+            ).format(
+                count=len(rows),
+                weak=sum(1 for row in rows if "weak_match" in list(row.get("flags") or [])),
+                empty=sum(1 for row in rows if "empty_vo" in list(row.get("flags") or [])),
+            )
+        )
+        page.recap_review_detail.setText(
+            self.texts.get(
+                "understanding_recap_review_detail_empty",
+                "Select a row to inspect beat and VO.",
+            )
+        )
+        self._sync_recap_review_rewrite_button()
+
+    def _recap_review_busy(self) -> bool:
+        return (
+            getattr(self, "_recap_worker", None) is not None
+            or getattr(self, "_recap_clip_caption_worker", None) is not None
+            or getattr(self, "_recap_rematch_beat_worker", None) is not None
+            or getattr(self, "_recap_rematch_weak_worker", None) is not None
+        )
+
+    def _selected_recap_review_clip_index(self) -> int | None:
+        from PySide6.QtCore import Qt
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is None:
+            return None
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, 0)
+        if item is None:
+            return None
+        try:
+            return int(item.data(Qt.ItemDataRole.UserRole + 2))
+        except (TypeError, ValueError):
+            return None
+
+    def _selected_recap_review_beat_id(self) -> int | None:
+        from PySide6.QtCore import Qt
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is None:
+            return None
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, 0)
+        if item is None:
+            return None
+        payload = item.data(Qt.ItemDataRole.UserRole + 3)
+        if not isinstance(payload, dict):
+            return None
+        try:
+            beat_id = int(payload.get("beat_id") or 0)
+        except (TypeError, ValueError):
+            return None
+        return beat_id if beat_id > 0 else None
+
+    def _sync_recap_review_rewrite_button(self) -> None:
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return
+        busy = self._recap_review_busy()
+        has_cuts = self._current_video_has_recap_cuts()
+        selected = self._selected_recap_review_clip_index() is not None
+        beat_id = self._selected_recap_review_beat_id()
+        rewrite = getattr(page, "btn_rewrite_recap_vo", None)
+        if rewrite is not None:
+            rewrite.setEnabled((not busy) and selected and has_cuts)
+        rematch = getattr(page, "btn_rematch_recap_beat", None)
+        if rematch is not None:
+            rematch.setEnabled((not busy) and beat_id is not None and has_cuts)
+        weak = getattr(page, "btn_rematch_weak_beats", None)
+        if weak is not None:
+            weak_count = self._current_weak_match_beat_count()
+            weak.setEnabled((not busy) and has_cuts and weak_count > 0)
+
+    def _current_weak_match_beat_count(self) -> int:
+        from src.services.recap_service import list_weak_match_beat_ids
+
+        payload = self._load_current_recap_cuts() or {}
+        return len(list_weak_match_beat_ids(list(payload.get("clips") or [])))
+    def _queue_edit_recap_review_vo(self, row: int) -> None:
+        from PySide6.QtCore import QTimer
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is not None and 0 <= int(row) < table.rowCount():
+            table.selectRow(int(row))
+        QTimer.singleShot(0, lambda r=int(row): self._edit_recap_review_vo(r))
+
+    def _edit_recap_review_vo(self, row: int) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDialog
+
+        from src.services.recap_service import save_recap_clip_vo
+        from ui.dialogs.recap_vo import RecapVoDialog
+
+        if self._recap_review_busy():
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_edit_busy",
+                    "A recap job is running. Try editing VO again in a moment.",
+                ),
+                kind="warning",
+            )
+            return
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is None:
+            return
+        item = table.item(int(row), 0)
+        if item is None:
+            return
+        try:
+            clip_index = int(item.data(Qt.ItemDataRole.UserRole + 2))
+        except (TypeError, ValueError):
+            return
+        payload = item.data(Qt.ItemDataRole.UserRole + 3)
+        if not isinstance(payload, dict):
+            payload = {}
+        dialog = RecapVoDialog(
+            self,
+            texts=self.texts,
+            vo=str(payload.get("vo") or ""),
+            event=str(payload.get("event") or ""),
+            clip_label=self.texts.get("understanding_recap_review_edit_vo", "Narration"),
+        )
+        if int(dialog.exec()) != int(QDialog.DialogCode.Accepted):
+            return
+        video_path = self._current_recap_video_path()
+        if not video_path:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_chunk_preview_no_video", "Video file not found."),
+                kind="warning",
+            )
+            return
+        try:
+            result = save_recap_clip_vo(
+                video_path,
+                clip_index,
+                str(dialog.result_vo() or ""),
+                video_id=self._selected_understanding_video_id(),
+            )
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("understanding_recap_review_edit_failed", "Could not save VO"),
+                exc,
+            )
+            return
+        self._refresh_recap_review_panel()
+        table = getattr(page, "recap_review_table", None)
+        if table is not None:
+            for index in range(table.rowCount()):
+                cell = table.item(index, 0)
+                if cell is None:
+                    continue
+                try:
+                    if int(cell.data(Qt.ItemDataRole.UserRole + 2)) == clip_index:
+                        table.selectRow(index)
+                        self._on_recap_review_cell_clicked(index, 0)
+                        break
+                except (TypeError, ValueError):
+                    continue
+        message = self.texts.get(
+            "understanding_recap_review_edit_saved",
+            "Saved VO on shot {index}.",
+        ).format(index=int(result.get("clip_index") or clip_index) + 1)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(message)
+        self._sync_recap_review_rewrite_button()
+
+    def rewrite_selected_recap_vo(self) -> None:
+        from ui.workers import RecapClipCaptionWorker
+
+        if self._recap_review_busy():
+            return
+        page = getattr(self, "understanding_page", None)
+        clip_index = self._selected_recap_review_clip_index()
+        if clip_index is None:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_rewrite_need_row",
+                    "Select a shot in the table first.",
+                ),
+                kind="warning",
+            )
+            return
+        video_path = self._current_recap_video_path()
+        if not video_path:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_chunk_preview_no_video", "Video file not found."),
+                kind="warning",
+            )
+            return
+        caption_prompt = ""
+        if page is not None and hasattr(page, "input_recap_caption_prompt"):
+            caption_prompt = str(page.input_recap_caption_prompt.toPlainText() or "")
+        running_text = self.texts.get(
+            "understanding_recap_review_rewrite_running",
+            "Rewriting narration for this shot…",
+        )
+        if page is not None:
+            page.lbl_status.setText(running_text)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(running_text)
+            if hasattr(page, "recap_progress_bar"):
+                page.recap_progress_bar.setVisible(True)
+                page.recap_progress_bar.setValue(20)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(running_text)
+            page.btn_stop.setVisible(True)
+            page.btn_stop.setEnabled(True)
+        self._sync_recap_export_button(running=True)
+        self._sync_recap_review_rewrite_button()
+        worker = RecapClipCaptionWorker(
+            video_path,
+            clip_index,
+            video_id=self._selected_understanding_video_id(),
+            system_prompt=caption_prompt,
+            parent=self,
+        )
+        self._recap_clip_caption_worker = worker
+
+        def _finish(active_worker=worker):
+            if getattr(self, "_recap_clip_caption_worker", None) is active_worker:
+                self._recap_clip_caption_worker = None
+            if page is not None:
+                if hasattr(page, "recap_progress_bar") and getattr(self, "_recap_worker", None) is None:
+                    page.recap_progress_bar.setVisible(False)
+                if getattr(self, "_recap_worker", None) is None and not (
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                ):
+                    page.btn_stop.setEnabled(False)
+                    page.btn_stop.setVisible(False)
+            self._sync_recap_export_button(running=False)
+            self._sync_recap_review_rewrite_button()
+            try:
+                active_worker.deleteLater()
+            except Exception:
+                pass
+
+        def _on_progress(pct: int, label: str, active_page=page):
+            if active_page is None:
+                return
+            if hasattr(active_page, "recap_progress_bar"):
+                active_page.recap_progress_bar.setVisible(True)
+                active_page.recap_progress_bar.setValue(max(0, min(100, int(pct))))
+            if hasattr(active_page, "recap_progress_status"):
+                active_page.recap_progress_status.set_status_text(label)
+            active_page.lbl_status.setText(label)
+
+        worker.progress_signal.connect(_on_progress)
+        worker.finished_signal.connect(self._finish_recap_clip_caption_rewrite)
+        worker.error_signal.connect(
+            lambda message: self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_review_rewrite_failed",
+                    "Could not rewrite this VO",
+                ),
+                Exception(message),
+            )
+        )
+        worker.finished.connect(_finish)
+        worker.start()
+        if hasattr(self, "_sync_tray_stop_action"):
+            self._sync_tray_stop_action()
+
+    def _finish_recap_clip_caption_rewrite(self, ok: bool, stopped: bool, payload: object) -> None:
+        page = getattr(self, "understanding_page", None)
+        if stopped or not ok:
+            if page is not None and stopped:
+                page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            return
+        result = dict(payload or {})
+        clip_index = int(result.get("clip_index") or 0)
+        self._refresh_recap_review_panel()
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is not None:
+            from PySide6.QtCore import Qt
+
+            for index in range(table.rowCount()):
+                cell = table.item(index, 0)
+                if cell is None:
+                    continue
+                try:
+                    if int(cell.data(Qt.ItemDataRole.UserRole + 2)) == clip_index:
+                        table.selectRow(index)
+                        self._on_recap_review_cell_clicked(index, 0)
+                        break
+                except (TypeError, ValueError):
+                    continue
+        message = self.texts.get(
+            "understanding_recap_review_rewrite_done",
+            "Rewrote VO on shot {index}.",
+        ).format(index=clip_index + 1)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+
+    def rematch_selected_recap_beat(self) -> None:
+        from ui.workers import RecapRematchBeatWorker
+
+        if self._recap_review_busy():
+            return
+        page = getattr(self, "understanding_page", None)
+        beat_id = self._selected_recap_review_beat_id()
+        if beat_id is None:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_rematch_need_beat",
+                    "Select a shot that has a beat id first.",
+                ),
+                kind="warning",
+            )
+            return
+        if not self.show_confirm_dialog(
+            self.texts.get("understanding_recap_review_rematch", "Rematch this beat"),
+            self.texts.get(
+                "understanding_recap_review_rematch_confirm",
+                "Rematch beat #{beat}? Its current shots are replaced; other beats are kept.",
+            ).format(beat=beat_id),
+        ):
+            return
+        video_id = self._selected_understanding_video_id()
+        video_path = self._current_recap_video_path()
+        if not video_id or not video_path:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_chunk_preview_no_video", "Video file not found."),
+                kind="warning",
+            )
+            return
+        match_prompt = ""
+        caption_prompt = ""
+        if page is not None:
+            if hasattr(page, "input_recap_prompt"):
+                match_prompt = str(page.input_recap_prompt.toPlainText() or "")
+            if hasattr(page, "input_recap_caption_prompt"):
+                caption_prompt = str(page.input_recap_caption_prompt.toPlainText() or "")
+        running_text = self.texts.get(
+            "understanding_recap_review_rematch_running",
+            "Rematching this beat…",
+        )
+        if page is not None:
+            page.lbl_status.setText(running_text)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(running_text)
+            if hasattr(page, "recap_progress_bar"):
+                page.recap_progress_bar.setVisible(True)
+                page.recap_progress_bar.setValue(8)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(running_text)
+            page.btn_stop.setVisible(True)
+            page.btn_stop.setEnabled(True)
+        self._sync_recap_export_button(running=True)
+        self._sync_recap_review_rewrite_button()
+        worker = RecapRematchBeatWorker(
+            video_id,
+            beat_id,
+            video_path=video_path,
+            system_prompt=match_prompt,
+            caption_prompt=caption_prompt,
+            parent=self,
+        )
+        self._recap_rematch_beat_worker = worker
+
+        def _finish(active_worker=worker):
+            if getattr(self, "_recap_rematch_beat_worker", None) is active_worker:
+                self._recap_rematch_beat_worker = None
+            if page is not None:
+                if hasattr(page, "recap_progress_bar") and getattr(self, "_recap_worker", None) is None:
+                    page.recap_progress_bar.setVisible(False)
+                if getattr(self, "_recap_worker", None) is None and not (
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                ):
+                    page.btn_stop.setEnabled(False)
+                    page.btn_stop.setVisible(False)
+            self._sync_recap_export_button(running=False)
+            self._sync_recap_review_rewrite_button()
+            try:
+                active_worker.deleteLater()
+            except Exception:
+                pass
+
+        def _on_progress(pct: int, label: str, active_page=page):
+            if active_page is None:
+                return
+            if hasattr(active_page, "recap_progress_bar"):
+                active_page.recap_progress_bar.setVisible(True)
+                active_page.recap_progress_bar.setValue(max(0, min(100, int(pct))))
+            if hasattr(active_page, "recap_progress_status"):
+                active_page.recap_progress_status.set_status_text(label)
+            active_page.lbl_status.setText(label)
+
+        worker.progress_signal.connect(_on_progress)
+        worker.finished_signal.connect(self._finish_recap_rematch_beat)
+        worker.error_signal.connect(
+            lambda message: self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_review_rematch_failed",
+                    "Could not rematch this beat",
+                ),
+                Exception(message),
+            )
+        )
+        worker.finished.connect(_finish)
+        worker.start()
+        if hasattr(self, "_sync_tray_stop_action"):
+            self._sync_tray_stop_action()
+
+    def _finish_recap_rematch_beat(self, ok: bool, stopped: bool, payload: object) -> None:
+        page = getattr(self, "understanding_page", None)
+        if stopped or not ok:
+            if page is not None and stopped:
+                page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            return
+        result = dict(payload or {})
+        beat_id = int(result.get("beat_id") or 0)
+        count = int(result.get("beat_clip_count") or result.get("clip_count") or 0)
+        self._refresh_recap_review_panel()
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is not None and beat_id > 0:
+            from PySide6.QtCore import Qt
+
+            for index in range(table.rowCount()):
+                cell = table.item(index, 0)
+                if cell is None:
+                    continue
+                payload_row = cell.data(Qt.ItemDataRole.UserRole + 3)
+                if not isinstance(payload_row, dict):
+                    continue
+                try:
+                    if int(payload_row.get("beat_id") or 0) == beat_id:
+                        table.selectRow(index)
+                        self._on_recap_review_cell_clicked(index, 0)
+                        break
+                except (TypeError, ValueError):
+                    continue
+        message = self.texts.get(
+            "understanding_recap_review_rematch_done",
+            "Rematched beat #{beat} ({count} shots).",
+        ).format(beat=beat_id, count=count)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+
+    def rematch_weak_recap_beats(self) -> None:
+        from src.services.recap_service import MAX_WEAK_REMATCH_BEATS, list_weak_match_beat_ids
+        from ui.workers import RecapRematchWeakBeatsWorker
+
+        if self._recap_review_busy():
+            return
+        page = getattr(self, "understanding_page", None)
+        payload = self._load_current_recap_cuts() or {}
+        weak_ids = list_weak_match_beat_ids(list(payload.get("clips") or []))
+        if not weak_ids:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_rematch_weak_none",
+                    "No weak-match beats right now.",
+                ),
+                kind="warning",
+            )
+            return
+        limit = int(MAX_WEAK_REMATCH_BEATS)
+        if not self.show_confirm_dialog(
+            self.texts.get("understanding_recap_review_rematch_weak", "Rematch all weak beats"),
+            self.texts.get(
+                "understanding_recap_review_rematch_weak_confirm",
+                "Rematch {count} weak-evidence beats?\nAt most {limit} beats per run.",
+            ).format(count=len(weak_ids), limit=limit),
+        ):
+            return
+        video_id = self._selected_understanding_video_id()
+        video_path = self._current_recap_video_path()
+        if not video_id or not video_path:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_chunk_preview_no_video", "Video file not found."),
+                kind="warning",
+            )
+            return
+        match_prompt = ""
+        caption_prompt = ""
+        if page is not None:
+            if hasattr(page, "input_recap_prompt"):
+                match_prompt = str(page.input_recap_prompt.toPlainText() or "")
+            if hasattr(page, "input_recap_caption_prompt"):
+                caption_prompt = str(page.input_recap_caption_prompt.toPlainText() or "")
+        running_text = self.texts.get(
+            "understanding_recap_review_rematch_weak_running",
+            "Batch-rematching weak beats…",
+        )
+        if page is not None:
+            page.lbl_status.setText(running_text)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(running_text)
+            if hasattr(page, "recap_progress_bar"):
+                page.recap_progress_bar.setVisible(True)
+                page.recap_progress_bar.setValue(8)
+            if hasattr(page, "recap_progress_status"):
+                page.recap_progress_status.set_status_text(running_text)
+            page.btn_stop.setVisible(True)
+            page.btn_stop.setEnabled(True)
+        self._sync_recap_export_button(running=True)
+        self._sync_recap_review_rewrite_button()
+        worker = RecapRematchWeakBeatsWorker(
+            video_id,
+            video_path=video_path,
+            system_prompt=match_prompt,
+            caption_prompt=caption_prompt,
+            max_beats=limit,
+            parent=self,
+        )
+        self._recap_rematch_weak_worker = worker
+
+        def _finish(active_worker=worker):
+            if getattr(self, "_recap_rematch_weak_worker", None) is active_worker:
+                self._recap_rematch_weak_worker = None
+            if page is not None:
+                if hasattr(page, "recap_progress_bar") and getattr(self, "_recap_worker", None) is None:
+                    page.recap_progress_bar.setVisible(False)
+                if getattr(self, "_recap_worker", None) is None and not (
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                ):
+                    page.btn_stop.setEnabled(False)
+                    page.btn_stop.setVisible(False)
+            self._sync_recap_export_button(running=False)
+            self._sync_recap_review_rewrite_button()
+            try:
+                active_worker.deleteLater()
+            except Exception:
+                pass
+
+        def _on_progress(pct: int, label: str, active_page=page):
+            if active_page is None:
+                return
+            if hasattr(active_page, "recap_progress_bar"):
+                active_page.recap_progress_bar.setVisible(True)
+                active_page.recap_progress_bar.setValue(max(0, min(100, int(pct))))
+            if hasattr(active_page, "recap_progress_status"):
+                active_page.recap_progress_status.set_status_text(label)
+            active_page.lbl_status.setText(label)
+
+        worker.progress_signal.connect(_on_progress)
+        worker.finished_signal.connect(self._finish_recap_rematch_weak)
+        worker.error_signal.connect(
+            lambda message: self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_review_rematch_weak_failed",
+                    "Could not batch-rematch weak beats",
+                ),
+                Exception(message),
+            )
+        )
+        worker.finished.connect(_finish)
+        worker.start()
+        if hasattr(self, "_sync_tray_stop_action"):
+            self._sync_tray_stop_action()
+
+    def _finish_recap_rematch_weak(self, ok: bool, stopped: bool, payload: object) -> None:
+        page = getattr(self, "understanding_page", None)
+        if stopped or not ok:
+            if page is not None and stopped:
+                page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            return
+        result = dict(payload or {})
+        done = len(list(result.get("beat_ids") or []))
+        remain = len(list(result.get("remaining_weak") or []))
+        failed = len(list(result.get("failed") or []))
+        self._refresh_recap_review_panel()
+        message = self.texts.get(
+            "understanding_recap_review_rematch_weak_done",
+            "Rematched {done} weak beats; still weak {remain}; failed {failed}.",
+        ).format(done=done, remain=remain, failed=failed)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+
+    def _on_recap_review_cell_clicked(self, row: int, column: int) -> None:
+        from PySide6.QtCore import Qt
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is None:
+            return
+        item = table.item(int(row), 0)
+        if item is None:
+            return
+        payload = item.data(Qt.ItemDataRole.UserRole + 3)
+        if not isinstance(payload, dict):
+            return
+        from src.services.recap_service import format_recap_clock_range
+
+        beat = payload.get("beat_id") or "—"
+        event = str(payload.get("event") or "").strip() or "—"
+        reason = str(payload.get("reason") or "").strip() or "—"
+        vo = str(payload.get("vo") or "").strip()
+        evidence_parts = []
+        for flag in list(payload.get("evidence_flags") or []):
+            evidence_parts.append(
+                self.texts.get(f"understanding_recap_review_flag_{flag}", flag)
+            )
+        required = [str(tag) for tag in list(payload.get("evidence_required") or []) if str(tag).strip()]
+        if required:
+            evidence_parts.append(
+                self.texts.get(
+                    "understanding_recap_review_evidence_required",
+                    "needs {tags}",
+                ).format(tags="/".join(required))
+            )
+        if payload.get("match_status") == "weak_match":
+            evidence_parts.insert(
+                0,
+                self.texts.get("understanding_recap_review_flag_weak_match", "weak match"),
+            )
+        evidence = " · ".join(evidence_parts) if evidence_parts else self.texts.get(
+            "understanding_recap_review_evidence_none",
+            "none tagged",
+        )
+        vo_owner = self.texts.get(
+            "understanding_recap_review_vo_owner_own"
+            if vo
+            else "understanding_recap_review_vo_owner_empty",
+            "this shot" if vo else "no VO on this shot",
+        )
+        page.recap_review_detail.setText(
+            self.texts.get(
+                "understanding_recap_review_detail",
+                "Beat #{beat} · recap {tl} · source {src}\nVO owner: {vo_owner}\nEvent: {event}\nEvidence: {evidence}\nNote: {reason}\nVO: {vo}",
+            ).format(
+                beat=beat,
+                tl=format_recap_clock_range(
+                    float(payload.get("tl_in") or 0.0),
+                    float(payload.get("tl_out") or 0.0),
+                ),
+                src=format_recap_clock_range(
+                    float(payload.get("src_in") or 0.0),
+                    float(payload.get("src_out") or 0.0),
+                ),
+                vo_owner=vo_owner,
+                event=event,
+                evidence=evidence,
+                reason=reason,
+                vo=vo or "—",
+            )
+        )
+        self._sync_recap_review_rewrite_button()
+
+    def _on_recap_review_cell_double_clicked(self, row: int, column: int) -> None:
+        from PySide6.QtCore import Qt
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "recap_review_table", None) if page is not None else None
+        if table is None:
+            return
+        item = table.item(int(row), 0)
+        if item is None:
+            return
+        try:
+            start = float(item.data(Qt.ItemDataRole.UserRole))
+            end = float(item.data(Qt.ItemDataRole.UserRole + 1))
+        except (TypeError, ValueError):
+            return
+        payload = item.data(Qt.ItemDataRole.UserRole + 3)
+        vo = ""
+        if isinstance(payload, dict):
+            vo = str(payload.get("vo") or "").strip()
+        self._play_understanding_range(start, end, caption_text=vo or None)
+        if page is not None:
+            from src.utils import format_timecode_range
+
+            page.lbl_status.setText(
+                self.texts.get(
+                    "understanding_recap_review_play",
+                    "Previewing source {range}",
+                ).format(range=format_timecode_range(start, end))
+            )
 
     def export_current_recap_jianying(self):
         from src.services.jianying_draft_service import (

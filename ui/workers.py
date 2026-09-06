@@ -1461,6 +1461,260 @@ class SpeakerClusterWorker(QThread):
             self.finished.emit()
 
 
+class RecapRematchBeatWorker(QThread):
+    """Rematch shots for one story beat and splice into saved cuts."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        video_id: str,
+        beat_id: int,
+        *,
+        video_path: str = "",
+        system_prompt: str = "",
+        caption_prompt: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.video_id = str(video_id or "").strip()
+        self.beat_id = int(beat_id)
+        self.video_path = str(video_path or "").strip()
+        self.system_prompt = str(system_prompt or "")
+        self.caption_prompt = str(caption_prompt or "")
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.recap_service import rematch_recap_beat
+
+            config = load_config()
+            texts = get_texts(config.get("language", "zh"))
+            stage_keys = {
+                "motion_gaps": "understanding_export_recap_motion_gaps",
+                "matching": "understanding_export_recap_matching",
+                "captions": "understanding_recap_review_rewrite_running",
+                "writing": "understanding_export_recap_writing",
+            }
+
+            def _on_progress(value, stage):
+                key = stage_keys.get(str(stage), "understanding_recap_review_rematch_running")
+                label = texts.get(key, str(stage))
+                self.progress_signal.emit(max(1, min(99, int(value))), label)
+
+            _on_progress(
+                8,
+                "matching",
+            )
+            self.progress_signal.emit(
+                8,
+                texts.get(
+                    "understanding_recap_review_rematch_running",
+                    "Rematching this beat…",
+                ),
+            )
+            result = rematch_recap_beat(
+                self.video_id,
+                self.beat_id,
+                video_path=self.video_path,
+                config=config,
+                system_prompt=self.system_prompt,
+                caption_prompt=self.caption_prompt,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                progress_callback=_on_progress,
+            )
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
+            self.finished_signal.emit(True, False, dict(result or {}))
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(
+                    False,
+                    True,
+                    {"beat_id": self.beat_id, "stopped": True},
+                )
+                return
+            logger.exception("Recap rematch beat worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+        finally:
+            self.finished.emit()
+
+
+class RecapRematchWeakBeatsWorker(QThread):
+    """Batch-rematch every weak-match beat on the saved cut list."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        video_id: str,
+        *,
+        video_path: str = "",
+        system_prompt: str = "",
+        caption_prompt: str = "",
+        max_beats: int = 8,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.video_id = str(video_id or "").strip()
+        self.video_path = str(video_path or "").strip()
+        self.system_prompt = str(system_prompt or "")
+        self.caption_prompt = str(caption_prompt or "")
+        self.max_beats = int(max_beats or 8)
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.recap_service import rematch_weak_recap_beats
+
+            config = load_config()
+            texts = get_texts(config.get("language", "zh"))
+
+            def _on_progress(value, stage):
+                label = texts.get(
+                    "understanding_recap_review_rematch_weak_running",
+                    "Batch-rematching weak beats…",
+                )
+                body = str(stage or "")
+                if body.startswith("weak_rematch:"):
+                    parts = body.split(":")
+                    # weak_rematch:1/3:12
+                    if len(parts) >= 3:
+                        done_total = parts[1]
+                        beat = parts[2]
+                        if "/" in done_total:
+                            done, total = done_total.split("/", 1)
+                            label = texts.get(
+                                "understanding_recap_review_rematch_weak_progress",
+                                "Weak rematch {done}/{total} (beat #{beat})…",
+                            ).format(done=done, total=total, beat=beat)
+                self.progress_signal.emit(max(1, min(99, int(value))), label)
+
+            self.progress_signal.emit(
+                8,
+                texts.get(
+                    "understanding_recap_review_rematch_weak_running",
+                    "Batch-rematching weak beats…",
+                ),
+            )
+            result = rematch_weak_recap_beats(
+                self.video_id,
+                video_path=self.video_path,
+                max_beats=self.max_beats,
+                config=config,
+                system_prompt=self.system_prompt,
+                caption_prompt=self.caption_prompt,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+                progress_callback=_on_progress,
+            )
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
+            self.finished_signal.emit(True, False, dict(result or {}))
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(False, True, {"stopped": True})
+                return
+            logger.exception("Recap rematch weak beats worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+        finally:
+            self.finished.emit()
+
+
+class RecapClipCaptionWorker(QThread):
+    """Rewrite narration for one locked recap shot."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, bool, object)
+    error_signal = Signal(str)
+    finished = Signal()
+
+    def __init__(
+        self,
+        video_path: str,
+        clip_index: int,
+        *,
+        video_id: str = "",
+        system_prompt: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.video_path = str(video_path or "").strip()
+        self.clip_index = int(clip_index)
+        self.video_id = str(video_id or "").strip()
+        self.system_prompt = str(system_prompt or "")
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            from src.app.config import load_config
+            from src.app.i18n import get_texts
+            from src.core.understanding.base import UnderstandingStoppedError
+            from src.services.recap_service import rewrite_recap_clip_caption
+
+            config = load_config()
+            texts = get_texts(config.get("language", "zh"))
+            self.progress_signal.emit(
+                20,
+                texts.get(
+                    "understanding_recap_review_rewrite_running",
+                    "Rewriting narration for this shot…",
+                ),
+            )
+            result = rewrite_recap_clip_caption(
+                self.video_path,
+                self.clip_index,
+                video_id=self.video_id,
+                config=config,
+                system_prompt=self.system_prompt,
+                should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
+            )
+            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
+            self.finished_signal.emit(True, False, dict(result or {}))
+        except Exception as exc:
+            from src.core.understanding.base import UnderstandingStoppedError
+
+            if isinstance(exc, UnderstandingStoppedError):
+                self.finished_signal.emit(
+                    False,
+                    True,
+                    {"clip_index": self.clip_index, "stopped": True},
+                )
+                return
+            logger.exception("Recap clip caption worker failed")
+            self.error_signal.emit(str(exc))
+            self.finished_signal.emit(False, False, {})
+        finally:
+            self.finished.emit()
+
+
 class ModelPackageImportWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(dict)

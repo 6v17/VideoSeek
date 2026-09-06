@@ -1432,6 +1432,15 @@ QTableView#LibraryGroupedLibTree::item:selected {
     background: transparent;
     padding: 0 4px 2px 4px;
 }
+#PreviewCaption {
+    color: __HEADLINE__;
+    font-size: 14px;
+    font-weight: 600;
+    background: __TRACK__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 8px 12px;
+}
 #ResultTable, #DataTable {
     background: __FIELD__;
     border: 1px solid __LINE__;

@@ -408,6 +408,8 @@ class UnderstandingAsrGuiMixin:
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
             page.btn_rename_speakers.setEnabled(False)
+        if hasattr(page, "btn_reset_speakers"):
+            page.btn_reset_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -514,6 +516,10 @@ class UnderstandingAsrGuiMixin:
             page.btn_rename_speakers.setEnabled(
                 (not running) and bool(self._current_video_speaker_labels())
             )
+        if hasattr(page, "btn_reset_speakers"):
+            page.btn_reset_speakers.setEnabled(
+                (not running) and bool(self._current_video_speaker_labels())
+            )
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled((not running) and self._current_video_has_recap_dialogue())
 
@@ -600,6 +606,8 @@ class UnderstandingAsrGuiMixin:
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
             page.btn_rename_speakers.setEnabled(False)
+        if hasattr(page, "btn_reset_speakers"):
+            page.btn_reset_speakers.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -774,6 +782,66 @@ class UnderstandingAsrGuiMixin:
             "understanding_speaker_rename_done",
             'Renamed "{old}" to "{new}" ({count} lines).',
         ).format(old=old_speaker, new=new_speaker, count=updated)
+        page = getattr(self, "understanding_page", None)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+
+    def reset_current_video_speakers(self):
+        from src.storage.dialogue_transcript_store import clear_dialogue_speakers
+
+        if self._asr_job_running():
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        if not self._current_video_speaker_labels():
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_speaker_reset_none",
+                    "No speaker labels to clear.",
+                ),
+                kind="warning",
+            )
+            return
+        if not self.show_confirm_dialog(
+            self.texts.get("understanding_speaker_reset_title", "Reset speakers"),
+            self.texts.get(
+                "understanding_speaker_reset_confirm",
+                "Clear every speaker label on this video (including manual character names)? You can cluster again afterwards.",
+            ),
+        ):
+            return
+        try:
+            updated = clear_dialogue_speakers(video_id, config=load_config())
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("understanding_speaker_reset_failed", "Could not reset speakers"),
+                exc,
+            )
+            return
+        self._refresh_understanding_dialogue_step()
+        if updated <= 0:
+            message = self.texts.get(
+                "understanding_speaker_reset_none",
+                "No speaker labels to clear.",
+            )
+            self.show_info_dialog(self.texts.get("warning_title", "Warning"), message, kind="warning")
+            return
+        message = self.texts.get(
+            "understanding_speaker_reset_done",
+            "Cleared {count} speaker labels.",
+        ).format(count=updated)
         page = getattr(self, "understanding_page", None)
         if page is not None:
             page.lbl_status.setText(message)

@@ -754,6 +754,22 @@ def normalize_understanding_config(config: Mapping[str, Any] | None = None) -> d
     from src.services.asr_settings import DEFAULT_REMOTE_ASR_CONFIG, finalize_remote_asr_settings
 
     remote_asr = finalize_remote_asr_settings(raw_understanding.get("remote_asr"))
+    raw_qc = raw_understanding.get("recap_match_qc")
+    if not isinstance(raw_qc, dict):
+        raw_qc = {}
+
+    def _qc_float(value, default: float) -> float:
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            score = float(default)
+        return min(0.95, max(0.05, score))
+
+    # Keep defaults aligned with recap_service.MATCH_WEAK_SCORE(_INSERT).
+    recap_match_qc = {
+        "weak": _qc_float(raw_qc.get("weak"), 0.42),
+        "weak_insert": _qc_float(raw_qc.get("weak_insert"), 0.36),
+    }
 
     understanding = {
         "active_profile": active_profile,
@@ -761,6 +777,7 @@ def normalize_understanding_config(config: Mapping[str, Any] | None = None) -> d
         "remote_vlm": remote_vlm,
         "remote_llm": remote_llm or dict(DEFAULT_REMOTE_LLM_CONFIG),
         "remote_asr": remote_asr or dict(DEFAULT_REMOTE_ASR_CONFIG),
+        "recap_match_qc": recap_match_qc,
     }
     cfg["understanding"] = understanding
     return cfg

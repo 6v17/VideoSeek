@@ -23,7 +23,10 @@ from ui.widgets.components import NoWheelComboBox
 from ui.widgets.data_table import DataTable
 from ui.widgets.scaffold import PageScaffold, VSCard, VSProgressStatusRow, make_runtime_banner
 from ui.widgets.searchable_id_combo import SearchableIdCombo
-from ui.widgets.table_specs import UNDERSTANDING_DIALOGUE_TABLE_SPEC
+from ui.widgets.table_specs import (
+    UNDERSTANDING_DIALOGUE_TABLE_SPEC,
+    UNDERSTANDING_RECAP_REVIEW_TABLE_SPEC,
+)
 
 
 def _action_button(object_name: str) -> QPushButton:
@@ -172,7 +175,7 @@ class UnderstandingEvidencePage(QWidget):
     def order_workflow_cards(self, *, recap_first: bool) -> None:
         layout = self.scaffold.content_layout
         if recap_first:
-            cards = (self.workspace_card, self.dialogue_card, self.export_card, self.generate_card)
+            cards = (self.workspace_card, self.dialogue_card, self.generate_card, self.export_card)
         else:
             cards = (self.workspace_card, self.generate_card, self.dialogue_card, self.export_card)
         insert_at = layout.indexOf(self.understanding_notice) + 1
@@ -389,6 +392,7 @@ class UnderstandingEvidencePage(QWidget):
         self.btn_extract_asr = _action_button("PrimaryButton")
         self.btn_cluster_speakers = _action_button("GhostButton")
         self.btn_rename_speakers = _action_button("GhostButton")
+        self.btn_reset_speakers = _action_button("GhostButton")
         self.btn_export_dialogue_json = _action_button("GhostButton")
         self.btn_stop_asr = _action_button("DangerGhostButton")
         self.btn_stop_asr.setEnabled(False)
@@ -396,6 +400,7 @@ class UnderstandingEvidencePage(QWidget):
         row.addWidget(self.btn_extract_asr, 0)
         row.addWidget(self.btn_cluster_speakers, 0)
         row.addWidget(self.btn_rename_speakers, 0)
+        row.addWidget(self.btn_reset_speakers, 0)
         row.addWidget(self.btn_open_subtitle_library, 0)
         row.addStretch(1)
         row.addWidget(self.btn_export_dialogue_json, 0)
@@ -478,3 +483,40 @@ class UnderstandingEvidencePage(QWidget):
         self.recap_progress_bar = self.recap_progress_status.progress_bar
         self.recap_progress_bar.setVisible(False)
         layout.addWidget(self.recap_progress_status)
+
+        self.recap_review_title = QLabel()
+        self.recap_review_title.setObjectName("SectionTitle")
+        self.recap_review_hint = _step_hint()
+        _add_step_header(layout, self.recap_review_title, self.recap_review_hint)
+        self.recap_review_status = _status_hint()
+        layout.addWidget(self.recap_review_status)
+        self.recap_review_detail = _status_hint()
+        layout.addWidget(self.recap_review_detail)
+        review_actions, review_row = _command_bar()
+        self.recap_review_action_bar = review_actions
+        self.btn_rewrite_recap_vo = _action_button("GhostButton")
+        self.btn_rewrite_recap_vo.setEnabled(False)
+        self.btn_rematch_recap_beat = _action_button("GhostButton")
+        self.btn_rematch_recap_beat.setEnabled(False)
+        self.btn_rematch_weak_beats = _action_button("GhostButton")
+        self.btn_rematch_weak_beats.setEnabled(False)
+        review_row.addWidget(self.btn_rewrite_recap_vo, 0)
+        review_row.addWidget(self.btn_rematch_recap_beat, 0)
+        review_row.addWidget(self.btn_rematch_weak_beats, 0)
+        review_row.addStretch(1)
+        layout.addWidget(review_actions)
+        self.recap_review_table = DataTable(spec=UNDERSTANDING_RECAP_REVIEW_TABLE_SPEC)
+        self.recap_review_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.recap_review_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.recap_review_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.recap_review_table.setMinimumHeight(180)
+        layout.addWidget(self.recap_review_table)
+        for widget in (
+            self.recap_review_title,
+            self.recap_review_hint,
+            self.recap_review_status,
+            self.recap_review_detail,
+            self.recap_review_action_bar,
+            self.recap_review_table,
+        ):
+            widget.setVisible(False)

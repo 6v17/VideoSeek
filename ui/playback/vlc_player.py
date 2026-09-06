@@ -77,6 +77,8 @@ def _vlc_embed_instance_args():
     args = [
         "--quiet",
         "--no-video-title-show",
+        # Recap SRT uses cut-timeline clocks; never auto-attach sidecars to source preview.
+        "--no-sub-autodetect-file",
         "--network-caching=800",
     ]
     if sys.platform.startswith("linux"):

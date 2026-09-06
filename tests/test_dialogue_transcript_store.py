@@ -283,6 +283,45 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
         )
         self.assertEqual(carried[0].get("speaker") or "", "")
 
+    def test_clear_dialogue_speakers_all_and_auto_only(self):
+        from src.storage.dialogue_transcript_store import (
+            clear_dialogue_speakers,
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+            update_dialogue_segment_speaker,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "v",
+                    [
+                        {"start": 1.0, "end": 2.0, "text": "甲", "asr_source": "asr"},
+                        {"start": 3.0, "end": 4.0, "text": "乙", "asr_source": "asr"},
+                        {"start": 5.0, "end": 6.0, "text": "丙", "asr_source": "asr"},
+                    ],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                update_dialogue_segment_speaker("v", 0, "声线1")
+                update_dialogue_segment_speaker("v", 1, "店长")
+                update_dialogue_segment_speaker("v", 2, "声线2")
+                cleared = clear_dialogue_speakers("v", auto_only=True)
+                self.assertEqual(cleared, 2)
+                payload = load_dialogue_transcript("v")
+                self.assertEqual(payload["segments"][0].get("speaker") or "", "")
+                self.assertEqual(payload["segments"][1]["speaker"], "店长")
+                self.assertEqual(payload["segments"][2].get("speaker") or "", "")
+                update_dialogue_segment_speaker("v", 0, "声线1")
+                cleared_all = clear_dialogue_speakers("v")
+                self.assertEqual(cleared_all, 2)
+                payload = load_dialogue_transcript("v")
+                self.assertTrue(all(not (seg.get("speaker") or "") for seg in payload["segments"]))
+
     def test_update_dialogue_segment_time_text_and_speaker(self):
         from src.storage.dialogue_transcript_store import (
             load_dialogue_transcript,

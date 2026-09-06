@@ -538,6 +538,65 @@ def rename_dialogue_speakers(
             return updated
 
 
+def clear_dialogue_speakers(
+    video_id: str,
+    *,
+    auto_only: bool = False,
+    config=None,
+) -> int:
+    """Clear speaker labels on one video. Returns rows changed.
+
+    When ``auto_only`` is True, only clustered placeholders like 声线1 / Voice 2 are cleared.
+    """
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return 0
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            if auto_only:
+                rows = conn.execute(
+                    """
+                    SELECT seg_index, speaker
+                    FROM segments
+                    WHERE video_id = ? AND IFNULL(speaker, '') != ''
+                    """,
+                    (video_id,),
+                ).fetchall()
+                targets = [
+                    int(row["seg_index"])
+                    for row in rows
+                    if is_auto_speaker_label(row["speaker"])
+                ]
+                if not targets:
+                    return 0
+                placeholders = ",".join("?" for _ in targets)
+                cur = conn.execute(
+                    f"""
+                    UPDATE segments
+                    SET speaker = ''
+                    WHERE video_id = ? AND seg_index IN ({placeholders})
+                    """,
+                    (video_id, *targets),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    UPDATE segments
+                    SET speaker = ''
+                    WHERE video_id = ? AND IFNULL(speaker, '') != ''
+                    """,
+                    (video_id,),
+                )
+            updated = int(cur.rowcount or 0)
+            if updated > 0:
+                conn.execute(
+                    "UPDATE transcripts SET updated_at = ? WHERE video_id = ?",
+                    (time.time(), video_id),
+                )
+            conn.commit()
+            return updated
+
+
 def _payload_from_rows(
     meta: sqlite3.Row | None,
     segment_rows: list[sqlite3.Row],
