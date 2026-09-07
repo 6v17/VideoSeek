@@ -2357,6 +2357,8 @@ class UnderstandingGuiMixin:
             page.input_recap_plan_prompt.setEnabled(not running)
         if hasattr(page, "input_recap_caption_prompt"):
             page.input_recap_caption_prompt.setEnabled(not running)
+        if hasattr(page, "input_recap_polish_prompt"):
+            page.input_recap_polish_prompt.setEnabled(not running)
         if hasattr(page, "btn_reset_recap_prompt"):
             page.btn_reset_recap_prompt.setEnabled(not running)
         if hasattr(page, "recap_prompt_tabs"):

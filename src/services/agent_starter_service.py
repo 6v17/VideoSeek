@@ -102,7 +102,10 @@ def _build_user_capability_bullets(
         if caps.get("image_search"):
             search_bits.append("reference images / screenshot folders")
         if search_bits:
-            bullets.append(f"Search: {' + '.join(search_bits)}; batch up to 64 queries.")
+            bullets.append(
+                f"Search: {' + '.join(search_bits)}; batch up to 64 queries; "
+                "visual text may set text_enhance."
+            )
         if caps.get("subtitle_library_discovery"):
             bullets.append("Probe subtitle libraries: GET /subtitle-libraries (+ /videos).")
         if caps.get("dialogue_search"):
@@ -110,6 +113,16 @@ def _build_user_capability_bullets(
             bullets.append(
                 "Hard-subtitle search: POST /search with search_kind=dialogue"
                 + (f" (~{n_dlg} videos)." if n_dlg is not None else ".")
+                + " Optional match_mode=fuzzy."
+            )
+        if caps.get("frame_extract"):
+            bullets.append(
+                "Extract JPEG frames: POST /frames/extract or /frames/extract/batch (≤16, base64)."
+            )
+        if caps.get("timeline_export"):
+            bullets.append(
+                "Multi-clip timeline: POST /export/timeline "
+                "(jianying / fcpxml / fcp7_xml; XML needs output_dir or write_path; point hits ±3s)."
             )
         if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
             bullets.append("Export mp4 rough-cut clips (default fast copy).")
@@ -137,7 +150,10 @@ def _build_user_capability_bullets(
     if caps.get("image_search"):
         search_bits.append("参考图/截图文件夹")
     if search_bits:
-        bullets.append(f"搜索：{' + '.join(search_bits)}；可一次批量最多 64 条。")
+        bullets.append(
+            f"搜索：{' + '.join(search_bits)}；可一次批量最多 64 条；"
+            "画面文搜可传 text_enhance。"
+        )
     if caps.get("subtitle_library_discovery"):
         bullets.append("探测字幕库：GET /subtitle-libraries（及 /videos）。")
     if caps.get("dialogue_search"):
@@ -145,6 +161,14 @@ def _build_user_capability_bullets(
         bullets.append(
             "硬字幕/台词检索：POST /search，search_kind=dialogue"
             + (f"（约 {n_dlg} 条视频）。" if n_dlg is not None else "。")
+            + " 可选 match_mode=fuzzy。"
+        )
+    if caps.get("frame_extract"):
+        bullets.append("取帧：POST /frames/extract 或 /frames/extract/batch（≤16，base64）。")
+    if caps.get("timeline_export"):
+        bullets.append(
+            "多片段时间线：POST /export/timeline（jianying / fcpxml / fcp7_xml；"
+            "XML 需 output_dir 或 write_path；点命中 ±3s）。"
         )
     if caps.get("export_clip") and ffmpeg.get("ffmpeg_available"):
         bullets.append("导出 mp4 粗剪片段（默认可快速 copy）。")
@@ -254,14 +278,16 @@ def build_agent_starter_text(
     if lang == "en":
         intro = (
             "VideoSeek — localhost CLIP visual search + export; "
-            "optional dialogue search via search_kind=dialogue when dialogue_index_ready."
+            "optional dialogue search via search_kind=dialogue when dialogue_index_ready "
+            "(match_mode=fuzzy); visual text may set text_enhance."
         )
         snapshot_title = "## Instance"
         not_ready = "Index not ready — ask the user to sync in VideoSeek before searching."
     else:
         intro = (
             "VideoSeek — 本机 CLIP 画面搜索 + 导出；"
-            "台词检索在 dialogue_index_ready 时用 search_kind=dialogue。"
+            "台词检索在 dialogue_index_ready 时用 search_kind=dialogue（可 match_mode=fuzzy）；"
+            "画面文搜可传 text_enhance。"
         )
         snapshot_title = "## 当前实例"
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步后再搜索。"
@@ -275,6 +301,8 @@ def build_agent_starter_text(
         "capabilities": caps if isinstance(caps, dict) else {},
         "dialogue_index_ready": bool(health.get("dialogue_index_ready")),
         "dialogue_indexed_videos": health.get("dialogue_indexed_videos"),
+        "dialogue_match_modes": health.get("dialogue_match_modes") or ["exact", "fuzzy"],
+        "text_search_enhance_enabled": bool(health.get("text_search_enhance_enabled")),
         "search_presets": preset_summaries,
     }
     if preset_total > len(preset_summaries):

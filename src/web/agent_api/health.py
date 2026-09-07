@@ -18,6 +18,7 @@ from src.storage.config_store import (
     get_local_model_asset_dirs,
     get_search_mode,
     get_search_scope_mode,
+    get_text_search_enhance_enabled,
 )
 
 from .constants import (
@@ -171,7 +172,30 @@ def _build_capabilities(
         "search_precision": True,
         "search_telemetry": True,
         "crop_locate": True,
+        "frame_extract": True,
+        "batch_frame_extract": True,
+        "timeline_export": True,
+        "nle_xml_export": True,
+        "jianying_draft": _jianying_draft_available(),
     }
+
+
+def _jianying_draft_available() -> bool:
+    try:
+        from src.services.jianying_draft_service import is_jianying_draft_support_available
+
+        return bool(is_jianying_draft_support_available())
+    except Exception:
+        return False
+
+
+def _max_batch_frame_extract() -> int:
+    try:
+        from .frames import MAX_BATCH_FRAME_EXTRACT
+
+        return int(MAX_BATCH_FRAME_EXTRACT)
+    except Exception:
+        return 16
 
 
 def build_health_ping_payload() -> Dict[str, Any]:
@@ -239,11 +263,14 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "agent_api_default_image_precision": default_agent_image_precision_mode(config),
         "max_batch_queries": MAX_BATCH_QUERIES,
         "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
+        "max_batch_frame_extract": _max_batch_frame_extract(),
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),
         "dialogue_index_ready": dialogue_ready,
         "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
         "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
+        "dialogue_match_modes": ["exact", "fuzzy"],
+        "text_search_enhance_enabled": bool(get_text_search_enhance_enabled(config)),
         "team": _build_team_health(config),
     }
 

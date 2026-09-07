@@ -441,24 +441,35 @@ class MainWindow(
             self.understanding_page.dialogue_table.itemChanged.connect(
                 self._on_understanding_dialogue_speaker_changed
             )
-        if hasattr(self.understanding_page, "recap_review_table"):
-            self.understanding_page.recap_review_table.cellClicked.connect(
-                self._on_recap_review_cell_clicked
+        if hasattr(self.understanding_page, "recap_review_tree"):
+            self.understanding_page.recap_review_tree.itemClicked.connect(
+                self._on_recap_review_item_clicked
             )
-            self.understanding_page.recap_review_table.cellDoubleClicked.connect(
-                self._on_recap_review_cell_double_clicked
+            self.understanding_page.recap_review_tree.itemDoubleClicked.connect(
+                self._on_recap_review_item_double_clicked
             )
-        if hasattr(self.understanding_page, "btn_rewrite_recap_vo"):
-            self.understanding_page.btn_rewrite_recap_vo.clicked.connect(
-                self.rewrite_selected_recap_vo
+            self.understanding_page.recap_review_tree.itemSelectionChanged.connect(
+                self._sync_recap_review_rewrite_button
             )
-        if hasattr(self.understanding_page, "btn_rematch_recap_beat"):
-            self.understanding_page.btn_rematch_recap_beat.clicked.connect(
-                self.rematch_selected_recap_beat
+        if hasattr(self.understanding_page, "btn_edit_recap_unit_vo"):
+            self.understanding_page.btn_edit_recap_unit_vo.clicked.connect(
+                self.edit_selected_recap_unit_vo
             )
-        if hasattr(self.understanding_page, "btn_rematch_weak_beats"):
-            self.understanding_page.btn_rematch_weak_beats.clicked.connect(
-                self.rematch_weak_recap_beats
+        if hasattr(self.understanding_page, "btn_recap_shot_up"):
+            self.understanding_page.btn_recap_shot_up.clicked.connect(
+                lambda: self.move_selected_recap_shot(-1)
+            )
+        if hasattr(self.understanding_page, "btn_recap_shot_down"):
+            self.understanding_page.btn_recap_shot_down.clicked.connect(
+                lambda: self.move_selected_recap_shot(1)
+            )
+        if hasattr(self.understanding_page, "btn_add_recap_shot"):
+            self.understanding_page.btn_add_recap_shot.clicked.connect(
+                self.add_shot_to_selected_recap_unit
+            )
+        if hasattr(self.understanding_page, "btn_delete_recap"):
+            self.understanding_page.btn_delete_recap.clicked.connect(
+                self.delete_selected_recap_review
             )
         self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
         self.understanding_page.btn_open_services.clicked.connect(self.open_understanding_settings)
@@ -971,6 +982,8 @@ class MainWindow(
             tabs.setTabText(0, t.get("understanding_recap_prompt_tab_plan", "1. Plan"))
             tabs.setTabText(1, t.get("understanding_recap_prompt_tab_match", "2. Match shots"))
             tabs.setTabText(2, t.get("understanding_recap_prompt_tab_captions", "3. Captions"))
+            if tabs.count() > 3:
+                tabs.setTabText(3, t.get("understanding_recap_prompt_tab_polish", "4. Polish"))
         if hasattr(self.understanding_page, "recap_start_hint"):
             self.understanding_page.recap_start_hint.setText(
                 t.get(
@@ -990,29 +1003,56 @@ class MainWindow(
             self.understanding_page.recap_review_hint.setText(
                 t.get("understanding_recap_review_hint", "")
             )
-        if hasattr(self.understanding_page, "btn_rewrite_recap_vo"):
-            self.understanding_page.btn_rewrite_recap_vo.setText(
-                t.get("understanding_recap_review_rewrite", "Rewrite this VO")
+        stretch_tip = t.get("understanding_stretch_handle_tip", "Drag to resize height")
+        for attr in (
+            "_dialogue_table_stretch",
+            "_recap_review_stretch",
+            "_chunk_caption_stretch",
+            "_video_summary_stretch",
+            "_vlm_prompt_stretch",
+            "_recap_prompt_stretch",
+        ):
+            handle = getattr(self.understanding_page, attr, None)
+            if handle is not None and hasattr(handle, "set_tooltip_text"):
+                handle.set_tooltip_text(stretch_tip)
+        if hasattr(self.understanding_page, "btn_edit_recap_unit_vo"):
+            self.understanding_page.btn_edit_recap_unit_vo.setText(
+                t.get("understanding_recap_review_edit_action", "Edit VO")
             )
-            self.understanding_page.btn_rewrite_recap_vo.setToolTip(
-                t.get("understanding_recap_review_rewrite_tip", "")
+            self.understanding_page.btn_edit_recap_unit_vo.setToolTip(
+                t.get("understanding_recap_review_edit_tip", "")
             )
-        if hasattr(self.understanding_page, "btn_rematch_recap_beat"):
-            self.understanding_page.btn_rematch_recap_beat.setText(
-                t.get("understanding_recap_review_rematch", "Rematch this beat")
+        if hasattr(self.understanding_page, "btn_recap_shot_up"):
+            self.understanding_page.btn_recap_shot_up.setText(
+                t.get("understanding_recap_review_shot_up", "Move up")
             )
-            self.understanding_page.btn_rematch_recap_beat.setToolTip(
-                t.get("understanding_recap_review_rematch_tip", "")
+        if hasattr(self.understanding_page, "btn_recap_shot_down"):
+            self.understanding_page.btn_recap_shot_down.setText(
+                t.get("understanding_recap_review_shot_down", "Move down")
             )
-        if hasattr(self.understanding_page, "btn_rematch_weak_beats"):
-            self.understanding_page.btn_rematch_weak_beats.setText(
-                t.get("understanding_recap_review_rematch_weak", "Rematch all weak beats")
+        if hasattr(self.understanding_page, "btn_add_recap_shot"):
+            self.understanding_page.btn_add_recap_shot.setText(
+                t.get("understanding_recap_review_add_shot", "Add shot")
             )
-            self.understanding_page.btn_rematch_weak_beats.setToolTip(
-                t.get("understanding_recap_review_rematch_weak_tip", "")
+            self.understanding_page.btn_add_recap_shot.setToolTip(
+                t.get("understanding_recap_review_add_shot_tip", "")
             )
-        if hasattr(self.understanding_page, "recap_review_table"):
-            self.understanding_page.recap_review_table.apply_header_labels(t)
+        if hasattr(self.understanding_page, "btn_delete_recap"):
+            self.understanding_page.btn_delete_recap.setText(
+                t.get("understanding_recap_review_delete_action", "Delete")
+            )
+            self.understanding_page.btn_delete_recap.setToolTip(
+                t.get("understanding_recap_review_delete_tip", "")
+            )
+        if hasattr(self.understanding_page, "recap_review_tree"):
+            headers = t.get(
+                "understanding_recap_review_headers",
+                ["Unit", "Recap", "Source", "VO / role"],
+            )
+            if isinstance(headers, (list, tuple)) and len(headers) >= 4:
+                self.understanding_page.recap_review_tree.setHeaderLabels(
+                    [str(headers[0]), str(headers[1]), str(headers[2]), str(headers[3])]
+                )
         cfg = self._understanding_config_widgets()
         dialog = getattr(self, "understanding_services_dialog", None)
         if dialog is not None:
@@ -2005,11 +2045,24 @@ class MainWindow(
             self._set_image_query(path, clear_text=True)
 
     def apply_theme(self):
+        from PySide6.QtGui import QColor, QPalette
+
+        from ui.widgets.styles import theme_color_map
+
         style = DARK_STYLE if self.is_dark_mode else LIGHT_STYLE
         app = QApplication.instance()
         if app:
             app.setProperty("videoseek_is_dark", self.is_dark_mode)
             app.setStyleSheet(style)
+            # Keep Highlight roles in sync so selectable QLabel / unstyled editors stay readable.
+            colors = theme_color_map(self.is_dark_mode)
+            palette = app.palette()
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(str(colors.get("ACCENT") or "#0078d4")))
+            palette.setColor(
+                QPalette.ColorRole.HighlightedText,
+                QColor(str(colors.get("INVERSE_TEXT") or "#ffffff")),
+            )
+            app.setPalette(palette)
         self.update()
         self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
         self._refresh_sidebar_icon_buttons()

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-# One mouse-wheel notch should move a few rows, not a whole episode of cues.
-WHEEL_ROWS_PER_NOTCH = 3
-WHEEL_MAX_ROWS = 4
+# One mouse-wheel notch should move about one row (search thumbs are tall).
+WHEEL_ROWS_PER_NOTCH = 1
+WHEEL_MAX_ROWS = 2
 
 
 def table_wheel_pixel_delta(pixel_y: int, angle_y: int, *, row_height: int) -> int:
@@ -13,6 +13,7 @@ def table_wheel_pixel_delta(pixel_y: int, angle_y: int, *, row_height: int) -> i
     pixel = int(pixel_y or 0)
     angle = int(angle_y or 0)
     if pixel:
+        # Touchpads often report large pixelDelta; never jump more than the cap.
         delta = pixel
     elif angle:
         delta = int(round(angle / 120.0 * WHEEL_ROWS_PER_NOTCH * row))

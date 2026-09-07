@@ -34,7 +34,10 @@
 | POST | `/search` | 单次搜索 |
 | POST | `/search/batch` | 批量搜索（可内嵌导出） |
 | GET | `/search/telemetry` | 截图搜诊断（可选） |
+| POST | `/frames/extract` | 按路径+时间取单帧 JPEG（base64） |
+| POST | `/frames/extract/batch` | 批量取帧（≤16，仍返回 base64） |
 | POST | `/export/manifest` | 生成剪辑清单 JSON |
+| POST | `/export/timeline` | 多片段 → 剪映草稿 / 达芬奇 FCPXML / Premiere XML |
 | POST | `/export/clip` | 导出单个片段 |
 | POST | `/export/clips/batch` | 批量导出片段 |
 
@@ -42,7 +45,7 @@
 
 ## 1. 能力与边界
 
-- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；硬字幕/台词关键词检索；生成 manifest JSON；导出 mp4 片段。
+- **支持：** 在已索引视频中按画面语义检索时间段（`video_path` + 起止秒）；硬字幕/台词关键词检索；按路径+时间取单帧 JPEG；多片段导出剪映草稿 / 达芬奇 FCPXML / Premiere XML；生成 manifest JSON；导出 mp4 片段。
 - **不支持：** 视频理解/总结（桌面「视频理解」页）；实时 ASR；全库剧情推理；自动成片；修改索引或用户设置（除非用户在对话中明确要求）。
 
 ---
@@ -108,7 +111,9 @@
 
 `search_precision_mode`（图搜）：`fast` \| `precise`；未传时见 `/health` 的 `agent_api_default_image_precision`；纯文搜忽略。  
 `preview_anchor_sec`：图搜且 `scope.video_paths` 恰好 1 条时可用；服务端将 `search_precision_mode` 设为 `precise`。  
-`search_kind=dialogue`：仅 `query_type=text`；先看 `/health` 的 `dialogue_index_ready` / `capabilities.dialogue_search`（需在桌面字幕库完成提取）。
+`search_kind=dialogue`：仅 `query_type=text`；先看 `/health` 的 `dialogue_index_ready` / `capabilities.dialogue_search`（需在桌面字幕库完成提取）。  
+`match_mode`（仅 `search_kind=dialogue`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
+`text_enhance`（仅画面文搜）：`true`/`false` 强制开/关多路 CLIP+RRF；省略则跟服务机配置 `text_search_enhance_enabled`（见 `/health`）。frame 与 chunk 文搜均可增强；响应 `meta.text_enhance` / `meta.text_enhance_applied` 回显意图与是否实际增强。
 
 ---
 
@@ -126,8 +131,10 @@
 | `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
 | `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
 | `index_stale` / `global_index_state` | 兼容字段；本地搜索实际以 Lance 是否就绪、桌面是否在同步为准 |
-| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `dialogue_search`, `subtitle_library_discovery`, `library_discovery`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate` 等 |
+| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `dialogue_search`, `subtitle_library_discovery`, `library_discovery`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `frame_extract`, `batch_frame_extract`, `timeline_export`, `nle_xml_export`, `jianying_draft` 等 |
 | `dialogue_index_ready` / `dialogue_indexed_videos` / `dialogue_rows` | 硬字幕索引是否可用及规模 |
+| `dialogue_match_modes` | 台词检索可选匹配：`["exact","fuzzy"]` |
+| `text_search_enhance_enabled` | 服务机默认是否开启画面文搜增强（请求可用 `text_enhance` 覆盖） |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
 | `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
@@ -282,6 +289,8 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `query` | 二选一 | — | 文本或图片路径 |
 | `query_type` | 否 | `text` | `text` \| `image_path`（`image_path` 时 `query` 为本地图片绝对路径）；也可用顶层字段 `image_path` 简写 |
 | `search_kind` | 否 | `visual` | `visual` \| `dialogue`；台词检索用 `dialogue`（仅文本 query） |
+| `match_mode` | 否 | `auto` | 仅 `dialogue`：`exact` \| `fuzzy` \| `auto`；团队客户端也可经 `search_mode` 透传 |
+| `text_enhance` | 否 | 服务机配置 | 仅画面文搜：`true`/`false` 强制；`null`/省略跟 `text_search_enhance_enabled`；frame/chunk 均可 |
 | `top_k` | 否 | 桌面配置，clamp **1–200** | 返回 hit 数上限 |
 | `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk`（`search_kind=dialogue` 时响应 `mode` 为 `dialogue`） |
 | `min_score` | 否 | preset 默认或不过滤 | 过滤低分 hit |
@@ -328,6 +337,8 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
     "top_k": 5,
     "fetch_top_k": 5,
     "search_precision_mode": "fast",
+    "text_enhance": null,
+    "text_enhance_applied": false,
     "index_ready": true,
     "global_index_state": "fresh",
     "scope_applied": true,
@@ -350,7 +361,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 |------|------|------|------|
 | `queries` | 与 folder 二选一 | `[]` | 最多 **64** 条；每项同单次 search，可单独 override `top_k`/`mode`/`scope` 等 |
 | `image_folder` | 与 queries 二选一 | — | 扫描目录下 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每条图一条 query（`query_type=image_path`） |
-| `top_k`, `mode`, `min_score`, `search_precision_mode` | 否 | — | **批量默认**，单条未设时继承 |
+| `top_k`, `mode`, `min_score`, `search_precision_mode`, `text_enhance` | 否 | — | **批量默认**，单条未设时继承 |
 | `continue_on_error` | 否 | `true` | 单条失败是否继续 |
 | `scope`, `expand_frame_hits`, `pad_before_sec`, `pad_after_sec` | 否 | 同单次 | 批量级默认 |
 | `export` | 否 | — | 内嵌导出，见下 |
@@ -452,7 +463,76 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 ---
 
-### 4.10 `POST /export/clip` · `POST /export/clips/batch`
+### 4.10 `POST /frames/extract`
+
+按 `video_path` + `time_sec` 抽取**单帧** JPEG（base64）。用于核对命中画面、或再作为 `image_base64` 图搜；**不是**导出成片（成片用 `/export/clip`）。
+
+**Body（`AgentFrameExtractRequest`）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `video_path` | 是 | — | 服务机本地绝对路径（须来自 `hits[]` / `/videos`，勿自拼） |
+| `time_sec` | 是 | — | 秒；负值按 `0` |
+| `max_edge` | 否 | **1280** | 缩放后长边上限，clamp **64–1920** |
+| `client_request_id` | 否 | — | 原样回显 |
+
+**成功响应：** `ok`, `video_path`, `time_sec`, `width`, `height`, `mime: "image/jpeg"`, `image_base64`, `client_request_id`, `meta.max_edge` / `meta.elapsed_ms`
+
+**易错：** 路径不存在 → 404；抽帧/编码失败 → 422 `frame_extract_failed`。不接受任意 HTTP URL。
+
+---
+
+### 4.10a `POST /frames/extract/batch`
+
+批量取帧（仍只返回 JPEG base64，**不落盘**）。适合搜完后挑几条 hit 核对；**不要**默认给每条搜索结果带图。
+
+**Body（`AgentBatchFrameExtractRequest`）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `items` | 是 | — | 最多 **16**；字段同单次 `/frames/extract` |
+| `max_edge` | 否 | — | 批量默认；单项未设 `max_edge` 时继承 |
+| `continue_on_error` | 否 | `true` | 单条失败是否继续 |
+
+**成功响应：** `{ "ok", "results": [ 同单次… \| {ok:false,error} ], "meta": { total, succeeded, failed, max_batch_frame_extract } }`
+
+推荐链路：`POST /search` → 选 hit → `POST /frames/extract/batch`。
+
+---
+
+### 4.10b `POST /export/timeline`
+
+把多条命中铺成**一条时间线**（带声音）：剪映草稿、达芬奇 FCPXML、或 Premiere FCP7 XML。复用桌面素材篮导出逻辑；点命中默认**锚点±3s**（约 6s，贴片头片尾）。
+
+**Body（`AgentTimelineExportRequest`）：**
+
+| 字段 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| `format` | 是 | — | `jianying` \| `fcpxml`（达芬奇）\| `fcp7_xml`（Premiere）；别名：`resolve`/`davinci`→fcpxml，`premiere`/`pr`→fcp7_xml |
+| `items` | 是 | — | 最多 **64** 条；每项见下 |
+| `write_path` | 与 `output_dir` 二选一 | — | 完整输出文件；勿写在库根内；缺扩展名时按 format 补 |
+| `output_dir` | 与 `write_path` 二选一 | — | 输出目录；服务端自动生成 `{project}.fcpxml` / `{project}.xml`（重名加时间戳） |
+| `drafts_dir` / `draft_name` | 否 | 本机剪映草稿根 / 自动命名 | 仅 `jianying` |
+| `project` | 否 | `VideoSeek` | 工程/序列名（也用于 `output_dir` 文件名） |
+| `client_request_id` | 否 | — | 回显 |
+
+**`items[]` 每项：**
+
+| 字段 | 说明 |
+|------|------|
+| `video_path` | 服务机本地绝对路径（来自 hits/`/videos`） |
+| `time_sec` | 点命中；与区间二选一 → `match_kind=frame`，导出时扩成 ±3s |
+| `start_sec` + `end_sec` | 区间；与 `time_sec` 二选一 → 原样使用 |
+| `client_request_id` | 可选 |
+
+**成功响应：** 均含统一字段 `export_path`（XML=`write_path`，剪映=`draft_path`）。  
+XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir`。另含 `clip_count`、`skipped` / `skipped_missing`、`meta`。
+
+**易错：** 空 items / 非法 format / XML 既无 `write_path` 也无 `output_dir` → 400；未装 `pyJianYingDraft` 或草稿目录无效 → 422。远程 URL 素材会跳过。
+
+---
+
+### 4.11 `POST /export/clip` · `POST /export/clips/batch`
 
 **单条 `export/clip` Body：**
 
@@ -492,7 +572,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 ---
 
-### 4.11 `GET /search/telemetry`
+### 4.12 `GET /search/telemetry`
 
 **Query：** `locale`（`zh` | `en`）
 
@@ -518,6 +598,8 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 |------|----------|
 | 参考图 / 截图文件夹 | `query_type: image_path` 或 batch 的 `image_folder` |
 | 精确瞬间 | `mode: frame` + `expand_frame_hits: true` |
+| 核对命中画面 / 取参考帧 | `POST /frames/extract` 或 `/frames/extract/batch`（≤16）→ `image_base64`（可再图搜）；勿默认给搜索全量带图 |
+| 多 hit 进剪映 / 达芬奇 / PR | `POST /export/timeline`（`format=jianying` / `fcpxml` / `fcp7_xml`；XML 用 `output_dir` 或 `write_path`；点命中默认 ±3s） |
 | 较长氛围 / 动作段 | `mode: chunk`（无命中时**先问用户**再切换） |
 | 要 mp4 | batch + `export`（`encode_mode: copy`，默认） |
 | 要剪辑清单 JSON | `POST /export/manifest`（用户明确要求） |

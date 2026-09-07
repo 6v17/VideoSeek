@@ -156,6 +156,44 @@ class TeamClientScopeTests(unittest.TestCase):
         self.assertEqual(payload.get("match_mode"), "fuzzy")
         self.assertNotIn("mode", payload)
 
+    def test_search_sends_text_enhance_for_visual_text(self):
+        captured = {}
+
+        def fake_post(url, payload, timeout=120.0):
+            captured["payload"] = payload
+            return {"ok": True, "hits": []}
+
+        with mock.patch("src.services.team_client_search._post_json", side_effect=fake_post):
+            run_team_client_search(
+                server_url="http://192.168.1.2:8765",
+                query_data="红衣女人",
+                is_text=True,
+                search_mode="chunk",
+                text_enhance=True,
+            )
+        payload = captured["payload"]
+        self.assertTrue(payload.get("text_enhance"))
+        self.assertEqual(payload.get("mode"), "chunk")
+        self.assertNotIn("search_kind", payload)
+
+    def test_search_omits_text_enhance_for_dialogue(self):
+        captured = {}
+
+        def fake_post(url, payload, timeout=120.0):
+            captured["payload"] = payload
+            return {"ok": True, "hits": []}
+
+        with mock.patch("src.services.team_client_search._post_json", side_effect=fake_post):
+            run_team_client_search(
+                server_url="http://192.168.1.2:8765",
+                query_data="你好",
+                is_text=True,
+                search_kind="dialogue",
+                match_mode="exact",
+                text_enhance=True,
+            )
+        self.assertNotIn("text_enhance", captured["payload"])
+
 
 if __name__ == "__main__":
     unittest.main()

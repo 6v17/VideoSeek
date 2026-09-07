@@ -326,18 +326,61 @@ class AgentApiSearchTests(unittest.TestCase):
         mock_run_search.assert_called_once()
 
     @patch("src.web.agent_api.search._index_snapshot")
-    @patch("src.web.agent_api.search.run_chunk_search")
-    def test_execute_agent_search_chunk_mode(self, mock_chunk_search, mock_snapshot):
+    @patch("src.web.agent_api.search.run_search")
+    def test_execute_agent_search_chunk_mode(self, mock_run_search, mock_snapshot):
         mock_snapshot.return_value = {
             "index_ready": True,
             "global_index_state": "fresh",
         }
-        mock_chunk_search.return_value = [SearchHit(1.0, 4.0, 0.6, "D:/clip.mp4")]
+        mock_run_search.return_value = [SearchHit(1.0, 4.0, 0.6, "D:/clip.mp4")]
         body = AgentSearchRequest(query="product close-up", mode="chunk")
         payload = execute_agent_search(body)
         self.assertEqual(payload["mode"], "chunk")
         self.assertEqual(payload["hits"][0]["end_sec"], 4.0)
-        mock_chunk_search.assert_called_once()
+        mock_run_search.assert_called_once()
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("search_mode"), "chunk")
+
+    @patch("src.web.agent_api.search._text_enhance_applied", return_value=True)
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    def test_execute_agent_search_passes_text_enhance(
+        self, mock_run_search, mock_snapshot, _mock_applied
+    ):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "global_index_state": "fresh",
+        }
+        mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.5, "D:/clip.mp4")]
+        body = AgentSearchRequest(
+            query="红衣女人",
+            query_type="text",
+            mode="chunk",
+            text_enhance=True,
+        )
+        payload = execute_agent_search(body)
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertEqual(kwargs.get("search_mode"), "chunk")
+        self.assertTrue(kwargs.get("text_enhance"))
+        self.assertTrue(payload["meta"]["text_enhance"])
+        self.assertTrue(payload["meta"]["text_enhance_applied"])
+
+    @patch("src.web.agent_api.search._text_enhance_applied", return_value=False)
+    @patch("src.web.agent_api.search._index_snapshot")
+    @patch("src.web.agent_api.search.run_search")
+    def test_execute_agent_search_text_enhance_false(
+        self, mock_run_search, mock_snapshot, _mock_applied
+    ):
+        mock_snapshot.return_value = {
+            "index_ready": True,
+            "global_index_state": "fresh",
+        }
+        mock_run_search.return_value = []
+        body = AgentSearchRequest(query="cat", mode="frame", text_enhance=False)
+        payload = execute_agent_search(body)
+        self.assertFalse(mock_run_search.call_args.kwargs.get("text_enhance"))
+        self.assertFalse(payload["meta"]["text_enhance"])
+        self.assertFalse(payload["meta"]["text_enhance_applied"])
 
 
 class AgentApiHealthTests(unittest.TestCase):
@@ -394,6 +437,13 @@ class AgentApiHealthTests(unittest.TestCase):
         self.assertEqual(payload["ffmpeg"]["ffmpeg_path"], "D:/VideoSeek/bin/ffmpeg.exe")
         self.assertEqual(payload["search_index_schema_version"], 2)
         self.assertEqual(payload["library_indexes_ready"], 2)
+        self.assertEqual(payload["dialogue_match_modes"], ["exact", "fuzzy"])
+        self.assertIn("text_search_enhance_enabled", payload)
+        self.assertTrue(payload["capabilities"]["frame_extract"])
+        self.assertTrue(payload["capabilities"]["batch_frame_extract"])
+        self.assertTrue(payload["capabilities"]["timeline_export"])
+        self.assertTrue(payload["capabilities"]["nle_xml_export"])
+        self.assertIn("jianying_draft", payload["capabilities"])
 
 
 class AgentApiEvidenceRouteTests(unittest.TestCase):

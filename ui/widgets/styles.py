@@ -325,6 +325,15 @@ QCheckBox:disabled {
     background: transparent;
     border: none;
 }
+#VerticalStretchHandle {
+    background: transparent;
+    border: none;
+    margin: 0px 2px;
+}
+#VerticalStretchHandle:hover {
+    background: __LINE__;
+    border-radius: 4px;
+}
 #UnderstandingSampleFrame {
     background: __FIELD__;
     border: 1px solid __LINE__;
@@ -344,7 +353,8 @@ QPlainTextEdit#UnderstandingOutput {
     border-radius: 8px;
     padding: 8px 10px;
     color: __TEXT__;
-    selection-background-color: __ACCENT_SOFT__;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
 }
 QPlainTextEdit#UnderstandingOutput:focus {
     border: 1px solid __ACCENT__;
@@ -890,6 +900,13 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     border-radius: 6px;
     padding: 7px 10px;
     color: __TEXT__;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
+}
+/* Text editors: never pair pale ACCENT_SOFT with system white HighlightedText. */
+QPlainTextEdit, QTextEdit {
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
 }
 QTextEdit#SearchInput, QPlainTextEdit#SearchInput {
     background: __FIELD__;
@@ -897,8 +914,8 @@ QTextEdit#SearchInput, QPlainTextEdit#SearchInput {
     border-radius: 6px;
     padding: 8px 10px;
     color: __TEXT__;
-    selection-background-color: __ACCENT_SOFT__;
-    selection-color: __HEADLINE__;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
 }
 QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     border: 1px solid __ACCENT__;
@@ -1433,13 +1450,12 @@ QTableView#LibraryGroupedLibTree::item:selected {
     padding: 0 4px 2px 4px;
 }
 #PreviewCaption {
-    color: __HEADLINE__;
-    font-size: 14px;
-    font-weight: 600;
-    background: __TRACK__;
-    border: 1px solid __LINE__;
-    border-radius: 8px;
-    padding: 8px 12px;
+    color: transparent;
+    font-size: 15px;
+    font-weight: 700;
+    background: transparent;
+    border: none;
+    padding: 6px 4px;
 }
 #ResultTable, #DataTable {
     background: __FIELD__;
@@ -1634,6 +1650,86 @@ QWidget[strongJumpRow="true"] {
     color: __MUTED__;
     font-size: 12px;
     font-weight: 600;
+}
+#RecapReviewPanel {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#RecapReviewDetail {
+    color: __TEXT__;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.35em;
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 76px;
+    max-height: 110px;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
+}
+#RecapReviewTree {
+    background: __PANEL__;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 8px;
+    outline: none;
+    show-decoration-selected: 1;
+    selection-background-color: transparent;
+    selection-color: __HEADLINE__;
+}
+#RecapReviewTree::item {
+    min-height: 32px;
+    padding: 0;
+    border: none;
+    color: __TEXT__;
+}
+#RecapReviewTree::item:hover,
+#RecapReviewTree::item:selected,
+#RecapReviewTree::item:selected:active,
+#RecapReviewTree::item:selected:!active {
+    background: transparent;
+    color: __HEADLINE__;
+}
+#RecapReviewTree::branch {
+    background: transparent;
+    border: none;
+}
+#RecapReviewTree QHeaderView::section {
+    background: __FIELD__;
+    border: none;
+    border-bottom: 2px solid __LINE_STRONG__;
+    border-right: 1px solid __LINE__;
+    padding: 8px 10px;
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+}
+#RecapChunkPickScroll {
+    background: transparent;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+}
+#RecapChunkSwatchOwned {
+    background: __SUCCESS__;
+    border: 1px solid __LINE__;
+    border-radius: 3px;
+}
+#RecapChunkSwatchUsed {
+    background: __WARN__;
+    border: 1px solid __LINE__;
+    border-radius: 3px;
+}
+#RecapChunkSwatchFree {
+    background: __LINE_STRONG__;
+    border: 1px solid __LINE__;
+    border-radius: 3px;
+}
+#RecapChunkSwatchPick {
+    background: transparent;
+    border: 2px solid __ACCENT__;
+    border-radius: 3px;
 }
 #LibraryListScroll {
     background: transparent;
@@ -1872,8 +1968,8 @@ QFrame#ExportModeOptionCard[selected="true"] {
     padding: 10px;
     font-family: Consolas, "Microsoft YaHei UI", monospace;
     font-size: 12px;
-    selection-background-color: __ACCENT_SOFT__;
-    selection-color: __HEADLINE__;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
 }
 #MessageBadge {
     min-width: 28px;
@@ -2055,8 +2151,8 @@ QListWidget#DialogueLibraryList::item:selected {
     border: 1px solid __ACCENT__;
     border-radius: 6px;
     padding: 2px 6px;
-    selection-background-color: __ACCENT_SOFT__;
-    selection-color: __HEADLINE__;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
 }
 #DialogRulesTable QHeaderView::section, #ResourceDialogTable QHeaderView::section {
     color: __MUTED__;

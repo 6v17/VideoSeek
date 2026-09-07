@@ -3,7 +3,7 @@ import time
 from types import SimpleNamespace
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -21,6 +21,41 @@ from src.utils import format_timecode_seconds
 from ui.playback.vlc_player import VlcPreviewPlayer
 
 logger = get_logger("preview_dialog")
+
+
+class _OutlinedCaptionLabel(QLabel):
+    """Yellow caption with a black outline so it stays readable on any theme."""
+
+    _FILL = QColor("#FFE566")
+    _STROKE = QColor("#000000")
+    _STROKE_RADIUS = 2
+
+    def paintEvent(self, event):  # noqa: N802
+        from PySide6.QtWidgets import QStyle, QStyleOption
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        option = QStyleOption()
+        option.initFrom(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+
+        text = self.text()
+        if not text:
+            painter.end()
+            return
+
+        flags = int(self.alignment()) | int(Qt.TextFlag.TextWordWrap)
+        rect = self.contentsRect()
+        radius = self._STROKE_RADIUS
+        painter.setPen(QPen(self._STROKE))
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                painter.drawText(rect.adjusted(dx, dy, dx, dy), flags, text)
+        painter.setPen(QPen(self._FILL))
+        painter.drawText(rect, flags, text)
+        painter.end()
 
 
 class _PreviewVideoHost(QWidget):
@@ -119,6 +154,8 @@ class ExportClipWorker(QThread):
 class PreviewDialog(QDialog):
     export_requested = Signal(str, float, float, str, str)
     export_status_changed = Signal(str, str)
+    # Emitted when the user dismisses the floating preview (close hides; event is ignored).
+    dismissed = Signal()
 
     def __init__(
         self,
@@ -176,7 +213,7 @@ class PreviewDialog(QDialog):
         self.video_host.setMinimumHeight(480)
         layout.addWidget(self.video_host, 1)
 
-        self.caption_label = QLabel("")
+        self.caption_label = _OutlinedCaptionLabel("")
         self.caption_label.setObjectName("PreviewCaption")
         self.caption_label.setWordWrap(True)
         self.caption_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
@@ -283,11 +320,13 @@ class PreviewDialog(QDialog):
         if self._close_requested:
             self.hide()
             event.ignore()
+            self.dismissed.emit()
             return
         self._begin_close()
         self.hide()
         self._finalize_close()
         event.ignore()
+        self.dismissed.emit()
 
     def is_export_running(self):
         return False
@@ -761,6 +800,10 @@ class PreviewDialog(QDialog):
         self._refresh_segment_bounds_labels()
         self._apply_detail_label()
         self._refresh_segment_queue_hint()
+
+    def current_segment_range(self) -> tuple[float, float] | None:
+        """Public: marked export/review segment, or None."""
+        return self._normalized_segment()
 
     def _normalized_segment(self):
         if self.segment_start_sec is None or self.segment_end_sec is None:

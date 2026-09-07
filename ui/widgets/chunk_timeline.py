@@ -242,6 +242,13 @@ class ChunkTimelineWidget(QWidget):
     def selected_index(self) -> int:
         return self._selected_index
 
+    def scroll_index_into_view(self, index: int, *, force: bool = False) -> None:
+        """Bring a segment into the horizontal viewport (used by pickers on open)."""
+        if force:
+            self._ensure_index_visible(int(index))
+            return
+        self._scroll_index_into_view_if_needed(int(index))
+
     def set_generating_index(self, index: int):
         self._generating_index = int(index)
         self.update()
@@ -430,11 +437,14 @@ class ChunkTimelineWidget(QWidget):
         )
 
     def _segment_color(self, segment: ChunkTimelineSegment, index: int) -> QColor:
-        # Selection fill must read clearly against ready green / pending amber.
-        if index == self._selected_index:
-            return QColor("#3B9EFF")
-        if segment.state == "ready":
+        _ = index
+        # Keep state fills; selection is an outline only (see paintEvent).
+        if segment.state in {"ready", "owned"}:
             return self._qcolor("SUCCESS", "#3DAA6D")
+        if segment.state == "used":
+            return self._qcolor("WARN", "#C9A227")
+        if segment.state == "free":
+            return self._qcolor("LINE_STRONG", "#5A5A5A")
         if segment.state == "pending" or segment.state == "generating":
             return self._qcolor("WARN", "#C9A227")
         return self._qcolor("LINE_STRONG", "#4A4A4A")
@@ -468,14 +478,23 @@ class ChunkTimelineWidget(QWidget):
             if index == self._generating_index and segment.state != "ready":
                 painter.setPen(QPen(self._qcolor("WARN", "#FFE08A"), 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRoundedRect(segment_rect.adjusted(1, 1, -1, -1), self._INNER_RADIUS, self._INNER_RADIUS)
+                painter.drawRoundedRect(
+                    segment_rect.adjusted(1, 1, -1, -1),
+                    self._INNER_RADIUS,
+                    self._INNER_RADIUS,
+                )
             elif index == self._selected_index:
-                painter.setPen(QPen(QColor("#EAF4FF"), 2))
+                # Outline only — never flood the segment with accent blue.
+                accent = self._qcolor("ACCENT", "#60a5fa")
+                painter.setPen(QPen(accent, 2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRoundedRect(segment_rect.adjusted(1, 1, -1, -1), self._INNER_RADIUS, self._INNER_RADIUS)
+                painter.drawRoundedRect(
+                    segment_rect.adjusted(1, 1, -1, -1),
+                    self._INNER_RADIUS,
+                    self._INNER_RADIUS,
+                )
 
         painter.end()
-
     def _index_at_position(self, point) -> int:
         if not self._segment_rects:
             self._segment_rects = self._compute_segment_rects(self._track_rect())

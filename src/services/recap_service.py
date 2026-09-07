@@ -32,8 +32,9 @@ MAX_VO_FILL = 0.90
 MIN_BEAT_BUDGET_SEC = 8.0
 MAX_BEAT_BUDGET_SEC = 24.0
 HARD_MIN_BEAT_SEC = 6.0
-MAX_STORY_BEATS = 26
-MAX_GAP_FILL_WINDOWS = 6
+MAX_STORY_BEATS = 32
+MAX_GAP_FILL_WINDOWS = 10
+MAX_PLAN_BEATS = MAX_STORY_BEATS
 RECAP_START_PLAN = "plan"
 RECAP_START_PLAN_ONLY = "plan_only"
 RECAP_START_MATCH = "match"
@@ -68,307 +69,141 @@ _OP_ED_RE = re.compile(
     re.IGNORECASE,
 )
 
-RECAP_NAME_POLICY = """【人物】必须把反复出场的人分开，不要用同一个「他」指两个人。称呼优先级从高到低：
-1. 本段 asr[].speaker 非空 → 这句对白的主语必须是这个 label（绝对证据；含用户命名声线），禁止改成别人或发型外号。
-2. 对白 text 里明确自报或当面称呼的名字，才能绑到被称呼的那个人，且整集只绑同一个人。
-3. people 表只是称呼词典：仅当本段 asr 已证实是此人时，才用表里的稳定称呼；禁止把表里其他名字安过来。
-4. 无人名且 asr.speaker 空时，才用画面特征或职业（红衣女人、柜台职员）。发色发型只能写在 look。
-禁止用「X发青年/少女/少年」一类发色外号替换 asr 已证实的名字。
-禁止男主/女主/主角。不要瞎起人名。
-people 里的名字不是万能替身：只能用在该人已出场/已自报/asr speaker 已是该 label 之后；禁止把后期才出场的人名提前安到早期无名角色身上。
-错误：people 有某个后期人名，开头无名少女一律写成那个名字。
-错误：event 写「女主」，口播就从 people 里随便抓一个女性名字顶上。
-错误：本段 asr.speaker 是柜台职员，口播却写成店长在说。
-无人名时用画面特征称呼（红衣少女、黑发少年），禁止用男主/女主糊弄。
-对白里提到的别人的名字，不要安到正在出镜/说话的人身上。
-asr 条目的 speaker 非空时，就是谁在说：当事实。不要改成别人，也不要用「他」盖掉。
-错误：「他走进店，他又拒收，他又报了警。」（三个人并成一个他）
-错误：「女主报了警。」「把柜台职员的话写成女人说的。」「asr 已是店长，口播却改称金发青年。」
-正确：「柜台职员拒收。红衣女人报了警。」（本段 asr/画面如此）
-正确：「店长拒收。」（本段 asr.speaker 已是店长）
+RECAP_NAME_POLICY = """【人物】
+1. asr[].speaker 非空 = 谁在说，口播主语必须跟它走；禁止改成别人。
+2. 对白里自报/当面叫名才可绑人，且整集只绑同一个人。
+3. people 只是称呼词典，不是万能替身；本段 asr 未证实的人名禁止写进口播。
+4. 无人名且 speaker 空时用画面特征称呼。禁止男主/女主/主角；不要瞎起人名；不要把多人并成同一个「他」。
 """
 
-RECAP_FACT_POLICY = """【主谓宾】每一条 event / 口播必须分清：谁做了、对谁做、发现/得到的是谁的东西。
-两个人各自做的事禁止并成一句「他们找到了……」。
-错误：「找到了男主和女主的名字」——把两人结果并成一件事。
-错误：先说「两人名字都找到了」，后又说「男主没找到自己的名字」——自相矛盾。
-正确（若证据如此）：「红衣女人只看到自己的名字。黑发少年没找到自己的名字。」
-同一事实整集口径一致：前面写「没找到」，后面禁止改成「找到了」，反之亦然。
-禁止用男主/女主糊弄主语；谁做了什么只跟 asr.speaker / 对白称呼走，不要从 people 表乱抓名字顶替。
+RECAP_FACT_POLICY = """【主谓宾】
+谁做了、对谁做、得到的是谁的东西必须分清；禁止两人结果并成「他们……」。
+同一事实整集口径一致，禁止前后自相矛盾。
+主语只跟 asr.speaker / 对白称呼走，禁止用男主/女主或从 people 乱抓名字顶替。
 """
 
-RECAP_EVIDENCE_POLICY = """【证据层级——必须遵守】
-1. 对白 asr 是绝对证据：asr[].speaker 非空 = 谁在说（不可改）；asr[].text = 说了什么（不可发明、不可张冠李戴）。
-2. 对白里出现的称呼/人名（当面叫名、自报）也是绝对证据，必须按原句归属，禁止安到别人身上。
-3. VLM caps 只是辅助画面：只可补「看得见的动作/场面」，禁止用 caps 改写谁在说话、谁做主、人物关系。
-4. event 是纲要；若与 asr 冲突，以 asr 为准。people 只是称呼词典，不是万能替身。
-错误：本段 asr.speaker 不是「店长」，却把这句话写成店长说的。
-错误：people 里有个后期人名，就把早期无名角色的台词安给他。
-错误：caps 看不清是谁，却用 people 里随便一个名字顶上。
-错误：台词和画面都没剑，却写「拔剑去挑战」。
-错误：cap/asr 没写脸部特写或表情，却写「面露惊恐」「神色慌张」「眼神一凛」。
-正确：asr.speaker=柜台职员 → 口播主语就是柜台职员。
-正确：无人名且 asr.speaker 空 → 用画面特征（红衣少女），不要从 people 抓名顶替。
-asr 与 cap 都没写的道具、招式、身份、动机、背景、前世、表情、眼神、脸色，一律禁止发明。
-拿不准就写得更短、更贴对白，不要脑补热闹，更不要脑补脸上戏。
+RECAP_EVIDENCE_POLICY = """【证据】
+1. asr speaker+text = 绝对证据，禁止张冠李戴、禁止发明台词。
+2. 对白里的称呼/人名按原句归属。
+3. VLM caps 只补看得见的动作/场面；与 asr 冲突时听对白。
+4. event 是纲要；与 asr 冲突以 asr 为准。
+asr/cap 没有的道具、招式、身份、动机、背景、表情眼神，一律禁止发明。
 """
 
-RECAP_VO_STYLE_POLICY = """【口播风格】你是在给观众讲故事，不是念分镜、不是读 VLM、不是导演讲戏。
-用第三人称讲「谁做了什么 / 关系怎么变了」。句子要像人口播：短、顺、有主谓。
-禁止当对白复读机、心理复读机：禁止「他说/她说/XX说/XX觉得/XX认为/XX心想/XX表示/XX心里/盘算/嘀咕」再转述台词或内心。观众能自己听原片。
-错误：「店长说这不对。」「店长觉得有问题。」「店长心里盘算着轻松赚钱。」
-正确：「店长当场否决。局面立刻僵住。」（仅当本段 asr.speaker 已是店长，或对白已证实是他）
-错误：连续多句都用同一人名开场「店长……。店长……。店长……。」
-正确：主语轮换或承前省略：「店长当场否决。局面立刻僵住。对方只好改口。」
-正确：「黑发少年提出对决。红衣女人当场拆穿。」（本段无人名 / asr.speaker 空）
-正确：「店长提出对决。」（仅当本段 asr 已证实说话人是店长）
-引用原对白只能极短关键词，用「」包裹，整句转述一律禁止。
-禁止男主/女主/主角称呼。
-禁止看图说话：禁止把 caps 原文或近义扩写念进旁白（服装、站位、镜头推拉、表情标签、构图说明）。
-错误：「画面中可以看到红衣女人走进店。」「众人面面相觑站在走廊。」
-正确：「红衣女人进店。」「众人都愣住了。」
-禁止剪辑报幕开场：场面转到、场景切回、换到另一处、镜头切到、画面切到、转场到……
-错误：「场面转到街上。冲击掀翻众人。」
-正确：「他们刚到街上，冲击就掀翻了众人。」
+RECAP_VO_STYLE_POLICY = """【口播】
+第三人称讲「谁做了什么 / 关系怎么变」。短、顺、有主谓。
+禁止对白/心理复读机：禁止「XX说/觉得/认为/心想/表示/心里」再转述；观众能听原片。
+引用对白只用极短「」关键词。禁止男主/女主/主角。
+禁止念 caps/服装/站位/镜头运动；禁止「场面转到/镜头切到」报幕。
 """
 
-RECAP_VO_CONTINUITY_POLICY = """【连贯】旁白是一条故事线。镜头 ≠ 场景：同一场景常有多刀（主镜、反应、特写），口播要像同一场戏连续往下讲，禁止每切一刀就当新场景重开。
-【一镜一句】只是字幕对齐单位，不是「一镜一场」。不要每句都重新介绍人物、地点、冲突。
-真正的承上启下只用于换场/换冲突（role=bridge 或 need_transition=true）：
-- 承上：接住上一场留下的人物、冲突或未竟动作。
-- 启下：落到新场面真正推进的事上，不要突然甩没铺垫的结果。
-错误（无过渡）：上一句「柜台拒收」，下一句「全员被击飞」。
-错误（假过渡/把反应当换场）：同场下一刀特写，却写得像另起一场去讲某人心理。
-正确（真换场）：「拒收之后双方撕破脸。街上冲击掀翻了众人。」
-同场多镜：承接上一句往下讲动作/关系变化；禁止套换场话术，禁止跳远处讲另一人反应当「过渡」。
-禁止用「场面转到 / 场景切回 / 镜头切到」报幕冒充过渡。
-过渡只写 caps/asr/event 已有内容，禁止编新对质、揭秘、胜负。
-禁止跳远。
+RECAP_VO_CONTINUITY_POLICY = """【连贯】
+旁白是一条故事线。镜头 ≠ 场景；一镜一句只是字幕单位，不是一镜一场。
+真换场/换冲突（role=bridge 或 need_transition）才承上启下；同场多镜接着往下讲，禁止每刀重开、禁止报幕冒充过渡。
+过渡只写 caps/asr/event 已有内容，禁止编新对质/揭秘/胜负，禁止跳远。
 """
 
 RECAP_EVIDENCE_REQUIRED_TAGS = ("人物", "动作", "反应", "物品", "对话", "变化", "场面")
 
-RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划：规划一条完整故事线大纲（beats），不写剪辑表、不写口播。
+RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划：只输出故事线大纲 beats，不写剪辑表、不写口播。
 
-【故事线——必须有头有尾、纲要递进】
-对白时间轴是叙事骨架。Chunk 有 cap 才是视觉证据；没有 cap 时不要编造看见了什么，把还需要的画面写在 needed_visual。
-列出能讲清这一集的 beats，通常 14–20 条，最多 24 条。
-自检：按 id 顺序只读全部 event，必须能听成一条连贯故事——谁从哪进来、发生了什么、怎么收束；禁止没头没尾的反应碎片。
-因果必须连续，宁多勿跳：每一次对峙、每一次身份/目标变化、每一个关键发现都要单独成条。
-【纲要↔纲要】相邻两条必须递进或转场：下一句要回答上一句的「然后呢 / 所以呢 / 人去哪了」。
-禁止只留两端结果、丢掉中间推进；禁止从「出事」直接跳到「结果」。
-禁止孤立反应句当大纲：不得单独写「XX惊讶了」「XX愣住了」「XX沉默了」——必须先有触发事件，再写局面变化（反应并进该条或并进下一推进拍）。
-禁止内心独白当大纲：不得写「XX心里盘算」「内心独白表示……」——大纲写可见行动与局面变化，内心戏留给原片。
-进入新活动/新空间之前必须有进入拍：赶到现场、入座开始、走进房间、被叫进去等；禁止观众还不知道人怎么进来的，下一条就写场内某人惊讶或场内结果。
-错误（没头）：直接「店长惊讶了」。
-错误（活动跳步）：前一条「现场比试通过」，下一条直接「题目简单 / 全勾完了 / 成绩出来了」。
-正确：「众人走进大厅开始登记 → 职员指出异常文件 → 店长当场愣住并叫停」。
-正确（换活动）：「比试通过 → 走进下一轮考场入座开工 → 再写答完/交卷/出分」。
-换场、换人、换冲突时必须有过渡拍（离开、进门、赶到、赶路、场面变化；importance 0.2–0.4）。
-同场内剧情推进也要递进：提问→回答→揭穿→摊牌，不能跳步。
-event 禁止写男主/女主/主角；无人名用画面特征（黑发少年、红衣少女）。
-高潮、对决、身份揭晓、胜负分晓必须单独成条，importance ≥ 0.85；禁止为压时长跳过最精彩的冲突，也禁止并进过场。
-短而关键的动作必须各自成条，t 可以只有几秒：失手、得手、致命一击、关键反转。禁止并成一句「最后赢了」；importance 看戏剧强度，不看原片长短。
-必须覆盖正片开场、中段推进、以及正片收束。不要把全部 beats 堆在中后段。
-成片时长按原片比例夹在约 3–8 分钟：因果一条不删，短片少注水，长集压缩过场，不要靠删剧情来缩短。压缩只砍走路/气氛/重复动作，不砍高潮。
-
-主线因果是骨架，不要把大纲写成分镜表：
-- 1–2 条设定/空间/规则展示（importance 0.25–0.45）
-- 1–2 条角色侧面（习惯、态度、关系；不要无证据编表情特写）
-- 【承上启下】换场/换冲突写低权重过渡 beat；同场按剧情递进拆拍，不要把每一次表情/反应单独拆成大纲条目（反应镜留给选镜 insert）。
-- 仅当同一连续场面、无空间/人物切换、且剧情已接上时，才可把无信息过场并进主线。
-换场过渡禁止编新对质、揭秘、胜负，也不要认错人。
-不要把无意义重复走路写成独立 beat；但进入新场所需的过渡不能省。
-不要选 OP/片头曲、ED/片尾曲、演职员表、标题动画、下一集预告。
-开场必须要：OP 之前的冷开场（如果有），以及片头曲之后的第一场戏。不要因为「去 OP」把开头剧情一起丢掉。
-不要按前 90 秒一刀切。只丢掉片头曲本身（歌词、标题动画、演职员表）。
-正片收束是片尾曲之前的最后剧情，不是 ED。
-最后一条 beat 必须落在正片后段、片尾曲之前。
-不要编造对白里没有的人物关系、动机、背景。
-
-【event 怎么写】
-event 是故事线纲要句：谁做了什么、局面因此怎么变——读起来要接得上一条，且能被画面或对白核对。
-错误（空洞主题）：「身份揭晓」「关系破裂」「气氛紧张」。
-错误（台词/心理复读）：「店长说……」「店长觉得……」「店长认为……」。
-错误（没头没尾的反应）：「店长惊讶了。」「全场震惊。」
-错误（碎观察、不像大纲）：把同场每个眼神、每个站位切成一条。
-正确：「众人走进大厅开始登记。」「职员指出异常文件。」「店长当场叫停并追问来源。」
-正确：「店长当面拒收支票，双方当场撕破脸。」「两人离开柜台赶到街上。」
-引用对白只用极短关键词，不要「XX说」整句转述。
-
-【选镜证据——给 Match 用，不替代故事线】
-每条 beat 必须填 evidence_required（1–4 个标签，只许用：人物/动作/反应/物品/对话/变化/场面），说明选镜至少要凑齐哪些证据。
-needed_visual 写还缺的具体画面提示（可空）；有 cap 时不要重复编造。
+对白时间轴是叙事骨架；Chunk 有 cap 才是视觉证据，没有就写 needed_visual，不要编看见了什么。
+【密稿可删】宁可多拍、让用户做减法；禁止稀薄提纲。通常 18–28 条，最多 32。
+按 id 读 event 必须能听成完整故事：开场进入 → 中段展开推进 → 高潮 → 正片收束（ED 之前）。
+相邻 beats 必须递进或转场（然后呢/所以呢）；禁止只留两端结果、丢掉中间展开；禁止大段时间空档无节拍。
+禁止孤立反应句/内心独白当大纲。进入新活动/新空间前必须有进入拍。换场写低权重过渡拍（0.2–0.4）。
+高潮/对决/揭晓/胜负单独成条，importance≥0.85。短而关键可各自成条。收束不可省略。
+event：谁做了什么、局面怎么变；禁止「XX说/觉得/认为」对白摘要；禁止男主/女主/主角。
+每条填 evidence_required（人物/动作/反应/物品/对话/变化/场面，1–4 个）与 needed_visual。
+不要选 OP/ED/演职员表/预告。不要编对白没有的关系/动机/背景。
 """ + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + RECAP_NAME_POLICY + """
-importance 是剧情重要性 0.05–1.0，不是原片时长。精彩短镜头必须很高；注水长镜头必须很低。t 可以只有几秒。
-
-只输出 JSON，不要 markdown。
+importance 0.05–1.0 看戏剧强度，不是原片时长。只输出 JSON。
 JSON schema:
-{"title":"...","people":[{"id":"s1","label":"店长","look":"工装"},{"id":"s2","label":"红衣女人","look":"长发红裙"}],"beats":[{"id":1,"event":"店长当面拒收支票，双方当场撕破脸","importance":0.9,"evidence_required":["人物","动作","物品"],"needed_visual":"柜台拒收动作","t":[120.0,151.0]}]}
+{"title":"...","people":[{"id":"s1","label":"人物A","look":""}],"beats":[{"id":1,"event":"谁做了什么、局面怎么变","importance":0.9,"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}]}
 """
 
 _RECAP_PLAN_BEAT_SCHEMA = (
     '{"id":1,"event":"谁做了什么、局面怎么变","importance":0.9,'
-    '"evidence_required":["人物","动作"],"needed_visual":"需要什么画面","t":[120.0,151.0]}'
+    '"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}'
 )
 
-RECAP_PLAN_HEAD_SYSTEM = """你只补正片开场故事节拍，不写剪辑表、不写口播。
-
-已经有后面的 beats。现在只看原片开头尚未覆盖的部分，补 1–3 条开场因果。
-必须包含：OP 之前的冷开场（如果有），以及片头曲之后的第一场戏。
-不要选 OP/片头曲、歌词、标题动画、演职员表。
-不要重复已有事件。
-event 写成故事推进句（谁做了什么、局面怎么变），且能被画面/对白核对；禁止「XX说/觉得/认为」；每条必须带 evidence_required（人物/动作/反应/物品/对话/变化/场面）。
+RECAP_PLAN_HEAD_SYSTEM = """你只补正片开场故事节拍（2–5 条），不写剪辑/口播。
+含冷开场（如有）与片头曲后第一场及紧随推进；不要 OP 本身；不要重复已有事件。
+密稿可删：开场因果宁可多一条，不要跳进中段。
+event 写局面推进；禁止「XX说/觉得」；带 evidence_required。
 """ + RECAP_NAME_POLICY + """
-importance 仍然看剧情，不是原片时长。
-
-只输出 JSON，不要 markdown。
+只输出 JSON。
 JSON schema:
-{"title":"...","people":[{"id":"s1","label":"店长","look":"工装"}],"beats":[""" + _RECAP_PLAN_BEAT_SCHEMA + """]}
+{"title":"...","people":[{"id":"s1","label":"人物A","look":""}],"beats":[""" + _RECAP_PLAN_BEAT_SCHEMA + """]}
 """
 
-RECAP_PLAN_TAIL_SYSTEM = """你只补正片收尾故事节拍，不写剪辑表、不写口播。
-
-已经有前半段 beats。现在只看尚未覆盖的正片后段，补 1–3 条收尾因果。
-不要重复已有事件，不要从开头再讲一遍。
-不要选 ED/片尾曲、演职员表、下一集预告。
-event 写成故事推进句（谁做了什么、局面怎么变），且能被画面/对白核对；禁止「XX说/觉得/认为」；每条必须带 evidence_required（人物/动作/反应/物品/对话/变化/场面）。
+RECAP_PLAN_TAIL_SYSTEM = """你只补正片收尾故事节拍（2–5 条），不写剪辑/口播。
+不要 ED/预告；不要重复已有事件；不要从头再讲。
+密稿可删：收束、余波、人物落点要盖住，禁止戛然而止只留高潮闪回。
+event 写局面推进；禁止「XX说/觉得」；带 evidence_required。
 """ + RECAP_NAME_POLICY + """
-importance 仍然看剧情，不是原片时长。
-
-只输出 JSON，不要 markdown。
+只输出 JSON。
 JSON schema:
-{"title":"...","people":[{"id":"s1","label":"店长","look":"工装"}],"beats":[""" + _RECAP_PLAN_BEAT_SCHEMA + """]}
+{"title":"...","people":[{"id":"s1","label":"人物A","look":""}],"beats":[""" + _RECAP_PLAN_BEAT_SCHEMA + """]}
 """
 
-RECAP_PLAN_GAP_SYSTEM = """你只补漏掉的故事因果，不写剪辑表、不写口播。
-
-已经有若干 beats，但中间有一段时间没有节拍。只检查当前这个空档里是否漏了推进故事的事件。
-每个 gap 默认只补 1 条。仅当空档很长且过程明显分两步（如尝试失败后再得手）时最多 2 条。
-空档里的关键过程要补，但不要把空档拆成一串碎拍或表情反应表；走路、气氛、重复动作不要。
-若空档两端活动性质变了（比试→文书、店内→街上、对峙→下一轮考核），优先补「进入新活动」过渡拍（赶到、入座开工、被叫进去）；禁止直接补场内结果（题目简单、全勾完了、成绩出来了、某人惊讶）。
-不要重复已有事件，不要从开头或结尾再讲一遍。
-新 beat 的 t 必须落在当前 gap 空档内；禁止把 already 里已有事件扩写成更长 beat，禁止覆盖 already 已占用的时间。
-一条只写一个因果节点。
-event 写成故事推进句，且能被画面/对白核对；禁止「XX说/觉得/认为」；禁止男主/女主/主角；每条必须带 evidence_required（人物/动作/反应/物品/对话/变化/场面）。
+RECAP_PLAN_GAP_SYSTEM = """你只补空档里漏掉的故事因果，不写剪辑/口播。
+密稿可删：空档里的展开过程要补上，不要只钉一个结果。
+短空档默认 1–2 条；长空档（过程明显多步）可补到 3 条。优先进入拍与中间推进；禁止直接补场内结果。
+t 必须落在当前 gap 内；不要重复 already。
+event 写局面推进；禁止「XX说/觉得」与男主/女主；带 evidence_required。
 """ + RECAP_NAME_POLICY + """
-不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。
-importance 仍然看剧情，不是原片时长；关键动作可以很高，哪怕只有几秒。
-
-只输出 JSON，不要 markdown。
+只输出 JSON。
 JSON schema:
 {"title":"...","beats":[""" + _RECAP_PLAN_BEAT_SCHEMA + """]}
 """
 
-RECAP_SYSTEM = """你是影视解说剪辑 Agent 的镜头规划节点。
+RECAP_SYSTEM = """你是影视解说的选镜节点：按 beats 找画面，不改剧情，不写 vo。
 
-输入：
-1. 剧情 beats（叙事目标）
-2. Chunk 视觉事件描述（视觉证据）
-3. 语音对白时间轴（只确认说过的话；谁在做这件事看 people / beat，不要靠猜）
+输入：beats（叙事目标+evidence_required）、chunks（视觉证据）、对白时间轴（确认说过的话；asr.speaker 非空不可改）。
+只选支持该 beat 的画面；证据对不上标弱证据，不要硬编。禁止男主/女主。
 
-beats 是故事大纲节拍：event 写剧情推进，evidence_required 说明要找什么可核对画面。
-Chunk 决定「看什么」，是视觉证据来源；优先用 cap 的 before→after 变化，不要只靠 event 语义相似。
-people 是人物称呼表。reason 里用表里的稳定称呼，不要把两个人写成同一个他。
-对白只确认台词内容；asr[].speaker 非空时就是谁在说，不要改。
-不要把对白里的名字随便安到出镜人身上。
-
-禁止修改 beat 的事件含义，只能寻找支持该 beat 的画面。
-选镜必须尽量覆盖 evidence_required；只靠 event 字面相似、证据对不上时，reason 必须写明「弱证据」，不要硬编成强证明。
-不要重新创作剧情，不要翻译对白。
-错误：beat 是「这人拿起钥匙」，Chunk 是「拿起杯子」，却写成「发现隐藏线索」。
-正确：找不到钥匙画面就换 Chunk，或标弱证据/相关反应，不要改写事件。
-
-【口播】
-不要写 vo。正式旁白由下一阶段「铺字幕」完成。JSON 里不要带 vo 字段。
-
-【镜头规则】
-1. 每个 beat 已有 budget_sec（成片配额）和 shots（建议刀数）。高权重多留证据镜；低权重少留或一刀带过。
-2. Chunk 是基本单位。优先用 cap 视觉事件判断画面。
-3. 一个 beat 可用相邻 Chunk：建立、动作、反应、特写。不要为了碎而碎。
-4. 每个镜头至少一种作用：推进剧情、关键动作、情绪强化、必要过渡、重要细节。
-5. 同一个 beat 内，相邻 clip 必须提供新的视觉信息。禁止用多个近似镜头重复描述同一事件。
-6. 普通镜头 5–12 秒，过程镜头不要 3 秒闪过去。
-7. src_in/src_out 必须落在对应 Chunk 时间范围内。可同时给 duration（秒）。同一连续动作可以略微连到相邻 Chunk。
-8. 成片时长按原片比例约 3–8 分钟。高权重尽量用满 budget_sec，低权重宁可短不要注水。不要为了赶时间跳过因果。
-9. 不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。时间最早的开场 beat 必须留下画面；冷开场要，片头曲不要。
-10. 给定的每一条 beat 都必须至少有一刀。正片收尾不得省略。剧情过程要讲连贯，不要只留高潮闪回。
-11. 关键动作之后该切特写、反应、表情就单独切一刀，不要为了省时间并进主线。shots>=2 时，后几刀常常是特写/反应，role 填 insert。insert 必须贴着同一 beat 的主线动作：优先同 chunk 或紧邻 chunk，紧跟主镜之后，落在该 beat 的 t 附近。禁止整段复用同一 src_in/src_out；允许动作后紧挨着的反应特写，哪怕和主镜在同一 chunk。禁止为了凑 insert 去选远晚于该 beat.t 的表情/特写。
-12. 【承上启下镜头】相邻 beats 换场/换人/换冲突时，必须单独留一刀过渡镜（role=bridge）：用离开、赶到、进门、出门、场面变化等可见画面接住上一拍、引出下一拍。禁止把过渡镜并进主线高潮/结果镜导致剧情跳远。纯重复走路且无换场信息才可并进。bridge 的 reason 只交代场面，不要发明新事件，不要认错人；换场不要标 insert。
-13. """ + RECAP_NAME_POLICY + """reason 跟 beat / people 的称呼走。
-
-每个 clip 写 beat_id、reason、duration。特写/反应再写 role。reason 说明这个画面如何证明该 beat。
-
+【镜头】
+1. 每 beat 至少一刀；先主镜（role 留空），特写/反应才 role=insert；换场才 role=bridge。
+2. insert 贴主镜之后、同 beat 附近；不要把主事件镜标成 insert。
+3. src 落在 chunk 内；普通镜 5–12 秒；同 beat 相邻镜要有新视觉信息。
+4. 不要 OP/ED/演职员表/预告。不要输出 vo 字段。
+""" + RECAP_NAME_POLICY + """
+只输出 JSON。
 JSON schema:
-{"title":"...","clips":[{"name":"01 柜台","beat_id":1,"chunk_index":0,"src_in":0.0,"src_out":8.5,"duration":8.5,"reason":"该镜包含 beat 所需的动作"},{"name":"02 特写","beat_id":1,"chunk_index":1,"src_in":9.0,"src_out":12.5,"duration":3.5,"role":"insert","reason":"拍下支票后的表情反应"},{"name":"03 赶到街上","beat_id":2,"chunk_index":2,"src_in":20.0,"src_out":24.0,"duration":4.0,"role":"bridge","reason":"离开柜台赶到街上，承接上一拍冲突"}]}
+{"title":"...","clips":[{"name":"01","beat_id":1,"chunk_index":0,"src_in":0.0,"src_out":8.5,"duration":8.5,"reason":"证明该 beat"},{"name":"02","beat_id":1,"chunk_index":1,"src_in":9.0,"src_out":12.0,"duration":3.0,"role":"insert","reason":"反应"}]}
 """
 
-RECAP_GAP_SYSTEM = """你是影视解说的查漏员。画面已经锁定，已有字幕不要改，只补真正漏掉的故事节拍。
-
-任务：只补「整段 beat 还没有任何旁白」的真空洞。同 beat 里主线已有旁白时，后续空镜是留给跨镜的，不要再补近义复读。
-初稿宁可偏密，让用户做减法；禁止把同一事实再写一遍去填空镜。
-
-【语速】
-1. 按 1.0 倍约每秒 5 个汉字/字母，1.35 倍约每秒 6.75 个。实际可用按 fill=0.9，约每秒 6 个。
-2. 每条 fill 的字数对照该镜 char_budget：至少约 85%，至多 100%。写太短等于没补。
-
-【规则】
-1. 不要改画面，不要改已有 captions，不要发明剧情，不要翻译对白。
-2. 只处理 gaps 里的镜头。前后句已讲过的事实必须 skip，不要换种说法再写一遍。
-3. 纯无信息走路可 skip；换场/过场/新场景到达且 gaps 点名时才补短过渡口播，禁止直接扔结果。
-4. 新口播要接上前后句，第三人称影视解说口吻。不要超长从句。不要重复前后句已经讲过的事实。
-5. """ + RECAP_NAME_POLICY + """不要把配角对白安成别人在说。
-6. """ + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + """
-7. """ + RECAP_EVIDENCE_POLICY + """
-8. """ + RECAP_FACT_POLICY + """补句不得与已有 captions 自相矛盾。
-9. 禁止看图说话：不要说「画面中可以看到」「一个穿红衣服的女人走进店」。要说「红衣女人进店」。禁止无证据「面露惊恐」。
-10. 禁止报幕式过渡；补句必须承上启下：接住前后 captions，再落到本镜推进。
-
-只输出 JSON，不要 markdown。
+RECAP_GAP_SYSTEM = """你是查漏员：画面已锁定，已有字幕不要改；只补整段 beat 仍无旁白的真空洞。
+同 beat 主线已有旁白时，后续空镜留给跨镜，不要近义复读。
+按 asr（绝对）/caps（辅助）/event 写第三人称解说；禁止发明剧情、禁止对白复读机。
+字数对照该镜 budget，约 85–100%。
+""" + RECAP_NAME_POLICY + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + """
+只输出 JSON。
 JSON schema:
 {"fills":[{"i":3,"text":"第三人称解说","skip":false}]}
 """
 
-RECAP_CAPTION_SYSTEM = """你是影视解说的口播员。画面已经锁定，不要改镜头。
+RECAP_CAPTION_SYSTEM = """你是口播员：画面已锁定，不要改镜头；写连贯故事口播，不是分镜说明书。
 
-任务：写连贯故事口播，不是给每刀写分镜说明书。
-同一 beat_id 的连续主镜（非 insert/bridge）必须合并成一条 caption：from=首镜 i，to=末镜 i，口播对照合并后的总 budget 写一句（或两句）完整故事，盖住这段画面约 85–90%。写太短等于漏解说，禁止为省事一镜一句。
-跨镜合并的目的：把同一件事讲完（有头有尾/有头有下文），不要把因果拆碎。
-role=insert：单独短句（from=to），或空着让主线旁白带走；禁止复述主事件。
-role=bridge / need_transition：可单独成条，真换场才承上启下。
-禁止为了凑字数把同一事实拆成多条近义复读。
-禁止「心里/盘算/嘀咕/觉得/认为」内心复读；观众听得见原片对白。
+同 beat_id 连续主镜合并一条 caption（from→to），按合并总 budget 写够约 85–100%。
+insert：短句或空着；bridge/真换场才承上启下。禁止近义复读、禁止对白/心理复读机。
 
-【证据怎么用】
-1. clips[].asr = 绝对证据：speaker 非空就是谁在说，text 就是说了什么；禁止张冠李戴。
-2. clips[].caps = VLM 辅助：只抽看得见的动作/场面；与 asr 冲突时听对白。
-3. event = 故事纲要；与 asr 冲突时以 asr 为准。people 只是称呼词典，不是本段出场证明。
-只能写证据已支持的事实，不得补充未出现的身份揭晓、胜负、动机、前世或表情。
-match_status=weak_match：仍要写旁白，但更短更保守。
-
-seed 若已有解说，整理成连贯旁白，不要改成画面描述，也不要把 seed 扩写成对白转述。
-禁止把 asr 整句朗读成旁白；引用原对白只能极短「」。
-
-【语速】
-1. 1.0 倍约每秒 5 个汉字/字母，1.35 倍约每秒 6.75 个。可用字数按 fill=0.87，约每秒 6 个。
-2. 合并段的 budget 是各镜之和：至少约 85%、至多 100%。单镜 insert 用更小 budget。
-3. 同 beat 主镜优先 from<to 合并；不要无故一镜一句把故事拆碎。
-
-【规则】
-1. 不要改画面。同 beat 连续主镜合并写；insert 才 from=to 短句。
-2. need_transition=true 或 role=bridge（真换场）：承上启下；同场连续镜禁止套换场话术。
-3. 必须写完整句子，以。！？收尾。禁止半句。禁止「XX觉得/XX认为/XX说/XX心里」开场堆句。
-4. 谁说话/谁做事只跟本段 asr[].speaker 与对白称呼走；禁止男主/女主；禁止用 people 里未在本段 asr 出现的人名顶替。
-5. """ + RECAP_NAME_POLICY + """people 有名字 ≠ 本段就是他；本段 asr 没证实就用画面特征。
-6. """ + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + """
-7. """ + RECAP_EVIDENCE_POLICY + """本镜 caps/asr 没有的道具动作、表情眼神不要补。
-8. """ + RECAP_FACT_POLICY + """与上一句旁白不得自相矛盾，也不得把别的镜的动作安到本段。
-9. 不要报服装、站位、镜头运动，除非它本身就是剧情动作且 caps/asr 已写明。
-10. 【时序】接得上上一句；禁止提前口述后面才会发生的事；禁止跳过进入拍直接讲场内结果。
-
-只输出 JSON，不要 markdown。
+证据：asr speaker+text 绝对；caps 辅助；event 纲要与 asr 冲突听 asr；people 非本段出场证明。
+禁止男主/女主；禁止发明证据没有的事实。
+""" + RECAP_NAME_POLICY + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + """
+只输出 JSON。
 JSON schema:
-{"captions":[{"text":"同拍连续主镜的连贯旁白。","from":1,"to":2},{"text":"下一拍旁白。","from":3,"to":3}]}
+{"captions":[{"text":"连贯旁白。","from":1,"to":2},{"text":"下一拍。","from":3,"to":3}]}
+"""
+
+RECAP_VO_POLISH_SYSTEM = """你是终稿润色员：只改旁白文字，不改镜头、不补镜、不发明剧情。
+合并近义复读与相邻句复读，修好病句；同 beat 可收成 from→to，后续镜 text 可空；空镜可空着。
+禁止对白复读机与男主/女主；已写对的人名保留。
+""" + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + RECAP_VO_STYLE_POLICY + """
+只输出 JSON。
+JSON schema:
+{"captions":[{"text":"润色后旁白。","from":1,"to":2},{"text":"","from":3,"to":3}]}
 """
 
 
@@ -416,6 +251,550 @@ def format_recap_clock(sec: float) -> str:
 
 def format_recap_clock_range(start: float, end: float) -> str:
     return f"{format_recap_clock(start)}–{format_recap_clock(end)}"
+
+
+def group_recap_vo_units(
+    clips: Sequence[Mapping[str, Any]] | None,
+    *,
+    beats: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Group flat clips into narration units: one parent VO covering child shots.
+
+    A unit starts at each clip that owns VO, or at the first empty clip after the
+    previous unit. Following empty same-beat shots stay as children until the next
+    VO-bearing clip (or beat change).
+    """
+    items = [dict(clip) for clip in clips or [] if isinstance(clip, Mapping)]
+    by_id = _beats_by_id(beats)
+    units: list[dict[str, Any]] = []
+    index = 0
+    while index < len(items):
+        start = index
+        head = items[start]
+        vo = str(head.get("vo") or "").strip()
+        beat_id = head.get("beat_id")
+        end = start
+        cursor = start + 1
+        while cursor < len(items):
+            nxt = items[cursor]
+            nxt_vo = str(nxt.get("vo") or "").strip()
+            if nxt_vo:
+                break
+            nxt_beat = nxt.get("beat_id")
+            if beat_id is not None and nxt_beat is not None and nxt_beat != beat_id:
+                break
+            end = cursor
+            cursor += 1
+        indices = list(range(start, end + 1))
+        shots: list[dict[str, Any]] = []
+        picture = 0.0
+        src_lo = float(items[start].get("src_in") or 0.0)
+        src_hi = float(items[start].get("src_out") or src_lo)
+        tl_lo = float(items[start].get("tl_in") or 0.0)
+        tl_hi = float(items[end].get("tl_out") or tl_lo)
+        for offset, clip_i in enumerate(indices):
+            clip = items[clip_i]
+            role = _clip_role(clip) or ("insert" if _looks_like_insert_cut(clip) else "")
+            if _is_bridge_clip(clip):
+                role = "bridge"
+            if role == "vo_hold":
+                # Narration placeholder with no picture shot — keep unit, hide from children.
+                continue
+            src_in = float(clip.get("src_in") or 0.0)
+            src_out = float(clip.get("src_out") or src_in)
+            tl_in = float(clip.get("tl_in") or 0.0)
+            tl_out = float(clip.get("tl_out") or tl_in)
+            span = max(0.0, tl_out - tl_in)
+            if span <= 0.04 and clip.get("duration") is not None:
+                span = max(0.0, float(clip.get("duration") or 0.0))
+            picture += span
+            src_lo = min(src_lo, src_in)
+            src_hi = max(src_hi, src_out)
+            shots.append(
+                {
+                    "offset": offset,
+                    "clip_index": clip_i,
+                    "name": str(clip.get("name") or f"{clip_i + 1:02d}"),
+                    "role": role,
+                    "src_in": round(src_in, 3),
+                    "src_out": round(src_out, 3),
+                    "tl_in": round(tl_in, 3),
+                    "tl_out": round(tl_out, 3),
+                    "picture_sec": round(span, 3),
+                }
+            )
+        # Re-number shot offsets so UI delete/reorder match visible children.
+        for shot_i, shot in enumerate(shots):
+            shot["offset"] = shot_i
+        try:
+            beat_int = int(beat_id) if beat_id is not None else 0
+        except (TypeError, ValueError):
+            beat_int = 0
+        beat = by_id.get(beat_int) or {}
+        speak = vo_sec(vo) if vo else 0.0
+        units.append(
+            {
+                "unit_index": len(units),
+                "clip_indices": indices,
+                "start_index": start,
+                "end_index": end,
+                "vo": vo,
+                "beat_id": beat_int or None,
+                "event": str(head.get("event") or beat.get("event") or "").strip(),
+                "picture_sec": round(picture, 3),
+                "speak_sec": round(speak, 3),
+                "cover_sec": round(max(speak, 0.0), 3),
+                "src_in": round(src_lo, 3),
+                "src_out": round(src_hi, 3),
+                "tl_in": round(tl_lo, 3),
+                "tl_out": round(tl_hi, 3),
+                "shots": shots,
+                "shortfall_sec": round(max(0.0, speak - picture), 3),
+            }
+        )
+        index = end + 1
+    return units
+
+
+def _write_recap_clips_payload(
+    media: str,
+    payload: Mapping[str, Any],
+    clips: Sequence[Mapping[str, Any]],
+    *,
+    rewrite_srt: bool = True,
+) -> dict[str, Any]:
+    info = {
+        "fps": float(payload.get("fps") or 24.0),
+        "width": int(payload.get("width") or 1920),
+        "height": int(payload.get("height") or 1080),
+    }
+    laid = layout_clips_on_timeline(list(clips), fps=float(info["fps"]))
+    dest = recap_cuts_path_for_video(media)
+    cuts_path = write_recap_cuts_file(
+        dest,
+        title=str(payload.get("title") or ""),
+        video_path=media,
+        video_id=str(payload.get("video_id") or ""),
+        info=info,
+        laid_out=laid,
+        beats_path=str(payload.get("beats_path") or ""),
+        stage=str(payload.get("stage") or "captions"),
+    )
+    srt_path = ""
+    if rewrite_srt:
+        stem = Path(os.path.abspath(os.path.expanduser(media))).stem
+        srt_dest = Path(os.path.abspath(os.path.expanduser(media))).parent / f"{stem}_recap.srt"
+        srt_path = str(write_srt(laid, srt_dest))
+    return {
+        "ok": True,
+        "cuts_path": str(cuts_path),
+        "srt_path": srt_path,
+        "clips": laid,
+        "units": group_recap_vo_units(laid),
+    }
+
+
+def save_recap_vo_unit(
+    video_path: str,
+    clip_indices: Sequence[int],
+    text: str,
+    *,
+    video_id: str = "",
+    rewrite_srt: bool = True,
+) -> dict[str, Any]:
+    """Hand-edit one narration unit: VO on first shot, clear children, stamp cover time."""
+    media = str(video_path or "").strip()
+    if not media:
+        raise RuntimeError("找不到原片路径。")
+    payload = load_recap_cuts(media, video_id=video_id)
+    if not payload:
+        raise RuntimeError("还没有选镜表。")
+    clips = [dict(clip) for clip in list(payload.get("clips") or [])]
+    indices = sorted({int(i) for i in clip_indices})
+    if not indices or indices[0] < 0 or indices[-1] >= len(clips):
+        raise RuntimeError("无效的解说单元镜头范围。")
+    for expected, got in enumerate(indices):
+        if got != indices[0] + expected:
+            raise RuntimeError("解说单元镜头必须连续。")
+    body = str(text or "").strip()
+    speak = _max_picture_for_vo(body) if body else 0.0
+    first = indices[0]
+    last = indices[-1]
+    for pos in indices:
+        row = dict(clips[pos])
+        if pos == first:
+            row["vo"] = body
+            row["vo_draft"] = body
+        else:
+            row["vo"] = ""
+            if "vo_draft" in row:
+                row["vo_draft"] = ""
+            row.pop("vo_tl_in", None)
+            row.pop("vo_tl_out", None)
+        clips[pos] = row
+    head = clips[first]
+    tl_in = float(head.get("tl_in") or 0.0)
+    unit_out = float(clips[last].get("tl_out") or tl_in)
+    if body and speak > 0:
+        vo_end = min(unit_out, tl_in + max(speak, 0.5))
+        if vo_end > tl_in + 0.04:
+            head["vo_tl_in"] = round(tl_in, 3)
+            head["vo_tl_out"] = round(vo_end, 3)
+        else:
+            head.pop("vo_tl_in", None)
+            head.pop("vo_tl_out", None)
+    else:
+        head.pop("vo_tl_in", None)
+        head.pop("vo_tl_out", None)
+    clips[first] = head
+    result = _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+    result["start_index"] = first
+    result["end_index"] = last
+    result["vo"] = body
+    result["speak_sec"] = round(vo_sec(body) if body else 0.0, 3)
+    return result
+
+
+def reorder_recap_unit_shot(
+    video_path: str,
+    clip_indices: Sequence[int],
+    from_offset: int,
+    to_offset: int,
+    *,
+    video_id: str = "",
+    rewrite_srt: bool = True,
+) -> dict[str, Any]:
+    """Move one child shot inside its narration unit, then re-layout timeline."""
+    media = str(video_path or "").strip()
+    if not media:
+        raise RuntimeError("找不到原片路径。")
+    payload = load_recap_cuts(media, video_id=video_id)
+    if not payload:
+        raise RuntimeError("还没有选镜表。")
+    clips = [dict(clip) for clip in list(payload.get("clips") or [])]
+    indices = [int(i) for i in clip_indices]
+    if len(indices) < 2:
+        raise RuntimeError("至少两个子镜头才能调序。")
+    if from_offset < 0 or to_offset < 0 or from_offset >= len(indices) or to_offset >= len(indices):
+        raise RuntimeError("子镜头位置无效。")
+    if from_offset == to_offset:
+        return _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+    block = [clips[i] for i in indices]
+    item = block.pop(from_offset)
+    block.insert(to_offset, item)
+    # Keep unit VO on the chronologically first slot after reorder.
+    voiced = [str(row.get("vo") or "").strip() for row in block]
+    unit_vo = next((text for text in voiced if text), "")
+    for offset, row in enumerate(block):
+        next_row = dict(row)
+        if offset == 0:
+            next_row["vo"] = unit_vo
+            next_row["vo_draft"] = unit_vo
+        else:
+            next_row["vo"] = ""
+            if "vo_draft" in next_row:
+                next_row["vo_draft"] = ""
+            next_row.pop("vo_tl_in", None)
+            next_row.pop("vo_tl_out", None)
+        clips[indices[offset]] = next_row
+    if unit_vo:
+        head = clips[indices[0]]
+        tl_in = float(head.get("tl_in") or 0.0)
+        last = clips[indices[-1]]
+        unit_out = float(last.get("tl_out") or tl_in)
+        speak = _max_picture_for_vo(unit_vo)
+        vo_end = min(unit_out, tl_in + max(speak, 0.5)) if speak > 0 else unit_out
+        if vo_end > tl_in + 0.04:
+            head["vo_tl_in"] = round(tl_in, 3)
+            head["vo_tl_out"] = round(vo_end, 3)
+        clips[indices[0]] = head
+    return _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+
+
+def owned_chunk_indices_for_clips(
+    chunks: Sequence[Mapping[str, Any]] | None,
+    clips: Sequence[Mapping[str, Any]] | None,
+    *,
+    overlap_ratio: float = 0.45,
+) -> set[int]:
+    """Chunks covered by the given clips (by chunk_index or time overlap)."""
+    return set(
+        classify_chunk_usage_for_clips(
+            chunks,
+            unit_clips=clips,
+            all_clips=clips,
+            overlap_ratio=overlap_ratio,
+        )
+    )
+
+
+def classify_chunk_usage_for_clips(
+    chunks: Sequence[Mapping[str, Any]] | None,
+    *,
+    unit_clips: Sequence[Mapping[str, Any]] | None = None,
+    all_clips: Sequence[Mapping[str, Any]] | None = None,
+    overlap_ratio: float = 0.45,
+) -> dict[int, str]:
+    """Map chunk index -> ``unit`` | ``used`` for picker coloring.
+
+    - ``unit``: already in the current narration unit
+    - ``used``: used by some other shot in the full cut list (not in the unit)
+    """
+
+    def _covered(shots: Sequence[Mapping[str, Any]] | None) -> set[int]:
+        owned: set[int] = set()
+        rows = [dict(row) for row in chunks or [] if isinstance(row, Mapping)]
+        items = [dict(row) for row in shots or [] if isinstance(row, Mapping)]
+        if not rows or not items:
+            return owned
+        for index, chunk in enumerate(rows):
+            try:
+                c0 = float(chunk.get("start") or chunk.get("src_in") or 0.0)
+                c1 = float(chunk.get("end") or chunk.get("src_out") or c0)
+            except (TypeError, ValueError):
+                continue
+            if c1 <= c0 + 0.04:
+                continue
+            span = max(0.001, c1 - c0)
+            for shot in items:
+                try:
+                    if int(shot.get("chunk_index")) == index:
+                        owned.add(index)
+                        break
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    s0 = float(shot.get("src_in") or 0.0)
+                    s1 = float(shot.get("src_out") or s0)
+                except (TypeError, ValueError):
+                    continue
+                overlap = max(0.0, min(c1, s1) - max(c0, s0))
+                if overlap >= max(0.5, span * float(overlap_ratio)):
+                    owned.add(index)
+                    break
+        return owned
+
+    unit_set = _covered(unit_clips)
+    all_set = _covered(all_clips if all_clips is not None else unit_clips)
+    usage: dict[int, str] = {}
+    for index in sorted(all_set | unit_set):
+        if index in unit_set:
+            usage[index] = "unit"
+        else:
+            usage[index] = "used"
+    return usage
+
+
+def add_recap_unit_shot(
+    video_path: str,
+    clip_indices: Sequence[int],
+    *,
+    src_in: float,
+    src_out: float,
+    after_offset: int | None = None,
+    name: str = "",
+    chunk_index: int | None = None,
+    video_id: str = "",
+    rewrite_srt: bool = True,
+) -> dict[str, Any]:
+    """Insert a child shot into a narration unit (no LLM)."""
+    media = str(video_path or "").strip()
+    if not media:
+        raise RuntimeError("找不到原片路径。")
+    payload = load_recap_cuts(media, video_id=video_id)
+    if not payload:
+        raise RuntimeError("还没有选镜表。")
+    clips = [dict(clip) for clip in list(payload.get("clips") or [])]
+    indices = [int(i) for i in clip_indices]
+    if not indices:
+        raise RuntimeError("无效的解说单元。")
+    start = float(src_in)
+    end = float(src_out)
+    if end <= start + 0.04:
+        raise RuntimeError("原片入点/出点无效。")
+    anchor = clips[indices[0]]
+    # VO-only placeholder: replace with the first real shot, keep narration text.
+    if len(indices) == 1 and _clip_role(anchor) == "vo_hold":
+        hold_vo = str(anchor.get("vo") or "").strip()
+        replacement = {
+            "name": str(name or "").strip() or str(anchor.get("name") or f"{len(clips):02d}"),
+            "beat_id": anchor.get("beat_id"),
+            "src_in": round(start, 3),
+            "src_out": round(end, 3),
+            "duration": round(end - start, 3),
+            "vo": hold_vo,
+            "vo_draft": hold_vo,
+            "role": "",
+            "reason": str(anchor.get("reason") or ""),
+            "event": str(anchor.get("event") or ""),
+        }
+        if chunk_index is not None:
+            try:
+                replacement["chunk_index"] = int(chunk_index)
+            except (TypeError, ValueError):
+                pass
+        clips[indices[0]] = replacement
+        return _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+    insert_at = indices[-1] + 1
+    if after_offset is not None and 0 <= int(after_offset) < len(indices):
+        insert_at = indices[int(after_offset)] + 1
+    new_clip = {
+        "name": str(name or "").strip() or f"{len(clips) + 1:02d}",
+        "beat_id": anchor.get("beat_id"),
+        "src_in": round(start, 3),
+        "src_out": round(end, 3),
+        "duration": round(end - start, 3),
+        "vo": "",
+        "role": str(anchor.get("role") or ""),
+        "reason": str(anchor.get("reason") or ""),
+        "event": str(anchor.get("event") or ""),
+    }
+    if chunk_index is not None:
+        try:
+            new_clip["chunk_index"] = int(chunk_index)
+        except (TypeError, ValueError):
+            pass
+    clips.insert(insert_at, new_clip)
+    return _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+
+
+def _unit_vo_text(block: Sequence[Mapping[str, Any]]) -> str:
+    for row in block:
+        text = str(row.get("vo") or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _stamp_unit_vo_on_block(block: list[dict[str, Any]], unit_vo: str) -> list[dict[str, Any]]:
+    stamped: list[dict[str, Any]] = []
+    for offset, row in enumerate(block):
+        next_row = dict(row)
+        if offset == 0:
+            next_row["vo"] = unit_vo
+            next_row["vo_draft"] = unit_vo
+            if unit_vo:
+                tl_in = float(next_row.get("tl_in") or 0.0)
+                last = block[-1]
+                unit_out = float(last.get("tl_out") or next_row.get("tl_out") or tl_in)
+                speak = _max_picture_for_vo(unit_vo)
+                vo_end = min(unit_out, tl_in + max(speak, 0.5)) if speak > 0 else unit_out
+                if vo_end > tl_in + 0.04:
+                    next_row["vo_tl_in"] = round(tl_in, 3)
+                    next_row["vo_tl_out"] = round(vo_end, 3)
+                else:
+                    next_row.pop("vo_tl_in", None)
+                    next_row.pop("vo_tl_out", None)
+            else:
+                next_row.pop("vo_tl_in", None)
+                next_row.pop("vo_tl_out", None)
+        else:
+            next_row["vo"] = ""
+            if "vo_draft" in next_row:
+                next_row["vo_draft"] = ""
+            next_row.pop("vo_tl_in", None)
+            next_row.pop("vo_tl_out", None)
+        stamped.append(next_row)
+    return stamped
+
+
+def delete_recap_unit_shot(
+    video_path: str,
+    clip_indices: Sequence[int],
+    offset: int,
+    *,
+    video_id: str = "",
+    rewrite_srt: bool = True,
+) -> dict[str, Any]:
+    """Remove one child shot. Last picture shot may leave a VO-only hold clip."""
+    media = str(video_path or "").strip()
+    if not media:
+        raise RuntimeError("找不到原片路径。")
+    payload = load_recap_cuts(media, video_id=video_id)
+    if not payload:
+        raise RuntimeError("还没有选镜表。")
+    clips = [dict(clip) for clip in list(payload.get("clips") or [])]
+    indices = [int(i) for i in clip_indices]
+    if not indices:
+        raise RuntimeError("无效的解说单元。")
+    # Visible shots skip vo_hold; map UI offset → real clip index.
+    picture_indices = [
+        i for i in indices if _clip_role(clips[i]) != "vo_hold"
+    ] if indices and max(indices) < len(clips) else []
+    if offset < 0 or offset >= len(picture_indices):
+        raise RuntimeError("子镜头位置无效。")
+    remove_at = int(picture_indices[offset])
+    block = [clips[i] for i in indices]
+    unit_vo = _unit_vo_text(block)
+    event = str(block[0].get("event") or "").strip()
+    beat_id = block[0].get("beat_id")
+    removed = dict(clips[remove_at])
+    del clips[remove_at]
+
+    remaining_picture = len(picture_indices) - 1
+    if remaining_picture <= 0:
+        if not unit_vo:
+            # No VO and no shots left — drop the unit entirely.
+            return _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+        speak = max(0.5, float(_max_picture_for_vo(unit_vo) or 0.5))
+        src_in = float(removed.get("src_in") or 0.0)
+        hold = {
+            "name": str(removed.get("name") or "vo"),
+            "beat_id": beat_id,
+            "src_in": round(src_in, 3),
+            "src_out": round(src_in + speak, 3),
+            "duration": round(speak, 3),
+            "vo": unit_vo,
+            "vo_draft": unit_vo,
+            "role": "vo_hold",
+            "event": event,
+            "reason": str(removed.get("reason") or ""),
+        }
+        clips.insert(remove_at, hold)
+        return _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+
+    # Rebuild remaining unit block after the deletion (indices shift past remove_at).
+    new_indices: list[int] = []
+    for old in indices:
+        if old == remove_at:
+            continue
+        new_indices.append(old - 1 if old > remove_at else old)
+    remaining = [clips[i] for i in new_indices]
+    stamped = _stamp_unit_vo_on_block(remaining, unit_vo)
+    for idx, row in zip(new_indices, stamped):
+        clips[idx] = row
+    result = _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+    result["deleted_offset"] = int(offset)
+    result["vo_hold"] = False
+    return result
+
+
+def delete_recap_vo_unit(
+    video_path: str,
+    clip_indices: Sequence[int],
+    *,
+    video_id: str = "",
+    rewrite_srt: bool = True,
+) -> dict[str, Any]:
+    """Remove a whole narration unit (VO + all child shots)."""
+    media = str(video_path or "").strip()
+    if not media:
+        raise RuntimeError("找不到原片路径。")
+    payload = load_recap_cuts(media, video_id=video_id)
+    if not payload:
+        raise RuntimeError("还没有选镜表。")
+    clips = [dict(clip) for clip in list(payload.get("clips") or [])]
+    indices = sorted({int(i) for i in clip_indices})
+    if not indices or indices[0] < 0 or indices[-1] >= len(clips):
+        raise RuntimeError("无效的解说单元镜头范围。")
+    for expected, got in enumerate(indices):
+        if got != indices[0] + expected:
+            raise RuntimeError("解说单元镜头必须连续。")
+    for index in reversed(indices):
+        del clips[index]
+    result = _write_recap_clips_payload(media, payload, clips, rewrite_srt=rewrite_srt)
+    result["deleted_unit_clips"] = len(indices)
+    return result
 
 
 def recap_clip_review_rows(
@@ -998,16 +1377,17 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
         else "先列 people（稳定称呼），无人名再用画面特征。禁止男主/女主。\n"
     )
     return (
-        f"原片时长 {duration:.0f} 秒。请规划 14–20 条完整故事线大纲 beats（最多 24），不要写 clips。\n"
+        f"原片时长 {duration:.0f} 秒。请规划 18–28 条密稿故事线大纲 beats（最多 32），不要写 clips。\n"
         f"从 0 秒开始覆盖开场，正片在大约 {story_end:.0f} 秒结束（片尾曲之前）。\n"
-        f"自检：只读全部 event 必须能听成有头有尾的故事。相邻纲要必须递进或转场（回答上一句的然后呢/所以呢/人去哪了）。成片目标约 {target:.0f} 秒（按原片比例，约 3–8 分钟），用压缩过场控时长，不要删因果。\n"
-        "进入新活动/新空间前必须有进入拍（赶到现场、入座开始、走进房间等）；禁止直接蹦到场内「某人惊讶了」或场内结果（题目简单/全勾完了）。\n"
-        "相邻活动性质变了时，中间必须有进入/离开过渡 beat；禁止比试通过后下一句直接写文书结果。\n"
+        f"【密稿可删】宁可多拍展开与收束，让用户做减法；禁止稀薄提纲、禁止大段无节拍空档。\n"
+        f"自检：只读全部 event 必须能听成有头有尾的故事（进入→展开→高潮→收束）。相邻纲要必须递进或转场。成片目标约 {target:.0f} 秒（按原片比例，约 3–8 分钟），用压缩过场控时长，不要删因果。\n"
+        "进入新活动/新空间前必须有进入拍（赶到现场、入座开始、走进房间等）；禁止直接蹦到场内「某人惊讶了」或场内结果（全勾完了/结果出来了）。\n"
+        "相邻场面或活动性质变了时，中间必须有进入/离开过渡 beat；禁止上一段刚结束下一句就直接写下一段场内结果。\n"
         "禁止孤立反应句当大纲（XX惊讶了/愣住了）；先有触发事件，再写局面变化。\n"
         "高潮/对决/身份揭晓/胜负分晓 importance≥0.85，禁止跳过最精彩的冲突。\n"
         "短而关键的动作（失手、得手、致命一击等）必须各自成条且高权重，禁止因只有几秒就并进前后大段。\n"
         "对白骨架的前后因果不得跳空：后果与起因各自成 beat，禁止只留两端结果。\n"
-        "相邻 beats 的 t 不要留下大段无节拍空档；中段推进过程要盖住，不要只留两端结果。\n"
+        "相邻 beats 的 t 不要留下大段无节拍空档；中段推进过程要盖住，收束也要盖住。\n"
         "同场戏按剧情递进拆拍，不要把每一次表情/反应拆成大纲条目。\n"
         + name_line
         + "不要用同一个他指两个人。\n"
@@ -1255,7 +1635,8 @@ def beats_cover_opening(beats: list[Mapping[str, Any]], duration_sec: float) -> 
 def story_gap_min_sec(duration_sec: float) -> float:
     """Minimum uncovered window that still warrants a plot-gap pass."""
     duration = max(0.0, float(duration_sec or 0.0))
-    return round(max(40.0, min(90.0, duration * 0.055)), 1)
+    # Lower threshold → catch more mid-story holes for a denser plan.
+    return round(max(28.0, min(55.0, duration * 0.04)), 1)
 
 
 def story_beat_gaps(
@@ -1326,26 +1707,16 @@ def prioritize_story_gaps(
     return sorted([*pinned, *largest], key=lambda item: item[0])
 
 
-_ACTIVITY_BUCKET_BATTLE = re.compile(
-    r"(混战|乱斗|比武|对决|战斗|武斗|对打|踢飞|施法|魔法阵|咏唱)"
-)
-_ACTIVITY_BUCKET_PAPER = re.compile(
-    r"(笔试|书面|答题|题目|试卷|选择制|答完|交卷|成绩|分数|文书|合同|签字)"
-)
-_ACTIVITY_BUCKET_CEREMONY = re.compile(
-    r"(典礼|合格榜|名单|入学|报到|授奖|宣誓)"
-)
+_ACTIVITY_EVENT_KEY_RE = re.compile(r"[\s，,。！？!?…；;：:、\"'「」『』（）()【】\[\]《》<>·\-—_]+")
 
 
-def _story_activity_bucket(event: str) -> str:
-    body = str(event or "")
-    if _ACTIVITY_BUCKET_BATTLE.search(body):
-        return "battle"
-    if _ACTIVITY_BUCKET_PAPER.search(body):
-        return "paper"
-    if _ACTIVITY_BUCKET_CEREMONY.search(body):
-        return "ceremony"
-    return ""
+def _event_overlap_ratio(left: str, right: str) -> float:
+    """How similar two beat events are; low score means different story beats."""
+    a = _ACTIVITY_EVENT_KEY_RE.sub("", str(left or ""))
+    b = _ACTIVITY_EVENT_KEY_RE.sub("", str(right or ""))
+    if not a or not b:
+        return 0.0
+    return float(SequenceMatcher(None, a, b).ratio())
 
 
 def activity_shift_gaps(
@@ -1353,7 +1724,7 @@ def activity_shift_gaps(
     *,
     min_gap_sec: float,
 ) -> list[tuple[float, float]]:
-    """Gaps between consecutive beats where the story activity clearly changed."""
+    """Pin long holes between consecutive beats whose events barely overlap (domain-agnostic)."""
     ordered: list[tuple[float, float, str]] = []
     for beat in beats:
         span = _time_span(beat.get("t"))
@@ -1367,9 +1738,8 @@ def activity_shift_gaps(
         gap_lo, gap_hi = float(prev[1]), float(cur[0])
         if gap_hi - gap_lo < threshold:
             continue
-        left = _story_activity_bucket(prev[2])
-        right = _story_activity_bucket(cur[2])
-        if left and right and left != right:
+        # Only pin when the outline itself jumped topics across a long hole.
+        if _event_overlap_ratio(prev[2], cur[2]) <= 0.34:
             out.append((round(gap_lo, 2), round(gap_hi, 2)))
     return out
 
@@ -1470,8 +1840,8 @@ def recap_plan_head_user_prompt(pack: Mapping[str, Any], existing: list[Mapping[
     until = min(duration, max(opening_deadline_sec(duration), first_start))
     return (
         f"原片时长 {duration:.0f} 秒。已有 beats 最早从 {first_start:.0f} 秒才开始。\n"
-        f"只规划 0 秒到 {until:.0f} 秒的开场 2–4 条 beats：冷开场（如有）+ 片头曲之后第一场戏。\n"
-        "沿用或补全 people 稳定称呼。不要 OP/片头曲/歌词/标题动画，不要重复下面 already。\n\n"
+        f"只规划 0 秒到 {until:.0f} 秒的开场 2–5 条 beats：冷开场（如有）+ 片头曲之后第一场及紧随推进。\n"
+        "密稿可删，开场因果宁可多一条。沿用或补全 people 稳定称呼。不要 OP/片头曲/歌词/标题动画，不要重复下面 already。\n\n"
         + json.dumps(
             {
                 "duration_sec": round(duration, 2),
@@ -1504,8 +1874,8 @@ def recap_plan_tail_user_prompt(pack: Mapping[str, Any], existing: list[Mapping[
     start = min(story_end, max(0.0, last_end))
     return (
         f"原片时长 {duration:.0f} 秒。已有 beats 最晚只覆盖到 {start:.0f} 秒。\n"
-        f"只规划 {start:.0f} 秒到正片结束（约 {story_end:.0f} 秒、片尾曲之前）的 2–4 条收尾 beats。\n"
-        "沿用或补全 people 稳定称呼。不要 ED/片尾曲/演职员表/预告，不要重复下面 already。\n\n"
+        f"只规划 {start:.0f} 秒到正片结束（约 {story_end:.0f} 秒、片尾曲之前）的 2–5 条收尾 beats。\n"
+        "密稿可删：收束与余波要盖住。沿用或补全 people 稳定称呼。不要 ED/片尾曲/演职员表/预告，不要重复下面 already。\n\n"
         + json.dumps(
             {
                 "duration_sec": round(duration, 2),
@@ -1530,9 +1900,9 @@ def recap_plan_gap_user_prompt(
     windows = [{"t": [round(float(lo), 2), round(float(hi), 2)]} for lo, hi in gaps]
     return (
         f"原片时长 {duration:.0f} 秒。下面 gaps 是当前要检查的正片空档。\n"
-        "每个 gap 默认只补 1 条；仅当空档很长且过程明显分两步时最多 2 条。t 必须落在对应 gap 内。\n"
+        "每个 gap 短空档补 1–2 条，长空档可到 3 条；展开过程要盖住。t 必须落在对应 gap 内。\n"
         "若空档两端活动变了，优先补进入拍，禁止直接补场内结果。\n"
-        "补关键过程，但不要拆成一串碎拍。不要重复 already，不要补走路和气氛。\n\n"
+        "密稿可删：补关键过程与中间推进，不要只钉结果；不要拆成表情碎拍。不要重复 already，不要补纯走路气氛。\n\n"
         + json.dumps(
             {
                 "duration_sec": round(duration, 2),
@@ -1954,14 +2324,8 @@ def normalize_evidence_required(raw: Any) -> list[str]:
 
 
 def sanitize_generic_role_labels(text: str) -> str:
-    """Rewrite banned generic lead labels into neutral on-screen roles."""
-    body = str(text or "")
-    if not body:
-        return body
-    body = body.replace("女主", "少女")
-    body = body.replace("男主", "少年")
-    body = body.replace("主角", "少年")
-    return body
+    """Identity: story wording is left to LLM stages, not code patches."""
+    return str(text or "")
 
 
 def normalize_story_beats(raw: Mapping[str, Any] | list[Any]) -> list[dict[str, Any]]:
@@ -2021,7 +2385,8 @@ def normalize_story_people(raw: Mapping[str, Any] | list[Any] | None) -> list[di
     if not isinstance(items, list):
         return []
     bad_label = re.compile(
-        r"^(男主|女主|主角|npc|语气助词.*|说话人\d*|声线\d*)$",
+        r"^(男主|女主|主角|npc|语气助词.*|说话人\d*|声线\d*)$|"
+        r"^(ed|op|bgm)$|.*(片头曲|片尾曲|主题曲)|^ed音乐$|^op音乐$|^bgm音乐$",
         re.IGNORECASE,
     )
     out: list[dict[str, Any]] = []
@@ -3250,7 +3615,7 @@ def apply_caption_cues(
             out[start_i]["vo_tl_out"] = round(end, 3)
         for index in range(start_i + 1, end_i + 1):
             out[index]["vo"] = ""
-    return scrub_adjacent_duplicate_vo(scrub_restated_insert_vo(scrub_generic_role_labels_vo(out)))
+    return out
 
 
 def split_underfilled_vo_clips(
@@ -3345,26 +3710,12 @@ def _vo_restates_prior(prior: str, text: str) -> bool:
 
 
 def scrub_generic_role_labels_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Rewrite banned 男主/女主/主角 labels left in narration."""
-    out = [dict(clip) for clip in clips]
-    for clip in out:
-        vo = str(clip.get("vo") or "")
-        cleaned = sanitize_generic_role_labels(vo)
-        if cleaned != vo:
-            clip["vo"] = cleaned
-        draft = str(clip.get("vo_draft") or "")
-        cleaned_draft = sanitize_generic_role_labels(draft)
-        if cleaned_draft != draft:
-            clip["vo_draft"] = cleaned_draft
-    return out
+    """No-op: label cleanup belongs in LLM prompts, not post-processing."""
+    return [dict(clip) for clip in clips or []]
 
 
-def _fallback_role_for_unattested_name(event: str, vo: str) -> str:
-    blob = f"{event} {vo}"
-    if "少女" in blob or "女孩" in blob or "女人" in blob:
-        return "少女"
-    if "少年" in blob or "男孩" in blob or "男人" in blob:
-        return "少年"
+def _fallback_role_for_unattested_name(event: str = "", vo: str = "", *, replaced: str = "") -> str:
+    del event, vo, replaced
     return "对方"
 
 
@@ -3412,193 +3763,196 @@ def scrub_unattested_people_names(
     pack: Mapping[str, Any] | None = None,
     beats: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Drop people-table names that this shot's ASR/event never attested."""
-    labels = sorted(_people_labels(people), key=len, reverse=True)
-    out = [dict(clip) for clip in clips]
-    if not labels:
-        return out
-    by_id = _beats_by_id(beats)
-    index = 0
-    while index < len(out):
-        clip = out[index]
-        vo = str(clip.get("vo") or "").strip()
-        if not vo:
-            index += 1
-            continue
-        end = index
-        cursor = index + 1
-        while cursor < len(out) and not str(out[cursor].get("vo") or "").strip():
-            # Same spoken caption often spans empty follow-up shots.
-            if out[cursor].get("beat_id") != clip.get("beat_id"):
-                break
-            end = cursor
-            cursor += 1
-        try:
-            beat_id = int(clip.get("beat_id") or 0)
-        except (TypeError, ValueError):
-            beat_id = 0
-        beat = by_id.get(beat_id) or {}
-        event = str(clip.get("event") or beat.get("event") or "")
-        src_in = float(clip.get("src_in") or 0.0)
-        src_out = float(out[end].get("src_out") or clip.get("src_out") or src_in)
-        attested = attested_people_labels_for_span(
-            pack,
-            src_in,
-            src_out,
-            people,
-            event=event,
-        )
-        cleaned = vo
-        for label in labels:
-            if label not in cleaned:
-                continue
-            if label in attested:
-                continue
-            cleaned = cleaned.replace(label, _fallback_role_for_unattested_name(event, cleaned))
-        cleaned = sanitize_generic_role_labels(cleaned)
-        if cleaned != vo:
-            clip["vo"] = cleaned
-        index = end + 1
-    return out
+    """No-op: unattested-name rewriting was a story patch."""
+    del people, pack, beats
+    return [dict(clip) for clip in clips or []]
 
 
 def merge_same_beat_mainline_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """One story unit per beat mainline run: merge consecutive main shots into one spanning VO."""
-    out = [dict(clip) for clip in clips]
-    index = 0
-    while index < len(out):
-        clip = out[index]
-        if _looks_like_insert_cut(clip) or _is_bridge_clip(clip):
-            index += 1
-            continue
-        beat_id = clip.get("beat_id")
-        end = index
-        cursor = index + 1
-        while cursor < len(out):
-            nxt = out[cursor]
-            if beat_id is None or nxt.get("beat_id") != beat_id:
-                break
-            if _looks_like_insert_cut(nxt) or _is_bridge_clip(nxt):
-                break
-            end = cursor
-            cursor += 1
-        if end > index:
-            parts = [str(out[pos].get("vo") or "").strip() for pos in range(index, end + 1)]
-            voiced = [part for part in parts if part]
-            if len(voiced) >= 2 or (parts and parts[0] and any(not part for part in parts[1:])):
-                merged = _join_vo(*parts)
-                if merged:
-                    start = float(out[index].get("tl_in") or 0.0)
-                    span_end = float(out[end].get("tl_out") or start)
-                    speak_end = start + max(_max_picture_for_vo(merged), 0.5)
-                    out[index]["vo"] = merged
-                    out[index]["vo_tl_in"] = round(start, 3)
-                    out[index]["vo_tl_out"] = round(min(span_end, speak_end), 3)
-                    for pos in range(index + 1, end + 1):
-                        out[pos]["vo"] = ""
-                        out[pos].pop("vo_tl_in", None)
-                        out[pos].pop("vo_tl_out", None)
-        index = end + 1
-    return out
+    """No-op: spanning VO is the caption/polish LLM's job."""
+    return [dict(clip) for clip in clips or []]
 
 
 def clear_redundant_insert_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """If same-beat mainline already narrates the same fact, drop the insert restatement."""
-    out = [dict(clip) for clip in clips]
-    main_vo_by_beat: dict[Any, str] = {}
-    for clip in out:
-        if _looks_like_insert_cut(clip) or _is_bridge_clip(clip):
-            continue
-        text = str(clip.get("vo") or "").strip()
-        if text:
-            main_vo_by_beat[clip.get("beat_id")] = text
-    for clip in out:
-        if not _looks_like_insert_cut(clip):
-            continue
-        text = str(clip.get("vo") or "").strip()
-        if not text:
-            continue
-        main = main_vo_by_beat.get(clip.get("beat_id")) or ""
-        if main and (_vo_restates_prior(main, text) or _vo_covers(main, text)):
-            clip["vo"] = ""
-            clip.pop("vo_tl_in", None)
-            clip.pop("vo_tl_out", None)
-    return out
+    """No-op: insert restatement cleanup belongs in LLM stages."""
+    return [dict(clip) for clip in clips or []]
 
 
 def finalize_recap_vo_density(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Prefer one dense spanning line per beat run; scrub paraphrase repeats. User can delete later."""
-    work = merge_same_beat_mainline_vo(clips)
-    work = clear_redundant_insert_vo(work)
-    work = scrub_restated_insert_vo(work)
-    work = scrub_adjacent_duplicate_vo(work)
-    # Second adjacent pass after inserts were cleared, so main↔main paraphrases also drop.
-    work = scrub_adjacent_duplicate_vo(work)
+    """No-op: keep LLM output as-is."""
+    return [dict(clip) for clip in clips or []]
+
+
+def scrub_intra_line_duplicate_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """No-op."""
+    return [dict(clip) for clip in clips or []]
+
+
+def recap_vo_polish_user_prompt(
+    clips: Sequence[Mapping[str, Any]],
+    *,
+    people: Sequence[Mapping[str, Any]] | None = None,
+    prev_caption: str = "",
+) -> str:
+    rows: list[dict[str, Any]] = []
+    for index, clip in enumerate(clips, 1):
+        dur = _caption_clip_sec(clip)
+        vo = str(clip.get("vo") or "").strip()
+        role = _caption_visual_role(clip) or "main"
+        row: dict[str, Any] = {
+            "i": index,
+            "beat_id": clip.get("beat_id"),
+            "role": role,
+            "dur": round(dur, 3),
+            "vo": vo,
+            "budget": tts_char_budget(dur),
+        }
+        if vo:
+            row["min_chars"] = max(8, int(round(dur * CHARS_PER_SEC * MIN_VO_FILL)))
+        rows.append(row)
+    total = sum(float(row.get("dur") or 0.0) for row in rows)
+    return (
+        f"画面已锁定，本段 {total:.0f} 秒。只润色旁白，不要改镜头。\n"
+        "合并近义复读与句内重复，修好病句；可跨同 beat 空镜收成 from→to。\n"
+        "不要发明新事实，不要给空镜硬编查漏。初稿偏密可以，方便用户删。\n"
+        "没改动的句子也可重新输出以确认；未提到的 i 保持原文。\n"
+        + (f"上一句旁白：{prev_caption}\n" if str(prev_caption or "").strip() else "")
+        + "\n"
+        + json.dumps({"people": list(people or []), "clips": rows}, ensure_ascii=False)
+    )
+
+
+def parse_vo_polish_cues(
+    text: str,
+    clips: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Parse polish edits; empty text is kept so duplicate lines can be cleared."""
+    payload = _loads_json_object(text)
+    raw = payload.get("captions") if isinstance(payload, Mapping) else None
+    if not isinstance(raw, list):
+        raise RuntimeError("LLM 没有返回润色 captions。")
+    items = list(clips or [])
+    if not items:
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        if "text" not in item and "vo" not in item:
+            continue
+        body = sanitize_generic_role_labels(str(item.get("text") if "text" in item else item.get("vo") or "").strip())
+        start_i, end_i = _caption_index_span(item, items)
+        if start_i is None:
+            continue
+        end_i = min(max(start_i, end_i if end_i is not None else start_i), len(items) - 1)
+        out.append(
+            {
+                "text": body,
+                "from": start_i + 1,
+                "to": end_i + 1,
+            }
+        )
+    return out
+
+
+def apply_vo_polish_cues(
+    clips: Sequence[Mapping[str, Any]],
+    captions: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Apply polish edits without wiping clips the model did not mention."""
+    out = [dict(clip) for clip in clips]
+    if not captions:
+        return out
+    planned: list[tuple[int, int, str]] = []
+    touched: set[int] = set()
+    for cap in captions:
+        if not isinstance(cap, Mapping):
+            continue
+        start_i, end_i = _caption_index_span(cap, out)
+        if start_i is None:
+            continue
+        end_i = min(max(start_i, end_i), len(out) - 1)
+        text = sanitize_generic_role_labels(str(cap.get("text") or "").strip())
+        planned.append((start_i, end_i, text))
+        for index in range(start_i, end_i + 1):
+            touched.add(index)
+    for index in touched:
+        out[index]["vo"] = ""
+        out[index].pop("vo_tl_in", None)
+        out[index].pop("vo_tl_out", None)
+    for start_i, end_i, text in planned:
+        if not text:
+            continue
+        out[start_i]["vo"] = text
+        start = float(out[start_i].get("tl_in") or 0.0)
+        end = float(out[end_i].get("tl_out") or start)
+        speak_picture = _max_picture_for_vo(text)
+        if speak_picture > 0:
+            end = min(end, start + max(speak_picture, 0.5))
+        if end > start + 0.04:
+            out[start_i]["vo_tl_in"] = round(start, 3)
+            out[start_i]["vo_tl_out"] = round(end, 3)
+    return out
+
+
+def polish_recap_vo(
+    clips: list[Mapping[str, Any]],
+    *,
+    config=None,
+    system_prompt: str | None = None,
+    people: Sequence[Mapping[str, Any]] | None = None,
+    beats: Sequence[Mapping[str, Any]] | None = None,
+    pack: Mapping[str, Any] | None = None,
+    should_stop_callback: Callable[[], bool] | None = None,
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Final LLM pass: polish narration text only. Shots stay locked."""
+    work = [dict(clip) for clip in clips]
+    if not any(str(clip.get("vo") or "").strip() for clip in work):
+        return work
+    if progress_callback:
+        progress_callback(91, "polish")
+    polish_system = resolve_recap_prompt(system_prompt, RECAP_VO_POLISH_SYSTEM)
+    prev = ""
+    offset = 0
+    for wave in split_clips_for_captions(work):
+        if not any(str(clip.get("vo") or "").strip() for clip in wave):
+            offset += len(wave)
+            continue
+        try:
+            text = call_remote_llm(
+                system=polish_system,
+                user=recap_vo_polish_user_prompt(wave, people=people, prev_caption=prev),
+                config=config,
+                temperature=0.2,
+                max_tokens=4096,
+                should_stop_callback=should_stop_callback,
+            )
+            caps = parse_vo_polish_cues(text, wave)
+            stamped = apply_vo_polish_cues(wave, caps)
+            for local_i, row in enumerate(stamped):
+                work[offset + local_i] = row
+            for clip in stamped:
+                body = str(clip.get("vo") or "").strip()
+                if body:
+                    prev = body
+        except UnderstandingStoppedError:
+            raise
+        except (RuntimeError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+        offset += len(wave)
+    work = scrub_unattested_people_names(work, people=people, pack=pack, beats=beats)
     return work
 
 
 def scrub_adjacent_duplicate_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Clear near-duplicate consecutive narration lines (same fact restated on the next shot)."""
-    out = [dict(clip) for clip in clips]
-    prev_text = ""
-    for clip in out:
-        text = str(clip.get("vo") or "").strip()
-        if not text:
-            continue
-        if prev_text and _vo_restates_prior(prev_text, text):
-            clip["vo"] = ""
-            clip.pop("vo_tl_in", None)
-            clip.pop("vo_tl_out", None)
-            continue
-        prev_text = text
-    return out
+    """No-op."""
+    return [dict(clip) for clip in clips or []]
 
 
 def scrub_restated_insert_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Drop insert narration that only restates the same-beat master or prior line."""
-    out = [dict(clip) for clip in clips]
-    by_beat: dict[Any, list[int]] = {}
-    for index, clip in enumerate(out):
-        by_beat.setdefault(clip.get("beat_id"), []).append(index)
-    for indices in by_beat.values():
-        masters = [
-            index
-            for index in indices
-            if not _looks_like_insert_cut(out[index]) and str(out[index].get("vo") or "").strip()
-        ]
-        inserts = [
-            index
-            for index in indices
-            if _looks_like_insert_cut(out[index]) and str(out[index].get("vo") or "").strip()
-        ]
-        anchors = [str(out[index].get("vo") or "").strip() for index in masters]
-        if not anchors:
-            voiced = [index for index in indices if str(out[index].get("vo") or "").strip()]
-            if len(voiced) < 2:
-                continue
-            anchors = [str(out[voiced[0]].get("vo") or "").strip()]
-            inserts = voiced[1:]
-        kept_inserts: list[str] = []
-        for index in inserts:
-            text = str(out[index].get("vo") or "").strip()
-            if any(_vo_restates_prior(anchor, text) for anchor in anchors + kept_inserts):
-                out[index]["vo"] = ""
-                out[index].pop("vo_tl_in", None)
-                out[index].pop("vo_tl_out", None)
-                continue
-            kept_inserts.append(text)
-    prev_text = ""
-    for clip in out:
-        text = str(clip.get("vo") or "").strip()
-        if not text:
-            continue
-        if prev_text and _looks_like_insert_cut(clip) and _vo_restates_prior(prev_text, text):
-            clip["vo"] = ""
-            clip.pop("vo_tl_in", None)
-            clip.pop("vo_tl_out", None)
-            continue
-        prev_text = text
-    return out
+    """No-op."""
+    return [dict(clip) for clip in clips or []]
 
 
 def fit_recap_captions_to_tts(
@@ -3655,10 +4009,7 @@ def fit_recap_captions_to_tts(
         offset += len(wave)
     if rewritten:
         work = apply_caption_cues(laid, rewritten)
-    work = scrub_unattested_people_names(work, people=people, pack=pack, beats=beats)
-    # Dense draft: do NOT split underfilled shots into empty tails for gap-fill —
-    # that destroys cross-shot spans and invites paraphrase duplicates.
-    return finalize_recap_vo_density(work)
+    return work
 
 
 def _is_bridge_clip(clip: Mapping[str, Any]) -> bool:
@@ -3823,8 +4174,7 @@ def fill_recap_vo_gaps(
         raise
     except (RuntimeError, json.JSONDecodeError, TypeError, ValueError):
         pass
-    work = scrub_unattested_people_names(work, people=people, pack=pack, beats=beats)
-    return finalize_recap_vo_density(work)
+    return work
 
 
 def _chunk_window(pack: Mapping[str, Any], chunk_index: int) -> tuple[float, float] | None:
@@ -4374,10 +4724,8 @@ def _clip_role(clip: Mapping[str, Any]) -> str:
 
 
 def _looks_like_insert_cut(clip: Mapping[str, Any]) -> bool:
-    if _clip_role(clip) == "insert":
-        return True
-    blob = f"{clip.get('name') or ''} {clip.get('reason') or ''}"
-    return bool(re.search(r"特写|近景|反应|表情|眼神|脸|细节", blob))
+    """Only trust explicit role=insert from the match LLM."""
+    return _clip_role(clip) == "insert"
 
 
 def _is_flash_cut(clip: Mapping[str, Any]) -> bool:
@@ -4600,12 +4948,17 @@ def coalesce_recap_cuts(cuts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
     return merged
 
 
+def ensure_main_cut_per_beat(cuts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """No-op: each-beat main shot is a Match prompt rule, not a code patch."""
+    return [dict(clip) for clip in cuts or []]
+
+
 def refine_recap_cuts(
     cuts: Sequence[Mapping[str, Any]],
     pack: Mapping[str, Any],
     beats: list[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Keep cuts and grow picture if the match VO still needs time. Do not edit the script."""
+    """Keep cuts and grow picture if needed. Do not edit the script."""
     out = coalesce_recap_cuts(list(cuts or []))
     out = clamp_insert_cuts_to_beat(out, pack, beats)
     out = pad_cuts_for_tts(out, pack, beats)
@@ -5704,6 +6057,7 @@ def generate_recap_timeline(
     system_prompt: str | None = None,
     plan_prompt: str | None = None,
     caption_prompt: str | None = None,
+    polish_prompt: str | None = None,
     start_from: str | None = None,
     should_stop_callback: Callable[[], bool] | None = None,
     progress_callback: Callable[..., None] | None = None,
@@ -5746,6 +6100,7 @@ def generate_recap_timeline(
     if caption_raw == str(RECAP_GAP_SYSTEM).strip():
         caption_raw = ""
     caption_system = resolve_recap_prompt(caption_raw, RECAP_CAPTION_SYSTEM)
+    polish_system = resolve_recap_prompt(polish_prompt, RECAP_VO_POLISH_SYSTEM)
     duration = float(pack.get("duration_sec") or 0.0)
     out_dir = Path(str(dest_dir or "").strip() or Path(video_path).resolve().parent)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -6080,14 +6435,10 @@ def generate_recap_timeline(
         progress_callback=progress_callback,
     )
     _raise_if_stopped()
-    # Second chance for non-weak empties that gap-fill still missed.
-    retry_indices = [
-        index
-        for index, clip in enumerate(laid_out)
-        if not str(clip.get("vo") or "").strip()
-        and not _is_bridge_clip(clip)
-        and _caption_clip_sec(clip) >= 1.6
-    ]
+    # Second chance only for true story holes (same rule as gap-fill).
+    # Do NOT refill same-beat inserts/follow shots left empty for spanning VO —
+    # that was the main source of near-duplicate narration.
+    retry_indices = recap_gap_clip_indices(laid_out)
     if retry_indices:
         _progress(89, "captions")
         try:
@@ -6105,9 +6456,19 @@ def generate_recap_timeline(
             raise
         except (RuntimeError, json.JSONDecodeError, TypeError, ValueError):
             pass
-    laid_out = finalize_recap_vo_density(laid_out)
     _raise_if_stopped()
-    _progress(90, "writing")
+    laid_out = polish_recap_vo(
+        laid_out,
+        config=cfg,
+        system_prompt=polish_system,
+        people=people,
+        beats=allocated,
+        pack=pack,
+        should_stop_callback=should_stop_callback,
+        progress_callback=progress_callback,
+    )
+    _raise_if_stopped()
+    _progress(92, "writing")
     cuts_path = write_recap_cuts_file(
         cuts_path,
         title=title,

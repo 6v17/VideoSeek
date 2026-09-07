@@ -8,12 +8,14 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QTabWidget,
+    QTreeWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -21,12 +23,13 @@ from PySide6.QtWidgets import (
 from ui.widgets.chunk_timeline import ChunkTimelineWidget
 from ui.widgets.components import NoWheelComboBox
 from ui.widgets.data_table import DataTable
+from ui.widgets.recap_review_delegate import RecapReviewItemDelegate
 from ui.widgets.scaffold import PageScaffold, VSCard, VSProgressStatusRow, make_runtime_banner
 from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.table_specs import (
     UNDERSTANDING_DIALOGUE_TABLE_SPEC,
-    UNDERSTANDING_RECAP_REVIEW_TABLE_SPEC,
 )
+from ui.widgets.vertical_stretch import add_vertically_stretchable
 
 
 def _action_button(object_name: str) -> QPushButton:
@@ -254,14 +257,20 @@ class UnderstandingEvidencePage(QWidget):
             self.input_custom_summary_prompt,
         ):
             editor.setObjectName("UnderstandingOutput")
-            editor.setMinimumHeight(112)
-            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            editor.setMinimumHeight(80)
+            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             editor.setTabChangesFocus(True)
         self.vlm_prompt_tabs.addTab(self.input_custom_caption_prompt, "")
         self.vlm_prompt_tabs.addTab(self.input_custom_description_prompt, "")
         self.vlm_prompt_tabs.addTab(self.input_custom_motion_prompt, "")
         self.vlm_prompt_tabs.addTab(self.input_custom_summary_prompt, "")
-        layout.addWidget(self.vlm_prompt_tabs)
+        self._vlm_prompt_stretch = add_vertically_stretchable(
+            layout,
+            self.vlm_prompt_tabs,
+            default_height=168,
+            min_height=120,
+            max_height=720,
+        )
 
         actions, row = _command_bar()
         self.btn_generate_evidence = _action_button("GhostButton")
@@ -356,11 +365,13 @@ class UnderstandingEvidencePage(QWidget):
         self.chunk_caption_text = QPlainTextEdit()
         self.chunk_caption_text.setObjectName("UnderstandingOutput")
         self.chunk_caption_text.setReadOnly(True)
-        self.chunk_caption_text.setMinimumHeight(132)
-        self.chunk_caption_text.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        self._chunk_caption_stretch = add_vertically_stretchable(
+            chunk_detail_layout,
+            self.chunk_caption_text,
+            default_height=160,
+            min_height=100,
+            max_height=900,
         )
-        chunk_detail_layout.addWidget(self.chunk_caption_text, 1)
         layout.addWidget(self.chunk_detail_card)
 
         self.video_summary_card = _UnderstandingSection()
@@ -371,11 +382,13 @@ class UnderstandingEvidencePage(QWidget):
         self.video_summary_text = QPlainTextEdit()
         self.video_summary_text.setObjectName("UnderstandingOutput")
         self.video_summary_text.setReadOnly(True)
-        self.video_summary_text.setMinimumHeight(120)
-        self.video_summary_text.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        self._video_summary_stretch = add_vertically_stretchable(
+            summary_layout,
+            self.video_summary_text,
+            default_height=140,
+            min_height=100,
+            max_height=900,
         )
-        summary_layout.addWidget(self.video_summary_text, 1)
         self.video_summary_meta_label = QLabel()
         self.video_summary_meta_label.setObjectName("StatusHint")
         self.video_summary_meta_label.setWordWrap(True)
@@ -417,10 +430,13 @@ class UnderstandingEvidencePage(QWidget):
         self.dialogue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dialogue_table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.dialogue_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.dialogue_table.setMinimumHeight(200)
-        self.dialogue_table.setMaximumHeight(280)
-        self.dialogue_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.dialogue_table)
+        self._dialogue_table_stretch = add_vertically_stretchable(
+            layout,
+            self.dialogue_table,
+            default_height=240,
+            min_height=140,
+            max_height=1200,
+        )
 
     def _build_export_step(self, layout: QVBoxLayout) -> None:
         prompt_row = QHBoxLayout()
@@ -441,18 +457,27 @@ class UnderstandingEvidencePage(QWidget):
         self.input_recap_plan_prompt = QPlainTextEdit()
         self.input_recap_prompt = QPlainTextEdit()
         self.input_recap_caption_prompt = QPlainTextEdit()
+        self.input_recap_polish_prompt = QPlainTextEdit()
         for editor in (
             self.input_recap_plan_prompt,
             self.input_recap_prompt,
             self.input_recap_caption_prompt,
+            self.input_recap_polish_prompt,
         ):
             editor.setObjectName("UnderstandingOutput")
-            editor.setMinimumHeight(112)
-            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            editor.setMinimumHeight(80)
+            editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.recap_prompt_tabs.addTab(self.input_recap_plan_prompt, "")
         self.recap_prompt_tabs.addTab(self.input_recap_prompt, "")
         self.recap_prompt_tabs.addTab(self.input_recap_caption_prompt, "")
-        layout.addWidget(self.recap_prompt_tabs)
+        self.recap_prompt_tabs.addTab(self.input_recap_polish_prompt, "")
+        self._recap_prompt_stretch = add_vertically_stretchable(
+            layout,
+            self.recap_prompt_tabs,
+            default_height=168,
+            min_height=120,
+            max_height=720,
+        )
 
         steps, step_row = _command_bar("UnderstandingStepBar")
         self.recap_step_bar = steps
@@ -484,39 +509,96 @@ class UnderstandingEvidencePage(QWidget):
         self.recap_progress_bar.setVisible(False)
         layout.addWidget(self.recap_progress_status)
 
+        self.recap_review_panel = VSCard(
+            variant="sub",
+            margins=(14, 12, 14, 12),
+            spacing=8,
+            object_name="RecapReviewPanel",
+        )
+        review = self.recap_review_panel.content_layout
         self.recap_review_title = QLabel()
         self.recap_review_title.setObjectName("SectionTitle")
         self.recap_review_hint = _step_hint()
-        _add_step_header(layout, self.recap_review_title, self.recap_review_hint)
+        _add_step_header(review, self.recap_review_title, self.recap_review_hint)
         self.recap_review_status = _status_hint()
-        layout.addWidget(self.recap_review_status)
-        self.recap_review_detail = _status_hint()
-        layout.addWidget(self.recap_review_detail)
+        review.addWidget(self.recap_review_status)
+        self.recap_review_detail = QLabel()
+        self.recap_review_detail.setObjectName("RecapReviewDetail")
+        self.recap_review_detail.setWordWrap(True)
+        self.recap_review_detail.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self.recap_review_detail.setMinimumHeight(76)
+        self.recap_review_detail.setMaximumHeight(110)
+        self.recap_review_detail.setTextFormat(Qt.TextFormat.RichText)
+        self.recap_review_detail.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        review.addWidget(self.recap_review_detail)
         review_actions, review_row = _command_bar()
         self.recap_review_action_bar = review_actions
+        self.btn_edit_recap_unit_vo = _action_button("AccentGhostButton")
+        self.btn_edit_recap_unit_vo.setEnabled(False)
+        self.btn_recap_shot_up = _action_button("GhostButton")
+        self.btn_recap_shot_up.setEnabled(False)
+        self.btn_recap_shot_down = _action_button("GhostButton")
+        self.btn_recap_shot_down.setEnabled(False)
+        self.btn_add_recap_shot = _action_button("SuccessGhostButton")
+        self.btn_add_recap_shot.setEnabled(False)
+        self.btn_delete_recap = _action_button("DangerGhostButton")
+        self.btn_delete_recap.setEnabled(False)
+        # Legacy LLM review actions kept hidden (generation stays 4-prompt only).
         self.btn_rewrite_recap_vo = _action_button("GhostButton")
-        self.btn_rewrite_recap_vo.setEnabled(False)
+        self.btn_rewrite_recap_vo.setVisible(False)
         self.btn_rematch_recap_beat = _action_button("GhostButton")
-        self.btn_rematch_recap_beat.setEnabled(False)
+        self.btn_rematch_recap_beat.setVisible(False)
         self.btn_rematch_weak_beats = _action_button("GhostButton")
-        self.btn_rematch_weak_beats.setEnabled(False)
-        review_row.addWidget(self.btn_rewrite_recap_vo, 0)
-        review_row.addWidget(self.btn_rematch_recap_beat, 0)
-        review_row.addWidget(self.btn_rematch_weak_beats, 0)
+        self.btn_rematch_weak_beats.setVisible(False)
+        review_row.addWidget(self.btn_edit_recap_unit_vo, 0)
+        review_row.addWidget(self.btn_recap_shot_up, 0)
+        review_row.addWidget(self.btn_recap_shot_down, 0)
+        review_row.addWidget(self.btn_add_recap_shot, 0)
+        review_row.addWidget(self.btn_delete_recap, 0)
         review_row.addStretch(1)
-        layout.addWidget(review_actions)
-        self.recap_review_table = DataTable(spec=UNDERSTANDING_RECAP_REVIEW_TABLE_SPEC)
-        self.recap_review_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.recap_review_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.recap_review_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.recap_review_table.setMinimumHeight(180)
-        layout.addWidget(self.recap_review_table)
-        for widget in (
-            self.recap_review_title,
-            self.recap_review_hint,
-            self.recap_review_status,
-            self.recap_review_detail,
-            self.recap_review_action_bar,
-            self.recap_review_table,
-        ):
-            widget.setVisible(False)
+        review.addWidget(review_actions)
+        self.recap_review_tree = QTreeWidget()
+        self.recap_review_tree.setObjectName("RecapReviewTree")
+        self.recap_review_tree.setColumnCount(4)
+        self.recap_review_tree.setHeaderLabels(["", "", "", ""])
+        self.recap_review_tree.setRootIsDecorated(True)
+        self.recap_review_tree.setItemsExpandable(True)
+        self.recap_review_tree.setExpandsOnDoubleClick(False)
+        self.recap_review_tree.setUniformRowHeights(True)
+        self.recap_review_tree.setAlternatingRowColors(False)
+        self.recap_review_tree.setIndentation(22)
+        self.recap_review_tree.setItemDelegate(RecapReviewItemDelegate(self.recap_review_tree))
+        self.recap_review_tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.recap_review_tree.setAutoScroll(False)
+        self.recap_review_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.recap_review_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.recap_review_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.recap_review_tree.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.recap_review_tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.recap_review_tree.setAnimated(False)
+        header = self.recap_review_tree.header()
+        header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.recap_review_tree.setColumnWidth(0, 176)
+        self.recap_review_tree.setColumnWidth(1, 118)
+        self.recap_review_tree.setColumnWidth(2, 118)
+        self._recap_review_stretch = add_vertically_stretchable(
+            review,
+            self.recap_review_tree,
+            default_height=420,
+            min_height=220,
+            max_height=1600,
+        )
+        # Alias for older callers that still look for recap_review_table.
+        self.recap_review_table = self.recap_review_tree
+        self.recap_review_panel.setVisible(False)
+        layout.addWidget(self.recap_review_panel)

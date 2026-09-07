@@ -123,6 +123,8 @@ class AgentStarterServiceTests(unittest.TestCase):
                 self._sample_health(),
                 locale="en",
             )
+        self.assertIn("match_mode=fuzzy", text)
+        self.assertIn("text_enhance", text)
         self.assertIn("/agent-doc?format=text", text)
         self.assertIn("do not scan the disk", text)
 

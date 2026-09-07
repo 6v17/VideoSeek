@@ -195,8 +195,12 @@ class SearchWorker(QThread):
             app_cfg = load_config()
             if is_team_client_mode(app_cfg):
                 from src.services.team_client_search import run_team_client_search
+                from src.storage.config_store import get_text_search_enhance_enabled
 
                 kind = str(config.search_kind or "").strip().lower()
+                text_enhance = None
+                if kind != "dialogue" and bool(config.is_text):
+                    text_enhance = bool(get_text_search_enhance_enabled(app_cfg))
                 results = run_team_client_search(
                     server_url=str(app_cfg.get("team_server_url") or ""),
                     query_data=config.query,
@@ -212,6 +216,7 @@ class SearchWorker(QThread):
                     preview_anchor_sec=config.preview_anchor_sec,
                     query_vector=config.query_vector,
                     match_mode=config.search_mode if kind == "dialogue" else None,
+                    text_enhance=text_enhance,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
                 results = filter_hits_by_min_score(results, config.min_score)
@@ -1183,6 +1188,7 @@ class RecapTimelineWorker(QThread):
         system_prompt: str = "",
         plan_prompt: str = "",
         caption_prompt: str = "",
+        polish_prompt: str = "",
         start_from: str = "plan",
         parent=None,
     ):
@@ -1192,6 +1198,7 @@ class RecapTimelineWorker(QThread):
         self.system_prompt = str(system_prompt or "")
         self.plan_prompt = str(plan_prompt or "")
         self.caption_prompt = str(caption_prompt or "")
+        self.polish_prompt = str(polish_prompt or "")
         self.start_from = str(start_from or "plan")
         self._stop_requested = False
 
@@ -1221,6 +1228,7 @@ class RecapTimelineWorker(QThread):
                 "motion_gaps_skip": "understanding_export_recap_motion_gaps_skip",
                 "captions": "understanding_export_recap_captions",
                 "gaps": "understanding_export_recap_gaps",
+                "polish": "understanding_export_recap_polish",
                 "writing": "understanding_export_recap_writing",
             }
 
@@ -1259,6 +1267,7 @@ class RecapTimelineWorker(QThread):
                 system_prompt=self.system_prompt,
                 plan_prompt=self.plan_prompt,
                 caption_prompt=self.caption_prompt,
+                polish_prompt=self.polish_prompt,
                 start_from=self.start_from,
                 should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
                 progress_callback=_on_progress,

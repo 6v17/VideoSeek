@@ -158,6 +158,8 @@ class PreviewGuiMixin:
             # Ensure main player exists on the shared instance before dialog borrows it.
             self.preview_controller._ensure_vlc_player()
             dialog = getattr(self, "_preview_dialog", None)
+            if dialog is not None:
+                self._clear_floating_preview_stay_on_top()
             if dialog is None:
                 dialog = PreviewDialog(
                     self,
@@ -192,6 +194,21 @@ class PreviewGuiMixin:
             return False
         finally:
             QTimer.singleShot(350, self._release_preview_dialog_gate)
+
+    def _clear_floating_preview_stay_on_top(self) -> None:
+        """Drop any stuck WindowStaysOnTopHint from older modal+preview stacking."""
+        from PySide6.QtCore import Qt
+
+        self._preview_force_on_top = False
+        dialog = getattr(self, "_preview_dialog", None)
+        if dialog is None:
+            return
+        flag = Qt.WindowType.WindowStaysOnTopHint
+        if not bool(dialog.windowFlags() & flag):
+            return
+        dialog.setWindowFlag(flag, False)
+        if dialog.isVisible():
+            dialog.show()
 
     def _migrate_floating_preview_off_shared_player(self, dialog, shared_instance) -> None:
         """Drop legacy one-player host hopping if this dialog was created before the fix."""

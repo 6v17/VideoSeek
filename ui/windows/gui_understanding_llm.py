@@ -426,12 +426,15 @@ class UnderstandingLlmGuiMixin:
         system_prompt = ""
         plan_prompt = ""
         caption_prompt = ""
+        polish_prompt = ""
         if hasattr(page, "input_recap_prompt"):
             system_prompt = str(page.input_recap_prompt.toPlainText() or "")
         if hasattr(page, "input_recap_plan_prompt"):
             plan_prompt = str(page.input_recap_plan_prompt.toPlainText() or "")
         if hasattr(page, "input_recap_caption_prompt"):
             caption_prompt = str(page.input_recap_caption_prompt.toPlainText() or "")
+        if hasattr(page, "input_recap_polish_prompt"):
+            polish_prompt = str(page.input_recap_polish_prompt.toPlainText() or "")
         self._recap_motion_timeline_shown = False
         if hasattr(self, "_prepare_understanding_timeline_for_generation"):
             self._prepare_understanding_timeline_for_generation()
@@ -442,6 +445,7 @@ class UnderstandingLlmGuiMixin:
             system_prompt=system_prompt,
             plan_prompt=plan_prompt,
             caption_prompt=caption_prompt,
+            polish_prompt=polish_prompt,
             start_from=start_from,
             parent=self,
         )
@@ -467,6 +471,8 @@ class UnderstandingLlmGuiMixin:
                 active_page.input_recap_plan_prompt.setEnabled(True)
             if hasattr(active_page, "input_recap_caption_prompt"):
                 active_page.input_recap_caption_prompt.setEnabled(True)
+            if hasattr(active_page, "input_recap_polish_prompt"):
+                active_page.input_recap_polish_prompt.setEnabled(True)
             if hasattr(active_page, "btn_reset_recap_prompt"):
                 active_page.btn_reset_recap_prompt.setEnabled(True)
             if hasattr(active_page, "chunk_timeline"):
@@ -670,36 +676,77 @@ class UnderstandingLlmGuiMixin:
             return None
         return load_recap_cuts(video_path, video_id=self._selected_understanding_video_id())
 
+    def _recap_review_scroll_bars(self):
+        tree = self._recap_review_tree()
+        if tree is None:
+            return None, None
+        return tree.verticalScrollBar(), tree.horizontalScrollBar()
+
+    def _capture_recap_review_scroll(self) -> tuple[int, int]:
+        vbar, hbar = self._recap_review_scroll_bars()
+        return (
+            int(vbar.value()) if vbar is not None else 0,
+            int(hbar.value()) if hbar is not None else 0,
+        )
+
+    def _restore_recap_review_scroll(self, vertical: int, horizontal: int) -> None:
+        vbar, hbar = self._recap_review_scroll_bars()
+        if vbar is not None:
+            vbar.setValue(int(vertical))
+        if hbar is not None:
+            hbar.setValue(int(horizontal))
+
+    def _stable_recap_review_mutation(self, mutate) -> None:
+        """Run refresh/select without yanking the page or the review tree."""
+        from contextlib import nullcontext
+
+        from PySide6.QtCore import QTimer
+
+        freeze = getattr(self, "_freeze_understanding_page_scroll", None)
+        page_cm = freeze() if callable(freeze) else nullcontext()
+        vpos, hpos = self._capture_recap_review_scroll()
+        with page_cm:
+            mutate()
+            self._restore_recap_review_scroll(vpos, hpos)
+            QTimer.singleShot(0, lambda: self._restore_recap_review_scroll(vpos, hpos))
+
     def _refresh_recap_review_panel(self) -> None:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QPushButton, QTableWidgetItem
+        from PySide6.QtWidgets import QTreeWidgetItem
 
         from src.services.recap_service import (
             format_recap_clock_range,
+            group_recap_vo_units,
             load_recap_beats,
-            recap_clip_review_rows,
         )
 
         page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if page is None or table is None:
+        tree = getattr(page, "recap_review_tree", None) if page is not None else None
+        if tree is None and page is not None:
+            tree = getattr(page, "recap_review_table", None)
+        if page is None or tree is None:
             return
-        widgets = (
-            getattr(page, "recap_review_title", None),
-            getattr(page, "recap_review_hint", None),
-            getattr(page, "recap_review_status", None),
-            getattr(page, "recap_review_detail", None),
-            getattr(page, "recap_review_action_bar", None),
-            table,
-        )
+        vpos, hpos = self._capture_recap_review_scroll()
+        panel = getattr(page, "recap_review_panel", None)
         payload = self._load_current_recap_cuts()
         clips = list((payload or {}).get("clips") or [])
         show = bool(clips)
-        for widget in widgets:
-            if widget is not None:
-                widget.setVisible(show)
+        if panel is not None:
+            panel.setVisible(show)
+        else:
+            for name in (
+                "recap_review_title",
+                "recap_review_hint",
+                "recap_review_status",
+                "recap_review_detail",
+                "recap_review_action_bar",
+            ):
+                widget = getattr(page, name, None)
+                if widget is not None:
+                    widget.setVisible(show)
+            tree.setVisible(show)
         if not show:
-            table.setRowCount(0)
+            tree.clear()
             if hasattr(page, "recap_review_detail"):
                 page.recap_review_detail.setText("")
             if hasattr(page, "recap_review_status"):
@@ -709,175 +756,141 @@ class UnderstandingLlmGuiMixin:
                         "No shot list yet. Run Match shots or one-click recap first.",
                     )
                 )
+            self._sync_recap_review_rewrite_button()
             return
 
         video_path = self._current_recap_video_path()
-        beats_payload = load_recap_beats(video_path, video_id=self._selected_understanding_video_id()) or {}
+        beats_payload = (
+            load_recap_beats(video_path, video_id=self._selected_understanding_video_id()) or {}
+        )
         beats = list(beats_payload.get("beats") or [])
-        people = list(beats_payload.get("people") or [])
-        # Re-score on open so old cuts / stricter QC show weak flags without a full rematch.
+        units = group_recap_vo_units(clips, beats=beats)
+        empty_label = self.texts.get("understanding_recap_review_flag_empty_vo", "no VO")
+        short_label = self.texts.get("understanding_recap_review_flag_underfill", "short VO")
+        tree.blockSignals(True)
+        tree.setUpdatesEnabled(False)
         try:
-            from src.app.config import load_config
-            from src.services.recap_service import annotate_recap_match_quality, build_recap_pack, write_recap_cuts_file
-
-            video_id = self._selected_understanding_video_id()
-            cfg = load_config()
-            pack = build_recap_pack(video_id, config=cfg) if video_id else None
-            if pack is not None:
-                pack = dict(pack)
-                pack["video_path"] = video_path or pack.get("video_path") or ""
-            scored = annotate_recap_match_quality(
-                clips,
-                beats,
-                pack,
-                people,
-                config=cfg,
-            )
-            # Keep existing VO / timeline clocks; only refresh QC fields.
-            by_src = {
-                (
-                    round(float(row.get("src_in") or 0.0), 3),
-                    round(float(row.get("src_out") or 0.0), 3),
-                    int(row.get("beat_id") or 0),
-                ): row
-                for row in scored
-            }
-            refreshed: list[dict] = []
-            changed = False
-            for clip in clips:
-                row = dict(clip)
-                key = (
-                    round(float(row.get("src_in") or 0.0), 3),
-                    round(float(row.get("src_out") or 0.0), 3),
-                    int(row.get("beat_id") or 0),
+            tree.clear()
+            for unit in units:
+                unit_index = int(unit.get("unit_index") or 0)
+                vo = str(unit.get("vo") or "").strip()
+                beat_id = unit.get("beat_id")
+                picture = float(unit.get("picture_sec") or 0.0)
+                speak = float(unit.get("speak_sec") or 0.0)
+                shortfall = float(unit.get("shortfall_sec") or 0.0)
+                status_parts: list[str] = []
+                if not vo:
+                    status_parts.append(empty_label)
+                elif shortfall > 0.35:
+                    status_parts.append(short_label)
+                label = self.texts.get(
+                    "understanding_recap_review_unit_label",
+                    "Unit {n} · VO {sec:.1f}s",
+                ).format(n=unit_index + 1, sec=speak)
+                if beat_id:
+                    label = f"{label} · #{beat_id}"
+                parent = QTreeWidgetItem(
+                    [
+                        label,
+                        format_recap_clock_range(
+                            float(unit.get("tl_in") or 0.0),
+                            float(unit.get("tl_out") or 0.0),
+                        ),
+                        format_recap_clock_range(
+                            float(unit.get("src_in") or 0.0),
+                            float(unit.get("src_out") or 0.0),
+                        ),
+                        vo or "—",
+                    ]
                 )
-                fresh = by_src.get(key)
-                if fresh:
-                    for field in (
-                        "match_status",
-                        "match_score",
-                        "match_threshold",
-                        "visual_score",
-                        "asr_score",
-                        "vlm_score",
-                        "character_score",
-                        "evidence_support",
-                    ):
-                        if row.get(field) != fresh.get(field):
-                            changed = True
-                        row[field] = fresh.get(field)
-                refreshed.append(row)
-            clips = refreshed
-            if changed and video_path:
-                from src.services.recap_service import recap_cuts_path_for_video
-
-                info = {
-                    "fps": float((payload or {}).get("fps") or 24.0),
-                    "width": int((payload or {}).get("width") or 1920),
-                    "height": int((payload or {}).get("height") or 1080),
+                unit_payload = {
+                    "kind": "unit",
+                    "unit_index": unit_index,
+                    "clip_indices": list(unit.get("clip_indices") or []),
+                    "beat_id": beat_id,
+                    "event": str(unit.get("event") or "").strip(),
+                    "vo": vo,
+                    "src_in": float(unit.get("src_in") or 0.0),
+                    "src_out": float(unit.get("src_out") or 0.0),
+                    "tl_in": float(unit.get("tl_in") or 0.0),
+                    "tl_out": float(unit.get("tl_out") or 0.0),
+                    "picture_sec": picture,
+                    "speak_sec": speak,
+                    "shortfall_sec": shortfall,
+                    "shot_count": len(list(unit.get("shots") or [])),
+                    "status": " · ".join(status_parts) if status_parts else "OK",
                 }
-                write_recap_cuts_file(
-                    recap_cuts_path_for_video(video_path),
-                    title=str((payload or {}).get("title") or ""),
-                    video_path=video_path,
-                    video_id=str((payload or {}).get("video_id") or video_id or ""),
-                    info=info,
-                    laid_out=clips,
-                    beats_path=str((payload or {}).get("beats_path") or ""),
-                    stage=str((payload or {}).get("stage") or "captions"),
-                )
-        except Exception:
-            pass
-        rows = recap_clip_review_rows(clips, beats=beats)
-        flag_labels = {
-            "underfill": self.texts.get("understanding_recap_review_flag_underfill", "short VO"),
-            "empty_vo": self.texts.get("understanding_recap_review_flag_empty_vo", "no VO"),
-            "insert": self.texts.get("understanding_recap_review_flag_insert", "insert"),
-            "bridge": self.texts.get("understanding_recap_review_flag_bridge", "bridge"),
-            "weak_match": self.texts.get("understanding_recap_review_flag_weak_match", "weak match"),
-            "asr": self.texts.get("understanding_recap_review_flag_asr", "ASR✓"),
-            "vlm": self.texts.get("understanding_recap_review_flag_vlm", "VLM✓"),
-            "character": self.texts.get("understanding_recap_review_flag_character", "cast✓"),
-            "thin": self.texts.get("understanding_recap_review_flag_thin", "thin evidence"),
-        }
-        edit_label = self.texts.get("understanding_recap_review_edit", "Edit")
-        running = self._recap_review_busy()
-        table.blockSignals(True)
-        table.setRowCount(0)
-        table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            src_in = float(row.get("src_in") or 0.0)
-            src_out = float(row.get("src_out") or src_in)
-            tl_in = float(row.get("tl_in") or 0.0)
-            tl_out = float(row.get("tl_out") or tl_in)
-            clip_index = int(row.get("index") or 0)
-            idx_item = QTableWidgetItem(str(clip_index + 1))
-            idx_item.setData(Qt.ItemDataRole.UserRole, src_in)
-            idx_item.setData(Qt.ItemDataRole.UserRole + 1, src_out)
-            idx_item.setData(Qt.ItemDataRole.UserRole + 2, clip_index)
-            idx_item.setData(Qt.ItemDataRole.UserRole + 3, dict(row))
-            idx_item.setFlags(idx_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            tl_item = QTableWidgetItem(format_recap_clock_range(tl_in, tl_out))
-            tl_item.setFlags(tl_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            src_item = QTableWidgetItem(format_recap_clock_range(src_in, src_out))
-            src_item.setFlags(src_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            beat_id = row.get("beat_id")
-            beat_item = QTableWidgetItem("" if not beat_id else str(beat_id))
-            beat_item.setFlags(beat_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            vo = str(row.get("vo") or "").strip()
-            vo_item = QTableWidgetItem(vo or "—")
-            vo_item.setFlags(vo_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            vo_item.setToolTip(vo)
-            status_parts = [flag_labels.get(flag, flag) for flag in list(row.get("flags") or [])]
-            status_parts.extend(
-                flag_labels.get(flag, flag) for flag in list(row.get("evidence_flags") or [])
-            )
-            status_item = QTableWidgetItem(" · ".join(status_parts) if status_parts else "OK")
-            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            table.setItem(row_index, 0, idx_item)
-            table.setItem(row_index, 1, tl_item)
-            table.setItem(row_index, 2, src_item)
-            table.setItem(row_index, 3, beat_item)
-            table.setItem(row_index, 4, vo_item)
-            table.setItem(row_index, 5, status_item)
-            button = QPushButton(edit_label)
-            button.setProperty("class", "TableBtn")
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setFixedHeight(28)
-            button.setMinimumWidth(56)
-            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            button.setAutoDefault(False)
-            button.setDefault(False)
-            button.setEnabled(not running)
-            # Queued: table selection finishes before the modal opens (avoids swallowed clicks).
-            button.clicked.connect(
-                lambda *_args, r=row_index: self._queue_edit_recap_review_vo(r)
-            )
-            table.setCellWidget(row_index, 6, button)
-            try:
-                from ui.widgets.styles import repolish_widget
-
-                repolish_widget(button)
-            except Exception:
-                pass
-        table.blockSignals(False)
+                parent.setData(0, Qt.ItemDataRole.UserRole, unit_payload)
+                parent.setToolTip(3, vo)
+                for shot in list(unit.get("shots") or []):
+                    role = str(shot.get("role") or "").strip()
+                    shot_sec = float(shot.get("picture_sec") or 0.0)
+                    child = QTreeWidgetItem(
+                        [
+                            self.texts.get(
+                                "understanding_recap_review_shot_label",
+                                "Shot {n} · {sec:.1f}s",
+                            ).format(n=int(shot.get("clip_index") or 0) + 1, sec=shot_sec),
+                            format_recap_clock_range(
+                                float(shot.get("tl_in") or 0.0),
+                                float(shot.get("tl_out") or 0.0),
+                            ),
+                            format_recap_clock_range(
+                                float(shot.get("src_in") or 0.0),
+                                float(shot.get("src_out") or 0.0),
+                            ),
+                            role or "—",
+                        ]
+                    )
+                    child.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        {
+                            "kind": "shot",
+                            "unit_index": unit_index,
+                            "clip_indices": list(unit.get("clip_indices") or []),
+                            "offset": int(shot.get("offset") or 0),
+                            "clip_index": int(shot.get("clip_index") or 0),
+                            "beat_id": beat_id,
+                            "event": str(unit.get("event") or "").strip(),
+                            "vo": vo,
+                            "role": role,
+                            "src_in": float(shot.get("src_in") or 0.0),
+                            "src_out": float(shot.get("src_out") or 0.0),
+                            "tl_in": float(shot.get("tl_in") or 0.0),
+                            "tl_out": float(shot.get("tl_out") or 0.0),
+                            "picture_sec": float(shot.get("picture_sec") or 0.0),
+                        },
+                    )
+                    parent.addChild(child)
+                tree.addTopLevelItem(parent)
+                parent.setExpanded(True)
+        finally:
+            tree.setUpdatesEnabled(True)
+            tree.blockSignals(False)
+            self._restore_recap_review_scroll(vpos, hpos)
         page.recap_review_status.setText(
             self.texts.get(
                 "understanding_recap_review_ready",
-                "{count} shots · weak {weak} · empty VO {empty}. Double-click to preview.",
+                "{units} units · {shots} shots · short cover {short}. Double-click to preview.",
             ).format(
-                count=len(rows),
-                weak=sum(1 for row in rows if "weak_match" in list(row.get("flags") or [])),
-                empty=sum(1 for row in rows if "empty_vo" in list(row.get("flags") or [])),
+                units=len(units),
+                shots=len(clips),
+                count=len(clips),
+                weak=0,
+                empty=sum(1 for unit in units if not str(unit.get("vo") or "").strip()),
+                short=sum(1 for unit in units if float(unit.get("shortfall_sec") or 0.0) > 0.35),
             )
         )
         page.recap_review_detail.setText(
             self.texts.get(
                 "understanding_recap_review_detail_empty",
-                "Select a row to inspect beat and VO.",
+                "Select a narration unit or child shot.",
             )
         )
         self._sync_recap_review_rewrite_button()
+        # Second restore after status/detail text can change outer page layout.
+        self._restore_recap_review_scroll(vpos, hpos)
 
     def _recap_review_busy(self) -> bool:
         return (
@@ -887,39 +900,51 @@ class UnderstandingLlmGuiMixin:
             or getattr(self, "_recap_rematch_weak_worker", None) is not None
         )
 
-    def _selected_recap_review_clip_index(self) -> int | None:
+    def _recap_review_tree(self):
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return None
+        return getattr(page, "recap_review_tree", None) or getattr(page, "recap_review_table", None)
+
+    def _selected_recap_review_payload(self) -> dict | None:
         from PySide6.QtCore import Qt
 
-        page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is None:
+        tree = self._recap_review_tree()
+        if tree is None:
             return None
-        row = table.currentRow()
-        if row < 0:
-            return None
-        item = table.item(row, 0)
+        item = tree.currentItem()
         if item is None:
             return None
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def _selected_recap_unit_indices(self) -> list[int] | None:
+        payload = self._selected_recap_review_payload()
+        if not payload:
+            return None
+        indices = [int(i) for i in list(payload.get("clip_indices") or [])]
+        return indices or None
+
+    def _selected_recap_review_clip_index(self) -> int | None:
+        payload = self._selected_recap_review_payload()
+        if not payload:
+            return None
+        if payload.get("kind") == "shot":
+            try:
+                return int(payload.get("clip_index"))
+            except (TypeError, ValueError):
+                return None
+        indices = list(payload.get("clip_indices") or [])
+        if not indices:
+            return None
         try:
-            return int(item.data(Qt.ItemDataRole.UserRole + 2))
+            return int(indices[0])
         except (TypeError, ValueError):
             return None
 
     def _selected_recap_review_beat_id(self) -> int | None:
-        from PySide6.QtCore import Qt
-
-        page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is None:
-            return None
-        row = table.currentRow()
-        if row < 0:
-            return None
-        item = table.item(row, 0)
-        if item is None:
-            return None
-        payload = item.data(Qt.ItemDataRole.UserRole + 3)
-        if not isinstance(payload, dict):
+        payload = self._selected_recap_review_payload()
+        if not payload:
             return None
         try:
             beat_id = int(payload.get("beat_id") or 0)
@@ -933,38 +958,87 @@ class UnderstandingLlmGuiMixin:
             return
         busy = self._recap_review_busy()
         has_cuts = self._current_video_has_recap_cuts()
-        selected = self._selected_recap_review_clip_index() is not None
-        beat_id = self._selected_recap_review_beat_id()
-        rewrite = getattr(page, "btn_rewrite_recap_vo", None)
-        if rewrite is not None:
-            rewrite.setEnabled((not busy) and selected and has_cuts)
-        rematch = getattr(page, "btn_rematch_recap_beat", None)
-        if rematch is not None:
-            rematch.setEnabled((not busy) and beat_id is not None and has_cuts)
-        weak = getattr(page, "btn_rematch_weak_beats", None)
-        if weak is not None:
-            weak_count = self._current_weak_match_beat_count()
-            weak.setEnabled((not busy) and has_cuts and weak_count > 0)
+        payload = self._selected_recap_review_payload()
+        unit_ok = bool(payload) and has_cuts and (not busy)
+        edit = getattr(page, "btn_edit_recap_unit_vo", None)
+        if edit is not None:
+            edit.setEnabled(unit_ok)
+        add_btn = getattr(page, "btn_add_recap_shot", None)
+        if add_btn is not None:
+            add_btn.setEnabled(unit_ok)
+        shot = payload if payload and payload.get("kind") == "shot" else None
+        offsets = list((payload or {}).get("clip_indices") or []) if payload else []
+        offset = int((shot or {}).get("offset") or 0) if shot else -1
+        up = getattr(page, "btn_recap_shot_up", None)
+        if up is not None:
+            up.setEnabled(bool(shot) and offset > 0 and has_cuts and (not busy))
+        down = getattr(page, "btn_recap_shot_down", None)
+        if down is not None:
+            down.setEnabled(
+                bool(shot) and 0 <= offset < len(offsets) - 1 and has_cuts and (not busy)
+            )
+        delete_btn = getattr(page, "btn_delete_recap", None)
+        if delete_btn is not None:
+            delete_btn.setEnabled(unit_ok)
+            if payload and payload.get("kind") == "shot":
+                delete_btn.setToolTip(
+                    self.texts.get(
+                        "understanding_recap_review_delete_shot_tip",
+                        "Delete this child shot. If it is the last shot, the narration unit remains.",
+                    )
+                )
+            else:
+                delete_btn.setToolTip(
+                    self.texts.get(
+                        "understanding_recap_review_delete_unit_tip",
+                        "Delete this narration unit (VO and all child shots).",
+                    )
+                )
+        # Legacy LLM buttons stay hidden/disabled.
+        for name in ("btn_rewrite_recap_vo", "btn_rematch_recap_beat", "btn_rematch_weak_beats"):
+            button = getattr(page, name, None)
+            if button is not None:
+                button.setEnabled(False)
+                button.setVisible(False)
 
     def _current_weak_match_beat_count(self) -> int:
         from src.services.recap_service import list_weak_match_beat_ids
 
         payload = self._load_current_recap_cuts() or {}
         return len(list_weak_match_beat_ids(list(payload.get("clips") or [])))
-    def _queue_edit_recap_review_vo(self, row: int) -> None:
-        from PySide6.QtCore import QTimer
 
-        page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is not None and 0 <= int(row) < table.rowCount():
-            table.selectRow(int(row))
-        QTimer.singleShot(0, lambda r=int(row): self._edit_recap_review_vo(r))
-
-    def _edit_recap_review_vo(self, row: int) -> None:
+    def _select_recap_review_unit(self, unit_index: int, *, offset: int | None = None) -> None:
         from PySide6.QtCore import Qt
+
+        tree = self._recap_review_tree()
+        if tree is None:
+            return
+        vpos, hpos = self._capture_recap_review_scroll()
+        for top in range(tree.topLevelItemCount()):
+            parent = tree.topLevelItem(top)
+            if parent is None:
+                continue
+            payload = parent.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(payload, dict):
+                continue
+            if int(payload.get("unit_index") or -1) != int(unit_index):
+                continue
+            target = parent
+            if offset is not None and 0 <= int(offset) < parent.childCount():
+                child = parent.child(int(offset))
+                if child is not None:
+                    target = child
+            tree.setCurrentItem(target)
+            # setCurrentItem may scroll-to-item; keep the viewport where the user left it.
+            self._restore_recap_review_scroll(vpos, hpos)
+            self._on_recap_review_item_clicked(target, 0)
+            self._restore_recap_review_scroll(vpos, hpos)
+            return
+
+    def edit_selected_recap_unit_vo(self) -> None:
         from PySide6.QtWidgets import QDialog
 
-        from src.services.recap_service import save_recap_clip_vo
+        from src.services.recap_service import save_recap_vo_unit
         from ui.dialogs.recap_vo import RecapVoDialog
 
         if self._recap_review_busy():
@@ -977,20 +1051,30 @@ class UnderstandingLlmGuiMixin:
                 kind="warning",
             )
             return
-        page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is None:
+        payload = self._selected_recap_review_payload()
+        indices = self._selected_recap_unit_indices()
+        if not payload or not indices:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_edit_need_unit",
+                    "Select a narration unit first.",
+                ),
+                kind="warning",
+            )
             return
-        item = table.item(int(row), 0)
-        if item is None:
-            return
-        try:
-            clip_index = int(item.data(Qt.ItemDataRole.UserRole + 2))
-        except (TypeError, ValueError):
-            return
-        payload = item.data(Qt.ItemDataRole.UserRole + 3)
-        if not isinstance(payload, dict):
-            payload = {}
+        unit_index = int(payload.get("unit_index") or 0)
+        # Prefer parent unit VO when a child shot is selected.
+        if payload.get("kind") == "shot":
+            tree = self._recap_review_tree()
+            item = tree.currentItem() if tree is not None else None
+            parent = item.parent() if item is not None else None
+            if parent is not None:
+                from PySide6.QtCore import Qt
+
+                parent_payload = parent.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(parent_payload, dict):
+                    payload = parent_payload
         dialog = RecapVoDialog(
             self,
             texts=self.texts,
@@ -1009,9 +1093,9 @@ class UnderstandingLlmGuiMixin:
             )
             return
         try:
-            result = save_recap_clip_vo(
+            result = save_recap_vo_unit(
                 video_path,
-                clip_index,
+                indices,
                 str(dialog.result_vo() or ""),
                 video_id=self._selected_understanding_video_id(),
             )
@@ -1021,29 +1105,362 @@ class UnderstandingLlmGuiMixin:
                 exc,
             )
             return
-        self._refresh_recap_review_panel()
-        table = getattr(page, "recap_review_table", None)
-        if table is not None:
-            for index in range(table.rowCount()):
-                cell = table.item(index, 0)
-                if cell is None:
-                    continue
-                try:
-                    if int(cell.data(Qt.ItemDataRole.UserRole + 2)) == clip_index:
-                        table.selectRow(index)
-                        self._on_recap_review_cell_clicked(index, 0)
-                        break
-                except (TypeError, ValueError):
-                    continue
+        self._stable_recap_review_mutation(
+            lambda: (
+                self._refresh_recap_review_panel(),
+                self._select_recap_review_unit(unit_index),
+            )
+        )
+        speak = float(result.get("speak_sec") or 0.0)
         message = self.texts.get(
             "understanding_recap_review_edit_saved",
-            "Saved VO on shot {index}.",
-        ).format(index=int(result.get("clip_index") or clip_index) + 1)
+            "Saved unit {index} VO (~{sec:.1f}s cover).",
+        ).format(index=unit_index + 1, sec=speak)
+        page = getattr(self, "understanding_page", None)
         if page is not None:
             page.lbl_status.setText(message)
             if hasattr(page, "recap_review_status"):
                 page.recap_review_status.setText(message)
         self._sync_recap_review_rewrite_button()
+
+    def move_selected_recap_shot(self, delta: int) -> None:
+        from src.services.recap_service import reorder_recap_unit_shot
+
+        if self._recap_review_busy():
+            return
+        payload = self._selected_recap_review_payload()
+        if not payload or payload.get("kind") != "shot":
+            return
+        indices = [int(i) for i in list(payload.get("clip_indices") or [])]
+        from_offset = int(payload.get("offset") or 0)
+        to_offset = from_offset + int(delta)
+        if to_offset < 0 or to_offset >= len(indices):
+            return
+        video_path = self._current_recap_video_path()
+        if not video_path:
+            return
+        unit_index = int(payload.get("unit_index") or 0)
+        try:
+            reorder_recap_unit_shot(
+                video_path,
+                indices,
+                from_offset,
+                to_offset,
+                video_id=self._selected_understanding_video_id(),
+            )
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_review_reorder_failed",
+                    "Could not reorder shots",
+                ),
+                exc,
+            )
+            return
+        self._stable_recap_review_mutation(
+            lambda: (
+                self._refresh_recap_review_panel(),
+                self._select_recap_review_unit(unit_index, offset=to_offset),
+            )
+        )
+
+    def delete_selected_recap_review(self) -> None:
+        from src.services.recap_service import delete_recap_unit_shot, delete_recap_vo_unit
+
+        if self._recap_review_busy():
+            return
+        payload = self._selected_recap_review_payload()
+        if not payload:
+            return
+        video_path = self._current_recap_video_path()
+        if not video_path:
+            return
+        indices = [int(i) for i in list(payload.get("clip_indices") or [])]
+        if not indices:
+            return
+        unit_index = int(payload.get("unit_index") or 0)
+        kind = str(payload.get("kind") or "unit")
+        if kind == "shot":
+            offset = int(payload.get("offset") or 0)
+            confirm = self.texts.get(
+                "understanding_recap_review_delete_shot_confirm",
+                "Delete this child shot?\n• Narration text is kept on the unit\n• If this is the last shot, the unit stays as VO-only",
+            )
+            if not self.show_confirm_dialog(
+                self.texts.get("understanding_recap_review_delete_title", "Delete"),
+                confirm,
+                kind="warning",
+                confirm_text=self.texts.get("understanding_recap_review_delete_action", "Delete"),
+            ):
+                return
+            try:
+                delete_recap_unit_shot(
+                    video_path,
+                    indices,
+                    offset,
+                    video_id=self._selected_understanding_video_id(),
+                )
+            except Exception as exc:
+                self.show_error_dialog(
+                    self.texts.get(
+                        "understanding_recap_review_delete_failed",
+                        "Could not delete",
+                    ),
+                    exc,
+                )
+                return
+            self._stable_recap_review_mutation(
+                lambda: (
+                    self._refresh_recap_review_panel(),
+                    self._select_recap_review_unit(unit_index),
+                )
+            )
+            message = self.texts.get(
+                "understanding_recap_review_delete_shot_saved",
+                "Deleted a child shot from unit {index}.",
+            ).format(index=unit_index + 1)
+        else:
+            vo = str(payload.get("vo") or "").strip()
+            shots = int(payload.get("shot_count") or len(indices) or 0)
+            confirm = self.texts.get(
+                "understanding_recap_review_delete_unit_confirm",
+                "Delete narration unit {index}?\n• Removes VO and {shots} shot(s)\n• This cannot be undone from here",
+            ).format(index=unit_index + 1, shots=shots, vo=(vo[:40] + ("…" if len(vo) > 40 else "")))
+            if not self.show_confirm_dialog(
+                self.texts.get("understanding_recap_review_delete_title", "Delete"),
+                confirm,
+                kind="warning",
+                confirm_text=self.texts.get("understanding_recap_review_delete_action", "Delete"),
+            ):
+                return
+            try:
+                delete_recap_vo_unit(
+                    video_path,
+                    indices,
+                    video_id=self._selected_understanding_video_id(),
+                )
+            except Exception as exc:
+                self.show_error_dialog(
+                    self.texts.get(
+                        "understanding_recap_review_delete_failed",
+                        "Could not delete",
+                    ),
+                    exc,
+                )
+                return
+            self._stable_recap_review_mutation(lambda: self._refresh_recap_review_panel())
+            message = self.texts.get(
+                "understanding_recap_review_delete_unit_saved",
+                "Deleted narration unit {index}.",
+            ).format(index=unit_index + 1)
+        page = getattr(self, "understanding_page", None)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(message)
+        self._sync_recap_review_rewrite_button()
+
+    def add_shot_to_selected_recap_unit(self) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from ui.dialogs.recap_chunk_pick import RecapChunkPickDialog
+        from src.services.recap_service import classify_chunk_usage_for_clips
+
+        if self._recap_review_busy():
+            return
+        payload = self._selected_recap_review_payload()
+        indices = self._selected_recap_unit_indices()
+        if not payload or not indices:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_edit_need_unit",
+                    "Select a narration unit first.",
+                ),
+                kind="warning",
+            )
+            return
+
+        chunks = list(getattr(self, "_understanding_index_chunks", []) or [])
+        if not chunks:
+            try:
+                from src.app.config import load_config
+                from src.services.indexing_service import load_video_chunks_by_id
+
+                video_id = self._selected_understanding_video_id()
+                if video_id:
+                    chunks = list(load_video_chunks_by_id(video_id, load_config()) or [])
+                    self._understanding_index_chunks = list(chunks)
+            except Exception:
+                chunks = []
+        if not chunks:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_recap_review_chunk_pick_no_chunks",
+                    "No semantic chunks for this video yet.",
+                ),
+                kind="warning",
+            )
+            return
+
+        cuts = self._load_current_recap_cuts() or {}
+        all_clips = list(cuts.get("clips") or [])
+        unit_clips = [all_clips[i] for i in indices if 0 <= int(i) < len(all_clips)]
+        usage = classify_chunk_usage_for_clips(
+            chunks,
+            unit_clips=unit_clips,
+            all_clips=all_clips,
+        )
+        # Anchor the axis on this unit's first shot, not the currently selected row's out-point.
+        first_clip = unit_clips[0] if unit_clips else {}
+        focus = float(
+            first_clip.get("src_in")
+            or first_clip.get("src_out")
+            or payload.get("src_in")
+            or 0.0
+        )
+        duration = float(
+            (getattr(self, "_understanding_video_context", {}) or {}).get("duration_sec") or 0.0
+        )
+
+        # Single modal only — never nest floating preview inside this picker.
+        dialog = RecapChunkPickDialog(
+            self,
+            texts=self.texts,
+            chunks=chunks,
+            usage_by_index=usage,
+            duration_sec=duration,
+            focus_sec=focus,
+        )
+        if int(dialog.exec()) != int(QDialog.DialogCode.Accepted):
+            return
+        if dialog.chose_custom():
+            self._insert_recap_unit_shot_custom_dialog()
+            return
+        shot = dialog.result_shot() or {}
+        self._insert_recap_unit_shot(
+            src_in=float(shot.get("src_in") or 0.0),
+            src_out=float(shot.get("src_out") or 0.0),
+            chunk_index=shot.get("chunk_index"),
+        )
+
+
+    def _recap_add_shot_anchor(self) -> tuple[dict, list[int], int, float, float] | None:
+        payload = self._selected_recap_review_payload()
+        indices = self._selected_recap_unit_indices()
+        if not payload or not indices:
+            return None
+        if payload.get("kind") == "shot":
+            after_offset = int(payload.get("offset") or 0)
+            src_in = float(payload.get("src_in") or 0.0)
+            src_out = max(src_in + 0.5, float(payload.get("src_out") or src_in + 0.5))
+        else:
+            after_offset = max(0, len(indices) - 1)
+            # Prefer last child shot clocks when parent unit is selected.
+            tree = self._recap_review_tree()
+            item = tree.currentItem() if tree is not None else None
+            child = item.child(item.childCount() - 1) if item is not None and item.childCount() else None
+            if child is not None:
+                from PySide6.QtCore import Qt
+
+                child_payload = child.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(child_payload, dict):
+                    src_in = float(child_payload.get("src_in") or 0.0)
+                    src_out = max(src_in + 0.5, float(child_payload.get("src_out") or src_in + 0.5))
+                else:
+                    src_in = float(payload.get("src_in") or 0.0)
+                    src_out = max(src_in + 0.5, float(payload.get("src_out") or src_in + 0.5))
+            else:
+                src_in = float(payload.get("src_in") or 0.0)
+                src_out = max(src_in + 0.5, float(payload.get("src_out") or src_in + 0.5))
+        return payload, indices, after_offset, src_in, src_out
+
+    def _insert_recap_unit_shot(
+        self,
+        *,
+        duration_sec: float | None = 2.0,
+        src_in: float | None = None,
+        src_out: float | None = None,
+        chunk_index: int | None = None,
+    ) -> None:
+        from src.services.recap_service import add_recap_unit_shot
+
+        anchor = self._recap_add_shot_anchor()
+        if anchor is None:
+            return
+        payload, indices, after_offset, anchor_in, anchor_out = anchor
+        if src_in is None or src_out is None:
+            span = max(0.5, float(anchor_out) - float(anchor_in))
+            if duration_sec is None:
+                duration_sec = span
+            start = float(anchor_out)
+            end = start + max(0.5, float(duration_sec))
+        else:
+            start = float(src_in)
+            end = float(src_out)
+        video_path = self._current_recap_video_path()
+        if not video_path:
+            return
+        unit_index = int(payload.get("unit_index") or 0)
+        kwargs: dict = {
+            "src_in": start,
+            "src_out": end,
+            "after_offset": after_offset,
+            "video_id": self._selected_understanding_video_id(),
+        }
+        if chunk_index is not None:
+            kwargs["chunk_index"] = int(chunk_index)
+        try:
+            add_recap_unit_shot(video_path, indices, **kwargs)
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_review_add_shot_failed",
+                    "Could not add shot",
+                ),
+                exc,
+            )
+            return
+        self._stable_recap_review_mutation(
+            lambda: (
+                self._refresh_recap_review_panel(),
+                self._select_recap_review_unit(unit_index, offset=(after_offset or 0) + 1),
+            )
+        )
+        page = getattr(self, "understanding_page", None)
+        message = self.texts.get(
+            "understanding_recap_review_add_shot_saved",
+            "Added a child shot to unit {index}.",
+        ).format(index=unit_index + 1)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "recap_review_status"):
+                page.recap_review_status.setText(message)
+
+    def _insert_recap_unit_shot_custom_dialog(self) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from ui.dialogs.recap_vo import RecapAddShotDialog
+
+        anchor = self._recap_add_shot_anchor()
+        if anchor is None:
+            return
+        _payload, _indices, _after, src_in, src_out = anchor
+        # Seed custom dialog at the insert point (after current out).
+        dialog = RecapAddShotDialog(
+            self,
+            texts=self.texts,
+            src_in=float(src_out),
+            src_out=float(src_out) + max(1.0, float(src_out) - float(src_in)),
+        )
+        if int(dialog.exec()) != int(QDialog.DialogCode.Accepted):
+            return
+        rang = dialog.result_range() or {}
+        self._insert_recap_unit_shot(
+            src_in=float(rang.get("src_in") or 0.0),
+            src_out=float(rang.get("src_out") or 0.0),
+        )
 
     def rewrite_selected_recap_vo(self) -> None:
         from ui.workers import RecapClipCaptionWorker
@@ -1153,21 +1570,6 @@ class UnderstandingLlmGuiMixin:
         result = dict(payload or {})
         clip_index = int(result.get("clip_index") or 0)
         self._refresh_recap_review_panel()
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is not None:
-            from PySide6.QtCore import Qt
-
-            for index in range(table.rowCount()):
-                cell = table.item(index, 0)
-                if cell is None:
-                    continue
-                try:
-                    if int(cell.data(Qt.ItemDataRole.UserRole + 2)) == clip_index:
-                        table.selectRow(index)
-                        self._on_recap_review_cell_clicked(index, 0)
-                        break
-                except (TypeError, ValueError):
-                    continue
         message = self.texts.get(
             "understanding_recap_review_rewrite_done",
             "Rewrote VO on shot {index}.",
@@ -1301,24 +1703,6 @@ class UnderstandingLlmGuiMixin:
         beat_id = int(result.get("beat_id") or 0)
         count = int(result.get("beat_clip_count") or result.get("clip_count") or 0)
         self._refresh_recap_review_panel()
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is not None and beat_id > 0:
-            from PySide6.QtCore import Qt
-
-            for index in range(table.rowCount()):
-                cell = table.item(index, 0)
-                if cell is None:
-                    continue
-                payload_row = cell.data(Qt.ItemDataRole.UserRole + 3)
-                if not isinstance(payload_row, dict):
-                    continue
-                try:
-                    if int(payload_row.get("beat_id") or 0) == beat_id:
-                        table.selectRow(index)
-                        self._on_recap_review_cell_clicked(index, 0)
-                        break
-                except (TypeError, ValueError):
-                    continue
         message = self.texts.get(
             "understanding_recap_review_rematch_done",
             "Rematched beat #{beat} ({count} shots).",
@@ -1466,59 +1850,73 @@ class UnderstandingLlmGuiMixin:
                 page.recap_review_status.setText(message)
         self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
 
-    def _on_recap_review_cell_clicked(self, row: int, column: int) -> None:
+    def _on_recap_review_item_clicked(self, item, column: int) -> None:
+        _ = column
         from PySide6.QtCore import Qt
 
         page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is None:
+        if page is None or item is None:
             return
-        item = table.item(int(row), 0)
-        if item is None:
+        freeze = getattr(self, "_freeze_understanding_page_scroll", None)
+        if freeze is not None:
+            with freeze():
+                self._update_recap_review_detail_from_item(item)
+                self._sync_recap_review_rewrite_button()
             return
-        payload = item.data(Qt.ItemDataRole.UserRole + 3)
+        self._update_recap_review_detail_from_item(item)
+        self._sync_recap_review_rewrite_button()
+
+    def _update_recap_review_detail_from_item(self, item) -> None:
+        import html
+
+        from PySide6.QtCore import Qt
+
+        page = getattr(self, "understanding_page", None)
+        if page is None or item is None:
+            return
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
         if not isinstance(payload, dict):
             return
         from src.services.recap_service import format_recap_clock_range
 
         beat = payload.get("beat_id") or "—"
         event = str(payload.get("event") or "").strip() or "—"
-        reason = str(payload.get("reason") or "").strip() or "—"
         vo = str(payload.get("vo") or "").strip()
-        evidence_parts = []
-        for flag in list(payload.get("evidence_flags") or []):
-            evidence_parts.append(
-                self.texts.get(f"understanding_recap_review_flag_{flag}", flag)
+        kind = str(payload.get("kind") or "unit")
+
+        def _chip(text: str, *, fg: str, bg: str) -> str:
+            return (
+                f'<span style="color:{fg};background:{bg};font-weight:700;'
+                f'padding:1px 7px;border-radius:4px;">{html.escape(text)}</span>'
             )
-        required = [str(tag) for tag in list(payload.get("evidence_required") or []) if str(tag).strip()]
-        if required:
-            evidence_parts.append(
-                self.texts.get(
-                    "understanding_recap_review_evidence_required",
-                    "needs {tags}",
-                ).format(tags="/".join(required))
+
+        def _timing_colors():
+            try:
+                from ui.widgets.styles import theme_color_map
+
+                colors = theme_color_map(bool(getattr(self, "is_dark_mode", True)))
+            except Exception:
+                colors = {}
+            return colors
+
+        colors = _timing_colors()
+        if kind == "shot":
+            picture = float(payload.get("picture_sec") or 0.0)
+            timing_plain = self.texts.get(
+                "understanding_recap_review_detail_shot_timing",
+                "Picture {picture:.1f}s",
+            ).format(picture=picture)
+            timing = _chip(
+                timing_plain,
+                fg=str(colors.get("SUCCESS") or "#0f7b3a"),
+                bg=str(colors.get("SUCCESS_SOFT") or "#e6f5ec"),
             )
-        if payload.get("match_status") == "weak_match":
-            evidence_parts.insert(
-                0,
-                self.texts.get("understanding_recap_review_flag_weak_match", "weak match"),
-            )
-        evidence = " · ".join(evidence_parts) if evidence_parts else self.texts.get(
-            "understanding_recap_review_evidence_none",
-            "none tagged",
-        )
-        vo_owner = self.texts.get(
-            "understanding_recap_review_vo_owner_own"
-            if vo
-            else "understanding_recap_review_vo_owner_empty",
-            "this shot" if vo else "no VO on this shot",
-        )
-        page.recap_review_detail.setText(
-            self.texts.get(
-                "understanding_recap_review_detail",
-                "Beat #{beat} · recap {tl} · source {src}\nVO owner: {vo_owner}\nEvent: {event}\nEvidence: {evidence}\nNote: {reason}\nVO: {vo}",
+            detail = self.texts.get(
+                "understanding_recap_review_detail_shot",
+                "Shot {n} · role {role}\nRecap {tl} · source {src}\n{timing}\nUnit VO: {vo}",
             ).format(
-                beat=beat,
+                n=int(payload.get("clip_index") or 0) + 1,
+                role=html.escape(str(payload.get("role") or "—") or "—"),
                 tl=format_recap_clock_range(
                     float(payload.get("tl_in") or 0.0),
                     float(payload.get("tl_out") or 0.0),
@@ -1527,34 +1925,70 @@ class UnderstandingLlmGuiMixin:
                     float(payload.get("src_in") or 0.0),
                     float(payload.get("src_out") or 0.0),
                 ),
-                vo_owner=vo_owner,
-                event=event,
-                evidence=evidence,
-                reason=reason,
-                vo=vo or "—",
+                timing=timing,
+                vo=html.escape(vo or "—"),
             )
-        )
-        self._sync_recap_review_rewrite_button()
+        else:
+            speak = float(payload.get("speak_sec") or 0.0)
+            picture = float(payload.get("picture_sec") or 0.0)
+            shortfall = float(payload.get("shortfall_sec") or max(0.0, speak - picture))
+            speak_fg = str(colors.get("WARN") or "#9a6700")
+            speak_bg = str(colors.get("WARN_SOFT") or "#fff4ce")
+            if shortfall > 0.35:
+                speak_fg = str(colors.get("DANGER") or "#c42b1c")
+                speak_bg = str(colors.get("DANGER_SOFT") or "#fde7e9")
+            speak_label = self.texts.get(
+                "understanding_recap_review_detail_timing_speak",
+                "Speak ~{speak:.1f}s",
+            ).format(speak=speak)
+            picture_label = self.texts.get(
+                "understanding_recap_review_detail_timing_picture",
+                "picture {picture:.1f}s",
+            ).format(picture=picture)
+            timing = (
+                f"{_chip(speak_label, fg=speak_fg, bg=speak_bg)}"
+                f' <span style="color:{html.escape(str(colors.get("MUTED") or "#6b6b6b"))};">/</span> '
+                f'{_chip(picture_label, fg=str(colors.get("SUCCESS") or "#0f7b3a"), bg=str(colors.get("SUCCESS_SOFT") or "#e6f5ec"))}'
+            )
+            detail = self.texts.get(
+                "understanding_recap_review_detail",
+                "Unit {unit} · beat #{beat} · {shots} shots\nRecap {tl} · source {src}\n{timing}\nEvent: {event}\nVO: {vo}",
+            ).format(
+                unit=int(payload.get("unit_index") or 0) + 1,
+                beat=html.escape(str(beat)),
+                shots=int(payload.get("shot_count") or len(list(payload.get("clip_indices") or []))),
+                tl=format_recap_clock_range(
+                    float(payload.get("tl_in") or 0.0),
+                    float(payload.get("tl_out") or 0.0),
+                ),
+                src=format_recap_clock_range(
+                    float(payload.get("src_in") or 0.0),
+                    float(payload.get("src_out") or 0.0),
+                ),
+                timing=timing,
+                event=html.escape(event),
+                vo=html.escape(vo or "—"),
+            )
+        # Keep detail height stable so page scroll does not jump.
+        page.recap_review_detail.setTextFormat(Qt.TextFormat.RichText)
+        page.recap_review_detail.setText(detail.replace("\n", "<br/>"))
 
-    def _on_recap_review_cell_double_clicked(self, row: int, column: int) -> None:
+    def _on_recap_review_item_double_clicked(self, item, column: int) -> None:
+        _ = column
         from PySide6.QtCore import Qt
 
         page = getattr(self, "understanding_page", None)
-        table = getattr(page, "recap_review_table", None) if page is not None else None
-        if table is None:
-            return
-        item = table.item(int(row), 0)
         if item is None:
             return
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict):
+            return
         try:
-            start = float(item.data(Qt.ItemDataRole.UserRole))
-            end = float(item.data(Qt.ItemDataRole.UserRole + 1))
+            start = float(payload.get("src_in") or 0.0)
+            end = float(payload.get("src_out") or start)
         except (TypeError, ValueError):
             return
-        payload = item.data(Qt.ItemDataRole.UserRole + 3)
-        vo = ""
-        if isinstance(payload, dict):
-            vo = str(payload.get("vo") or "").strip()
+        vo = str(payload.get("vo") or "").strip()
         self._play_understanding_range(start, end, caption_text=vo or None)
         if page is not None:
             from src.utils import format_timecode_range
@@ -1565,6 +1999,21 @@ class UnderstandingLlmGuiMixin:
                     "Previewing source {range}",
                 ).format(range=format_timecode_range(start, end))
             )
+
+    def _on_recap_review_cell_clicked(self, row: int, column: int) -> None:
+        # Back-compat for older callers; tree selection uses item handlers.
+        _ = row, column
+        tree = self._recap_review_tree()
+        if tree is None:
+            return
+        self._on_recap_review_item_clicked(tree.currentItem(), 0)
+
+    def _on_recap_review_cell_double_clicked(self, row: int, column: int) -> None:
+        _ = row, column
+        tree = self._recap_review_tree()
+        if tree is None:
+            return
+        self._on_recap_review_item_double_clicked(tree.currentItem(), 0)
 
     def export_current_recap_jianying(self):
         from src.services.jianying_draft_service import (
@@ -1684,7 +2133,12 @@ class UnderstandingLlmGuiMixin:
         )
 
     def reset_recap_prompt(self):
-        from src.services.recap_service import RECAP_CAPTION_SYSTEM, RECAP_PLAN_SYSTEM, RECAP_SYSTEM
+        from src.services.recap_service import (
+            RECAP_CAPTION_SYSTEM,
+            RECAP_PLAN_SYSTEM,
+            RECAP_SYSTEM,
+            RECAP_VO_POLISH_SYSTEM,
+        )
 
         page = getattr(self, "understanding_page", None)
         if page is None or not hasattr(page, "input_recap_prompt"):
@@ -1696,6 +2150,7 @@ class UnderstandingLlmGuiMixin:
             (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
             (page.input_recap_prompt, RECAP_SYSTEM),
             (getattr(page, "input_recap_caption_prompt", None), RECAP_CAPTION_SYSTEM),
+            (getattr(page, "input_recap_polish_prompt", None), RECAP_VO_POLISH_SYSTEM),
         )
         if index < 0 or index >= len(editors):
             index = 1
@@ -1704,17 +2159,25 @@ class UnderstandingLlmGuiMixin:
             editor.setPlainText(default)
 
     def _ensure_recap_prompt_default(self):
-        from src.services.recap_service import RECAP_CAPTION_SYSTEM, RECAP_GAP_SYSTEM, RECAP_PLAN_SYSTEM, RECAP_SYSTEM
+        from src.services.recap_service import (
+            RECAP_CAPTION_SYSTEM,
+            RECAP_GAP_SYSTEM,
+            RECAP_PLAN_SYSTEM,
+            RECAP_SYSTEM,
+            RECAP_VO_POLISH_SYSTEM,
+        )
 
         page = getattr(self, "understanding_page", None)
         if page is None:
             return
         caption_editor = getattr(page, "input_recap_caption_prompt", None)
         match_editor = getattr(page, "input_recap_prompt", None)
+        polish_editor = getattr(page, "input_recap_polish_prompt", None)
         pairs = (
             (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
             (match_editor, RECAP_SYSTEM),
             (caption_editor, RECAP_CAPTION_SYSTEM),
+            (polish_editor, RECAP_VO_POLISH_SYSTEM),
         )
         for editor, default in pairs:
             if editor is None:

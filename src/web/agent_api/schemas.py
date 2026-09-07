@@ -36,6 +36,8 @@ class AgentSearchRequest(BaseModel):
     query_vector: Optional[List[float]] = None
     # Dialogue only: exact | fuzzy | auto (team clients may also send via search_mode).
     match_mode: Optional[str] = None
+    # Visual text search: multi-route CLIP + RRF. null = use server text_search_enhance_enabled.
+    text_enhance: Optional[bool] = None
     client_request_id: Optional[str] = None
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
@@ -67,6 +69,7 @@ class AgentBatchSearchRequest(BaseModel):
     min_score: Optional[float] = None
     search_precision_mode: Optional[str] = None
     video_discovery_enabled: Optional[bool] = None
+    text_enhance: Optional[bool] = None
     continue_on_error: bool = True
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
@@ -98,6 +101,48 @@ class AgentManifestRequest(BaseModel):
     pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
     pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
     mode: Optional[str] = None
+
+
+class AgentFrameExtractRequest(BaseModel):
+    """Single-frame JPEG extract at time_sec (local video_path on the API host)."""
+
+    video_path: str
+    time_sec: float
+    # Longest edge after optional downscale (64–1920); default applied in execute.
+    max_edge: Optional[int] = None
+    client_request_id: Optional[str] = None
+
+
+class AgentBatchFrameExtractRequest(BaseModel):
+    """Batch single-frame extracts (JPEG base64). Default max_edge applies to items that omit it."""
+
+    items: List[AgentFrameExtractRequest] = Field(default_factory=list)
+    max_edge: Optional[int] = None
+    continue_on_error: bool = True
+
+
+class AgentTimelineClipItem(BaseModel):
+    """One clip for timeline export: point (time_sec) or range (start_sec/end_sec)."""
+
+    video_path: str
+    time_sec: Optional[float] = None
+    start_sec: Optional[float] = None
+    end_sec: Optional[float] = None
+    client_request_id: Optional[str] = None
+
+
+class AgentTimelineExportRequest(BaseModel):
+    """Multi-clip NLE/Jianying timeline: jianying | fcpxml | fcp7_xml."""
+
+    format: str
+    items: List[AgentTimelineClipItem] = Field(default_factory=list)
+    project: Optional[str] = None
+    # XML: full file path, or output_dir (+ auto filename). Jianying ignores these.
+    write_path: Optional[str] = None
+    output_dir: Optional[str] = None
+    drafts_dir: Optional[str] = None
+    draft_name: Optional[str] = None
+    client_request_id: Optional[str] = None
 
 
 class AgentExportClipRequest(BaseModel):

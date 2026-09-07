@@ -24,8 +24,13 @@ from src.services.search_scope import (
     resolve_hit_source_path,
     scope_request_is_explicit,
 )
-from src.services.search_service import run_chunk_search, run_dialogue_search, run_search
-from src.storage.config_store import get_search_mode, get_search_scope_mode, get_search_top_k
+from src.services.search_service import run_dialogue_search, run_search
+from src.storage.config_store import (
+    get_search_mode,
+    get_search_scope_mode,
+    get_search_top_k,
+    get_text_search_enhance_enabled,
+)
 
 from .constants import (
     API_VERSION,
@@ -89,6 +94,40 @@ def _resolve_dialogue_match_mode(body: AgentSearchRequest) -> str:
     if mode in {"frame", "chunk", "precise", "video_discovery"}:
         return "auto"
     return "auto"
+
+
+def _resolve_text_enhance_request(body: AgentSearchRequest, *, config=None) -> bool | None:
+    """Return request override, or None to follow server config."""
+    raw = getattr(body, "text_enhance", None)
+    if raw is None:
+        return None
+    return bool(raw)
+
+
+def _text_enhance_applied(
+    *,
+    is_text: bool,
+    query_data,
+    query_vector,
+    text_enhance: bool | None,
+    config=None,
+) -> bool:
+    from src.services.text_search_enhance import should_enhance_text_query
+
+    cfg = config or load_config()
+    enabled = (
+        bool(get_text_search_enhance_enabled(cfg))
+        if text_enhance is None
+        else bool(text_enhance)
+    )
+    return bool(
+        should_enhance_text_query(
+            is_text=is_text,
+            query_data=query_data,
+            query_vector=query_vector,
+            enabled=enabled,
+        )
+    )
 
 
 def _clamp_top_k(top_k: Optional[int]) -> int:
@@ -745,6 +784,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
     with acquire_search_slot():
+        text_enhance = _resolve_text_enhance_request(body, config=config)
         search_kwargs = {
             "top_k": top_k,
             "scope_video_paths": scope_video_paths,
@@ -753,22 +793,24 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "search_precision_mode": resolved["search_precision_mode"],
             "pixel_query_data": resolved["pixel_query_data"],
             "video_discovery_enabled": resolved.get("video_discovery_enabled"),
+            "text_enhance": text_enhance,
         }
         if preview_anchor_sec is not None:
             search_kwargs["preview_anchor_sec"] = preview_anchor_sec
-        if mode == "chunk":
-            hits = run_chunk_search(
-                resolved["query_data"],
-                is_text=bool(resolved["is_text"]),
-                **search_kwargs,
-            )
-        else:
-            hits = run_search(
-                resolved["query_data"],
-                is_text=bool(resolved["is_text"]),
-                search_mode="frame",
-                **search_kwargs,
-            )
+        # Always use run_search so frame and chunk text queries share enhance.
+        hits = run_search(
+            resolved["query_data"],
+            is_text=bool(resolved["is_text"]),
+            search_mode=mode,
+            **search_kwargs,
+        )
+        enhance_applied = _text_enhance_applied(
+            is_text=bool(resolved["is_text"]),
+            query_data=resolved["query_data"],
+            query_vector=resolved["query_vector"],
+            text_enhance=text_enhance,
+            config=config,
+        )
 
     hits = _filter_hits(hits, resolved["min_score"])
     _record_agent_search_telemetry(resolved, hits, preview_anchor_sec=preview_anchor_sec)
@@ -795,6 +837,8 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "fetch_top_k": fetch_k,
             "search_precision_mode": resolved["search_precision_mode"],
             "video_discovery_enabled": resolved.get("video_discovery_enabled"),
+            "text_enhance": text_enhance,
+            "text_enhance_applied": bool(enhance_applied),
             "index_ready": True,
             "global_index_state": snapshot["global_index_state"],
             "search_index_schema_version": snapshot.get("search_index_schema_version"),
@@ -909,6 +953,10 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
             if item.video_discovery_enabled is not None
             else batch.video_discovery_enabled
         ),
+        text_enhance=(
+            item.text_enhance if item.text_enhance is not None else batch.text_enhance
+        ),
+        match_mode=item.match_mode,
         client_request_id=item.client_request_id,
         scope=item.scope if item.scope is not None else batch.scope,
         expand_frame_hits=batch.expand_frame_hits,

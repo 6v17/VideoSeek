@@ -24,10 +24,13 @@ from .export_ops import _resolve_batch_search_export_timeout_sec, execute_export
 from .health import build_health_payload
 from .schemas import (
     AgentBatchExportClipsRequest,
+    AgentBatchFrameExtractRequest,
     AgentBatchSearchRequest,
     AgentExportClipRequest,
+    AgentFrameExtractRequest,
     AgentManifestRequest,
     AgentSearchRequest,
+    AgentTimelineExportRequest,
 )
 from .search import (
     _resolve_search_timeout_sec,
@@ -67,7 +70,10 @@ class AgentApiService:
         self.app.post("/api/v1/search")(self._search)
         self.app.post("/api/v1/search/batch")(self._search_batch)
         self.app.get("/api/v1/search/telemetry")(self._search_telemetry)
+        self.app.post("/api/v1/frames/extract")(self._frames_extract)
+        self.app.post("/api/v1/frames/extract/batch")(self._frames_extract_batch)
         self.app.post("/api/v1/export/manifest")(self._export_manifest)
+        self.app.post("/api/v1/export/timeline")(self._export_timeline)
         self.app.post("/api/v1/export/clip")(self._export_clip)
         self.app.post("/api/v1/export/clips/batch")(self._export_clips_batch)
 
@@ -365,6 +371,58 @@ class AgentApiService:
             payload["meta"]["batch_export_enabled"] = True
         return JSONResponse(payload)
 
+    async def _frames_extract(self, body: AgentFrameExtractRequest):
+        from .frames import execute_agent_frame_extract
+
+        started = time.perf_counter()
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(execute_agent_frame_extract, body),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            raise_api_error(503, "engine_busy", "Frame extract timed out after 15 seconds.")
+        except FileNotFoundError as exc:
+            raise_api_error(404, "invalid_request", str(exc))
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except RuntimeError as exc:
+            raise_api_error(422, "frame_extract_failed", str(exc))
+        except Exception as exc:
+            logger.exception("Agent frame extract failed.")
+            raise_api_error(422, "frame_extract_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
+    async def _frames_extract_batch(self, body: AgentBatchFrameExtractRequest):
+        from .frames import execute_agent_batch_frame_extract
+
+        started = time.perf_counter()
+        # Cap wall time: ~15s per frame budget, hard ceiling 120s.
+        timeout_sec = min(120.0, max(30.0, 15.0 * max(1, len(body.items or []))))
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(execute_agent_batch_frame_extract, body),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            raise_api_error(
+                503,
+                "engine_busy",
+                f"Batch frame extract timed out after {int(timeout_sec)} seconds.",
+            )
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except Exception as exc:
+            logger.exception("Agent batch frame extract failed.")
+            raise_api_error(422, "frame_extract_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
     async def _export_manifest(self, body: AgentManifestRequest):
         started = time.perf_counter()
         try:
@@ -377,6 +435,35 @@ class AgentApiService:
         except Exception as exc:
             logger.exception("Agent manifest export failed.")
             raise_api_error(422, "query_failed", str(exc))
+
+        payload.setdefault("meta", {})
+        payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(payload)
+
+    async def _export_timeline(self, body: AgentTimelineExportRequest):
+        from .timeline_export import execute_agent_timeline_export
+
+        started = time.perf_counter()
+        try:
+            payload = await asyncio.wait_for(
+                asyncio.to_thread(execute_agent_timeline_export, body),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            raise_api_error(503, "engine_busy", "Timeline export timed out after 60 seconds.")
+        except ValueError as exc:
+            raise_api_error(400, "invalid_request", str(exc))
+        except FileNotFoundError as exc:
+            raise_api_error(404, "invalid_request", str(exc))
+        except RuntimeError as exc:
+            message = str(exc)
+            lower = message.lower()
+            if "pyjianyingdraft" in lower or "jianying" in lower:
+                raise_api_error(422, "timeline_export_failed", message)
+            raise_api_error(422, "timeline_export_failed", message)
+        except Exception as exc:
+            logger.exception("Agent timeline export failed.")
+            raise_api_error(422, "timeline_export_failed", str(exc))
 
         payload.setdefault("meta", {})
         payload["meta"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)

@@ -537,6 +537,7 @@ def run_team_client_search(
     preview_anchor_sec: Optional[float] = None,
     query_vector=None,
     match_mode: Optional[str] = None,
+    text_enhance: Optional[bool] = None,
     api_port_default: int = 8765,
     timeout: float = 180.0,
 ) -> List[SearchHit]:
@@ -568,6 +569,8 @@ def run_team_client_search(
         # Send both keys: older servers only read `mode`; `search_mode` is the team alias.
         payload["mode"] = mode
         payload["search_mode"] = mode
+    if text_enhance is not None and kind != "dialogue":
+        payload["text_enhance"] = bool(text_enhance)
     precision = str(search_precision_mode or "").strip().lower()
     if precision:
         payload["search_precision_mode"] = precision
