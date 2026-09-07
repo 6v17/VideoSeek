@@ -2,6 +2,7 @@
 
 Visual / compose / image tabs use the CLIP library registry.
 Dialogue (subtitle) tab uses the global subtitle library registry.
+Tags tab uses videos present in the VLM tag projection index.
 """
 
 from __future__ import annotations
@@ -30,26 +31,52 @@ class SearchScopeGuiMixin:
         self._search_scope_video_paths = get_search_scope_video_paths()
         self._dialogue_search_scope_mode = get_dialogue_search_scope_mode()
         self._dialogue_search_scope_video_paths = get_dialogue_search_scope_video_paths()
+        # Tags scope is session-local (projection set changes with「录入标签库」).
+        self._tag_search_scope_mode = "all"
+        self._tag_search_scope_video_paths: list[str] = []
         self._search_scope_entries_cache: list = []
         self._dialogue_search_scope_entries_cache: list = []
+        self._tag_search_scope_entries_cache: list = []
         self._search_scope_entries_dirty = True
         self._dialogue_search_scope_entries_dirty = True
+        self._tag_search_scope_entries_dirty = True
 
-    def _search_scope_is_dialogue(self) -> bool:
+    def _search_scope_kind(self) -> str:
         active = ""
         if hasattr(self, "_search_active_tab"):
             try:
                 active = str(self._search_active_tab() or "")
             except Exception:
                 active = ""
-        return active == getattr(self, "SEARCH_TAB_DIALOGUE", "dialogue")
+        if active == getattr(self, "SEARCH_TAB_DIALOGUE", "dialogue"):
+            return "dialogue"
+        if active == getattr(self, "SEARCH_TAB_TAGS", "tags"):
+            return "tags"
+        return "visual"
+
+    def _search_scope_is_dialogue(self) -> bool:
+        return self._search_scope_kind() == "dialogue"
+
+    def _search_scope_is_tags(self) -> bool:
+        return self._search_scope_kind() == "tags"
+
+    def _search_scope_entries_cache_for_kind(self) -> list:
+        kind = self._search_scope_kind()
+        if kind == "dialogue":
+            return list(getattr(self, "_dialogue_search_scope_entries_cache", []) or [])
+        if kind == "tags":
+            return list(getattr(self, "_tag_search_scope_entries_cache", []) or [])
+        return list(getattr(self, "_search_scope_entries_cache", []) or [])
 
     def _search_scope_ready_count(self) -> int:
-        cache = (
-            self._dialogue_search_scope_entries_cache
-            if self._search_scope_is_dialogue()
-            else self._search_scope_entries_cache
-        )
+        cache = self._search_scope_entries_cache_for_kind()
+        if self._search_scope_is_tags():
+            # Tag projection rows are searchable even when the media file is offline.
+            return sum(
+                1
+                for ent in cache
+                if str(ent.get("asset_state", "")).strip().lower() == "ready"
+            )
         return sum(
             1
             for ent in cache
@@ -60,7 +87,7 @@ class SearchScopeGuiMixin:
     def _search_scope_picker_available(self) -> bool:
         from src.services.team_mode_service import is_team_client_mode
 
-        if self._search_scope_is_dialogue():
+        if self._search_scope_is_dialogue() or self._search_scope_is_tags():
             return self._search_scope_ready_count() >= 2
         if not is_team_client_mode() and needs_search_index_schema_upgrade():
             return False
@@ -99,6 +126,23 @@ class SearchScopeGuiMixin:
                 self._dialogue_search_scope_entries_dirty = True
             return
 
+        if self._search_scope_is_tags():
+            if (
+                not force
+                and not getattr(self, "_tag_search_scope_entries_dirty", True)
+                and self._tag_search_scope_entries_cache
+            ):
+                return
+            try:
+                from src.storage.evidence_tags_store import list_tag_search_scope_entries
+
+                self._tag_search_scope_entries_cache = list_tag_search_scope_entries()
+                self._tag_search_scope_entries_dirty = False
+            except Exception:
+                self._tag_search_scope_entries_cache = []
+                self._tag_search_scope_entries_dirty = True
+            return
+
         if not force and not getattr(self, "_search_scope_entries_dirty", True) and self._search_scope_entries_cache:
             return
         try:
@@ -125,31 +169,58 @@ class SearchScopeGuiMixin:
     def invalidate_dialogue_search_scope_entries_cache(self) -> None:
         self._dialogue_search_scope_entries_dirty = True
 
+    def invalidate_tag_search_scope_entries_cache(self) -> None:
+        self._tag_search_scope_entries_dirty = True
+
     def _active_scope_mode(self) -> str:
-        if self._search_scope_is_dialogue():
+        kind = self._search_scope_kind()
+        if kind == "dialogue":
             return str(getattr(self, "_dialogue_search_scope_mode", "all") or "all")
+        if kind == "tags":
+            return str(getattr(self, "_tag_search_scope_mode", "all") or "all")
         return str(getattr(self, "_search_scope_mode", "all") or "all")
 
     def _active_scope_video_paths(self) -> list[str]:
-        if self._search_scope_is_dialogue():
+        kind = self._search_scope_kind()
+        if kind == "dialogue":
             return list(getattr(self, "_dialogue_search_scope_video_paths", []) or [])
+        if kind == "tags":
+            return list(getattr(self, "_tag_search_scope_video_paths", []) or [])
         return list(getattr(self, "_search_scope_video_paths", []) or [])
 
     def _set_active_scope(self, mode: str, video_paths: list[str]) -> None:
         normalized_mode = "selected" if str(mode or "").strip().lower() == "selected" else "all"
         paths = [normalize_scope_path(path) for path in (video_paths or []) if str(path or "").strip()]
-        if self._search_scope_is_dialogue():
+        kind = self._search_scope_kind()
+        if kind == "dialogue":
             self._dialogue_search_scope_mode = normalized_mode
             self._dialogue_search_scope_video_paths = paths
             save_dialogue_search_scope(normalized_mode, video_paths=paths)
             self._dialogue_search_scope_mode = get_dialogue_search_scope_mode()
             self._dialogue_search_scope_video_paths = get_dialogue_search_scope_video_paths()
+        elif kind == "tags":
+            self._tag_search_scope_mode = normalized_mode
+            self._tag_search_scope_video_paths = paths
         else:
             self._search_scope_mode = normalized_mode
             self._search_scope_video_paths = paths
             save_search_scope(normalized_mode, video_paths=paths)
             self._search_scope_mode = get_search_scope_mode()
             self._search_scope_video_paths = get_search_scope_video_paths()
+
+    def _known_scope_paths(self, cache: list) -> set[str]:
+        known_paths: set[str] = set()
+        for ent in cache:
+            if str(ent.get("asset_state", "")).strip().lower() != "ready":
+                continue
+            video_path = normalize_scope_path(str(ent.get("video_path", "") or "").strip())
+            if video_path:
+                known_paths.add(video_path)
+            lib_path = str(ent.get("library_path", "") or "").strip()
+            rel_path = str(ent.get("video_rel_path", "") or "").strip()
+            if lib_path and rel_path:
+                known_paths.add(normalize_scope_path(os.path.join(lib_path, rel_path)))
+        return known_paths
 
     def _refresh_search_scope_ui(self, *, force_entries: bool = False) -> None:
         if not hasattr(self, "search_page"):
@@ -159,19 +230,8 @@ class SearchScopeGuiMixin:
         # Keep the cluster in layout so tab switches do not jump the panel.
         self.search_page.search_scope_cluster.setVisible(True)
 
-        cache = (
-            self._dialogue_search_scope_entries_cache
-            if self._search_scope_is_dialogue()
-            else self._search_scope_entries_cache
-        )
-        known_paths = set()
-        for ent in cache:
-            if str(ent.get("asset_state", "")).strip().lower() != "ready":
-                continue
-            lib_path = str(ent.get("library_path", "") or "").strip()
-            rel_path = str(ent.get("video_rel_path", "") or "").strip()
-            if lib_path and rel_path:
-                known_paths.add(normalize_scope_path(os.path.join(lib_path, rel_path)))
+        cache = self._search_scope_entries_cache_for_kind()
+        known_paths = self._known_scope_paths(cache)
 
         current_paths = [
             normalize_scope_path(path)
@@ -184,11 +244,11 @@ class SearchScopeGuiMixin:
             self._set_active_scope(mode, pruned_paths)
             mode = self._active_scope_mode()
 
-        library_paths = (
-            get_dialogue_search_scope_library_paths()
-            if self._search_scope_is_dialogue()
-            else get_search_scope_library_paths()
-        )
+        library_paths: list[str] = []
+        if self._search_scope_is_dialogue():
+            library_paths = get_dialogue_search_scope_library_paths()
+        elif not self._search_scope_is_tags():
+            library_paths = get_search_scope_library_paths()
         if mode == "selected" and not self._active_scope_video_paths() and not library_paths:
             self._set_active_scope("all", [])
 
@@ -207,22 +267,35 @@ class SearchScopeGuiMixin:
 
                 expanded = resolve_active_dialogue_search_video_scope() or []
                 count = len(expanded)
+            elif self._search_scope_is_tags():
+                count = self._search_scope_ready_count()
             else:
                 count = len(list_ready_video_paths_for_libraries(get_search_scope_library_paths()))
             summary = texts.get("search_scope_picker_partial", "{count}").format(count=count)
             display = texts.get("search_scope_picker_short", "{count}").format(count=count)
         else:
-            summary = texts.get("search_scope_all", "")
-            display = texts.get("search_scope_all_short", summary)
+            if self._search_scope_is_tags():
+                ready = self._search_scope_ready_count()
+                summary = texts.get(
+                    "search_scope_tags_all",
+                    texts.get("search_scope_all", ""),
+                )
+                if ready > 0 and "{count}" in str(
+                    texts.get("search_scope_tags_all_ready", "")
+                ):
+                    summary = texts.get(
+                        "search_scope_tags_all_ready",
+                        "{count} tagged video(s)",
+                    ).format(count=ready)
+                display = texts.get("search_scope_all_short", summary)
+            else:
+                summary = texts.get("search_scope_all", "")
+                display = texts.get("search_scope_all_short", summary)
         self.search_page.search_scope_select.set_display_text(display, tooltip=summary)
 
     def open_search_scope_editor(self) -> None:
         self._refresh_search_scope_entries(force=True)
-        cache = (
-            self._dialogue_search_scope_entries_cache
-            if self._search_scope_is_dialogue()
-            else self._search_scope_entries_cache
-        )
+        cache = self._search_scope_entries_cache_for_kind()
         if not cache:
             return
         dialog = SearchScopeEditorDialog(
@@ -244,6 +317,13 @@ class SearchScopeGuiMixin:
 
         return resolve_active_search_video_scope()
 
+    def _resolve_active_tag_search_scope(self) -> tuple[list[str] | None, list[str] | None]:
+        """Tags-tab scope: selected projected videos, else all projected videos."""
+        if self._active_scope_mode() != "selected":
+            return None, None
+        paths = [p for p in self._active_scope_video_paths() if str(p or "").strip()]
+        return (paths or None), None
+
     def _validate_search_scope(self) -> bool:
         if not self._search_scope_picker_available():
             return True
@@ -253,4 +333,6 @@ class SearchScopeGuiMixin:
             return True
         if self._search_scope_is_dialogue():
             return bool(get_dialogue_search_scope_library_paths())
+        if self._search_scope_is_tags():
+            return False
         return bool(get_search_scope_library_paths())

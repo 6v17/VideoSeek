@@ -434,10 +434,12 @@ class SearchPage(QWidget):
         self.lbl_active_model = self.search_panel.lbl_active_model
         self.lbl_text_model_hint = self.search_panel.lbl_text_model_hint
         self.lbl_dialogue_hint = self.search_panel.lbl_dialogue_hint
+        self.lbl_tags_hint = self.search_panel.lbl_tags_hint
         self.search_query_tabs = self.search_panel.search_query_tabs
         self.img_label = self.search_panel.img_label
         self.text_search = self.search_panel.text_search
         self.dialogue_search = self.search_panel.dialogue_search
+        self.tags_search = self.search_panel.tags_search
         self.search_mode = self.search_panel.search_mode
         self.search_mode_label = self.search_panel.search_mode_label
         self.text_search_enhance = self.search_panel.text_search_enhance

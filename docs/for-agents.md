@@ -105,15 +105,25 @@
 |------|------|
 | `preset_id` | 与 `query` 互斥；二者都缺 → 400 |
 | `query` + `query_type` | `text` 或 `image_path`（`image_path` 时 `query` 为本地图片绝对路径）；也可用简写字段 `image_path`（等价于 `query` + `query_type=image_path`） |
-| `search_kind` | 可选：`visual`（默认，CLIP 画面）\| `dialogue`（硬字幕/台词关键词）；与 `mode` frame/chunk 正交 |
+| `search_kind` | 可选：`visual`（默认，CLIP 画面）\| `dialogue`（硬字幕/台词关键词）\| `tags`（理解页 VLM 标签）；与 `mode` frame/chunk 正交 |
 | `top_k` | 每条 query 返回 hit 数上限（1–200） |
 | `image_folder` | 与 `queries` 二选一；扫描 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每张图一条 query；`client_request_id` = 文件名 |
 
 `search_precision_mode`（图搜）：`fast` \| `precise`；未传时见 `/health` 的 `agent_api_default_image_precision`；纯文搜忽略。  
 `preview_anchor_sec`：图搜且 `scope.video_paths` 恰好 1 条时可用；服务端将 `search_precision_mode` 设为 `precise`。  
 `search_kind=dialogue`：仅 `query_type=text`；先看 `/health` 的 `dialogue_index_ready` / `capabilities.dialogue_search`（需在桌面字幕库完成提取）。  
-`match_mode`（仅 `search_kind=dialogue`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
-`text_enhance`（仅画面文搜）：`true`/`false` 强制开/关多路 CLIP+RRF；省略则跟服务机配置 `text_search_enhance_enabled`（见 `/health`）。frame 与 chunk 文搜均可增强；响应 `meta.text_enhance` / `meta.text_enhance_applied` 回显意图与是否实际增强。
+`search_kind=tags`：仅 `query_type=text`；先看 `/health` 的 `tag_index_ready` / `capabilities.tag_search`（需在理解页生成 VLM 标签，并点「录入标签库」写入投影；Agent **不代跑** VLM）。命中时间为 chunk 段区间；`matched_text` 为命中标签（多标签用 ` · ` 拼接）。  
+`match_mode`（`search_kind=dialogue` 或 `tags`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
+`text_enhance`（仅**画面文搜** `query_type=text`）：**由 Agent 按需开关**——`true`/`false` 覆盖本机/服务机面板默认；省略则跟 `/health.text_search_enhance_enabled`。frame 与 chunk 均可。响应看 `meta.text_enhance`（意图）与 `meta.text_enhance_applied`（是否真的跑了增强）。图搜、`query_vector` 预计算、dialogue/tags **不走**增强。
+
+**文搜增强在做什么（预期管理）：**
+
+1. 从查询拆短语，并做有限同义扩展（规则表，不是大模型改写整句）。  
+2. 用 CLIP 在原文与候选短语间挑最多约 **4** 路语义相近且彼此不太重复的查询。  
+3. 各路分别 ANN 检索，再用 **RRF** 融合排序（命中分变成融合分，与单路 CLIP 分数不可直接对比）。  
+
+**适合：** 复合画面描述（多物体/属性/场景）、口语化或同义说法多的查询。  
+**不适合当万能：** 不会理解剧情推理；不会把「找某句台词」变成字幕检索（台词用 `search_kind=dialogue`）；不会把「按标签找」变成画面检索（标签用 `search_kind=tags`）；过短/无有效短语时可能 `text_enhance_applied=false` 退回普通单路文搜；更慢、占更多搜索槽。召回变宽时噪声也可能变多——无结果可开增强重试，已经过噪可 `text_enhance=false`。
 
 ---
 
@@ -131,9 +141,11 @@
 | `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
 | `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
 | `index_stale` / `global_index_state` | 兼容字段；本地搜索实际以 Lance 是否就绪、桌面是否在同步为准 |
-| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `dialogue_search`, `subtitle_library_discovery`, `library_discovery`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `frame_extract`, `batch_frame_extract`, `timeline_export`, `nle_xml_export`, `jianying_draft` 等 |
+| `capabilities` | `text_search`, `image_search`, `frame_search`, `chunk_search`, `dialogue_search`, `tag_search`, `subtitle_library_discovery`, `library_discovery`, `export_clip`, `export_manifest`, `batch_search`, `search_presets`, `crop_locate`, `frame_extract`, `batch_frame_extract`, `timeline_export`, `nle_xml_export`, `jianying_draft` 等 |
 | `dialogue_index_ready` / `dialogue_indexed_videos` / `dialogue_rows` | 硬字幕索引是否可用及规模 |
 | `dialogue_match_modes` | 台词检索可选匹配：`["exact","fuzzy"]` |
+| `tag_index_ready` / `tag_indexed_videos` / `tag_rows` | VLM 标签投影是否可用及规模（权威稿仍在理解页 JSON） |
+| `tag_match_modes` | 标签检索可选匹配：`["exact","fuzzy"]` |
 | `text_search_enhance_enabled` | 服务机默认是否开启画面文搜增强（请求可用 `text_enhance` 覆盖） |
 | `ffmpeg.ffmpeg_available` | 为 false 则无法导出 |
 | `model`, `provider`, `embedding_space`, `dimension`, `metric` | 当前 embedding |
@@ -288,11 +300,11 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `preset_id` | 二选一 | — | 与 `query` 互斥 |
 | `query` | 二选一 | — | 文本或图片路径 |
 | `query_type` | 否 | `text` | `text` \| `image_path`（`image_path` 时 `query` 为本地图片绝对路径）；也可用顶层字段 `image_path` 简写 |
-| `search_kind` | 否 | `visual` | `visual` \| `dialogue`；台词检索用 `dialogue`（仅文本 query） |
-| `match_mode` | 否 | `auto` | 仅 `dialogue`：`exact` \| `fuzzy` \| `auto`；团队客户端也可经 `search_mode` 透传 |
-| `text_enhance` | 否 | 服务机配置 | 仅画面文搜：`true`/`false` 强制；`null`/省略跟 `text_search_enhance_enabled`；frame/chunk 均可 |
+| `search_kind` | 否 | `visual` | `visual` \| `dialogue` \| `tags`；台词用 `dialogue`，VLM 标签用 `tags`（均仅文本 query） |
+| `match_mode` | 否 | `auto` | `dialogue` / `tags`：`exact` \| `fuzzy` \| `auto`；团队客户端也可经 `search_mode` 透传 |
+| `text_enhance` | 否 | 跟 `/health` | **Agent 可显式开关**画面文搜增强；见 §3 机制说明；`meta.text_enhance_applied` 表示是否生效 |
 | `top_k` | 否 | 桌面配置，clamp **1–200** | 返回 hit 数上限 |
-| `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk`（`search_kind=dialogue` 时响应 `mode` 为 `dialogue`） |
+| `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk`（`dialogue`/`tags` 时响应 `mode` 分别为 `dialogue`/`tags`） |
 | `min_score` | 否 | preset 默认或不过滤 | 过滤低分 hit |
 | `search_precision_mode` | 否 | 见 health | `fast` \| `precise`；图搜未传时用 `agent_api_default_image_precision`；纯文搜忽略 |
 | `client_request_id` | 否 | — | 原样回显，便于对账 |
@@ -590,7 +602,8 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 |----------|--------|------|
 | 在库里**找**镜头（画面） | `POST /search` 或 `/search/batch`（默认 `search_kind=visual`） | CLIP 画面匹配 → `hits[]` |
 | 按硬字幕/台词找 | `POST /search`（`search_kind=dialogue`） | 需 `dialogue_index_ready`；先探测 `/subtitle-libraries` |
-| 视频理解 / 画面描述 / ASR 解说 | **不适用** | 仅桌面「视频理解」页；本 API 不提供 |
+| 按 VLM 标签找 | `POST /search`（`search_kind=tags`） | 需 `tag_index_ready`；标签在理解页生成，Agent 不代跑 VLM |
+| 视频理解 / 画面描述 / ASR 解说 / 生成标签 | **不适用** | 仅桌面「视频理解」页；本 API 不提供生成管线 |
 
 ### 5.2 可选场景
 
@@ -598,6 +611,7 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 |------|----------|
 | 参考图 / 截图文件夹 | `query_type: image_path` 或 batch 的 `image_folder` |
 | 精确瞬间 | `mode: frame` + `expand_frame_hits: true` |
+| 复合画面描述难命中 | 画面文搜加 `text_enhance: true`；过噪则 `false`；看 `meta.text_enhance_applied`（§3） |
 | 核对命中画面 / 取参考帧 | `POST /frames/extract` 或 `/frames/extract/batch`（≤16）→ `image_base64`（可再图搜）；勿默认给搜索全量带图 |
 | 多 hit 进剪映 / 达芬奇 / PR | `POST /export/timeline`（`format=jianying` / `fcpxml` / `fcp7_xml`；XML 用 `output_dir` 或 `write_path`；点命中默认 ±3s） |
 | 较长氛围 / 动作段 | `mode: chunk`（无命中时**先问用户**再切换） |

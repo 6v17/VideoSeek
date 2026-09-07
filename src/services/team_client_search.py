@@ -550,8 +550,8 @@ def run_team_client_search(
         "team_play_urls": True,
     }
     kind = str(search_kind or "").strip().lower()
-    if kind == "dialogue":
-        payload["search_kind"] = "dialogue"
+    if kind in {"dialogue", "tags"}:
+        payload["search_kind"] = kind
         payload["expand_frame_hits"] = False
     if top_k is not None:
         payload["top_k"] = int(top_k)
@@ -561,7 +561,7 @@ def run_team_client_search(
         except (TypeError, ValueError):
             pass
     mode = str(search_mode or "").strip().lower()
-    if kind == "dialogue":
+    if kind in {"dialogue", "tags"}:
         dialogue_mode = str(match_mode or mode or "").strip().lower()
         if dialogue_mode in {"exact", "fuzzy", "auto", "segment", "keyword", "literal", "tolerant", "approx"}:
             payload["match_mode"] = dialogue_mode
@@ -569,14 +569,14 @@ def run_team_client_search(
         # Send both keys: older servers only read `mode`; `search_mode` is the team alias.
         payload["mode"] = mode
         payload["search_mode"] = mode
-    if text_enhance is not None and kind != "dialogue":
+    if text_enhance is not None and kind not in {"dialogue", "tags"}:
         payload["text_enhance"] = bool(text_enhance)
     precision = str(search_precision_mode or "").strip().lower()
     if precision:
         payload["search_precision_mode"] = precision
-    if video_discovery_enabled is not None and kind != "dialogue":
+    if video_discovery_enabled is not None and kind not in {"dialogue", "tags"}:
         payload["video_discovery_enabled"] = bool(video_discovery_enabled)
-    if preview_anchor_sec is not None and kind != "dialogue":
+    if preview_anchor_sec is not None and kind not in {"dialogue", "tags"}:
         try:
             payload["preview_anchor_sec"] = max(0.0, float(preview_anchor_sec))
         except (TypeError, ValueError):
@@ -593,7 +593,7 @@ def run_team_client_search(
         payload["scope"] = scope
 
     encoded_vector = _encode_query_vector_payload(query_vector)
-    if encoded_vector is not None and kind != "dialogue":
+    if encoded_vector is not None and kind not in {"dialogue", "tags"}:
         payload["query_vector"] = encoded_vector
         # Keep query_type so server preserves text vs image/mixed compose semantics.
         payload["query_type"] = "text" if is_text else "image_path"
@@ -605,8 +605,8 @@ def run_team_client_search(
         payload["query_type"] = "text"
         payload["query"] = str(query_data or "")
     else:
-        if kind == "dialogue":
-            raise RuntimeError("dialogue search only supports text queries")
+        if kind in {"dialogue", "tags"}:
+            raise RuntimeError(f"{kind} search only supports text queries")
         payload.update(_encode_image_query(query_data) or {})
 
     data = _post_json(f"{base}/api/v1/search", payload, timeout=timeout)
@@ -628,8 +628,8 @@ def run_team_client_search(
         start_sec, end_sec = _team_hit_time_range(row, preferred_mode=mode)
         match_kind = str(row.get("match_kind") or "").strip().lower()
         if not match_kind:
-            if kind == "dialogue":
-                match_kind = "dialogue"
+            if kind in {"dialogue", "tags"}:
+                match_kind = kind
             elif mode == "chunk":
                 match_kind = "chunk"
             else:

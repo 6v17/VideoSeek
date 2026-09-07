@@ -577,6 +577,7 @@ def write_evidence_bundle(
     provenance["understanding_mode"] = output_mode
     serialized["provenance"] = provenance
     _atomic_write_json(path, serialized)
+    # Tag search projection is manual ("录入标签库"); JSON remains the source of truth.
     return path
 
 
@@ -1598,6 +1599,12 @@ def _remove_paths(paths: list[str]) -> tuple[list[str], list[str]]:
 
 def delete_evidence_for_video(video_id: str, *, config=None) -> bool:
     removed, _errors = _remove_paths(_evidence_file_paths(video_id, config=config))
+    try:
+        from src.storage.evidence_tags_store import delete_video_tags
+
+        delete_video_tags(str(video_id or "").strip(), config=config)
+    except Exception:
+        logger.exception("Failed to delete projected evidence tags for %s", video_id)
     return bool(removed)
 
 
@@ -1610,6 +1617,12 @@ def delete_evidence_for_videos(video_ids: list[str], *, config=None) -> dict[str
             continue
         removed, item_errors = _remove_paths(_evidence_file_paths(video_text, config=config))
         errors.extend(item_errors)
+        try:
+            from src.storage.evidence_tags_store import delete_video_tags
+
+            delete_video_tags(video_text, config=config)
+        except Exception:
+            logger.exception("Failed to delete projected evidence tags for %s", video_text)
         if removed:
             deleted.append(video_text)
     return {
@@ -1621,6 +1634,12 @@ def delete_evidence_for_videos(video_ids: list[str], *, config=None) -> dict[str
 
 def clear_all_evidence(*, config=None) -> dict[str, Any]:
     cfg = dict(config or load_config())
+    try:
+        from src.storage.evidence_tags_store import clear_all_tag_rows
+
+        clear_all_tag_rows(config=cfg)
+    except Exception:
+        logger.exception("Failed to clear projected evidence tags")
     evidence_root = os.path.normpath(get_evidence_root(config=cfg))
     folders = [
         os.path.normpath(get_evidence_tags_dir(config=cfg)),

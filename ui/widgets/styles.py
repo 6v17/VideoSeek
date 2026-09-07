@@ -937,6 +937,27 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     selection-color: __HEADLINE__;
     outline: 0;
 }
+#TagSuggestPopup {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
+}
+#TagSuggestList {
+    background: __PANEL__;
+    color: __HEADLINE__;
+    border: none;
+    outline: 0;
+    padding: 2px 0;
+}
+#TagSuggestList::item {
+    padding: 5px 10px;
+    min-height: 22px;
+}
+#TagSuggestList::item:selected,
+#TagSuggestList::item:hover {
+    background: __ACCENT_SOFT__;
+    color: __HEADLINE__;
+}
 #SearchableIdCombo {
     background: transparent;
     border: none;

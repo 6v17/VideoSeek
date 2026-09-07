@@ -1,6 +1,7 @@
 """Local search panel with image/text query tabs and shared scope + mobile upload."""
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -22,6 +23,39 @@ from ui.widgets.layout import (
 )
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
+from ui.widgets.tag_suggest_popup import TagSuggestPopup
+
+
+class _TagsSearchEdit(QTextEdit):
+    """Tags query editor that forwards Up/Down/Enter/Esc to the suggest popup."""
+
+    suggest_navigate = Signal(int)
+    suggest_accept = Signal()
+    suggest_dismiss = Signal()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        key = event.key()
+        if key == Qt.Key.Key_Down:
+            self.suggest_navigate.emit(1)
+            event.accept()
+            return
+        if key == Qt.Key.Key_Up:
+            self.suggest_navigate.emit(-1)
+            event.accept()
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            self.suggest_accept.emit()
+            # Parent may accept the suggestion; if popup hidden, fall through to default newline.
+            # We always accept here and let the host decide whether to search.
+            event.accept()
+            return
+        if key == Qt.Key.Key_Escape:
+            self.suggest_dismiss.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class SearchScopeSelect(QComboBox):
@@ -132,6 +166,18 @@ class SearchPanel(VSCard):
         self.lbl_dialogue_hint = QLabel()
         self.lbl_dialogue_hint.setObjectName("StatusHint")
         self.lbl_dialogue_hint.setWordWrap(True)
+
+        self.tags_search = _TagsSearchEdit()
+        self.tags_search.setObjectName("SearchInput")
+        self.tags_search.setMinimumHeight(68)
+        self.tags_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.tags_search.setAcceptRichText(False)
+        self.tag_suggest_popup = TagSuggestPopup(self)
+        self.tag_suggest_chosen = self.tag_suggest_popup.tag_chosen
+
+        self.lbl_tags_hint = QLabel()
+        self.lbl_tags_hint.setObjectName("StatusHint")
+        self.lbl_tags_hint.setWordWrap(True)
 
         mode_combo_width = max(combo_width, int(COMPONENT_SIZES.get("search_image_mode_combo_width", 108)))
         mode_cluster_width = field_label_width + field_gap + mode_combo_width
@@ -271,6 +317,14 @@ class SearchPanel(VSCard):
         dialogue_tab_layout.addWidget(self.dialogue_search, 1)
         dialogue_tab_layout.addWidget(self.lbl_dialogue_hint, 0, Qt.AlignmentFlag.AlignTop)
 
+        self.tags_tab = QWidget()
+        self.tags_tab.setFixedHeight(tab_page_height)
+        tags_tab_layout = QVBoxLayout(self.tags_tab)
+        tags_tab_layout.setContentsMargins(4, 8, 4, 4)
+        tags_tab_layout.setSpacing(8)
+        tags_tab_layout.addWidget(self.tags_search, 1)
+        tags_tab_layout.addWidget(self.lbl_tags_hint, 0, Qt.AlignmentFlag.AlignTop)
+
         self.search_query_tabs = QTabWidget()
         self.search_query_tabs.setObjectName("SearchQueryTabs")
         self.search_query_tabs.setFixedHeight(compute_search_query_tabs_height())
@@ -279,6 +333,7 @@ class SearchPanel(VSCard):
         self.search_query_tabs.addTab(self.text_tab, "")
         self.search_query_tabs.addTab(self.compose_tab, "")
         self.search_query_tabs.addTab(self.dialogue_tab, "")
+        self.search_query_tabs.addTab(self.tags_tab, "")
 
         self.search_scope_label = QLabel()
         self.search_scope_label.setObjectName("InlineFieldLabel")
@@ -382,3 +437,29 @@ class SearchPanel(VSCard):
 
     def clear_dialogue_query(self) -> None:
         self.dialogue_search.clear()
+
+    def tags_query(self) -> str:
+        return self.tags_search.toPlainText().strip()
+
+    def set_tags_query(self, text: str) -> None:
+        self.tags_search.blockSignals(True)
+        self.tags_search.setPlainText(str(text or ""))
+        self.tags_search.blockSignals(False)
+
+    def clear_tags_query(self) -> None:
+        self.tags_search.blockSignals(True)
+        self.tags_search.clear()
+        self.tags_search.blockSignals(False)
+        if getattr(self, "tag_suggest_popup", None) is not None:
+            self.tag_suggest_popup.clear_and_hide()
+
+    def show_tag_suggestions(self, tags: list[str]) -> None:
+        popup = getattr(self, "tag_suggest_popup", None)
+        if popup is None:
+            return
+        popup.set_suggestions(list(tags or []), anchor=self.tags_search)
+
+    def hide_tag_suggestions(self) -> None:
+        popup = getattr(self, "tag_suggest_popup", None)
+        if popup is not None:
+            popup.clear_and_hide()

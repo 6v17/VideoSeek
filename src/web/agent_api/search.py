@@ -24,7 +24,7 @@ from src.services.search_scope import (
     resolve_hit_source_path,
     scope_request_is_explicit,
 )
-from src.services.search_service import run_dialogue_search, run_search
+from src.services.search_service import run_dialogue_search, run_search, run_tag_search
 from src.storage.config_store import (
     get_search_mode,
     get_search_scope_mode,
@@ -375,7 +375,9 @@ def _normalize_search_kind(value: Optional[str]) -> str:
         return "visual"
     if kind == "dialogue":
         return "dialogue"
-    raise ValueError(f"Unsupported search_kind: {value!r}. Use visual or dialogue.")
+    if kind == "tags":
+        return "tags"
+    raise ValueError(f"Unsupported search_kind: {value!r}. Use visual, dialogue, or tags.")
 
 
 def _resolve_hit_video_path(hit: SearchHit, *, config=None) -> str:
@@ -760,6 +762,8 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     search_kind = _normalize_search_kind(body.search_kind)
     if search_kind == "dialogue":
         return _execute_agent_dialogue_search(body, config=config)
+    if search_kind == "tags":
+        return _execute_agent_tag_search(body, config=config)
 
     resolved = _resolve_agent_search_inputs(body, config=config)
     preview_anchor_sec = _resolve_preview_anchor_sec(body, resolved)
@@ -925,6 +929,83 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
             "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
             "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
             "dialogue_matched_by": matched_by,
+            **scope_meta,
+        },
+    }
+    if message:
+        response["message"] = message
+    return response
+
+
+def _execute_agent_tag_search(body: AgentSearchRequest, *, config=None) -> Dict[str, Any]:
+    from src.storage.evidence_tags_store import get_tag_index_stats
+
+    cfg = config or load_config()
+    query = str(body.query or "").strip()
+    if not query:
+        raise ValueError("tag search requires a non-empty text query")
+    query_type = str(body.query_type or "text").strip().lower() or "text"
+    if query_type not in {"text", ""}:
+        raise ValueError("tag search only supports query_type=text")
+
+    top_k = _clamp_top_k(body.top_k)
+    scope_video_paths, scope_library_paths = _resolve_agent_search_scope(body, config=cfg)
+    fetch_k = _resolve_fetch_top_k_for_paths(
+        top_k,
+        scope_video_paths,
+        scope_library_paths,
+        config=cfg,
+    )
+    tag_stats = get_tag_index_stats(config=cfg)
+
+    with acquire_search_slot():
+        hits, message, matched_by = run_tag_search(
+            query,
+            top_k=top_k,
+            scope_video_paths=scope_video_paths,
+            scope_library_paths=scope_library_paths,
+            min_score=body.min_score,
+            config=cfg,
+            match_mode=_resolve_dialogue_match_mode(body),
+        )
+
+    scope_meta = _build_scope_meta(
+        _scope_from_resolved_paths(scope_video_paths, scope_library_paths),
+        config=cfg,
+    )
+    team_play_urls = bool(getattr(body, "team_play_urls", False))
+    if not team_play_urls:
+        try:
+            from src.services.team_mode_service import is_team_server_mode
+
+            if is_team_server_mode(cfg):
+                team_play_urls = True
+        except Exception:
+            pass
+    response = {
+        "api_version": API_VERSION,
+        "ok": True,
+        "query": query,
+        "query_type": "text",
+        "search_kind": "tags",
+        "mode": "tags",
+        "client_request_id": body.client_request_id,
+        "hits": _hits_to_payload(
+            hits,
+            mode="tags",
+            expand_frame_hits=False,
+            pad_before_sec=0.0,
+            pad_after_sec=0.0,
+            team_play_urls=team_play_urls,
+        ),
+        "meta": {
+            "returned": len(hits),
+            "top_k": top_k,
+            "fetch_top_k": fetch_k,
+            "tag_index_ready": bool(tag_stats.get("tag_index_ready")),
+            "tag_indexed_videos": int(tag_stats.get("tag_indexed_videos") or 0),
+            "tag_rows": int(tag_stats.get("tag_rows") or 0),
+            "tag_matched_by": matched_by,
             **scope_meta,
         },
     }

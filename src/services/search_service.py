@@ -1140,6 +1140,81 @@ def run_dialogue_search(
     return hits, "", matched_by
 
 
+def run_tag_search(
+    query: str,
+    *,
+    top_k=None,
+    scope_video_paths=None,
+    scope_library_paths=None,
+    min_score=None,
+    config=None,
+    match_mode: str = "exact",
+) -> tuple[List[SearchHit], str, str]:
+    """Search projected VLM tags (evidence_tags.db). Returns (hits, message, matched_by)."""
+    from src.storage.config_store import get_search_top_k
+    from src.storage.evidence_tags_store import get_tag_index_stats, search_tags
+
+    cfg = dict(config or load_config())
+    text = str(query or "").strip()
+    if not text:
+        return [], "empty query", ""
+
+    try:
+        resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
+    except (TypeError, ValueError):
+        resolved_top_k = get_search_top_k(cfg)
+    resolved_top_k = max(1, min(200, resolved_top_k))
+
+    stats = get_tag_index_stats(config=cfg)
+    if not stats.get("tag_index_ready"):
+        return [], "no tag index (generate VLM tags on Understanding page first)", ""
+
+    scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
+    fetch_k = resolve_fetch_top_k(resolved_top_k, scoped)
+    # Scope by video_path after fetch (CLIP library scope); do not use subtitle video_ids.
+    mode = str(match_mode or "exact").strip().lower() or "exact"
+    raw_hits = search_tags(
+        text,
+        config=cfg,
+        top_k=fetch_k if scoped else resolved_top_k,
+        match_mode=mode,
+        video_ids=None,
+    )
+    matched_by = "keyword_fuzzy" if mode in {"fuzzy", "tolerant", "approx"} else "keyword"
+    hits = []
+    for item in raw_hits:
+        # Show the full chunk tag set; UI still highlights the query within it.
+        display_tags = item.get("chunk_tags") or item.get("matched_tags") or []
+        hits.append(
+            SearchHit(
+                start_sec=float(item.get("start_sec") or 0.0),
+                end_sec=float(item.get("end_sec") or 0.0),
+                score=float(item.get("score") or 0.0),
+                video_path=str(item.get("video_path") or ""),
+                match_kind="tags",
+                video_id=str(item.get("video_id") or ""),
+                matched_text=" · ".join(
+                    str(t).strip() for t in display_tags if str(t or "").strip()
+                ),
+            )
+        )
+    from src.services.search_scope import enrich_hits_with_source_paths
+
+    hits = enrich_hits_with_source_paths(hits, config=cfg)
+    hits = apply_search_scope(
+        hits,
+        video_paths=scope_video_paths,
+        library_paths=scope_library_paths,
+        top_k=resolved_top_k,
+    )
+    if min_score is not None:
+        hits = filter_hits_by_min_score(hits, min_score)
+
+    if not hits:
+        return [], "no tag matches", matched_by
+    return hits, "", matched_by
+
+
 __all__ = [
     "_LOCATE_CROP_MIN_CLIP_SCORE",
     "build_query_vector",
@@ -1152,6 +1227,7 @@ __all__ = [
     "resolve_clip_confidence_tier_key",
     "run_chunk_search",
     "run_dialogue_search",
+    "run_tag_search",
     "run_mixed_query_search",
     "run_search",
     "warmup_search_runtime",

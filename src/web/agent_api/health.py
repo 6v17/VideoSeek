@@ -154,6 +154,7 @@ def _build_capabilities(
     snapshot: Dict[str, Any],
     *,
     dialogue_index_ready: bool = False,
+    tag_index_ready: bool = False,
 ) -> Dict[str, bool]:
     ffmpeg_info = _build_ffmpeg_info()
     return {
@@ -162,6 +163,7 @@ def _build_capabilities(
         "frame_search": bool(snapshot.get("frame_index_ready")),
         "chunk_search": bool(snapshot.get("chunk_index_ready")),
         "dialogue_search": bool(dialogue_index_ready),
+        "tag_search": bool(tag_index_ready),
         "subtitle_library_discovery": True,
         "export_manifest": True,
         "export_clip": bool(ffmpeg_info.get("ffmpeg_available")),
@@ -219,11 +221,14 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     timeouts = _agent_timeout_settings(config)
     from src.services.search_telemetry import is_telemetry_enabled
     from src.services.indexing_runtime_status import get_index_sync_status
+    from src.storage.evidence_tags_store import get_tag_index_stats
     from src.storage.lance_dialogue_search import get_dialogue_index_stats
 
     sync_status = get_index_sync_status()
     dialogue_stats = get_dialogue_index_stats(config=config)
     dialogue_ready = bool(dialogue_stats.get("dialogue_index_ready"))
+    tag_stats = get_tag_index_stats(config=config)
+    tag_ready = bool(tag_stats.get("tag_index_ready"))
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -243,6 +248,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "capabilities": _build_capabilities(
             snapshot,
             dialogue_index_ready=dialogue_ready,
+            tag_index_ready=tag_ready,
         ),
         "ffmpeg": _build_ffmpeg_info(),
         "video_count": _count_library_videos(),
@@ -270,6 +276,10 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "dialogue_indexed_videos": int(dialogue_stats.get("dialogue_indexed_videos") or 0),
         "dialogue_rows": int(dialogue_stats.get("dialogue_rows") or 0),
         "dialogue_match_modes": ["exact", "fuzzy"],
+        "tag_index_ready": tag_ready,
+        "tag_indexed_videos": int(tag_stats.get("tag_indexed_videos") or 0),
+        "tag_rows": int(tag_stats.get("tag_rows") or 0),
+        "tag_match_modes": ["exact", "fuzzy"],
         "text_search_enhance_enabled": bool(get_text_search_enhance_enabled(config)),
         "team": _build_team_health(config),
     }

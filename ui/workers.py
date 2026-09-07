@@ -190,7 +190,12 @@ class SearchWorker(QThread):
         try:
             from src.app.config import load_config
             from src.services.team_mode_service import is_team_client_mode
-            from src.services.search_service import filter_hits_by_min_score, run_dialogue_search, run_search
+            from src.services.search_service import (
+                filter_hits_by_min_score,
+                run_dialogue_search,
+                run_search,
+                run_tag_search,
+            )
 
             app_cfg = load_config()
             if is_team_client_mode(app_cfg):
@@ -199,7 +204,7 @@ class SearchWorker(QThread):
 
                 kind = str(config.search_kind or "").strip().lower()
                 text_enhance = None
-                if kind != "dialogue" and bool(config.is_text):
+                if kind not in {"dialogue", "tags"} and bool(config.is_text):
                     text_enhance = bool(get_text_search_enhance_enabled(app_cfg))
                 results = run_team_client_search(
                     server_url=str(app_cfg.get("team_server_url") or ""),
@@ -215,12 +220,12 @@ class SearchWorker(QThread):
                     video_discovery_enabled=config.video_discovery_enabled,
                     preview_anchor_sec=config.preview_anchor_sec,
                     query_vector=config.query_vector,
-                    match_mode=config.search_mode if kind == "dialogue" else None,
+                    match_mode=config.search_mode if kind in {"dialogue", "tags"} else None,
                     text_enhance=text_enhance,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
                 results = filter_hits_by_min_score(results, config.min_score)
-                if kind == "dialogue":
+                if kind in {"dialogue", "tags"}:
                     self.dialogue_status_message = ""
                     self.dialogue_matched_by = "team"
                 self.result_ready.emit(list(results) if results is not None else [])
@@ -236,6 +241,21 @@ class SearchWorker(QThread):
                     scope_library_paths=config.scope_library_paths or None,
                     min_score=config.min_score,
                     query_vector=config.query_vector,
+                    match_mode=match_mode,
+                )
+                self.dialogue_status_message = str(message or "").strip()
+                self.dialogue_matched_by = str(matched_by or "").strip()
+                self.result_ready.emit(results)
+                return
+
+            if kind == "tags":
+                match_mode = str(config.search_mode or "exact").strip().lower() or "exact"
+                results, message, matched_by = run_tag_search(
+                    str(config.query or ""),
+                    top_k=config.top_k,
+                    scope_video_paths=config.scope_video_paths or None,
+                    scope_library_paths=config.scope_library_paths or None,
+                    min_score=config.min_score,
                     match_mode=match_mode,
                 )
                 self.dialogue_status_message = str(message or "").strip()

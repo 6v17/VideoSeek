@@ -10,6 +10,7 @@ class SearchPanelStateMixin:
     SEARCH_TAB_TEXT = "text"
     SEARCH_TAB_COMPOSE = "compose"
     SEARCH_TAB_DIALOGUE = "dialogue"
+    SEARCH_TAB_TAGS = "tags"
 
     IMAGE_SEARCH_MODES = ("chunk", "frame", "video_discovery", "precise")
 
@@ -25,6 +26,11 @@ class SearchPanelStateMixin:
         if not hasattr(self, "search_page"):
             return False
         return bool(self.search_page.search_panel.dialogue_query())
+
+    def _search_has_tags_query(self) -> bool:
+        if not hasattr(self, "search_page"):
+            return False
+        return bool(self.search_page.search_panel.tags_query())
 
     def _search_has_compose_query(self) -> bool:
         if not hasattr(self, "search_page"):
@@ -47,6 +53,8 @@ class SearchPanelStateMixin:
             return self.SEARCH_TAB_COMPOSE
         if index == 3:
             return self.SEARCH_TAB_DIALOGUE
+        if index == 4:
+            return self.SEARCH_TAB_TAGS
         return self.SEARCH_TAB_IMAGE
 
     def _set_search_query_tab(self, tab: str) -> None:
@@ -62,6 +70,8 @@ class SearchPanelStateMixin:
             target = 2
         elif normalized == self.SEARCH_TAB_DIALOGUE:
             target = 3
+        elif normalized == self.SEARCH_TAB_TAGS:
+            target = 4
         else:
             target = 0
         if tabs.currentIndex() != target:
@@ -75,6 +85,8 @@ class SearchPanelStateMixin:
             return "compose" if self._search_has_compose_query() else "empty"
         if tab == self.SEARCH_TAB_DIALOGUE:
             return "dialogue" if self._search_has_dialogue_query() else "empty"
+        if tab == self.SEARCH_TAB_TAGS:
+            return "tags" if self._search_has_tags_query() else "empty"
         return "image" if self._search_has_image_query() else "empty"
 
     def _search_scope_is_global(self) -> bool:
@@ -310,6 +322,8 @@ class SearchPanelStateMixin:
             tabs.setTabText(2, texts.get("search_tab_compose", "Compose"))
             if tabs.count() > 3:
                 tabs.setTabText(3, texts.get("search_tab_dialogue", "Dialogue"))
+            if tabs.count() > 4:
+                tabs.setTabText(4, texts.get("search_tab_tags", "Tags"))
 
         compose_form = getattr(page.search_panel, "compose_form", None)
         if compose_form is not None:
@@ -327,7 +341,7 @@ class SearchPanelStateMixin:
                 mode_stack.setCurrentIndex(0)
             elif active_tab == self.SEARCH_TAB_IMAGE:
                 mode_stack.setCurrentIndex(1)
-            elif active_tab == self.SEARCH_TAB_DIALOGUE:
+            elif active_tab in {self.SEARCH_TAB_DIALOGUE, self.SEARCH_TAB_TAGS}:
                 mode_stack.setCurrentIndex(3)
             else:
                 mode_stack.setCurrentIndex(2)
@@ -365,29 +379,48 @@ class SearchPanelStateMixin:
             page.image_search_mode_label.setToolTip(hint)
             page.image_search_mode.setToolTip(hint)
 
-        if active_tab == self.SEARCH_TAB_DIALOGUE:
+        if active_tab in {self.SEARCH_TAB_DIALOGUE, self.SEARCH_TAB_TAGS}:
             self._populate_dialogue_search_mode_combo()
             dialogue_mode = getattr(page, "dialogue_search_mode", None)
             mode = self._dialogue_match_mode_from_ui()
-            hint_key = (
-                "search_dialogue_match_fuzzy_hint"
-                if mode == "fuzzy"
-                else "search_dialogue_match_exact_hint"
-            )
-            tip = texts.get(
-                hint_key,
-                texts.get("search_dialogue_match_segment_hint", ""),
-            )
+            if active_tab == self.SEARCH_TAB_TAGS:
+                hint_key = (
+                    "search_tags_match_fuzzy_hint"
+                    if mode == "fuzzy"
+                    else "search_tags_match_exact_hint"
+                )
+                tip = texts.get(hint_key, texts.get("search_tags_mode_hint", ""))
+                label_text = texts.get(
+                    "search_tags_match_label",
+                    texts.get("search_dialogue_match_label", "Match mode"),
+                )
+            else:
+                hint_key = (
+                    "search_dialogue_match_fuzzy_hint"
+                    if mode == "fuzzy"
+                    else "search_dialogue_match_exact_hint"
+                )
+                tip = texts.get(
+                    hint_key,
+                    texts.get("search_dialogue_match_segment_hint", ""),
+                )
+                label_text = texts.get("search_dialogue_match_label", "Match mode")
             if dialogue_mode is not None:
                 dialogue_mode.setToolTip(tip)
             label = getattr(page, "dialogue_search_mode_label", None)
             if label is not None:
+                label.setText(label_text)
                 label.setToolTip(tip)
 
         dialogue_hint = getattr(page, "lbl_dialogue_hint", None)
         if dialogue_hint is not None:
             dialogue_hint.setText(self._dialogue_search_hint_text(texts))
             dialogue_hint.setVisible(active_tab == self.SEARCH_TAB_DIALOGUE)
+
+        tags_hint = getattr(page, "lbl_tags_hint", None)
+        if tags_hint is not None:
+            tags_hint.setText(self._tags_search_hint_text(texts))
+            tags_hint.setVisible(active_tab == self.SEARCH_TAB_TAGS)
 
         self._refresh_search_model_display()
 
@@ -428,6 +461,47 @@ class SearchPanelStateMixin:
             pass
         return fallback
 
+    def _tags_search_hint_text(self, texts) -> str:
+        mode = self._dialogue_match_mode_from_ui()
+        if mode == "fuzzy":
+            fallback = texts.get(
+                "search_tags_match_fuzzy_hint",
+                "Fuzzy match on VLM tags. Generate tags on the Understanding page first.",
+            )
+            ready_key = "search_tags_match_fuzzy_hint_ready"
+        else:
+            fallback = texts.get(
+                "search_tags_match_exact_hint",
+                texts.get(
+                    "search_tags_mode_hint",
+                    "Exact substring match on VLM tags. Generate tags on the Understanding page first.",
+                ),
+            )
+            ready_key = "search_tags_match_exact_hint_ready"
+        try:
+            import time
+
+            from src.storage.evidence_tags_store import get_tag_index_stats
+
+            now = time.monotonic()
+            cached = getattr(self, "_tags_stats_cache", None)
+            if cached and (now - float(cached.get("at", 0.0))) < 30.0:
+                indexed = int(cached.get("indexed") or 0)
+            else:
+                stats = get_tag_index_stats()
+                indexed = int(stats.get("tag_indexed_videos") or 0)
+                self._tags_stats_cache = {"at": now, "indexed": indexed}
+            if indexed > 0:
+                ready = texts.get(ready_key, fallback).format(count=indexed)
+                suggest = texts.get(
+                    "search_tags_suggest_hint",
+                    "Suggestions appear below as you type; click a full tag to search.",
+                )
+                return f"{ready} {suggest}".strip()
+        except Exception:
+            pass
+        return fallback
+
     def _refresh_search_model_display(self) -> None:
         if not hasattr(self, "search_page"):
             return
@@ -453,6 +527,15 @@ class SearchPanelStateMixin:
                 )
                 page.lbl_text_model_hint.setVisible(False)
                 return
+            if active_tab == self.SEARCH_TAB_TAGS:
+                page.lbl_active_model.setText(
+                    texts.get(
+                        "search_tags_runtime_label",
+                        "Tag search (VLM tags projection, no CLIP required)",
+                    )
+                )
+                page.lbl_text_model_hint.setVisible(False)
+                return
 
             config = load_config()
             model_label = format_active_model_search_label(config)
@@ -463,24 +546,27 @@ class SearchPanelStateMixin:
             page.lbl_text_model_hint.setText(hint)
             page.lbl_text_model_hint.setVisible(bool(hint) and active_tab == self.SEARCH_TAB_TEXT)
         except Exception:
-            page.lbl_active_model.setText(
-                texts.get(
-                    "search_dialogue_runtime_label",
-                    "Subtitle search (global library, no CLIP required)",
+            if active_tab == self.SEARCH_TAB_DIALOGUE:
+                page.lbl_active_model.setText(
+                    texts.get(
+                        "search_dialogue_runtime_label",
+                        "Subtitle search (global library, no CLIP required)",
+                    )
                 )
-                if active_tab == self.SEARCH_TAB_DIALOGUE
-                else ""
-            )
+            elif active_tab == self.SEARCH_TAB_TAGS:
+                page.lbl_active_model.setText(
+                    texts.get(
+                        "search_tags_runtime_label",
+                        "Tag search (VLM tags projection, no CLIP required)",
+                    )
+                )
+            else:
+                page.lbl_active_model.setText("")
             page.lbl_active_model.setVisible(True)
             page.lbl_text_model_hint.setVisible(False)
 
     def _refresh_search_precision_controls(self) -> None:
         self._refresh_search_panel_state()
-
-    def _on_search_query_tab_changed(self, _index: int = 0) -> None:
-        self._refresh_search_panel_state()
-        if hasattr(self, "_refresh_search_scope_ui"):
-            self._refresh_search_scope_ui(force_entries=True)
 
     def _on_search_mode_changed(self) -> None:
         self._save_search_mode()
@@ -496,6 +582,93 @@ class SearchPanelStateMixin:
 
     def _on_dialogue_search_mode_changed(self) -> None:
         self._refresh_search_panel_state()
+
+    def _ensure_tag_suggest_timer(self):
+        timer = getattr(self, "_tag_suggest_timer", None)
+        if timer is not None:
+            return timer
+        from PySide6.QtCore import QTimer
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(140)
+        timer.timeout.connect(self._refresh_tag_suggestions)
+        self._tag_suggest_timer = timer
+        return timer
+
+    def _on_tags_query_changed(self) -> None:
+        self._refresh_search_panel_state(refresh_scope=False)
+        if self._search_active_tab() != self.SEARCH_TAB_TAGS:
+            self._hide_tag_suggestions()
+            return
+        self._ensure_tag_suggest_timer().start()
+
+    def _refresh_tag_suggestions(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        if self._search_active_tab() != self.SEARCH_TAB_TAGS:
+            self._hide_tag_suggestions()
+            return
+        panel = self.search_page.search_panel
+        query = panel.tags_query()
+        if not query:
+            self._hide_tag_suggestions()
+            return
+        try:
+            from src.storage.evidence_tags_store import suggest_tags
+
+            tags = suggest_tags(query, limit=12)
+        except Exception:
+            tags = []
+        # Don't suggest when the typed text already equals the only exact tag.
+        if len(tags) == 1 and str(tags[0]).strip().casefold() == query.casefold():
+            self._hide_tag_suggestions()
+            return
+        if not tags:
+            self._hide_tag_suggestions()
+            return
+        panel.show_tag_suggestions(tags)
+
+    def _hide_tag_suggestions(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        panel = getattr(self.search_page, "search_panel", None)
+        if panel is not None:
+            panel.hide_tag_suggestions()
+
+    def _on_tag_suggest_navigate(self, delta: int) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        popup = getattr(self.search_page.search_panel, "tag_suggest_popup", None)
+        if popup is not None and popup.isVisible():
+            popup.move_selection(int(delta))
+
+    def _on_tag_suggest_accept(self) -> None:
+        if not hasattr(self, "search_page"):
+            return
+        panel = self.search_page.search_panel
+        popup = getattr(panel, "tag_suggest_popup", None)
+        if popup is not None and popup.isVisible() and popup.choose_current():
+            return
+        query = panel.tags_query()
+        if query and hasattr(self, "_run_tag_search"):
+            self._run_tag_search(query)
+
+    def _on_tag_suggest_chosen(self, tag: str) -> None:
+        text = str(tag or "").strip()
+        if not text or not hasattr(self, "search_page"):
+            return
+        panel = self.search_page.search_panel
+        panel.set_tags_query(text)
+        panel.hide_tag_suggestions()
+        if hasattr(self, "_run_tag_search"):
+            self._run_tag_search(text)
+
+    def _on_search_query_tab_changed(self, _index: int = 0) -> None:
+        self._hide_tag_suggestions()
+        self._refresh_search_panel_state()
+        if hasattr(self, "_refresh_search_scope_ui"):
+            self._refresh_search_scope_ui(force_entries=True)
 
     def open_compose_search_tab(self) -> None:
         self.switch_page("search")

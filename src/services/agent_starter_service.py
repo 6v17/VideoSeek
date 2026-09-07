@@ -79,7 +79,7 @@ def _build_user_capability_bullets(
     preset_total: int = 0,
     locale: str = "zh",
 ) -> List[str]:
-    """Plain-language capability lines for the first reply (≤6 bullets)."""
+    """Plain-language capability lines for the first reply (≤8 bullets)."""
     lang = "en" if str(locale).lower().startswith("en") else "zh"
     caps = health.get("capabilities") if isinstance(health.get("capabilities"), dict) else {}
     ffmpeg = health.get("ffmpeg") if isinstance(health.get("ffmpeg"), dict) else {}
@@ -104,7 +104,8 @@ def _build_user_capability_bullets(
         if search_bits:
             bullets.append(
                 f"Search: {' + '.join(search_bits)}; batch up to 64 queries; "
-                "visual text may set text_enhance."
+                "YOU set text_enhance true/false on visual text "
+                "(multi-route CLIP+RRF, not LLM rewrite; see agent-doc)."
             )
         if caps.get("subtitle_library_discovery"):
             bullets.append("Probe subtitle libraries: GET /subtitle-libraries (+ /videos).")
@@ -114,6 +115,13 @@ def _build_user_capability_bullets(
                 "Hard-subtitle search: POST /search with search_kind=dialogue"
                 + (f" (~{n_dlg} videos)." if n_dlg is not None else ".")
                 + " Optional match_mode=fuzzy."
+            )
+        if caps.get("tag_search"):
+            n_tags = health.get("tag_indexed_videos")
+            bullets.append(
+                "VLM tag search: POST /search with search_kind=tags"
+                + (f" (~{n_tags} videos)." if n_tags is not None else ".")
+                + " Optional match_mode=fuzzy. Tags are generated on the Understanding page (Agent does not run VLM)."
             )
         if caps.get("frame_extract"):
             bullets.append(
@@ -131,8 +139,8 @@ def _build_user_capability_bullets(
                 f"{preset_total} search presets — snapshot shows up to {STARTER_PRESET_SNAPSHOT_LIMIT}; "
                 "use GET /search/presets for all."
             )
-        bullets.append("Not available: live ASR, plot reasoning, auto narration videos.")
-        return bullets[:6]
+        bullets.append("Not available: live ASR, plot reasoning, auto narration videos, running VLM tag generation.")
+        return bullets[:8]
 
     if not health.get("index_ready"):
         bullets.append("索引未就绪 — 请让用户在 VideoSeek 里先同步视频库。")
@@ -152,7 +160,8 @@ def _build_user_capability_bullets(
     if search_bits:
         bullets.append(
             f"搜索：{' + '.join(search_bits)}；可一次批量最多 64 条；"
-            "画面文搜可传 text_enhance。"
+            "画面文搜由你传 text_enhance true/false"
+            "（多路 CLIP+RRF，非大模型改写；细节见 agent-doc）。"
         )
     if caps.get("subtitle_library_discovery"):
         bullets.append("探测字幕库：GET /subtitle-libraries（及 /videos）。")
@@ -162,6 +171,13 @@ def _build_user_capability_bullets(
             "硬字幕/台词检索：POST /search，search_kind=dialogue"
             + (f"（约 {n_dlg} 条视频）。" if n_dlg is not None else "。")
             + " 可选 match_mode=fuzzy。"
+        )
+    if caps.get("tag_search"):
+        n_tags = health.get("tag_indexed_videos")
+        bullets.append(
+            "VLM 标签检索：POST /search，search_kind=tags"
+            + (f"（约 {n_tags} 条视频）。" if n_tags is not None else "。")
+            + " 可选 match_mode=fuzzy。标签在理解页生成（Agent 不代跑 VLM）。"
         )
     if caps.get("frame_extract"):
         bullets.append("取帧：POST /frames/extract 或 /frames/extract/batch（≤16，base64）。")
@@ -177,8 +193,8 @@ def _build_user_capability_bullets(
             f"共 {preset_total} 个搜索预设 — 快照最多 {STARTER_PRESET_SNAPSHOT_LIMIT} 个，"
             "全量见 GET /search/presets。"
         )
-    bullets.append("不支持：实时 ASR、全库剧情推理、自动解说成片。")
-    return bullets[:6]
+    bullets.append("不支持：实时 ASR、全库剧情推理、自动解说成片、代跑 VLM 生成标签。")
+    return bullets[:8]
 
 
 def _format_first_reply_instruction(
@@ -243,8 +259,10 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
             f"2. DEFAULT: one POST {batch_url} + export.output_dir for mp4. "
             f"Preset: {preset_body} | Folder: {folder_body}\n"
             "3. preset_id from snapshot or GET /search/presets; video_path only from API — never guess paths.\n"
-            "4. Non-default (user must ask): manifest, precise/preview_anchor_sec, intermediate JSON files.\n"
-            f"5. Scope: GET {api_base}/libraries / GET {api_base}/videos when needed."
+            "4. Visual text search: YOU may set text_enhance true/false "
+            "(phrase/synonym routes + CLIP pick + RRF; not plot LLM; check meta.text_enhance_applied).\n"
+            "5. Non-default (user must ask): manifest, precise/preview_anchor_sec, intermediate JSON files.\n"
+            f"6. Scope: GET {api_base}/libraries / GET {api_base}/videos when needed."
         )
     return (
         "## Policy kernel（唯一 binding）\n"
@@ -252,8 +270,10 @@ def _format_policy_kernel(*, locale: str, api_base: str) -> str:
         f"2. 默认：一次 POST {batch_url}，要 mp4 同 body 加 export.output_dir。"
         f"Preset：{preset_body} | 截图文件夹：{folder_body}\n"
         "3. preset_id 来自快照或 GET /search/presets；video_path 只来自 API — 禁止猜路径。\n"
-        "4. 非默认（须用户要求）：manifest、precise/preview_anchor_sec、中间 JSON 文件。\n"
-        f"5. 缩 scope：GET {api_base}/libraries / GET {api_base}/videos。"
+        "4. 画面文搜：由你传 text_enhance true/false"
+        "（短语/同义多路 + CLIP 挑选 + RRF；非剧情大模型；看 meta.text_enhance_applied）。\n"
+        "5. 非默认（须用户要求）：manifest、precise/preview_anchor_sec、中间 JSON 文件。\n"
+        f"6. 缩 scope：GET {api_base}/libraries / GET {api_base}/videos。"
     )
 
 
@@ -279,7 +299,9 @@ def build_agent_starter_text(
         intro = (
             "VideoSeek — localhost CLIP visual search + export; "
             "optional dialogue search via search_kind=dialogue when dialogue_index_ready "
-            "(match_mode=fuzzy); visual text may set text_enhance."
+            "(match_mode=fuzzy); optional VLM tag search via search_kind=tags when "
+            "tag_index_ready (tags from Understanding page; Agent does not run VLM); "
+            "YOU control visual text_enhance."
         )
         snapshot_title = "## Instance"
         not_ready = "Index not ready — ask the user to sync in VideoSeek before searching."
@@ -287,7 +309,8 @@ def build_agent_starter_text(
         intro = (
             "VideoSeek — 本机 CLIP 画面搜索 + 导出；"
             "台词检索在 dialogue_index_ready 时用 search_kind=dialogue（可 match_mode=fuzzy）；"
-            "画面文搜可传 text_enhance。"
+            "标签检索在 tag_index_ready 时用 search_kind=tags（标签在理解页生成，Agent 不代跑 VLM）；"
+            "画面文搜由你控制 text_enhance。"
         )
         snapshot_title = "## 当前实例"
         not_ready = "索引未就绪 — 请让用户在 VideoSeek 中同步后再搜索。"
@@ -302,6 +325,9 @@ def build_agent_starter_text(
         "dialogue_index_ready": bool(health.get("dialogue_index_ready")),
         "dialogue_indexed_videos": health.get("dialogue_indexed_videos"),
         "dialogue_match_modes": health.get("dialogue_match_modes") or ["exact", "fuzzy"],
+        "tag_index_ready": bool(health.get("tag_index_ready")),
+        "tag_indexed_videos": health.get("tag_indexed_videos"),
+        "tag_match_modes": health.get("tag_match_modes") or ["exact", "fuzzy"],
         "text_search_enhance_enabled": bool(health.get("text_search_enhance_enabled")),
         "search_presets": preset_summaries,
     }

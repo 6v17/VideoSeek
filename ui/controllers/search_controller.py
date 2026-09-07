@@ -254,8 +254,8 @@ class SearchController(QObject):
         search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
         clip_score_mode = False
         low_confidence_threshold = None
-        # CLIP confidence is only meaningful for visual/image searches, never subtitle search.
-        if search_kind != "dialogue":
+        # CLIP confidence is only meaningful for visual/image searches, never subtitle/tag search.
+        if search_kind not in {"dialogue", "tags"}:
             image_path = str(getattr(self.parent_window, "current_img_path", "") or "").strip()
             if image_path:
                 try:
@@ -270,7 +270,7 @@ class SearchController(QObject):
 
         highlight_query = ""
         dialogue_match_mode = ""
-        if search_kind == "dialogue" and worker_config is not None:
+        if search_kind in {"dialogue", "tags"} and worker_config is not None:
             highlight_query = str(getattr(worker_config, "query", "") or "").strip()
             dialogue_match_mode = str(getattr(worker_config, "search_mode", "") or "").strip()
         self._result_display_context = {
@@ -348,6 +348,31 @@ class SearchController(QObject):
             mode_label = texts.get(mode_key, texts.get("search_tab_dialogue", "Subtitles"))
             status_text = texts.get(
                 "search_done_dialogue",
+                "{mode} · {duration:.2f}s · {count}",
+            ).format(mode=mode_label, duration=duration, count=total_count)
+            self.parent_window.search_page.lbl_status.setText(status_text)
+            return
+
+        if search_kind == "tags":
+            tags_message = str(getattr(self.worker, "dialogue_status_message", "") or "").strip()
+            tags_keys = {
+                "no tag index (generate VLM tags on Understanding page first)": "search_tags_no_index",
+                "no tag matches": "search_tags_no_matches",
+                "empty query": "search_empty_tags",
+            }
+            if tags_message and not results:
+                key = tags_keys.get(tags_message)
+                status_text = texts.get(key, tags_message) if key else tags_message
+                self.parent_window.search_page.lbl_status.setText(status_text)
+                return
+            matched_by = str(getattr(self.worker, "dialogue_matched_by", "") or "").strip()
+            if matched_by == "keyword_fuzzy":
+                mode_key = "search_tags_match_fuzzy"
+            else:
+                mode_key = "search_tags_match_exact"
+            mode_label = texts.get(mode_key, texts.get("search_tab_tags", "Tags"))
+            status_text = texts.get(
+                "search_done_tags",
                 "{mode} · {duration:.2f}s · {count}",
             ).format(mode=mode_label, duration=duration, count=total_count)
             self.parent_window.search_page.lbl_status.setText(status_text)

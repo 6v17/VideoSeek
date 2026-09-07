@@ -23,7 +23,7 @@ class AgentSearchRequest(BaseModel):
     # Team client upload: decode to a temp file on the server
     image_base64: Optional[str] = None
     image_mime: Optional[str] = None
-    # visual (default) | dialogue — orthogonal to mode frame/chunk
+    # visual (default) | dialogue | tags — orthogonal to mode frame/chunk
     search_kind: Optional[str] = None
     top_k: Optional[int] = None
     mode: Optional[str] = None
@@ -34,7 +34,7 @@ class AgentSearchRequest(BaseModel):
     video_discovery_enabled: Optional[bool] = None
     # Precomputed CLIP vector (compose / presets). When set, server skips re-encoding.
     query_vector: Optional[List[float]] = None
-    # Dialogue only: exact | fuzzy | auto (team clients may also send via search_mode).
+    # Dialogue/tags: exact | fuzzy | auto (team clients may also send via search_mode).
     match_mode: Optional[str] = None
     # Visual text search: multi-route CLIP + RRF. null = use server text_search_enhance_enabled.
     text_enhance: Optional[bool] = None

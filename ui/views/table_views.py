@@ -109,6 +109,9 @@ def _dialogue_video_cell(
     matched_text: str,
     query: str,
     match_mode: str,
+    *,
+    show_title: bool = True,
+    snippet_max_len: int = 40,
 ) -> QLabel:
     from ui.views.dialogue_highlight import highlight_dialogue_html
 
@@ -116,19 +119,26 @@ def _dialogue_video_cell(
         matched_text,
         query,
         match_mode=match_mode,
-        max_len=40,
+        max_len=max(12, int(snippet_max_len or 40)),
     )
     label = QLabel()
     label.setObjectName("ResultDialogueVideoCell")
     label.setTextFormat(Qt.RichText)
     label.setAlignment(Qt.AlignCenter)
     label.setWordWrap(True)
-    label.setText(
-        "<div style='text-align:center'>"
-        f"<div>{_escape_html(base_name)}</div>"
-        f"<div style='margin-top:2px;line-height:1.25'>{snippet_html}</div>"
-        "</div>"
-    )
+    if show_title and str(base_name or "").strip():
+        label.setText(
+            "<div style='text-align:center'>"
+            f"<div>{_escape_html(base_name)}</div>"
+            f"<div style='margin-top:2px;line-height:1.25'>{snippet_html}</div>"
+            "</div>"
+        )
+    else:
+        label.setText(
+            "<div style='text-align:center;line-height:1.25'>"
+            f"{snippet_html}"
+            "</div>"
+        )
     # Let hover/tooltip hit the QTableWidgetItem underneath (styled like other columns).
     label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
     label.setStyleSheet("background: transparent;")
@@ -203,7 +213,31 @@ def populate_result_table(
         base_name = os.path.basename(video_path)
         query = str(highlight_query or "").strip()
         mode = str(dialogue_match_mode or "").strip().lower()
-        if match_kind == "dialogue" and matched_text and query:
+        if match_kind == "tags" and matched_text and query:
+            # Tags column: show the chunk tag set only (filename is in the tooltip).
+            name_item = QTableWidgetItem("")
+            name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
+            table.setCellWidget(
+                row,
+                LocalSearchCol.VIDEO,
+                _dialogue_video_cell(
+                    "",
+                    matched_text,
+                    query,
+                    mode or "exact",
+                    show_title=False,
+                    snippet_max_len=72,
+                ),
+            )
+        elif match_kind == "tags" and matched_text:
+            snippet = matched_text if len(matched_text) <= 72 else f"{matched_text[:71]}…"
+            name_item = QTableWidgetItem(snippet)
+            name_item.setToolTip(f"{video_path}\n\n{matched_text}")
+            name_item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, LocalSearchCol.VIDEO, name_item)
+        elif match_kind == "dialogue" and matched_text and query:
             # Empty item text: cell widget paints the label; keeping both caused ghosting.
             name_item = QTableWidgetItem("")
             name_item.setToolTip(f"{video_path}\n\n{matched_text}")
@@ -233,13 +267,13 @@ def populate_result_table(
 
         time_item = QTableWidgetItem(_format_time_range(start_sec, end_sec, texts, match_kind=match_kind))
         time_item.setTextAlignment(Qt.AlignCenter)
-        if match_kind == "dialogue" and matched_text:
+        if match_kind in {"dialogue", "tags"} and matched_text:
             time_item.setToolTip(matched_text)
         table.setItem(row, LocalSearchCol.RANGE, time_item)
 
         mode_item = QTableWidgetItem(_result_mode_label(start_sec, end_sec, texts, match_kind=match_kind))
         mode_item.setTextAlignment(Qt.AlignCenter)
-        if match_kind == "dialogue" and matched_text:
+        if match_kind in {"dialogue", "tags"} and matched_text:
             mode_item.setToolTip(matched_text)
         table.setItem(row, LocalSearchCol.MODE, mode_item)
 
@@ -505,6 +539,8 @@ def _result_mode_label(start_sec, end_sec, texts, match_kind="frame"):
         return texts.get("result_mode_video", texts["result_mode_frame"])
     if str(match_kind or "") == "dialogue":
         return texts.get("result_mode_dialogue", texts.get("search_tab_dialogue", "Dialogue"))
+    if str(match_kind or "") == "tags":
+        return texts.get("result_mode_tags", texts.get("search_tab_tags", "Tags"))
     if abs(float(end_sec) - float(start_sec)) < 1e-3:
         return texts["result_mode_frame"]
     return texts["result_mode_chunk"]

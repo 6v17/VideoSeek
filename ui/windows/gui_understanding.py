@@ -156,12 +156,35 @@ class UnderstandingGuiMixin:
             page.header.subtitle.setText(
                 self.texts.get("understanding_page_desc_motion", page.header.subtitle.text())
             )
-        if page.btn_generate_evidence.objectName() != "GhostButton":
-            page.btn_generate_evidence.setObjectName("GhostButton")
+        if page.btn_generate_evidence.objectName() != "PrimaryButton":
+            page.btn_generate_evidence.setObjectName("PrimaryButton")
             style = page.btn_generate_evidence.style()
             style.unpolish(page.btn_generate_evidence)
             style.polish(page.btn_generate_evidence)
             page.btn_generate_evidence.update()
+        if getattr(page, "btn_generate_batch", None) is not None:
+            if page.btn_generate_batch.objectName() != "AccentGhostButton":
+                page.btn_generate_batch.setObjectName("AccentGhostButton")
+                style = page.btn_generate_batch.style()
+                style.unpolish(page.btn_generate_batch)
+                style.polish(page.btn_generate_batch)
+                page.btn_generate_batch.update()
+        if getattr(page, "btn_project_tags", None) is not None:
+            page.btn_project_tags.setText(
+                self.texts.get("understanding_project_tags_button", "Index tag library")
+            )
+            page.btn_project_tags.setToolTip(
+                self.texts.get(
+                    "understanding_project_tags_tip",
+                    "Write existing evidence/tags JSON into the tag search index. Does not run VLM.",
+                )
+            )
+            if page.btn_project_tags.objectName() != "SuccessGhostButton":
+                page.btn_project_tags.setObjectName("SuccessGhostButton")
+                style = page.btn_project_tags.style()
+                style.unpolish(page.btn_project_tags)
+                style.polish(page.btn_project_tags)
+                page.btn_project_tags.update()
         page.btn_evidence_details.setText(
             self.texts.get(
                 "library_evidence_detail_motion",
@@ -1427,6 +1450,8 @@ class UnderstandingGuiMixin:
             ready and not understanding_running and not indexing_running and has_video
         )
         page.btn_generate_batch.setEnabled(ready and not understanding_running and not indexing_running)
+        if hasattr(page, "btn_project_tags"):
+            page.btn_project_tags.setEnabled(not understanding_running and not indexing_running)
         if hasattr(page, "btn_generate_summary"):
             page.btn_generate_summary.setEnabled(False)
             page.btn_generate_summary.hide()
@@ -1578,6 +1603,8 @@ class UnderstandingGuiMixin:
         page.btn_generate_evidence.setEnabled(False)
         if hasattr(page, "btn_generate_batch"):
             page.btn_generate_batch.setEnabled(False)
+        if hasattr(page, "btn_project_tags"):
+            page.btn_project_tags.setEnabled(False)
         if hasattr(page, "btn_generate_summary"):
             page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
@@ -1618,6 +1645,80 @@ class UnderstandingGuiMixin:
         if self.understanding_controller.start_video(video_id, mode=self._current_understanding_mode()):
             if hasattr(self, "_sync_tray_stop_action"):
                 self._sync_tray_stop_action()
+
+    def project_understanding_tags_index(self):
+        """Rebuild tag search projection from evidence/tags JSON (manual; does not run VLM)."""
+        if not self._ensure_startup_migration_idle("feature_understanding"):
+            return
+        if self.indexing_controller.is_running():
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        page = self.understanding_page
+        page.btn_project_tags.setEnabled(False)
+        page.lbl_status.setText(
+            self.texts.get("understanding_project_tags_running", "Indexing tag library…")
+        )
+        try:
+            from src.app.config import load_config
+            from src.storage.evidence_tags_store import rebuild_all_from_json
+
+            result = rebuild_all_from_json(config=load_config())
+        except Exception as exc:
+            page.btn_project_tags.setEnabled(True)
+            self.show_error_dialog(
+                self.texts.get("understanding_project_tags_failed", "Failed to index tag library."),
+                exc,
+            )
+            return
+
+        if hasattr(self, "_tags_stats_cache"):
+            self._tags_stats_cache = None
+        if hasattr(self, "invalidate_tag_search_scope_entries_cache"):
+            self.invalidate_tag_search_scope_entries_cache()
+        if hasattr(self, "_hide_tag_suggestions"):
+            self._hide_tag_suggestions()
+        videos = int(result.get("videos_projected") or 0)
+        rows = int(result.get("tag_rows") or 0)
+        errors = list(result.get("errors") or [])
+        page.lbl_status.setText(
+            self.texts.get(
+                "understanding_project_tags_done",
+                "Tag library indexed: {videos} video(s), {rows} tag row(s).",
+            ).format(videos=videos, rows=rows)
+        )
+        page.btn_project_tags.setEnabled(True)
+        if errors:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_project_tags_partial",
+                    "Indexed with {count} error(s). First: {first}",
+                ).format(count=len(errors), first=errors[0]),
+                kind="warning",
+            )
+        elif videos <= 0:
+            scanned = int(result.get("videos_scanned") or 0)
+            by_store = result.get("scanned_by_store") or {}
+            if scanned > 0:
+                detail = ", ".join(f"{k}={v}" for k, v in sorted(by_store.items()) if v)
+                self.show_info_dialog(
+                    self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                    self.texts.get(
+                        "understanding_project_tags_no_tag_fields",
+                        "Found {scanned} evidence file(s) ({detail}) but none had chunk tags to index.",
+                    ).format(scanned=scanned, detail=detail or "-"),
+                    kind="info",
+                )
+            else:
+                self.show_info_dialog(
+                    self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                    self.texts.get(
+                        "understanding_project_tags_empty",
+                        "No tags JSON found to index. Generate tags on the Understanding page first.",
+                    ),
+                    kind="info",
+                )
 
     def start_generate_understanding_batch(self):
         if not self._ensure_startup_migration_idle("feature_understanding"):
@@ -1684,6 +1785,8 @@ class UnderstandingGuiMixin:
         self.switch_page("understanding")
         page.btn_generate_evidence.setEnabled(False)
         page.btn_generate_batch.setEnabled(False)
+        if hasattr(page, "btn_project_tags"):
+            page.btn_project_tags.setEnabled(False)
         if hasattr(page, "btn_generate_summary"):
             page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
@@ -1846,6 +1949,8 @@ class UnderstandingGuiMixin:
         page.btn_generate_evidence.setEnabled(True)
         if hasattr(page, "btn_generate_batch"):
             page.btn_generate_batch.setEnabled(True)
+        if hasattr(page, "btn_project_tags"):
+            page.btn_project_tags.setEnabled(True)
         if hasattr(page, "btn_generate_summary"):
             page.btn_generate_summary.setEnabled(False)
             page.btn_generate_summary.hide()

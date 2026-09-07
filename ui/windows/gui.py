@@ -339,6 +339,17 @@ class MainWindow(
         self.search_page.text_search.textChanged.connect(
             lambda *_: self._refresh_search_panel_state(refresh_scope=False)
         )
+        if hasattr(self.search_page.search_panel, "tags_search"):
+            tags_edit = self.search_page.search_panel.tags_search
+            tags_edit.textChanged.connect(self._on_tags_query_changed)
+            if hasattr(tags_edit, "suggest_navigate"):
+                tags_edit.suggest_navigate.connect(self._on_tag_suggest_navigate)
+            if hasattr(tags_edit, "suggest_accept"):
+                tags_edit.suggest_accept.connect(self._on_tag_suggest_accept)
+            if hasattr(tags_edit, "suggest_dismiss"):
+                tags_edit.suggest_dismiss.connect(self._hide_tag_suggestions)
+            if hasattr(self.search_page.search_panel, "tag_suggest_chosen"):
+                self.search_page.search_panel.tag_suggest_chosen.connect(self._on_tag_suggest_chosen)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self._init_search_scope_state()
@@ -390,6 +401,8 @@ class MainWindow(
 
         self.understanding_page.btn_generate_evidence.clicked.connect(self.start_generate_understanding_evidence)
         self.understanding_page.btn_generate_batch.clicked.connect(self.start_generate_understanding_batch)
+        if hasattr(self.understanding_page, "btn_project_tags"):
+            self.understanding_page.btn_project_tags.clicked.connect(self.project_understanding_tags_index)
         self.understanding_page.btn_evidence_details.clicked.connect(self.show_local_evidence_details)
         self.understanding_page.btn_export_video_json.clicked.connect(self.export_current_video_understanding_json)
         self.understanding_page.btn_export_recap.clicked.connect(
@@ -1456,6 +1469,17 @@ class MainWindow(
             self._run_dialogue_search(dialogue_query)
             return
 
+        # VLM tag search uses the evidence_tags projection — no CLIP model.
+        if active_tab == self.SEARCH_TAB_TAGS:
+            tags_query = self.search_page.search_panel.tags_query()
+            if not tags_query:
+                self.search_page.lbl_status.setText(
+                    self.texts.get("search_empty_tags", self.texts["empty_query"])
+                )
+                return
+            self._run_tag_search(tags_query)
+            return
+
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
             return
@@ -1550,6 +1574,37 @@ class MainWindow(
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             search_kind="dialogue",
+            search_mode=match_mode,
+        )
+        return True
+
+    def _run_tag_search(self, raw_query, *, sync_ui=True):
+        query = str(raw_query or "").strip()
+        if not query:
+            self.search_page.lbl_status.setText(
+                self.texts.get("search_empty_tags", self.texts["empty_query"])
+            )
+            return False
+        if sync_ui:
+            self.switch_page("search")
+            self._set_search_query_tab(self.SEARCH_TAB_TAGS)
+            self.search_page.search_panel.set_tags_query(query)
+        if not self._validate_search_scope():
+            self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
+            return False
+
+        scope_video_paths, scope_library_paths = None, None
+        if hasattr(self, "_resolve_active_tag_search_scope"):
+            scope_video_paths, scope_library_paths = self._resolve_active_tag_search_scope()
+        match_mode = "exact"
+        if hasattr(self, "_dialogue_match_mode_from_ui"):
+            match_mode = self._dialogue_match_mode_from_ui()
+        self.search_controller.start_search(
+            query,
+            True,
+            scope_library_paths=scope_library_paths,
+            scope_video_paths=scope_video_paths,
+            search_kind="tags",
             search_mode=match_mode,
         )
         return True
@@ -1965,6 +2020,7 @@ class MainWindow(
         self.current_img_path = None
         self.search_page.search_panel.clear_text_query()
         self.search_page.search_panel.clear_dialogue_query()
+        self.search_page.search_panel.clear_tags_query()
         self.search_page.search_panel.compose_form.clear()
         self.search_page.img_label.clear()
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
