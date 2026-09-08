@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -14,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.i18n import get_texts
+from src.app.path_display import video_display_name
 from src.services.shot_list_service import ShotListStore
 from src.services.search_locate import format_clip_score_percent
 from ui.dialogs.shell import VSDialogShell
@@ -189,7 +188,7 @@ class ShotListDialog(VSDialogShell):
             order_item.setData(Qt.UserRole, item.id)
             self.table.setItem(row, 0, order_item)
 
-            video_item = QTableWidgetItem(os.path.basename(item.video_path) or item.video_path)
+            video_item = QTableWidgetItem(video_display_name(item.video_path) or item.video_path)
             video_item.setToolTip(item.video_path)
             self.table.setItem(row, 1, video_item)
 

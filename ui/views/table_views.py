@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from src.services.library_service import resolve_library_card_status
 from src.storage.asset_store import load_model_metadata
 from src.app.config import load_config
+from src.app.path_display import video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_locate import (
     format_clip_score_percent,
@@ -210,7 +211,7 @@ def populate_result_table(
 
         table.setCellWidget(row, LocalSearchCol.PREVIEW, make_thumb_label(text=texts["thumb_loading"]))
 
-        base_name = os.path.basename(video_path)
+        base_name = video_display_name(video_path)
         query = str(highlight_query or "").strip()
         mode = str(dialogue_match_mode or "").strip().lower()
         if match_kind == "tags" and matched_text and query:
@@ -326,7 +327,7 @@ def populate_link_result_table(table, results, source_link, on_preview, on_locat
         source_time_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, 1, source_time_item)
 
-        name_item = QTableWidgetItem(os.path.basename(result["video_path"]))
+        name_item = QTableWidgetItem(video_display_name(result["video_path"]))
         name_item.setToolTip(result["video_path"])
         name_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, 2, name_item)

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.app.logging_utils import get_logger
+from src.app.path_display import video_display_name
 from src.utils import format_timecode_seconds
 from ui.playback.vlc_player import VlcPreviewPlayer
 
@@ -761,7 +762,7 @@ class PreviewDialog(QDialog):
             )
         if encode_mode is None:
             return
-        base_name = os.path.splitext(os.path.basename(self.video_path))[0]
+        base_name = os.path.splitext(video_display_name(self.video_path))[0] or "clip"
         suggested_name = f"{base_name}_segment_{int(start_sec):06d}.mp4"
         save_path, _ = QFileDialog.getSaveFileName(
             self,
