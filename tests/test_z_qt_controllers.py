@@ -634,6 +634,21 @@ class SearchControllerTests(unittest.TestCase):
         self.assertIs(controller.worker, second_worker)
         second_worker.start.assert_called_once()
 
+    @patch("src.services.search_preset_model.get_preset")
+    def test_start_preset_search_uses_compose_search_path(self, mock_get_preset):
+        parent = _make_parent_window()
+        parent.apply_search_preset_to_ui = MagicMock()
+        parent._start_compose_search = MagicMock()
+        controller = SearchController(parent)
+        preset = {"id": "p1", "query": "rain street", "fusion": {"text_weight": 0.5, "image_weight": 0.5}}
+        mock_get_preset.return_value = preset
+
+        controller.start_preset_search("p1")
+
+        mock_get_preset.assert_called_once_with("p1")
+        parent.apply_search_preset_to_ui.assert_called_once_with(preset)
+        parent._start_compose_search.assert_called_once_with()
+
     def test_clear_results_resets_table(self):
         parent = _make_parent_window()
         controller = SearchController(parent)

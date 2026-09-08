@@ -204,13 +204,41 @@ class SearchWorker(QThread):
                 from src.storage.config_store import get_text_search_enhance_enabled
 
                 kind = str(config.search_kind or "").strip().lower()
+                query_data = config.query
+                is_text = bool(config.is_text)
+                query_vector = config.query_vector
+                compose_paths = list(config.compose_image_paths or [])
+                is_compose = kind == "compose" or (
+                    config.compose_text is not None or config.compose_image_paths is not None
+                )
+                # Compose must match local mixed search: text-only → let server encode;
+                # with refs → fuse on the client and send query_vector (same as Search button).
+                if is_compose and kind not in {"dialogue", "tags"}:
+                    from src.services.search_preset_query import encode_mixed_query_vector
+
+                    compose_text = str(
+                        config.compose_text if config.compose_text is not None else ""
+                    ).strip()
+                    if compose_paths:
+                        query_vector = encode_mixed_query_vector(
+                            query=compose_text,
+                            source_image_paths=compose_paths,
+                            fusion=config.compose_fusion,
+                            config=app_cfg,
+                        )
+                        is_text = bool(compose_text) and not compose_paths
+                        query_data = compose_text or compose_paths[0]
+                    else:
+                        query_vector = None
+                        is_text = True
+                        query_data = compose_text
                 text_enhance = None
-                if kind not in {"dialogue", "tags"} and bool(config.is_text):
+                if kind not in {"dialogue", "tags"} and bool(is_text) and query_vector is None:
                     text_enhance = bool(get_text_search_enhance_enabled(app_cfg))
                 results = run_team_client_search(
                     server_url=str(app_cfg.get("team_server_url") or ""),
-                    query_data=config.query,
-                    is_text=bool(config.is_text),
+                    query_data=query_data,
+                    is_text=is_text,
                     search_mode=config.search_mode,
                     search_precision_mode=config.search_precision_mode,
                     search_kind=kind or None,
@@ -220,7 +248,7 @@ class SearchWorker(QThread):
                     scope_library_paths=config.scope_library_paths or None,
                     video_discovery_enabled=config.video_discovery_enabled,
                     preview_anchor_sec=config.preview_anchor_sec,
-                    query_vector=config.query_vector,
+                    query_vector=query_vector,
                     match_mode=config.search_mode if kind in {"dialogue", "tags"} else None,
                     text_enhance=text_enhance,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),

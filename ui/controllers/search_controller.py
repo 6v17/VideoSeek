@@ -108,35 +108,55 @@ class SearchController(QObject):
         self.worker.start()
 
     def start_preset_search(self, preset_id):
+        """Load preset into Compose and run the same path as clicking Search.
+
+        Older code searched with a cached query_vector and skipped compose/text-enhance,
+        so chip results disagreed with a manual Compose search of the same content.
+        """
+        from src.services.search_preset_model import get_preset
+
+        preset = get_preset(str(preset_id or "").strip())
+        if preset is None:
+            page = getattr(self.parent_window, "search_page", None)
+            if page is not None and hasattr(page, "lbl_status"):
+                texts = getattr(self.parent_window, "texts", {}) or {}
+                page.lbl_status.setText(texts.get("search_presets_empty", "Preset not found"))
+            return
+        if hasattr(self.parent_window, "apply_search_preset_to_ui"):
+            self.parent_window.apply_search_preset_to_ui(preset)
+        if hasattr(self.parent_window, "_start_compose_search"):
+            self.parent_window._start_compose_search()
+            return
+        # Fallback if Compose entry is missing (should not happen in desktop UI).
         from src.services.search_request_service import resolve_search_query_inputs
         from src.services.search_scope import resolve_effective_search_scope
 
         query_part = resolve_search_query_inputs(preset_id=preset_id)
-        preset = query_part["preset"]
         scope_video_paths, scope_library_paths = resolve_effective_search_scope(
             None,
             preset_scope_video_paths=query_part.get("preset_scope_video_paths"),
         )
-        is_text = bool(query_part["is_text"])
-        if hasattr(self.parent_window, "apply_search_preset_to_ui"):
-            self.parent_window.apply_search_preset_to_ui(preset)
-        # Presets share compose granularity: frame/chunk from the text/compose mode control.
+        compose_mode = "frame"
         if hasattr(self.parent_window, "_text_search_mode_from_ui"):
             compose_mode = self.parent_window._text_search_mode_from_ui()
-        else:
-            compose_mode = "frame"
         self.start_search(
             query=query_part.get("query_data"),
-            is_text=is_text,
+            is_text=bool(query_part["is_text"]),
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
-            query_vector=query_part.get("query_vector"),
+            query_vector=None,
             search_mode=compose_mode,
+            search_kind="compose",
             top_k=query_part.get("default_top_k"),
             min_score=query_part.get("default_min_score"),
             search_precision_mode="fast",
             pixel_query_data=query_part.get("pixel_query_data"),
             video_discovery_enabled=False,
+            compose_text=str((query_part.get("preset") or {}).get("query") or ""),
+            compose_image_paths=list(
+                ((query_part.get("preset") or {}).get("source_image_paths") or [])
+            ),
+            compose_fusion=(query_part.get("preset") or {}).get("fusion"),
         )
 
     def clear_results(self):
