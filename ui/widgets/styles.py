@@ -554,16 +554,18 @@ QPushButton:disabled {
     border-color: __ACCENT__;
 }
 #GhostButton {
-    background: transparent;
-    border-color: __LINE__;
+    background: __BUTTON_SOFT__;
+    border-color: __LINE_STRONG__;
+    color: __HEADLINE__;
+    font-weight: 600;
 }
 #GhostButton:hover {
-    background: __BUTTON_SOFT__;
-    border-color: __LINE__;
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE_STRONG__;
 }
 #GhostButton:pressed {
     background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE__;
+    border-color: __ACCENT__;
 }
 #PresetChipButton {
     background: __ACCENT_SOFT__;
@@ -716,58 +718,63 @@ QPushButton#SearchResultsPagerButton:disabled {
     border: none;
 }
 #AccentGhostButton {
-    background: transparent;
+    background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
     color: __ACCENT__;
     font-weight: 700;
 }
 #AccentGhostButton:hover {
     background: __ACCENT_SOFT__;
+    border-color: __ACCENT_HOVER__;
+    color: __ACCENT_HOVER__;
 }
 #AccentGhostButton:pressed {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
 }
 #AccentGhostButton:disabled {
-    background: transparent;
+    background: __FIELD__;
     border-color: __LINE__;
     color: __MUTED__;
     font-weight: 600;
 }
 #SuccessGhostButton {
-    background: transparent;
+    background: __SUCCESS_SOFT__;
     border-color: __SUCCESS__;
     color: __SUCCESS__;
     font-weight: 700;
 }
 #SuccessGhostButton:hover {
     background: __SUCCESS_SOFT__;
+    border-color: __SUCCESS_HOVER__;
+    color: __SUCCESS_HOVER__;
 }
 #SuccessGhostButton:pressed {
     background: __SUCCESS_SOFT__;
     border-color: __SUCCESS__;
 }
 #SuccessGhostButton:disabled {
-    background: transparent;
+    background: __FIELD__;
     border-color: __LINE__;
     color: __MUTED__;
     font-weight: 600;
 }
 #DangerGhostButton {
-    background: transparent;
+    background: __DANGER_SOFT__;
     border-color: __DANGER__;
     color: __DANGER__;
     font-weight: 700;
 }
 #DangerGhostButton:hover {
     background: __DANGER_SOFT__;
+    border-color: __DANGER__;
 }
 #DangerGhostButton:pressed {
     background: __DANGER_SOFT__;
     border-color: __DANGER__;
 }
 #DangerGhostButton:disabled {
-    background: transparent;
+    background: __FIELD__;
     border-color: __LINE__;
     color: __MUTED__;
     font-weight: 600;

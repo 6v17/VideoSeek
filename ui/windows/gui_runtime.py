@@ -105,10 +105,30 @@ class RuntimeGuiMixin:
         if hasattr(self, "_refresh_search_model_display"):
             self._refresh_search_model_display()
 
+    def _resolve_runtime_issue_key(self, status):
+        """Pick the issue code that should be shown to users.
+
+        Healthy DirectML sessions may still carry diagnostics.issue=\"unknown\" from an
+        earlier soft probe; that must not be reported as a current fault.
+        """
+        normalized = dict(status or {})
+        issue = str(normalized.get("issue") or "").strip()
+        warning = str(normalized.get("warning") or "").strip()
+        diagnostics = dict(normalized.get("diagnostics") or {})
+        diag_issue = str(diagnostics.get("issue") or "").strip()
+        effective = issue or diag_issue
+        if not effective:
+            return ""
+        if effective == "unknown" and self._is_gpu_backend_label(normalized.get("backend")) and not warning:
+            return ""
+        return effective
+
     def _build_runtime_issue_summary(self, status):
-        issue = str(status.get("issue") or "").strip()
         diagnostics = dict(status.get("diagnostics") or {})
-        issue_text = self._get_runtime_issue_text(issue or diagnostics.get("issue"))
+        issue = self._resolve_runtime_issue_key(status)
+        issue_text = self._get_runtime_issue_text(issue)
+        if not issue_text:
+            return ""
 
         missing_dlls = [str(item) for item in diagnostics.get("missing_dlls") or [] if str(item).strip()]
         if missing_dlls:
@@ -127,15 +147,38 @@ class RuntimeGuiMixin:
     def _build_runtime_diagnostics_detail(self, status):
         diagnostics = dict(status.get("diagnostics") or {})
         lines = []
-        backend = str(status.get("backend") or "").strip() or self.texts.get("setting_inference_uninitialized", "Not initialized")
-        lines.append(f"Backend: {backend}")
-        lines.append(f"Initialized: {bool(status.get('initialized'))}")
-        lines.append(f"Prefer GPU: {bool(status.get('prefer_gpu'))}")
+        backend = str(status.get("backend") or "").strip() or self.texts.get(
+            "setting_inference_uninitialized", "Not initialized"
+        )
+        lines.append(
+            self.texts.get("setting_runtime_detail_backend", "Backend: {value}").format(value=backend)
+        )
+        initialized = bool(status.get("initialized"))
+        lines.append(
+            self.texts.get("setting_runtime_detail_initialized", "Engine: {value}").format(
+                value=self.texts.get(
+                    "setting_runtime_detail_initialized_yes" if initialized else "setting_runtime_detail_initialized_no",
+                    "Ready" if initialized else "Not initialized",
+                )
+            )
+        )
+        prefer_gpu = bool(status.get("prefer_gpu"))
+        lines.append(
+            self.texts.get("setting_runtime_detail_prefer_gpu", "Preference: {value}").format(
+                value=self.texts.get(
+                    "setting_runtime_detail_prefer_gpu_yes" if prefer_gpu else "setting_runtime_detail_prefer_gpu_no",
+                    "Prefer GPU" if prefer_gpu else "CPU only",
+                )
+            )
+        )
         from src.core.extract_frames import get_frame_decode_status
 
         decode_status = get_frame_decode_status(load_config())
         lines.append(
-            self.texts.get("setting_runtime_detail_frame_decode", "Frame decode: requested={requested}, d3d11va available={available}, last={last}").format(
+            self.texts.get(
+                "setting_runtime_detail_frame_decode",
+                "Frame decode: hardware={available}, requested={requested}, last={last}",
+            ).format(
                 requested=bool(decode_status.get("requested")),
                 available=bool(decode_status.get("d3d11va_available")),
                 last=str(decode_status.get("last_backend") or "cpu"),
@@ -147,41 +190,151 @@ class RuntimeGuiMixin:
 
         missing_dlls = [str(item) for item in diagnostics.get("missing_dlls") or [] if str(item).strip()]
         if missing_dlls:
-            lines.append(self.texts.get("setting_runtime_detail_missing_dlls", "Missing DLLs: {items}").format(items=", ".join(missing_dlls)))
+            lines.append(
+                self.texts.get("setting_runtime_detail_missing_dlls", "Missing system components: {items}").format(
+                    items=", ".join(missing_dlls)
+                )
+            )
 
         missing_msvc_dlls = [str(item) for item in diagnostics.get("missing_msvc_dlls") or [] if str(item).strip()]
         if missing_msvc_dlls:
-            lines.append(self.texts.get("setting_runtime_detail_missing_msvc_dlls", "Missing VC++ DLLs: {items}").format(items=", ".join(missing_msvc_dlls)))
+            lines.append(
+                self.texts.get("setting_runtime_detail_missing_msvc_dlls", "Missing VC++ components: {items}").format(
+                    items=", ".join(missing_msvc_dlls)
+                )
+            )
 
         available_providers = [str(item) for item in diagnostics.get("available_providers") or [] if str(item).strip()]
         if available_providers:
-            lines.append(self.texts.get("setting_runtime_detail_available_providers", "Available providers: {items}").format(items=", ".join(available_providers)))
+            lines.append(
+                self.texts.get("setting_runtime_detail_available_providers", "Available accelerators: {items}").format(
+                    items=", ".join(available_providers)
+                )
+            )
 
         windows_build = diagnostics.get("windows_build")
         if windows_build:
-            lines.append(self.texts.get("setting_runtime_detail_windows_build", "Windows build: {value}").format(value=windows_build))
+            lines.append(
+                self.texts.get("setting_runtime_detail_windows_build", "Windows build: {value}").format(
+                    value=windows_build
+                )
+            )
 
         probe_stage = str(diagnostics.get("probe_stage") or "").strip()
         if probe_stage:
             probe_stage_key = f"setting_runtime_probe_stage_{probe_stage}"
             probe_stage_text = self.texts.get(probe_stage_key, probe_stage)
-            lines.append(self.texts.get("setting_runtime_detail_probe_stage", "Failure stage: {value}").format(value=probe_stage_text))
+            lines.append(
+                self.texts.get("setting_runtime_detail_probe_stage", "Stuck at: {value}").format(
+                    value=probe_stage_text
+                )
+            )
 
         probe_exception_type = str(diagnostics.get("probe_exception_type") or "").strip()
         probe_exception_message = str(diagnostics.get("probe_exception_message") or "").strip()
         probe_exception = ": ".join(part for part in [probe_exception_type, probe_exception_message] if part)
         if probe_exception:
-            lines.append(self.texts.get("setting_runtime_detail_probe_exception", "Exception: {value}").format(value=probe_exception))
+            lines.append(
+                self.texts.get("setting_runtime_detail_probe_exception", "Technical error: {value}").format(
+                    value=probe_exception
+                )
+            )
 
         failure_kind = str(diagnostics.get("failure_kind") or "").strip()
         if failure_kind:
-            lines.append(f"Failure kind: {failure_kind}")
+            lines.append(
+                self.texts.get("setting_runtime_detail_failure_kind", "Failure type: {value}").format(
+                    value=failure_kind
+                )
+            )
 
         active_providers = diagnostics.get("active_providers")
         if isinstance(active_providers, dict) and active_providers:
-            lines.append(f"Active providers: {json.dumps(active_providers, ensure_ascii=False)}")
+            lines.append(
+                self.texts.get("setting_runtime_detail_active_providers", "Active: {value}").format(
+                    value=json.dumps(active_providers, ensure_ascii=False)
+                )
+            )
 
         return "\n".join(line for line in lines if line)
+
+    def _runtime_diagnostics_advice_key(self, issue: str) -> str:
+        issue_key = str(issue or "").strip()
+        known = {
+            "directml",
+            "directx",
+            "windows",
+            "windows_version",
+            "msvc",
+            "probe_timeout",
+            "probe_launch_failed",
+            "visual_provider_not_activated",
+            "text_provider_not_activated",
+            "visual_probe_failed",
+            "text_probe_failed",
+            "session_init_failed",
+        }
+        if issue_key in known:
+            return f"setting_runtime_diag_advice_{issue_key}"
+        return "setting_runtime_diag_advice_unknown"
+
+    def _build_runtime_diagnostics_user_message(self, status):
+        normalized = dict(status or {})
+        prefer_gpu = bool(normalized.get("prefer_gpu"))
+        initialized = bool(normalized.get("initialized"))
+        backend = str(normalized.get("backend") or "").strip()
+        is_gpu = self._is_gpu_backend_label(backend)
+        warning = str(normalized.get("warning") or "").strip()
+        issue = self._resolve_runtime_issue_key(normalized)
+
+        if not initialized:
+            status_key = "setting_runtime_diag_status_uninitialized"
+            meaning_key = "setting_runtime_diag_meaning_uninitialized"
+            advice_key = "setting_runtime_diag_advice_uninitialized"
+        elif not prefer_gpu and not is_gpu:
+            status_key = "setting_runtime_diag_status_cpu_only"
+            meaning_key = "setting_runtime_diag_meaning_cpu_only"
+            advice_key = "setting_runtime_diag_advice_cpu_only"
+        elif is_gpu and warning:
+            status_key = "setting_runtime_diag_status_gpu_soft"
+            meaning_key = "setting_runtime_diag_meaning_gpu_soft"
+            advice_key = self._runtime_diagnostics_advice_key(issue) if issue else "setting_runtime_diag_advice_ok"
+        elif is_gpu:
+            status_key = "setting_runtime_diag_status_gpu_ok"
+            meaning_key = "setting_runtime_diag_meaning_gpu_ok"
+            advice_key = "setting_runtime_diag_advice_ok"
+        else:
+            status_key = "setting_runtime_diag_status_cpu_fallback"
+            meaning_key = "setting_runtime_diag_meaning_cpu_fallback"
+            advice_key = self._runtime_diagnostics_advice_key(issue)
+
+        sections = [
+            self.texts.get("setting_runtime_diag_section_status", "Status"),
+            self.texts.get(status_key, status_key),
+            self.texts.get(meaning_key, meaning_key),
+        ]
+
+        reason = self._build_runtime_issue_summary(normalized)
+        if reason and (warning or issue):
+            sections.extend(
+                [
+                    "",
+                    self.texts.get("setting_runtime_diag_section_reason", "Reason"),
+                    reason,
+                ]
+            )
+
+        sections.extend(
+            [
+                "",
+                self.texts.get("setting_runtime_diag_section_advice", "What to do"),
+                self.texts.get(advice_key, advice_key),
+                "",
+                self.texts.get("setting_runtime_diag_section_tech", "Details"),
+                self._build_runtime_diagnostics_detail(normalized),
+            ]
+        )
+        return "\n".join(sections).strip()
 
     def _build_runtime_diagnostics_payload(self, status):
         normalized_status = dict(status or {})
@@ -193,10 +346,14 @@ class RuntimeGuiMixin:
             "warning": normalized_status.get("warning", ""),
             "summary": self._build_runtime_issue_summary(normalized_status),
             "detail": self._build_runtime_diagnostics_detail(normalized_status),
+            "user_message": self._build_runtime_diagnostics_user_message(normalized_status),
             "diagnostics": dict(normalized_status.get("diagnostics") or {}),
         }
 
     def _get_runtime_issue_text(self, issue):
+        issue_key = str(issue or "").strip()
+        if not issue_key:
+            return ""
         issue_key_map = {
             "directml": "setting_runtime_issue_directml",
             "directx": "setting_runtime_issue_directx",
@@ -211,7 +368,7 @@ class RuntimeGuiMixin:
             "text_probe_failed": "setting_runtime_issue_text_probe_failed",
             "session_init_failed": "setting_runtime_issue_session_init_failed",
         }
-        text_key = issue_key_map.get(str(issue or "").strip(), "setting_runtime_issue_unknown")
+        text_key = issue_key_map.get(issue_key, "setting_runtime_issue_unknown")
         return self.texts.get(text_key, self.texts.get("setting_runtime_issue_unknown", "DirectML runtime"))
 
     def copy_runtime_diagnostics(self, status=None):
@@ -232,17 +389,9 @@ class RuntimeGuiMixin:
         from src.core.clip_embedding import get_engine_runtime_status
 
         status = get_engine_runtime_status()
-        payload = self._build_runtime_diagnostics_payload(status)
-        lines = []
-        if payload["summary"]:
-            lines.append(payload["summary"])
-        if payload["detail"] and payload["detail"] != payload["summary"]:
-            lines.append(payload["detail"])
-        if payload["warning"]:
-            lines.append(payload["warning"])
-        text = "\n\n".join(line for line in lines if line).strip()
+        text = self._build_runtime_diagnostics_user_message(status)
         if not text:
-            text = json.dumps(payload, ensure_ascii=False, indent=2)
+            text = json.dumps(self._build_runtime_diagnostics_payload(status), ensure_ascii=False, indent=2)
         dialog = AppMessageDialog(
             self.texts.get("setting_show_runtime_diagnostics_title", "GPU diagnostics"),
             text,
@@ -252,7 +401,7 @@ class RuntimeGuiMixin:
             language=self.language,
             confirm=True,
             cancel_text=self.texts["close"],
-            confirm_text=self.texts.get("setting_copy_runtime_diagnostics", "Copy GPU diagnostics"),
+            confirm_text=self.texts.get("setting_copy_runtime_diagnostics", "Copy diagnostics"),
         )
         dialog.exec()
         if dialog.confirmed():

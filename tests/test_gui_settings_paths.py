@@ -24,11 +24,13 @@ class GuiSettingsPathTests(unittest.TestCase):
     def test_build_runtime_issue_summary_prefers_missing_dll_names(self):
         dummy = types.SimpleNamespace(
             texts={
-                "setting_runtime_issue_directx": "DirectML / DirectX 12",
-                "setting_runtime_issue_unknown": "DirectML runtime",
+                "setting_runtime_issue_directx": "GPU or system does not support DirectX 12",
+                "setting_runtime_issue_unknown": "GPU environment problem",
             }
         )
         dummy._get_runtime_issue_text = lambda issue: self.Target._get_runtime_issue_text(dummy, issue)
+        dummy._resolve_runtime_issue_key = lambda status: self.Target._resolve_runtime_issue_key(dummy, status)
+        dummy._is_gpu_backend_label = lambda backend: self.Target._is_gpu_backend_label(dummy, backend)
 
         summary = self.Target._build_runtime_issue_summary(
             dummy,
@@ -38,56 +40,106 @@ class GuiSettingsPathTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(summary, "DirectML / DirectX 12: DirectML.dll, d3d12.dll")
+        self.assertEqual(summary, "GPU or system does not support DirectX 12: DirectML.dll, d3d12.dll")
 
-    def test_build_runtime_diagnostics_detail_includes_structured_evidence(self):
+    def test_build_runtime_issue_summary_ignores_stale_unknown_on_healthy_gpu(self):
         dummy = types.SimpleNamespace(
             texts={
-                "setting_runtime_issue_probe_timeout": "GPU probe timed out",
-                "setting_runtime_issue_unknown": "DirectML runtime",
-                "setting_runtime_detail_missing_dlls": "Missing DLLs: {items}",
-                "setting_runtime_detail_missing_msvc_dlls": "Missing VC++ DLLs: {items}",
-                "setting_runtime_detail_available_providers": "Available providers: {items}",
-                "setting_runtime_detail_windows_build": "Windows build: {value}",
-                "setting_runtime_detail_probe_stage": "Failure stage: {value}",
-                "setting_runtime_detail_probe_exception": "Exception: {value}",
-                "setting_runtime_probe_stage_subprocess": "probe subprocess",
+                "setting_runtime_issue_unknown": "GPU environment problem",
             }
         )
+        dummy._is_gpu_backend_label = lambda backend: self.Target._is_gpu_backend_label(dummy, backend)
+        dummy._resolve_runtime_issue_key = lambda status: self.Target._resolve_runtime_issue_key(dummy, status)
         dummy._get_runtime_issue_text = lambda issue: self.Target._get_runtime_issue_text(dummy, issue)
-        dummy._build_runtime_issue_summary = lambda status: self.Target._build_runtime_issue_summary(dummy, status)
 
-        detail = self.Target._build_runtime_diagnostics_detail(
+        summary = self.Target._build_runtime_issue_summary(
             dummy,
             {
-                "issue": "probe_timeout",
+                "backend": "DirectML",
+                "initialized": True,
+                "prefer_gpu": True,
+                "issue": "",
+                "warning": "",
                 "diagnostics": {
-                    "available_providers": ["CPUExecutionProvider"],
-                    "windows_build": 22631,
-                    "probe_stage": "subprocess",
-                    "probe_exception_type": "TimeoutExpired",
-                    "probe_exception_message": "GPU runtime probe timed out.",
+                    "issue": "unknown",
+                    "available_providers": ["DmlExecutionProvider", "CPUExecutionProvider"],
+                    "active_providers": {
+                        "visual": ["DmlExecutionProvider", "CPUExecutionProvider"],
+                        "text": ["DmlExecutionProvider", "CPUExecutionProvider"],
+                    },
                 },
             },
         )
 
-        self.assertIn("GPU probe timed out", detail)
-        self.assertIn("Available providers: CPUExecutionProvider", detail)
+        self.assertEqual(summary, "")
+
+    def test_build_runtime_diagnostics_detail_includes_structured_evidence(self):
+        dummy = types.SimpleNamespace(
+            texts={
+                "setting_runtime_issue_probe_timeout": "GPU check timed out",
+                "setting_runtime_issue_unknown": "GPU environment problem",
+                "setting_runtime_detail_backend": "Backend: {value}",
+                "setting_runtime_detail_initialized": "Engine: {value}",
+                "setting_runtime_detail_initialized_yes": "Ready",
+                "setting_runtime_detail_initialized_no": "Not initialized",
+                "setting_runtime_detail_prefer_gpu": "Preference: {value}",
+                "setting_runtime_detail_prefer_gpu_yes": "Prefer GPU",
+                "setting_runtime_detail_prefer_gpu_no": "CPU only",
+                "setting_runtime_detail_frame_decode": "Frame decode: hardware={available}, requested={requested}, last={last}",
+                "setting_runtime_detail_missing_dlls": "Missing system components: {items}",
+                "setting_runtime_detail_missing_msvc_dlls": "Missing VC++ components: {items}",
+                "setting_runtime_detail_available_providers": "Available accelerators: {items}",
+                "setting_runtime_detail_windows_build": "Windows build: {value}",
+                "setting_runtime_detail_probe_stage": "Stuck at: {value}",
+                "setting_runtime_detail_probe_exception": "Technical error: {value}",
+                "setting_runtime_probe_stage_subprocess": "Starting check process",
+                "setting_inference_uninitialized": "Not initialized",
+            }
+        )
+        dummy._get_runtime_issue_text = lambda issue: self.Target._get_runtime_issue_text(dummy, issue)
+        dummy._resolve_runtime_issue_key = lambda status: self.Target._resolve_runtime_issue_key(dummy, status)
+        dummy._is_gpu_backend_label = lambda backend: self.Target._is_gpu_backend_label(dummy, backend)
+        dummy._build_runtime_issue_summary = lambda status: self.Target._build_runtime_issue_summary(dummy, status)
+
+        with patch("ui.windows.gui_runtime.load_config", return_value={}), patch(
+            "src.core.extract_frames.get_frame_decode_status",
+            return_value={"requested": False, "d3d11va_available": False, "last_backend": "cpu"},
+        ):
+            detail = self.Target._build_runtime_diagnostics_detail(
+                dummy,
+                {
+                    "backend": "CPU",
+                    "initialized": True,
+                    "prefer_gpu": True,
+                    "issue": "probe_timeout",
+                    "diagnostics": {
+                        "available_providers": ["CPUExecutionProvider"],
+                        "windows_build": 22631,
+                        "probe_stage": "subprocess",
+                        "probe_exception_type": "TimeoutExpired",
+                        "probe_exception_message": "GPU runtime probe timed out.",
+                    },
+                },
+            )
+
+        self.assertIn("GPU check timed out", detail)
+        self.assertIn("Available accelerators: CPUExecutionProvider", detail)
         self.assertIn("Windows build: 22631", detail)
-        self.assertIn("Failure stage: probe subprocess", detail)
-        self.assertIn("Exception: TimeoutExpired: GPU runtime probe timed out.", detail)
+        self.assertIn("Stuck at: Starting check process", detail)
+        self.assertIn("Technical error: TimeoutExpired: GPU runtime probe timed out.", detail)
 
     def test_build_runtime_diagnostics_payload_includes_summary_and_raw_diagnostics(self):
         dummy = types.SimpleNamespace(
             texts={
-                "setting_runtime_issue_directx": "DirectML / DirectX 12",
-                "setting_runtime_issue_unknown": "DirectML runtime",
-                "setting_runtime_detail_missing_dlls": "Missing DLLs: {items}",
+                "setting_runtime_issue_directx": "GPU or system does not support DirectX 12",
+                "setting_runtime_issue_unknown": "GPU environment problem",
+                "setting_runtime_detail_missing_dlls": "Missing system components: {items}",
             }
         )
         dummy._get_runtime_issue_text = lambda issue: self.Target._get_runtime_issue_text(dummy, issue)
         dummy._build_runtime_issue_summary = lambda status: self.Target._build_runtime_issue_summary(dummy, status)
-        dummy._build_runtime_diagnostics_detail = lambda status: self.Target._build_runtime_diagnostics_detail(dummy, status)
+        dummy._build_runtime_diagnostics_detail = lambda status: "Missing system components: DirectML.dll"
+        dummy._build_runtime_diagnostics_user_message = lambda status: "user facing"
 
         payload = self.Target._build_runtime_diagnostics_payload(
             dummy,
@@ -101,8 +153,9 @@ class GuiSettingsPathTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(payload["summary"], "DirectML / DirectX 12: DirectML.dll")
-        self.assertIn("Missing DLLs: DirectML.dll", payload["detail"])
+        self.assertEqual(payload["summary"], "GPU or system does not support DirectX 12: DirectML.dll")
+        self.assertIn("Missing system components: DirectML.dll", payload["detail"])
+        self.assertEqual(payload["user_message"], "user facing")
         self.assertEqual(payload["diagnostics"], {"missing_dlls": ["DirectML.dll"]})
 
     def test_copy_runtime_diagnostics_copies_json_and_updates_status(self):
@@ -110,16 +163,19 @@ class GuiSettingsPathTests(unittest.TestCase):
         status_label = MagicMock()
         dummy = types.SimpleNamespace(
             texts={
-                "setting_copy_runtime_diagnostics_done": "GPU diagnostics copied to clipboard.",
+                "setting_copy_runtime_diagnostics_done": "Diagnostics copied — send them to support if needed.",
             },
             settings_page=types.SimpleNamespace(lbl_status=status_label),
         )
-        dummy._build_runtime_diagnostics_payload = lambda status: self.Target._build_runtime_diagnostics_payload(dummy, status)
-        dummy._build_runtime_issue_summary = lambda status: "DirectML / DirectX 12: DirectML.dll"
-        dummy._build_runtime_diagnostics_detail = lambda status: "Missing DLLs: DirectML.dll"
+        dummy._build_runtime_diagnostics_payload = lambda status: {
+            "backend": "CPU",
+            "diagnostics": {"missing_dlls": ["DirectML.dll"]},
+            "summary": "GPU or system does not support DirectX 12: DirectML.dll",
+            "user_message": "user facing",
+        }
 
         with (
-            patch("ui.windows.gui_runtime.get_engine_runtime_status", return_value={"backend": "CPU", "diagnostics": {"missing_dlls": ["DirectML.dll"]}}),
+            patch("src.core.clip_embedding.get_engine_runtime_status", return_value={"backend": "CPU", "diagnostics": {"missing_dlls": ["DirectML.dll"]}}),
             patch("ui.windows.gui_runtime.QApplication.clipboard", return_value=clipboard),
         ):
             self.Target.copy_runtime_diagnostics(dummy)
@@ -128,30 +184,29 @@ class GuiSettingsPathTests(unittest.TestCase):
         copied_payload = json.loads(clipboard.setText.call_args.args[0])
         self.assertEqual(copied_payload["backend"], "CPU")
         self.assertEqual(copied_payload["diagnostics"], {"missing_dlls": ["DirectML.dll"]})
-        status_label.setText.assert_called_once_with("GPU diagnostics copied to clipboard.")
+        status_label.setText.assert_called_once_with("Diagnostics copied — send them to support if needed.")
 
     def test_show_runtime_diagnostics_uses_summary_and_detail_dialog(self):
         dummy = types.SimpleNamespace(
             texts={
                 "setting_show_runtime_diagnostics_title": "GPU diagnostics",
                 "close": "Close",
-                "setting_copy_runtime_diagnostics": "Copy",
+                "setting_copy_runtime_diagnostics": "Copy diagnostics",
             },
             is_dark_mode=False,
             language="zh",
         )
-        dummy._build_runtime_diagnostics_payload = lambda status: {
-            "summary": "DirectML / DirectX 12: DirectML.dll",
-            "detail": "Missing DLLs: DirectML.dll",
-            "warning": "GPU execution is unavailable.",
-        }
+        dummy._build_runtime_diagnostics_user_message = MagicMock(
+            return_value="Status\nGPU unavailable — using CPU instead\n\nWhat to do\nUpdate drivers"
+        )
+        dummy._build_runtime_diagnostics_payload = MagicMock(return_value={})
 
         dialog_inst = MagicMock()
         dialog_inst.exec = MagicMock(return_value=0)
         dialog_inst.confirmed = MagicMock(return_value=False)
 
         with (
-            patch("ui.windows.gui_runtime.get_engine_runtime_status", return_value={"backend": "CPU"}),
+            patch("src.core.clip_embedding.get_engine_runtime_status", return_value={"backend": "CPU"}),
             patch("ui.windows.gui_runtime.AppMessageDialog") as mock_dialog,
         ):
             mock_dialog.return_value = dialog_inst
@@ -160,9 +215,8 @@ class GuiSettingsPathTests(unittest.TestCase):
         mock_dialog.assert_called_once()
         args, kwargs = mock_dialog.call_args
         self.assertEqual(args[0], "GPU diagnostics")
-        self.assertIn("DirectML / DirectX 12: DirectML.dll", args[1])
-        self.assertIn("Missing DLLs: DirectML.dll", args[1])
-        self.assertIn("GPU execution is unavailable.", args[1])
+        self.assertIn("GPU unavailable — using CPU instead", args[1])
+        self.assertIn("Update drivers", args[1])
         self.assertEqual(kwargs.get("kind"), "info")
         self.assertTrue(kwargs.get("confirm"))
         dialog_inst.exec.assert_called_once()

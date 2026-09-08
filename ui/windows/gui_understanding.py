@@ -2650,7 +2650,7 @@ class UnderstandingGuiMixin:
             extra_actions=[
                 {
                     "label": self.texts["details_open_selected"],
-                    "object_name": "GhostButton",
+                    "object_name": "AccentGhostButton",
                     "handler": self._open_selected_evidence_detail_path,
                 },
                 {
@@ -2660,7 +2660,7 @@ class UnderstandingGuiMixin:
                 },
                 {
                     "label": self.texts.get("library_evidence_open_dir", "Open Evidence Folder"),
-                    "object_name": "GhostButton",
+                    "object_name": "AccentGhostButton",
                     "handler": self._open_evidence_detail_folder,
                 },
                 {
