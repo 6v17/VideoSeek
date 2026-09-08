@@ -102,7 +102,13 @@ from src.services.recap_service import (
     tts_char_budget,
     vo_needed_sec,
     vo_sec,
+    default_recap_caption_prompt,
+    default_recap_match_prompt,
+    default_recap_plan_prompt,
+    default_recap_polish_prompt,
+    normalize_evidence_required,
     RECAP_CAPTION_SYSTEM,
+    RECAP_CAPTION_SYSTEM_EN,
     RECAP_EVIDENCE_POLICY,
     RECAP_FACT_POLICY,
     RECAP_GAP_SYSTEM,
@@ -110,9 +116,12 @@ from src.services.recap_service import (
     RECAP_PLAN_GAP_SYSTEM,
     RECAP_PLAN_HEAD_SYSTEM,
     RECAP_PLAN_SYSTEM,
+    RECAP_PLAN_SYSTEM_EN,
     RECAP_SYSTEM,
+    RECAP_SYSTEM_EN,
     RECAP_VO_CONTINUITY_POLICY,
     RECAP_VO_POLISH_SYSTEM,
+    RECAP_VO_POLISH_SYSTEM_EN,
     RECAP_VO_STYLE_POLICY,
     TTS_SPEED,
 )
@@ -2620,6 +2629,7 @@ class RecapPackTests(unittest.TestCase):
 
     def test_resolve_recap_system_prompt_falls_back_to_default(self):
         self.assertEqual(resolve_recap_system_prompt("  "), RECAP_SYSTEM)
+        self.assertEqual(resolve_recap_system_prompt("  ", "en"), RECAP_SYSTEM_EN)
         self.assertEqual(resolve_recap_system_prompt("只输出 JSON"), "只输出 JSON")
         self.assertEqual(resolve_recap_prompt("", RECAP_PLAN_SYSTEM), RECAP_PLAN_SYSTEM)
         self.assertEqual(resolve_recap_prompt("自定义规划", RECAP_PLAN_SYSTEM), "自定义规划")
@@ -2631,6 +2641,18 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(normalize_recap_start_from("plan_only"), "plan_only")
         self.assertEqual(normalize_recap_start_from(""), "plan")
 
+    def test_recap_prompts_follow_caption_language(self):
+        self.assertEqual(default_recap_plan_prompt("zh"), RECAP_PLAN_SYSTEM)
+        self.assertEqual(default_recap_plan_prompt("en"), RECAP_PLAN_SYSTEM_EN)
+        self.assertEqual(default_recap_match_prompt("en"), RECAP_SYSTEM_EN)
+        self.assertEqual(default_recap_caption_prompt("en"), RECAP_CAPTION_SYSTEM_EN)
+        self.assertEqual(default_recap_polish_prompt("en"), RECAP_VO_POLISH_SYSTEM_EN)
+        self.assertIn("Write the VO in English", RECAP_CAPTION_SYSTEM_EN)
+        self.assertIn("story planner", RECAP_PLAN_SYSTEM_EN)
+        self.assertIn("evidence_required", RECAP_PLAN_SYSTEM_EN)
+        self.assertIn("人物", RECAP_PLAN_SYSTEM_EN)
+        self.assertEqual(normalize_evidence_required(["action", "dialogue"]), ["动作", "对话"])
+        self.assertEqual(normalize_evidence_required(["person", "scene"]), ["人物", "场面"])
     def test_write_and_load_recap_beats(self):
         with tempfile.TemporaryDirectory() as tmp:
             video = Path(tmp) / "ep01.mp4"

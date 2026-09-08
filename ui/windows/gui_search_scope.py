@@ -31,7 +31,7 @@ class SearchScopeGuiMixin:
         self._search_scope_video_paths = get_search_scope_video_paths()
         self._dialogue_search_scope_mode = get_dialogue_search_scope_mode()
         self._dialogue_search_scope_video_paths = get_dialogue_search_scope_video_paths()
-        # Tags scope is session-local (projection set changes with「录入标签库」).
+        # Tags scope is session-local (projection set changes with「同步到搜索」).
         self._tag_search_scope_mode = "all"
         self._tag_search_scope_video_paths: list[str] = []
         self._search_scope_entries_cache: list = []

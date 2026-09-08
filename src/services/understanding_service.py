@@ -577,7 +577,7 @@ def write_evidence_bundle(
     provenance["understanding_mode"] = output_mode
     serialized["provenance"] = provenance
     _atomic_write_json(path, serialized)
-    # Tag search projection is manual ("录入标签库"); JSON remains the source of truth.
+    # Tag search projection is manual ("同步到搜索"); JSON remains the source of truth.
     return path
 
 

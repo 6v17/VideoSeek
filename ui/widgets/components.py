@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QTabWidget,  # retained for other pages
     QTextEdit,
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.layout import COMPONENT_SIZES
+from ui.widgets.layout import COMPONENT_SIZES, compare_row_card_height, compute_search_panel_width
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import ResultTable
 from ui.widgets.search_results_pager import SearchResultsPager
@@ -407,12 +408,14 @@ class SearchPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
         self.scaffold = PageScaffold()
-        root.addWidget(self.scaffold)
+        self.scaffold.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        root.addWidget(self.scaffold, 1)
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
@@ -425,9 +428,6 @@ class SearchPage(QWidget):
         self.lbl_status.setWordWrap(False)
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_status.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-
-        compare_row = QHBoxLayout()
-        compare_row.setSpacing(12)
 
         self.search_panel = SearchPanel()
         self.query_card = self.search_panel
@@ -475,16 +475,35 @@ class SearchPage(QWidget):
         self.preview_placeholder = self.preview_panel.preview_placeholder
         self.expanded_chrome = self.preview_panel.expanded_chrome
 
-        compare_row.addWidget(self.search_panel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        compare_row.addWidget(self.preview_panel, 1, Qt.AlignmentFlag.AlignTop)
-        page_body.addLayout(compare_row, 2)
-        self._compare_row = compare_row
+        self.compare_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.compare_splitter.setObjectName("SearchCompareSplitter")
+        self.compare_splitter.setChildrenCollapsible(False)
+        self.compare_splitter.setHandleWidth(10)
+        self.compare_splitter.addWidget(self.search_panel)
+        self.compare_splitter.addWidget(self.preview_panel)
+        self.compare_splitter.setStretchFactor(0, 0)
+        self.compare_splitter.setStretchFactor(1, 1)
+        self.compare_splitter.setSizes(
+            [
+                int(getattr(self.search_panel, "_default_width", compute_search_panel_width())),
+                720,
+            ]
+        )
+        self._compare_splitter_save_timer = QTimer(self)
+        self._compare_splitter_save_timer.setSingleShot(True)
+        self._compare_splitter_save_timer.setInterval(450)
+        self._compare_splitter_save_timer.timeout.connect(self._persist_compare_splitter_sizes)
+        self.compare_splitter.splitterMoved.connect(self._on_compare_splitter_moved)
+        self._compare_splitter = self.compare_splitter
+        self._compare_row = None
         self._page_body = page_body
         self._preview_layout_maximized = False
 
         # Slot stays in the page layout; results_card can reparent into a float window.
         self.results_slot = QWidget()
         self.results_slot.setObjectName("SearchResultsSlot")
+        self.results_slot.setMinimumHeight(160)
+        self.results_slot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.results_slot_layout = QVBoxLayout(self.results_slot)
         self.results_slot_layout.setContentsMargins(0, 0, 0, 0)
         self.results_slot_layout.setSpacing(0)
@@ -558,7 +577,28 @@ class SearchPage(QWidget):
         self.results_float_placeholder.hide()
 
         self.results_slot_layout.addWidget(self.results_card)
-        page_body.addWidget(self.results_slot, 5)
+
+        top_min = compare_row_card_height()
+        self.compare_splitter.setMinimumHeight(top_min)
+        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.workspace_splitter.setObjectName("SearchWorkspaceSplitter")
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.setHandleWidth(10)
+        self.workspace_splitter.addWidget(self.compare_splitter)
+        self.workspace_splitter.addWidget(self.results_slot)
+        self.workspace_splitter.setStretchFactor(0, 3)
+        self.workspace_splitter.setStretchFactor(1, 5)
+        self.workspace_splitter.setSizes([top_min + 40, 420])
+        self._workspace_splitter_save_timer = QTimer(self)
+        self._workspace_splitter_save_timer.setSingleShot(True)
+        self._workspace_splitter_save_timer.setInterval(450)
+        self._workspace_splitter_save_timer.timeout.connect(self._persist_workspace_splitter_sizes)
+        self.workspace_splitter.splitterMoved.connect(self._on_workspace_splitter_moved)
+        page_body.addWidget(self.workspace_splitter, 1)
+        self._workspace_splitter = self.workspace_splitter
+
+        QTimer.singleShot(0, self._restore_compare_splitter_sizes)
+        QTimer.singleShot(0, self._restore_workspace_splitter_sizes)
 
         self._results_float_window = None
         self._results_float_texts = {
@@ -585,18 +625,102 @@ class SearchPage(QWidget):
         if not self.is_results_floating():
             self.results_slot.setVisible(not maximized)
         self.preview_panel.set_maximized(maximized)
-        body = getattr(self, "_page_body", None)
-        if body is not None:
-            for i in range(body.count()):
-                item = body.itemAt(i)
-                if item is None:
-                    continue
-                widget = item.widget()
-                layout = item.layout()
-                if widget is self.results_slot:
-                    body.setStretch(i, 0 if maximized else 5)
-                elif layout is getattr(self, "_compare_row", None):
-                    body.setStretch(i, 1 if maximized else 2)
+        workspace = getattr(self, "workspace_splitter", None)
+        if workspace is not None and maximized:
+            # Give the compare row the full workspace while results are hidden.
+            total = max(1, sum(int(v) for v in workspace.sizes()) or 1)
+            workspace.setSizes([total, 0])
+        elif workspace is not None and not maximized:
+            self._restore_workspace_splitter_sizes()
+
+    def _on_compare_splitter_moved(self, *_args) -> None:
+        timer = getattr(self, "_compare_splitter_save_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _on_workspace_splitter_moved(self, *_args) -> None:
+        timer = getattr(self, "_workspace_splitter_save_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _restore_compare_splitter_sizes(self) -> None:
+        splitter = getattr(self, "compare_splitter", None)
+        if splitter is None:
+            return
+        left_default = max(
+            1,
+            int(self.search_panel.minimumWidth() or getattr(self.search_panel, "_default_width", 0) or compute_search_panel_width()),
+        )
+        try:
+            from src.app.config import load_config
+
+            raw = load_config().get("search_compare_splitter_sizes")
+            if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+                left = max(left_default, int(raw[0]))
+                right = max(1, int(raw[1]))
+                splitter.setSizes([left, right])
+                return
+        except Exception:
+            pass
+        # First-run / no saved sizes: search pane starts at its minimum width.
+        total = max(int(splitter.width()), left_default + 480)
+        splitter.setSizes([left_default, max(480, total - left_default)])
+
+    def _restore_workspace_splitter_sizes(self) -> None:
+        splitter = getattr(self, "workspace_splitter", None)
+        if splitter is None:
+            return
+        top_min = compare_row_card_height()
+        try:
+            from src.app.config import load_config
+
+            raw = load_config().get("search_workspace_splitter_sizes")
+            if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+                top = max(top_min, int(raw[0]))
+                bottom = max(160, int(raw[1]))
+                splitter.setSizes([top, bottom])
+                return
+        except Exception:
+            pass
+        splitter.setSizes([top_min + 40, 420])
+
+    def _persist_compare_splitter_sizes(self) -> None:
+        splitter = getattr(self, "compare_splitter", None)
+        if splitter is None or not splitter.isVisible():
+            return
+        sizes = [int(v) for v in splitter.sizes()]
+        if len(sizes) < 2 or sizes[0] <= 0 or sizes[1] <= 0:
+            return
+        try:
+            from src.app.config import load_config, save_config
+
+            cfg = load_config()
+            if list(cfg.get("search_compare_splitter_sizes") or []) == sizes:
+                return
+            cfg["search_compare_splitter_sizes"] = sizes
+            save_config(cfg)
+        except Exception:
+            pass
+
+    def _persist_workspace_splitter_sizes(self) -> None:
+        if getattr(self, "_preview_layout_maximized", False):
+            return
+        splitter = getattr(self, "workspace_splitter", None)
+        if splitter is None or not splitter.isVisible():
+            return
+        sizes = [int(v) for v in splitter.sizes()]
+        if len(sizes) < 2 or sizes[0] <= 0 or sizes[1] <= 0:
+            return
+        try:
+            from src.app.config import load_config, save_config
+
+            cfg = load_config()
+            if list(cfg.get("search_workspace_splitter_sizes") or []) == sizes:
+                return
+            cfg["search_workspace_splitter_sizes"] = sizes
+            save_config(cfg)
+        except Exception:
+            pass
 
     def is_preview_maximized(self) -> bool:
         return bool(self.preview_panel.is_maximized())

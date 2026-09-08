@@ -1149,14 +1149,28 @@ def run_tag_search(
     min_score=None,
     config=None,
     match_mode: str = "exact",
+    required_tags=None,
 ) -> tuple[List[SearchHit], str, str]:
-    """Search projected VLM tags (evidence_tags.db). Returns (hits, message, matched_by)."""
+    """Search projected VLM tags (evidence_tags.db). Returns (hits, message, matched_by).
+
+    Multiple tags (``required_tags`` or ``query`` split on `` · ``) are AND-combined.
+    """
     from src.storage.config_store import get_search_top_k
     from src.storage.evidence_tags_store import get_tag_index_stats, search_tags
 
     cfg = dict(config or load_config())
+    terms = [
+        str(t).strip()
+        for t in (required_tags or [])
+        if str(t or "").strip()
+    ]
     text = str(query or "").strip()
-    if not text:
+    if not terms and text:
+        if " · " in text:
+            terms = [p.strip() for p in text.split(" · ") if p.strip()]
+        else:
+            terms = [text]
+    if not terms:
         return [], "empty query", ""
 
     try:
@@ -1174,11 +1188,12 @@ def run_tag_search(
     # Scope by video_path after fetch (CLIP library scope); do not use subtitle video_ids.
     mode = str(match_mode or "exact").strip().lower() or "exact"
     raw_hits = search_tags(
-        text,
+        "",
         config=cfg,
         top_k=fetch_k if scoped else resolved_top_k,
         match_mode=mode,
         video_ids=None,
+        required_tags=terms,
     )
     matched_by = "keyword_fuzzy" if mode in {"fuzzy", "tolerant", "approx"} else "keyword"
     hits = []

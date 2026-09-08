@@ -92,9 +92,8 @@ class PreviewPanel(VSCard):
         self._panel_height = compare_row_card_height()
         self.preview_host.setMinimumHeight(320)
         self.setMinimumHeight(self._panel_height)
-        self.setMaximumHeight(self._panel_height)
-        self.setFixedHeight(self._panel_height)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMaximumHeight(16777215)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _apply_maximized_geometry(self):
         self.preview_host.setMinimumHeight(480)

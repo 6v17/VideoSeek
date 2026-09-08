@@ -112,7 +112,7 @@
 `search_precision_mode`（图搜）：`fast` \| `precise`；未传时见 `/health` 的 `agent_api_default_image_precision`；纯文搜忽略。  
 `preview_anchor_sec`：图搜且 `scope.video_paths` 恰好 1 条时可用；服务端将 `search_precision_mode` 设为 `precise`。  
 `search_kind=dialogue`：仅 `query_type=text`；先看 `/health` 的 `dialogue_index_ready` / `capabilities.dialogue_search`（需在桌面字幕库完成提取）。  
-`search_kind=tags`：仅 `query_type=text`；先看 `/health` 的 `tag_index_ready` / `capabilities.tag_search`（需在理解页生成 VLM 标签，并点「录入标签库」写入投影；Agent **不代跑** VLM）。命中时间为 chunk 段区间；`matched_text` 为命中标签（多标签用 ` · ` 拼接）。  
+`search_kind=tags`：仅 `query_type=text`；先看 `/health` 的 `tag_index_ready` / `capabilities.tag_search`（需在理解页生成标签，并点「同步到搜索」写入投影；Agent **不代跑** VLM）。命中时间为 chunk 段区间；`matched_text` 为该 chunk 完整标签集（多标签用 ` · ` 拼接）。多个标签可用 `query` 写成 `tagA · tagB`（AND：同一 chunk 须同时命中）。  
 `match_mode`（`search_kind=dialogue` 或 `tags`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
 `text_enhance`（仅**画面文搜** `query_type=text`）：**由 Agent 按需开关**——`true`/`false` 覆盖本机/服务机面板默认；省略则跟 `/health.text_search_enhance_enabled`。frame 与 chunk 均可。响应看 `meta.text_enhance`（意图）与 `meta.text_enhance_applied`（是否真的跑了增强）。图搜、`query_vector` 预计算、dialogue/tags **不走**增强。
 
@@ -602,7 +602,7 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 |----------|--------|------|
 | 在库里**找**镜头（画面） | `POST /search` 或 `/search/batch`（默认 `search_kind=visual`） | CLIP 画面匹配 → `hits[]` |
 | 按硬字幕/台词找 | `POST /search`（`search_kind=dialogue`） | 需 `dialogue_index_ready`；先探测 `/subtitle-libraries` |
-| 按 VLM 标签找 | `POST /search`（`search_kind=tags`） | 需 `tag_index_ready`；标签在理解页生成，Agent 不代跑 VLM |
+| 按标签找 | `POST /search`（`search_kind=tags`） | 需 `tag_index_ready`；理解页生成后「同步到搜索」，Agent 不代跑 VLM |
 | 视频理解 / 画面描述 / ASR 解说 / 生成标签 | **不适用** | 仅桌面「视频理解」页；本 API 不提供生成管线 |
 
 ### 5.2 可选场景

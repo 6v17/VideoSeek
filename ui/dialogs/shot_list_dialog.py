@@ -103,14 +103,14 @@ class ShotListDialog(VSDialogShell):
         )
         self.btn_batch_export = QPushButton(self.texts.get("shot_list_batch_export", "Batch export clips"))
         self.btn_export_manifest.setObjectName("GhostButton")
-        self.btn_export_fcpxml.setObjectName("GhostButton")
+        self.btn_export_fcpxml.setObjectName("AccentGhostButton")
         self.btn_export_fcpxml.setToolTip(
             self.texts.get(
                 "shot_list_export_fcpxml_tip",
                 "默认导出 Premiere / 达芬奇可用的 FCP7 XML（*.xml）；也可选 FCPXML 给达芬奇。需本地视频文件。",
             )
         )
-        self.btn_export_jianying.setObjectName("GhostButton")
+        self.btn_export_jianying.setObjectName("SuccessGhostButton")
         self.btn_export_jianying.setToolTip(
             self.texts.get(
                 "shot_list_export_jianying_tip",
@@ -142,6 +142,12 @@ class ShotListDialog(VSDialogShell):
         self.btn_clear = QPushButton(self.texts.get("shot_list_clear", "Clear all"))
         self.btn_preview = QPushButton(self.texts.get("preview", "Preview"))
         self.btn_locate = QPushButton(self.texts.get("locate", "Locate"))
+        self.btn_move_up.setObjectName("NeutralToolButton")
+        self.btn_move_down.setObjectName("NeutralToolButton")
+        self.btn_remove.setObjectName("DangerGhostButton")
+        self.btn_clear.setObjectName("DangerGhostButton")
+        self.btn_preview.setObjectName("GhostButton")
+        self.btn_locate.setObjectName("GhostButton")
         for button in (
             self.btn_move_up,
             self.btn_move_down,
@@ -150,7 +156,6 @@ class ShotListDialog(VSDialogShell):
             self.btn_preview,
             self.btn_locate,
         ):
-            button.setObjectName("GhostButton")
             self.footer_layout.addWidget(button)
         self.footer_layout.addStretch(1)
         self.btn_close = QPushButton(self.texts.get("close", "Close"))

@@ -100,13 +100,18 @@ def highlight_dialogue_html(
         return escape(display)
 
     mode = str(match_mode or "exact").strip().lower()
-    if mode in {"fuzzy", "tolerant", "approx", "keyword_fuzzy"}:
-        flags = _fuzzy_flags(display, needle)
-    else:
-        flags = _exact_flags(display, needle)
-        # Trailing ellipsis is never part of the match.
-        if display.endswith("…") and flags:
-            flags[-1] = False
+    # Tags UI may pass AND chips joined as "a · b" — highlight each term.
+    parts = [p.strip() for p in needle.split(" · ") if p.strip()] if " · " in needle else [needle]
+    flags = [False] * len(display)
+    for part in parts:
+        if mode in {"fuzzy", "tolerant", "approx", "keyword_fuzzy"}:
+            part_flags = _fuzzy_flags(display, part)
+        else:
+            part_flags = _exact_flags(display, part)
+        flags = [a or b for a, b in zip(flags, part_flags)]
+    # Trailing ellipsis is never part of the match.
+    if display.endswith("…") and flags:
+        flags[-1] = False
 
     paint = color or _highlight_color()
     return _paint_flags(display, flags, color=paint)

@@ -6,8 +6,11 @@ import json
 import re
 from typing import Any, Iterable, List
 
-_TAG_MAX_CHARS = 48
+# Short labels only — never truncate prose into fake tags (motion mode used to).
+_TAG_MAX_CHARS = 16
 _TAG_MAX_COUNT = 24
+_SENTENCE_PUNCT_RE = re.compile(r"[。！？!?\n；;]")
+_SLASH_SPLIT_RE = re.compile(r"[/／|]+")
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 _QUOTED_STRING_RE = re.compile(r'"((?:\\.|[^"\\])*)"|\'((?:\\.|[^\'\\])*)\'')
 _TAGS_ARRAY_RE = re.compile(
@@ -18,6 +21,32 @@ _JSON_DEBRIS_RE = re.compile(
     r'^(?:\{+\s*)?(?:["\']?tags["\']?\s*[:=]\s*\[?)|(?:\]+\s*\}+)$',
     re.IGNORECASE,
 )
+
+
+def _looks_like_prose(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if _SENTENCE_PUNCT_RE.search(value):
+        return True
+    # Motion captions are multi-clause; bare length catches truncated prose.
+    if len(value) > 64 and ("，" in value or "," in value or " " in value):
+        return True
+    return False
+
+
+def expand_raw_tag_pieces(value: Any) -> List[str]:
+    """Split slash-joined VLM tags (prompt leakage: 人物/动作/场景) into atoms."""
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if _looks_like_prose(text):
+        return []
+    if _SLASH_SPLIT_RE.search(text):
+        parts = [p.strip() for p in _SLASH_SPLIT_RE.split(text) if p.strip()]
+        if len(parts) >= 2:
+            return parts
+    return [text]
 
 
 def normalize_tag_text(value: Any) -> str:
@@ -32,8 +61,11 @@ def normalize_tag_text(value: Any) -> str:
     text = " ".join(text.split())
     if not text or text.lower() in {"tags", "labels", "keywords"}:
         return ""
+    if _looks_like_prose(text):
+        return ""
     if len(text) > _TAG_MAX_CHARS:
-        text = text[:_TAG_MAX_CHARS].rstrip()
+        # Reject — truncating captions created the "description as tag" bug.
+        return ""
     return text
 
 
@@ -41,17 +73,23 @@ def _dedupe_tags(tags: Iterable[str], *, limit: int = _TAG_MAX_COUNT) -> List[st
     out: List[str] = []
     seen: set[str] = set()
     for raw in tags:
-        tag = normalize_tag_text(raw)
-        if not tag:
-            continue
-        key = tag.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(tag)
-        if len(out) >= max(1, int(limit)):
-            break
+        for piece in expand_raw_tag_pieces(raw):
+            tag = normalize_tag_text(piece)
+            if not tag:
+                continue
+            key = tag.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(tag)
+            if len(out) >= max(1, int(limit)):
+                return out
     return out
+
+
+def projectable_tags(tags: Iterable[Any], *, limit: int = _TAG_MAX_COUNT) -> List[str]:
+    """Normalize a chunk's tags for SQLite projection (filters prose / splits /)."""
+    return _dedupe_tags(tags, limit=limit)
 
 
 def _tags_from_json_payload(payload: Any) -> List[str] | None:
@@ -111,7 +149,7 @@ def _try_recover_tags_from_jsonish(text: str) -> List[str] | None:
         if quoted:
             return quoted
         parts = re.split(r"[,，、/;；|\n]+", array_match.group(1))
-        recovered = [part for part in parts if normalize_tag_text(part)]
+        recovered = [part for part in parts if normalize_tag_text(part) or expand_raw_tag_pieces(part)]
         if recovered:
             return recovered
     # Whole payload is a quoted-string list / object debris.
@@ -155,7 +193,11 @@ def _try_parse_json_tags(text: str) -> List[str] | None:
 
 
 def parse_vlm_tag_list(raw_text: str, *, max_tags: int = _TAG_MAX_COUNT) -> List[str]:
-    """Extract tags from VLM output (JSON preferred; comma/line split fallback)."""
+    """Extract tags from VLM output (JSON preferred; comma/line split fallback).
+
+    Motion replies are prose + optional JSON. Never turn the prose body into tags:
+    if JSON is missing and the text looks like sentences, return [].
+    """
     text = str(raw_text or "").strip()
     if not text:
         return []
@@ -167,6 +209,9 @@ def parse_vlm_tag_list(raw_text: str, *, max_tags: int = _TAG_MAX_COUNT) -> List
         recovered = _try_recover_tags_from_jsonish(text)
         if recovered:
             return _dedupe_tags(recovered, limit=max_tags)
+    # Do not ingest motion/description prose as tags.
+    if _looks_like_prose(text):
+        return []
     parts = re.split(r"[,，、/;；|\n]+", text)
     return _dedupe_tags(parts, limit=max_tags)
 

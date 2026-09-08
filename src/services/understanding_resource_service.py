@@ -175,7 +175,7 @@ MOTION_LANGUAGE_PROMPTS = {
         "4. 不要输出故事总结，不要 Markdown。\n"
         "\n"
         "最后，如果可以提取，请单独输出 JSON：\n"
-        '{"tags":["人物/动作/场景/镜头/情绪等短标签"]}'
+        '{"tags":["人物","动作","场景","镜头","情绪"]}'
     ),
     CAPTION_LANGUAGE_EN: (
         "This is a stitched image of two frames from the same video span.\n"
@@ -191,7 +191,7 @@ MOTION_LANGUAGE_PROMPTS = {
         "4. No story summary. No markdown.\n"
         "\n"
         "Finally, if you can extract them, output JSON on its own:\n"
-        '{"tags":["short tags for people/action/scene/shot/emotion"]}'
+        '{"tags":["person","action","scene","shot","emotion"]}'
     ),
 }
 VIDEO_SUMMARY_LANGUAGE_PROMPTS = {

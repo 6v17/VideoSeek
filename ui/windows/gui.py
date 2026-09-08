@@ -339,17 +339,15 @@ class MainWindow(
         self.search_page.text_search.textChanged.connect(
             lambda *_: self._refresh_search_panel_state(refresh_scope=False)
         )
-        if hasattr(self.search_page.search_panel, "tags_search"):
+        if hasattr(self.search_page.search_panel, "tags_form"):
+            panel = self.search_page.search_panel
+            panel.tags_form.filter_changed.connect(self._on_tags_query_changed)
+            panel.tags_form.selection_changed.connect(self._on_tag_selection_changed)
+            panel.tags_form.activate_search.connect(self._on_tag_search_activate)
+            panel.tag_suggest_chosen.connect(self._on_tag_suggest_chosen)
+        elif hasattr(self.search_page.search_panel, "tags_search"):
             tags_edit = self.search_page.search_panel.tags_search
             tags_edit.textChanged.connect(self._on_tags_query_changed)
-            if hasattr(tags_edit, "suggest_navigate"):
-                tags_edit.suggest_navigate.connect(self._on_tag_suggest_navigate)
-            if hasattr(tags_edit, "suggest_accept"):
-                tags_edit.suggest_accept.connect(self._on_tag_suggest_accept)
-            if hasattr(tags_edit, "suggest_dismiss"):
-                tags_edit.suggest_dismiss.connect(self._hide_tag_suggestions)
-            if hasattr(self.search_page.search_panel, "tag_suggest_chosen"):
-                self.search_page.search_panel.tag_suggest_chosen.connect(self._on_tag_suggest_chosen)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
         self._init_search_scope_state()
@@ -1471,13 +1469,19 @@ class MainWindow(
 
         # VLM tag search uses the evidence_tags projection — no CLIP model.
         if active_tab == self.SEARCH_TAB_TAGS:
-            tags_query = self.search_page.search_panel.tags_query()
-            if not tags_query:
+            terms = []
+            if hasattr(self.search_page.search_panel, "tag_search_terms"):
+                terms = self.search_page.search_panel.tag_search_terms()
+            else:
+                tags_query = self.search_page.search_panel.tags_query()
+                if tags_query:
+                    terms = [tags_query]
+            if not terms:
                 self.search_page.lbl_status.setText(
                     self.texts.get("search_empty_tags", self.texts["empty_query"])
                 )
                 return
-            self._run_tag_search(tags_query)
+            self._run_tag_search(required_tags=terms)
             return
 
         if not self.check_runtime_resources():
@@ -1578,17 +1582,35 @@ class MainWindow(
         )
         return True
 
-    def _run_tag_search(self, raw_query, *, sync_ui=True):
-        query = str(raw_query or "").strip()
-        if not query:
+    def _run_tag_search(self, raw_query=None, *, sync_ui=True, required_tags=None):
+        terms = [
+            str(t).strip()
+            for t in (required_tags or [])
+            if str(t or "").strip()
+        ]
+        if not terms:
+            query = str(raw_query or "").strip()
+            if query:
+                terms = [p.strip() for p in query.split(" · ") if p.strip()] if " · " in query else [query]
+        if not terms and hasattr(self, "search_page") and hasattr(
+            self.search_page.search_panel, "tag_search_terms"
+        ):
+            terms = self.search_page.search_panel.tag_search_terms()
+        if not terms:
             self.search_page.lbl_status.setText(
                 self.texts.get("search_empty_tags", self.texts["empty_query"])
             )
             return False
+        display = " · ".join(terms)
         if sync_ui:
             self.switch_page("search")
             self._set_search_query_tab(self.SEARCH_TAB_TAGS)
-            self.search_page.search_panel.set_tags_query(query)
+            # Avoid wiping chips when the panel already holds the same terms.
+            current = []
+            if hasattr(self.search_page.search_panel, "tag_search_terms"):
+                current = self.search_page.search_panel.tag_search_terms()
+            if [t.casefold() for t in current] != [t.casefold() for t in terms]:
+                self.search_page.search_panel.set_tags_query(display)
         if not self._validate_search_scope():
             self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
             return False
@@ -1600,12 +1622,13 @@ class MainWindow(
         if hasattr(self, "_dialogue_match_mode_from_ui"):
             match_mode = self._dialogue_match_mode_from_ui()
         self.search_controller.start_search(
-            query,
+            display,
             True,
             scope_library_paths=scope_library_paths,
             scope_video_paths=scope_video_paths,
             search_kind="tags",
             search_mode=match_mode,
+            required_tags=terms,
         )
         return True
 

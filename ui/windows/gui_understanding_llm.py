@@ -2134,23 +2134,24 @@ class UnderstandingLlmGuiMixin:
 
     def reset_recap_prompt(self):
         from src.services.recap_service import (
-            RECAP_CAPTION_SYSTEM,
-            RECAP_PLAN_SYSTEM,
-            RECAP_SYSTEM,
-            RECAP_VO_POLISH_SYSTEM,
+            default_recap_caption_prompt,
+            default_recap_match_prompt,
+            default_recap_plan_prompt,
+            default_recap_polish_prompt,
         )
 
         page = getattr(self, "understanding_page", None)
         if page is None or not hasattr(page, "input_recap_prompt"):
             return
+        language = self._vlm_prompt_language() if hasattr(self, "_vlm_prompt_language") else "zh"
         index = 1
         if hasattr(page, "recap_prompt_tabs"):
             index = int(page.recap_prompt_tabs.currentIndex())
         editors = (
-            (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
-            (page.input_recap_prompt, RECAP_SYSTEM),
-            (getattr(page, "input_recap_caption_prompt", None), RECAP_CAPTION_SYSTEM),
-            (getattr(page, "input_recap_polish_prompt", None), RECAP_VO_POLISH_SYSTEM),
+            (getattr(page, "input_recap_plan_prompt", None), default_recap_plan_prompt(language)),
+            (page.input_recap_prompt, default_recap_match_prompt(language)),
+            (getattr(page, "input_recap_caption_prompt", None), default_recap_caption_prompt(language)),
+            (getattr(page, "input_recap_polish_prompt", None), default_recap_polish_prompt(language)),
         )
         if index < 0 or index >= len(editors):
             index = 1
@@ -2158,33 +2159,52 @@ class UnderstandingLlmGuiMixin:
         if editor is not None:
             editor.setPlainText(default)
 
+    def _recap_prompt_getter_pairs(self):
+        from src.services.recap_service import (
+            default_recap_caption_prompt,
+            default_recap_match_prompt,
+            default_recap_plan_prompt,
+            default_recap_polish_prompt,
+        )
+
+        page = getattr(self, "understanding_page", None)
+        if page is None:
+            return ()
+        return (
+            (getattr(page, "input_recap_plan_prompt", None), default_recap_plan_prompt),
+            (getattr(page, "input_recap_prompt", None), default_recap_match_prompt),
+            (getattr(page, "input_recap_caption_prompt", None), default_recap_caption_prompt),
+            (getattr(page, "input_recap_polish_prompt", None), default_recap_polish_prompt),
+        )
+
+    def _refresh_recap_prompt_editors_for_language(self) -> None:
+        language = self._vlm_prompt_language() if hasattr(self, "_vlm_prompt_language") else "zh"
+        builtin_langs = ("zh", "en")
+        for editor, getter in self._recap_prompt_getter_pairs():
+            if editor is None:
+                continue
+            current = str(editor.toPlainText() or "").strip()
+            if not current or any(current == str(getter(item) or "").strip() for item in builtin_langs):
+                editor.setPlainText(getter(language))
+
     def _ensure_recap_prompt_default(self):
         from src.services.recap_service import (
-            RECAP_CAPTION_SYSTEM,
             RECAP_GAP_SYSTEM,
-            RECAP_PLAN_SYSTEM,
-            RECAP_SYSTEM,
-            RECAP_VO_POLISH_SYSTEM,
+            RECAP_GAP_SYSTEM_EN,
         )
 
         page = getattr(self, "understanding_page", None)
         if page is None:
             return
+        language = self._vlm_prompt_language() if hasattr(self, "_vlm_prompt_language") else "zh"
         caption_editor = getattr(page, "input_recap_caption_prompt", None)
         match_editor = getattr(page, "input_recap_prompt", None)
-        polish_editor = getattr(page, "input_recap_polish_prompt", None)
-        pairs = (
-            (getattr(page, "input_recap_plan_prompt", None), RECAP_PLAN_SYSTEM),
-            (match_editor, RECAP_SYSTEM),
-            (caption_editor, RECAP_CAPTION_SYSTEM),
-            (polish_editor, RECAP_VO_POLISH_SYSTEM),
-        )
-        for editor, default in pairs:
+        for editor, getter in self._recap_prompt_getter_pairs():
             if editor is None:
                 continue
             body = str(editor.toPlainText() or "").strip()
             stale_caption = editor is caption_editor and (
-                body == str(RECAP_GAP_SYSTEM).strip()
+                body in {str(RECAP_GAP_SYSTEM).strip(), str(RECAP_GAP_SYSTEM_EN).strip()}
                 or "按 reason、beat 和 people 写旁白" in body
                 or "连续空镜特写可以并进前一句" in body
             )
@@ -2194,4 +2214,8 @@ class UnderstandingLlmGuiMixin:
                 and '"role":"insert"' not in body.replace(" ", "")
             )
             if not body or stale_caption or stale_match:
-                editor.setPlainText(default)
+                editor.setPlainText(getter(language))
+            elif any(
+                body == str(getter(item) or "").strip() for item in ("zh", "en")
+            ) and body != str(getter(language) or "").strip():
+                editor.setPlainText(getter(language))

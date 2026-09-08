@@ -30,7 +30,10 @@ class SearchPanelStateMixin:
     def _search_has_tags_query(self) -> bool:
         if not hasattr(self, "search_page"):
             return False
-        return bool(self.search_page.search_panel.tags_query())
+        panel = self.search_page.search_panel
+        if hasattr(panel, "tag_search_terms"):
+            return bool(panel.tag_search_terms())
+        return bool(panel.tags_query())
 
     def _search_has_compose_query(self) -> bool:
         if not hasattr(self, "search_page"):
@@ -421,6 +424,11 @@ class SearchPanelStateMixin:
         if tags_hint is not None:
             tags_hint.setText(self._tags_search_hint_text(texts))
             tags_hint.setVisible(active_tab == self.SEARCH_TAB_TAGS)
+        tags_form = getattr(getattr(page, "search_panel", None), "tags_form", None)
+        if tags_form is not None:
+            tags_form.set_placeholder(
+                texts.get("search_tags_placeholder", "Filter tags, or pick from suggestions…")
+            )
 
         self._refresh_search_model_display()
 
@@ -492,12 +500,8 @@ class SearchPanelStateMixin:
                 indexed = int(stats.get("tag_indexed_videos") or 0)
                 self._tags_stats_cache = {"at": now, "indexed": indexed}
             if indexed > 0:
-                ready = texts.get(ready_key, fallback).format(count=indexed)
-                suggest = texts.get(
-                    "search_tags_suggest_hint",
-                    "Suggestions appear below as you type; click a full tag to search.",
-                )
-                return f"{ready} {suggest}".strip()
+                # Keep one short status line; interaction tips live in the placeholder.
+                return texts.get(ready_key, fallback).format(count=indexed)
         except Exception:
             pass
         return fallback
@@ -596,77 +600,69 @@ class SearchPanelStateMixin:
         self._tag_suggest_timer = timer
         return timer
 
-    def _on_tags_query_changed(self) -> None:
+    def _on_tags_query_changed(self, *_args) -> None:
         self._refresh_search_panel_state(refresh_scope=False)
         if self._search_active_tab() != self.SEARCH_TAB_TAGS:
-            self._hide_tag_suggestions()
             return
         self._ensure_tag_suggest_timer().start()
+
+    def _on_tag_selection_changed(self) -> None:
+        self._refresh_search_panel_state(refresh_scope=False)
+        if self._search_active_tab() != self.SEARCH_TAB_TAGS:
+            return
+        # Chips only change the query; search runs via 搜索 / Enter.
+        self._ensure_tag_suggest_timer().start()
+
+    def _on_tag_search_activate(self) -> None:
+        if not hasattr(self, "_run_tag_search"):
+            return
+        panel = getattr(getattr(self, "search_page", None), "search_panel", None)
+        if panel is None:
+            return
+        terms = panel.tag_search_terms() if hasattr(panel, "tag_search_terms") else []
+        if not terms:
+            self.search_page.lbl_status.setText(
+                self.texts.get("search_empty_tags", self.texts.get("empty_query", ""))
+            )
+            return
+        self._run_tag_search(required_tags=terms, sync_ui=False)
 
     def _refresh_tag_suggestions(self) -> None:
         if not hasattr(self, "search_page"):
             return
         if self._search_active_tab() != self.SEARCH_TAB_TAGS:
-            self._hide_tag_suggestions()
             return
         panel = self.search_page.search_panel
-        query = panel.tags_query()
-        if not query:
-            self._hide_tag_suggestions()
-            return
+        form = getattr(panel, "tags_form", None)
+        query = form.filter_text() if form is not None else panel.tags_query()
+        exclude = form.selected_tags() if form is not None else []
         try:
             from src.storage.evidence_tags_store import suggest_tags
 
-            tags = suggest_tags(query, limit=12)
+            # Selected chips: only suggest tags that still co-occur on AND-matching chunks.
+            tags = suggest_tags(
+                query,
+                limit=48,
+                exclude_tags=exclude,
+                required_tags=exclude or None,
+            )
         except Exception:
             tags = []
-        # Don't suggest when the typed text already equals the only exact tag.
-        if len(tags) == 1 and str(tags[0]).strip().casefold() == query.casefold():
-            self._hide_tag_suggestions()
-            return
-        if not tags:
-            self._hide_tag_suggestions()
-            return
         panel.show_tag_suggestions(tags)
 
     def _hide_tag_suggestions(self) -> None:
-        if not hasattr(self, "search_page"):
-            return
-        panel = getattr(self.search_page, "search_panel", None)
-        if panel is not None:
-            panel.hide_tag_suggestions()
-
-    def _on_tag_suggest_navigate(self, delta: int) -> None:
-        if not hasattr(self, "search_page"):
-            return
-        popup = getattr(self.search_page.search_panel, "tag_suggest_popup", None)
-        if popup is not None and popup.isVisible():
-            popup.move_selection(int(delta))
-
-    def _on_tag_suggest_accept(self) -> None:
-        if not hasattr(self, "search_page"):
-            return
-        panel = self.search_page.search_panel
-        popup = getattr(panel, "tag_suggest_popup", None)
-        if popup is not None and popup.isVisible() and popup.choose_current():
-            return
-        query = panel.tags_query()
-        if query and hasattr(self, "_run_tag_search"):
-            self._run_tag_search(query)
+        # Kept for callers (e.g. understanding page); inline list is refreshed, not hidden.
+        if self._search_active_tab() == self.SEARCH_TAB_TAGS:
+            self._refresh_tag_suggestions()
 
     def _on_tag_suggest_chosen(self, tag: str) -> None:
-        text = str(tag or "").strip()
-        if not text or not hasattr(self, "search_page"):
-            return
-        panel = self.search_page.search_panel
-        panel.set_tags_query(text)
-        panel.hide_tag_suggestions()
-        if hasattr(self, "_run_tag_search"):
-            self._run_tag_search(text)
+        # Chip add + activate_search already fire from TagSearchForm.
+        _ = tag
 
     def _on_search_query_tab_changed(self, _index: int = 0) -> None:
-        self._hide_tag_suggestions()
         self._refresh_search_panel_state()
+        if self._search_active_tab() == self.SEARCH_TAB_TAGS:
+            self._ensure_tag_suggest_timer().start()
         if hasattr(self, "_refresh_search_scope_ui"):
             self._refresh_search_scope_ui(force_entries=True)
 

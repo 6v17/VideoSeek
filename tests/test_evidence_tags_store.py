@@ -74,6 +74,56 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 suggestions = store.suggest_tags("per", limit=10)
                 self.assertIn("person", suggestions)
 
+                popular = store.suggest_tags("", limit=10)
+                self.assertTrue(len(popular) >= 1)
+
+                # Cache: second popular call should hit without error and match.
+                popular2 = store.suggest_tags("", limit=10)
+                self.assertEqual(popular, popular2)
+                self.assertGreaterEqual(len(store._SUGGEST_CACHE), 1)
+
+                cooccur = store.suggest_tags(
+                    "",
+                    limit=10,
+                    required_tags=["person"],
+                    exclude_tags=["person"],
+                )
+                self.assertIn("table", cooccur)
+                self.assertNotIn("person", cooccur)
+
+                and_hits = store.search_tags(
+                    "",
+                    required_tags=["person", "table"],
+                    match_mode="exact",
+                    top_k=5,
+                )
+                self.assertEqual(len(and_hits), 1)
+                self.assertEqual(and_hits[0]["chunk_index"], 0)
+
+                and_miss = store.search_tags(
+                    "",
+                    required_tags=["person", "road"],
+                    match_mode="exact",
+                    top_k=5,
+                )
+                self.assertEqual(len(and_miss), 0)
+
+                # Prose / slash noise must not enter the projection.
+                n3 = store.replace_video_tags_from_bundle(
+                    "vid1",
+                    _sample_bundle(
+                        tags0=[
+                            "人物/动作/场景",
+                            "佩戴长手套的女性角色正伸手触碰一张橙色皮质座椅",
+                            "镜头聚焦于其上半身和手臂动作。",
+                        ],
+                        tags1=[],
+                    ),
+                )
+                self.assertEqual(n3, 3)
+                projected = store.suggest_tags("", limit=20)
+                self.assertEqual(set(projected), {"人物", "动作", "场景"})
+
                 # Checkpoint-style replace with extra chunk tags.
                 n2 = store.replace_video_tags_from_bundle(
                     "vid1",
@@ -185,6 +235,39 @@ class RunTagSearchTests(unittest.TestCase):
                 self.assertIn("table", hits[0].matched_text)
                 self.assertEqual(hits[0].start_sec, 0.0)
                 self.assertEqual(hits[0].end_sec, 5.0)
+
+
+    def test_run_tag_search_and_terms(self):
+        from src.services.search_service import run_tag_search
+        from src.storage import evidence_tags_store as store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                store._SCHEMA_READY.clear()
+                store.replace_video_tags_from_bundle("vid1", _sample_bundle())
+                hits, message, matched_by = run_tag_search(
+                    "person · table",
+                    top_k=5,
+                    match_mode="exact",
+                    config={"data_root": tmp},
+                )
+                self.assertEqual(message, "")
+                self.assertEqual(matched_by, "keyword")
+                self.assertEqual(len(hits), 1)
+                hits2, message2, _ = run_tag_search(
+                    "",
+                    required_tags=["person", "table"],
+                    top_k=5,
+                    match_mode="exact",
+                    config={"data_root": tmp},
+                )
+                self.assertEqual(message2, "")
+                self.assertEqual(len(hits2), 1)
 
 
 class AgentTagSearchTests(unittest.TestCase):

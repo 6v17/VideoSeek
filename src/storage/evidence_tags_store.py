@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from typing import Any, Mapping, Sequence
 
 from src.app.logging_utils import get_logger
+from src.services.understanding_tags import projectable_tags
 from src.storage.dialogue_transcript_store import (
     _fuzzy_dialogue_rank,
     _fuzzy_probe_needles,
@@ -23,6 +24,16 @@ logger = get_logger("evidence_tags_store")
 _SCHEMA_VERSION = 1
 _SCHEMA_READY: set[str] = set()
 _WRITE_LOCK = __import__("threading").RLock()
+# Process-local suggest cache: invalidated on any projection write.
+_SUGGEST_CACHE: dict[tuple[Any, ...], list[str]] = {}
+_SUGGEST_CACHE_GEN = 0
+_SUGGEST_CACHE_MAX = 96
+
+
+def _invalidate_suggest_cache() -> None:
+    global _SUGGEST_CACHE_GEN
+    _SUGGEST_CACHE.clear()
+    _SUGGEST_CACHE_GEN += 1
 
 
 def get_evidence_tags_db_path(*, config=None) -> str:
@@ -116,8 +127,7 @@ def _iter_tag_rows_from_bundle(
         except (TypeError, ValueError):
             end_sec = start_sec
         tags = raw.get("tags") if isinstance(raw.get("tags"), (list, tuple)) else []
-        for tag_raw in tags:
-            tag = str(tag_raw or "").strip()
+        for tag in projectable_tags(tags):
             tag_cf = _casefold_tag(tag)
             if not tag or not tag_cf:
                 continue
@@ -167,6 +177,7 @@ def replace_video_tags_from_bundle(
                     rows,
                 )
             conn.commit()
+    _invalidate_suggest_cache()
     return len(rows)
 
 
@@ -178,7 +189,10 @@ def delete_video_tags(video_id: str, *, config=None) -> int:
         with _db(config=config) as conn:
             cur = conn.execute("DELETE FROM tag_rows WHERE video_id = ?", (vid,))
             conn.commit()
-            return int(cur.rowcount or 0)
+            deleted = int(cur.rowcount or 0)
+    if deleted:
+        _invalidate_suggest_cache()
+    return deleted
 
 
 def clear_all_tag_rows(*, config=None) -> int:
@@ -186,7 +200,10 @@ def clear_all_tag_rows(*, config=None) -> int:
         with _db(config=config) as conn:
             cur = conn.execute("DELETE FROM tag_rows")
             conn.commit()
-            return int(cur.rowcount or 0)
+            deleted = int(cur.rowcount or 0)
+    if deleted:
+        _invalidate_suggest_cache()
+    return deleted
 
 
 def list_tag_search_scope_entries(*, config=None) -> list[dict[str, Any]]:
@@ -351,29 +368,78 @@ def suggest_tags(
     *,
     config=None,
     limit: int = 12,
+    exclude_tags: Sequence[str] | None = None,
+    required_tags: Sequence[str] | None = None,
 ) -> list[str]:
-    """Return distinct full tags matching the typed needle (substring on tag_cf).
+    """Return distinct full tags for the suggestion list.
 
-    Ordered by frequency (desc), then shorter tags first — for search-box suggestions.
+    Empty query → popular tags by frequency (or co-occurring tags when
+    ``required_tags`` is set).
+    Non-empty → substring match on ``tag_cf``.
+
+    When ``required_tags`` is set, only tags that co-occur on chunks matching
+    *all* required needles (AND) are suggested — so multi-chip pick stays
+    useful for the next AND term.
+
+    Results are cached in-process until the next projection write.
     """
     needle = normalize_dialogue_query(query)
-    if not needle:
-        return []
-    keep = max(1, min(40, int(limit or 12)))
+    keep = max(1, min(64, int(limit or 12)))
+    exclude = {
+        str(t).strip().casefold()
+        for t in (exclude_tags or [])
+        if str(t or "").strip()
+    }
+    anchors = _normalize_tag_needles("", required_tags)
+    # Chips already selected should not reappear even if caller forgot exclude.
+    for anchor in anchors:
+        exclude.add(anchor)
+
+    db_path = get_evidence_tags_db_path(config=config)
+    cache_key = (
+        _SUGGEST_CACHE_GEN,
+        os.path.normpath(db_path),
+        needle,
+        tuple(anchors),
+        tuple(sorted(exclude)),
+        keep,
+    )
+    cached = _SUGGEST_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
+
+    fetch = keep + len(exclude) + 8
     with _db(config=config) as conn:
-        rows = list(
-            conn.execute(
-                """
-                SELECT tag, COUNT(*) AS hit_count
-                FROM tag_rows
-                WHERE instr(tag_cf, ?) > 0
-                GROUP BY tag_cf
-                ORDER BY hit_count DESC, LENGTH(tag_cf) ASC, tag ASC
-                LIMIT ?
-                """,
-                (needle, keep),
+        if anchors:
+            rows = _suggest_rows_cooccurring(conn, anchors, needle, fetch)
+        elif needle:
+            rows = list(
+                conn.execute(
+                    """
+                    SELECT tag, COUNT(*) AS hit_count
+                    FROM tag_rows
+                    WHERE instr(tag_cf, ?) > 0
+                    GROUP BY tag_cf
+                    ORDER BY hit_count DESC, LENGTH(tag_cf) ASC, tag ASC
+                    LIMIT ?
+                    """,
+                    (needle, fetch),
+                )
             )
-        )
+        else:
+            rows = list(
+                conn.execute(
+                    """
+                    SELECT tag, COUNT(*) AS hit_count
+                    FROM tag_rows
+                    GROUP BY tag_cf
+                    ORDER BY hit_count DESC, LENGTH(tag_cf) ASC, tag ASC
+                    LIMIT ?
+                    """,
+                    (fetch,),
+                )
+            )
+
     out: list[str] = []
     seen: set[str] = set()
     for row in rows:
@@ -381,28 +447,104 @@ def suggest_tags(
         if not tag:
             continue
         key = tag.casefold()
-        if key in seen:
+        if key in seen or key in exclude:
             continue
         seen.add(key)
         out.append(tag)
+        if len(out) >= keep:
+            break
+
+    if len(_SUGGEST_CACHE) >= _SUGGEST_CACHE_MAX:
+        # Drop an arbitrary old entry; gen bump clears everything on writes.
+        _SUGGEST_CACHE.pop(next(iter(_SUGGEST_CACHE)), None)
+    _SUGGEST_CACHE[cache_key] = list(out)
     return out
 
 
+def _suggest_rows_cooccurring(
+    conn: sqlite3.Connection,
+    anchors: Sequence[str],
+    needle: str,
+    fetch: int,
+) -> list[sqlite3.Row]:
+    """Tags on chunks that already match every required anchor (AND)."""
+    if not anchors:
+        return []
+    key_sql_parts: list[str] = []
+    params: list[Any] = []
+    for anchor in anchors:
+        key_sql_parts.append(
+            "SELECT video_id, chunk_index FROM tag_rows WHERE instr(tag_cf, ?) > 0"
+        )
+        params.append(anchor)
+    matched_sql = " INTERSECT ".join(key_sql_parts)
+    if needle:
+        sql = f"""
+            SELECT t.tag AS tag, COUNT(*) AS hit_count
+            FROM tag_rows t
+            INNER JOIN ({matched_sql}) m
+              ON t.video_id = m.video_id AND t.chunk_index = m.chunk_index
+            WHERE instr(t.tag_cf, ?) > 0
+            GROUP BY t.tag_cf
+            ORDER BY hit_count DESC, LENGTH(t.tag_cf) ASC, t.tag ASC
+            LIMIT ?
+        """
+        params = list(params) + [needle, int(fetch)]
+    else:
+        sql = f"""
+            SELECT t.tag AS tag, COUNT(*) AS hit_count
+            FROM tag_rows t
+            INNER JOIN ({matched_sql}) m
+              ON t.video_id = m.video_id AND t.chunk_index = m.chunk_index
+            GROUP BY t.tag_cf
+            ORDER BY hit_count DESC, LENGTH(t.tag_cf) ASC, t.tag ASC
+            LIMIT ?
+        """
+        params = list(params) + [int(fetch)]
+    return list(conn.execute(sql, params))
+
+
+def _normalize_tag_needles(
+    query: str = "",
+    required_tags: Sequence[str] | None = None,
+) -> list[str]:
+    needles: list[str] = []
+    seen: set[str] = set()
+    for raw in list(required_tags or []):
+        needle = normalize_dialogue_query(raw)
+        if needle and needle not in seen:
+            seen.add(needle)
+            needles.append(needle)
+    for raw in (str(query or "").strip(),):
+        if not raw:
+            continue
+        # UI / agent may pass joined chips as "a · b".
+        parts = [p.strip() for p in raw.split(" · ")] if " · " in raw else [raw]
+        for part in parts:
+            needle = normalize_dialogue_query(part)
+            if needle and needle not in seen:
+                seen.add(needle)
+                needles.append(needle)
+    return needles
+
+
 def search_tags(
-    query: str,
+    query: str = "",
     *,
     config=None,
     top_k: int = 50,
     match_mode: str = "exact",
     video_ids: list[str] | set[str] | None = None,
+    required_tags: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return chunk-level hits: one row per (video_id, chunk_index).
 
-    ``matched_tags`` = tags that matched the query (for ranking).
-    ``chunk_tags`` = full tag set for that chunk (for result display + highlight).
+    Multiple needles (``required_tags`` and/or ``query``) are AND-combined:
+    a chunk must match every needle. ``matched_tags`` = tags that matched any
+    needle; ``chunk_tags`` = full tag set for display + highlight.
     """
-    needle = normalize_dialogue_query(query)
-    if not needle:
+    needles = _normalize_tag_needles(query, required_tags)
+    if not needles:
         return []
     mode = str(match_mode or "exact").strip().lower()
     if mode in {"fuzzy", "tolerant", "approx"}:
@@ -417,39 +559,150 @@ def search_tags(
             return []
 
     with _db(config=config) as conn:
-        if mode == "exact":
-            sql = """
-                SELECT video_id, video_path, library_path, chunk_index,
-                       start_sec, end_sec, tag, tag_cf
-                FROM tag_rows
-                WHERE instr(tag_cf, ?) > 0
-            """
-            params: list[Any] = [needle]
-            if want_ids is not None:
-                placeholders = ",".join("?" for _ in want_ids)
-                sql += f" AND video_id IN ({placeholders})"
-                params.extend(want_ids)
-            rows = list(conn.execute(sql, params))
-            hits = _aggregate_exact_hits(rows, needle, keep)
-        else:
-            probes = _fuzzy_probe_needles(needle)
-            if not probes:
+        if len(needles) == 1:
+            needle = needles[0]
+            if mode == "exact":
+                rows = _fetch_tag_rows_exact(conn, needle, want_ids)
+                hits = _aggregate_exact_hits(rows, needle, keep)
+            else:
+                rows = _fetch_tag_rows_fuzzy(conn, needle, want_ids)
+                if not rows:
+                    return []
+                hits = _aggregate_fuzzy_hits(rows, needle, keep)
+            return _attach_full_chunk_tags(conn, hits)
+
+        surviving: set[tuple[str, int]] | None = None
+        for needle in needles:
+            if mode == "exact":
+                keys = {
+                    (str(row["video_id"] or ""), int(row["chunk_index"]))
+                    for row in _fetch_tag_rows_exact(conn, needle, want_ids)
+                }
+            else:
+                keys = set()
+                for row in _fetch_tag_rows_fuzzy(conn, needle, want_ids):
+                    tag_cf = str(row["tag_cf"] or "").strip() or str(row["tag"] or "").casefold()
+                    _sub, scatter = _fuzzy_dialogue_rank(tag_cf, needle)
+                    if fuzzy_dialogue_accepts(scatter, needle):
+                        keys.add((str(row["video_id"] or ""), int(row["chunk_index"])))
+            if surviving is None:
+                surviving = keys
+            else:
+                surviving &= keys
+            if not surviving:
                 return []
-            or_parts = ["instr(tag_cf, ?) > 0" for _ in probes]
-            sql = f"""
-                SELECT video_id, video_path, library_path, chunk_index,
-                       start_sec, end_sec, tag, tag_cf
-                FROM tag_rows
-                WHERE ({' OR '.join(or_parts)})
-            """
-            params = list(probes)
-            if want_ids is not None:
-                placeholders = ",".join("?" for _ in want_ids)
-                sql += f" AND video_id IN ({placeholders})"
-                params.extend(want_ids)
-            rows = list(conn.execute(sql, params))
-            hits = _aggregate_fuzzy_hits(rows, needle, keep)
+        hits = _aggregate_and_hits(conn, surviving or set(), needles, mode, keep)
         return _attach_full_chunk_tags(conn, hits)
+
+
+def _fetch_tag_rows_exact(
+    conn: sqlite3.Connection,
+    needle: str,
+    want_ids: list[str] | None,
+) -> list[sqlite3.Row]:
+    sql = """
+        SELECT video_id, video_path, library_path, chunk_index,
+               start_sec, end_sec, tag, tag_cf
+        FROM tag_rows
+        WHERE instr(tag_cf, ?) > 0
+    """
+    params: list[Any] = [needle]
+    if want_ids is not None:
+        placeholders = ",".join("?" for _ in want_ids)
+        sql += f" AND video_id IN ({placeholders})"
+        params.extend(want_ids)
+    return list(conn.execute(sql, params))
+
+
+def _fetch_tag_rows_fuzzy(
+    conn: sqlite3.Connection,
+    needle: str,
+    want_ids: list[str] | None,
+) -> list[sqlite3.Row]:
+    probes = _fuzzy_probe_needles(needle)
+    if not probes:
+        return []
+    or_parts = ["instr(tag_cf, ?) > 0" for _ in probes]
+    sql = f"""
+        SELECT video_id, video_path, library_path, chunk_index,
+               start_sec, end_sec, tag, tag_cf
+        FROM tag_rows
+        WHERE ({' OR '.join(or_parts)})
+    """
+    params: list[Any] = list(probes)
+    if want_ids is not None:
+        placeholders = ",".join("?" for _ in want_ids)
+        sql += f" AND video_id IN ({placeholders})"
+        params.extend(want_ids)
+    return list(conn.execute(sql, params))
+
+
+def _tag_matches_needle(tag_cf: str, needle: str, mode: str) -> bool:
+    if not tag_cf or not needle:
+        return False
+    if mode == "exact":
+        return needle in tag_cf
+    _sub, scatter = _fuzzy_dialogue_rank(tag_cf, needle)
+    return fuzzy_dialogue_accepts(scatter, needle)
+
+
+def _aggregate_and_hits(
+    conn: sqlite3.Connection,
+    keys: set[tuple[str, int]],
+    needles: Sequence[str],
+    mode: str,
+    keep: int,
+) -> list[dict[str, Any]]:
+    if not keys:
+        return []
+    clauses: list[str] = []
+    params: list[Any] = []
+    for vid, chunk_index in keys:
+        clauses.append("(video_id = ? AND chunk_index = ?)")
+        params.extend([vid, chunk_index])
+    sql = f"""
+        SELECT video_id, video_path, library_path, chunk_index,
+               start_sec, end_sec, tag, tag_cf
+        FROM tag_rows
+        WHERE {' OR '.join(clauses)}
+    """
+    rows = list(conn.execute(sql, params))
+    grouped: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        vid = str(row["video_id"] or "")
+        chunk_index = int(row["chunk_index"])
+        key = (vid, chunk_index)
+        if key not in keys:
+            continue
+        tag = str(row["tag"] or "").strip()
+        tag_cf = str(row["tag_cf"] or "").strip() or tag.casefold()
+        matched_any = any(_tag_matches_needle(tag_cf, needle, mode) for needle in needles)
+        if not matched_any:
+            continue
+        entry = grouped.get(key)
+        if entry is None:
+            grouped[key] = {
+                "video_id": vid,
+                "video_path": str(row["video_path"] or ""),
+                "library_path": str(row["library_path"] or ""),
+                "chunk_index": chunk_index,
+                "start_sec": float(row["start_sec"] or 0.0),
+                "end_sec": float(row["end_sec"] or 0.0),
+                "matched_tags": [tag] if tag else [],
+                "score": float(len(needles)),
+            }
+        elif tag and tag not in entry["matched_tags"]:
+            entry["matched_tags"].append(tag)
+    ordered = sorted(
+        grouped.values(),
+        key=lambda item: (
+            -len(item["matched_tags"]),
+            -float(item["score"]),
+            str(item["video_path"]),
+            int(item["chunk_index"]),
+        ),
+    )
+    return ordered[:keep]
 
 
 def _attach_full_chunk_tags(

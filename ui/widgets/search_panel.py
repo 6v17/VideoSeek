@@ -1,7 +1,6 @@
 """Local search panel with image/text query tabs and shared scope + mobile upload."""
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -23,39 +22,7 @@ from ui.widgets.layout import (
 )
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
-from ui.widgets.tag_suggest_popup import TagSuggestPopup
-
-
-class _TagsSearchEdit(QTextEdit):
-    """Tags query editor that forwards Up/Down/Enter/Esc to the suggest popup."""
-
-    suggest_navigate = Signal(int)
-    suggest_accept = Signal()
-    suggest_dismiss = Signal()
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        key = event.key()
-        if key == Qt.Key.Key_Down:
-            self.suggest_navigate.emit(1)
-            event.accept()
-            return
-        if key == Qt.Key.Key_Up:
-            self.suggest_navigate.emit(-1)
-            event.accept()
-            return
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
-            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-        ):
-            self.suggest_accept.emit()
-            # Parent may accept the suggestion; if popup hidden, fall through to default newline.
-            # We always accept here and let the host decide whether to search.
-            event.accept()
-            return
-        if key == Qt.Key.Key_Escape:
-            self.suggest_dismiss.emit()
-            event.accept()
-            return
-        super().keyPressEvent(event)
+from ui.widgets.tag_search_form import TagSearchForm
 
 
 class SearchScopeSelect(QComboBox):
@@ -167,17 +134,14 @@ class SearchPanel(VSCard):
         self.lbl_dialogue_hint.setObjectName("StatusHint")
         self.lbl_dialogue_hint.setWordWrap(True)
 
-        self.tags_search = _TagsSearchEdit()
-        self.tags_search.setObjectName("SearchInput")
-        self.tags_search.setMinimumHeight(68)
-        self.tags_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.tags_search.setAcceptRichText(False)
-        self.tag_suggest_popup = TagSuggestPopup(self)
-        self.tag_suggest_chosen = self.tag_suggest_popup.tag_chosen
+        self.tags_form = TagSearchForm()
+        self.tags_search = self.tags_form.tags_search
+        self.tag_suggest_chosen = self.tags_form.suggestion_activated
+        self.tag_search_activate = self.tags_form.activate_search
+        self.tag_selection_changed = self.tags_form.selection_changed
 
-        self.lbl_tags_hint = QLabel()
-        self.lbl_tags_hint.setObjectName("StatusHint")
-        self.lbl_tags_hint.setWordWrap(True)
+        self.lbl_tags_hint = self.tags_form.hint_label
+
 
         mode_combo_width = max(combo_width, int(COMPONENT_SIZES.get("search_image_mode_combo_width", 108)))
         mode_cluster_width = field_label_width + field_gap + mode_combo_width
@@ -321,9 +285,8 @@ class SearchPanel(VSCard):
         self.tags_tab.setFixedHeight(tab_page_height)
         tags_tab_layout = QVBoxLayout(self.tags_tab)
         tags_tab_layout.setContentsMargins(4, 8, 4, 4)
-        tags_tab_layout.setSpacing(8)
-        tags_tab_layout.addWidget(self.tags_search, 1)
-        tags_tab_layout.addWidget(self.lbl_tags_hint, 0, Qt.AlignmentFlag.AlignTop)
+        tags_tab_layout.setSpacing(0)
+        tags_tab_layout.addWidget(self.tags_form, 1)
 
         self.search_query_tabs = QTabWidget()
         self.search_query_tabs.setObjectName("SearchQueryTabs")
@@ -416,9 +379,20 @@ class SearchPanel(VSCard):
         layout.addWidget(self.search_mode_options_stack, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addLayout(action_row, 0)
 
-        self.setFixedHeight(compare_row_card_height())
-        self.setFixedWidth(compute_search_panel_width())
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        default_width = compute_search_panel_width()
+        self._default_width = default_width
+        self.setMinimumWidth(default_width)
+        # Allow dragging wider for tags suggestions; keep a sane ceiling.
+        self.setMaximumWidth(max(default_width + 280, int(default_width * 1.85)))
+        self._default_height = compare_row_card_height()
+        self.setMinimumHeight(self._default_height)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+
+    def sizeHint(self):
+        from PySide6.QtCore import QSize
+
+        # Initial preferred width = layout minimum; splitter can still widen.
+        return QSize(int(self._default_width), int(self._default_height))
 
     def text_query(self) -> str:
         return self.text_search.toPlainText().strip()
@@ -439,27 +413,61 @@ class SearchPanel(VSCard):
         self.dialogue_search.clear()
 
     def tags_query(self) -> str:
-        return self.tags_search.toPlainText().strip()
+        form = getattr(self, "tags_form", None)
+        if form is not None:
+            terms = form.search_terms()
+            if terms:
+                return " · ".join(terms)
+            return form.filter_text()
+        return self.tags_search.text().strip() if hasattr(self.tags_search, "text") else ""
+
+    def tag_search_terms(self) -> list[str]:
+        form = getattr(self, "tags_form", None)
+        if form is not None:
+            return form.search_terms()
+        query = self.tags_query()
+        return [query] if query else []
 
     def set_tags_query(self, text: str) -> None:
-        self.tags_search.blockSignals(True)
-        self.tags_search.setPlainText(str(text or ""))
-        self.tags_search.blockSignals(False)
+        form = getattr(self, "tags_form", None)
+        value = str(text or "").strip()
+        if form is None:
+            if hasattr(self.tags_search, "setText"):
+                self.tags_search.blockSignals(True)
+                self.tags_search.setText(value)
+                self.tags_search.blockSignals(False)
+            return
+        form._suppress_selection_signal = True
+        try:
+            form.clear(emit=False)
+            if not value:
+                return
+            if " · " in value:
+                for part in value.split(" · "):
+                    form.add_tag(part.strip(), clear_filter=False, emit=False)
+                form.set_filter_text("")
+            else:
+                form.add_tag(value, clear_filter=True, emit=False)
+        finally:
+            form._suppress_selection_signal = False
 
     def clear_tags_query(self) -> None:
-        self.tags_search.blockSignals(True)
-        self.tags_search.clear()
-        self.tags_search.blockSignals(False)
-        if getattr(self, "tag_suggest_popup", None) is not None:
-            self.tag_suggest_popup.clear_and_hide()
+        form = getattr(self, "tags_form", None)
+        if form is not None:
+            form.clear()
+            return
+        if hasattr(self.tags_search, "clear"):
+            self.tags_search.blockSignals(True)
+            self.tags_search.clear()
+            self.tags_search.blockSignals(False)
 
     def show_tag_suggestions(self, tags: list[str]) -> None:
-        popup = getattr(self, "tag_suggest_popup", None)
-        if popup is None:
-            return
-        popup.set_suggestions(list(tags or []), anchor=self.tags_search)
+        form = getattr(self, "tags_form", None)
+        if form is not None:
+            form.set_suggestions(list(tags or []))
 
     def hide_tag_suggestions(self) -> None:
-        popup = getattr(self, "tag_suggest_popup", None)
-        if popup is not None:
-            popup.clear_and_hide()
+        # Inline list stays visible; clear only when idle with no chips/filter.
+        form = getattr(self, "tags_form", None)
+        if form is not None and not form.filter_text() and not form.selected_tags():
+            form.set_suggestions([])

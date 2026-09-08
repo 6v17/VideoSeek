@@ -13,7 +13,12 @@ from src.app.config import load_config
 from src.core.understanding.base import UnderstandingStoppedError
 from src.media.fcpxml import layout_clips_on_timeline, write_cuts_json, write_fcpxml, write_srt
 from src.services.llm_settings import call_remote_llm, get_remote_llm_settings
-from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+from src.services.understanding_resource_service import (
+    CAPTION_LANGUAGE_EN,
+    CAPTION_LANGUAGE_ZH,
+    UNDERSTANDING_MODE_MOTION,
+    normalize_caption_language,
+)
 
 BASE_CHARS_PER_SEC = 5.0
 TTS_SPEED = 1.35
@@ -205,6 +210,208 @@ RECAP_VO_POLISH_SYSTEM = """你是终稿润色员：只改旁白文字，不改�
 JSON schema:
 {"captions":[{"text":"润色后旁白。","from":1,"to":2},{"text":"","from":3,"to":3}]}
 """
+
+RECAP_NAME_POLICY_EN = """[Characters]
+1. Non-empty asr[].speaker = who is speaking; narration subjects must follow it. Never reassign speech.
+2. Bind a name only from self-intro or direct address in dialogue, and only to one person for the whole episode.
+3. people is a nickname dictionary, not a free cast list; do not put unverified names into VO for this beat.
+4. With no name and empty speaker, use visible traits. Ban “male lead / female lead / protagonist”; do not invent names; do not merge people into one “he/she”.
+"""
+
+RECAP_FACT_POLICY_EN = """[Subject–verb–object]
+Keep who did what to whom and whose object clear; never merge two outcomes into “they…”.
+Keep the same fact consistent across the episode; no contradictions.
+Subjects follow asr.speaker / dialogue address only—no lead labels or random people-table names.
+"""
+
+RECAP_EVIDENCE_POLICY_EN = """[Evidence]
+1. asr speaker+text is absolute; never misattribute or invent lines.
+2. Names/addresses in dialogue stay with the original utterance.
+3. VLM caps only add visible action/scene; when they conflict with asr, trust dialogue.
+4. event is an outline; asr wins on conflict.
+Never invent props, moves, identities, motives, backstory, or micro-expressions absent from asr/cap.
+"""
+
+RECAP_VO_STYLE_POLICY_EN = """[Voiceover]
+Third-person “who did what / how the relationship changed”. Short, clear subject–verb.
+No dialogue/thought parrot: no “X said/felt/thought/claimed…”. Viewers can hear the source.
+Quote dialogue only as tiny 「」 keywords. Ban lead labels.
+Do not read caps/costume/blocking/camera moves; no “cut to / the scene shifts to” announcer lines.
+Write the VO in English.
+"""
+
+RECAP_VO_CONTINUITY_POLICY_EN = """[Continuity]
+VO is one storyline. A cut ≠ a new scene; one line per cut is a subtitle unit, not a new scene.
+Only bridge on real scene/conflict changes (role=bridge or need_transition); same-scene multi-cuts continue the thread—no restart each cut, no fake transitions.
+Transitions use only facts already in caps/asr/event—no new confrontations, reveals, or outcomes, no jumps.
+"""
+
+_RECAP_PLAN_BEAT_SCHEMA_EN = (
+    '{"id":1,"event":"who did what and how the situation changed","importance":0.9,'
+    '"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}'
+)
+
+RECAP_PLAN_SYSTEM_EN = """You are the story planner for a film/TV recap: output storyline beats only—no cut list, no VO.
+
+The dialogue timeline is the narrative spine; a chunk is visual evidence only when it has a cap—otherwise write needed_visual, do not invent what was seen.
+[Dense draft OK] Prefer more beats users can cut; ban thin outlines. Usually 18–28 beats, max 32.
+Reading events by id must sound like a full story: cold open/entry → mid development → climax → wrap before ED.
+Adjacent beats must advance or bridge (and then? / so?); do not keep only endpoints and drop middle beats; no long unbeat gaps.
+No isolated reaction/inner-monologue beats. Entering a new activity/space needs an entry beat. Scene changes get low-weight bridge beats (0.2–0.4).
+Climax/duel/reveal/outcome alone, importance≥0.85. Short decisive actions may be their own beats. Ending cannot be skipped.
+event: who did what and how the situation changed; no “X said/felt/thought” dialogue digests; no lead labels.
+Each beat needs evidence_required (人物/动作/反应/物品/对话/变化/场面 — keep these Chinese tokens, 1–4) and needed_visual.
+Skip OP/ED/credits/trailers. Do not invent relations/motives/backstory absent from dialogue.
+""" + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + RECAP_NAME_POLICY_EN + """
+importance 0.05–1.0 tracks dramatic strength, not source duration. JSON only.
+JSON schema:
+{"title":"...","people":[{"id":"s1","label":"Person A","look":""}],"beats":[{"id":1,"event":"who did what and how the situation changed","importance":0.9,"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}]}
+"""
+
+RECAP_PLAN_HEAD_SYSTEM_EN = """You only add opening story beats (2–5). No cuts/VO.
+Include cold open (if any) and the first post-OP scene plus immediate follow-through; not the OP itself; do not repeat existing events.
+Dense draft OK: prefer one extra opening causal beat over jumping mid-story.
+event advances the situation; no “X said/felt”; include evidence_required (Chinese tokens as in schema).
+""" + RECAP_NAME_POLICY_EN + """
+JSON only.
+JSON schema:
+{"title":"...","people":[{"id":"s1","label":"Person A","look":""}],"beats":[""" + _RECAP_PLAN_BEAT_SCHEMA_EN + """]}
+"""
+
+RECAP_PLAN_TAIL_SYSTEM_EN = """You only add closing story beats (2–5). No cuts/VO.
+No ED/trailers; do not repeat existing events; do not restart from the beginning.
+Dense draft OK: cover wrap, aftershock, character landing—no abrupt stop on climax flashback alone.
+event advances the situation; no “X said/felt”; include evidence_required.
+""" + RECAP_NAME_POLICY_EN + """
+JSON only.
+JSON schema:
+{"title":"...","people":[{"id":"s1","label":"Person A","look":""}],"beats":[""" + _RECAP_PLAN_BEAT_SCHEMA_EN + """]}
+"""
+
+RECAP_PLAN_GAP_SYSTEM_EN = """You only fill missing causal beats inside a gap. No cuts/VO.
+Dense draft OK: fill the unfolding process, not a single endpoint.
+Short gaps: usually 1–2 beats; long multi-step gaps up to 3. Prefer entry + mid-progress; do not jump to in-scene results.
+t must fall inside the current gap; do not repeat already.
+event advances the situation; no “X said/felt” or lead labels; include evidence_required.
+""" + RECAP_NAME_POLICY_EN + """
+JSON only.
+JSON schema:
+{"title":"...","beats":[""" + _RECAP_PLAN_BEAT_SCHEMA_EN + """]}
+"""
+
+RECAP_SYSTEM_EN = """You are the shot-matching node for a film/TV recap: pick frames for beats—do not rewrite plot, do not write vo.
+
+Input: beats (narrative target + evidence_required), chunks (visual evidence), dialogue timeline (confirm spoken lines; non-empty asr.speaker is fixed).
+Only pick shots that support the beat; mark weak evidence when it does not line up—do not invent. Ban lead labels.
+
+[Shots]
+1. At least one cut per beat; primary shot first (empty role); CU/reaction only as role=insert; scene changes as role=bridge.
+2. insert sits after the primary, near the same beat; never mark the main-event shot as insert.
+3. src stays inside the chunk; normal shots 5–12s; adjacent shots in a beat need new visual info.
+4. Skip OP/ED/credits/trailers. Do not output a vo field.
+""" + RECAP_NAME_POLICY_EN + """
+JSON only.
+JSON schema:
+{"title":"...","clips":[{"name":"01","beat_id":1,"chunk_index":0,"src_in":0.0,"src_out":8.5,"duration":8.5,"reason":"proves this beat"},{"name":"02","beat_id":1,"chunk_index":1,"src_in":9.0,"src_out":12.0,"duration":3.0,"role":"insert","reason":"reaction"}]}
+"""
+
+RECAP_GAP_SYSTEM_EN = """You are the gap filler: picture is locked; do not change existing captions; only fill beats that still have no VO.
+If the beat’s main line already has VO, leave later empty cuts for cross-cut continuity—no near-paraphrase repeats.
+Third-person English VO from asr (absolute) / caps (support) / event; no invented plot; no dialogue parrot.
+Length ≈ 85–100% of that cut’s budget.
+""" + RECAP_NAME_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + RECAP_VO_CONTINUITY_POLICY_EN + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + """
+JSON only.
+JSON schema:
+{"fills":[{"i":3,"text":"third-person English VO","skip":false}]}
+"""
+
+RECAP_CAPTION_SYSTEM_EN = """You write the VO: picture is locked—do not change cuts; write continuous story narration in English, not a shot list.
+
+Merge consecutive primary cuts with the same beat_id into one caption (from→to) and fill ≈ 85–100% of the merged budget.
+insert: short line or empty; bridge / real scene change only for transitions. No near-paraphrase repeats; no dialogue/thought parrot.
+
+Evidence: asr speaker+text absolute; caps supportive; event outline loses to asr; people is not proof of presence.
+Ban lead labels; invent nothing absent from evidence.
+""" + RECAP_NAME_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + RECAP_VO_CONTINUITY_POLICY_EN + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + """
+JSON only.
+JSON schema:
+{"captions":[{"text":"Continuous English VO.","from":1,"to":2},{"text":"Next beat.","from":3,"to":3}]}
+"""
+
+RECAP_VO_POLISH_SYSTEM_EN = """You polish the final VO: change narration text only—no cut changes, no new shots, no invented plot.
+Merge near-paraphrase and adjacent repeats; fix broken sentences; same beat may collapse to from→to with later text empty; empty cuts may stay empty.
+No dialogue parrot or lead labels; keep correct names already written.
+Write and keep the VO in English.
+""" + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + """
+JSON only.
+JSON schema:
+{"captions":[{"text":"Polished English VO.","from":1,"to":2},{"text":"","from":3,"to":3}]}
+"""
+
+RECAP_PLAN_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_PLAN_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_PLAN_SYSTEM_EN,
+}
+RECAP_MATCH_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_SYSTEM_EN,
+}
+RECAP_CAPTION_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_CAPTION_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_CAPTION_SYSTEM_EN,
+}
+RECAP_POLISH_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_VO_POLISH_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_VO_POLISH_SYSTEM_EN,
+}
+RECAP_PLAN_HEAD_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_PLAN_HEAD_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_PLAN_HEAD_SYSTEM_EN,
+}
+RECAP_PLAN_TAIL_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_PLAN_TAIL_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_PLAN_TAIL_SYSTEM_EN,
+}
+RECAP_PLAN_GAP_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_PLAN_GAP_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_PLAN_GAP_SYSTEM_EN,
+}
+RECAP_GAP_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_GAP_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_GAP_SYSTEM_EN,
+}
+
+
+def default_recap_plan_prompt(language: str | None = None) -> str:
+    return RECAP_PLAN_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_match_prompt(language: str | None = None) -> str:
+    return RECAP_MATCH_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_caption_prompt(language: str | None = None) -> str:
+    return RECAP_CAPTION_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_polish_prompt(language: str | None = None) -> str:
+    return RECAP_POLISH_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_plan_head_prompt(language: str | None = None) -> str:
+    return RECAP_PLAN_HEAD_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_plan_tail_prompt(language: str | None = None) -> str:
+    return RECAP_PLAN_TAIL_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_plan_gap_prompt(language: str | None = None) -> str:
+    return RECAP_PLAN_GAP_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_gap_prompt(language: str | None = None) -> str:
+    return RECAP_GAP_LANGUAGE_PROMPTS[normalize_caption_language(language)]
 
 
 def looks_like_op_ed_text(*parts: Any) -> bool:
@@ -2271,21 +2478,43 @@ def normalize_evidence_required(raw: Any) -> list[str]:
     aliases = {
         "角色": "人物",
         "人": "人物",
+        "person": "人物",
+        "people": "人物",
+        "character": "人物",
+        "characters": "人物",
         "行为": "动作",
         "动作结果": "动作",
+        "action": "动作",
+        "actions": "动作",
         "表情": "反应",
         "情绪": "反应",
+        "reaction": "反应",
+        "reactions": "反应",
         "道具": "物品",
         "线索": "物品",
         "信息": "物品",
+        "object": "物品",
+        "objects": "物品",
+        "item": "物品",
+        "items": "物品",
+        "prop": "物品",
+        "props": "物品",
         "台词": "对话",
         "对白": "对话",
         "asr": "对话",
+        "dialogue": "对话",
+        "dialog": "对话",
+        "speech": "对话",
         "变化说明": "变化",
         "前后": "变化",
+        "change": "变化",
+        "changes": "变化",
         "场景": "场面",
         "换场": "场面",
         "空间": "场面",
+        "scene": "场面",
+        "scenes": "场面",
+        "setting": "场面",
     }
     items: list[Any]
     if isinstance(raw, str):
@@ -3912,7 +4141,10 @@ def polish_recap_vo(
         return work
     if progress_callback:
         progress_callback(91, "polish")
-    polish_system = resolve_recap_prompt(system_prompt, RECAP_VO_POLISH_SYSTEM)
+    polish_system = resolve_recap_prompt(
+        system_prompt,
+        default_recap_polish_prompt(resolve_recap_caption_language(config)),
+    )
     prev = ""
     offset = 0
     for wave in split_clips_for_captions(work):
@@ -3980,7 +4212,7 @@ def fit_recap_captions_to_tts(
     for wave in waves:
         try:
             text = call_remote_llm(
-                system=resolve_recap_prompt(system_prompt, RECAP_CAPTION_SYSTEM),
+                system=resolve_recap_prompt(system_prompt, default_recap_caption_prompt(resolve_recap_caption_language(config))),
                 user=recap_caption_user_prompt(
                     wave,
                     people=people,
@@ -4153,7 +4385,7 @@ def fill_recap_vo_gaps(
         progress_callback(88, "gaps")
     try:
         text = call_remote_llm(
-            system=RECAP_GAP_SYSTEM,
+            system=default_recap_gap_prompt(resolve_recap_caption_language(config)),
             user=recap_gap_user_prompt(
                 work,
                 captions,
@@ -5165,8 +5397,17 @@ def resolve_recap_prompt(text: str | None, default: str) -> str:
     return body or default
 
 
-def resolve_recap_system_prompt(text: str | None) -> str:
-    return resolve_recap_prompt(text, RECAP_SYSTEM)
+def resolve_recap_caption_language(config=None) -> str:
+    cfg = config if isinstance(config, Mapping) else load_config()
+    understanding = cfg.get("understanding") if isinstance(cfg, Mapping) else None
+    remote = understanding.get("remote_vlm") if isinstance(understanding, Mapping) else None
+    if isinstance(remote, Mapping):
+        return normalize_caption_language(remote.get("caption_language"))
+    return CAPTION_LANGUAGE_ZH
+
+
+def resolve_recap_system_prompt(text: str | None, language: str | None = None) -> str:
+    return resolve_recap_prompt(text, default_recap_match_prompt(language))
 
 
 def _try_story_plan_llm(
@@ -5387,7 +5628,7 @@ def rewrite_recap_clip_caption(
             break
     wave = [dict(clips[index])]
     text = call_remote_llm(
-        system=resolve_recap_prompt(system_prompt, RECAP_CAPTION_SYSTEM),
+        system=resolve_recap_prompt(system_prompt, default_recap_caption_prompt(resolve_recap_caption_language(config))),
         user=recap_caption_user_prompt(
             wave,
             people=people,
@@ -5610,7 +5851,7 @@ def caption_recap_clip_indices(
             prev = body
             break
     text = call_remote_llm(
-        system=resolve_recap_prompt(system_prompt, RECAP_CAPTION_SYSTEM),
+        system=resolve_recap_prompt(system_prompt, default_recap_caption_prompt(resolve_recap_caption_language(config))),
         user=recap_caption_user_prompt(
             wave,
             people=people,
@@ -5721,7 +5962,7 @@ def rematch_recap_beat(
 
     _raise_if_stopped()
     _progress(45, "matching")
-    match_system = resolve_recap_system_prompt(system_prompt)
+    match_system = resolve_recap_system_prompt(system_prompt, resolve_recap_caption_language(cfg))
     wave_pack = pack_for_beats(pack, context_beats, pad_sec=36.0)
     match_text = call_remote_llm(
         system=match_system,
@@ -6094,13 +6335,17 @@ def generate_recap_timeline(
 
     _raise_if_stopped()
     stage = normalize_recap_start_from(start_from)
-    plan_system = resolve_recap_prompt(plan_prompt, RECAP_PLAN_SYSTEM)
-    match_system = resolve_recap_system_prompt(system_prompt)
+    caption_language = resolve_recap_caption_language(cfg)
+    plan_system = resolve_recap_prompt(plan_prompt, default_recap_plan_prompt(caption_language))
+    match_system = resolve_recap_system_prompt(system_prompt, caption_language)
     caption_raw = str(caption_prompt or "").strip()
-    if caption_raw == str(RECAP_GAP_SYSTEM).strip():
+    if caption_raw in {
+        str(RECAP_GAP_SYSTEM).strip(),
+        str(RECAP_GAP_SYSTEM_EN).strip(),
+    }:
         caption_raw = ""
-    caption_system = resolve_recap_prompt(caption_raw, RECAP_CAPTION_SYSTEM)
-    polish_system = resolve_recap_prompt(polish_prompt, RECAP_VO_POLISH_SYSTEM)
+    caption_system = resolve_recap_prompt(caption_raw, default_recap_caption_prompt(caption_language))
+    polish_system = resolve_recap_prompt(polish_prompt, default_recap_polish_prompt(caption_language))
     duration = float(pack.get("duration_sec") or 0.0)
     out_dir = Path(str(dest_dir or "").strip() or Path(video_path).resolve().parent)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -6181,7 +6426,7 @@ def generate_recap_timeline(
                 _progress(22, "planning")
                 head_pack = filter_pack_to_span(pack, 0.0, first_start, pad_sec=12.0)
                 head_parsed = _try_story_plan_llm(
-                    system=RECAP_PLAN_HEAD_SYSTEM,
+                    system=default_recap_plan_head_prompt(caption_language),
                     user=recap_plan_head_user_prompt(head_pack, beats),
                     config=cfg,
                     should_stop_callback=should_stop_callback,
@@ -6207,7 +6452,7 @@ def generate_recap_timeline(
                 _progress(32, "closing")
                 tail_pack = filter_pack_to_span(pack, last_end, story_end, pad_sec=8.0)
                 tail_parsed = _try_story_plan_llm(
-                    system=RECAP_PLAN_TAIL_SYSTEM,
+                    system=default_recap_plan_tail_prompt(caption_language),
                     user=recap_plan_tail_user_prompt(tail_pack, beats),
                     config=cfg,
                     should_stop_callback=should_stop_callback,
@@ -6241,7 +6486,7 @@ def generate_recap_timeline(
                 _progress(38, "plot_gaps")
                 gap_pack = filter_pack_to_spans(pack, [gap], pad_sec=16.0)
                 gap_parsed = _try_story_plan_llm(
-                    system=RECAP_PLAN_GAP_SYSTEM,
+                    system=default_recap_plan_gap_prompt(caption_language),
                     user=recap_plan_gap_user_prompt(gap_pack, beats, [gap]),
                     config=cfg,
                     should_stop_callback=should_stop_callback,

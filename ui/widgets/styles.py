@@ -288,11 +288,13 @@ QCheckBox:disabled {
 #UnderstandingCommandBar #AccentGhostButton,
 #UnderstandingCommandBar #DangerGhostButton,
 #UnderstandingCommandBar #SuccessGhostButton,
+#UnderstandingCommandBar #NeutralToolButton,
 #CloneCommandBar #PrimaryButton,
 #CloneCommandBar #GhostButton,
 #CloneCommandBar #AccentGhostButton,
 #CloneCommandBar #DangerGhostButton,
-#CloneCommandBar #SuccessGhostButton {
+#CloneCommandBar #SuccessGhostButton,
+#CloneCommandBar #NeutralToolButton {
     min-height: 32px;
     padding: 5px 14px;
     border-radius: 6px;
@@ -942,10 +944,45 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     border: 1px solid __LINE__;
     border-radius: 6px;
 }
-#TagSuggestList {
-    background: __PANEL__;
+#TagSearchForm {
+    background: transparent;
+}
+#TagSearchBar {
+    background: __FIELD__;
     color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
+    padding: 4px 10px;
+    selection-background-color: __ACCENT_SOFT__;
+}
+#TagSearchBar:focus {
+    border: 1px solid __ACCENT__;
+}
+#TagChipScroll {
+    background: transparent;
     border: none;
+}
+#TagChipHost {
+    background: transparent;
+}
+#TagChipButton {
+    background: __ACCENT_SOFT__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    min-height: 22px;
+}
+#TagChipButton:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE_STRONG__;
+}
+#TagSuggestList {
+    background: __FIELD__;
+    color: __HEADLINE__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
     outline: 0;
     padding: 2px 0;
 }
@@ -1447,6 +1484,30 @@ QTableView#LibraryGroupedLibTree::item:selected {
 #ThumbPreview:hover {
     border-color: __ACCENT__;
 }
+QSplitter#SearchCompareSplitter {
+    background: transparent;
+}
+QSplitter#SearchCompareSplitter::handle {
+    background: transparent;
+    margin: 0 2px;
+    border-radius: 3px;
+}
+QSplitter#SearchCompareSplitter::handle:hover,
+QSplitter#SearchCompareSplitter::handle:pressed {
+    background: __LINE_STRONG__;
+}
+QSplitter#SearchWorkspaceSplitter {
+    background: transparent;
+}
+QSplitter#SearchWorkspaceSplitter::handle {
+    background: transparent;
+    margin: 2px 0;
+    border-radius: 3px;
+}
+QSplitter#SearchWorkspaceSplitter::handle:hover,
+QSplitter#SearchWorkspaceSplitter::handle:pressed {
+    background: __LINE_STRONG__;
+}
 #VideoContainer {
     background: __VIDEO_BG__;
     border: 1px solid __LINE__;
@@ -1850,7 +1911,8 @@ QFrame#Card, #DialogCard {
 #DialogFooter #GhostButton,
 #DialogFooter #DangerGhostButton,
 #DialogFooter #SuccessGhostButton,
-#DialogFooter #AccentGhostButton {
+#DialogFooter #AccentGhostButton,
+#DialogFooter #NeutralToolButton {
     min-height: 34px;
     padding: 6px 16px;
     border-radius: 8px;

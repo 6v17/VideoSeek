@@ -45,8 +45,30 @@ class UnderstandingTagsTests(unittest.TestCase):
         tags = parse_vlm_tag_list('{"tags":["A","a","B","B","C"]}', max_tags=2)
         self.assertEqual(tags, ["A", "B"])
 
-    def test_format_display(self):
-        self.assertEqual(format_tags_for_display(["海边", "跑车"]), "海边 · 跑车")
+    def test_rejects_motion_prose_without_json(self):
+        prose = (
+            "左侧画面中，一位身穿深色紧身服饰，佩戴长手套的女性角色正伸手触碰一张橙色皮质座椅。"
+            "镜头聚焦于其上半身和手臂动作。"
+        )
+        self.assertEqual(parse_vlm_tag_list(prose), [])
+
+    def test_parses_json_after_motion_prose(self):
+        raw = (
+            "左侧画面中角色伸手触碰座椅。镜头聚焦手臂动作。\n"
+            '{"tags":["人物","动作","座椅"]}'
+        )
+        self.assertEqual(parse_vlm_tag_list(raw), ["人物", "动作", "座椅"])
+
+    def test_splits_slash_joined_tags(self):
+        tags = parse_vlm_tag_list('{"tags":["人物/动作/场景/镜头"]}')
+        self.assertEqual(tags, ["人物", "动作", "场景", "镜头"])
+
+    def test_rejects_long_truncated_caption_as_tag(self):
+        from src.services.understanding_tags import normalize_tag_text, projectable_tags
+
+        junk = "佩戴长手套的女性角色正伸手触碰一张橙色皮质座椅"
+        self.assertEqual(normalize_tag_text(junk), "")
+        self.assertEqual(projectable_tags([junk, "动作", "人物"]), ["动作", "人物"])
 
 
 if __name__ == "__main__":

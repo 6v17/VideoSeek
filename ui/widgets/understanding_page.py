@@ -138,7 +138,7 @@ class UnderstandingEvidencePage(QWidget):
         self.workspace_title = QLabel()
         self.workspace_title.setObjectName("CardTitle")
         self.select_hint = _step_hint()
-        self.btn_open_services = _action_button("GhostButton")
+        self.btn_open_services = _action_button("AccentGhostButton")
         _add_step_header(
             self.workspace_card.content_layout,
             self.workspace_title,
@@ -405,9 +405,9 @@ class UnderstandingEvidencePage(QWidget):
         self.btn_open_subtitle_library = _action_button("GhostButton")
         self.btn_open_subtitle_library.setVisible(False)
         self.btn_extract_asr = _action_button("PrimaryButton")
-        self.btn_cluster_speakers = _action_button("GhostButton")
-        self.btn_rename_speakers = _action_button("GhostButton")
-        self.btn_reset_speakers = _action_button("GhostButton")
+        self.btn_cluster_speakers = _action_button("AccentGhostButton")
+        self.btn_rename_speakers = _action_button("NeutralToolButton")
+        self.btn_reset_speakers = _action_button("DangerGhostButton")
         self.btn_export_dialogue_json = _action_button("GhostButton")
         self.btn_stop_asr = _action_button("DangerGhostButton")
         self.btn_stop_asr.setEnabled(False)
@@ -496,8 +496,8 @@ class UnderstandingEvidencePage(QWidget):
         self.recap_main_bar = actions
         self.btn_export_recap = _action_button("PrimaryButton")
         self.btn_edit_recap_beats = _action_button("GhostButton")
-        self.btn_recap_jianying = _action_button("GhostButton")
-        self.btn_recap_fcpxml = _action_button("GhostButton")
+        self.btn_recap_jianying = _action_button("SuccessGhostButton")
+        self.btn_recap_fcpxml = _action_button("AccentGhostButton")
         row.addWidget(self.btn_export_recap, 0)
         row.addWidget(self.btn_edit_recap_beats, 0)
         row.addStretch(1)

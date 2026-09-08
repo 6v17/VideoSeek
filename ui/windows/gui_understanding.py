@@ -171,12 +171,12 @@ class UnderstandingGuiMixin:
                 page.btn_generate_batch.update()
         if getattr(page, "btn_project_tags", None) is not None:
             page.btn_project_tags.setText(
-                self.texts.get("understanding_project_tags_button", "Index tag library")
+                self.texts.get("understanding_project_tags_button", "Sync to search")
             )
             page.btn_project_tags.setToolTip(
                 self.texts.get(
                     "understanding_project_tags_tip",
-                    "Write existing evidence/tags JSON into the tag search index. Does not run VLM.",
+                    "Write generated understanding tags into the search index. Does not run the model.",
                 )
             )
             if page.btn_project_tags.objectName() != "SuccessGhostButton":
@@ -247,6 +247,8 @@ class UnderstandingGuiMixin:
 
     def _on_understanding_caption_language_changed(self, *_args):
         self._refresh_vlm_prompt_editors_for_language()
+        if hasattr(self, "_refresh_recap_prompt_editors_for_language"):
+            self._refresh_recap_prompt_editors_for_language()
         self._persist_understanding_job_options()
 
     def _persist_understanding_job_options(self) -> None:
@@ -1657,7 +1659,7 @@ class UnderstandingGuiMixin:
         page = self.understanding_page
         page.btn_project_tags.setEnabled(False)
         page.lbl_status.setText(
-            self.texts.get("understanding_project_tags_running", "Indexing tag library…")
+            self.texts.get("understanding_project_tags_running", "Syncing tags to search…")
         )
         try:
             from src.app.config import load_config
@@ -1667,7 +1669,7 @@ class UnderstandingGuiMixin:
         except Exception as exc:
             page.btn_project_tags.setEnabled(True)
             self.show_error_dialog(
-                self.texts.get("understanding_project_tags_failed", "Failed to index tag library."),
+                self.texts.get("understanding_project_tags_failed", "Failed to sync tags to search."),
                 exc,
             )
             return

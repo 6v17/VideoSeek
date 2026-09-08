@@ -33,6 +33,7 @@ class SearchConfig:
     compose_text: Optional[str] = None
     compose_image_paths: Optional[List[str]] = None
     compose_fusion: Optional[dict] = None
+    required_tags: Optional[List[str]] = None
 
 
 class FetchWorkerBase(QThread):
@@ -257,6 +258,7 @@ class SearchWorker(QThread):
                     scope_library_paths=config.scope_library_paths or None,
                     min_score=config.min_score,
                     match_mode=match_mode,
+                    required_tags=list(config.required_tags or []) or None,
                 )
                 self.dialogue_status_message = str(message or "").strip()
                 self.dialogue_matched_by = str(matched_by or "").strip()
