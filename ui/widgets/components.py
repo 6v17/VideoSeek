@@ -29,7 +29,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.layout import COMPONENT_SIZES, compare_row_card_height, compute_search_panel_width
+from ui.widgets.layout import (
+    COMPONENT_SIZES,
+    compare_row_card_height,
+    compare_row_min_height,
+    compute_search_panel_width,
+    fit_splitter_pair,
+    result_table_min_height,
+)
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import ResultTable
 from ui.widgets.search_results_pager import SearchResultsPager
@@ -542,7 +549,7 @@ class SearchPage(QWidget):
         results_toolbar.addWidget(self.results_actions, 0)
 
         self.results_pager = SearchResultsPager()
-        self.result_view = ResultView(min_table_height=COMPONENT_SIZES["result_table_min_height"])
+        self.result_view = ResultView(min_table_height=result_table_min_height())
         self.result_table = self.result_view.table
         results_layout.addWidget(self.results_title)
         results_layout.addLayout(results_toolbar)
@@ -578,7 +585,8 @@ class SearchPage(QWidget):
 
         self.results_slot_layout.addWidget(self.results_card)
 
-        top_min = compare_row_card_height()
+        top_min = compare_row_min_height()
+        bottom_min = result_table_min_height()
         self.compare_splitter.setMinimumHeight(top_min)
         self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
         self.workspace_splitter.setObjectName("SearchWorkspaceSplitter")
@@ -588,7 +596,8 @@ class SearchPage(QWidget):
         self.workspace_splitter.addWidget(self.results_slot)
         self.workspace_splitter.setStretchFactor(0, 3)
         self.workspace_splitter.setStretchFactor(1, 5)
-        self.workspace_splitter.setSizes([top_min + 40, 420])
+        preferred_top = compare_row_card_height()
+        self.workspace_splitter.setSizes([preferred_top + 40, max(bottom_min, 420)])
         self._workspace_splitter_save_timer = QTimer(self)
         self._workspace_splitter_save_timer.setSingleShot(True)
         self._workspace_splitter_save_timer.setInterval(450)
@@ -649,41 +658,64 @@ class SearchPage(QWidget):
             return
         left_default = max(
             1,
-            int(self.search_panel.minimumWidth() or getattr(self.search_panel, "_default_width", 0) or compute_search_panel_width()),
+            int(
+                self.search_panel.minimumWidth()
+                or getattr(self.search_panel, "_default_width", 0)
+                or compute_search_panel_width()
+            ),
         )
+        right_min = 320
+        total = max(int(splitter.width()), left_default + right_min)
+        saved_left = saved_right = 0
         try:
             from src.app.config import load_config
 
             raw = load_config().get("search_compare_splitter_sizes")
             if isinstance(raw, (list, tuple)) and len(raw) >= 2:
-                left = max(left_default, int(raw[0]))
-                right = max(1, int(raw[1]))
-                splitter.setSizes([left, right])
-                return
+                saved_left = int(raw[0])
+                saved_right = int(raw[1])
         except Exception:
             pass
-        # First-run / no saved sizes: search pane starts at its minimum width.
-        total = max(int(splitter.width()), left_default + 480)
-        splitter.setSizes([left_default, max(480, total - left_default)])
+        sizes = fit_splitter_pair(
+            total,
+            saved_left,
+            saved_right,
+            a_min=left_default,
+            b_min=right_min,
+            default_a=left_default,
+            default_b=max(right_min, total - left_default),
+        )
+        splitter.setSizes(sizes)
 
     def _restore_workspace_splitter_sizes(self) -> None:
         splitter = getattr(self, "workspace_splitter", None)
         if splitter is None:
             return
-        top_min = compare_row_card_height()
+        top_min = compare_row_min_height()
+        bottom_min = max(160, result_table_min_height())
+        preferred_top = compare_row_card_height() + 40
+        preferred_bottom = max(bottom_min, 420)
+        total = max(int(splitter.height()), top_min + bottom_min)
+        saved_top = saved_bottom = 0
         try:
             from src.app.config import load_config
 
             raw = load_config().get("search_workspace_splitter_sizes")
             if isinstance(raw, (list, tuple)) and len(raw) >= 2:
-                top = max(top_min, int(raw[0]))
-                bottom = max(160, int(raw[1]))
-                splitter.setSizes([top, bottom])
-                return
+                saved_top = int(raw[0])
+                saved_bottom = int(raw[1])
         except Exception:
             pass
-        splitter.setSizes([top_min + 40, 420])
-
+        sizes = fit_splitter_pair(
+            total,
+            saved_top,
+            saved_bottom,
+            a_min=top_min,
+            b_min=bottom_min,
+            default_a=preferred_top,
+            default_b=preferred_bottom,
+        )
+        splitter.setSizes(sizes)
     def _persist_compare_splitter_sizes(self) -> None:
         splitter = getattr(self, "compare_splitter", None)
         if splitter is None or not splitter.isVisible():

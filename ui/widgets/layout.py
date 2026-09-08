@@ -5,7 +5,8 @@ from PySide6.QtGui import QGuiApplication
 WINDOW_SIZES = {
     "main": {
         "preferred": QSize(1360, 850),
-        "minimum": QSize(1080, 680),
+        # Soft floor; apply_window_size further clamps against available geometry.
+        "minimum": QSize(1024, 600),
         "screen_margin": 72,
     },
     "about_dialog": {
@@ -54,6 +55,9 @@ COMPONENT_SIZES = {
     "compose_image_strip_height": 86,
     "link_query_preview_min_height": 210,
     "result_table_min_height": 420,
+    "result_table_min_height_floor": 180,
+    "compare_row_min_height_floor": 280,
+    "preview_host_min_height_floor": 180,
     "video_scope_tree_min_height": 200,
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
@@ -80,7 +84,7 @@ def compute_search_query_tabs_height(config=None) -> int:
 
 
 def compare_row_card_height(config=None) -> int:
-    """Shared fixed height for the search panel and preview panel cards."""
+    """Preferred height for search/preview cards (sizeHint / first-run defaults)."""
     sizes = dict(COMPONENT_SIZES)
     if isinstance(config, dict):
         sizes.update(config)
@@ -117,6 +121,70 @@ def _available_size(margin):
     return QSize(width, height)
 
 
+def _available_height(margin=None) -> int | None:
+    if margin is None:
+        margin = WINDOW_SIZES["main"]["screen_margin"]
+    available = _available_size(margin)
+    return int(available.height()) if available is not None else None
+
+
+def compare_row_min_height(config=None) -> int:
+    """Hard minimum for the compare row; shrinks on short / high-DPI screens."""
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    preferred = compare_row_card_height(sizes)
+    floor = int(sizes.get("compare_row_min_height_floor", 280))
+    available = _available_height()
+    if available is None:
+        return min(preferred, 360)
+    if available >= 900:
+        return preferred
+    if available >= 800:
+        return min(preferred, 420)
+    if available >= 700:
+        return min(preferred, 360)
+    return min(preferred, floor)
+
+
+def result_table_min_height(config=None) -> int:
+    """Hard minimum for the search results table; shrinks on short screens."""
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    preferred = int(sizes["result_table_min_height"])
+    floor = int(sizes.get("result_table_min_height_floor", 180))
+    available = _available_height()
+    if available is None:
+        return min(preferred, 240)
+    if available >= 900:
+        return preferred
+    if available >= 800:
+        return min(preferred, 280)
+    if available >= 700:
+        return min(preferred, 220)
+    return min(preferred, floor)
+
+
+def preview_host_min_height(config=None) -> int:
+    """Minimum preview surface height inside the compare row."""
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    preferred = int(sizes["preview_host_min_height"])
+    floor = int(sizes.get("preview_host_min_height_floor", 180))
+    available = _available_height()
+    if available is None:
+        return min(preferred, 220)
+    if available >= 900:
+        return preferred
+    if available >= 800:
+        return min(preferred, 240)
+    if available >= 700:
+        return min(preferred, 200)
+    return min(preferred, floor)
+
+
 def clamp_size(preferred, margin):
     available = _available_size(margin)
     if not available:
@@ -126,16 +194,25 @@ def clamp_size(preferred, margin):
 
 def apply_window_size(window, preferred, minimum, margin):
     target = clamp_size(preferred, margin)
+    available = _available_size(margin)
     min_width = min(minimum.width(), target.width())
     min_height = min(minimum.height(), target.height())
+    if available is not None:
+        # Keep mins inside ~95% of the usable desktop so high-DPI laptops are not forced taller.
+        min_width = min(min_width, max(320, int(available.width() * 0.95)))
+        min_height = min(min_height, max(240, int(available.height() * 0.95)))
     window.setMinimumSize(min_width, min_height)
     window.resize(target)
 
 
 def apply_dialog_size(dialog, preferred, minimum, margin):
     target = clamp_size(preferred, margin)
+    available = _available_size(margin)
     min_width = min(minimum.width(), target.width())
     min_height = min(minimum.height(), target.height())
+    if available is not None:
+        min_width = min(min_width, max(320, int(available.width() * 0.95)))
+        min_height = min(min_height, max(240, int(available.height() * 0.95)))
     dialog.setMinimumSize(min_width, min_height)
     dialog.resize(target)
 
@@ -145,3 +222,58 @@ def message_dialog_min_width(default_width, margin):
     if not available:
         return default_width
     return min(default_width, available.width())
+
+
+def fit_splitter_pair(
+    total: int,
+    saved_a: int,
+    saved_b: int,
+    *,
+    a_min: int,
+    b_min: int,
+    default_a: int,
+    default_b: int,
+    drift_ratio: float = 0.25,
+) -> list[int]:
+    """Scale or discard a saved splitter pair so both sides respect mins on the current viewport."""
+    total = max(0, int(total or 0))
+    a_min = max(1, int(a_min))
+    b_min = max(1, int(b_min))
+    default_a = max(a_min, int(default_a))
+    default_b = max(b_min, int(default_b))
+
+    def _defaults() -> list[int]:
+        if total <= 0:
+            return [default_a, default_b]
+        need = a_min + b_min
+        if total < need:
+            if total <= a_min:
+                return [max(1, total // 2), max(1, total - total // 2)]
+            top = min(a_min, total - 1)
+            return [top, max(1, total - top)]
+        a = min(default_a, total - b_min)
+        a = max(a_min, a)
+        return [a, max(b_min, total - a)]
+
+    saved_a = int(saved_a or 0)
+    saved_b = int(saved_b or 0)
+    saved_total = saved_a + saved_b
+    if saved_a <= 0 or saved_b <= 0 or saved_total <= 0:
+        return _defaults()
+
+    if total <= 0:
+        return [max(a_min, saved_a), max(b_min, saved_b)]
+
+    drift = abs(saved_total - total) / float(max(total, 1))
+    if drift > drift_ratio:
+        a = int(round(total * (saved_a / float(saved_total))))
+        b = total - a
+    else:
+        a, b = saved_a, saved_b
+        if a + b != total and a + b > 0:
+            a = int(round(total * (a / float(a + b))))
+            b = total - a
+
+    if a < a_min or b < b_min:
+        return _defaults()
+    return [a, b]

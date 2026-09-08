@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from ui.widgets.layout import (
     COMPONENT_SIZES,
     compare_row_card_height,
+    compare_row_min_height,
     compute_search_panel_width,
     compute_search_query_tabs_height,
 )
@@ -384,14 +385,15 @@ class SearchPanel(VSCard):
         self.setMinimumWidth(default_width)
         # Allow dragging wider for tags suggestions; keep a sane ceiling.
         self.setMaximumWidth(max(default_width + 280, int(default_width * 1.85)))
+        # Preferred height for sizeHint; hard min shrinks on short / high-DPI screens.
         self._default_height = compare_row_card_height()
-        self.setMinimumHeight(self._default_height)
+        self.setMinimumHeight(compare_row_min_height())
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
     def sizeHint(self):
         from PySide6.QtCore import QSize
 
-        # Initial preferred width = layout minimum; splitter can still widen.
+        # Initial preferred size; splitter can still shrink to minimumHeight / widen.
         return QSize(int(self._default_width), int(self._default_height))
 
     def text_query(self) -> str:

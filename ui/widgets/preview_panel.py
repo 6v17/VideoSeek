@@ -5,7 +5,11 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout
 
 from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
-from ui.widgets.layout import COMPONENT_SIZES, compare_row_card_height
+from ui.widgets.layout import (
+    compare_row_card_height,
+    compare_row_min_height,
+    preview_host_min_height,
+)
 from ui.widgets.scaffold import VSCard
 
 
@@ -56,7 +60,7 @@ class PreviewPanel(VSCard):
 
         self.preview_host = PreviewHostFrame()
         self.preview_host.setObjectName("VideoContainer")
-        self.preview_host.setMinimumHeight(max(320, int(COMPONENT_SIZES["preview_host_min_height"])))
+        self.preview_host.setMinimumHeight(preview_host_min_height())
         self.preview_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.preview_host_layout = QVBoxLayout(self.preview_host)
         self.preview_host_layout.setContentsMargins(4, 4, 4, 4)
@@ -90,13 +94,15 @@ class PreviewPanel(VSCard):
 
     def _apply_normal_geometry(self):
         self._panel_height = compare_row_card_height()
-        self.preview_host.setMinimumHeight(320)
-        self.setMinimumHeight(self._panel_height)
+        self.preview_host.setMinimumHeight(preview_host_min_height())
+        # Min shrinks on short screens; sizeHint still prefers _panel_height via parent splitter.
+        self.setMinimumHeight(compare_row_min_height())
         self.setMaximumHeight(16777215)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _apply_maximized_geometry(self):
-        self.preview_host.setMinimumHeight(480)
-        self.setMinimumHeight(self.MAXIMIZED_MIN_HEIGHT)
+        host_min = max(280, preview_host_min_height())
+        self.preview_host.setMinimumHeight(host_min)
+        self.setMinimumHeight(min(self.MAXIMIZED_MIN_HEIGHT, max(compare_row_min_height(), host_min + 120)))
         self.setMaximumHeight(16777215)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
