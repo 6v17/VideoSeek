@@ -1,110 +1,110 @@
 # VideoSeek
 
-**中文** | [English](./README.en.md)
+[中文说明](./README.zh.md) | **English**
 
-**本地视频素材库：用文字或截图找片段时间，预览后导出片段。**  
-数据在本地索引与检索（ONNX + Lance + FFmpeg），不上传你的视频文件。
+**Search your local video library by text or screenshot, preview hits, export clips.**  
+Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media files are not uploaded.
 
-> 个人开源小工具，Windows 为主；安装包用户与源码用户共用同一套 UI。  
-> **永久免费。** 勿信收费倒卖或付费代装；请从 [GitHub](https://github.com/6v17/VideoSeek) / [官网](https://www.lv17.top/) 获取。
+> Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.  
+> **Free forever.** Don’t pay for resale or “paid install” copies — get it from [GitHub](https://github.com/6v17/VideoSeek) / [the site](https://www.lv17.top/).
 
-## 功能一览
+## Features
 
-### 核心（做完「同步视频库」即可用）
+### Core (available after you **sync a library**)
 
-| 功能 | 说明 |
-|------|------|
-| **本地视频库** | 添加文件夹为库，同步后抽帧并向量化 |
-| **文字搜索** | 输入描述，在已索引视频里找相似画面时间段 |
-| **图片 / 截图搜索** | 用参考图或裁剪截图找类似镜头（含定位、精搜等选项） |
-| **硬字幕搜索** | 对库内视频提取画面字幕（OCR）后，按关键词检索台词时间点；精确匹配，或模糊匹配（**优先完整子集命中，再比散落命中**，结果高亮） |
-| **搜索范围** | 全库、指定库、指定视频；支持搜索预设（保存整包条件） |
-| **frame / chunk** | 按帧命中或按语义 chunk 聚合结果 |
-| **预览与导出** | 命中时间轴预览，导出 mp4 片段 |
+| Feature | Description |
+|---------|-------------|
+| **Local libraries** | Add folders, sync to extract frames and build embeddings |
+| **Text search** | Describe a scene; get time ranges in indexed videos |
+| **Image / screenshot search** | Find similar shots from a reference or cropped frame |
+| **Hard-subtitle search** | OCR on-screen subtitles, then keyword search by time; exact match, or fuzzy (**complete query spans first, then scatter hit-rate**, with highlighting) |
+| **Scope & presets** | All libraries, selected libraries/videos; saved search presets |
+| **frame / chunk modes** | Per-frame hits or semantic chunk aggregation |
+| **Preview & export** | Timeline preview; export mp4 segments |
 
-### 可选扩展
+### Optional
 
-| 功能 | 说明 |
-|------|------|
-| **视频理解** | 桌面端可选：按语义 chunk 生成画面描述与整片总结；可做**影视解说剪辑**（规划 → 选镜 → 铺字幕），并对白用本地 **CAM++** 聚声线（权重在 `resources/asr/campplus.*`） |
-| **剪映草稿** | 镜头篮 / 解说剪辑可导出剪映草稿；安装包已内置依赖 |
-| **本机 Agent API** | `127.0.0.1` HTTP：语义/字幕搜索、列库与视频、导出片段（见 `docs/for-agents.md`；不含视频理解） |
-| **视频下载** | 从网页链接解析并下载到本地文件夹，再按普通视频库同步索引 |
-| **可选插件** | 启动前可通过 `VIDEOSEEK_PLUGINS` / `profile/plugins.json`，或同级私有插件目录 / `pip install` 加载扩展页。开源本体不含第三方插件代码 |
+| Feature | Description |
+|---------|-------------|
+| **Video understanding** | Desktop-only optional: per-chunk captions + whole-video summary; **recap cuts** (plan → match shots → captions); local **CAM++** speaker clustering (`resources/asr/campplus.*`) |
+| **Jianying drafts** | Export shot lists / recap cuts to Jianying; installer bundles the dependency |
+| **Localhost Agent API** | HTTP on `127.0.0.1`: semantic/subtitle search, list libraries/videos, export clips (see `docs/for-agents.md`; no understanding endpoints) |
+| **Video download** | Resolve page links, download into a local folder, then sync like a normal library |
+| **Optional plugins** | Load extension pages before startup via `VIDEOSEEK_PLUGINS` or `profile/plugins.json` (nav / package kinds / i18n). The open-source tree ships no third-party plugin code. |
 
-## 适合谁
+## Who is it for?
 
-- 硬盘 / NAS 里堆了大量素材，想**按画面语义找片段**，而不是逐个文件翻
-- 剪辑前做**粗定位**，再进 NLE 精剪
-- 希望**本地跑模型**，并可选让 Cursor / 其它 Agent 通过 HTTP 调搜索
+- Large local or NAS media folders — find **semantically similar shots**, not filenames
+- **Rough-cut prep** before editing in a NLE
+- **Local models** plus optional HTTP access for Cursor / other agents
 
-## 界面预览
+## Screenshots
 
 ![搜索界面](docs/assets/图搜视频.png)
 
-## 下载
+## Download
 
-不想自己配 Python / 依赖？去 **[lv17.top](https://www.lv17.top/)** 下载安装包。首次启动按应用内提示下载并 **导入运行资源**（模型、FFmpeg 等）。
+Prefer not to manage Python? Get the **installer** from **[lv17.top](https://www.lv17.top/)**. On first launch, import **runtime assets** (models, FFmpeg) as prompted.
 
-## 最小使用步骤
+## Minimal workflow
 
-1. **配置运行资源** — 首次启动按提示操作，或在 **设置** 中下载并 **导入** 模型、FFmpeg 等。
-2. **添加视频库** — 侧边栏 **视频库** → **视频库** Tab → 添加本地文件夹。
-3. **同步选中视频** — 勾选要处理的视频 → **同步选中视频**，等待抽帧与向量化完成。
-4. **搜索** — 侧边栏 **搜索** → 文字或图片检索。
+1. **Runtime assets** — First-launch prompts, or **Settings** → import models and FFmpeg.
+2. **Add a library** — Sidebar **Local Library** → **Videos** tab → add a folder.
+3. **Sync selected** — Check videos → **Sync selected**; wait for indexing.
+4. **Search** — Sidebar **Search** → text or image query.
 
-视频理解、硬字幕提取、Agent API 等为可选功能，**需先完成视频库同步**（字幕搜索还需导入 OCR，并在「字幕库」Tab 中提取字幕）。
+Video understanding, subtitle extraction, and the Agent API are optional — **sync a library first** (subtitle search also needs the OCR pack and extraction under the **Subtitles** tab).
 
-图文步骤见 **[使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)**。
+Illustrated walkthrough (Chinese): **[User guide (Feishu)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)**.
 
-## 交流
+## Community
 
-- **使用教程**：[飞书文档](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)（导入资源、建库同步、文搜/图搜/字幕）
-- **QQ 群**：1033551438（安装、使用问题与反馈）
-- **GitHub Issues**：也欢迎在此提问（尤其源码 / Agent API）
+- **User guide (ZH)**: [Feishu doc](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)
+- **QQ group**: 1033551438
+- **GitHub Issues** — especially for source builds and the Agent API
 
-## 源码运行
+## From source
 
-推荐 **Windows 10/11**。Linux / macOS 需自行调整 ONNX 运行时（见 `docs/quickstart.md`）。
+**Windows 10/11 recommended.** Linux / macOS: adjust ONNX runtime (see `docs/quickstart.md`).
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-也可用 Conda：`conda env create -f environment.yml` → `conda activate VideoSeek`。
+Or Conda: `conda env create -f environment.yml` → `conda activate VideoSeek`.
 
-首次启动会提示缺运行资源（安装包与源码用户均需在应用内导入）：
+Missing runtime assets (import in-app for both installer and source):
 
-| 缺什么 | 怎么办 |
-|--------|--------|
-| 模型、FFmpeg | 按应用内提示下载，或 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **导入并解析**；也可从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载各模型 zip 与 `ffmpeg.exe` 后导入 |
-| VLC（仅 Windows 源码） | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到项目根目录 |
+| Missing | Fix |
+|---------|-----|
+| Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse**; or download model zips and `ffmpeg.exe` from [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models), then import |
+| VLC (Windows source only) | Download `vlc_lib.zip` from [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) and extract at project root |
 
-排障、手动摆模型、测试命令见 **`docs/quickstart.md`**。
+See **`docs/quickstart.md`** for troubleshooting and tests.
 
-## 文档
+## Docs
 
-| 文档 | 内容 |
-|------|------|
-| [使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) | 安装包用户图文上手（资源导入、视频库、字幕库、搜索） |
-| `docs/quickstart.md` | 源码安装细节、排障、测试 |
-| `docs/for-agents.md` | 本机 Agent API 字段与示例 |
-| `docs/architecture.md` | 模块与数据流（开发者向） |
+| Doc | Topic |
+|-----|--------|
+| [User guide (Feishu, ZH)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) | Illustrated setup for installer users |
+| `docs/quickstart.md` | From-source setup, troubleshooting, tests |
+| `docs/for-agents.md` | Localhost Agent API |
+| `docs/architecture.md` | Architecture (developers) |
 
-## 许可证
+## License
 
 Copyright (c) 2026 [6v17](https://github.com/6v17)
 
-采用 [AGPL-3.0](LICENSE)（GNU Affero General Public License v3.0）。
+Licensed under [AGPL-3.0](LICENSE) (GNU Affero General Public License v3.0).
 
-## 感谢捐赠
+## Thanks for your support
 
-真心感谢每一位打赏支持 VideoSeek 的朋友😊，你们的鼓励是我继续把工具做好的动力🤗。名单按时间记录，**不公开金额**。
+Sincere thanks to everyone who tipped VideoSeek — your encouragement keeps the project going. Listed by date; **amounts are not shown**.
 
-想换成自己的头像，发邮件到 **2627538472@qq.com**，附上昵称和头像图就行💖💖💖。
+To use your own avatar, email **2627538472@qq.com** with your WeChat nickname and an image.
 
-| 头像 | 昵称 | 留言 | 日期 |
+| Avatar | Nickname | Message | Date |
 |:---:|:---|:---|:---:|
 | <img src="https://ui-avatars.com/api/?name=%E7%83%AD%E5%BF%83%E7%94%A8%E6%88%B7&background=6b7280&color=fff&size=80" width="40" height="40" alt="" /> | 热心用户 | 很好用！感谢！😋 | 2026-07-13 |
 | <img src="https://ui-avatars.com/api/?name=%E5%B2%81%E5%B2%81%E5%B9%B3%E5%AE%89&background=0d9488&color=fff&size=80" width="40" height="40" alt="" /> | 岁岁平安 | 软件很牛逼，你也很牛逼 | 2026-07-17 |
