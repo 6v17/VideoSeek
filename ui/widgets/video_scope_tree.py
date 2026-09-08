@@ -29,6 +29,13 @@ from PySide6.QtWidgets import (
 )
 
 from src.services.search_scope import normalize_scope_path
+from ui.widgets.list_find_bar import (
+    ListFindBar,
+    ListFindHit,
+    clear_find_hit_highlights,
+    collect_grouped_find_hits,
+    reveal_grouped_find_hit,
+)
 
 _LIST_VIEW_HEIGHT = 280
 
@@ -170,6 +177,7 @@ class _LibBlock:
         "lib_cb",
         "model",
         "view",
+        "card",
         "body",
         "collapse",
         "entries",
@@ -184,6 +192,7 @@ class _LibBlock:
         self.lib_cb: QCheckBox | None = None
         self.model: ScopeVideoTableModel | None = None
         self.view: QTableView | None = None
+        self.card: QFrame | None = None
         self.body: QWidget | None = None
         self.collapse: QToolButton | None = None
         self.entries: list[dict] = []
@@ -201,10 +210,19 @@ class VideoScopeTreeWidget(QWidget):
         self.setObjectName("VideoScopeTree")
         self._silent = False
         self._blocks: list[_LibBlock] = []
+        self._find_hits: list[ListFindHit] = []
+        self._find_index = -1
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
+
+        # Hosted by the scope dialog toolbar (compact).
+        self._find_bar = ListFindBar(self, compact=True, input_width=200)
+        self._find_bar.query_changed.connect(self._on_find_query_changed)
+        self._find_bar.next_requested.connect(lambda: self._step_find(1))
+        self._find_bar.prev_requested.connect(lambda: self._step_find(-1))
+        self._find_reveal_gen = 0
 
         self._scroll = QScrollArea()
         self._scroll.setObjectName("VideoScopeScroll")
@@ -220,6 +238,31 @@ class VideoScopeTreeWidget(QWidget):
 
         self._scroll.setWidget(self._list_host)
         root.addWidget(self._scroll, 1)
+
+    @property
+    def find_bar(self) -> ListFindBar:
+        return self._find_bar
+
+    def set_find_texts(
+        self,
+        *,
+        placeholder: str = "",
+        prev_text: str = "",
+        next_text: str = "",
+        status_template: str = "",
+        none_text: str = "",
+        prev_tip: str = "",
+        next_tip: str = "",
+    ) -> None:
+        self._find_bar.set_texts(
+            placeholder=placeholder,
+            prev_text=prev_text,
+            next_text=next_text,
+            status_template=status_template,
+            none_text=none_text,
+            prev_tip=prev_tip,
+            next_tip=next_tip,
+        )
 
     def total_video_items(self) -> int:
         return sum(len(b.entries) for b in self._blocks)
@@ -317,6 +360,72 @@ class VideoScopeTreeWidget(QWidget):
             self._vbox.addWidget(card)
 
         self._vbox.addStretch(1)
+        self._rebuild_find_hits(reveal=False)
+
+    def _on_find_query_changed(self, _query: str) -> None:
+        self._rebuild_find_hits(reveal=True, reset_index=True)
+
+    def _dismiss_find_highlight(self) -> None:
+        """Clear find chrome after the user clicks elsewhere; query/hits stay for F3."""
+        self._find_reveal_gen += 1
+        clear_find_hit_highlights(self._blocks)
+
+    def _set_focused_block(self, block: _LibBlock | None) -> None:
+        for b in self._blocks:
+            card = b.card
+            if card is None:
+                continue
+            on = block is not None and b is block
+            want = "true" if on else "false"
+            if str(card.property("focused") or "") == want:
+                continue
+            card.setProperty("focused", want)
+            style = card.style()
+            if style is not None:
+                style.unpolish(card)
+                style.polish(card)
+            card.update()
+
+    def _rebuild_find_hits(self, *, reveal: bool, reset_index: bool = False) -> None:
+        self._find_hits = collect_grouped_find_hits(self._blocks, self._find_bar.query())
+        if not self._find_hits:
+            self._find_index = -1
+            self._find_bar.set_match_status(0, 0)
+            self._find_reveal_gen += 1
+            clear_find_hit_highlights(self._blocks)
+            return
+        if reset_index or self._find_index < 0 or self._find_index >= len(self._find_hits):
+            self._find_index = 0
+        self._find_bar.set_match_status(self._find_index + 1, len(self._find_hits))
+        if reveal:
+            self._reveal_current_find_hit()
+
+    def _step_find(self, delta: int) -> None:
+        if not self._find_hits:
+            self._rebuild_find_hits(reveal=True, reset_index=True)
+            return
+        self._find_index = (self._find_index + delta) % len(self._find_hits)
+        self._find_bar.set_match_status(self._find_index + 1, len(self._find_hits))
+        self._reveal_current_find_hit()
+
+    def _reveal_current_find_hit(self) -> None:
+        if self._find_index < 0 or self._find_index >= len(self._find_hits):
+            return
+        hit = self._find_hits[self._find_index]
+        if hit.block_index < 0 or hit.block_index >= len(self._blocks):
+            return
+        block = self._blocks[hit.block_index]
+        self._find_reveal_gen += 1
+        gen = self._find_reveal_gen
+        reveal_grouped_find_hit(
+            blocks=self._blocks,
+            block=block,
+            entry_index=hit.entry_index,
+            ensure_populated=self._ensure_populated,
+            set_expanded=self._set_block_expanded,
+            still_current=lambda: gen == self._find_reveal_gen,
+        )
+        self._set_focused_block(block)
 
     def _clear_cards(self) -> None:
         self._blocks.clear()
@@ -378,6 +487,7 @@ class VideoScopeTreeWidget(QWidget):
         card = QFrame()
         card.setObjectName("VideoScopeLibCard")
         card.setProperty("rowStripe", "odd" if row_index % 2 else "even")
+        block.card = card
         outer = QVBoxLayout(card)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -445,23 +555,8 @@ class VideoScopeTreeWidget(QWidget):
 
         model.dataChanged.connect(lambda *_args, b=block: self._on_model_checks_changed(b))
 
-        def set_expanded(on: bool) -> None:
-            block.expanded = bool(on)
-            body.setVisible(block.expanded)
-            card.setProperty("expanded", "true" if block.expanded else "false")
-            for widget in (card, header):
-                style = widget.style()
-                if style is not None:
-                    style.unpolish(widget)
-                    style.polish(widget)
-            collapse.setArrowType(
-                Qt.ArrowType.DownArrow if block.expanded else Qt.ArrowType.RightArrow
-            )
-            if block.expanded:
-                self._ensure_populated(block)
-
-        collapse.clicked.connect(lambda: set_expanded(not block.expanded))
-        title.clicked.connect(lambda: set_expanded(not block.expanded))
+        collapse.clicked.connect(lambda: self._on_user_toggle_expand(block))
+        title.clicked.connect(lambda: self._on_user_toggle_expand(block))
 
         top.addWidget(collapse, 0)
         top.addWidget(lib_cb, 0)
@@ -472,6 +567,7 @@ class VideoScopeTreeWidget(QWidget):
         card.setProperty("expanded", "true" if block.expanded else "false")
 
         lib_cb.stateChanged.connect(lambda st, blk=block: self._on_library_state_changed(blk, st))
+        view.pressed.connect(lambda *_args, b=block: self._on_video_row_pressed(b))
 
         if block.expanded:
             self._ensure_populated(block)
@@ -479,6 +575,33 @@ class VideoScopeTreeWidget(QWidget):
             self._sync_lib_checkbox(block)
 
         return block, card
+
+    def _on_video_row_pressed(self, block: _LibBlock) -> None:
+        self._dismiss_find_highlight()
+        self._set_focused_block(block)
+
+    def _on_user_toggle_expand(self, block: _LibBlock) -> None:
+        self._dismiss_find_highlight()
+        self._set_focused_block(block)
+        self._set_block_expanded(block, not block.expanded)
+
+    def _set_block_expanded(self, block: _LibBlock, on: bool) -> None:
+        block.expanded = bool(on)
+        if block.body is not None:
+            block.body.setVisible(block.expanded)
+        card = block.card
+        if card is not None:
+            card.setProperty("expanded", "true" if block.expanded else "false")
+            style = card.style()
+            if style is not None:
+                style.unpolish(card)
+                style.polish(card)
+        if block.collapse is not None:
+            block.collapse.setArrowType(
+                Qt.ArrowType.DownArrow if block.expanded else Qt.ArrowType.RightArrow
+            )
+        if block.expanded:
+            self._ensure_populated(block)
 
     def _ensure_populated(self, block: _LibBlock) -> None:
         if block.populated or block.model is None:
@@ -510,6 +633,8 @@ class VideoScopeTreeWidget(QWidget):
     def _on_library_state_changed(self, block: _LibBlock, state: int) -> None:
         if self._silent:
             return
+        self._dismiss_find_highlight()
+        self._set_focused_block(block)
         cs = Qt.CheckState(state)
         checked = cs != Qt.CheckState.Unchecked
         if cs == Qt.CheckState.PartiallyChecked:

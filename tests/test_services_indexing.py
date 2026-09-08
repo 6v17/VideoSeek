@@ -371,6 +371,30 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(removed, [])
         self.assertIn("movie.mp4", meta["libraries"]["E:\\videos"]["files"])
 
+    def test_cleanup_missing_library_files_can_include_offline_roots(self):
+        meta = {
+            "libraries": {
+                "E:\\videos": {
+                    "files": {
+                        "movie.mp4": {"vid": "gone"},
+                    }
+                }
+            }
+        }
+
+        with patch("src.services.indexing_service.os.path.exists", return_value=False):
+            removed = list(
+                indexing_service.cleanup_missing_library_files(
+                    meta,
+                    {},
+                    None,
+                    include_offline_roots=True,
+                )
+            )
+
+        self.assertEqual(removed, ["gone"])
+        self.assertNotIn("movie.mp4", meta["libraries"]["E:\\videos"]["files"])
+
     def test_list_missing_library_files_skips_offline_library_roots(self):
         meta = {
             "libraries": {
@@ -405,6 +429,41 @@ class IndexingServiceTests(unittest.TestCase):
                     "video_rel_path": "missing.mp4",
                     "abs_path": "D:\\online\\missing.mp4",
                     "video_id": "gone",
+                    "offline_root": False,
+                }
+            ],
+        )
+
+    def test_list_missing_library_files_can_include_offline_library_roots(self):
+        meta = {
+            "libraries": {
+                "E:\\offline": {
+                    "files": {
+                        "keep.mp4": {"vid": "keep"},
+                    }
+                },
+            }
+        }
+
+        with patch("src.services.indexing_service.os.path.exists", return_value=False):
+            missing = list(
+                indexing_service.list_missing_library_files(
+                    meta,
+                    {},
+                    None,
+                    include_offline_roots=True,
+                )
+            )
+
+        self.assertEqual(
+            missing,
+            [
+                {
+                    "library_path": "E:\\offline",
+                    "video_rel_path": "keep.mp4",
+                    "abs_path": "E:\\offline\\keep.mp4",
+                    "video_id": "keep",
+                    "offline_root": True,
                 }
             ],
         )
@@ -1525,7 +1584,7 @@ class IndexingServiceTests(unittest.TestCase):
         mock_process_single_video.return_value = (None, None, True, False)
         meta = {"libraries": {"D:\\videos": {"files": {}}}}
 
-        failed_videos, search_assets_changed = indexing_service.scan_target_libraries(
+        failed_videos, search_assets_changed, _planned = indexing_service.scan_target_libraries(
             meta,
             {"indexing_video_workers": 1},
             lambda path: "vid_a",
@@ -1574,7 +1633,7 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
     @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
     @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
-    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False, 0))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", side_effect=AssertionError("should not cleanup"))
     @patch("src.workflows.update_video.load_model_metadata", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid", "asset_state": "ready"}}}}})
@@ -1608,7 +1667,46 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
     @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
     @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
-    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False, 0))
+    @patch("src.workflows.update_video.save_model_metadata")
+    @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(()))
+    @patch(
+        "src.workflows.update_video.load_model_metadata",
+        return_value={
+            "libraries": {
+                "D:\\videos": {
+                    "files": {"a.mp4": {"vid": "ready_vid", "asset_state": "ready"}},
+                }
+            }
+        },
+    )
+    @patch("src.workflows.update_video.load_config")
+    @patch("src.workflows.update_video.garbage_collect_indices")
+    def test_update_videos_flow_selection_matched_none_not_treated_as_success(
+        self,
+        _mock_gc,
+        mock_load_config,
+        _mock_load_meta,
+        _mock_cleanup,
+        _mock_save_meta,
+        _mock_scan,
+        _mock_reconcile,
+        _mock_ann,
+        _mock_drop,
+    ):
+        mock_load_config.return_value = {
+            "auto_cleanup_missing_files": False,
+            "meta_file": "source/meta.json",
+        }
+
+        output = update_video.update_videos_flow(video_ids=["stale_vid"])
+
+        self.assertIsNone(output[0])
+
+    @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
+    @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
+    @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False, 0))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(()))
     @patch("src.workflows.update_video.load_model_metadata", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid", "asset_state": "ready"}}}}})
@@ -1640,7 +1738,7 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
     @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
     @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
-    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True, 0))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(()))
     @patch(
@@ -1679,7 +1777,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(mock_scan.call_args.kwargs["include_existing_assets"], False)
 
     @patch("src.workflows.update_video.os.path.exists")
-    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], False, 0))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", side_effect=AssertionError("should not cleanup"))
     @patch(
@@ -1731,7 +1829,7 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
     @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
     @patch("src.workflows.update_video.delete_physical_video_data")
-    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True, 0))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(["vid_a"]))
     @patch("src.workflows.update_video.load_model_metadata", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid", "asset_state": "ready"}}}}})
@@ -1764,7 +1862,7 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.storage.lance_store.drop_lance_vector_indexes", return_value={"dropped": []})
     @patch("src.storage.lance_store.is_lance_ann_enabled", return_value=False)
     @patch("src.services.library_service.reconcile_ready_assets_with_lance", return_value=0)
-    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True))
+    @patch("src.workflows.update_video.scan_target_libraries", return_value=([], True, 0))
     @patch("src.workflows.update_video.save_model_metadata")
     @patch("src.workflows.update_video.cleanup_missing_library_files", return_value=iter(["vid_a"]))
     @patch("src.workflows.update_video.load_model_metadata", return_value={"libraries": {"D:\\videos": {"files": {"a.mp4": {"vid": "vid", "asset_state": "ready"}}}}})

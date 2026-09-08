@@ -145,6 +145,9 @@ def _update_videos_flow_body(
             config,
             target_lib,
             selected_entries=cleanup_missing_entries,
+            # Explicit UI cleanup should also cover folders deleted from disk;
+            # automatic sync cleanup still skips offline roots.
+            include_offline_roots=bool(force_cleanup_missing_files),
         ):
             removed_any = True
             # cleanup_missing already removed the file row; only wipe payload when
@@ -205,7 +208,11 @@ def _update_videos_flow_body(
         save_model_metadata(meta, config=config)
         raise
     scan_s = time.perf_counter() - t_scan
-    failed_videos, _scan_search_assets_changed = scan_result
+    failed_videos, _scan_search_assets_changed, planned_files = scan_result
+    selected_ids = None
+    if video_ids is not None:
+        selected_ids = {str(v).strip() for v in video_ids if str(v or "").strip()}
+    selection_matched_none = bool(selected_ids) and int(planned_files or 0) == 0
 
     if should_stop_callback and should_stop_callback():
         save_model_metadata(meta, config=config)
@@ -258,11 +265,18 @@ def _update_videos_flow_body(
     except Exception as exc:
         logger.warning("Post-index library artifact cleanup failed: %s", exc)
     has_search_assets = _has_ready_search_assets(meta)
+    # Selected sync with zero planned files did not index the selection — do not
+    # report success just because unrelated videos elsewhere are already ready.
+    if selection_matched_none:
+        has_search_assets = False
     logger.info(
-        "Index update complete: cleanup=%.2fs scan_libraries=%.2fs has_search_assets=%s total=%.2fs",
+        "Index update complete: cleanup=%.2fs scan_libraries=%.2fs has_search_assets=%s "
+        "planned=%s selection_matched_none=%s total=%.2fs",
         cleanup_s,
         scan_s,
         has_search_assets,
+        planned_files,
+        selection_matched_none,
         time.perf_counter() - flow_start,
     )
     return (True, None, None, None) if has_search_assets else (None, None, None, None)

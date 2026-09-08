@@ -28,6 +28,7 @@ from src.storage.lance_store import format_byte_size
 from src.utils import open_folder_in_explorer, open_in_explorer
 from ui.dialogs import ResourceTableDialog
 from ui.workers import LocalVectorDetailsWorker
+from ui.widgets.list_find_bar import list_find_text_kwargs
 
 
 class LibraryIndexingGuiMixin:
@@ -42,6 +43,7 @@ class LibraryIndexingGuiMixin:
         subtitle.open_library_requested.connect(self.open_library_folder)
         visual.selection_changed.connect(self._refresh_remove_library_button)
         subtitle.selection_changed.connect(self._refresh_remove_library_button)
+        visual.selection_changed.connect(self._refresh_remove_selected_videos_button)
         self._library_tree_hooks_ready = True
 
     def _asset_state_label(self, asset_state: str) -> str:
@@ -183,12 +185,17 @@ class LibraryIndexingGuiMixin:
                 open_text=open_text,
                 empty_text=empty_text,
                 status_template=status_template,
+                offline_status_text=self.texts.get(
+                    "library_path_missing_status",
+                    "Path missing",
+                ),
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
                 ),
                 header_count=self.texts.get("library_col_count", "Count"),
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
+                **list_find_text_kwargs(self.texts),
             )
             visual_entries = list(payload.get("visual_entries") or [])
             visual_paths = list(payload.get("visual_library_paths") or [])
@@ -223,12 +230,17 @@ class LibraryIndexingGuiMixin:
                 open_text=open_text,
                 empty_text=empty_sub,
                 status_template=status_sub,
+                offline_status_text=self.texts.get(
+                    "library_path_missing_status",
+                    "Path missing",
+                ),
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
                 ),
                 header_count=self.texts.get("library_col_count", "Count"),
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
+                **list_find_text_kwargs(self.texts),
             )
             sub_rows = []
             for item in subtitle_entries:
@@ -355,13 +367,37 @@ class LibraryIndexingGuiMixin:
         if (
             getattr(self, "_remove_library_running", False)
             or self._remove_library_worker_running()
+            or getattr(self, "_remove_selected_videos_running", False)
+            or self._remove_selected_videos_worker_running()
+            or self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+        ):
+            btn.setEnabled(False)
+            self._refresh_remove_selected_videos_button()
+            return
+        tree = self._active_library_tree()
+        btn.setEnabled(bool(tree.collect_checked_library_paths()))
+        self._refresh_remove_selected_videos_button()
+
+    def _refresh_remove_selected_videos_button(self):
+        btn = getattr(self.library_page, "btn_remove_selected_videos", None)
+        if btn is None:
+            return
+        if self._is_subtitle_library_mode():
+            btn.setEnabled(False)
+            return
+        if (
+            getattr(self, "_remove_library_running", False)
+            or self._remove_library_worker_running()
+            or getattr(self, "_remove_selected_videos_running", False)
+            or self._remove_selected_videos_worker_running()
             or self.indexing_controller.is_busy()
             or self._dialogue_index_running()
         ):
             btn.setEnabled(False)
             return
-        tree = self._active_library_tree()
-        btn.setEnabled(bool(tree.collect_checked_library_paths()))
+        tree = self.library_page.visual_video_tree
+        btn.setEnabled(bool(tree.collect_checked_video_ids()))
 
     def refresh_library_table(self):
         from src.services.team_mode_service import is_team_client_mode
@@ -377,12 +413,17 @@ class LibraryIndexingGuiMixin:
                 open_text=open_text,
                 empty_text=empty_text,
                 status_template=status_template,
+                offline_status_text=self.texts.get(
+                    "library_path_missing_status",
+                    "Path missing",
+                ),
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
                 ),
                 header_count=self.texts.get("library_col_count", "Count"),
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
+                **list_find_text_kwargs(self.texts),
             )
             # Drop stale local rows before remote fetch when switching to 用户机.
             if is_team_client_mode():
@@ -392,6 +433,7 @@ class LibraryIndexingGuiMixin:
             self._refresh_library_action_hints()
             self._refresh_team_client_library_chrome()
             self._refresh_remove_library_button()
+            self._refresh_cleanup_missing_button_state(probe=True)
             if hasattr(self, "invalidate_search_scope_entries_cache"):
                 self.invalidate_search_scope_entries_cache()
             if hasattr(self, "_refresh_search_scope_ui"):
@@ -434,6 +476,7 @@ class LibraryIndexingGuiMixin:
             "btn_refresh_visual_library": not client,
             "btn_index_issues": not client,
             "btn_cleanup_missing": not client,
+            "btn_remove_selected_videos": not client,
             "btn_vector_details": not client,
             "btn_build_dialogue_index": not client,
             "btn_reembed_dialogue": not client,
@@ -475,6 +518,8 @@ class LibraryIndexingGuiMixin:
         else:
             # Keep mode-aware add/remove copy (not the generic shared fallback).
             self._refresh_library_action_hints()
+        self._refresh_remove_selected_videos_button()
+        self._refresh_cleanup_missing_button_state(probe=False)
 
     def refresh_selected_visual_libraries(self):
         """Rescan checked libraries so newly dropped files appear in the tree."""
@@ -593,7 +638,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
-        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self._apply_cleanup_missing_button_state(bool(getattr(self, "_last_cleanup_missing_available", False)), force_disabled=True)
         self.library_page.progress_bar.setVisible(True)
         self.library_page.progress_bar.setValue(0)
         self.library_page.lbl_status.setText(
@@ -612,7 +657,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.input_subtitle_sample_strategy.setEnabled(True)
         self.library_page.input_subtitle_ocr_batch.setEnabled(True)
         self.library_page.btn_add_lib.setEnabled(True)
-        self.library_page.btn_cleanup_missing.setEnabled(True)
+        self._refresh_cleanup_missing_button_state(probe=True)
         self.library_page.progress_bar.setVisible(False)
         self._refresh_remove_library_button()
 
@@ -772,6 +817,133 @@ class LibraryIndexingGuiMixin:
             return
         self.remove_library_entry(paths)
 
+    def remove_selected_library_videos(self):
+        title = self.texts.get("remove_selected_videos", "Remove selected videos")
+        if (
+            getattr(self, "_remove_library_running", False)
+            or self._remove_library_worker_running()
+            or getattr(self, "_remove_selected_videos_running", False)
+            or self._remove_selected_videos_worker_running()
+            or self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+        ):
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+        if self._is_subtitle_library_mode():
+            return
+
+        entries = self.library_page.visual_video_tree.collect_checked_entries()
+        if not entries:
+            self.show_info_dialog(
+                title,
+                self.texts.get(
+                    "remove_selected_videos_empty",
+                    "Check one or more videos first.",
+                ),
+                kind="info",
+            )
+            self._refresh_remove_selected_videos_button()
+            return
+
+        confirm = self.texts.get(
+            "remove_selected_videos_confirm",
+            "Remove {count} checked videos from the library and clear their CLIP indexes?",
+        ).format(count=len(entries))
+        if not self.show_confirm_dialog(self.texts.get("confirm_title", "Confirm"), confirm):
+            return
+
+        from ui.workers import RemoveSelectedVideosWorker
+
+        self._remove_selected_videos_running = True
+        self.library_page.btn_sync_db.setEnabled(False)
+        self.library_page.btn_refresh_visual_library.setEnabled(False)
+        self.library_page.btn_add_lib.setEnabled(False)
+        self.library_page.btn_remove_lib.setEnabled(False)
+        self._apply_cleanup_missing_button_state(bool(getattr(self, "_last_cleanup_missing_available", False)), force_disabled=True)
+        self.library_page.btn_remove_selected_videos.setEnabled(False)
+        self.library_page.btn_vector_details.setEnabled(False)
+        self.library_page.progress_bar.setVisible(True)
+        self.library_page.progress_bar.setValue(0)
+        self.library_page.lbl_status.setText(
+            self.texts.get("remove_selected_videos", "Remove selected videos") + "…"
+        )
+
+        worker = RemoveSelectedVideosWorker(entries)
+        self.remove_selected_videos_worker = worker
+        worker.progress_signal.connect(self._update_remove_selected_videos_progress)
+        worker.error_signal.connect(self._handle_remove_selected_videos_error)
+        worker.finished_signal.connect(self._finish_remove_selected_videos)
+        worker.finished.connect(lambda w=worker: self._cleanup_remove_selected_videos_worker(w))
+        worker.start()
+
+    def _remove_selected_videos_worker_running(self) -> bool:
+        worker = getattr(self, "remove_selected_videos_worker", None)
+        return bool(worker is not None and worker.isRunning())
+
+    def _cleanup_remove_selected_videos_worker(self, worker) -> None:
+        if getattr(self, "remove_selected_videos_worker", None) is worker:
+            self.remove_selected_videos_worker = None
+
+    def _update_remove_selected_videos_progress(self, value, text):
+        self.library_page.progress_bar.setValue(int(value))
+        raw = str(text or "")
+        if raw.startswith("remove_videos|"):
+            parts = raw.split("|")
+            if len(parts) >= 4 and parts[1].isdigit() and parts[2].isdigit():
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "remove_selected_videos_progress",
+                        "Removing selected videos… {current}/{total}",
+                    ).format(current=parts[1], total=parts[2])
+                )
+                return
+        if raw:
+            self.library_page.lbl_status.setText(raw)
+
+    def _handle_remove_selected_videos_error(self, message):
+        self.show_error_dialog(
+            self.texts.get("remove_selected_videos_failed", "Failed to remove selected videos"),
+            message,
+        )
+
+    def _finish_remove_selected_videos(self, success, result):
+        try:
+            self.library_page.progress_bar.setVisible(False)
+            self.library_page.progress_bar.setValue(0)
+            self.library_page.btn_sync_db.setEnabled(True)
+            self.library_page.btn_refresh_visual_library.setEnabled(True)
+            self.library_page.btn_add_lib.setEnabled(True)
+            self._refresh_cleanup_missing_button_state(probe=True)
+            self.library_page.btn_vector_details.setEnabled(True)
+            payload = result if isinstance(result, dict) else {}
+            if success:
+                self.library_page.lbl_status.setText(
+                    self.texts.get(
+                        "remove_selected_videos_done",
+                        "Removed {removed} video row(s); cleared {deleted} index payload(s), kept {shared} shared.",
+                    ).format(
+                        removed=int(payload.get("removed_count") or 0),
+                        deleted=int(payload.get("deleted_payload_count") or 0),
+                        shared=int(payload.get("kept_shared_count") or 0),
+                    )
+                )
+                self.refresh_library_table()
+                if hasattr(self, "invalidate_search_scope_entries_cache"):
+                    self.invalidate_search_scope_entries_cache()
+                if hasattr(self, "_refresh_search_scope_ui"):
+                    try:
+                        self._refresh_search_scope_ui(force_entries=True)
+                    except Exception:
+                        pass
+            else:
+                self.library_page.lbl_status.setText(
+                    self.texts.get("remove_selected_videos_failed", "Failed to remove selected videos")
+                )
+        finally:
+            self._remove_selected_videos_running = False
+            self._refresh_remove_library_button()
+            self._refresh_team_client_library_chrome()
+
     def remove_library_entry(self, path):
         if getattr(self, "_remove_library_running", False) or self._remove_library_worker_running():
             self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
@@ -831,7 +1003,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
-        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self._apply_cleanup_missing_button_state(bool(getattr(self, "_last_cleanup_missing_available", False)), force_disabled=True)
         self.library_page.progress_bar.setVisible(True)
         self.library_page.progress_bar.setValue(0)
         self.library_page.lbl_status.setText(
@@ -905,7 +1077,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.input_subtitle_sample_strategy.setEnabled(True)
             self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
-            self.library_page.btn_cleanup_missing.setEnabled(True)
+            self._refresh_cleanup_missing_button_state(probe=True)
             self.library_page.progress_bar.setVisible(False)
             if success:
                 # Defer tree rebuilds so the finished signal returns quickly.
@@ -1209,12 +1381,17 @@ class LibraryIndexingGuiMixin:
                 open_text=open_text,
                 empty_text=empty_text,
                 status_template=status_template,
+                offline_status_text=self.texts.get(
+                    "library_path_missing_status",
+                    "Path missing",
+                ),
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
                 ),
                 header_count=self.texts.get("library_col_count", "Count"),
                 header_status=self.texts.get("library_col_status", "Status"),
                 header_action=self.texts.get("library_col_action", "Action"),
+                **list_find_text_kwargs(self.texts),
             )
             if is_team_client_mode():
                 tree.refresh_from_entries([], library_paths=[])
@@ -1576,7 +1753,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.input_subtitle_ocr_batch.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
-        self.library_page.btn_cleanup_missing.setEnabled(False)
+        self._apply_cleanup_missing_button_state(bool(getattr(self, "_last_cleanup_missing_available", False)), force_disabled=True)
         self.library_page.btn_stop_dialogue_index.setEnabled(True)
         self.library_page.btn_stop_dialogue_index.setVisible(True)
         self.library_page.progress_bar.setVisible(True)
@@ -1654,7 +1831,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.input_subtitle_sample_strategy.setEnabled(True)
             self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
-            self.library_page.btn_cleanup_missing.setEnabled(True)
+            self._refresh_cleanup_missing_button_state(probe=True)
             self.library_page.btn_stop_dialogue_index.setEnabled(False)
             self.library_page.btn_stop_dialogue_index.setVisible(False)
             self.library_page.progress_bar.setVisible(False)
@@ -1723,7 +1900,9 @@ class LibraryIndexingGuiMixin:
         try:
             config = load_config()
             meta = load_model_metadata(config=config)
-            missing_entries = list(list_missing_library_files(meta, config))
+            missing_entries = list(
+                list_missing_library_files(meta, config, include_offline_roots=True)
+            )
         except Exception as exc:
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
@@ -1864,7 +2043,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_add_lib.setEnabled(False)
             self.library_page.btn_remove_lib.setEnabled(False)
             self._apply_index_issue_button_state(False)
-            self.library_page.btn_cleanup_missing.setEnabled(False)
+            self._apply_cleanup_missing_button_state(bool(getattr(self, "_last_cleanup_missing_available", False)), force_disabled=True)
             if getattr(self, "_debug_tools_enabled", False):
                 self.library_page.btn_debug_gpu_oom.setEnabled(False)
                 self.library_page.btn_debug_system_oom.setEnabled(False)
@@ -1953,7 +2132,6 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_stop_index.setEnabled(False)
         self.library_page.btn_stop_index.setVisible(False)
         self.library_page.btn_add_lib.setEnabled(True)
-        self.library_page.btn_cleanup_missing.setEnabled(True)
         if getattr(self, "_debug_tools_enabled", False):
             self.library_page.btn_debug_gpu_oom.setEnabled(True)
             self.library_page.btn_debug_system_oom.setEnabled(True)
@@ -1966,22 +2144,39 @@ class LibraryIndexingGuiMixin:
         self._last_index_issues = issue_list
         self._last_index_issue_target = target_lib
         self._apply_index_issue_button_state(issue_count > 0)
+        selection_matched_none = any(
+            str(item.get("reason") or "").strip().lower() == "selection_matched_none"
+            for item in issue_list
+            if isinstance(item, dict)
+        )
         if stopped:
             status_text = self.texts["index_stopped"]
         elif success:
-            if has_search_assets:
+            if selection_matched_none:
+                status_text = self.texts.get(
+                    "library_sync_failure_reason_selection_matched_none",
+                    self.texts["index_updated_empty"],
+                )
+            elif has_search_assets:
                 status_text = self.texts["index_updated_single"] if target_lib else self.texts["index_updated"]
             else:
                 status_text = self.texts["index_updated_empty_single"] if target_lib else self.texts["index_updated_empty"]
             if issue_count:
                 status_text = f"{status_text} {self.texts['index_issue_summary'].format(count=issue_count)}"
-            if not has_search_assets and not stopped:
-                self.show_info_dialog(
-                    self.texts.get("warning_title", self.texts.get("success_title", "Warning")),
-                    self.texts.get(
+            if (not has_search_assets or selection_matched_none) and not stopped:
+                if selection_matched_none:
+                    dialog_text = self.texts.get(
+                        "index_selection_matched_none_dialog",
+                        status_text,
+                    )
+                else:
+                    dialog_text = self.texts.get(
                         "index_updated_empty_dialog",
                         status_text,
-                    ),
+                    )
+                self.show_info_dialog(
+                    self.texts.get("warning_title", self.texts.get("success_title", "Warning")),
+                    dialog_text,
                     kind="warning",
                 )
         else:
@@ -2074,6 +2269,60 @@ class LibraryIndexingGuiMixin:
         button.style().unpolish(button)
         button.style().polish(button)
         button.update()
+
+    def _probe_cleanup_missing_available(self) -> bool:
+        """True when cleanup would find at least one invalid/missing source entry."""
+        try:
+            from src.services.team_mode_service import is_team_client_mode
+
+            if is_team_client_mode():
+                return False
+            config = load_config()
+            meta = load_model_metadata(config=config)
+            for _entry in list_missing_library_files(meta, config, include_offline_roots=True):
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _apply_cleanup_missing_button_state(self, has_content, *, force_disabled: bool = False):
+        button = getattr(self.library_page, "btn_cleanup_missing", None)
+        if button is None:
+            return
+        has_content = bool(has_content)
+        self._last_cleanup_missing_available = has_content
+        button.setEnabled(bool(has_content) and not force_disabled)
+        button.setObjectName("WarningButton" if has_content else "GhostButton")
+        style = button.style()
+        if style is not None:
+            style.unpolish(button)
+            style.polish(button)
+        button.update()
+
+    def _cleanup_missing_button_busy(self) -> bool:
+        return bool(
+            getattr(self, "_remove_library_running", False)
+            or self._remove_library_worker_running()
+            or getattr(self, "_remove_selected_videos_running", False)
+            or self._remove_selected_videos_worker_running()
+            or self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+        )
+
+    def _refresh_cleanup_missing_button_state(self, *, probe: bool = True):
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            self._apply_cleanup_missing_button_state(False, force_disabled=True)
+            return
+        if probe:
+            has_content = self._probe_cleanup_missing_available()
+        else:
+            has_content = bool(getattr(self, "_last_cleanup_missing_available", False))
+        self._apply_cleanup_missing_button_state(
+            has_content,
+            force_disabled=self._cleanup_missing_button_busy(),
+        )
 
     def show_last_index_issue_details(self):
         if not self._last_index_issues:

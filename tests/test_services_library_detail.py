@@ -234,6 +234,90 @@ class LibraryDetailServiceTests(unittest.TestCase):
         _mock_gc_orphans.assert_called_once()
         mock_compact.assert_called_once_with("profile")
 
+    @patch("src.storage.lance_store.compact_lance_storage")
+    @patch("src.storage.lance_store.garbage_collect_orphan_lance_videos")
+    @patch("src.services.library_service.garbage_collect_orphan_library_indexes")
+    @patch("src.services.library_service.clear_library_search_index")
+    @patch(
+        "src.services.library_service.get_local_model_asset_dirs",
+        return_value={"base_dir": "profile"},
+    )
+    @patch("src.services.library_service.save_model_metadata")
+    @patch(
+        "src.services.library_service.load_model_metadata",
+        return_value={
+            "libraries": {
+                "D:\\videos": {
+                    "files": {
+                        "a.mp4": {"vid": "vid_a", "asset_state": "ready"},
+                        "b.mp4": {"vid": "vid_b", "asset_state": "ready"},
+                    }
+                },
+                "E:\\shared": {
+                    "files": {
+                        "b.mp4": {"vid": "vid_b", "asset_state": "ready"},
+                    }
+                },
+            }
+        },
+    )
+    @patch(
+        "src.services.library_service.load_config",
+        return_value={
+            "meta_file": "source/meta.json",
+            "vector_dir": "source/vector",
+            "index_dir": "source/index",
+        },
+    )
+    def test_remove_library_videos_keeps_shared_payloads(
+        self,
+        _mock_load_config,
+        mock_load_meta,
+        mock_save_meta,
+        _mock_get_model_dirs,
+        _mock_clear_library_index,
+        _mock_gc,
+        _mock_gc_orphans,
+        mock_compact,
+    ):
+        deleted = []
+
+        def delete_video_data(video_id, config, refresh_lance_state=True):
+            deleted.append(video_id)
+
+        result = library_service.remove_library_videos(
+            [
+                {
+                    "library_path": "D:\\videos",
+                    "video_rel_path": "a.mp4",
+                    "video_id": "vid_a",
+                },
+                {
+                    "library_path": "D:\\videos",
+                    "video_rel_path": "b.mp4",
+                    "video_id": "vid_b",
+                },
+            ],
+            delete_video_data,
+        )
+
+        self.assertEqual(result["removed_count"], 2)
+        self.assertEqual(result["deleted_payload_count"], 1)
+        self.assertEqual(result["kept_shared_count"], 1)
+        self.assertEqual(deleted, ["vid_a"])
+        saved_meta = mock_save_meta.call_args.args[0]
+        libs = saved_meta["libraries"]
+
+        def _files_for(fragment: str) -> dict:
+            for path, data in libs.items():
+                if fragment in str(path).lower().replace("/", "\\"):
+                    return (data or {}).get("files") or {}
+            return {}
+
+        self.assertEqual(_files_for("videos"), {})
+        self.assertIn("b.mp4", _files_for("shared"))
+        mock_compact.assert_called_once_with("profile")
+
     @patch("src.storage.lance_search_index.get_lance_indexed_video_ids", return_value=set())
     @patch("src.services.library_service.get_local_model_asset_dirs", side_effect=_model_dirs_from_test_config)
     @patch("src.services.library_service.os.path.exists")

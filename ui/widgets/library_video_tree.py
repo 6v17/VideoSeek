@@ -30,6 +30,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.list_find_bar import (
+    ListFindBar,
+    ListFindHit,
+    clear_find_hit_highlights,
+    collect_grouped_find_hits,
+    reveal_grouped_find_hit,
+)
+
 _LIST_VIEW_HEIGHT = 280
 _STATUS_READY = QColor("#2ec27e")
 _STATUS_PENDING = QColor("#f4c95d")
@@ -279,14 +287,24 @@ class LibraryGroupedVideoTree(QWidget):
         self._empty_text = ""
         self._open_text = "Open"
         self._status_template = "{ready}/{total}"
+        self._offline_status_text = ""
         self._header_video = ""
         self._header_count = ""
         self._header_status = ""
         self._header_action = ""
+        self._find_hits: list[ListFindHit] = []
+        self._find_index = -1
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(6)
+
+        # Hosted by the library toolbar (compact); keep ownership here for find logic.
+        self._find_bar = ListFindBar(self, compact=True, input_width=200)
+        self._find_bar.query_changed.connect(self._on_find_query_changed)
+        self._find_bar.next_requested.connect(lambda: self._step_find(1))
+        self._find_bar.prev_requested.connect(lambda: self._step_find(-1))
+        self._find_reveal_gen = 0
 
         self._column_header = QFrame()
         self._column_header.setObjectName("LibraryTreeColumnHeader")
@@ -351,6 +369,10 @@ class LibraryGroupedVideoTree(QWidget):
         root.addWidget(self._scroll, 1)
         self.selection_changed.connect(self._sync_select_all_checkbox)
 
+    @property
+    def find_bar(self) -> ListFindBar:
+        return self._find_bar
+
     def set_action_texts(
         self,
         *,
@@ -358,10 +380,18 @@ class LibraryGroupedVideoTree(QWidget):
         remove_text: str = "",
         empty_text: str = "",
         status_template: str = "",
+        offline_status_text: str = "",
         header_video: str = "",
         header_count: str = "",
         header_status: str = "",
         header_action: str = "",
+        find_placeholder: str = "",
+        find_prev: str = "",
+        find_next: str = "",
+        find_status: str = "",
+        find_none: str = "",
+        find_prev_tip: str = "",
+        find_next_tip: str = "",
     ) -> None:
         del remove_text  # legacy keyword kept for call-site compatibility
         if open_text:
@@ -370,6 +400,30 @@ class LibraryGroupedVideoTree(QWidget):
             self._status_template = status_template
             for block in self._blocks:
                 self._refresh_block_status_label(block)
+        if offline_status_text:
+            self._offline_status_text = offline_status_text
+            for block in self._blocks:
+                self._refresh_block_status_label(block)
+        if any(
+            (
+                find_placeholder,
+                find_prev,
+                find_next,
+                find_status,
+                find_none,
+                find_prev_tip,
+                find_next_tip,
+            )
+        ):
+            self._find_bar.set_texts(
+                placeholder=find_placeholder,
+                prev_text=find_prev,
+                next_text=find_next,
+                status_template=find_status,
+                none_text=find_none,
+                prev_tip=find_prev_tip,
+                next_tip=find_next_tip,
+            )
         if header_video:
             self._header_video = header_video
             self._header_video_label.setText(header_video)
@@ -443,6 +497,10 @@ class LibraryGroupedVideoTree(QWidget):
         label = block.status_label
         if label is None:
             return
+        lib_path = str(block.lib_path or "").strip()
+        if lib_path and not os.path.isdir(lib_path):
+            label.setText(self._offline_status_text or "Path missing")
+            return
         total = len(block.entries)
         ready = sum(1 for ent in block.entries if self._entry_is_ready(ent))
         template = self._status_template or "{ready}/{total}"
@@ -476,6 +534,9 @@ class LibraryGroupedVideoTree(QWidget):
         expanded_lib_paths: Iterable[str] | None = None,
     ) -> None:
         prev_checked = set(self.collect_checked_video_ids())
+        prev_checked_libs = {
+            os.path.normpath(p) for p in self.collect_checked_library_paths() if str(p).strip()
+        }
         prev_expanded = set(self.collect_expanded_library_paths())
         self._clear_cards()
 
@@ -500,6 +561,7 @@ class LibraryGroupedVideoTree(QWidget):
             self._scroll.setVisible(False)
             self._column_header.setVisible(False)
             self._sync_select_all_checkbox()
+            self._rebuild_find_hits(reveal=False)
             return
 
         self._empty_label.setVisible(False)
@@ -518,6 +580,7 @@ class LibraryGroupedVideoTree(QWidget):
         if checked_video_ids is not None:
             wanted_global = {str(v).strip() for v in checked_video_ids if str(v).strip()}
             default_on = False
+            prev_checked_libs = set()
         else:
             wanted_global = prev_checked
             default_on = default_checked if not wanted_global else False
@@ -534,12 +597,14 @@ class LibraryGroupedVideoTree(QWidget):
                 for e in vids
                 if str(e.get("video_id") or "").strip() in wanted_global
             }
+            # Empty / offline shells have no video rows; keep header check across refresh.
+            lib_default_on = default_on or (not vids and lib_key in prev_checked_libs)
             # Default collapsed; only restore paths the user already expanded.
             body_exp = bool(exp_norm) and lib_key in exp_norm
             block, card = self._build_library_card(
                 lib_path,
                 vids,
-                default_on=default_on,
+                default_on=lib_default_on,
                 wanted_ids=lib_wanted,
                 body_expanded=body_exp,
                 row_index=row_index,
@@ -550,6 +615,72 @@ class LibraryGroupedVideoTree(QWidget):
         self._vbox.addStretch(1)
         self.selection_changed.emit()
         self._sync_select_all_checkbox()
+        self._rebuild_find_hits(reveal=False)
+
+    def _on_find_query_changed(self, _query: str) -> None:
+        self._rebuild_find_hits(reveal=True, reset_index=True)
+
+    def _dismiss_find_highlight(self) -> None:
+        """Clear find chrome after the user clicks elsewhere; query/hits stay for F3."""
+        self._find_reveal_gen += 1
+        clear_find_hit_highlights(self._blocks)
+
+    def _set_focused_block(self, block: _LibBlock | None) -> None:
+        for b in self._blocks:
+            card = b.card
+            if card is None:
+                continue
+            on = block is not None and b is block
+            want = "true" if on else "false"
+            if str(card.property("focused") or "") == want:
+                continue
+            card.setProperty("focused", want)
+            style = card.style()
+            if style is not None:
+                style.unpolish(card)
+                style.polish(card)
+            card.update()
+
+    def _rebuild_find_hits(self, *, reveal: bool, reset_index: bool = False) -> None:
+        self._find_hits = collect_grouped_find_hits(self._blocks, self._find_bar.query())
+        if not self._find_hits:
+            self._find_index = -1
+            self._find_bar.set_match_status(0, 0)
+            self._find_reveal_gen += 1
+            clear_find_hit_highlights(self._blocks)
+            return
+        if reset_index or self._find_index < 0 or self._find_index >= len(self._find_hits):
+            self._find_index = 0
+        self._find_bar.set_match_status(self._find_index + 1, len(self._find_hits))
+        if reveal:
+            self._reveal_current_find_hit()
+
+    def _step_find(self, delta: int) -> None:
+        if not self._find_hits:
+            self._rebuild_find_hits(reveal=True, reset_index=True)
+            return
+        self._find_index = (self._find_index + delta) % len(self._find_hits)
+        self._find_bar.set_match_status(self._find_index + 1, len(self._find_hits))
+        self._reveal_current_find_hit()
+
+    def _reveal_current_find_hit(self) -> None:
+        if self._find_index < 0 or self._find_index >= len(self._find_hits):
+            return
+        hit = self._find_hits[self._find_index]
+        if hit.block_index < 0 or hit.block_index >= len(self._blocks):
+            return
+        block = self._blocks[hit.block_index]
+        self._find_reveal_gen += 1
+        gen = self._find_reveal_gen
+        reveal_grouped_find_hit(
+            blocks=self._blocks,
+            block=block,
+            entry_index=hit.entry_index,
+            ensure_populated=self._ensure_populated,
+            set_expanded=self._set_block_expanded,
+            still_current=lambda: gen == self._find_reveal_gen,
+        )
+        self._set_focused_block(block)
 
     def patch_status_texts(self, by_video_id: dict[str, str]) -> None:
         """Cheap in-place status update without rebuilding cards."""
@@ -619,7 +750,9 @@ class LibraryGroupedVideoTree(QWidget):
 
         lib_cb = QCheckBox()
         lib_cb.setObjectName("LibraryLibCheck")
-        lib_cb.setTristate(True)
+        # Empty offline shells need a plain on/off check so Remove stays usable;
+        # libraries with videos keep tristate for partial selection.
+        lib_cb.setTristate(bool(vids))
         lib_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         block.lib_cb = lib_cb
 
@@ -683,23 +816,8 @@ class LibraryGroupedVideoTree(QWidget):
 
         model.dataChanged.connect(lambda *_args, b=block: self._sync_lib_checkbox_from_videos(b, force=True))
 
-        def set_expanded(on: bool) -> None:
-            block.expanded = bool(on)
-            body.setVisible(block.expanded)
-            card.setProperty("expanded", "true" if block.expanded else "false")
-            for widget in (card, header):
-                style = widget.style()
-                if style is not None:
-                    style.unpolish(widget)
-                    style.polish(widget)
-            collapse.setArrowType(
-                Qt.ArrowType.DownArrow if block.expanded else Qt.ArrowType.RightArrow
-            )
-            if block.expanded:
-                self._ensure_populated(block)
-
-        collapse.clicked.connect(lambda: set_expanded(not block.expanded))
-        title.clicked.connect(lambda: set_expanded(not block.expanded))
+        collapse.clicked.connect(lambda: self._on_user_toggle_expand(block))
+        title.clicked.connect(lambda: self._on_user_toggle_expand(block))
 
         top.addWidget(collapse, 0)
         top.addWidget(lib_cb, 0)
@@ -713,6 +831,7 @@ class LibraryGroupedVideoTree(QWidget):
         card.setProperty("expanded", "true" if block.expanded else "false")
 
         lib_cb.stateChanged.connect(lambda st, blk=block: self._on_library_state_changed(blk, st))
+        view.pressed.connect(lambda *_args, b=block: self._on_video_row_pressed(b))
 
         if block.expanded:
             self._ensure_populated(block)
@@ -721,6 +840,33 @@ class LibraryGroupedVideoTree(QWidget):
             self._sync_lib_checkbox_from_sticky(block)
 
         return block, card
+
+    def _on_video_row_pressed(self, block: _LibBlock) -> None:
+        self._dismiss_find_highlight()
+        self._set_focused_block(block)
+
+    def _on_user_toggle_expand(self, block: _LibBlock) -> None:
+        self._dismiss_find_highlight()
+        self._set_focused_block(block)
+        self._set_block_expanded(block, not block.expanded)
+
+    def _set_block_expanded(self, block: _LibBlock, on: bool) -> None:
+        block.expanded = bool(on)
+        if block.body is not None:
+            block.body.setVisible(block.expanded)
+        card = block.card
+        if card is not None:
+            card.setProperty("expanded", "true" if block.expanded else "false")
+            style = card.style()
+            if style is not None:
+                style.unpolish(card)
+                style.polish(card)
+        if block.collapse is not None:
+            block.collapse.setArrowType(
+                Qt.ArrowType.DownArrow if block.expanded else Qt.ArrowType.RightArrow
+            )
+        if block.expanded:
+            self._ensure_populated(block)
 
     def _ensure_populated(self, block: _LibBlock) -> None:
         if block.populated or block.model is None:
@@ -737,6 +883,8 @@ class LibraryGroupedVideoTree(QWidget):
     def _on_library_state_changed(self, block: _LibBlock, state: int) -> None:
         if self._silent:
             return
+        self._dismiss_find_highlight()
+        self._set_focused_block(block)
         cs = Qt.CheckState(state)
         checked = cs != Qt.CheckState.Unchecked
         if cs == Qt.CheckState.PartiallyChecked:
@@ -748,6 +896,17 @@ class LibraryGroupedVideoTree(QWidget):
                 block.lib_cb.blockSignals(False)
             finally:
                 self._silent = False
+
+        # Offline / empty shells have no video rows. Selection is stored on
+        # default_on — if we only toggle the model, _sync_* snaps back to unchecked.
+        if not block.entries:
+            block.default_on = checked
+            block.wanted_ids.clear()
+            if block.populated and block.model is not None:
+                block.model.set_all_checked(False)
+            self._sync_lib_checkbox_from_sticky(block)
+            self.selection_changed.emit()
+            return
 
         if not block.populated:
             # Selecting a large collapsed library: mark all ids without building widgets.
@@ -768,11 +927,25 @@ class LibraryGroupedVideoTree(QWidget):
         if block.model is not None:
             block.model.set_all_checked(checked)
             block.wanted_ids = set(block.model.checked_video_ids())
+            block.default_on = checked and not block.wanted_ids
         self._sync_lib_checkbox_from_videos(block, force=True)
         self.selection_changed.emit()
 
     def _sync_lib_checkbox_from_sticky(self, block: _LibBlock) -> None:
         tot = sum(1 for e in block.entries if str(e.get("video_id") or "").strip())
+        # Empty / offline shells have no video rows, but users still need to check them
+        # to click Remove Library after deleting folders from disk.
+        if tot == 0:
+            self._silent = True
+            try:
+                block.lib_cb.blockSignals(True)
+                block.lib_cb.setCheckState(
+                    Qt.CheckState.Checked if block.default_on else Qt.CheckState.Unchecked
+                )
+                block.lib_cb.blockSignals(False)
+            finally:
+                self._silent = False
+            return
         n = len(block.wanted_ids) if not block.default_on else (tot if block.wanted_ids or block.default_on else 0)
         if block.default_on and not block.wanted_ids:
             n = tot
@@ -783,7 +956,7 @@ class LibraryGroupedVideoTree(QWidget):
         self._silent = True
         try:
             block.lib_cb.blockSignals(True)
-            if tot == 0 or n == 0:
+            if n == 0:
                 block.lib_cb.setCheckState(Qt.CheckState.Unchecked)
             elif n >= tot:
                 block.lib_cb.setCheckState(Qt.CheckState.Checked)
@@ -803,7 +976,11 @@ class LibraryGroupedVideoTree(QWidget):
         self._silent = True
         try:
             block.lib_cb.blockSignals(True)
-            if tot == 0 or n == 0:
+            if tot == 0:
+                block.lib_cb.setCheckState(
+                    Qt.CheckState.Checked if block.default_on else Qt.CheckState.Unchecked
+                )
+            elif n == 0:
                 block.lib_cb.setCheckState(Qt.CheckState.Unchecked)
             elif n == tot:
                 block.lib_cb.setCheckState(Qt.CheckState.Checked)
@@ -817,6 +994,7 @@ class LibraryGroupedVideoTree(QWidget):
     def _on_select_all_changed(self, state: int) -> None:
         if self._silent:
             return
+        self._dismiss_find_highlight()
         cs = Qt.CheckState(state)
         if cs == Qt.CheckState.PartiallyChecked:
             # Treat partial click as "select all".
@@ -839,7 +1017,12 @@ class LibraryGroupedVideoTree(QWidget):
                     Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
                 )
                 block.lib_cb.blockSignals(False)
-                if not block.populated:
+                if not block.entries:
+                    block.default_on = checked
+                    block.wanted_ids.clear()
+                    if block.populated and block.model is not None:
+                        block.model.set_all_checked(False)
+                elif not block.populated:
                     if checked:
                         block.wanted_ids = {
                             str(e.get("video_id") or "").strip()
@@ -853,7 +1036,7 @@ class LibraryGroupedVideoTree(QWidget):
                 elif block.model is not None:
                     block.model.set_all_checked(checked)
                     block.wanted_ids = set(block.model.checked_video_ids())
-                    block.default_on = checked
+                    block.default_on = checked and not block.wanted_ids
         finally:
             self._silent = False
         self.selection_changed.emit()

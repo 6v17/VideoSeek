@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 from ui.dialogs.app_message import AppMessageDialog
 from ui.dialogs.shell import VSDialogShell
 from ui.widgets.layout import WINDOW_SIZES, message_dialog_min_width
+from ui.widgets.list_find_bar import list_find_text_kwargs
 from ui.widgets.styles import repolish_widget
 from ui.widgets.video_scope_tree import VideoScopeTreeWidget
 
@@ -47,28 +48,39 @@ class SearchScopeEditorDialog(VSDialogShell):
         self._result_mode = "all"
         self._result_video_paths: list[str] = []
 
+        self.scope_tree = VideoScopeTreeWidget(self)
+        find_kwargs = list_find_text_kwargs(texts)
+        self.scope_tree.set_find_texts(
+            placeholder=find_kwargs["find_placeholder"],
+            prev_text=find_kwargs["find_prev"],
+            next_text=find_kwargs["find_next"],
+            status_template=find_kwargs["find_status"],
+            none_text=find_kwargs["find_none"],
+            prev_tip=find_kwargs["find_prev_tip"],
+            next_tip=find_kwargs["find_next_tip"],
+        )
+        self.scope_tree.set_header_labels(
+            str(texts.get("search_scope_video_col", "Video")),
+            "",
+        )
+
         toolbar_host = QWidget()
         toolbar = QHBoxLayout(toolbar_host)
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(10)
-        self._summary_label = QLabel()
-        self._summary_label.setObjectName("DialogMetaLabel")
         btn_select_all = QPushButton(str(texts.get("search_scope_select_all", "")))
         btn_select_all.setObjectName("GhostButton")
         btn_select_all.clicked.connect(self._select_all)
         btn_clear_all = QPushButton(str(texts.get("search_scope_clear_all", "")))
         btn_clear_all.setObjectName("GhostButton")
         btn_clear_all.clicked.connect(self._clear_all)
-        toolbar.addWidget(self._summary_label, 1)
+        self._summary_label = QLabel()
+        self._summary_label.setObjectName("DialogMetaLabel")
         toolbar.addWidget(btn_select_all, 0)
         toolbar.addWidget(btn_clear_all, 0)
+        toolbar.addWidget(self._summary_label, 1)
+        toolbar.addWidget(self.scope_tree.find_bar, 0)
         self.content_layout.addWidget(toolbar_host)
-
-        self.scope_tree = VideoScopeTreeWidget(self)
-        self.scope_tree.set_header_labels(
-            str(texts.get("search_scope_video_col", "Video")),
-            "",
-        )
         self.content_layout.addWidget(self.scope_tree, 1)
 
         self.add_footer_button(
@@ -86,6 +98,8 @@ class SearchScopeEditorDialog(VSDialogShell):
         self._load_tree()
         btn_select_all.setEnabled(self.scope_tree.total_video_items() > 0)
         btn_clear_all.setEnabled(self.scope_tree.total_video_items() > 0)
+        # Shortcuts need the dialog as host after find_bar is reparented into the toolbar.
+        self.scope_tree.find_bar.install_shortcuts(self)
         repolish_widget(self)
 
     def _load_tree(self) -> None:

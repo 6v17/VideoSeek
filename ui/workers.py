@@ -557,6 +557,47 @@ class RemoveLibraryWorker(QThread):
             self.finished_signal.emit(ok)
 
 
+class RemoveSelectedVideosWorker(QThread):
+    """Remove checked video rows from visual libraries off the UI thread."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(bool, object)
+    error_signal = Signal(str)
+
+    def __init__(self, entries):
+        super().__init__()
+        self.entries = [dict(ent) for ent in (entries or []) if isinstance(ent, dict)]
+        self._result: dict = {}
+
+    def run(self):
+        ok = False
+        result: dict = {
+            "removed_count": 0,
+            "deleted_payload_count": 0,
+            "kept_shared_count": 0,
+        }
+        try:
+            from src.services.library_service import remove_library_videos
+            from src.workflows.update_video import delete_physical_video_data
+
+            def _progress(value, text):
+                self.progress_signal.emit(int(value), str(text or ""))
+
+            result = remove_library_videos(
+                self.entries,
+                delete_physical_video_data,
+                progress_callback=_progress,
+            )
+            ok = True
+        except Exception as exc:
+            logger.exception("Remove selected videos worker failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+            ok = False
+        finally:
+            self._result = dict(result or {})
+            self.finished_signal.emit(ok, dict(self._result))
+
+
 class LibraryRegisterWorker(QThread):
     """Discover/register videos under library folders off the UI thread."""
 

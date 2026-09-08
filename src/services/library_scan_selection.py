@@ -78,18 +78,20 @@ def plan_library_scan_paths(
     planned = [planned_by_vid[vid] for vid in sorted(planned_by_vid)]
     unmatched = sorted(wanted - set(planned_by_vid))
 
+    # Per-library 0/partial matches are expected when the same selection is
+    # applied across every library. Global "matched none" is logged by the caller.
     if not planned and wanted:
-        logger.error(
-            "Selected sync matched 0/%s video_ids (discovered=%s meta_files=%s root=%s). "
-            "Refusing to treat this as a successful empty sync.",
+        logger.debug(
+            "Selected sync: no hits in library (wanted=%s discovered=%s meta_files=%s root=%s)",
             len(wanted),
             len(files),
             len(by_rel),
             root_path,
         )
-    elif unmatched:
-        logger.warning(
-            "Selected sync unmatched %s/%s video_ids (matched=%s meta_first=%s discover_overlay=%s root=%s)",
+    elif unmatched and planned:
+        logger.debug(
+            "Selected sync library partial match unmatched=%s/%s matched=%s "
+            "meta_first=%s discover_overlay=%s root=%s",
             len(unmatched),
             len(wanted),
             len(planned),

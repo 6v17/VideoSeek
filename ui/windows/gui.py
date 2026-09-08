@@ -61,6 +61,7 @@ from ui.widgets.sidebar_icons import (
 from ui.controllers.indexing_controller import IndexingController
 from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
+from ui.widgets.list_find_bar import list_find_text_kwargs
 from ui.widgets.preview_panel import _scroll_ancestor_vertically
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.team_mode_controller import TeamModeController
@@ -363,6 +364,9 @@ class MainWindow(
 
         self.library_page.btn_add_lib.clicked.connect(self.select_video_folder)
         self.library_page.btn_remove_lib.clicked.connect(self.remove_selected_libraries)
+        self.library_page.btn_remove_selected_videos.clicked.connect(
+            self.remove_selected_library_videos
+        )
         self.library_page.btn_sync_db.clicked.connect(
             lambda: self.start_update_index(checked_only=True)
         )
@@ -812,19 +816,29 @@ class MainWindow(
             open_text=t.get("open_folder", "Open"),
             empty_text=t.get("library_list_empty", ""),
             status_template=t.get("library_sync_status", "{ready}/{total} synced"),
+            offline_status_text=t.get(
+                "library_path_missing_status",
+                "Path missing (check then Remove)",
+            ),
             header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
             header_count=t.get("library_col_count", "Count"),
             header_status=t.get("library_col_status", "Status"),
             header_action=t.get("library_col_action", "Action"),
+            **list_find_text_kwargs(t),
         )
         self.library_page.subtitle_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
             empty_text=t.get("dialogue_library_empty", ""),
             status_template=t.get("library_extract_status", "{ready}/{total} extracted"),
+            offline_status_text=t.get(
+                "library_path_missing_status",
+                "Path missing (check then Remove)",
+            ),
             header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
             header_count=t.get("library_col_count", "Count"),
             header_status=t.get("library_col_status", "Status"),
             header_action=t.get("library_col_action", "Action"),
+            **list_find_text_kwargs(t),
         )
         self.library_page.btn_build_dialogue_index.setText(t.get("build_dialogue_index", "Build dialogue index"))
         self.library_page.btn_build_dialogue_index.setToolTip(
@@ -888,12 +902,19 @@ class MainWindow(
         self.library_page.btn_stop_dialogue_index.setText(t["stop"])
         self.library_page.btn_index_issues.setText(t["index_issues_button"])
         self.library_page.btn_cleanup_missing.setText(t["cleanup_missing_vectors"])
+        self.library_page.btn_remove_selected_videos.setText(
+            t.get("remove_selected_videos", "Remove selected videos")
+        )
+        self.library_page.btn_remove_selected_videos.setToolTip(
+            t.get("remove_selected_videos_hint", "")
+        )
         self.library_page.btn_vector_details.setText(t["library_vectors_detail"])
         self.library_page.btn_debug_gpu_oom.setText(t["debug_gpu_oom"])
         self.library_page.btn_debug_system_oom.setText(t["debug_system_oom"])
         self.library_page.btn_debug_gpu_oom.setVisible(getattr(self, "_debug_tools_enabled", False))
         self.library_page.btn_debug_system_oom.setVisible(getattr(self, "_debug_tools_enabled", False))
         self._apply_index_issue_button_state(bool(self._last_index_issues))
+        self._refresh_cleanup_missing_button_state(probe=True)
 
         self.understanding_page.header.title.setText(t["understanding_page_title"])
         self.understanding_page.header.set_badge(

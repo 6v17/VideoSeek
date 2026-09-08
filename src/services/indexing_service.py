@@ -561,9 +561,16 @@ def _selected_missing_entry_keys(selected_entries):
     return keys
 
 
-def cleanup_missing_library_files(meta, config, target_lib=None, selected_entries=None):
+def cleanup_missing_library_files(
+    meta, config, target_lib=None, selected_entries=None, *, include_offline_roots=False
+):
     selected_keys = _selected_missing_entry_keys(selected_entries)
-    for entry in list_missing_library_files(meta, config, target_lib):
+    for entry in list_missing_library_files(
+        meta,
+        config,
+        target_lib,
+        include_offline_roots=include_offline_roots,
+    ):
         if selected_keys:
             entry_key = (
                 canonicalize_library_path(entry["library_path"]),
@@ -578,24 +585,43 @@ def cleanup_missing_library_files(meta, config, target_lib=None, selected_entrie
             del lib_files[rel_path]
 
 
-def list_missing_library_files(meta, config, target_lib=None):
+def list_missing_library_files(meta, config, target_lib=None, *, include_offline_roots=False):
     target_key = canonicalize_library_path(target_lib) if target_lib else None
     for root_path, lib_data in list(meta["libraries"].items()):
         if target_key and canonicalize_library_path(root_path) != target_key:
             continue
-        if not os.path.exists(root_path):
-            logger.info("Skipping missing-file cleanup for offline library root: %s", root_path)
-            continue
-
         lib_files = lib_data.get("files", {})
-        for rel_path in list(lib_files.keys()):
-            abs_path = os.path.join(root_path, rel_path)
-            if not os.path.exists(abs_path):
+        if not isinstance(lib_files, dict):
+            continue
+        root_exists = os.path.exists(root_path)
+        if not root_exists:
+            if not include_offline_roots:
+                logger.info("Skipping missing-file cleanup for offline library root: %s", root_path)
+                continue
+            # Folder was deleted (or disk offline): treat every registered file as missing
+            # so explicit "清理失效" can drop meta rows + exclusive Lance payloads.
+            for rel_path in list(lib_files.keys()):
+                abs_path = os.path.join(root_path, rel_path)
+                info = lib_files.get(rel_path) or {}
                 yield {
                     "library_path": root_path,
                     "video_rel_path": rel_path,
                     "abs_path": abs_path,
-                    "video_id": lib_files[rel_path].get("vid"),
+                    "video_id": info.get("vid") if isinstance(info, dict) else None,
+                    "offline_root": True,
+                }
+            continue
+
+        for rel_path in list(lib_files.keys()):
+            abs_path = os.path.join(root_path, rel_path)
+            if not os.path.exists(abs_path):
+                info = lib_files.get(rel_path) or {}
+                yield {
+                    "library_path": root_path,
+                    "video_rel_path": rel_path,
+                    "abs_path": abs_path,
+                    "video_id": info.get("vid") if isinstance(info, dict) else None,
+                    "offline_root": False,
                 }
 
 
@@ -740,8 +766,27 @@ def _library_index_state_after_scan(lib_data) -> str:
     return "pending"
 
 
-def _collect_library_scan_plan(meta, target_lib=None):
+def _library_meta_has_any_video_id(lib_data, selected_video_ids: set[str]) -> bool:
+    """True when this library's meta already references at least one selected id."""
+    if not selected_video_ids:
+        return False
+    files = lib_data.get("files") if isinstance(lib_data, dict) else None
+    if not isinstance(files, dict):
+        return False
+    for info in files.values():
+        if not isinstance(info, dict):
+            continue
+        video_id = str(info.get("vid", "") or "").strip()
+        if video_id and video_id in selected_video_ids:
+            return True
+    return False
+
+
+def _collect_library_scan_plan(meta, target_lib=None, selected_video_ids=None):
     target_key = canonicalize_library_path(target_lib) if target_lib else None
+    wanted = None
+    if selected_video_ids is not None:
+        wanted = {str(v).strip() for v in selected_video_ids if str(v or "").strip()}
     plan = []
     for root_path, lib_data in meta.get("libraries", {}).items():
         if target_key and canonicalize_library_path(root_path) != target_key:
@@ -751,6 +796,10 @@ def _collect_library_scan_plan(meta, target_lib=None):
         if not isinstance(lib_data, dict):
             lib_data = {}
             meta["libraries"][root_path] = lib_data
+        # Selected sync: skip libraries whose meta has none of the ids — discover
+        # cannot invent vids, and scanning every other root is wasted I/O.
+        if wanted is not None and not _library_meta_has_any_video_id(lib_data, wanted):
+            continue
         abs_paths = discover_video_files_incremental(root_path, lib_data)
         plan.append((root_path, lib_data, abs_paths))
     return plan
@@ -1874,7 +1923,11 @@ def scan_target_libraries(
             _queue_meta_persist()
 
         failed_videos = []
-        scan_plan = _collect_library_scan_plan(meta, target_lib=target_lib)
+        scan_plan = _collect_library_scan_plan(
+            meta,
+            target_lib=target_lib,
+            selected_video_ids=selected_video_ids,
+        )
 
         from src.services.library_scan_selection import plan_library_scan_paths
 
@@ -1885,25 +1938,40 @@ def scan_target_libraries(
                 plan_library_scan_paths(root_path, lib_files, valid_files, selected_video_ids)
             )
 
-        if selected_video_ids is not None and selected_video_ids and total_files == 0:
-            sample_root = scan_plan[0][0] if scan_plan else (target_lib or "")
-            logger.error(
-                "Index sync selection matched no on-disk files (%s ids, %s libraries). "
-                "This usually means path-key mismatch or missing sources.",
-                len(selected_video_ids),
-                len(scan_plan),
-            )
-            _emit_issue(
-                issue_callback,
-                sample_root or "",
-                "",
-                sample_root or "",
-                action="skipped",
-                reason="selection_matched_none",
-                detail=(
-                    f"selected={len(selected_video_ids)} planned=0 libraries={len(scan_plan)}"
-                ),
-            )
+        if selected_video_ids is not None and selected_video_ids:
+            if total_files == 0:
+                sample_root = scan_plan[0][0] if scan_plan else (target_lib or "")
+                logger.error(
+                    "Index sync selection matched no on-disk files (%s ids, %s candidate libraries). "
+                    "This usually means path-key mismatch, missing sources, or stale selection ids.",
+                    len(selected_video_ids),
+                    len(scan_plan),
+                )
+                _emit_issue(
+                    issue_callback,
+                    sample_root or "",
+                    "",
+                    sample_root or "",
+                    action="skipped",
+                    reason="selection_matched_none",
+                    detail=(
+                        f"selected={len(selected_video_ids)} planned=0 libraries={len(scan_plan)}"
+                    ),
+                )
+            elif total_files < len(selected_video_ids):
+                logger.warning(
+                    "Index sync selection matched %s/%s video_ids across %s libraries",
+                    total_files,
+                    len(selected_video_ids),
+                    len(scan_plan),
+                )
+            else:
+                logger.info(
+                    "Index sync selection matched %s/%s video_ids across %s libraries",
+                    total_files,
+                    len(selected_video_ids),
+                    len(scan_plan),
+                )
 
         global_file_index = 0
         _report_scan_progress(0, total_files)
@@ -1973,7 +2041,7 @@ def scan_target_libraries(
                 lib_data["files"] = lib_files
                 raise
 
-        return failed_videos, search_assets_changed
+        return failed_videos, search_assets_changed, total_files
     finally:
         _flush_meta(force=True)
         end_lance_index_batch(profile_base_dir)

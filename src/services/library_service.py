@@ -578,6 +578,138 @@ def remove_library(path, delete_video_data, progress_callback=None):
     return True
 
 
+def remove_library_videos(entries, delete_video_data, progress_callback=None) -> dict:
+    """Remove selected video rows from visual libraries; wipe exclusive Lance payloads.
+
+    Keeps library folders in meta (even if emptied). Does not touch subtitle OCR.
+    Shared ``video_id`` payloads stay when another library still references them.
+    """
+    config = load_config()
+    meta = load_model_metadata(config=config)
+    meta["libraries"] = _normalize_library_map(meta.get("libraries", {}))
+
+    def _progress(percent: int, text: str = "") -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(int(percent), str(text or ""))
+        except Exception:
+            pass
+
+    planned: list[tuple[str, str, str]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for ent in entries or []:
+        if not isinstance(ent, dict):
+            continue
+        lib_path = canonicalize_library_path(ent.get("library_path") or "")
+        rel_raw = str(ent.get("video_rel_path") or "").strip()
+        if not rel_raw:
+            video_path = str(ent.get("video_path") or ent.get("abs_path") or "").strip()
+            if lib_path and video_path:
+                try:
+                    rel_raw = os.path.relpath(video_path, lib_path)
+                except Exception:
+                    rel_raw = ""
+        rel_path = canonicalize_library_rel_path(rel_raw) if rel_raw else ""
+        video_id = str(ent.get("video_id") or "").strip()
+        if not lib_path or not rel_path:
+            continue
+        key = (lib_path, rel_path)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        planned.append((lib_path, rel_path, video_id))
+
+    if not planned:
+        return {"removed_count": 0, "deleted_payload_count": 0, "kept_shared_count": 0}
+
+    _progress(2, "remove_videos|meta")
+    affected_libs: set[str] = set()
+    removed_rows: list[tuple[str, str, str]] = []
+    for lib_path, rel_path, fallback_vid in planned:
+        library = meta["libraries"].get(lib_path)
+        if not isinstance(library, dict):
+            continue
+        files = library.get("files")
+        if not isinstance(files, dict):
+            continue
+        file_key = None
+        for candidate in files.keys():
+            if canonicalize_library_rel_path(candidate) == rel_path:
+                file_key = candidate
+                break
+        if file_key is None:
+            continue
+        info = files.get(file_key) if isinstance(files.get(file_key), dict) else {}
+        video_id = str((info or {}).get("vid") or fallback_vid or "").strip()
+        del files[file_key]
+        affected_libs.add(lib_path)
+        removed_rows.append((lib_path, rel_path, video_id))
+
+    for lib_path in affected_libs:
+        try:
+            clear_library_search_index(lib_path, config=config)
+        except Exception:
+            pass
+    try:
+        garbage_collect_orphan_library_indexes(meta, config=config)
+    except Exception:
+        pass
+    save_model_metadata(meta, config=config)
+
+    payload_ids: list[str] = []
+    kept_shared = 0
+    seen_vids: set[str] = set()
+    for _lib, _rel, video_id in removed_rows:
+        if not video_id or video_id in seen_vids:
+            continue
+        seen_vids.add(video_id)
+        if count_video_id_refs(meta, video_id) == 0:
+            payload_ids.append(video_id)
+        else:
+            kept_shared += 1
+
+    deleted_payload = 0
+    if payload_ids:
+        total = len(payload_ids)
+        for index, video_id in enumerate(payload_ids):
+            _progress(
+                int(8 + (index / max(total, 1)) * 80),
+                f"remove_videos|{index + 1}|{total}|{video_id}",
+            )
+            try:
+                delete_video_data(video_id, config, refresh_lance_state=False)
+            except TypeError:
+                delete_video_data(video_id, config)
+            deleted_payload += 1
+        _progress(92, "remove_videos|compact")
+        try:
+            from src.storage.lance_store import (
+                compact_lance_storage,
+                garbage_collect_orphan_lance_videos,
+            )
+
+            base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+            garbage_collect_orphan_lance_videos(
+                meta,
+                config=config,
+                compact=False,
+                refresh_state=False,
+            )
+            compact_lance_storage(base_dir)
+        except Exception as exc:
+            get_logger("library_service").warning(
+                "Post video-removal Lance cleanup failed: %s", exc
+            )
+
+    _progress(100, "remove_videos|done")
+    return {
+        "removed_count": len(removed_rows),
+        "deleted_payload_count": deleted_payload,
+        "kept_shared_count": kept_shared,
+    }
+
+
 def _effective_asset_state(info, source_exists, vector_exists, vector_ok, lance_ready):
     """Ready only when Lance has the video. Legacy npy alone is broken/migration pending."""
     stored_state = str(info.get("asset_state", "")).strip().lower()

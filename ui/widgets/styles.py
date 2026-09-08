@@ -1308,6 +1308,16 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     border: 1px solid __LINE__;
     border-radius: 8px;
 }
+#ListFindBar #ListFindStatus {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+    min-width: 72px;
+}
+#ListFindBar #ListFindStatus[hasMatches="true"] {
+    color: __ACCENT__;
+}
 #LibraryLibCard {
     background: __PANEL__;
     border: none;
@@ -1328,6 +1338,35 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryLibCard[expanded="true"] #LibraryLibHeader {
     border-bottom: 1px solid __LINE__;
     background: __BUTTON_SOFT__;
+}
+#LibraryLibCard[focused="true"] {
+    border-left: 3px solid __ACCENT__;
+}
+#LibraryLibCard[focused="true"] #LibraryLibHeader,
+#LibraryLibCard[focused="true"][expanded="true"] #LibraryLibHeader {
+    background: __ACCENT_SOFT__;
+}
+#LibraryLibCard[focused="true"] #LibraryLibTitle {
+    color: __ACCENT__;
+    font-weight: 700;
+}
+#LibraryLibCard[findHit="true"] {
+    background: __ACCENT_SOFT__;
+}
+#LibraryLibCard[findHit="true"] #LibraryLibHeader,
+#LibraryLibCard[findHit="true"][expanded="true"] #LibraryLibHeader {
+    background: __ACCENT_SOFT__;
+    border-bottom: 1px solid __ACCENT__;
+}
+#LibraryLibCard[findHit="true"] #LibraryLibTitle {
+    color: __ACCENT__;
+    font-weight: 700;
+}
+#LibraryLibCard[findHit="true"][findHitKind="library"] {
+    border-left: 3px solid __ACCENT__;
+}
+#LibraryLibCard[findHit="true"][findHitKind="video"] #LibraryLibHeader {
+    border-left: 2px solid __ACCENT__;
 }
 #LibraryLibTitle {
     color: __HEADLINE__;
@@ -1426,9 +1465,12 @@ QTableView#LibraryGroupedLibTree::item {
 QTableView#LibraryGroupedLibTree::item:hover {
     background: __ACCENT_SOFT__;
 }
-QTableView#LibraryGroupedLibTree::item:selected {
-    background: transparent;
-    color: __TEXT__;
+QTableView#LibraryGroupedLibTree::item:selected,
+QTableView#LibraryGroupedLibTree::item:selected:active,
+QTableView#LibraryGroupedLibTree::item:selected:!active {
+    background: __ACCENT_SOFT__;
+    color: __HEADLINE__;
+    font-weight: 600;
 }
 #SearchMobileRow {
     background: transparent;
@@ -2556,6 +2598,35 @@ ClickableLabel[detailActive="true"] {
     border-bottom: 1px solid __LINE__;
     background: __BUTTON_SOFT__;
 }
+#VideoScopeLibCard[focused="true"] {
+    border-left: 3px solid __ACCENT__;
+}
+#VideoScopeLibCard[focused="true"] #VideoScopeLibHeader,
+#VideoScopeLibCard[focused="true"][expanded="true"] #VideoScopeLibHeader {
+    background: __ACCENT_SOFT__;
+}
+#VideoScopeLibCard[focused="true"] #VideoScopeLibTitle {
+    color: __ACCENT__;
+    font-weight: 700;
+}
+#VideoScopeLibCard[findHit="true"] {
+    background: __ACCENT_SOFT__;
+}
+#VideoScopeLibCard[findHit="true"] #VideoScopeLibHeader,
+#VideoScopeLibCard[findHit="true"][expanded="true"] #VideoScopeLibHeader {
+    background: __ACCENT_SOFT__;
+    border-bottom: 1px solid __ACCENT__;
+}
+#VideoScopeLibCard[findHit="true"] #VideoScopeLibTitle {
+    color: __ACCENT__;
+    font-weight: 700;
+}
+#VideoScopeLibCard[findHit="true"][findHitKind="library"] {
+    border-left: 3px solid __ACCENT__;
+}
+#VideoScopeLibCard[findHit="true"][findHitKind="video"] #VideoScopeLibHeader {
+    border-left: 2px solid __ACCENT__;
+}
 #VideoScopeLibTitle {
     color: __HEADLINE__;
     font-size: 13px;
@@ -2587,9 +2658,12 @@ QTableView#VideoScopeLibTree::item {
 QTableView#VideoScopeLibTree::item:hover {
     background: __ACCENT_SOFT__;
 }
-QTableView#VideoScopeLibTree::item:selected {
-    background: transparent;
-    color: __TEXT__;
+QTableView#VideoScopeLibTree::item:selected,
+QTableView#VideoScopeLibTree::item:selected:active,
+QTableView#VideoScopeLibTree::item:selected:!active {
+    background: __ACCENT_SOFT__;
+    color: __HEADLINE__;
+    font-weight: 600;
 }
 #VideoScopeLibBody {
     background: transparent;

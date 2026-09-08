@@ -1037,6 +1037,9 @@ class LibraryPage(QWidget):
         self.btn_index_issues.setEnabled(False)
         self.btn_cleanup_missing = QPushButton()
         self.btn_cleanup_missing.setObjectName("GhostButton")
+        self.btn_remove_selected_videos = QPushButton()
+        self.btn_remove_selected_videos.setObjectName("DangerGhostButton")
+        self.btn_remove_selected_videos.setEnabled(False)
         self.btn_vector_details = QPushButton()
         self.btn_vector_details.setObjectName("GhostButton")
         self.btn_debug_gpu_oom = QPushButton()
@@ -1045,6 +1048,12 @@ class LibraryPage(QWidget):
         self.btn_debug_system_oom = QPushButton()
         self.btn_debug_system_oom.setObjectName("GhostButton")
         self.btn_debug_system_oom.setVisible(False)
+
+        self.visual_video_tree = LibraryGroupedVideoTree()
+        self.visual_video_tree.setMinimumHeight(280)
+        self.library_list = self.visual_video_tree
+        self.library_column_header_labels = []
+
         toolbar.addWidget(self.btn_sync_db)
         toolbar.addWidget(self.btn_refresh_visual_library)
         toolbar.addSpacing(4)
@@ -1052,18 +1061,16 @@ class LibraryPage(QWidget):
         toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_index_issues)
         toolbar.addWidget(self.btn_cleanup_missing)
+        toolbar.addWidget(self.btn_remove_selected_videos)
         toolbar.addWidget(self.btn_vector_details)
         toolbar.addWidget(self.btn_debug_gpu_oom)
         toolbar.addWidget(self.btn_debug_system_oom)
         toolbar.addStretch()
+        toolbar.addWidget(self.visual_video_tree.find_bar, 0)
         toolbar.addWidget(self.btn_stop_index)
         table_layout.addLayout(toolbar)
-
-        self.visual_video_tree = LibraryGroupedVideoTree()
-        self.visual_video_tree.setMinimumHeight(280)
-        self.library_list = self.visual_video_tree
-        self.library_column_header_labels = []
         table_layout.addWidget(self.visual_video_tree, 1)
+        self.visual_video_tree.find_bar.install_shortcuts(self.table_card)
         visual_layout.addWidget(self.table_card, 1)
 
         # --- Panel: subtitle library (one card) ---
@@ -1120,6 +1127,11 @@ class LibraryPage(QWidget):
         self.btn_stop_dialogue_index.setObjectName("DangerGhostButton")
         self.btn_stop_dialogue_index.setEnabled(False)
         self.btn_stop_dialogue_index.setVisible(False)
+
+        self.subtitle_video_tree = LibraryGroupedVideoTree()
+        self.subtitle_video_tree.setMinimumHeight(280)
+        self.dialogue_list = self.subtitle_video_tree
+
         dialogue_toolbar.addWidget(self.btn_build_dialogue_index)
         dialogue_toolbar.addWidget(self.btn_reembed_dialogue)
         dialogue_toolbar.addWidget(self.btn_clear_dialogue)
@@ -1138,10 +1150,15 @@ class LibraryPage(QWidget):
         dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
         dialogue_table_layout.addLayout(dialogue_toolbar)
 
-        self.subtitle_video_tree = LibraryGroupedVideoTree()
-        self.subtitle_video_tree.setMinimumHeight(280)
-        self.dialogue_list = self.subtitle_video_tree
+        find_row = QHBoxLayout()
+        find_row.setContentsMargins(0, 0, 0, 0)
+        find_row.setSpacing(8)
+        find_row.addWidget(self.subtitle_video_tree.find_bar, 0)
+        find_row.addStretch(1)
+        dialogue_table_layout.addLayout(find_row)
+
         dialogue_table_layout.addWidget(self.subtitle_video_tree, 1)
+        self.subtitle_video_tree.find_bar.install_shortcuts(self.dialogue_table_card)
         dialogue_layout.addWidget(self.dialogue_table_card, 1)
 
         self.library_stack.addWidget(self.visual_tab)
