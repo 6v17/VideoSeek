@@ -46,18 +46,18 @@ COMPONENT_SIZES = {
     "sidebar_action_height": 32,
     "image_drop_min_height": 280,
     "search_query_tab_chrome_height": 41,
-    "search_query_tab_page_margins_v": 11,
+    "search_query_tab_page_margins_v": 8,
     # Must fit #SearchModeSelect (1px border + padding + text); too short clips the bottom edge.
     "search_image_options_row_height": 36,
-    "preview_host_min_height": 320,
-    "search_compare_baseline_height": 540,
+    "preview_host_min_height": 240,
+    "search_compare_baseline_height": 470,
     "search_panel_width_extra": 28,
-    "compose_image_strip_height": 86,
+    "compose_image_strip_height": 72,
     "link_query_preview_min_height": 210,
     "result_table_min_height": 420,
     "result_table_min_height_floor": 180,
-    "compare_row_min_height_floor": 280,
-    "preview_host_min_height_floor": 180,
+    "compare_row_min_height_floor": 260,
+    "preview_host_min_height_floor": 160,
     "video_scope_tree_min_height": 200,
     "progress_bar_height": 18,
     "progress_bar_min_width": 260,
@@ -67,8 +67,9 @@ COMPONENT_SIZES = {
     "mobile_bridge_qr_width": 56,
     "search_field_label_width": 60,
     "search_field_gap": 4,
-    "search_controls_group_gap": 12,
-    "search_panel_card_margin": 12,
+    "search_controls_group_gap": 8,
+    "search_panel_card_margin": 8,
+    "search_panel_row_spacing": 4,
     "settings_path_input_width": 160,
     "understanding_form_label_width": 96,
 }
@@ -137,13 +138,13 @@ def compare_row_min_height(config=None) -> int:
     floor = int(sizes.get("compare_row_min_height_floor", 280))
     available = _available_height()
     if available is None:
-        return min(preferred, 360)
+        return min(preferred, 320)
     if available >= 900:
         return preferred
     if available >= 800:
-        return min(preferred, 420)
+        return min(preferred, 380)
     if available >= 700:
-        return min(preferred, 360)
+        return min(preferred, 300)
     return min(preferred, floor)
 
 

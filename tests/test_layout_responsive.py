@@ -20,7 +20,10 @@ class LayoutResponsiveTests(unittest.TestCase):
     def test_compare_row_min_shrinks_on_short_screen(self):
         preferred = compare_row_card_height()
         with patch.object(layout_mod, "_available_height", return_value=650):
-            self.assertEqual(compare_row_min_height(), min(preferred, 280))
+            self.assertEqual(
+                compare_row_min_height(),
+                min(preferred, layout_mod.COMPONENT_SIZES["compare_row_min_height_floor"]),
+            )
         with patch.object(layout_mod, "_available_height", return_value=950):
             self.assertEqual(compare_row_min_height(), preferred)
 

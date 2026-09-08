@@ -122,18 +122,18 @@ class SearchComposeFormWidget(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setSpacing(4)
 
         self.input_description = QTextEdit()
         self.input_description.setObjectName("SearchInput")
         self.input_description.setPlaceholderText("")
         self.input_description.setAcceptRichText(False)
         if self._fill_text:
-            self.input_description.setMinimumHeight(72)
+            self.input_description.setMinimumHeight(68)
             self.input_description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             root.addWidget(self.input_description, 1)
         else:
-            self.input_description.setFixedHeight(88)
+            self.input_description.setFixedHeight(80)
             root.addWidget(self.input_description)
 
         self.images_scroll = QScrollArea()

@@ -229,13 +229,19 @@ class ModelPackagesGuiMixin:
                 message = f"{message}\n\nChecksums verified: {checksum_verified_count}"
             if self._ffmpeg_imported_with_package:
                 message = f"{message}\n\n{self.texts.get('ffmpeg_import_done', 'FFmpeg imported successfully.')}"
-            if dialog is not None and not self.ui_state.resources_ready:
-                dialog.set_import_success_state(
-                    self.texts.get("parse_model_package_done", "Model packages parsed: +{imported}, updated {updated}.").format(
-                        imported=imported,
-                        updated=updated,
+            if dialog is not None:
+                if self.ui_state.resources_ready:
+                    dialog.set_manage_state()
+                else:
+                    dialog.set_import_success_state(
+                        self.texts.get(
+                            "parse_model_package_done",
+                            "Model packages parsed: +{imported}, updated {updated}.",
+                        ).format(
+                            imported=imported,
+                            updated=updated,
+                        )
                     )
-                )
             if errors:
                 skipped_note = self.texts.get(
                     "parse_model_package_skipped",

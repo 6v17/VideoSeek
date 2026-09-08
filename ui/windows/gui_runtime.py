@@ -364,6 +364,18 @@ class RuntimeGuiMixin:
             return
         webbrowser.open(target_url)
 
+    def open_model_package_github_page(self):
+        app_meta = get_app_meta()
+        target_url = str(app_meta.get("model_github_url", "") or "").strip()
+        if not target_url:
+            self.show_info_dialog(
+                self.texts["warning_title"],
+                self.texts["download_models_unavailable"],
+                kind="warning",
+            )
+            return
+        webbrowser.open(target_url)
+
     def _finish_runtime_resource_download(self, result):
         self.settings_page.input_model_dir.setText(result.get("model_dir", get_configured_model_dir()))
         if result.get("ffmpeg_path"):

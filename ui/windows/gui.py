@@ -986,12 +986,12 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "btn_reset_recap_prompt"):
             self.understanding_page.btn_reset_recap_prompt.setText(
-                t.get("understanding_recap_prompt_reset", "Restore this default")
+                t.get("understanding_recap_prompt_reset", "Restore")
             )
         if hasattr(self.understanding_page, "recap_prompt_tabs"):
             tabs = self.understanding_page.recap_prompt_tabs
             tabs.setTabText(0, t.get("understanding_recap_prompt_tab_plan", "1. Plan"))
-            tabs.setTabText(1, t.get("understanding_recap_prompt_tab_match", "2. Match shots"))
+            tabs.setTabText(1, t.get("understanding_recap_prompt_tab_match", "2. Match"))
             tabs.setTabText(2, t.get("understanding_recap_prompt_tab_captions", "3. Captions"))
             if tabs.count() > 3:
                 tabs.setTabText(3, t.get("understanding_recap_prompt_tab_polish", "4. Polish"))
@@ -1101,7 +1101,7 @@ class MainWindow(
             self.understanding_page.btn_reset_custom_prompts.setText(
                 t.get(
                     "understanding_vlm_prompt_reset",
-                    t.get("understanding_reset_custom_prompts", "Restore this default"),
+                    t.get("understanding_reset_custom_prompts", "Restore"),
                 )
             )
         if hasattr(self.understanding_page, "vlm_prompt_tabs"):
@@ -1144,27 +1144,27 @@ class MainWindow(
         self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
-        self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "One-click recap"))
+        self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "Recap"))
         self.understanding_page.btn_export_recap.setToolTip(
             t.get("understanding_export_recap_tip", "")
         )
         if hasattr(self.understanding_page, "btn_recap_step_plan"):
             self.understanding_page.btn_recap_step_plan.setText(
-                t.get("understanding_recap_step_plan", "Plan outline")
+                t.get("understanding_recap_step_plan", "Plan")
             )
             self.understanding_page.btn_recap_step_plan.setToolTip(
                 t.get("understanding_recap_step_plan_tip", "")
             )
         if hasattr(self.understanding_page, "btn_recap_step_match"):
             self.understanding_page.btn_recap_step_match.setText(
-                t.get("understanding_recap_step_match", "Match shots")
+                t.get("understanding_recap_step_match", "Match")
             )
             self.understanding_page.btn_recap_step_match.setToolTip(
                 t.get("understanding_recap_step_match_tip", "")
             )
         if hasattr(self.understanding_page, "btn_recap_step_captions"):
             self.understanding_page.btn_recap_step_captions.setText(
-                t.get("understanding_recap_step_captions", "Pack captions")
+                t.get("understanding_recap_step_captions", "Captions")
             )
             self.understanding_page.btn_recap_step_captions.setToolTip(
                 t.get("understanding_recap_step_captions_tip", "")
@@ -1178,7 +1178,7 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "btn_recap_jianying"):
             self.understanding_page.btn_recap_jianying.setText(
-                t.get("understanding_recap_jianying", "Generate Jianying draft")
+                t.get("understanding_recap_jianying", "Jianying")
             )
             self.understanding_page.btn_recap_jianying.setToolTip(
                 t.get("understanding_recap_jianying_tip", "")

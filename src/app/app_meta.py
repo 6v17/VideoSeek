@@ -4,6 +4,8 @@ APP_META = {
     "about_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/about.json",
     "version_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/version.json",
     "model_manifest_url": "https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA",
+    "model_github_url": "https://github.com/6v17/VideoSeek/releases/tag/models",
+    "model_guide_url": "https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad",
     "remote_index_manifest_url": "",
     "remote_timeout": 4,
     "donate_image_url": "https://videoseek-models.oss-cn-hangzhou.aliyuncs.com/assets/wechat-reward.png",

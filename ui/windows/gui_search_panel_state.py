@@ -324,17 +324,32 @@ class SearchPanelStateMixin:
             tabs.setTabText(1, texts.get("search_tab_text", "Text"))
             tabs.setTabText(2, texts.get("search_tab_compose", "Compose"))
             if tabs.count() > 3:
-                tabs.setTabText(3, texts.get("search_tab_dialogue", "Dialogue"))
+                tabs.setTabText(3, texts.get("search_tab_dialogue", "Subs"))
+                tabs.setTabToolTip(
+                    3,
+                    texts.get(
+                        "search_tab_dialogue_tip",
+                        texts.get("search_tab_dialogue", "Subtitles"),
+                    ),
+                )
             if tabs.count() > 4:
                 tabs.setTabText(4, texts.get("search_tab_tags", "Tags"))
-
+                tabs.setTabToolTip(4, texts.get("search_tab_tags", "Tags"))
+            for index in (0, 1, 2):
+                if tabs.count() > index:
+                    tabs.setTabToolTip(index, tabs.tabText(index))
+            # Prefer fitting all five tabs in the narrow search pane (especially EN labels).
+            bar = tabs.tabBar()
+            if bar is not None:
+                bar.setUsesScrollButtons(False)
+                bar.setExpanding(False)
         compose_form = getattr(page.search_panel, "compose_form", None)
         if compose_form is not None:
             compose_form.set_texts(texts)
 
         btn_save_preset = getattr(page.search_panel, "btn_save_preset", None)
         if btn_save_preset is not None:
-            btn_save_preset.setText(texts.get("search_compose_save_preset", "Save as preset"))
+            btn_save_preset.setText(texts.get("search_compose_save_preset", "Save preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
 
         mode_stack = getattr(page, "search_mode_options_stack", None)

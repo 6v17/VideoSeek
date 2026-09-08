@@ -84,3 +84,18 @@ def qq_toolbar_icon(*, size: int = 20) -> QIcon:
         f"</svg>"
     )
     return _icon_from_svg(svg, size=size)
+
+
+def package_toolbar_icon(*, is_dark: bool, size: int = 32) -> QIcon:
+    """Simple archive / package mark for the model-import drop zone."""
+    stroke = "#e5e5e5" if is_dark else "#2b2b2b"
+    fill = "#3a3a3a" if is_dark else "#f3f3f3"
+    accent = "#60a5fa" if is_dark else "#0078d4"
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">'
+        f'<path d="M3.5 7.5L12 3l8.5 4.5v9L12 21l-8.5-4.5v-9z" '
+        f'stroke="{stroke}" stroke-width="1.6" fill="{fill}"/>'
+        f'<path d="M3.5 7.5L12 12l8.5-4.5M12 12V21" stroke="{accent}" stroke-width="1.6"/>'
+        f"</svg>"
+    )
+    return _icon_from_svg(svg, size=size)

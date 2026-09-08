@@ -76,9 +76,10 @@ class SearchPanel(VSCard):
 
     def __init__(self, parent=None):
         card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 12))
-        super().__init__(parent, margins=(card_margin,) * 4, spacing=8)
+        row_spacing = int(COMPONENT_SIZES.get("search_panel_row_spacing", 4))
+        super().__init__(parent, margins=(card_margin,) * 4, spacing=row_spacing)
         layout = self.content_layout
-        layout.setSpacing(8)
+        layout.setSpacing(row_spacing)
 
         combo_width = int(COMPONENT_SIZES.get("search_option_combo_width", 96))
         scope_select_width = int(COMPONENT_SIZES.get("search_scope_select_width", 120))
@@ -253,16 +254,16 @@ class SearchPanel(VSCard):
         self.image_tab = QWidget()
         self.image_tab.setFixedHeight(tab_page_height)
         image_tab_layout = QVBoxLayout(self.image_tab)
-        image_tab_layout.setContentsMargins(4, 8, 4, 4)
-        image_tab_layout.setSpacing(10)
+        image_tab_layout.setContentsMargins(4, 4, 4, 4)
+        image_tab_layout.setSpacing(6)
         image_tab_layout.addWidget(self.img_label, 0, Qt.AlignmentFlag.AlignTop)
         image_tab_layout.addStretch(1)
 
         self.text_tab = QWidget()
         self.text_tab.setFixedHeight(tab_page_height)
         text_tab_layout = QVBoxLayout(self.text_tab)
-        text_tab_layout.setContentsMargins(4, 8, 4, 4)
-        text_tab_layout.setSpacing(8)
+        text_tab_layout.setContentsMargins(4, 4, 4, 4)
+        text_tab_layout.setSpacing(4)
         text_tab_layout.addWidget(self.text_search, 1)
         text_tab_layout.addWidget(self.lbl_text_model_hint, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -270,22 +271,22 @@ class SearchPanel(VSCard):
         self.compose_tab = QWidget()
         self.compose_tab.setFixedHeight(tab_page_height)
         compose_tab_layout = QVBoxLayout(self.compose_tab)
-        compose_tab_layout.setContentsMargins(4, 8, 4, 4)
+        compose_tab_layout.setContentsMargins(4, 4, 4, 4)
         compose_tab_layout.setSpacing(0)
         compose_tab_layout.addWidget(self.compose_form, 1)
 
         self.dialogue_tab = QWidget()
         self.dialogue_tab.setFixedHeight(tab_page_height)
         dialogue_tab_layout = QVBoxLayout(self.dialogue_tab)
-        dialogue_tab_layout.setContentsMargins(4, 8, 4, 4)
-        dialogue_tab_layout.setSpacing(8)
+        dialogue_tab_layout.setContentsMargins(4, 4, 4, 4)
+        dialogue_tab_layout.setSpacing(4)
         dialogue_tab_layout.addWidget(self.dialogue_search, 1)
         dialogue_tab_layout.addWidget(self.lbl_dialogue_hint, 0, Qt.AlignmentFlag.AlignTop)
 
         self.tags_tab = QWidget()
         self.tags_tab.setFixedHeight(tab_page_height)
         tags_tab_layout = QVBoxLayout(self.tags_tab)
-        tags_tab_layout.setContentsMargins(4, 8, 4, 4)
+        tags_tab_layout.setContentsMargins(4, 4, 4, 4)
         tags_tab_layout.setSpacing(0)
         tags_tab_layout.addWidget(self.tags_form, 1)
 
@@ -293,6 +294,8 @@ class SearchPanel(VSCard):
         self.search_query_tabs.setObjectName("SearchQueryTabs")
         self.search_query_tabs.setFixedHeight(compute_search_query_tabs_height())
         self.search_query_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.search_query_tabs.tabBar().setUsesScrollButtons(False)
+        self.search_query_tabs.tabBar().setExpanding(False)
         self.search_query_tabs.addTab(self.image_tab, "")
         self.search_query_tabs.addTab(self.text_tab, "")
         self.search_query_tabs.addTab(self.compose_tab, "")
@@ -368,7 +371,7 @@ class SearchPanel(VSCard):
         self.btn_clear.setObjectName("DangerGhostButton")
         action_row = QHBoxLayout()
         # Extra top gap so the mode combo bottom border is not covered by 开始搜索.
-        action_row.setContentsMargins(0, 8, 0, 0)
+        action_row.setContentsMargins(0, 4, 0, 0)
         action_row.setSpacing(8)
         action_row.addWidget(self.btn_search, 1)
         action_row.addWidget(self.btn_save_preset, 0)

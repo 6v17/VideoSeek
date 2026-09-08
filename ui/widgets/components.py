@@ -920,20 +920,20 @@ class LibraryPage(QWidget):
         # Chrome: mode switch + add/remove as one left-packed group, hint underneath
         self.shared_toolbar_card = VSCard(
             variant="sub",
-            margins=(14, 12, 14, 12),
-            spacing=10,
+            margins=(12, 8, 12, 8),
+            spacing=6,
             object_name="LibrarySharedStrip",
         )
         shared_outer = self.shared_toolbar_card.content_layout
 
         chrome_row = QHBoxLayout()
         chrome_row.setContentsMargins(0, 0, 0, 0)
-        chrome_row.setSpacing(14)
+        chrome_row.setSpacing(10)
         chrome_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         mode_block = QVBoxLayout()
         mode_block.setContentsMargins(0, 0, 0, 0)
-        mode_block.setSpacing(4)
+        mode_block.setSpacing(2)
         self.lbl_mode_caption = QLabel()
         self.lbl_mode_caption.setObjectName("LibraryChromeCaption")
         mode_block.addWidget(self.lbl_mode_caption)
@@ -941,7 +941,7 @@ class LibraryPage(QWidget):
         self.mode_segment = QFrame()
         self.mode_segment.setObjectName("LibraryModeSegment")
         mode_row = QHBoxLayout(self.mode_segment)
-        mode_row.setContentsMargins(3, 3, 3, 3)
+        mode_row.setContentsMargins(2, 2, 2, 2)
         mode_row.setSpacing(2)
         mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.btn_tab_visual = QPushButton()
@@ -949,12 +949,12 @@ class LibraryPage(QWidget):
         self.btn_tab_visual.setCheckable(True)
         self.btn_tab_visual.setChecked(True)
         self.btn_tab_visual.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab_visual.setMinimumWidth(96)
+        self.btn_tab_visual.setMinimumWidth(88)
         self.btn_tab_dialogue = QPushButton()
         self.btn_tab_dialogue.setObjectName("LibraryModeBtn")
         self.btn_tab_dialogue.setCheckable(True)
         self.btn_tab_dialogue.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab_dialogue.setMinimumWidth(96)
+        self.btn_tab_dialogue.setMinimumWidth(88)
         mode_row.addWidget(self.btn_tab_visual)
         mode_row.addWidget(self.btn_tab_dialogue)
         self._library_mode_group = QButtonGroup(self)
@@ -966,7 +966,7 @@ class LibraryPage(QWidget):
 
         action_block = QVBoxLayout()
         action_block.setContentsMargins(0, 0, 0, 0)
-        action_block.setSpacing(4)
+        action_block.setSpacing(2)
         self.lbl_action_caption = QLabel()
         self.lbl_action_caption.setObjectName("LibraryChromeCaption")
         self.lbl_action_caption.setAlignment(
@@ -999,11 +999,10 @@ class LibraryPage(QWidget):
         self.lbl_shared_library_hint.setObjectName("LibraryChromeHint")
         self.lbl_shared_library_hint.setWordWrap(True)
         self.lbl_shared_library_hint.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
         )
         shared_outer.addWidget(self.lbl_shared_library_hint)
         page_body.addWidget(self.shared_toolbar_card)
-
         self.library_stack = QStackedWidget()
         self.library_stack.setObjectName("LibraryStack")
         # Compatibility alias: older code used QTabWidget APIs.

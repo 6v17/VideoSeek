@@ -141,6 +141,9 @@ class RuntimeResourceController(QObject):
             )
             self.dialog.import_requested.connect(self.parent_window.parse_model_packages)
             self.dialog.go_download_requested.connect(self.parent_window.open_model_package_download_page)
+            self.dialog.go_github_download_requested.connect(
+                self.parent_window.open_model_package_github_page
+            )
             self._dialog_theme = current_theme
             self._dialog_language = current_language
         return self.dialog

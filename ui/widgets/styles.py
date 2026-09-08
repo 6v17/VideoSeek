@@ -984,11 +984,12 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     border: 1px solid __LINE__;
     border-radius: 6px;
     outline: 0;
-    padding: 2px 0;
+    padding: 0;
 }
 #TagSuggestList::item {
-    padding: 5px 10px;
-    min-height: 22px;
+    padding: 2px 8px;
+    min-height: 18px;
+    border-bottom: 1px solid __LINE__;
 }
 #TagSuggestList::item:selected,
 #TagSuggestList::item:hover {
@@ -1171,8 +1172,9 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     border-bottom: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
-    padding: 8px 18px;
-    margin-right: 4px;
+    /* Keep compact so EN labels (Image/Text/Compose/Subs/Tags) fit the search panel width. */
+    padding: 6px 8px;
+    margin-right: 2px;
     color: __MUTED__;
     font-weight: 600;
 }
@@ -1234,31 +1236,33 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: __PANEL__;
     border: 1px solid __LINE__;
     border-radius: 10px;
+    padding: 0;
 }
 /* Same family as 添加库 / 删除库; never set max-height (clips bottom borders). */
 #LibrarySharedStrip #SuccessGhostButton,
 #LibrarySharedStrip #DangerGhostButton {
-    min-height: 34px;
-    padding: 6px 16px;
+    min-height: 28px;
+    padding: 4px 12px;
     border-radius: 8px;
 }
 #LibraryChromeCaption {
     color: __MUTED__;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.02em;
     background: transparent;
     border: none;
     padding: 0;
+    margin: 0;
 }
 #LibraryChromeHint {
     color: __MUTED__;
     font-size: 12px;
     font-weight: 500;
-    background: __FIELD__;
-    border: 1px solid __LINE__;
-    border-radius: 8px;
-    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
 }
 #LibraryStack {
     background: transparent;
@@ -1267,17 +1271,17 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryModeSegment {
     background: __FIELD__;
     border: 1px solid __LINE__;
-    border-radius: 10px;
+    border-radius: 8px;
 }
 #LibraryModeBtn {
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 6px;
     color: __MUTED__;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
-    min-height: 30px;
-    padding: 5px 16px;
+    min-height: 26px;
+    padding: 3px 12px;
 }
 #LibraryModeBtn:hover:!checked {
     background: __BUTTON_SOFT_HOVER__;
@@ -2075,42 +2079,161 @@ QFrame#ExportModeOptionCard[selected="true"] {
 #MessageBadge[kind="error"] {
     background: __DANGER__;
 }
-#ModelUploadArea {
-    text-align: center;
-    border: 1px dashed __LINE_STRONG__;
-    border-radius: 8px;
-    padding: 18px;
-    background: __PANEL__;
+#ModelImportGuide {
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+    background: __TRACK__;
+}
+#ModelImportGuide #SectionLabel {
     color: __HEADLINE__;
-    font-size: 13px;
-    font-weight: 600;
-    min-height: 96px;
+    font-size: 12px;
+    font-weight: 700;
+}
+#ModelImportGuideSubTitle {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 6px;
+    padding-top: 2px;
+    background: transparent;
+}
+#ModelImportGuideLine {
+    color: __TEXT__;
+    font-size: 12px;
+    line-height: 1.35;
+    background: transparent;
+}
+#ModelUploadArea {
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 10px;
+    background: __TRACK__;
+    min-height: 88px;
 }
 #ModelUploadArea:hover {
     border-color: __ACCENT__;
-    background: __FIELD__;
+    background: __ACCENT_SOFT__;
 }
-QListWidget#ModelFileList {
+#ModelUploadIcon {
+    background: __PANEL__;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 8px;
+}
+#ModelUploadTitle {
+    color: __HEADLINE__;
+    font-size: 13px;
+    font-weight: 700;
+    background: transparent;
+}
+#ModelUploadMeta {
+    color: __MUTED__;
+    font-size: 11px;
+    background: transparent;
+}
+#ModelUploadAction {
+    color: __ACCENT__;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+}
+#ModelResourceStatusInline {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+}
+#ModelResourceStatusBar {
+    background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 8px;
+    min-width: 148px;
+}
+#ModelResourceStatusChip {
+    font-size: 12px;
+    font-weight: 600;
+}
+QDialog#ModelImportDialog {
+    background: __WINDOW__;
+}
+QDialog#ModelImportDialog QFrame#Card {
     background: __PANEL__;
-    padding: 6px;
+    border: 1px solid __LINE_STRONG__;
+}
+QListWidget#ModelFileList {
+    border: none;
+    background: transparent;
+    padding: 0;
     outline: 0;
 }
 QListWidget#ModelFileList::item {
-    padding: 8px 10px;
-    border-radius: 8px;
-    margin: 2px 0;
-    border: 1px solid transparent;
-}
-QListWidget#ModelFileList::item:hover {
-    background: __FIELD__;
-    border-color: __LINE__;
+    padding: 0;
+    margin: 0 0 8px 0;
+    border: none;
+    background: transparent;
 }
 QListWidget#ModelFileList::item:selected {
-    background: __FIELD__;
+    background: transparent;
+}
+#ModelPendingPanel {
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 10px;
+    background: __TRACK__;
+}
+#ModelPendingPanel #SectionLabel {
     color: __HEADLINE__;
+    font-size: 12px;
+    font-weight: 700;
+}
+#ModelPendingCount {
+    color: __ACCENT__;
+    font-size: 12px;
+    font-weight: 700;
+}
+#ModelPendingRow {
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 8px;
+    background: __PANEL__;
+}
+#ModelPendingRow:hover {
     border-color: __ACCENT__;
+}
+#ModelPendingRow[selected="true"] {
+    border: 2px solid __ACCENT__;
+    background: __ACCENT_SOFT__;
+}
+#ModelPendingRowName {
+    color: __HEADLINE__;
+    font-size: 13px;
+    font-weight: 600;
+}
+#ModelPendingRowMeta {
+    color: __MUTED__;
+    font-size: 11px;
+}
+#ModelPendingKind {
+    color: __ACCENT__;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border: 1px solid __ACCENT__;
+    border-radius: 4px;
+    background: __ACCENT_SOFT__;
+}
+QListWidget#ModelInstalledList {
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+    background: __PANEL__;
+    padding: 4px;
+    outline: 0;
+}
+QListWidget#ModelInstalledList::item {
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: __TEXT__;
+    font-size: 12px;
+}
+#SectionLabel {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 700;
 }
 QListWidget#UnderstandingServiceNav {
     border: 1px solid __LINE__;

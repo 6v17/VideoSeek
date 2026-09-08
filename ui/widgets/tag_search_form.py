@@ -63,7 +63,7 @@ class TagSearchForm(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(6)
+        root.setSpacing(4)
 
         self.chips_scroll = QScrollArea()
         self.chips_scroll.setObjectName("TagChipScroll")
@@ -94,7 +94,8 @@ class TagSearchForm(QWidget):
         self.suggest_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.suggest_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.suggest_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.suggest_list.setSpacing(1)
+        self.suggest_list.setSpacing(0)
+        self.suggest_list.setUniformItemSizes(True)
         self.suggest_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root.addWidget(self.suggest_list, 1)
 
