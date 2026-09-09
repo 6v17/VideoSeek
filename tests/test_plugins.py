@@ -48,6 +48,16 @@ class PluginRegistryTests(unittest.TestCase):
             ("search", "library", "understanding", "clone", "link", "settings"),
         )
 
+    def test_register_page_accepts_visible_fn(self):
+        registry = get_registry()
+        registry.register_page(
+            "clone",
+            label_key="nav_clone",
+            factory=lambda: object(),
+            visible_fn=lambda: False,
+        )
+        self.assertFalse(registry.pages[0].visible_fn())
+
     def test_package_kind_reserved_names_rejected(self):
         with self.assertRaises(ValueError):
             get_registry().register_package_kind(

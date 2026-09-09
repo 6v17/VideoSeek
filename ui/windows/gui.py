@@ -266,6 +266,7 @@ class MainWindow(
                 insert_after=spec.insert_after,
             )
             button.clicked.connect(lambda _checked=False, name=spec.page_id: self.switch_page(name))
+        self.refresh_plugin_nav_visibility()
 
         builtin_widgets = {
             "search": lambda: self._build_scroll_page(self.search_page),
@@ -614,6 +615,36 @@ class MainWindow(
                 raise
         for feature in get_registry().features:
             feature.wire_signals(self)
+        self.refresh_plugin_nav_visibility()
+
+    def refresh_plugin_nav_visibility(self) -> None:
+        """Show/hide optional plugin nav entries based on ``PageSpec.visible_fn``."""
+        sidebar = getattr(self, "sidebar", None)
+        if sidebar is None:
+            return
+        specs = getattr(self, "_plugin_page_specs", None) or {}
+        current = ""
+        try:
+            idx = int(self.pages.currentIndex()) if getattr(self, "pages", None) is not None else -1
+            order = list(getattr(self, "_nav_page_order", ()) or ())
+            if 0 <= idx < len(order):
+                current = order[idx]
+        except Exception:
+            current = ""
+        for page_id, spec in specs.items():
+            button = sidebar.nav_button(page_id)
+            if button is None:
+                continue
+            visible_fn = getattr(spec, "visible_fn", None)
+            visible = True
+            if callable(visible_fn):
+                try:
+                    visible = bool(visible_fn())
+                except Exception:
+                    visible = False
+            button.setVisible(visible)
+            if not visible and current == page_id:
+                self.switch_page("search")
 
     def switch_page(self, page_name):
         mapping = {name: i for i, name in enumerate(self._nav_page_order)}
@@ -1254,6 +1285,8 @@ class MainWindow(
         self.settings_page.lbl_status.setText(t["settings_hint"])
         self._bind_sampling_preview_signals()
         self._update_sampling_preview()
+        if hasattr(self, "push_resources_status"):
+            self.push_resources_status()
         if self._startup_complete:
             self.refresh_library_table()
             self.refresh_search_presets_ui()

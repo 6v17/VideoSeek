@@ -24,6 +24,9 @@ class PageSpec:
     factory: Callable[[], Any]
     insert_after: str = "understanding"
     scrollable: bool = True
+    # When set, sidebar shows this page only while the callable returns True
+    # (e.g. clone nav appears after the fingerprint model is installed).
+    visible_fn: Optional[Callable[[], bool]] = None
 
 
 @dataclass
@@ -73,6 +76,7 @@ class PluginRegistry:
         factory: Callable[[], Any],
         insert_after: str = "understanding",
         scrollable: bool = True,
+        visible_fn: Optional[Callable[[], bool]] = None,
     ) -> None:
         page_id = str(page_id or "").strip()
         if not page_id:
@@ -86,6 +90,7 @@ class PluginRegistry:
                 factory=factory,
                 insert_after=str(insert_after or "understanding"),
                 scrollable=bool(scrollable),
+                visible_fn=visible_fn,
             )
         )
 

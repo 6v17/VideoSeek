@@ -568,17 +568,21 @@ class RuntimeGuiMixin:
         self.runtime_resource_controller.show_manage_dialog()
 
     def _on_runtime_banner_action(self):
-        if getattr(self, "_legacy_migration_tip_visible", False) and not self.is_startup_migration_busy():
-            # Prefer opening Settings migrate when tip is showing and resources are OK.
-            try:
-                from src.services.runtime_resource_service import get_runtime_resource_status
-
-                if get_runtime_resource_status().get("resources_ready"):
-                    self._open_settings_for_legacy_migration()
-                    return
-            except Exception:
-                self._open_settings_for_legacy_migration()
-                return
+        # Prefer the tip kind currently shown: legacy migrate vs import resources.
+        tip_kind = ""
+        for page in self._iter_runtime_banner_pages():
+            banner = getattr(getattr(page, "header", None), "runtime_banner", None)
+            if banner is not None and banner.isVisible():
+                tip_kind = str(banner.property("tipKind") or "").strip()
+                if tip_kind:
+                    break
+        if tip_kind == "legacy_migration" or (
+            getattr(self, "_legacy_migration_tip_visible", False)
+            and not self.is_startup_migration_busy()
+            and tip_kind != "resources_missing"
+        ):
+            self._open_settings_for_legacy_migration()
+            return
         self.open_runtime_resource_dialog()
 
     def open_model_package_download_page(self):
@@ -645,28 +649,75 @@ class RuntimeGuiMixin:
         if status.get("resources_ready") and getattr(self, "_legacy_migration_tip_visible", False):
             self._show_legacy_migration_tip_banner()
             return
-        model_ready = bool(status.get("model_ready"))
-        ffmpeg_ready = bool(status.get("ffmpeg_ready"))
-        if (not model_ready) and (not ffmpeg_ready):
-            missing_text = self.texts.get("models_missing_generic_both", "Model and FFmpeg are not ready.")
-        elif not model_ready:
-            missing_text = self.texts.get("models_missing_generic_model", "Model resources are missing.")
-        elif not ffmpeg_ready:
-            missing_text = self.texts.get("models_missing_generic_ffmpeg", "FFmpeg is missing.")
-        else:
-            missing_text = self.texts.get("models_missing_generic_unknown", "Runtime resources are incomplete.")
-        banner_text = self.texts.get("runtime_banner_missing", "Runtime resources are not ready: {missing}").format(missing=missing_text)
-        action_text = self.texts.get("runtime_banner_open_import", "Go Import")
+        banner_text = self.texts.get("runtime_banner_missing", "Missing runtime resources")
+        action_text = self.texts.get("runtime_banner_open_import", "Go to import")
+        show_warn = not bool(status.get("resources_ready"))
         for page in self._iter_runtime_banner_pages():
             banner = page.header.runtime_banner
             banner_label = page.header.runtime_banner_text
             banner_btn = page.header.runtime_banner_action
             banner_btn.setText(action_text)
-            if status.get("resources_ready"):
-                set_runtime_banner_warn(banner, False)
-                banner.hide()
-            else:
+            if show_warn:
                 banner_label.setText(banner_text)
+                banner.setProperty("tipKind", "resources_missing")
                 set_runtime_banner_warn(banner, True)
                 banner_btn.show()
                 banner.show()
+            else:
+                banner.setProperty("tipKind", "")
+                set_runtime_banner_warn(banner, False)
+                banner.hide()
+        if show_warn:
+            self._start_runtime_inline_tip_breathing()
+        else:
+            self._stop_runtime_inline_tip_breathing()
+
+    def _start_runtime_inline_tip_breathing(self):
+        from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+        effects = getattr(self, "_runtime_inline_tip_effects", None)
+        anims = getattr(self, "_runtime_inline_tip_animations", None)
+        if effects is None:
+            effects = {}
+            self._runtime_inline_tip_effects = effects
+        if anims is None:
+            anims = {}
+            self._runtime_inline_tip_animations = anims
+
+        for page in self._iter_runtime_banner_pages():
+            # Animate the whole tip (label + button) so both breathe together.
+            host = page.header.runtime_banner
+            if not host.isVisible():
+                continue
+            key = id(host)
+            effect = effects.get(key)
+            if effect is None:
+                effect = QGraphicsOpacityEffect(host)
+                effect.setOpacity(1.0)
+                host.setGraphicsEffect(effect)
+                effects[key] = effect
+            animation = anims.get(key)
+            if animation is None:
+                animation = QPropertyAnimation(effect, b"opacity", self)
+                animation.setDuration(1600)
+                animation.setStartValue(1.0)
+                animation.setKeyValueAt(0.5, 0.45)
+                animation.setEndValue(1.0)
+                animation.setEasingCurve(QEasingCurve.InOutSine)
+                animation.setLoopCount(-1)
+                anims[key] = animation
+            if animation.state() != QPropertyAnimation.Running:
+                animation.start()
+
+    def _stop_runtime_inline_tip_breathing(self):
+        from PySide6.QtCore import QPropertyAnimation
+
+        anims = getattr(self, "_runtime_inline_tip_animations", None) or {}
+        effects = getattr(self, "_runtime_inline_tip_effects", None) or {}
+        for animation in anims.values():
+            if animation is not None and animation.state() == QPropertyAnimation.Running:
+                animation.stop()
+        for effect in effects.values():
+            if effect is not None:
+                effect.setOpacity(1.0)

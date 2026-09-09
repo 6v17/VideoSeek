@@ -362,6 +362,32 @@ class StartupMigrationGateTests(unittest.TestCase):
                 self.assertFalse(migration_runner_module.needs_background_startup_migration(config))
                 mock_npy.assert_not_called()
 
+    def test_empty_wipe_bootstraps_inline_without_legacy_tip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = os.path.join(tmp, "profile")
+            model_dir = os.path.join(data_root, "models")
+            os.makedirs(model_dir, exist_ok=True)
+            config = {
+                "schema_version": 1,
+                "data_root": data_root,
+                "model_dir": model_dir,
+                "models": {"active_profile": "clip_onnx_default", "profiles": []},
+            }
+            with (
+                patch.object(migration_runner_module, "load_config", return_value=config),
+                patch.object(migration_runner_module, "save_config", side_effect=lambda c: None),
+                patch(
+                    "src.services.model_package_service.ensure_default_clip_manifest",
+                    return_value=None,
+                ),
+            ):
+                self.assertFalse(migration_runner_module.needs_background_startup_migration(config))
+                result = migration_runner_module.run_startup_migration_quick()
+            self.assertFalse(result.get("needs_background"))
+            self.assertTrue(result.get("migrated"))
+            state_file = os.path.join(data_root, "data", "migration_state.json")
+            self.assertTrue(os.path.isfile(state_file))
+
 
 if __name__ == "__main__":
     unittest.main()

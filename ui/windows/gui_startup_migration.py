@@ -178,12 +178,17 @@ class StartupMigrationGuiMixin:
             banner_text.setText(self.texts["startup_migration_banner"].format(percent=int(value), message=text))
             set_runtime_banner_warn(banner, True)
             banner.show()
+        if hasattr(self, "_start_runtime_inline_tip_breathing"):
+            self._start_runtime_inline_tip_breathing()
 
     def _hide_startup_migration_banner(self):
         self.sidebar.runtime_hint.hide()
         for page in self._iter_runtime_banner_pages():
+            page.header.runtime_banner.setProperty("tipKind", "")
             page.header.runtime_banner.hide()
             page.header.runtime_banner_action.show()
+        if hasattr(self, "_stop_runtime_inline_tip_breathing"):
+            self._stop_runtime_inline_tip_breathing()
         if hasattr(self, "push_resources_status"):
             self.push_resources_status()
 
@@ -207,9 +212,12 @@ class StartupMigrationGuiMixin:
             action = page.header.runtime_banner_action
             banner_text.setText(tip)
             action.setText(action_text)
+            banner.setProperty("tipKind", "legacy_migration")
             action.show()
             set_runtime_banner_warn(banner, True)
             banner.show()
+        if hasattr(self, "_start_runtime_inline_tip_breathing"):
+            self._start_runtime_inline_tip_breathing()
 
     def _dismiss_legacy_migration_tip(self):
         self._legacy_migration_tip_visible = False

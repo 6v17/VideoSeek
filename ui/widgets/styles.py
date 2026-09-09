@@ -82,6 +82,49 @@ QMenu::separator {
     font-size: 12px;
     font-weight: 700;
 }
+/* Page title-row tip: no strip — yellow text only when warn */
+#RuntimeInlineTip {
+    background: transparent;
+    border: none;
+}
+#RuntimeInlineTip #RuntimeInlineTipText {
+    color: __TEXT__;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 0;
+}
+#RuntimeInlineTip[bannerTone="warn"] {
+    background: transparent;
+    border: none;
+}
+#RuntimeInlineTip[bannerTone="warn"] #RuntimeInlineTipText {
+    color: __WARN__;
+    font-size: 15px;
+    font-weight: 700;
+}
+#RuntimeInlineTip #AccentGhostButton {
+    min-height: 32px;
+    max-height: 34px;
+    padding: 4px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton {
+    color: __WARN__;
+    border: 1px solid __WARN__;
+    background: __WARN_SOFT__;
+}
+#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton:hover {
+    color: __WARN__;
+    border-color: __WARN__;
+    background: __WARN_SOFT__;
+}
+#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton:pressed {
+    color: __WARN__;
+    border-color: __WARN__;
+    background: __WARN_SOFT__;
+}
 #NoticeTitle {
     color: __NOTICE_TEXT__;
     font-size: 14px;
@@ -288,16 +331,31 @@ QCheckBox:disabled {
 #UnderstandingCommandBar #AccentGhostButton,
 #UnderstandingCommandBar #DangerGhostButton,
 #UnderstandingCommandBar #SuccessGhostButton,
-#UnderstandingCommandBar #NeutralToolButton,
+#UnderstandingCommandBar #NeutralToolButton {
+    min-height: 32px;
+    padding: 5px 14px;
+    border-radius: 6px;
+}
 #CloneCommandBar #PrimaryButton,
 #CloneCommandBar #GhostButton,
 #CloneCommandBar #AccentGhostButton,
 #CloneCommandBar #DangerGhostButton,
 #CloneCommandBar #SuccessGhostButton,
 #CloneCommandBar #NeutralToolButton {
-    min-height: 32px;
-    padding: 5px 14px;
-    border-radius: 6px;
+    min-height: 24px;
+    max-height: 26px;
+    padding: 1px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+}
+#CloneCommandBar #PrimaryButton:pressed,
+#CloneCommandBar #GhostButton:pressed,
+#CloneCommandBar #AccentGhostButton:pressed,
+#CloneCommandBar #DangerGhostButton:pressed,
+#CloneCommandBar #SuccessGhostButton:pressed,
+#CloneCommandBar #NeutralToolButton:pressed {
+    padding-top: 2px;
+    padding-bottom: 0px;
 }
 #UnderstandingStepBar {
     background: transparent;
@@ -2830,7 +2888,7 @@ THEME_COLORS_LIGHT_BASE = {
     "SUCCESS": "#0f7b3a",
     "SUCCESS_HOVER": "#159345",
     "SUCCESS_SOFT": "#e6f5ec",
-    "WARN": "#9a6700",
+    "WARN": "#7a4f00",
     "WARN_SOFT": "#fff4ce",
     "DANGER": "#c42b1c",
     "DANGER_SOFT": "#fde7e9",

@@ -411,8 +411,9 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
             {"understanding_mode": "motion", "caption_language": "zh"}
         )
         self.assertIn("拼接图", motion_settings["prompt"])
-        self.assertIn("2-4句", motion_settings["prompt"])
+        self.assertIn("2-3句", motion_settings["prompt"])
         self.assertIn("变化", motion_settings["prompt"])
+        self.assertIn('"tags":["男人","起身","手机","室内","近景"]', motion_settings["prompt"])
         self.assertNotEqual(motion_settings["prompt"], tag_settings["prompt"])
 
     def test_finalize_uses_custom_prompts_when_enabled(self):

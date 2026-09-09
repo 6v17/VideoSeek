@@ -643,6 +643,62 @@ def _load_meta_for_startup(config):
     return load_metadata(existing_meta_file)
 
 
+def _has_heavy_legacy_migration_work(config, meta=None) -> bool:
+    """True when wiped/fresh installs should NOT show the legacy-migration tip.
+
+    Missing migration markers alone is not enough — empty wipes just need a quiet
+    inline bootstrap. Tip only when there is real legacy payload to move/import.
+    """
+    runtime_config = config or load_config()
+    if legacy_npy_vectors_present(runtime_config):
+        return True
+    if needs_search_index_schema_migration(runtime_config):
+        return True
+    payload = meta if isinstance(meta, dict) else _load_meta_for_startup(runtime_config)
+    libraries = payload.get("libraries") if isinstance(payload, dict) else None
+    if isinstance(libraries, dict) and libraries:
+        return True
+    return False
+
+
+def _bootstrap_fresh_schema_v2(config, progress_callback=None):
+    """Quietly seed schema v2 + migration_state for empty / wiped installs."""
+    _emit(progress_callback, 20, "正在初始化数据结构")
+    normalized_config = _normalize_config_v2(config)
+    save_config(normalized_config)
+    latest_config = load_config()
+    model_paths = get_model_profile_storage_paths(config=latest_config)
+    _ensure_expected_asset_dirs(latest_config)
+    latest_meta = load_metadata(model_paths["meta_file"])
+    save_metadata(_normalize_meta_v2(latest_meta, latest_config), model_paths["meta_file"])
+    try:
+        from src.services.model_package_service import ensure_default_clip_manifest
+
+        ensure_default_clip_manifest(config=latest_config)
+    except Exception:
+        logger.warning("Failed to write default CLIP model manifest during fresh schema bootstrap", exc_info=True)
+    _write_migration_state(latest_config, "")
+    video_id_result, search_index_result = _apply_post_schema_maintenance(
+        latest_config,
+        progress_callback=progress_callback,
+    )
+    _emit(progress_callback, 100, "数据结构已就绪")
+    return _attach_maintenance_summary(
+        {
+            "needs_background": False,
+            "migrated": True,
+            "schema_version": TARGET_SCHEMA_VERSION,
+            "backup_dir": "",
+            "migrated_local_payloads": 0,
+            "migrated_local_asset_files": 0,
+            "migrated_global_payloads": 0,
+            "migrated_remote_payloads": 0,
+        },
+        video_id_result,
+        search_index_result,
+    )
+
+
 def needs_background_startup_migration(config=None):
     """True when startup must run full migration off the UI thread."""
     from src.storage.video_id_migration import is_lance_migration_completed
@@ -650,7 +706,8 @@ def needs_background_startup_migration(config=None):
     runtime_config = config or load_config()
     meta = _load_meta_for_startup(runtime_config)
     if not _already_migrated(runtime_config, meta):
-        return True
+        # Fresh wipe / new install: no tip, quick path bootstraps inline.
+        return _has_heavy_legacy_migration_work(runtime_config, meta)
     # Trust the recorded Lance flag: leftover npy sidecars after completed migration
     # must not force a vector-dir listdir (or video-id scan) on every launch.
     if not is_lance_migration_completed(runtime_config) and legacy_npy_vectors_present(runtime_config):
@@ -665,6 +722,10 @@ def run_startup_migration_quick(progress_callback=None):
     """Fast synchronous checks; defer heavy work when needs_background_startup_migration()."""
     _emit(progress_callback, 3, "正在快速检查数据结构")
     config = load_config()
+    meta = _load_meta_for_startup(config)
+    if not _already_migrated(config, meta) and not _has_heavy_legacy_migration_work(config, meta):
+        logger.info("Fresh/empty install: bootstrapping schema v2 inline (no legacy tip)")
+        return _bootstrap_fresh_schema_v2(config, progress_callback=progress_callback)
     if needs_background_startup_migration(config):
         logger.info("Startup migration deferred to background worker")
         config_version = _read_schema_version(config.get("schema_version"), default=1)
@@ -683,7 +744,6 @@ def run_startup_migration_quick(progress_callback=None):
             "pending_legacy": False,
         }
 
-    meta = _load_meta_for_startup(config)
     try:
         from src.services.model_package_service import ensure_default_clip_manifest
 
