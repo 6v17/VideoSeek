@@ -383,15 +383,20 @@ def resolve_active_search_mode(config=None) -> str:
 def resolve_fetch_top_k(top_k: int, scoped: bool) -> int:
     normalized_top_k = max(1, int(top_k))
     if scoped:
-        return min(200, max(normalized_top_k * 5, normalized_top_k + 10))
+        # Keep the historical soft ceiling for modest top_k, but never fetch fewer
+        # rows than the user-facing result limit (now up to 300).
+        expanded = max(normalized_top_k * 5, normalized_top_k + 10)
+        return max(normalized_top_k, min(200, expanded))
     return normalized_top_k
 
 
 def resolve_per_video_fetch_top_k(top_k: int, video_count: int) -> int:
     normalized_top_k = max(1, int(top_k))
     if int(video_count) <= 1:
-        return min(200, max(normalized_top_k * 5, normalized_top_k + 10))
-    return min(200, max(normalized_top_k * 2, normalized_top_k + 5))
+        expanded = max(normalized_top_k * 5, normalized_top_k + 10)
+    else:
+        expanded = max(normalized_top_k * 2, normalized_top_k + 5)
+    return max(normalized_top_k, min(200, expanded))
 
 
 def is_search_scoped(

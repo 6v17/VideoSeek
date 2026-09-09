@@ -220,12 +220,18 @@ class SearchController(QObject):
             pass
 
     def start_warmup(self):
+        if self.is_warmup_running():
+            return
         if self._warmup_started:
             return
         self._warmup_started = True
         self.warmup_worker = SearchWarmupWorker()
         self.warmup_worker.finished.connect(self._finish_warmup)
         self.warmup_worker.start()
+
+    def is_warmup_running(self) -> bool:
+        worker = self.warmup_worker
+        return worker is not None and worker.isRunning()
 
     def stop_thumbnail_loading(self):
         thread = self.thumb_thread
@@ -455,7 +461,10 @@ class SearchController(QObject):
         if self._is_shutdown:
             return
         self.warmup_worker = None
-        self.parent_window.push_inference_status()
+        if hasattr(self.parent_window, "_on_runtime_warmup_finished"):
+            self.parent_window._on_runtime_warmup_finished()
+        else:
+            self.parent_window.push_inference_status()
 
     def _handle_search_error(self, error_text):
         if self._is_shutdown or not self._is_current_worker():

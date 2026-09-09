@@ -109,7 +109,7 @@ class AgentApiHelperTests(unittest.TestCase):
         with patch("src.web.agent_api.search.get_search_top_k", return_value=20):
             self.assertEqual(_clamp_top_k(None), 20)
             self.assertEqual(_clamp_top_k(3), 3)
-            self.assertEqual(_clamp_top_k(999), 200)
+            self.assertEqual(_clamp_top_k(999), 300)
             self.assertEqual(_clamp_top_k("bad"), 20)
 
     @patch.object(config_store_module, "get_search_scope_video_paths", return_value=[])

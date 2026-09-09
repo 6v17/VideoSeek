@@ -139,7 +139,7 @@ def _clamp_top_k(top_k: Optional[int]) -> int:
         value = int(top_k)
     except (TypeError, ValueError):
         return default_k
-    return max(1, min(200, value))
+    return max(1, min(300, value))
 
 
 def _normalize_agent_path(path: str) -> str:

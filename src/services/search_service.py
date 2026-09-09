@@ -97,7 +97,11 @@ from src.services.search_neighbor_rerank import (
     _neighbor_candidate_score,
     _neighbor_rerank_enabled,
 )
-from src.services.search_query import filter_hits_by_min_score
+from src.services.search_query import (
+    _coalesce_query_vector,
+    build_query_vector,
+    filter_hits_by_min_score,
+)
 from src.services.search_video_discovery import (
     _aggregate_hits_to_video_discovery,
     _apply_video_discovery_presentation,
@@ -116,43 +120,6 @@ from src.storage.config_store import (
 )
 
 logger = get_logger("search_service")
-
-
-def build_query_vector(query_data, is_text=False):
-    import faiss
-    from src.core.clip_embedding import get_clip_embeddings_batch, get_text_embedding
-
-    if is_text:
-        query_vector = get_text_embedding(query_data)
-    elif isinstance(query_data, str):
-        from src.core.image_io import load_image_bgr
-
-        image = load_image_bgr(query_data)
-        if image is None:
-            raise RuntimeError(
-                "Could not load query image. Use JPG/PNG/WEBP, or install pillow-heif for iPhone HEIC photos."
-            )
-        query_vector = get_clip_embeddings_batch([image])
-    else:
-        query_vector = get_clip_embeddings_batch([query_data])
-
-    query_vector = query_vector.astype("float32")
-    faiss.normalize_L2(query_vector)
-    return query_vector
-
-
-def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
-    if query_vector is not None:
-        import faiss
-
-        vector = np.asarray(query_vector, dtype=np.float32)
-        if vector.ndim == 1:
-            vector = vector.reshape(1, -1)
-        elif vector.ndim != 2 or vector.shape[0] != 1:
-            raise RuntimeError("Invalid query vector. Please retry the search.")
-        faiss.normalize_L2(vector)
-        return vector
-    return build_query_vector(query_data, is_text=is_text)
 
 
 def _run_frame_search_per_videos(
@@ -1074,7 +1041,7 @@ def run_dialogue_search(
         resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
     except (TypeError, ValueError):
         resolved_top_k = get_search_top_k(cfg)
-    resolved_top_k = max(1, min(200, resolved_top_k))
+    resolved_top_k = max(1, min(300, resolved_top_k))
 
     # Over-fetch when scoped so post-filter still has candidates.
     fetch_k = resolve_fetch_top_k(
@@ -1177,7 +1144,7 @@ def run_tag_search(
         resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
     except (TypeError, ValueError):
         resolved_top_k = get_search_top_k(cfg)
-    resolved_top_k = max(1, min(200, resolved_top_k))
+    resolved_top_k = max(1, min(300, resolved_top_k))
 
     stats = get_tag_index_stats(config=cfg)
     if not stats.get("tag_index_ready"):

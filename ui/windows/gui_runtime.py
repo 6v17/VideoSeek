@@ -11,9 +11,12 @@ from PySide6.QtWidgets import QApplication
 
 from src.app.app_meta import get_app_meta
 from src.app.config import get_configured_data_root, load_config
+from src.app.logging_utils import get_logger
 from src.utils import get_configured_model_dir, get_ffmpeg_status_text, open_folder_in_explorer
 from ui.dialogs import AppMessageDialog
 from ui.widgets.styles import set_runtime_banner_warn
+
+logger = get_logger("gui.runtime")
 
 
 class RuntimeGuiMixin:
@@ -458,8 +461,71 @@ class RuntimeGuiMixin:
         self.close()
 
     def _start_runtime_warmup(self):
+        """Deprecated path: warmup is lazy on first CLIP search/sync."""
+        self.ensure_runtime_warmup(lambda: None)
+
+    def ensure_runtime_warmup(self, on_ready) -> None:
+        """Warm CLIP/ONNX once, show status on search+library bars, then run ``on_ready``."""
+        if callable(on_ready) is False:
+            on_ready = lambda: None
+        if getattr(self, "_runtime_warmup_ready", False):
+            on_ready()
+            return
+        callbacks = getattr(self, "_warmup_ready_callbacks", None)
+        if callbacks is None:
+            self._warmup_ready_callbacks = []
+            callbacks = self._warmup_ready_callbacks
+        callbacks.append(on_ready)
+        if self.search_controller.is_warmup_running():
+            self._apply_runtime_warmup_status()
+            return
+        self._apply_runtime_warmup_status()
         self.search_controller.start_warmup()
-        self.preview_controller.start_warmup()
+
+    def _apply_runtime_warmup_status(self) -> None:
+        text = self.texts.get("runtime_warmup_status", "Warming up model…")
+        search_lbl = getattr(self.search_page, "lbl_status", None)
+        library_lbl = getattr(self.library_page, "lbl_status", None)
+        if search_lbl is not None:
+            search_lbl.setText(text)
+        if library_lbl is not None:
+            library_lbl.setText(text)
+        btn_search = getattr(self.search_page, "btn_search", None)
+        if btn_search is not None:
+            btn_search.setEnabled(False)
+        btn_sync = getattr(self.library_page, "btn_sync_db", None)
+        if btn_sync is not None and self.ui_state.resources_ready:
+            # Keep sync disabled while the engine is still loading.
+            btn_sync.setEnabled(False)
+
+    def _on_runtime_warmup_finished(self) -> None:
+        self._runtime_warmup_ready = True
+        self.push_inference_status()
+        callbacks = list(getattr(self, "_warmup_ready_callbacks", []) or [])
+        self._warmup_ready_callbacks = []
+        btn_search = getattr(self.search_page, "btn_search", None)
+        if btn_search is not None:
+            btn_search.setEnabled(True)
+        if self.ui_state.resources_ready:
+            btn_sync = getattr(self.library_page, "btn_sync_db", None)
+            if btn_sync is not None:
+                btn_sync.setEnabled(True)
+            btn_refresh = getattr(self.library_page, "btn_refresh_visual_library", None)
+            if btn_refresh is not None:
+                btn_refresh.setEnabled(True)
+        ready_text = self.texts.get("ready", "")
+        warmup_text = self.texts.get("runtime_warmup_status", "Warming up model…")
+        for lbl in (
+            getattr(self.search_page, "lbl_status", None),
+            getattr(self.library_page, "lbl_status", None),
+        ):
+            if lbl is not None and lbl.text().strip() == warmup_text.strip():
+                lbl.setText(ready_text)
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.exception("Runtime warmup ready callback failed")
 
     def check_runtime_resources(self, show_dialog=True):
         return self.runtime_resource_controller.check_resources(show_dialog=show_dialog)
@@ -501,6 +567,20 @@ class RuntimeGuiMixin:
     def open_runtime_resource_dialog(self):
         self.runtime_resource_controller.show_manage_dialog()
 
+    def _on_runtime_banner_action(self):
+        if getattr(self, "_legacy_migration_tip_visible", False) and not self.is_startup_migration_busy():
+            # Prefer opening Settings migrate when tip is showing and resources are OK.
+            try:
+                from src.services.runtime_resource_service import get_runtime_resource_status
+
+                if get_runtime_resource_status().get("resources_ready"):
+                    self._open_settings_for_legacy_migration()
+                    return
+            except Exception:
+                self._open_settings_for_legacy_migration()
+                return
+        self.open_runtime_resource_dialog()
+
     def open_model_package_download_page(self):
         app_meta = get_app_meta()
         target_url = str(app_meta.get("model_manifest_url", "") or "").strip()
@@ -540,11 +620,7 @@ class RuntimeGuiMixin:
         self.search_page.btn_search.setEnabled(True)
         self.library_page.btn_sync_db.setEnabled(resources_ready)
         self.library_page.btn_refresh_visual_library.setEnabled(resources_ready)
-        if resources_ready:
-            if getattr(self, "_startup_complete", False):
-                self._start_runtime_warmup()
-            else:
-                self._defer_runtime_warmup = True
+        # CLIP/ONNX warmup is deferred until first visual search or library sync.
         disabled_text = self.texts.get("model_features_disabled", "")
         if not resources_ready:
             status_text = disabled_text
@@ -564,6 +640,11 @@ class RuntimeGuiMixin:
         self._update_runtime_banner(status)
 
     def _update_runtime_banner(self, status):
+        if self.is_startup_migration_busy():
+            return
+        if status.get("resources_ready") and getattr(self, "_legacy_migration_tip_visible", False):
+            self._show_legacy_migration_tip_banner()
+            return
         model_ready = bool(status.get("model_ready"))
         ffmpeg_ready = bool(status.get("ffmpeg_ready"))
         if (not model_ready) and (not ffmpeg_ready):

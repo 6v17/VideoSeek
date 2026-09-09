@@ -106,7 +106,7 @@
 | `preset_id` | 与 `query` 互斥；二者都缺 → 400 |
 | `query` + `query_type` | `text` 或 `image_path`（`image_path` 时 `query` 为本地图片绝对路径）；也可用简写字段 `image_path`（等价于 `query` + `query_type=image_path`） |
 | `search_kind` | 可选：`visual`（默认，CLIP 画面）\| `dialogue`（硬字幕/台词关键词）\| `tags`（理解页 VLM 标签）；与 `mode` frame/chunk 正交 |
-| `top_k` | 每条 query 返回 hit 数上限（1–200） |
+| `top_k` | 每条 query 返回 hit 数上限（1–300） |
 | `image_folder` | 与 `queries` 二选一；扫描 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每张图一条 query；`client_request_id` = 文件名 |
 
 `search_precision_mode`（图搜）：`fast` \| `precise`；未传时见 `/health` 的 `agent_api_default_image_precision`；纯文搜忽略。  
@@ -303,7 +303,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `search_kind` | 否 | `visual` | `visual` \| `dialogue` \| `tags`；台词用 `dialogue`，VLM 标签用 `tags`（均仅文本 query） |
 | `match_mode` | 否 | `auto` | `dialogue` / `tags`：`exact` \| `fuzzy` \| `auto`；团队客户端也可经 `search_mode` 透传 |
 | `text_enhance` | 否 | 跟 `/health` | **Agent 可显式开关**画面文搜增强；见 §3 机制说明；`meta.text_enhance_applied` 表示是否生效 |
-| `top_k` | 否 | 桌面配置，clamp **1–200** | 返回 hit 数上限 |
+| `top_k` | 否 | 桌面配置，clamp **1–300** | 返回 hit 数上限 |
 | `mode` | 否 | 桌面 `search_mode` | `frame` \| `chunk`（`dialogue`/`tags` 时响应 `mode` 分别为 `dialogue`/`tags`） |
 | `min_score` | 否 | preset 默认或不过滤 | 过滤低分 hit |
 | `search_precision_mode` | 否 | 见 health | `fast` \| `precise`；图搜未传时用 `agent_api_default_image_precision`；纯文搜忽略 |

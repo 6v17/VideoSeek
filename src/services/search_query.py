@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import List
 
-import faiss
 import numpy as np
 
 from src.core.clip_embedding import get_clip_embeddings_batch, get_text_embedding
+from src.core.faiss_index import _normalize_vectors
 from src.domain.search_hit import SearchHit
 
 
@@ -26,9 +26,7 @@ def build_query_vector(query_data, is_text=False):
     else:
         query_vector = get_clip_embeddings_batch([query_data])
 
-    query_vector = query_vector.astype("float32")
-    faiss.normalize_L2(query_vector)
-    return query_vector
+    return _normalize_vectors(query_vector.astype("float32"))
 
 
 def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
@@ -38,8 +36,7 @@ def _coalesce_query_vector(query_data, is_text=False, query_vector=None):
             vector = vector.reshape(1, -1)
         elif vector.ndim != 2 or vector.shape[0] != 1:
             raise RuntimeError("Invalid query vector. Please retry the search.")
-        faiss.normalize_L2(vector)
-        return vector
+        return _normalize_vectors(vector)
     return build_query_vector(query_data, is_text=is_text)
 
 

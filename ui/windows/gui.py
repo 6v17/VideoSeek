@@ -125,6 +125,8 @@ class MainWindow(
         self.about_payload = None
         self._startup_complete = False
         self._update_notice_auto_show_pending = False
+        self._runtime_warmup_ready = False
+        self._warmup_ready_callbacks = []
         self._defer_runtime_warmup = False
         self._preview_dialog_cooldown_until = 0.0
         self._preview_dialog_opening = False
@@ -522,6 +524,7 @@ class MainWindow(
         self.settings_page.btn_browse_ffmpeg_path.clicked.connect(self._browse_ffmpeg_path)
         self.settings_page.btn_browse_model_dir.clicked.connect(self._browse_model_dir)
         self.settings_page.btn_migrate_model_dir.clicked.connect(self._migrate_model_root)
+        self.settings_page.btn_migrate_legacy_index.clicked.connect(self._migrate_legacy_index)
         self.settings_page.btn_rediscover_models.clicked.connect(self.rediscover_model_profiles)
         self.settings_page.btn_download_runtime_resources.clicked.connect(self.open_runtime_resource_dialog)
         self.settings_page.btn_remove_model_profile.clicked.connect(self.remove_current_model_profile)
@@ -542,7 +545,7 @@ class MainWindow(
         if app is not None:
             app.installEventFilter(self)
         for page in self._iter_runtime_banner_pages():
-            page.header.runtime_banner_action.clicked.connect(self.open_runtime_resource_dialog)
+            page.header.runtime_banner_action.clicked.connect(self._on_runtime_banner_action)
 
     def _build_scroll_page(self, page_widget):
         scroll = QScrollArea()
@@ -1263,9 +1266,7 @@ class MainWindow(
         if synced_path:
             self.settings_page.input_ffmpeg_path.setText(synced_path)
         self._startup_complete = True
-        if getattr(self, "_defer_runtime_warmup", False):
-            self._defer_runtime_warmup = False
-            self._start_runtime_warmup()
+        # CLIP warmup is deferred until first visual search / library sync.
         # Show UI first; heavy orphan/index cleanup can wait until the event loop is idle.
         self.refresh_library_table()
         self.refresh_search_presets_ui()
@@ -1527,6 +1528,9 @@ class MainWindow(
         self._run_image_search(self.current_img_path)
 
     def _run_text_search(self, raw_query, *, sync_ui=True):
+        if not getattr(self, "_runtime_warmup_ready", False):
+            self.ensure_runtime_warmup(lambda: self._run_text_search(raw_query, sync_ui=sync_ui))
+            return False
         query_info = prepare_text_query(str(raw_query or ""))
         if query_info["too_short"]:
             self.search_page.lbl_status.setText(self.texts["query_too_short"])
@@ -1655,6 +1659,9 @@ class MainWindow(
 
     def _run_image_search(self, image_path, *, sync_ui=True):
         """Execute the PC image-tab search path for a concrete image file."""
+        if not getattr(self, "_runtime_warmup_ready", False):
+            self.ensure_runtime_warmup(lambda: self._run_image_search(image_path, sync_ui=sync_ui))
+            return False
         path = str(image_path or "").strip()
         if not path:
             self.search_page.lbl_status.setText(self.texts.get("search_empty_image", self.texts["empty_query"]))
@@ -1704,6 +1711,13 @@ class MainWindow(
         *,
         sync_ui=True,
     ):
+        if not getattr(self, "_runtime_warmup_ready", False):
+            self.ensure_runtime_warmup(
+                lambda: self._run_compose_search_with_inputs(
+                    raw_query, image_paths, fusion, sync_ui=sync_ui
+                )
+            )
+            return False
         from src.services.search_preset_service import build_compose_search_plan
         from src.services.search_scope import resolve_default_active_search_scope
 
@@ -1853,6 +1867,9 @@ class MainWindow(
         self._run_image_search(image_path, sync_ui=True)
 
     def _start_compose_search(self):
+        if not getattr(self, "_runtime_warmup_ready", False):
+            self.ensure_runtime_warmup(self._start_compose_search)
+            return
         compose_form = self.search_page.search_panel.compose_form
         if not compose_form.has_content():
             self.search_page.lbl_status.setText(
@@ -1943,6 +1960,13 @@ class MainWindow(
             return
         if not self.check_runtime_resources():
             self.search_page.lbl_status.setText(self.texts["model_features_disabled"])
+            return
+        if not getattr(self, "_runtime_warmup_ready", False):
+            self.ensure_runtime_warmup(
+                lambda: self.start_in_video_deep_search(
+                    video_path, preview_sec=preview_sec, anchor_score=anchor_score
+                )
+            )
             return
         image_path = str(getattr(self, "current_img_path", "") or "").strip()
         if not image_path:

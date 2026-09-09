@@ -218,6 +218,8 @@ class SettingsGuiMixin:
         self._settings_loading = False
         self._set_settings_dirty(False)
         self._refresh_team_mode_status()
+        if hasattr(self, "_refresh_legacy_migration_settings_ui"):
+            self._refresh_legacy_migration_settings_ui()
         if hasattr(self, "_refresh_search_precision_controls"):
             self._refresh_search_precision_controls()
         if hasattr(self, "load_understanding_settings"):
@@ -1670,6 +1672,24 @@ class SettingsGuiMixin:
         if not selected_path:
             return
         self.settings_page.input_model_dir.setText(os.path.normpath(selected_path))
+
+    def _migrate_legacy_index(self):
+        t = self.texts
+        if not self._ensure_startup_migration_idle("feature_settings"):
+            return
+        from src.storage.migration_runner import needs_background_startup_migration
+
+        if not needs_background_startup_migration():
+            self.start_manual_legacy_migration()
+            return
+        confirm = t.get(
+            "legacy_migration_confirm",
+            "Import leftover npy/faiss vectors into Lance for the active profile? "
+            "This does not re-encode videos. Continue?",
+        )
+        if not self.show_confirm_dialog(t.get("confirm_title", "Confirm"), confirm):
+            return
+        self.start_manual_legacy_migration()
 
     def _migrate_model_root(self):
         t = self.texts

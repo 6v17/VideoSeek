@@ -23,7 +23,7 @@
 
 工程约定（新功能边界、legacy 禁扩、lint）：[`docs/engineering.md`](engineering.md)。
 
-**存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db` / `dialogue_transcript_store`），关键词 / 模糊检索**只**走该库。Lance `dialogue_segments` 无产品读写（Whisper 台词未发布；语义字幕暂缓），删除字幕时仅作防御性清理。遗留 `*_vectors.npy` / `*.faiss` 仅用于启动迁移导入与清理，不再作为热路径读缓存。
+**存储：** 画面向量索引为 **Lance**；硬字幕文本在 **SQLite**（`transcripts.db` / `dialogue_transcript_store`），关键词 / 模糊检索**只**走该库。Lance `dialogue_segments` 无产品读写（Whisper 台词未发布；语义字幕暂缓），删除字幕时仅作防御性清理。遗留 `*_vectors.npy` / `*.faiss` 仅用于设置页手动迁移导入与库页清理，不再作为热路径读缓存。
 
 **视频理解**为可选扩展，不阻塞搜索与索引；仅桌面「视频理解」页使用，**不**暴露给 Agent API。
 

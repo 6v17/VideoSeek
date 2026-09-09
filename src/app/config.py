@@ -191,7 +191,7 @@ DEFAULT_CONFIG = {
 
 CONFIG_BOUNDS = {
     "fps": (0.01, 24.0),
-    "search_top_k": (1, 200),
+    "search_top_k": (1, 300),
     "frame_neighbor_rerank_top_n": (1, 100),
     "frame_neighbor_rerank_window": (1, 12),
     "image_pixel_rerank_top_n": (1, 100),

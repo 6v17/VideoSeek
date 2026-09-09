@@ -168,7 +168,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_mode = NoWheelComboBox()
         self.input_sampling_fps_rules = QLineEdit(self)
         self.input_top_k = NoWheelSpinBox()
-        self.input_top_k.setRange(1, 200)
+        self.input_top_k.setRange(1, 300)
         self.input_lance_ann_enabled = NoWheelComboBox()
         self.input_frame_neighbor_rerank_enabled = NoWheelComboBox()
         self.input_frame_neighbor_rerank_top_n = NoWheelSpinBox()
@@ -303,6 +303,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_model_dir = QLineEdit()
         self.btn_browse_model_dir = QPushButton()
         self.btn_migrate_model_dir = QPushButton()
+        self.label_legacy_migration = ClickableLabel()
+        self.btn_migrate_legacy_index = QPushButton()
+        self.lbl_legacy_migration_status = QLabel()
+        self.hint_legacy_migration = QLabel()
         self.section_search_title = QLabel()
         self.section_fast_image_search_title = QLabel()
         self.section_precise_search_title = QLabel()
@@ -474,6 +478,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_browse_model_dir.setMinimumHeight(34)
         self.btn_migrate_model_dir.setObjectName("AccentGhostButton")
         self.btn_migrate_model_dir.setMinimumHeight(34)
+        self.btn_migrate_legacy_index.setObjectName("AccentGhostButton")
+        self.btn_migrate_legacy_index.setMinimumHeight(34)
+        self.lbl_legacy_migration_status.setObjectName("StatusHint")
+        self.lbl_legacy_migration_status.setWordWrap(True)
 
         self.input_data_root_bundle = QWidget()
         self.input_data_root_bundle.setSizePolicy(
@@ -510,6 +518,16 @@ class SettingsPage(QWidget, SettingsFormMixin):
         model_dir_buttons_layout.addWidget(self.btn_migrate_model_dir, 0)
         input_model_dir_bundle_layout.addWidget(self.input_model_dir, 1)
         input_model_dir_bundle_layout.addWidget(self.model_dir_buttons_row, 0)
+
+        self.input_legacy_migration_bundle = QWidget()
+        self.input_legacy_migration_bundle.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        legacy_migration_bundle_layout = QHBoxLayout(self.input_legacy_migration_bundle)
+        legacy_migration_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        legacy_migration_bundle_layout.setSpacing(8)
+        legacy_migration_bundle_layout.addWidget(self.btn_migrate_legacy_index, 0)
+        legacy_migration_bundle_layout.addWidget(self.lbl_legacy_migration_status, 1)
 
         self.input_active_model_profile_bundle = QWidget()
         self.input_active_model_profile_bundle.setSizePolicy(
@@ -795,6 +813,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_model_dir,
             self.input_model_dir_bundle,
             self.hint_model_dir,
+        )
+        self._add_setting_row(
+            self.section_paths_form,
+            3,
+            self.label_legacy_migration,
+            self.input_legacy_migration_bundle,
+            self.hint_legacy_migration,
         )
 
         self.card_general = VSCard()
@@ -1217,6 +1242,21 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_browse_ffmpeg_path.setText(texts["browse_file"])
         self.btn_browse_model_dir.setText(texts["browse_folder"])
         self.btn_migrate_model_dir.setText(texts["migrate_model_root"])
+        self.label_legacy_migration.setText(
+            texts.get("setting_legacy_migration", "遗留索引迁移")
+        )
+        self.btn_migrate_legacy_index.setText(
+            texts.get("legacy_migration_run", "迁移遗留索引")
+        )
+        self.hint_legacy_migration.setText(
+            texts.get(
+                "setting_legacy_migration_hint",
+                "将旧版 npy/faiss 导入 Lance（无需整库重算）。新用户一般无需操作。",
+            )
+        )
+        self.lbl_legacy_migration_status.setText(
+            texts.get("legacy_migration_status_ready", "当前已是最新结构。")
+        )
         self.btn_download_runtime_resources.setText(texts.get("import_runtime_resources", texts["download_models"]))
         self.btn_rediscover_models.setText(
             texts.get("model_rediscover", texts.get("model_scan_model_dir", "重新探测模型"))
@@ -1297,6 +1337,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_gpu_runtime.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.hint_gpu_runtime.setVisible(False)
         self.hint_model_dir.setText(texts["setting_model_dir_hint"])
+        self.hint_legacy_migration.setText(
+            texts.get(
+                "setting_legacy_migration_hint",
+                "将旧版 npy/faiss 导入 Lance（无需整库重算）。新用户一般无需操作。",
+            )
+        )
         self._update_sampling_mode_visibility()
         self._update_frame_neighbor_rerank_visibility()
         self._update_image_pixel_probe_mode_visibility()
@@ -1334,6 +1380,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_data_root,
             self.label_ffmpeg_path,
             self.label_model_dir,
+            self.label_legacy_migration,
         ]:
             self._configure_setting_label(label)
             label.setProperty("detailActive", False)

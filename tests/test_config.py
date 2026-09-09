@@ -371,7 +371,7 @@ class ConfigMigrationTests(unittest.TestCase):
                 )
                 loaded = config_module.load_config()
 
-            self.assertEqual(loaded["search_top_k"], 200)
+            self.assertEqual(loaded["search_top_k"], 300)
             self.assertEqual(loaded["preview_seconds"], 2)
             self.assertEqual(loaded["preview_width"], 1920)
             self.assertEqual(loaded["preview_height"], 90)

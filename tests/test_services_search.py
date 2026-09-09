@@ -9,15 +9,15 @@ from src.services import search_service
 
 
 class SearchServiceTests(unittest.TestCase):
-    @patch("faiss.normalize_L2")
-    @patch("src.core.clip_embedding.get_text_embedding")
-    def test_build_query_vector_for_text(self, mock_text_embedding, mock_normalize):
-        mock_text_embedding.return_value = np.array([[1.0, 2.0]], dtype=np.float32)
+    @patch("src.services.search_query.get_text_embedding")
+    def test_build_query_vector_for_text(self, mock_text_embedding):
+        mock_text_embedding.return_value = np.array([[3.0, 4.0]], dtype=np.float32)
 
         result = search_service.build_query_vector("cat on sofa", is_text=True)
 
         self.assertEqual(result.dtype, np.float32)
-        mock_normalize.assert_called_once()
+        self.assertEqual(result.shape, (1, 2))
+        np.testing.assert_allclose(result, [[0.6, 0.8]], rtol=1e-5, atol=1e-5)
         mock_text_embedding.assert_called_once_with("cat on sofa")
 
     @patch("src.services.search_service.load_search_assets")

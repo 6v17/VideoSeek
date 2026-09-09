@@ -2021,6 +2021,19 @@ class LibraryIndexingGuiMixin:
             if not self.check_runtime_resources():
                 self.library_page.lbl_status.setText(self.texts["model_features_disabled"])
                 return
+            if not getattr(self, "_runtime_warmup_ready", False):
+                self.ensure_runtime_warmup(
+                    lambda: self._start_index_update(
+                        target_lib=target_lib,
+                        force_cleanup_missing_files=force_cleanup_missing_files,
+                        cleanup_missing_entries=cleanup_missing_entries,
+                        rebuild_global_assets=rebuild_global_assets,
+                        debug_failure=debug_failure,
+                        index_from_vectors_only=index_from_vectors_only,
+                        video_ids=video_ids,
+                    )
+                )
+                return
             self.switch_page("library")
             if (
                 self.indexing_controller.is_busy()

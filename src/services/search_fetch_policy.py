@@ -20,7 +20,7 @@ def resolve_source_filtered_fetch_top_k(top_k: int, scoped: bool) -> int:
     normalized = max(1, int(top_k))
     base = resolve_fetch_top_k(normalized, scoped)
     expanded = max(base * 5, normalized + 50)
-    return min(_SOURCE_FILTER_FETCH_CAP, expanded)
+    return max(normalized, min(_SOURCE_FILTER_FETCH_CAP, expanded))
 
 
 def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
@@ -31,7 +31,7 @@ def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
         multiplier = int(DEFAULT_CONFIG["image_search_fetch_multiplier"])
     multiplier = max(1, min(multiplier, 8))
     expanded = max(base * multiplier, base + 15)
-    return min(_GLOBAL_STAGE1_FETCH_CAP, expanded)
+    return max(int(top_k), min(_GLOBAL_STAGE1_FETCH_CAP, expanded))
 
 
 def _precise_pixel_localize_top_n(config, hits: List[SearchHit] | None = None) -> int:
@@ -66,7 +66,7 @@ def _resolve_frame_fetch_top_k(
         multiplier = int(DEFAULT_CONFIG["image_search_fetch_multiplier"])
     multiplier = max(1, min(multiplier, 8))
     expanded = max(fetch_k * multiplier, fetch_k + 15)
-    return min(_PRECISE_FETCH_CAP, expanded)
+    return max(int(top_k), min(_PRECISE_FETCH_CAP, expanded))
 
 
 def _resolve_chunk_precise_frame_fetch_k(top_k: int, scoped: bool) -> int:
@@ -74,4 +74,4 @@ def _resolve_chunk_precise_frame_fetch_k(top_k: int, scoped: bool) -> int:
     expanded = max(normalized * 6, normalized + 30)
     if scoped:
         expanded = max(expanded, normalized * 3 + 15)
-    return min(200, expanded)
+    return max(normalized, min(200, expanded))

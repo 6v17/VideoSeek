@@ -73,15 +73,14 @@ def invalidate_all_preset_query_caches(preset_id: str, config=None) -> None:
 
 
 def _normalize_query_vector(vector) -> np.ndarray:
-    import faiss
+    from src.core.faiss_index import _normalize_vectors
 
     query_vector = np.asarray(vector, dtype=np.float32)
     if query_vector.ndim == 1:
         query_vector = query_vector.reshape(1, -1)
     elif query_vector.ndim != 2 or query_vector.shape[0] != 1:
         raise RuntimeError("Preset query vector must be shape (1, dim)")
-    faiss.normalize_L2(query_vector)
-    return query_vector
+    return _normalize_vectors(query_vector)
 
 
 def _load_cached_query_vector(preset: dict, config=None) -> np.ndarray | None:

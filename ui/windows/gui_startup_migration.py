@@ -1,4 +1,8 @@
-"""Non-blocking startup data migration — banner, worker, and action guards."""
+"""Manual / optional data migration — banner, worker, and action guards.
+
+Heavy npy/Lance upgrades are no longer auto-run at launch. Launch only does a
+quick check; if work is needed, a dismissible tip points users to Settings.
+"""
 
 from __future__ import annotations
 
@@ -14,14 +18,16 @@ logger = get_logger("gui.startup_migration")
 
 
 class StartupMigrationGuiMixin:
-    """Background startup migration with guarded indexing/search actions."""
+    """Background data migration with guarded indexing/search actions."""
 
     def _init_startup_migration_state(self):
         self._startup_migration_busy = False
         self._startup_migration_worker = None
         self._startup_migration_finish_scheduled = False
+        self._legacy_migration_tip_visible = False
 
     def begin_startup_migration(self):
+        """Post-show bootstrap: quick check only; never auto-start heavy migrate."""
         if getattr(self, "startup_cancelled", False):
             return
         from src.storage.migration_runner import run_startup_migration_quick
@@ -40,12 +46,46 @@ class StartupMigrationGuiMixin:
 
         set_startup_migration_summary(summary)
         if summary.get("needs_background"):
-            self._startup_migration_busy = True
-            self._apply_startup_migration_lock(True)
-            self._update_startup_migration_banner(0, self.texts["startup_migration_running"])
-            self._start_startup_migration_worker()
+            logger.info("Legacy data migration needed; deferring to Settings (no auto-run)")
+            self._legacy_migration_tip_visible = True
+            self._refresh_legacy_migration_settings_ui()
+            if not getattr(self, "_startup_complete", False):
+                self._finish_startup_sequence()
+            self._show_legacy_migration_tip_banner()
             return
+
+        self._legacy_migration_tip_visible = False
         self._on_startup_migration_finished(summary)
+
+    def start_manual_legacy_migration(self) -> bool:
+        """User-triggered migrate from Settings. Returns False if already busy."""
+        if self.is_startup_migration_busy():
+            self._ensure_startup_migration_idle("feature_settings")
+            return False
+        from src.storage.migration_runner import needs_background_startup_migration
+
+        if not needs_background_startup_migration():
+            self.show_info_dialog(
+                self.texts.get("legacy_migration_up_to_date_title", "Data layout"),
+                self.texts.get(
+                    "legacy_migration_up_to_date_body",
+                    "Local search data is already up to date. No migration needed.",
+                ),
+                kind="info",
+            )
+            self._legacy_migration_tip_visible = False
+            self._refresh_legacy_migration_settings_ui()
+            if hasattr(self, "push_resources_status"):
+                self.push_resources_status()
+            return False
+
+        self._legacy_migration_tip_visible = False
+        self._startup_migration_busy = True
+        self._apply_startup_migration_lock(True)
+        self._update_startup_migration_banner(0, self.texts["startup_migration_running"])
+        self._refresh_legacy_migration_settings_ui()
+        self._start_startup_migration_worker()
+        return True
 
     def _start_startup_migration_worker(self):
         shutdown_thread(getattr(self, "_startup_migration_worker", None))
@@ -62,14 +102,18 @@ class StartupMigrationGuiMixin:
         shutdown_thread(getattr(self, "_startup_migration_worker", None))
         self._startup_migration_worker = None
         self._startup_migration_busy = False
+        self._legacy_migration_tip_visible = False
         self._apply_startup_migration_lock(False)
         self._hide_startup_migration_banner()
         set_startup_migration_summary(summary)
+        self._refresh_legacy_migration_settings_ui()
         self._show_startup_migration_notice()
         if not getattr(self, "_startup_complete", False):
             self._finish_startup_sequence()
         else:
             self.refresh_library_table()
+            if hasattr(self, "push_resources_status"):
+                self.push_resources_status()
 
     def _on_startup_migration_failed(self, error_text):
         shutdown_thread(getattr(self, "_startup_migration_worker", None))
@@ -77,12 +121,19 @@ class StartupMigrationGuiMixin:
         self._startup_migration_busy = False
         self._apply_startup_migration_lock(False)
         self._hide_startup_migration_banner()
-        logger.error("Background startup migration failed: %s", error_text)
+        self._refresh_legacy_migration_settings_ui()
+        logger.error("Background data migration failed: %s", error_text)
         QMessageBox.critical(
             self,
             self.texts["startup_migration_failed_title"],
             self.texts["startup_migration_failed_body"].format(error=error_text),
         )
+        # Tip can come back if legacy work is still pending.
+        from src.storage.migration_runner import needs_background_startup_migration
+
+        if needs_background_startup_migration():
+            self._legacy_migration_tip_visible = True
+            self._show_legacy_migration_tip_banner()
 
     def is_startup_migration_busy(self):
         return bool(getattr(self, "_startup_migration_busy", False))
@@ -106,8 +157,13 @@ class StartupMigrationGuiMixin:
             self.link_page.btn_download,
             self.settings_page.btn_save,
         ]
+        btn_migrate = getattr(self.settings_page, "btn_migrate_legacy_index", None)
+        if btn_migrate is not None:
+            widgets.append(btn_migrate)
         for widget in widgets:
             widget.setEnabled(not locked)
+        if not locked:
+            self._refresh_legacy_migration_settings_ui()
 
     def _update_startup_migration_banner(self, value: int, text: str):
         hint = self.sidebar.runtime_hint
@@ -130,3 +186,77 @@ class StartupMigrationGuiMixin:
             page.header.runtime_banner_action.show()
         if hasattr(self, "push_resources_status"):
             self.push_resources_status()
+
+    def _show_legacy_migration_tip_banner(self):
+        if not getattr(self, "_legacy_migration_tip_visible", False):
+            return
+        if self.is_startup_migration_busy():
+            return
+        tip = self.texts.get(
+            "legacy_migration_tip_banner",
+            "Legacy search index detected. Migrate it under Settings when ready.",
+        )
+        action_text = self.texts.get("legacy_migration_tip_action", "Open Settings")
+        hint = self.sidebar.runtime_hint
+        hint.setText(tip)
+        hint.setProperty("state", "warn")
+        hint.show()
+        for page in self._iter_runtime_banner_pages():
+            banner = page.header.runtime_banner
+            banner_text = page.header.runtime_banner_text
+            action = page.header.runtime_banner_action
+            banner_text.setText(tip)
+            action.setText(action_text)
+            action.show()
+            set_runtime_banner_warn(banner, True)
+            banner.show()
+
+    def _dismiss_legacy_migration_tip(self):
+        self._legacy_migration_tip_visible = False
+        self.sidebar.runtime_hint.hide()
+        if hasattr(self, "push_resources_status"):
+            self.push_resources_status()
+
+    def _open_settings_for_legacy_migration(self):
+        self._dismiss_legacy_migration_tip()
+        try:
+            self.switch_page("settings")
+        except Exception:
+            try:
+                self.stack.setCurrentWidget(self.settings_page)
+            except Exception:
+                pass
+        btn = getattr(self.settings_page, "btn_migrate_legacy_index", None)
+        if btn is not None:
+            btn.setFocus()
+
+    def _refresh_legacy_migration_settings_ui(self):
+        page = getattr(self, "settings_page", None)
+        if page is None:
+            return
+        status = getattr(page, "lbl_legacy_migration_status", None)
+        btn = getattr(page, "btn_migrate_legacy_index", None)
+        if status is None and btn is None:
+            return
+        from src.storage.migration_runner import needs_background_startup_migration
+
+        busy = self.is_startup_migration_busy()
+        needed = False if busy else needs_background_startup_migration()
+        if status is not None:
+            if busy:
+                status.setText(
+                    self.texts.get("legacy_migration_status_busy", "Migration in progress…")
+                )
+            elif needed:
+                status.setText(
+                    self.texts.get(
+                        "legacy_migration_status_needed",
+                        "Legacy index found — migrate when convenient.",
+                    )
+                )
+            else:
+                status.setText(
+                    self.texts.get("legacy_migration_status_ready", "Already up to date.")
+                )
+        if btn is not None and not busy:
+            btn.setEnabled(True)
