@@ -384,6 +384,12 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
     meta = load_model_metadata(config=cfg)
     libraries = _normalize_library_map(meta.get("libraries", {}))
     lance_video_ids = _lance_indexed_video_ids(config=cfg)
+    profile_base_dir = ""
+    if lance_video_ids is not None:
+        try:
+            profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
+        except Exception:
+            profile_base_dir = ""
     entries: list[dict] = []
     demoted = 0
     for root_path, lib_data in libraries.items():
@@ -406,6 +412,15 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
                 asset_state = stored_state
             else:
                 lance_ready = video_id in lance_video_ids
+                if (
+                    not lance_ready
+                    and stored_state == "ready"
+                    and profile_base_dir
+                ):
+                    if _lance_video_has_vectors(
+                        video_id, config=cfg, profile_base_dir=profile_base_dir
+                    ):
+                        lance_ready = True
                 asset_state = _effective_asset_state(
                     info,
                     source_exists,
@@ -458,17 +473,40 @@ def _lance_indexed_video_ids(*, config=None):
         return None
 
 
+def _lance_video_has_vectors(video_id: str, *, config=None, profile_base_dir: str = "") -> bool:
+    """Per-video Lance probe used when the bulk indexed-id set may be incomplete."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return False
+    try:
+        from src.storage.lance_search_index import lance_video_has_vectors
+
+        base_dir = str(profile_base_dir or "").strip() or get_local_model_asset_dirs(config=config)["base_dir"]
+        return bool(lance_video_has_vectors(base_dir, video_id))
+    except Exception:
+        return False
+
+
 def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
     """Demote meta ``ready`` rows that have no Lance vectors. Returns demotion count.
 
     No-op when Lance is not ready, so empty/unavailable storage never mass-demotes meta.
+    Candidates missing from the bulk id set are double-checked with a per-video Lance
+    probe so a truncated id listing cannot falsely demote indexed videos.
     """
     if not isinstance(meta, dict):
         return 0
     lance_video_ids = _lance_indexed_video_ids(config=config)
     if lance_video_ids is None:
         return 0
+
+    try:
+        profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+    except Exception:
+        profile_base_dir = ""
+
     demoted = 0
+    demoted_ids: list[str] = []
     for lib_data in (meta.get("libraries") or {}).values():
         if not isinstance(lib_data, dict):
             continue
@@ -485,8 +523,20 @@ def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
                 continue
             if video_id in lance_video_ids:
                 continue
+            if _lance_video_has_vectors(video_id, config=config, profile_base_dir=profile_base_dir):
+                continue
             info["asset_state"] = "missing_asset"
             demoted += 1
+            demoted_ids.append(video_id)
+    if demoted_ids:
+        sample = ", ".join(demoted_ids[:12])
+        suffix = "" if len(demoted_ids) <= 12 else f", … (+{len(demoted_ids) - 12} more)"
+        get_logger("library_service").warning(
+            "Demoting %s ready→missing_asset (absent from Lance): %s%s",
+            demoted,
+            sample,
+            suffix,
+        )
     return demoted
 
 

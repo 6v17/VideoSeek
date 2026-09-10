@@ -462,7 +462,11 @@ def _try_reuse_lance_indexed_video(
     profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
     if indexed_ids is not None:
         if saved_vid not in indexed_ids:
-            return None
+            # Bulk id listing can be incomplete on very large tables; probe before giving up.
+            from src.storage.lance_search_index import lance_video_has_vectors
+
+            if not lance_video_has_vectors(profile_base_dir, saved_vid):
+                return None
     else:
         from src.storage.lance_search_index import lance_video_has_vectors
 

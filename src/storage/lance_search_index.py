@@ -144,6 +144,80 @@ def _load_columns_arrow(
     return builder.limit(int(limit)).to_arrow()
 
 
+def _scan_all_column_values(table, column: str) -> list:
+    """Load every non-null value of ``column`` without the fixed 2M search cap.
+
+    Prefer ``search().select([column]).limit(count_rows)`` — works with stock
+    ``lancedb`` (no optional ``pylance``). ``table.to_lance()`` needs pylance and
+    is skipped in packaged builds.
+    """
+    column = str(column or "").strip()
+    if not column:
+        return []
+    try:
+        total_rows = int(table.count_rows())
+    except Exception:
+        total_rows = -1
+    if total_rows == 0:
+        return []
+
+    if total_rows > 0:
+        try:
+            arrow = _load_columns_arrow(table, [column], limit=total_rows)
+            if arrow.num_rows > 0 and column in arrow.column_names:
+                values = [value for value in arrow[column].to_pylist() if value]
+                if int(arrow.num_rows) >= total_rows:
+                    return values
+                logger.warning(
+                    "Lance %s listing incomplete via search limit=count: got %s/%s rows; "
+                    "trying take_offsets",
+                    column,
+                    arrow.num_rows,
+                    total_rows,
+                )
+        except Exception as exc:
+            logger.debug("Lance search column scan failed for %s: %s", column, exc)
+
+    # Fallback: take_offsets pages with column projection (still no pylance).
+    take_offsets = getattr(table, "take_offsets", None)
+    if total_rows > 0 and callable(take_offsets):
+        try:
+            values: list = []
+            page = 65_536
+            for start in range(0, total_rows, page):
+                end = min(start + page, total_rows)
+                builder = take_offsets(list(range(start, end)))
+                select = getattr(builder, "select", None)
+                if callable(select):
+                    builder = select([column])
+                arrow = builder.to_arrow()
+                if column not in arrow.column_names:
+                    continue
+                values.extend(value for value in arrow[column].to_pylist() if value)
+            if values or total_rows == 0:
+                return values
+        except Exception as exc:
+            logger.debug("Lance take_offsets column scan failed for %s: %s", column, exc)
+
+    # Last resort: historical capped search (may truncate very large tables).
+    try:
+        arrow = _load_columns_arrow(table, [column], limit=_LANCE_ROW_SCAN_LIMIT)
+    except Exception as exc:
+        logger.debug("Failed to load Lance column %s via capped search: %s", column, exc)
+        return []
+    if arrow.num_rows <= 0 or column not in arrow.column_names:
+        return []
+    if total_rows > int(arrow.num_rows):
+        logger.warning(
+            "Lance %s listing truncated via search().limit: got %s/%s rows; "
+            "indexed video id set may be incomplete",
+            column,
+            arrow.num_rows,
+            total_rows,
+        )
+    return [value for value in arrow[column].to_pylist() if value]
+
+
 def _load_table_arrow(
     table,
     *,
@@ -508,14 +582,11 @@ def get_lance_indexed_video_ids(profile_base_dir: str) -> frozenset[str]:
         return frozenset()
     table = db.open_table(FRAMES_TABLE_NAME)
     try:
-        arrow = _load_columns_arrow(table, ["video_id"])
+        raw_ids = _scan_all_column_values(table, "video_id")
     except Exception as exc:
         logger.debug("Failed to list Lance video ids for %s: %s", profile_base_dir, exc)
         return frozenset()
-    if arrow.num_rows <= 0:
-        ids = frozenset()
-    else:
-        ids = frozenset(str(value) for value in arrow["video_id"].to_pylist() if value)
+    ids = frozenset(str(value) for value in raw_ids if value)
     _INDEXED_VIDEO_IDS_CACHE[profile_base_dir] = (state_mtime, ids)
     return ids
 
@@ -565,17 +636,15 @@ def _count_video_ids_in_table(table, *, column: str = "video_id") -> dict[str, i
     from collections import Counter
 
     try:
-        arrow = _load_columns_arrow(table, [column])
+        raw_values = _scan_all_column_values(table, column)
     except Exception as exc:
         logger.debug("Failed to count Lance %s values: %s", column, exc)
         return {}
-    if arrow.num_rows <= 0 or column not in arrow.column_names:
+    if not raw_values:
         return {}
     return {
         str(value): int(count)
-        for value, count in Counter(
-            str(value) for value in arrow[column].to_pylist() if value
-        ).items()
+        for value, count in Counter(str(value) for value in raw_values if value).items()
     }
 
 

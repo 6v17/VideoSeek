@@ -53,12 +53,48 @@ class ReadyAssetReconcileTests(unittest.TestCase):
         with patch(
             "src.services.library_service._lance_indexed_video_ids",
             return_value=frozenset({"vid_keep"}),
+        ), patch(
+            "src.services.library_service.get_local_model_asset_dirs",
+            return_value={"base_dir": "D:/profile"},
+        ), patch(
+            "src.services.library_service._lance_video_has_vectors",
+            return_value=False,
         ):
             demoted = reconcile_ready_assets_with_lance(meta, config={})
         self.assertEqual(demoted, 1)
         self.assertEqual(meta["libraries"]["D:/videos"]["files"]["keep.mp4"]["asset_state"], "ready")
         self.assertEqual(meta["libraries"]["D:/videos"]["files"]["gone.mp4"]["asset_state"], "missing_asset")
         self.assertEqual(meta["libraries"]["D:/videos"]["files"]["failed.mp4"]["asset_state"], "sync_failed")
+
+    def test_reconcile_keeps_ready_when_bulk_ids_miss_but_lance_has_vectors(self):
+        """Truncated get_lance_indexed_video_ids must not false-demote real Lance rows."""
+        meta = {
+            "libraries": {
+                "D:/videos": {
+                    "files": {
+                        "keep.mp4": {"vid": "vid_keep", "asset_state": "ready"},
+                        "hidden.mp4": {"vid": "vid_hidden", "asset_state": "ready"},
+                    }
+                }
+            }
+        }
+
+        def _probe(video_id, *, config=None, profile_base_dir=""):
+            return video_id == "vid_hidden"
+
+        with patch(
+            "src.services.library_service._lance_indexed_video_ids",
+            return_value=frozenset({"vid_keep"}),
+        ), patch(
+            "src.services.library_service.get_local_model_asset_dirs",
+            return_value={"base_dir": "D:/profile"},
+        ), patch(
+            "src.services.library_service._lance_video_has_vectors",
+            side_effect=_probe,
+        ):
+            demoted = reconcile_ready_assets_with_lance(meta, config={})
+        self.assertEqual(demoted, 0)
+        self.assertEqual(meta["libraries"]["D:/videos"]["files"]["hidden.mp4"]["asset_state"], "ready")
 
     def test_reconcile_skips_when_lance_unavailable(self):
         meta = {
@@ -96,6 +132,14 @@ class ReadyAssetReconcileTests(unittest.TestCase):
                 "src.services.library_service._lance_indexed_video_ids",
                 return_value=frozenset(),
             ),
+            patch(
+                "src.services.library_service.get_local_model_asset_dirs",
+                return_value={"base_dir": "D:/profile"},
+            ),
+            patch(
+                "src.services.library_service._lance_video_has_vectors",
+                return_value=False,
+            ),
             patch("src.services.library_service.get_index_sync_status", return_value={"index_sync_in_progress": False}),
             patch("src.services.library_service.save_model_metadata") as save_meta,
         ):
@@ -104,6 +148,64 @@ class ReadyAssetReconcileTests(unittest.TestCase):
         self.assertEqual(entries[0]["asset_state"], "missing_asset")
         self.assertEqual(meta["libraries"][lib_root]["files"]["clip.mp4"]["asset_state"], "missing_asset")
         save_meta.assert_called_once()
+
+
+class LanceColumnScanTests(unittest.TestCase):
+    def test_scan_all_column_values_uses_count_sized_search(self):
+        try:
+            from src.storage.lance_search_index import _scan_all_column_values
+        except ImportError as exc:
+            self.skipTest(f"optional deps missing: {exc}")
+
+        class _Col:
+            def __init__(self, values):
+                self._values = values
+
+            def to_pylist(self):
+                return list(self._values)
+
+        class _Arrow:
+            def __init__(self, values):
+                self.num_rows = len(values)
+                self.column_names = ["video_id"]
+                self._values = values
+
+            def __getitem__(self, name):
+                return _Col(self._values)
+
+        class _Builder:
+            def __init__(self, values):
+                self._values = values
+                self._limit = None
+
+            def select(self, columns):
+                return self
+
+            def limit(self, n):
+                self._limit = int(n)
+                return self
+
+            def to_arrow(self):
+                if self._limit is None:
+                    raise AssertionError("limit required")
+                return _Arrow(self._values[: self._limit])
+
+        class _Table:
+            def __init__(self):
+                self._values = ["vid_a", "vid_b", "vid_a"] * 10  # 30 rows
+
+            def count_rows(self):
+                return len(self._values)
+
+            def search(self):
+                return _Builder(self._values)
+
+            def take_offsets(self, offsets):
+                raise AssertionError("take_offsets should not run when count-sized search works")
+
+        values = _scan_all_column_values(_Table(), "video_id")
+        self.assertEqual(len(values), 30)
+        self.assertEqual(set(values), {"vid_a", "vid_b"})
 
 
 class LanceUpsertRestoreTests(unittest.TestCase):
