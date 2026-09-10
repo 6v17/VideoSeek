@@ -57,6 +57,8 @@ COMPONENT_SIZES = {
     "result_table_min_height": 420,
     "result_table_min_height_floor": 180,
     "compare_row_min_height_floor": 260,
+    # Tall screens: do not lock the compare row to its preferred height, or results stay short.
+    "compare_row_min_height_cap": 380,
     "preview_host_min_height_floor": 160,
     "video_scope_tree_min_height": 200,
     "progress_bar_height": 18,
@@ -130,19 +132,22 @@ def _available_height(margin=None) -> int | None:
 
 
 def compare_row_min_height(config=None) -> int:
-    """Hard minimum for the compare row; shrinks on short / high-DPI screens."""
+    """Hard minimum for the compare row; shrinks on short / high-DPI screens.
+
+    Preferred card height is only a sizeHint / first-run default. Using it as the
+    hard minimum on tall screens locked the top pane and starved the results table.
+    """
     sizes = dict(COMPONENT_SIZES)
     if isinstance(config, dict):
         sizes.update(config)
     preferred = compare_row_card_height(sizes)
     floor = int(sizes.get("compare_row_min_height_floor", 280))
+    soft_cap = int(sizes.get("compare_row_min_height_cap", 380))
     available = _available_height()
     if available is None:
-        return min(preferred, 320)
-    if available >= 900:
-        return preferred
+        return min(preferred, soft_cap, 320)
     if available >= 800:
-        return min(preferred, 380)
+        return min(preferred, soft_cap)
     if available >= 700:
         return min(preferred, 300)
     return min(preferred, floor)

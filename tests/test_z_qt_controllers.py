@@ -438,6 +438,8 @@ def _make_parent_window():
     parent.search_page.btn_search = MagicMock()
     parent.search_page.lbl_status = MagicMock()
     parent.search_page.result_view = MagicMock()
+    parent.search_page.preview_placeholder = MagicMock()
+    parent.preview_surface_stack = MagicMock()
     parent.result_table = MagicMock()
     parent.push_inference_status = MagicMock()
     parent.push_resources_status = MagicMock()
@@ -727,6 +729,21 @@ class PreviewControllerTests(unittest.TestCase):
         vlc_player.set_host_widget.assert_called_once_with(parent.video_widget, force=True)
         vlc_player.play.assert_called_once_with("D:/videos/clip.mp4", 27.0, stop_sec=33.0)
         parent.media_player.setSource.assert_called_once()
+        parent.preview_surface_stack.setCurrentWidget.assert_called_with(parent.video_widget)
+
+    @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
+    def test_stop_preview_covers_vlc_frame_with_placeholder(self, _mock_instance):
+        parent = _make_parent_window()
+        controller = PreviewController(parent)
+        controller.vlc_player = MagicMock()
+        controller.vlc_player.is_available.return_value = True
+
+        controller.stop_preview(skip_telemetry=True)
+
+        controller.vlc_player.clear_session.assert_called_once()
+        parent.preview_surface_stack.setCurrentWidget.assert_called_with(
+            parent.search_page.preview_placeholder
+        )
 
     @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
@@ -805,6 +822,8 @@ class VlcPreviewPlayerTests(unittest.TestCase):
 
         local = _build_vlc_media_options(r"D:\videos\a.mp4", 64.0)
         self.assertIn(":start-time=64.000", local)
+        early = _build_vlc_media_options(r"D:\videos\a.mp4", 2.5)
+        self.assertTrue(all(not item.startswith(":start-time=") for item in early))
         self.assertIn(
             "%5Bclip%5D.mp4",
             normalize_http_media_url("http://host/videos/lib1/[clip].mp4"),
@@ -1080,6 +1099,49 @@ class PreviewDialogTests(unittest.TestCase):
         mock_player.set_media.assert_called_with(None)
         self.assertTrue(player._released)
         self.assertIsNone(player._player)
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_play_same_file_seeks_without_media_new(self, _mock_timer):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        mock_mp = MagicMock()
+        mock_mp.play.return_value = 0
+        mock_mp.get_time.return_value = 40000
+        mock_mp.get_length.return_value = 120000
+        mock_mp.is_playing.return_value = True
+        mock_instance = MagicMock()
+        mock_instance.media_new.return_value = MagicMock()
+        player._player = mock_mp
+        player._instance = mock_instance
+        player._owns_instance = False
+
+        self.assertTrue(player.play("D:/videos/clip.mp4", 10.0, stop_sec=16.0))
+        self.assertEqual(mock_instance.media_new.call_count, 1)
+
+        mock_instance.media_new.reset_mock()
+        mock_mp.set_time.reset_mock()
+        self.assertTrue(player.play("D:/videos/clip.mp4", 40.0, stop_sec=46.0))
+        mock_instance.media_new.assert_not_called()
+        mock_mp.set_time.assert_called()
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_play_same_file_reloads_when_seek_is_before_start_time(self, _mock_timer):
+        host = MagicMock()
+        host.winId.return_value = 123
+        player = VlcPreviewPlayer(host)
+        mock_mp = MagicMock()
+        mock_mp.play.return_value = 0
+        mock_instance = MagicMock()
+        mock_instance.media_new.return_value = MagicMock()
+        player._player = mock_mp
+        player._instance = mock_instance
+        player._owns_instance = False
+
+        self.assertTrue(player.play("D:/videos/clip.mp4", 40.0, stop_sec=46.0))
+        mock_instance.media_new.reset_mock()
+        self.assertTrue(player.play("D:/videos/clip.mp4", 5.0, stop_sec=11.0))
+        mock_instance.media_new.assert_called_once()
 
 
 if __name__ == "__main__":

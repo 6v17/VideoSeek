@@ -290,7 +290,10 @@ class MainWindow(
         content_layout.addWidget(self.pages)
         main_layout.addWidget(self.content, 1)
 
-        self.search_page.preview_placeholder.hide()
+        self.search_page.preview_placeholder.setMinimumHeight(0)
+        self.search_page.preview_placeholder.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.video_widget = QVideoWidget()
         self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_widget.setAttribute(Qt.WA_NativeWindow, True)
@@ -304,7 +307,12 @@ class MainWindow(
         self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.video_widget.installEventFilter(self)
         self.search_page.btn_manage_presets.installEventFilter(self)
-        self.search_page.preview_host_layout.addWidget(self.video_widget, 1)
+        self.preview_surface_stack = QStackedWidget(self.search_page.preview_host)
+        self.search_page.preview_host_layout.removeWidget(self.search_page.preview_placeholder)
+        self.preview_surface_stack.addWidget(self.search_page.preview_placeholder)
+        self.preview_surface_stack.addWidget(self.video_widget)
+        self.search_page.preview_host_layout.addWidget(self.preview_surface_stack, 1)
+        self.preview_surface_stack.setCurrentWidget(self.search_page.preview_placeholder)
 
         self.result_table = self.search_page.result_table
 

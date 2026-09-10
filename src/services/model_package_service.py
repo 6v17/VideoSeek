@@ -74,6 +74,30 @@ def _resolve_model_variant(profile):
     return variant or "vit-base-patch32"
 
 
+def _optional_positive_int(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _runtime_extras_from_manifest(manifest):
+    """Copy optional numeric runtime fields declared on model_manifest.json."""
+    extras = {}
+    if not isinstance(manifest, dict):
+        return extras
+    dimension = _optional_positive_int(
+        manifest.get("embedding_dimension", manifest.get("dimension"))
+    )
+    if dimension is not None:
+        extras["embedding_dimension"] = dimension
+    image_size = _optional_positive_int(manifest.get("image_size"))
+    if image_size is not None:
+        extras["image_size"] = image_size
+    return extras
+
+
 def _resolve_profile_resource_dir(profile):
     runtime = dict(profile.get("runtime") or {})
     model_root = str(runtime.get("model_dir", "") or "").strip()
@@ -325,7 +349,10 @@ def import_model_package_zip(model_root, zip_path, sha256_file=None, require_che
                 f"(expected {expected_sha256}, actual {actual_sha256})"
             )
 
-    with tempfile.TemporaryDirectory(prefix="videoseek-model-pack-") as temp_dir:
+    # Unpack on the same volume as model_root. Default tempfile is often on C:
+    # (LOCALAPPDATA\\Temp), which fails for multi-GB packs even when D: has space.
+    os.makedirs(root, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="videoseek-model-pack-", dir=root) as temp_dir:
         extract_dir = os.path.join(temp_dir, "extracted")
         os.makedirs(extract_dir, exist_ok=True)
         _safe_extract_zip(zip_path, extract_dir)
@@ -455,24 +482,32 @@ def import_model_packages(model_root, manifest_files=None):
                     "model_config": "config.json",
                 }
 
+        runtime = {
+            "prefer_gpu": prefer_gpu,
+            "model_dir": root,
+            "model_variant": variant,
+        }
+        runtime.update(_runtime_extras_from_manifest(manifest))
+        capabilities = {
+            "text_query": True,
+            "image_query": True,
+            "video_embedding": True,
+            "cross_modal_search": True,
+        }
+        if "embedding_dimension" in runtime:
+            capabilities["embedding_dimension"] = runtime["embedding_dimension"]
+
         new_profile = {
             "id": profile_id,
             "provider": provider,
             "display_name": display_name,
             "enabled": True,
-            "runtime": {
-                "prefer_gpu": prefer_gpu,
-                "model_dir": root,
-                "model_variant": variant,
-            },
+            "runtime": runtime,
             "files": files_map,
-            "capabilities": {
-                "text_query": True,
-                "image_query": True,
-                "video_embedding": True,
-                "cross_modal_search": True,
-            },
+            "capabilities": capabilities,
         }
+        if "embedding_dimension" in runtime:
+            new_profile["embedding_dimension"] = runtime["embedding_dimension"]
 
         should_append_new_profile = False
         if profile_id in existing_idx:
@@ -651,19 +686,57 @@ def ensure_default_clip_manifest(config=None):
     if os.path.exists(manifest_file):
         return manifest_file
 
-    payload = {
-        "id": str(target_profile.get("id", "") or "clip_onnx_default"),
-        "provider": "clip_onnx",
-        "variant": variant,
-        "display_name": str(target_profile.get("display_name", "") or "OpenAI CLIP"),
-        "prefer_gpu": bool(runtime.get("prefer_gpu", True)),
-        "required_files": list(required_files),
-        "files": dict(target_profile.get("files") or {}),
-    }
+    payload = build_openai_clip_profile_manifest(
+        variant,
+        embedding_dimension=_optional_positive_int(
+            runtime.get("embedding_dimension")
+            or target_profile.get("embedding_dimension")
+            or 512
+        )
+        or 512,
+        image_size=_optional_positive_int(runtime.get("image_size")) or 224,
+        profile_id=str(target_profile.get("id", "") or "clip_onnx_default"),
+        display_name=str(target_profile.get("display_name", "") or "OpenAI CLIP"),
+        prefer_gpu=bool(runtime.get("prefer_gpu", True)),
+        required_files=list(required_files),
+        files=dict(target_profile.get("files") or {}),
+    )
     with open(manifest_file, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
     return manifest_file
 
+
+def build_openai_clip_profile_manifest(
+    variant="vit-base-patch32",
+    *,
+    embedding_dimension=512,
+    image_size=224,
+    profile_id="",
+    display_name="",
+    prefer_gpu=True,
+    required_files=None,
+    files=None,
+):
+    variant_text = str(variant or "").strip() or "vit-base-patch32"
+    files_map = dict(files or {})
+    if not files_map:
+        files_map = {
+            "visual_model": "clip_visual.onnx",
+            "text_model": "clip_text.onnx",
+            "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+        }
+    required = list(required_files or REQUIRED_MODEL_FILES)
+    return {
+        "id": str(profile_id or "").strip() or f"clip_onnx_{variant_text.replace('-', '_')}",
+        "provider": "clip_onnx",
+        "variant": variant_text,
+        "display_name": str(display_name or "").strip() or f"OpenAI CLIP {variant_text}",
+        "prefer_gpu": bool(prefer_gpu),
+        "embedding_dimension": int(embedding_dimension),
+        "image_size": int(image_size),
+        "required_files": required,
+        "files": files_map,
+    }
 
 def prune_incomplete_model_profiles(config=None) -> dict:
     """Drop config profiles whose required model files are missing on disk."""

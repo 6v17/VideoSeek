@@ -208,7 +208,9 @@ def import_understanding_component_zip(
         if item.get("installed")
     }
 
-    with tempfile.TemporaryDirectory(prefix="videoseek-understanding-pack-") as temp_dir:
+    # Keep unpack staging on the same volume as model_dir (not C: Temp).
+    os.makedirs(root, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="videoseek-understanding-pack-", dir=root) as temp_dir:
         extract_dir = os.path.join(temp_dir, "extracted")
         os.makedirs(extract_dir, exist_ok=True)
         _safe_extract_zip(zip_path, extract_dir)

@@ -196,6 +196,7 @@ sequenceDiagram
 - 内置：**`clip_onnx`**、**`siglip2_onnx`**、**`chinese_clip_onnx`**。
 - 未知 `provider` **直接失败**（不静默换模型，否则会污染检索结果）。
 - 磁盘布局：`config_store.resolve_provider_dir()`；向量在 `data/model_assets/<provider_dir>/<variant>/`。
+- 同族大档（224）：`scripts/vision_model_pack_specs.py` + `export_*_onnx.py` / `pack_vision_model_zip.py`；manifest 需带 `embedding_dimension`（OpenAI L=768，SigLIP2 so400m=1152）。
 
 ### 新增模型 provider
 

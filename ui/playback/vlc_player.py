@@ -86,14 +86,23 @@ def _vlc_embed_instance_args():
     return args
 
 
+# Default preview window is 6s. Early clips open from 0 + seek; deep seeks may use :start-time.
+_LOCAL_START_TIME_MIN_SEC = 6.0
+
+
 def _build_vlc_media_options(video_path: str, start_sec: float) -> list[str]:
-    """Media options for preview. HTTP avoids :start-time (slow linear demux over HTTP)."""
+    """Media options for preview.
+
+    HTTP avoids ``:start-time`` (slow linear demux). Local deep seeks may use it;
+    early positions open from file start and seek — near-zero ``:start-time`` is
+    flaky, and same-file reuse must be able to rewind to 0 after a clip ends.
+    """
     options: list[str] = []
     if _is_http_media_url(video_path):
         options.append(":network-caching=800")
         return options
     start = max(0.0, float(start_sec or 0.0))
-    if start > 0.0:
+    if start >= _LOCAL_START_TIME_MIN_SEC:
         options.append(f":start-time={start:.3f}")
     return options
 
@@ -155,6 +164,8 @@ class VlcPreviewPlayer:
         self._current_media = None
         self._released = False
         self._current_video_path = ""
+        self._loaded_video_path = ""
+        self._media_origin_sec = 0.0
         self._pending_seek_ms = None
         self._play_busy = False
         self._session_active = False
@@ -183,33 +194,34 @@ class VlcPreviewPlayer:
         finally:
             self._play_busy = False
 
-    def _play_impl(self, video_path, start_sec, stop_sec=None):
-        if not self.is_available():
-            return False
+    def _canonical_play_path(self, video_path: str) -> str:
+        text = normalize_http_media_url(os.fspath(video_path))
+        if _is_http_media_url(text):
+            return text
+        return os.path.normcase(os.path.normpath(text))
 
-        self._current_video_path = normalize_http_media_url(os.fspath(video_path))
-        self._pending_seek_ms = None
-        start_sec = max(0.0, float(start_sec))
-        stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
-        remote = _is_http_media_url(self._current_video_path)
+    def _can_seek_loaded_media(self, video_path: str, start_sec: float) -> bool:
+        if (
+            self._current_media is None
+            or self._player is None
+            or self._released
+            or not self._loaded_video_path
+        ):
+            return False
+        if video_path != self._loaded_video_path:
+            return False
+        if _is_http_media_url(video_path):
+            return True
+        origin = float(getattr(self, "_media_origin_sec", 0.0) or 0.0)
+        return float(start_sec) + 0.05 >= origin
 
-        self._reset_for_replay()
-        if not self.is_available():
-            return False
-        # Keep hwnd bound across media swaps; clearing to None first can spawn a
-        # standalone "VLC (Direct3D11 output)" window on the second play.
-        self.rebind_output_window()
-        try:
-            options = _build_vlc_media_options(self._current_video_path, start_sec)
-            media = self._instance.media_new(self._current_video_path, *options)
-            self._set_media(media)
-            self.rebind_output_window()
-        except Exception as exc:
-            _log_vlc_warning("prepare media playback", exc)
-            return False
-        self._stop_at_ms = -1 if stop_sec is None else int(stop_sec * 1000)
+    def _apply_clip_window(self, stop_sec):
+        self._stop_at_ms = -1 if stop_sec is None else int(float(stop_sec) * 1000)
         self._locked_stop_at_ms = self._stop_at_ms
         self._user_unlocked = False
+        self._pending_seek_ms = None
+
+    def _finish_play_start(self, *, start_sec: float, seek_after_open: bool) -> bool:
         try:
             result = self._player.play()
         except Exception as exc:
@@ -225,14 +237,62 @@ class VlcPreviewPlayer:
         # One immediate + one delayed rebind is enough; stacking many timers under
         # rapid enlarge-preview clicks made the UI feel frozen.
         self._schedule_rebind(delay_ms=80)
-        if remote and start_sec > 0.05:
-            # Browser-like: open stream first, then byte-range seek — much faster than :start-time.
-            self._pending_seek_ms = int(start_sec * 1000)
+        if seek_after_open:
+            # Include 0: reused media is often paused at the previous clip end.
+            self._pending_seek_ms = int(max(0.0, float(start_sec)) * 1000)
             self._schedule_pending_seek()
         if self._stop_at_ms > 0:
             self._timer.start()
         self._session_active = True
         return True
+
+    def _play_loaded_media(self, start_sec: float, stop_sec) -> bool:
+        """Seek an already-open file instead of media_new (same path, later clip)."""
+        self._reset_for_replay()
+        if not self.is_available():
+            return False
+        self._current_video_path = self._loaded_video_path
+        self._apply_clip_window(stop_sec)
+        self.rebind_output_window()
+        return self._finish_play_start(start_sec=start_sec, seek_after_open=True)
+
+    def _play_impl(self, video_path, start_sec, stop_sec=None):
+        if not self.is_available():
+            return False
+
+        next_path = self._canonical_play_path(video_path)
+        start_sec = max(0.0, float(start_sec))
+        stop_sec = None if stop_sec is None else max(start_sec, float(stop_sec))
+        if self._can_seek_loaded_media(next_path, start_sec):
+            return self._play_loaded_media(start_sec, stop_sec)
+
+        self._current_video_path = next_path
+        self._loaded_video_path = next_path
+        remote = _is_http_media_url(next_path)
+        use_start_time = (not remote) and start_sec >= _LOCAL_START_TIME_MIN_SEC
+        # Media opened with :start-time cannot reliably seek earlier than that origin.
+        self._media_origin_sec = start_sec if use_start_time else 0.0
+
+        self._reset_for_replay()
+        if not self.is_available():
+            return False
+        # Keep hwnd bound across media swaps; clearing to None first can spawn a
+        # standalone "VLC (Direct3D11 output)" window on the second play.
+        self.rebind_output_window()
+        try:
+            options = _build_vlc_media_options(next_path, start_sec)
+            media = self._instance.media_new(next_path, *options)
+            self._set_media(media)
+            self.rebind_output_window()
+        except Exception as exc:
+            _log_vlc_warning("prepare media playback", exc)
+            return False
+        self._apply_clip_window(stop_sec)
+        return self._finish_play_start(
+            start_sec=start_sec,
+            # HTTP and early local clips: open then set_time (including rewind to 0).
+            seek_after_open=(remote or not use_start_time),
+        )
 
     def release_native_output(self):
         """Detach libvlc from the host HWND so QMediaPlayer can use the same widget."""
@@ -281,7 +341,12 @@ class VlcPreviewPlayer:
         self._set_paused(True)
 
     def clear_session(self):
-        """End the current clip so UI cannot resume it; avoids native stop()/set_media(None)."""
+        """End the current clip so UI cannot resume it; avoids native stop()/set_media(None).
+
+        Keeps the last Media loaded so the next play of the same file can seek
+        instead of reopening. Callers should hide the video surface to drop the
+        leftover frame.
+        """
         self.suspend()
         self._current_video_path = ""
         self._session_active = False
@@ -302,6 +367,8 @@ class VlcPreviewPlayer:
         self._user_unlocked = False
         self._pending_seek_ms = None
         self._current_video_path = ""
+        self._loaded_video_path = ""
+        self._media_origin_sec = 0.0
         if self._player is not None:
             try:
                 self._player.audio_set_mute(True)
@@ -608,6 +675,7 @@ class VlcPreviewPlayer:
             return False
         start_sec = max(0.0, float(target_ms) / 1000.0)
         remote = _is_http_media_url(self._current_video_path)
+        use_start_time = (not remote) and start_sec >= _LOCAL_START_TIME_MIN_SEC
         try:
             options = _build_vlc_media_options(self._current_video_path, start_sec)
             media = self._instance.media_new(self._current_video_path, *options)
@@ -622,7 +690,9 @@ class VlcPreviewPlayer:
             return False
         self._unmute()
         self._schedule_rebind(delay_ms=80)
-        if remote and start_sec > 0.05:
+        self._media_origin_sec = start_sec if use_start_time else 0.0
+        self._loaded_video_path = self._current_video_path
+        if remote or not use_start_time:
             self._pending_seek_ms = int(start_sec * 1000)
             self._schedule_pending_seek()
         else:

@@ -1,91 +1,158 @@
-"""Export Chinese CLIP text/image encoders to ONNX (512-d projected features).
+"""Export Chinese CLIP text/image encoders to ONNX (projected features).
 
-The wrappers must return `.pooler_output` from `get_*_features`. Newer
-transformers returns a dataclass from those helpers; exporting the object
-directly produces (batch, seq, 768) tensors instead of CLIP embeddings.
+Wrappers must return projected embeddings from ``get_*_features``. Newer
+transformers may return a dataclass; exporting the object directly yields
+(batch, seq, hidden) tensors instead of CLIP embeddings.
 
-Example:
-    python scripts/export_chinese_clip_onnx.py
-    python scripts/export_chinese_clip_onnx.py --sample-image path/to.png
+Examples:
+    python scripts/export_chinese_clip_onnx.py --hf-id OFA-Sys/chinese-clip-vit-base-patch16
+    python scripts/export_chinese_clip_onnx.py --pack vit-large-patch14
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from pathlib import Path
 
-import torch
-from PIL import Image
-from transformers import ChineseCLIPConfig, ChineseCLIPModel, ChineseCLIPProcessor
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.vision_model_pack_specs import get_pack_spec  # noqa: E402
+
 DEFAULT_ONNX_DIR = ROOT / "models" / "chinese-clip" / "vit-base-patch16"
-DEFAULT_PYTORCH_DIR = ROOT / "models" / "chinese_clip"
-DEFAULT_SAMPLE_IMAGE = DEFAULT_PYTORCH_DIR / "festival.jpg"
 
 
-class TextEncoder(torch.nn.Module):
-    def __init__(self, model: ChineseCLIPModel):
-        super().__init__()
-        self.model = model
-
-    def forward(self, input_ids, attention_mask):
-        outputs = self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
-        return outputs.pooler_output
-
-
-class ImageEncoder(torch.nn.Module):
-    def __init__(self, model: ChineseCLIPModel):
-        super().__init__()
-        self.model = model
-
-    def forward(self, pixel_values):
-        outputs = self.model.get_image_features(pixel_values=pixel_values)
-        return outputs.pooler_output
+def _load_torch_stack():
+    try:
+        import torch
+        from PIL import Image
+        from transformers import ChineseCLIPModel, ChineseCLIPProcessor
+    except ImportError as exc:
+        raise SystemExit(
+            "Missing export deps. Install with:\n"
+            "  pip install torch transformers pillow onnx\n"
+        ) from exc
+    return torch, Image, ChineseCLIPModel, ChineseCLIPProcessor
 
 
-def _load_model(processor_dir: Path, weights_dir: Path) -> ChineseCLIPModel:
-    config = ChineseCLIPConfig.from_pretrained(str(processor_dir), local_files_only=True)
-    model = ChineseCLIPModel.from_pretrained(
-        str(weights_dir),
-        config=config,
-        local_files_only=True,
+def _projected(features):
+    if hasattr(features, "pooler_output"):
+        return features.pooler_output
+    return features
+
+
+def _write_manifest(onnx_dir: Path, variant: str, embedding_dimension: int, image_size: int) -> None:
+    from src.core.chinese_clip_provider import build_chinese_clip_profile_manifest
+
+    payload = build_chinese_clip_profile_manifest(
+        variant,
+        embedding_dimension=embedding_dimension,
+        image_size=image_size,
     )
-    model.eval()
-    return model
+    path = onnx_dir / "model_manifest.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote manifest -> {path}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export Chinese CLIP ONNX encoders.")
-    parser.add_argument("--onnx-dir", type=Path, default=DEFAULT_ONNX_DIR)
-    parser.add_argument("--pytorch-dir", type=Path, default=DEFAULT_PYTORCH_DIR)
-    parser.add_argument("--sample-image", type=Path, default=DEFAULT_SAMPLE_IMAGE)
+    parser.add_argument("--pack", type=str, default="", help="Pack key/variant from vision_model_pack_specs")
+    parser.add_argument("--onnx-dir", type=Path, default=None)
+    parser.add_argument("--hf-id", type=str, default="")
+    parser.add_argument("--variant", type=str, default="")
+    parser.add_argument("--embedding-dimension", type=int, default=0)
+    parser.add_argument("--image-size", type=int, default=0)
+    parser.add_argument("--sample-image", type=Path, default=None)
     parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--local-files-only", action="store_true")
     args = parser.parse_args()
 
-    onnx_dir = args.onnx_dir.resolve()
-    pytorch_dir = args.pytorch_dir.resolve()
+    torch, Image, ChineseCLIPModel, ChineseCLIPProcessor = _load_torch_stack()
+
+    hf_id = str(args.hf_id or "").strip()
+    variant = str(args.variant or "").strip()
+    embedding_dimension = int(args.embedding_dimension or 0)
+    image_size = int(args.image_size or 0)
+    onnx_dir = args.onnx_dir
+
+    if args.pack:
+        spec = get_pack_spec(args.pack)
+        if spec["provider"] != "chinese_clip_onnx":
+            raise SystemExit(f"--pack {args.pack} is not a Chinese CLIP pack")
+        hf_id = hf_id or str(spec["hf_id"])
+        variant = variant or str(spec["variant"])
+        embedding_dimension = embedding_dimension or int(spec["embedding_dimension"])
+        image_size = image_size or int(spec["image_size"])
+        if onnx_dir is None:
+            onnx_dir = ROOT / "models" / spec["provider_dir"] / variant
+
+    if not hf_id:
+        hf_id = "OFA-Sys/chinese-clip-vit-base-patch16"
+    if not variant:
+        variant = "vit-base-patch16"
+    if embedding_dimension <= 0:
+        embedding_dimension = 512
+    if image_size <= 0:
+        image_size = 224
+    if onnx_dir is None:
+        onnx_dir = DEFAULT_ONNX_DIR
+    onnx_dir = onnx_dir.resolve()
     onnx_dir.mkdir(parents=True, exist_ok=True)
 
-    if not args.sample_image.is_file():
-        raise FileNotFoundError(f"Sample image not found: {args.sample_image}")
+    processor = ChineseCLIPProcessor.from_pretrained(
+        hf_id, local_files_only=bool(args.local_files_only)
+    )
+    model = ChineseCLIPModel.from_pretrained(hf_id, local_files_only=bool(args.local_files_only))
+    model.eval()
+    processor.save_pretrained(str(onnx_dir))
+    model.config.to_json_file(str(onnx_dir / "config.json"))
+    # Some HF Chinese-CLIP repos only ship vocab.txt (no tokenizer.json). Copy sidecars
+    # from the source tree when processor.save_pretrained omits them.
+    src_root = Path(hf_id)
+    if src_root.is_dir():
+        for name in ("vocab.txt", "preprocessor_config.json", "config.json", "tokenizer_config.json"):
+            src = src_root / name
+            dst = onnx_dir / name
+            if src.is_file() and not dst.is_file():
+                dst.write_bytes(src.read_bytes())
+    for name in ("vocab.txt", "preprocessor_config.json", "config.json"):
+        if not (onnx_dir / name).is_file():
+            raise RuntimeError(f"Missing required sidecar after save: {onnx_dir / name}")
 
-    processor = ChineseCLIPProcessor.from_pretrained(str(onnx_dir), local_files_only=True)
-    model = _load_model(onnx_dir, pytorch_dir)
+    class TextEncoder(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.model = inner
+
+        def forward(self, input_ids, attention_mask):
+            return _projected(
+                self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
+            )
+
+    class ImageEncoder(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.model = inner
+
+        def forward(self, pixel_values):
+            return _projected(self.model.get_image_features(pixel_values=pixel_values))
 
     texts = ["节日庆典"]
     text_inputs = processor(text=texts, return_tensors="pt", padding=True)
-    image = Image.open(args.sample_image).convert("RGB")
+    if args.sample_image and args.sample_image.is_file():
+        image = Image.open(args.sample_image).convert("RGB")
+    else:
+        image = Image.new("RGB", (image_size, image_size), color=(128, 128, 128))
     image_inputs = processor(images=image, return_tensors="pt")
-
-    text_wrapper = TextEncoder(model)
-    image_wrapper = ImageEncoder(model)
 
     text_path = onnx_dir / "chinese_clip_text.onnx"
     image_path = onnx_dir / "chinese_clip_image.onnx"
 
     torch.onnx.export(
-        text_wrapper,
+        TextEncoder(model),
         (text_inputs["input_ids"], text_inputs["attention_mask"]),
         str(text_path),
         input_names=["input_ids", "attention_mask"],
@@ -100,7 +167,7 @@ def main() -> None:
     print(f"exported text -> {text_path}")
 
     torch.onnx.export(
-        image_wrapper,
+        ImageEncoder(model),
         (image_inputs["pixel_values"],),
         str(image_path),
         input_names=["pixel_values"],
@@ -112,6 +179,7 @@ def main() -> None:
         opset_version=args.opset,
     )
     print(f"exported image -> {image_path}")
+    _write_manifest(onnx_dir, variant, embedding_dimension, image_size)
 
 
 if __name__ == "__main__":

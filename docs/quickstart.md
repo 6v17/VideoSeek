@@ -50,7 +50,21 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 
 默认 `clip_onnx` 需要同目录下的 `clip_visual.onnx`、`clip_text.onnx`、`bpe_simple_vocab_16e6.txt.gz`。换 `siglip2_onnx` / `chinese_clip_onnx` 等时文件列表随 profile 变。
 
-自定义包需同目录放置 **`model_manifest.json`**（不是 `manifest.json`），至少含 `provider` 与 `variant`。官方 zip 已自带，字段细节见 `src/services/model_package_service.py`。
+自定义包需同目录放置 **`model_manifest.json`**（不是 `manifest.json`），至少含 `provider` 与 `variant`。大参数包还应写 `embedding_dimension` / `image_size`（导入会写入 profile）。官方 zip 已自带，字段细节见 `src/services/model_package_service.py`。
+
+**224 大档包（导出后打包）：**
+
+```bash
+python scripts/pack_vision_model_zip.py --list
+python scripts/export_chinese_clip_onnx.py --pack chinese-clip-vit-large-patch14
+python scripts/export_openai_clip_onnx.py --pack openai-clip-vit-large-patch14
+python scripts/export_siglip2_onnx.py --pack siglip2-so400m-patch14-224
+python scripts/pack_vision_model_zip.py --pack chinese-clip-vit-large-patch14
+python scripts/pack_vision_model_zip.py --pack openai-clip-vit-large-patch14
+python scripts/pack_vision_model_zip.py --pack siglip2-so400m-patch14-224
+```
+
+依赖：`pip install torch transformers pillow onnx`。每个大档是独立 profile，导入后须对该 profile **重新同步索引**。
 
 切换设置里的当前模型后，须重新同步媒体库索引。
 

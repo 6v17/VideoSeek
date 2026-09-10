@@ -597,7 +597,8 @@ class SearchPage(QWidget):
         self.workspace_splitter.setStretchFactor(0, 3)
         self.workspace_splitter.setStretchFactor(1, 5)
         preferred_top = compare_row_card_height()
-        self.workspace_splitter.setSizes([preferred_top + 40, max(bottom_min, 420)])
+        preferred_bottom = max(bottom_min, 480)
+        self.workspace_splitter.setSizes([preferred_top, preferred_bottom])
         self._workspace_splitter_save_timer = QTimer(self)
         self._workspace_splitter_save_timer.setSingleShot(True)
         self._workspace_splitter_save_timer.setInterval(450)
@@ -693,8 +694,8 @@ class SearchPage(QWidget):
             return
         top_min = compare_row_min_height()
         bottom_min = max(160, result_table_min_height())
-        preferred_top = compare_row_card_height() + 40
-        preferred_bottom = max(bottom_min, 420)
+        preferred_top = compare_row_card_height()
+        preferred_bottom = max(bottom_min, 480)
         total = max(int(splitter.height()), top_min + bottom_min)
         saved_top = saved_bottom = 0
         try:
@@ -706,6 +707,9 @@ class SearchPage(QWidget):
                 saved_bottom = int(raw[1])
         except Exception:
             pass
+        # Legacy saves often kept an oversized compare row after layout mins changed.
+        if saved_top > preferred_top + 80 and saved_bottom < preferred_bottom:
+            saved_top = saved_bottom = 0
         sizes = fit_splitter_pair(
             total,
             saved_top,

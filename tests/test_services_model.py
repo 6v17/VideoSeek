@@ -272,6 +272,53 @@ class ModelPackageServiceTests(unittest.TestCase):
             self.assertEqual(result["imported"], 1)
             self.assertEqual(result["errors"], [])
 
+    def test_import_propagates_embedding_dimension_and_image_size(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            manifest_dir = Path(model_root) / "openai-clip" / "vit-large-patch14"
+            manifest_dir.mkdir(parents=True)
+            for name in ("clip_visual.onnx", "clip_text.onnx", "bpe_simple_vocab_16e6.txt.gz"):
+                (manifest_dir / name).write_bytes(b"x")
+            (manifest_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "clip_onnx_vit_large_patch14",
+                        "provider": "clip_onnx",
+                        "variant": "vit-large-patch14",
+                        "display_name": "OpenAI CLIP vit-large-patch14",
+                        "embedding_dimension": 768,
+                        "image_size": 224,
+                        "required_files": [
+                            "clip_visual.onnx",
+                            "clip_text.onnx",
+                            "bpe_simple_vocab_16e6.txt.gz",
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "models": {
+                    "active_profile": "",
+                    "profiles": [],
+                }
+            }
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config") as mock_save_config,
+                patch("src.services.model_package_service.get_config_schema_version", return_value=2),
+            ):
+                result = model_package_service.import_model_packages(model_root)
+
+            self.assertEqual(result["imported"], 1)
+            self.assertEqual(result["errors"], [])
+            profile = config["models"]["profiles"][0]
+            self.assertEqual(profile["embedding_dimension"], 768)
+            self.assertEqual(profile["runtime"]["embedding_dimension"], 768)
+            self.assertEqual(profile["runtime"]["image_size"], 224)
+            self.assertEqual(profile["capabilities"]["embedding_dimension"], 768)
+            self.assertTrue(mock_save_config.called)
 
 
 class ModelResourceDirTests(unittest.TestCase):

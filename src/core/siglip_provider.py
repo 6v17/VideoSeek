@@ -161,7 +161,12 @@ class SigLIP2OnnxEngine(OnnxVisionBatchMixin):
         }
 
 
-def build_siglip_profile_manifest(variant="base-patch16-224"):
+def build_siglip_profile_manifest(
+    variant="base-patch16-224",
+    *,
+    embedding_dimension=768,
+    image_size=224,
+):
     """Return a model_manifest payload for SigLIP package parsing."""
     variant_text = str(variant or "").strip() or "base-patch16-224"
     return {
@@ -170,6 +175,8 @@ def build_siglip_profile_manifest(variant="base-patch16-224"):
         "variant": variant_text,
         "display_name": f"SigLIP2 {variant_text}",
         "prefer_gpu": True,
+        "embedding_dimension": int(embedding_dimension),
+        "image_size": int(image_size),
         "required_files": [
             "vision_model.onnx",
             "text_model.onnx",

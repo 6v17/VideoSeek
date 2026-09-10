@@ -40,6 +40,7 @@ from src.storage.config_store import (
     get_active_embedding_spec,
     get_active_model_profile,
     get_active_model_resource_dir,
+    get_active_model_runtime,
     get_effective_prefer_gpu,
 )
 from src.utils import (
@@ -62,6 +63,13 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
         runtime_plan = prepare_inference_runtime(prefer_gpu=config_prefer_gpu, provider="clip_onnx")
         prefer_gpu = runtime_plan["effective_prefer_gpu"]
         providers = resolve_onnx_providers(prefer_gpu=prefer_gpu, config=runtime_config)
+        active_runtime = get_active_model_runtime(config=runtime_config)
+        try:
+            image_size = int(active_runtime.get("image_size") or 224)
+        except (TypeError, ValueError):
+            image_size = 224
+        if image_size <= 0:
+            image_size = 224
 
         model_paths = ensure_model_files(["clip_visual.onnx", "clip_text.onnx"])
         self.model_paths = dict(model_paths)
@@ -88,10 +96,11 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
         backend = gpu_backend_label(
             [self.active_providers["visual"], self.active_providers["text"]]
         )
+        self.image_size = image_size
         self.init_vision_batch_state(
             visual_session=self.visual_session,
             embedding_batch_size=_resolve_embedding_batch_size(runtime_config),
-            image_size=224,
+            image_size=image_size,
             using_gpu=self.using_gpu,
             backend_label=backend,
             active_providers=self.active_providers,
@@ -128,16 +137,17 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
         return "input"
 
     def preprocess_into(self, img_bgr, out_chw):
-        """Normalize one BGR frame into CHW float32 ``out_chw`` shaped (3, 224, 224).
+        """Normalize one BGR frame into CHW float32 ``out_chw`` shaped (3, image_size, image_size).
 
-        Frames from ``stream_frames_with_ffmpeg`` are already 224×224; skip resize there.
-        File paths may be arbitrary resolution and still need resize.
+        Frames from ``stream_frames_with_ffmpeg`` are already 224×224; skip resize there when
+        the active profile also uses 224. File paths may be arbitrary resolution.
         """
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         h, w = int(img.shape[0]), int(img.shape[1])
-        if h != 224 or w != 224:
-            interp = cv2.INTER_AREA if (h > 224 or w > 224) else cv2.INTER_LINEAR
-            img = cv2.resize(img, (224, 224), interpolation=interp)
+        size = int(getattr(self, "image_size", 224) or 224)
+        if h != size or w != size:
+            interp = cv2.INTER_AREA if (h > size or w > size) else cv2.INTER_LINEAR
+            img = cv2.resize(img, (size, size), interpolation=interp)
         t = img.astype(np.float32, copy=False)
         t *= 1.0 / 255.0
         t -= self.mean
@@ -145,9 +155,10 @@ class CLIPOnnxEngine(OnnxVisionBatchMixin):
         out_chw[:] = np.transpose(t, (2, 0, 1))
 
     def _preprocess(self, img_bgr):
-        out = np.empty((3, 224, 224), dtype=np.float32)
+        size = int(getattr(self, "image_size", 224) or 224)
+        out = np.empty((3, size, size), dtype=np.float32)
         self.preprocess_into(img_bgr, out)
-        return out.reshape(1, 3, 224, 224)
+        return out.reshape(1, 3, size, size)
 
     def encode_text(self, text):
         # Retained intentionally: this public text-encoding entrypoint is
@@ -1174,6 +1185,15 @@ def generate_vectors_and_index_for_video(
     return vectors, timestamps, None, chunks
 
 
+def _runtime_image_size(runtime_config, default=224):
+    runtime = get_active_model_runtime(config=runtime_config)
+    try:
+        image_size = int(runtime.get("image_size") or default)
+    except (TypeError, ValueError):
+        image_size = int(default)
+    return image_size if image_size > 0 else int(default)
+
+
 def _register_default_inference_engines():
     register_inference_engine("clip_onnx", lambda: CLIPOnnxEngine())
 
@@ -1181,7 +1201,10 @@ def _register_default_inference_engines():
         from src.core.siglip_provider import SigLIP2OnnxEngine
 
         runtime_config = load_config()
-        return SigLIP2OnnxEngine(get_active_model_resource_dir(config=runtime_config))
+        return SigLIP2OnnxEngine(
+            get_active_model_resource_dir(config=runtime_config),
+            image_size=_runtime_image_size(runtime_config, default=224),
+        )
 
     register_inference_engine("siglip2_onnx", _siglip_factory)
 
@@ -1189,7 +1212,10 @@ def _register_default_inference_engines():
         from src.core.chinese_clip_provider import ChineseCLIPOnnxEngine
 
         runtime_config = load_config()
-        return ChineseCLIPOnnxEngine(get_active_model_resource_dir(config=runtime_config))
+        return ChineseCLIPOnnxEngine(
+            get_active_model_resource_dir(config=runtime_config),
+            image_size=_runtime_image_size(runtime_config, default=224),
+        )
 
     register_inference_engine("chinese_clip_onnx", _chinese_clip_factory)
 

@@ -72,6 +72,7 @@ class PreviewController:
         except Exception as exc:
             logger.debug("Assert main preview host skipped: %s", exc)
         if vlc_player.play(playback_path, clip_start, stop_sec=clip_end):
+            self._set_preview_surface_idle(False)
             return True
 
         # Team play_url: never ffmpeg-remux remote HTTP on the UI thread (can hang / crash).
@@ -84,6 +85,7 @@ class PreviewController:
         result = create_preview_clip(playback_path, clip_start, cache_path, duration_sec=clip_duration)
         if result.returncode == 0:
             self.current_preview_path = cache_path
+            self._set_preview_surface_idle(False)
             media_player.setSource(QUrl.fromLocalFile(cache_path))
             media_player.play()
             return True
@@ -159,6 +161,7 @@ class PreviewController:
         if self.vlc_player is not None:
             # End the clip session so Play cannot resume after 清空.
             self.vlc_player.clear_session()
+        self._set_preview_surface_idle(True)
         try:
             self.parent_window.media_player.pause()
         except Exception as exc:
@@ -229,6 +232,33 @@ class PreviewController:
             silent=silent,
             encode_mode=mode,
         )
+
+    def _set_preview_surface_idle(self, idle: bool) -> None:
+        """Show placeholder over the native VLC hwnd so the last decoded frame is hidden."""
+        window = self.parent_window
+        stack = getattr(window, "preview_surface_stack", None)
+        video = getattr(window, "video_widget", None)
+        page = getattr(window, "search_page", None)
+        placeholder = getattr(page, "preview_placeholder", None) if page is not None else None
+        if stack is not None and video is not None and placeholder is not None:
+            try:
+                stack.setCurrentWidget(placeholder if idle else video)
+            except Exception as exc:
+                logger.debug("Preview surface stack switch skipped: %s", exc)
+                return
+            if idle:
+                return
+            player = self.vlc_player
+            if player is not None and player.is_available():
+                QTimer.singleShot(0, player.rebind_output_window)
+            return
+        if video is None or placeholder is None:
+            return
+        try:
+            placeholder.setVisible(bool(idle))
+            video.setVisible(not idle)
+        except Exception as exc:
+            logger.debug("Preview surface visibility skipped: %s", exc)
 
     def cleanup_previous_preview(self):
         if not self.current_preview_path:

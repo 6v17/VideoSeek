@@ -67,15 +67,15 @@ def _resolve_image_path(raw: str | None) -> Path:
     )
 
 
-def _assert_onnx_shapes(text_arr: np.ndarray, image_arr: np.ndarray) -> None:
-    if text_arr.ndim != 2 or text_arr.shape[1] != 512:
+def _assert_onnx_shapes(text_arr: np.ndarray, image_arr: np.ndarray, expected_dim: int) -> None:
+    if text_arr.ndim != 2 or text_arr.shape[1] != expected_dim:
         raise RuntimeError(
-            f"Text ONNX output has wrong shape {text_arr.shape}; expected (batch, 512). "
+            f"Text ONNX output has wrong shape {text_arr.shape}; expected (batch, {expected_dim}). "
             "Re-export with: python scripts/export_chinese_clip_onnx.py"
         )
-    if image_arr.ndim != 2 or image_arr.shape[1] != 512:
+    if image_arr.ndim != 2 or image_arr.shape[1] != expected_dim:
         raise RuntimeError(
-            f"Image ONNX output has wrong shape {image_arr.shape}; expected (batch, 512). "
+            f"Image ONNX output has wrong shape {image_arr.shape}; expected (batch, {expected_dim}). "
             "Re-export with: python scripts/export_chinese_clip_onnx.py"
         )
 
@@ -121,6 +121,7 @@ def main() -> int:
     parser.add_argument("--onnx-dir", type=Path, default=DEFAULT_ONNX_DIR)
     parser.add_argument("--pytorch-dir", type=Path, default=DEFAULT_PYTORCH_DIR)
     parser.add_argument("--image", type=str, default=None, help="Test image path (default: models/chinese_clip/festival.jpg)")
+    parser.add_argument("--expected-dim", type=int, default=512, help="Projected embedding size (base/L14=512)")
     parser.add_argument("--text-cos-threshold", type=float, default=0.999)
     parser.add_argument("--max-abs-threshold", type=float, default=1e-3)
     args = parser.parse_args()
@@ -160,7 +161,7 @@ def main() -> int:
     onnx_text = _run_onnx_text(text_session, processor, TEXT_SAMPLES, ort)
     onnx_image = _run_onnx_image(image_session, processor, image, ort, Image)
     try:
-        _assert_onnx_shapes(onnx_text, onnx_image)
+        _assert_onnx_shapes(onnx_text, onnx_image, int(args.expected_dim))
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1

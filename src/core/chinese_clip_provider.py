@@ -154,14 +154,21 @@ class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
         return features
 
 
-def build_chinese_clip_profile_manifest(variant="vit-base-patch16"):
+def build_chinese_clip_profile_manifest(
+    variant="vit-base-patch16",
+    *,
+    embedding_dimension=512,
+    image_size=224,
+):
     variant_text = str(variant or "").strip() or "vit-base-patch16"
-    return {
+    payload = {
         "id": f"chinese_clip_{variant_text.replace('-', '_')}",
         "provider": "chinese_clip_onnx",
         "variant": variant_text,
         "display_name": f"Chinese CLIP {variant_text}",
         "prefer_gpu": True,
+        "embedding_dimension": int(embedding_dimension),
+        "image_size": int(image_size),
         "required_files": [
             "chinese_clip_image.onnx",
             "chinese_clip_text.onnx",
@@ -177,3 +184,4 @@ def build_chinese_clip_profile_manifest(variant="vit-base-patch16"):
             "model_config": "config.json",
         },
     }
+    return payload

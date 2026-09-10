@@ -1585,7 +1585,8 @@ QTableView#LibraryGroupedLibTree::item:selected:!active {
     padding: 12px;
 }
 #PreviewPlaceholder {
-    min-height: 260px;
+    /* Fill the preview host; do not force a tall min (starves the results splitter). */
+    min-height: 0px;
 }
 #ThumbPreview {
     background: __FIELD__;
