@@ -275,7 +275,32 @@ class SearchController(QObject):
             self._result_display_context = {}
             result_view.clear()
             self._sync_results_pager()
-            self.parent_window.search_page.lbl_status.setText(self.parent_window.texts["no_results"])
+            status = self.parent_window.texts["no_results"]
+            search_kind = ""
+            worker_config = getattr(self.worker, "config", None)
+            if worker_config is not None:
+                search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
+            if search_kind not in {"dialogue", "tags"}:
+                try:
+                    from src.storage.config_store import get_local_model_asset_dirs
+                    from src.storage.lance_search_index import lance_search_is_ready
+                    from src.storage.video_id_migration import legacy_npy_vectors_present
+
+                    base_dir = get_local_model_asset_dirs()["base_dir"]
+                    if not lance_search_is_ready(base_dir):
+                        if legacy_npy_vectors_present():
+                            status = self.parent_window.texts.get(
+                                "search_index_not_ready_legacy_npy",
+                                status,
+                            )
+                        else:
+                            status = self.parent_window.texts.get(
+                                "search_index_not_ready",
+                                status,
+                            )
+                except Exception as exc:
+                    logger.debug("Empty-search readiness hint skipped: %s", exc)
+            self.parent_window.search_page.lbl_status.setText(status)
             return
 
         worker_config = getattr(self.worker, "config", None)

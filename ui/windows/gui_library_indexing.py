@@ -51,6 +51,16 @@ class LibraryIndexingGuiMixin:
         key = f"library_asset_state_{state}"
         return self.texts.get(key, state)
 
+    @staticmethod
+    def _visual_asset_status_tone(asset_state: str) -> str:
+        state = str(asset_state or "").strip().lower()
+        if state == "ready":
+            return "ready"
+        # Missing/broken vectors: yellow “needs sync” cue (no extra button required).
+        if state in {"missing_asset", "broken_asset"}:
+            return "fix"
+        return "pending"
+
     def _build_visual_tree_entries(self, *, register: bool = False) -> tuple[list[dict], list[str]]:
         from src.services.team_mode_service import is_team_client_mode
 
@@ -70,7 +80,7 @@ class LibraryIndexingGuiMixin:
                     {
                         **item,
                         "status_text": self._asset_state_label(state),
-                        "status_tone": "ready" if state == "ready" else "pending",
+                        "status_tone": self._visual_asset_status_tone(state),
                     }
                 )
             return rows, library_paths
@@ -81,12 +91,11 @@ class LibraryIndexingGuiMixin:
         rows = []
         for item in entries:
             state = str(item.get("asset_state") or "").strip().lower()
-            ready = state == "ready"
             rows.append(
                 {
                     **item,
                     "status_text": self._asset_state_label(state),
-                    "status_tone": "ready" if ready else "pending",
+                    "status_tone": self._visual_asset_status_tone(state),
                 }
             )
         return rows, list(libraries.keys())
@@ -206,7 +215,7 @@ class LibraryIndexingGuiMixin:
                     {
                         **item,
                         "status_text": self._asset_state_label(state),
-                        "status_tone": "ready" if state == "ready" else "pending",
+                        "status_tone": self._visual_asset_status_tone(state),
                     }
                 )
             tree.refresh_from_entries(rows, library_paths=visual_paths)
@@ -434,6 +443,7 @@ class LibraryIndexingGuiMixin:
             self._refresh_team_client_library_chrome()
             self._refresh_remove_library_button()
             self._refresh_cleanup_missing_button_state(probe=True)
+            self._refresh_fix_missing_vectors_button()
             if hasattr(self, "invalidate_search_scope_entries_cache"):
                 self.invalidate_search_scope_entries_cache()
             if hasattr(self, "_refresh_search_scope_ui"):
@@ -475,6 +485,7 @@ class LibraryIndexingGuiMixin:
             "btn_sync_db": not client,
             "btn_refresh_visual_library": not client,
             "btn_index_issues": not client,
+            "btn_fix_missing_vectors": not client,
             "btn_cleanup_missing": not client,
             "btn_remove_selected_videos": not client,
             "btn_vector_details": not client,
@@ -628,6 +639,8 @@ class LibraryIndexingGuiMixin:
     def _begin_library_register_ui(self):
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_refresh_visual_library.setEnabled(False)
+        if hasattr(self.library_page, "btn_fix_missing_vectors"):
+            self.library_page.btn_fix_missing_vectors.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -658,6 +671,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.input_subtitle_ocr_batch.setEnabled(True)
         self.library_page.btn_add_lib.setEnabled(True)
         self._refresh_cleanup_missing_button_state(probe=True)
+        self._refresh_fix_missing_vectors_button()
         self.library_page.progress_bar.setVisible(False)
         self._refresh_remove_library_button()
 
@@ -857,6 +871,8 @@ class LibraryIndexingGuiMixin:
         self._remove_selected_videos_running = True
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_refresh_visual_library.setEnabled(False)
+        if hasattr(self.library_page, "btn_fix_missing_vectors"):
+            self.library_page.btn_fix_missing_vectors.setEnabled(False)
         self.library_page.btn_add_lib.setEnabled(False)
         self.library_page.btn_remove_lib.setEnabled(False)
         self._apply_cleanup_missing_button_state(bool(getattr(self, "_last_cleanup_missing_available", False)), force_disabled=True)
@@ -914,6 +930,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_refresh_visual_library.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self._refresh_cleanup_missing_button_state(probe=True)
+            self._refresh_fix_missing_vectors_button()
             self.library_page.btn_vector_details.setEnabled(True)
             payload = result if isinstance(result, dict) else {}
             if success:
@@ -993,6 +1010,8 @@ class LibraryIndexingGuiMixin:
         self._remove_library_mode = "subtitle" if subtitle_mode else "visual"
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_refresh_visual_library.setEnabled(False)
+        if hasattr(self.library_page, "btn_fix_missing_vectors"):
+            self.library_page.btn_fix_missing_vectors.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -1078,6 +1097,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self._refresh_cleanup_missing_button_state(probe=True)
+            self._refresh_fix_missing_vectors_button()
             self.library_page.progress_bar.setVisible(False)
             if success:
                 # Defer tree rebuilds so the finished signal returns quickly.
@@ -1097,6 +1117,7 @@ class LibraryIndexingGuiMixin:
             self._remove_library_running = False
             self._remove_library_mode = ""
             self._refresh_remove_library_button()
+            self._refresh_fix_missing_vectors_button()
 
     def start_update_index(
         self,
@@ -1135,6 +1156,64 @@ class LibraryIndexingGuiMixin:
             force_cleanup_missing_files=False,
             rebuild_global_assets=rebuild_global_assets,
             video_ids=selected_ids,
+        )
+
+    def start_fix_missing_vectors(self):
+        """Rebuild vectors for demoted / npy-only videos that still have a source file."""
+        from src.services.library_service import collect_reindexable_missing_video_ids
+        from src.services.team_mode_service import is_team_client_mode
+
+        title = self.texts.get("fix_missing_vectors", "修复向量")
+        if is_team_client_mode():
+            self.show_info_dialog(
+                self.texts.get("info_title", self.texts.get("success_title", "Info")),
+                self.texts.get(
+                    "library_team_readonly",
+                    "用户机不能添加本地库。请在服务机添加并索引。",
+                ),
+                kind="warning",
+            )
+            return
+        if not self._ensure_startup_migration_idle("feature_indexing"):
+            return
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+            or self._remove_selected_videos_worker_running()
+        ):
+            self.library_page.lbl_status.setText(self.texts.get("index_already_running", ""))
+            return
+
+        try:
+            missing_ids = collect_reindexable_missing_video_ids()
+        except Exception as exc:
+            self.show_error_dialog(title, exc)
+            return
+
+        if not missing_ids:
+            self.show_info_dialog(
+                title,
+                self.texts.get(
+                    "fix_missing_vectors_empty",
+                    "当前没有可修复的向量缺失项（源文件仍在、状态为缺失或仅有遗留 npy）。",
+                ),
+                kind="info",
+            )
+            self._refresh_fix_missing_vectors_button(count=0)
+            return
+
+        confirm = self.texts.get(
+            "fix_missing_vectors_confirm",
+            "将修复 {count} 个「向量/索引缺失」视频（源文件仍在磁盘，会重新嵌入）。开始吗？",
+        ).format(count=len(missing_ids))
+        if not self.show_confirm_dialog(self.texts.get("confirm_title", "Confirm"), confirm):
+            return
+
+        self._start_index_update(
+            force_cleanup_missing_files=False,
+            rebuild_global_assets=True,
+            video_ids=missing_ids,
         )
 
     def start_dialogue_index(self):
@@ -1743,6 +1822,8 @@ class LibraryIndexingGuiMixin:
 
         self.library_page.btn_sync_db.setEnabled(False)
         self.library_page.btn_refresh_visual_library.setEnabled(False)
+        if hasattr(self.library_page, "btn_fix_missing_vectors"):
+            self.library_page.btn_fix_missing_vectors.setEnabled(False)
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -1832,6 +1913,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.input_subtitle_ocr_batch.setEnabled(True)
             self.library_page.btn_add_lib.setEnabled(True)
             self._refresh_cleanup_missing_button_state(probe=True)
+            self._refresh_fix_missing_vectors_button()
             self.library_page.btn_stop_dialogue_index.setEnabled(False)
             self.library_page.btn_stop_dialogue_index.setVisible(False)
             self.library_page.progress_bar.setVisible(False)
@@ -2044,6 +2126,8 @@ class LibraryIndexingGuiMixin:
                 return
             self.library_page.btn_sync_db.setEnabled(False)
             self.library_page.btn_refresh_visual_library.setEnabled(False)
+            if hasattr(self.library_page, "btn_fix_missing_vectors"):
+                self.library_page.btn_fix_missing_vectors.setEnabled(False)
             self.library_page.btn_build_dialogue_index.setEnabled(False)
             self.library_page.btn_reembed_dialogue.setEnabled(False)
             self.library_page.btn_clear_dialogue.setEnabled(False)
@@ -2164,6 +2248,20 @@ class LibraryIndexingGuiMixin:
         )
         if stopped:
             status_text = self.texts["index_stopped"]
+            try:
+                from src.services.library_service import collect_reindexable_missing_video_ids
+
+                leftover = len(collect_reindexable_missing_video_ids())
+            except Exception:
+                leftover = 0
+            if leftover:
+                status_text = (
+                    f"{status_text} "
+                    + self.texts.get(
+                        "index_stopped_fix_hint",
+                        "仍有 {count} 个可修复项，可点「修复向量」继续。",
+                    ).format(count=leftover)
+                )
         elif success:
             if selection_matched_none:
                 status_text = self.texts.get(
@@ -2176,6 +2274,20 @@ class LibraryIndexingGuiMixin:
                 status_text = self.texts["index_updated_empty_single"] if target_lib else self.texts["index_updated_empty"]
             if issue_count:
                 status_text = f"{status_text} {self.texts['index_issue_summary'].format(count=issue_count)}"
+            try:
+                from src.services.library_service import collect_reindexable_missing_video_ids
+
+                leftover = len(collect_reindexable_missing_video_ids())
+            except Exception:
+                leftover = 0
+            if leftover:
+                status_text = (
+                    f"{status_text} "
+                    + self.texts.get(
+                        "fix_missing_vectors_after_sync_hint",
+                        "另有 {count} 个向量缺失（源文件仍在），可点「修复向量」。",
+                    ).format(count=leftover)
+                )
             if (not has_search_assets or selection_matched_none) and not stopped:
                 if selection_matched_none:
                     dialog_text = self.texts.get(
@@ -2195,6 +2307,7 @@ class LibraryIndexingGuiMixin:
         else:
             status_text = self.texts["index_failed"]
         self.library_page.lbl_status.setText(status_text)
+        self._refresh_fix_missing_vectors_button()
         self._refresh_search_session_hint()
         if hasattr(self, "_refresh_understanding_ui"):
             self._refresh_understanding_ui()
@@ -2336,6 +2449,49 @@ class LibraryIndexingGuiMixin:
             has_content,
             force_disabled=self._cleanup_missing_button_busy(),
         )
+
+    def _refresh_fix_missing_vectors_button(self, count: int | None = None) -> None:
+        from src.services.team_mode_service import is_team_client_mode
+
+        btn = getattr(self.library_page, "btn_fix_missing_vectors", None)
+        if btn is None:
+            return
+        if is_team_client_mode():
+            btn.setEnabled(False)
+            btn.setText(self.texts.get("fix_missing_vectors", "修复向量"))
+            btn.setToolTip(self.texts.get("fix_missing_vectors_hint", ""))
+            return
+        busy = bool(
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+            or self._remove_selected_videos_worker_running()
+        )
+        if count is None:
+            try:
+                from src.services.library_service import collect_reindexable_missing_video_ids
+
+                count = len(collect_reindexable_missing_video_ids())
+            except Exception:
+                count = int(getattr(self, "_last_fix_missing_count", 0) or 0)
+        self._last_fix_missing_count = int(count or 0)
+        base = self.texts.get("fix_missing_vectors", "修复向量")
+        if self._last_fix_missing_count > 0:
+            btn.setText(
+                self.texts.get("fix_missing_vectors_count", "修复 {count}").format(
+                    label=base,
+                    count=self._last_fix_missing_count,
+                )
+            )
+        else:
+            btn.setText(base)
+        btn.setToolTip(
+            self.texts.get(
+                "fix_missing_vectors_hint",
+                "为「向量/索引缺失」且源文件仍在的视频重新嵌入（无需先勾选）。",
+            )
+        )
+        btn.setEnabled((not busy) and self._last_fix_missing_count > 0)
 
     def show_last_index_issue_details(self):
         if not self._last_index_issues:

@@ -1469,6 +1469,12 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     padding: 2px 6px;
     min-height: 22px;
 }
+#LibraryLibSyncStatus[libSync="needs_fix"] {
+    color: __WARN__;
+}
+#LibraryLibSyncStatus[libSync="offline"] {
+    color: __MUTED__;
+}
 #LibraryLibBody {
     background: transparent;
     border: none;

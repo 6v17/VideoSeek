@@ -41,6 +41,8 @@ from ui.widgets.list_find_bar import (
 _LIST_VIEW_HEIGHT = 280
 _STATUS_READY = QColor("#2ec27e")
 _STATUS_PENDING = QColor("#f4c95d")
+# Fixable missing vectors — stronger amber so it reads as “needs sync”.
+_STATUS_FIX = QColor("#d89b0d")
 
 
 class _ClickLabel(QLabel):
@@ -161,8 +163,15 @@ class LibraryVideoTableModel(QAbstractTableModel):
             tone = str(ent.get("status_tone") or "").strip().lower()
             if not tone:
                 state = str(ent.get("asset_state") or "").strip().lower()
-                tone = "ready" if state == "ready" or ent.get("has_transcript") else "pending"
-            return _STATUS_READY if tone == "ready" else _STATUS_PENDING
+                if state in {"missing_asset", "broken_asset"}:
+                    tone = "fix"
+                else:
+                    tone = "ready" if state == "ready" or ent.get("has_transcript") else "pending"
+            if tone == "ready":
+                return _STATUS_READY
+            if tone == "fix":
+                return _STATUS_FIX
+            return _STATUS_PENDING
         if role == Qt.ItemDataRole.UserRole:
             return dict(ent)
         if role == Qt.ItemDataRole.UserRole + 1:
@@ -483,11 +492,19 @@ class LibraryGroupedVideoTree(QWidget):
         return out
 
     @staticmethod
+    def _entry_needs_fix(ent: dict) -> bool:
+        tone = str(ent.get("status_tone") or "").strip().lower()
+        if tone == "fix":
+            return True
+        state = str(ent.get("asset_state") or "").strip().lower()
+        return state in {"missing_asset", "broken_asset"}
+
+    @staticmethod
     def _entry_is_ready(ent: dict) -> bool:
         tone = str(ent.get("status_tone") or "").strip().lower()
         if tone == "ready":
             return True
-        if tone == "pending":
+        if tone in {"pending", "fix"}:
             return False
         if ent.get("has_transcript"):
             return True
@@ -500,14 +517,25 @@ class LibraryGroupedVideoTree(QWidget):
         lib_path = str(block.lib_path or "").strip()
         if lib_path and not os.path.isdir(lib_path):
             label.setText(self._offline_status_text or "Path missing")
+            label.setProperty("libSync", "offline")
+            style = label.style()
+            if style is not None:
+                style.unpolish(label)
+                style.polish(label)
             return
         total = len(block.entries)
         ready = sum(1 for ent in block.entries if self._entry_is_ready(ent))
+        needs_fix = any(self._entry_needs_fix(ent) for ent in block.entries)
         template = self._status_template or "{ready}/{total}"
         try:
             label.setText(template.format(ready=ready, total=total))
         except Exception:
             label.setText(f"{ready}/{total}")
+        label.setProperty("libSync", "needs_fix" if needs_fix else "")
+        style = label.style()
+        if style is not None:
+            style.unpolish(label)
+            style.polish(label)
 
     def collect_checked_entries(self) -> list[dict]:
         out: list[dict] = []

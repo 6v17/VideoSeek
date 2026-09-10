@@ -540,6 +540,32 @@ def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
     return demoted
 
 
+def collect_reindexable_missing_video_ids(*, config=None) -> list[str]:
+    """Video ids that need vector rebuild and still have a source file on disk.
+
+    Includes ``missing_asset`` and ``broken_asset`` (legacy npy-only). Skips
+    ``missing_source`` / ``sync_failed`` — those need path repair or a normal sync.
+    """
+    cfg = config or load_config()
+    entries = list_library_video_entries(config=cfg, register=False)
+    ids: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if not bool(entry.get("source_exists")):
+            continue
+        state = str(entry.get("asset_state", "") or "").strip().lower()
+        if state not in {"missing_asset", "broken_asset"}:
+            continue
+        video_id = str(entry.get("video_id", "") or "").strip()
+        if not video_id or video_id in seen:
+            continue
+        seen.add(video_id)
+        ids.append(video_id)
+    return ids
+
+
 def remove_library(path, delete_video_data, progress_callback=None):
     """Remove a visual library from the active CLIP profile and exclusive Lance data.
 

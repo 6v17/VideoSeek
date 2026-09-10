@@ -407,6 +407,7 @@ class MainWindow(
         self.library_page.btn_stop_index.clicked.connect(self.stop_update_index)
         self.library_page.library_stack.currentChanged.connect(self._on_library_tab_changed)
         self.library_page.btn_index_issues.clicked.connect(self.show_last_index_issue_details)
+        self.library_page.btn_fix_missing_vectors.clicked.connect(self.start_fix_missing_vectors)
         self.library_page.btn_cleanup_missing.clicked.connect(self.cleanup_missing_library_vectors)
         self.library_page.btn_vector_details.clicked.connect(self.show_local_vector_details)
         self.library_page.btn_debug_gpu_oom.clicked.connect(self.start_debug_gpu_oom)
@@ -943,7 +944,16 @@ class MainWindow(
         self.library_page.btn_stop_index.setText(t["stop"])
         self.library_page.btn_stop_dialogue_index.setText(t["stop"])
         self.library_page.btn_index_issues.setText(t["index_issues_button"])
+        self.library_page.btn_fix_missing_vectors.setText(t.get("fix_missing_vectors", "修复向量"))
+        self.library_page.btn_fix_missing_vectors.setToolTip(
+            t.get(
+                "fix_missing_vectors_hint",
+                "为「向量/索引缺失」且源文件仍在的视频重新嵌入（无需先勾选）。",
+            )
+        )
         self.library_page.btn_cleanup_missing.setText(t["cleanup_missing_vectors"])
+        if hasattr(self, "_refresh_fix_missing_vectors_button"):
+            self._refresh_fix_missing_vectors_button()
         self.library_page.btn_remove_selected_videos.setText(
             t.get("remove_selected_videos", "Remove selected videos")
         )
