@@ -466,6 +466,12 @@ class ConfigMigrationTests(unittest.TestCase):
                 config_module.DEFAULT_CONFIG["frame_neighbor_rerank_window"],
             )
 
+    def test_default_search_defaults_favor_chunk_and_neighbor_rerank(self):
+        self.assertEqual(config_module.DEFAULT_CONFIG["search_mode"], "chunk")
+        self.assertEqual(config_module.DEFAULT_CONFIG["image_search_mode"], "frame")
+        self.assertTrue(config_module.DEFAULT_CONFIG["frame_neighbor_rerank_enabled"])
+        self.assertFalse(config_module.DEFAULT_CONFIG["text_search_enhance_enabled"])
+
     def test_default_config_includes_sampling_rules_template(self):
         self.assertEqual(config_module.DEFAULT_CONFIG["sampling_fps_rules"], "0-10m=2; 10m-=1")
 

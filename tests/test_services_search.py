@@ -168,13 +168,20 @@ class SearchServiceTests(unittest.TestCase):
 
     def test_neighbor_rerank_auto_enabled_for_image_search(self):
         self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=True))
-        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
+        self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
 
     def test_neighbor_rerank_respects_text_default(self):
         self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=True))
 
-    def test_neighbor_rerank_disabled_for_fast_image_search(self):
-        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
+    def test_neighbor_rerank_enabled_for_fast_image_search_by_default(self):
+        self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
+        self.assertFalse(
+            search_service._neighbor_rerank_enabled(
+                {"frame_neighbor_rerank_enabled": False},
+                is_text=False,
+                precise_image=False,
+            )
+        )
 
     @patch("src.services.search_locate_pipeline.apply_image_pixel_rerank")
     def test_finalize_frame_hits_prefers_pixel_query_data(self, mock_pixel):

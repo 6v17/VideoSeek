@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+
 from src.storage.config_store import get_search_scope_library_paths
 
 
@@ -12,7 +14,7 @@ class SearchPanelStateMixin:
     SEARCH_TAB_DIALOGUE = "dialogue"
     SEARCH_TAB_TAGS = "tags"
 
-    IMAGE_SEARCH_MODES = ("chunk", "frame", "video_discovery", "precise")
+    IMAGE_SEARCH_MODES = ("frame", "video_discovery", "precise", "chunk")
 
     def _search_has_image_query(self) -> bool:
         return bool(str(getattr(self, "current_img_path", "") or "").strip())
@@ -258,6 +260,11 @@ class SearchPanelStateMixin:
         }
         for mode in self.IMAGE_SEARCH_MODES:
             page.image_search_mode.addItem(labels[mode], mode)
+            tip_key = f"search_image_mode_{mode}_tip"
+            tip = texts.get(tip_key, "")
+            if tip:
+                item_index = page.image_search_mode.count() - 1
+                page.image_search_mode.setItemData(item_index, tip, Qt.ItemDataRole.ToolTipRole)
         normalized = str(current_mode or "frame").strip().lower()
         if normalized not in self.IMAGE_SEARCH_MODES:
             normalized = "frame"
@@ -393,7 +400,11 @@ class SearchPanelStateMixin:
         if active_tab == self.SEARCH_TAB_IMAGE:
             page.image_search_mode_label.setText(texts.get("search_image_mode_label", texts.get("setting_search_mode", "")))
             self._populate_image_search_mode_combo()
-            hint = texts.get("search_image_mode_hint", "")
+            current_image_mode = str(page.image_search_mode.currentData() or "frame").strip().lower()
+            hint = texts.get(
+                f"search_image_mode_{current_image_mode}_tip",
+                texts.get("search_image_mode_hint", ""),
+            )
             page.image_search_mode_label.setToolTip(hint)
             page.image_search_mode.setToolTip(hint)
 

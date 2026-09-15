@@ -361,6 +361,9 @@ def _install_pyside_stub():
 
     qtwidgets.QApplication = _QApplication
     qtgui.QFontMetrics = _QLabel
+    qtgui.QColor = type("QColor", (), {"__init__": lambda self, *a, **k: None})
+    qtgui.QPainter = type("QPainter", (), {"__init__": lambda self, *a, **k: None})
+    qtgui.QPen = type("QPen", (), {"__init__": lambda self, *a, **k: None})
 
     pyside6 = types.ModuleType("PySide6")
     pyside6.__path__ = []
@@ -663,14 +666,53 @@ class SearchControllerTests(unittest.TestCase):
 
     def test_display_results_handles_empty_result(self):
         parent = _make_parent_window()
+        parent.texts["search_empty_try_text_enhance"] = "Try Enhance"
         controller = SearchController(parent)
         controller.worker = MagicMock()
+        controller.worker.config = MagicMock()
+        controller.worker.config.search_kind = "text"
+        controller.worker.config.is_text = True
+        controller.worker.config.search_precision_mode = "fast"
+        controller.worker.config.video_discovery_enabled = False
         controller._is_current_worker = MagicMock(return_value=True)
 
-        controller._display_results([])
+        with patch(
+            "src.storage.lance_search_index.lance_search_is_ready",
+            return_value=True,
+        ), patch(
+            "src.storage.config_store.get_local_model_asset_dirs",
+            return_value={"base_dir": "x"},
+        ), patch(
+            "src.storage.config_store.get_text_search_enhance_enabled",
+            return_value=False,
+        ), patch(
+            "src.storage.video_id_migration.legacy_npy_vectors_present",
+            return_value=False,
+        ):
+            controller._display_results([])
 
         parent.search_page.result_view.clear.assert_called_once()
-        parent.search_page.lbl_status.setText.assert_called_with("No results")
+        parent.search_page.lbl_status.setText.assert_called_with("No results · Try Enhance")
+        parent.search_page.result_view.set_empty_message.assert_called_with(
+            "No results · Try Enhance"
+        )
+
+    def test_results_status_appends_deep_locate_hint_for_video_hits(self):
+        from src.domain.search_hit import SearchHit
+
+        parent = _make_parent_window()
+        parent.texts["search_done"] = "Done {duration:.2f}s · {count}"
+        parent.texts["search_done_deep_locate_hint"] = "Use Find shot"
+        controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller._last_search_duration = 1.25
+        hits = [SearchHit(0.0, 1.0, 0.9, "a.mp4", match_kind="video")]
+
+        controller._update_results_status_text(hits, {"search_kind": "image"})
+
+        parent.search_page.lbl_status.setText.assert_called_once_with(
+            "Done 1.25s · 1 · Use Find shot"
+        )
 
     @patch("ui.controllers.search_controller.SearchWarmupWorker")
     def test_start_warmup_starts_once(self, mock_worker_cls):

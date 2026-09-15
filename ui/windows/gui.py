@@ -209,7 +209,10 @@ class MainWindow(
         self.apply_texts()
         self._bind_settings_dirty_tracking()
         self.load_settings_values()
-        self._set_search_precision_mode_ui("fast")
+        # Do not force image_search_mode after load — persisted frame / video_discovery /
+        # chunk / precise must survive restart. New installs already default to frame.
+        if hasattr(self, "_refresh_search_panel_state"):
+            self._refresh_search_panel_state()
         self._set_settings_dirty(False)
         self.check_runtime_resources(show_dialog=False)
         if self.startup_cancelled:

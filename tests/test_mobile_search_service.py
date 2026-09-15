@@ -65,6 +65,14 @@ class MobileSearchServiceTests(unittest.TestCase):
         self.assertEqual(defaults["search_precision_default"], "precise")
         self.assertEqual(defaults["scope_mode"], "selected")
         self.assertEqual(len(defaults["image_search_modes"]), 4)
+        self.assertEqual(
+            [item["id"] for item in defaults["image_search_modes"]],
+            ["frame", "video_discovery", "precise", "chunk"],
+        )
+        self.assertEqual(
+            [item["id"] for item in defaults["text_search_modes"]],
+            ["chunk", "frame"],
+        )
         self.assertGreaterEqual(defaults["max_compose_images"], 1)
 
     def test_build_image_payload_includes_image_search_mode(self):

@@ -264,6 +264,81 @@ class SearchController(QObject):
         label = texts.get(key, key)
         self.parent_window.search_page.lbl_status.setText(label)
 
+    def _resolve_empty_search_status(self) -> str:
+        """Human empty-state copy: index readiness, dialogue/tags, then mode tips."""
+        texts = self.parent_window.texts
+        status = str(texts.get("no_results", "") or "").strip()
+        worker_config = getattr(self.worker, "config", None)
+        search_kind = ""
+        if worker_config is not None:
+            search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
+
+        if search_kind == "dialogue":
+            dialogue_message = str(getattr(self.worker, "dialogue_status_message", "") or "").strip()
+            dialogue_keys = {
+                "no dialogue index for active profile (build dialogue index first)": "search_dialogue_no_index",
+                "no dialogue matches": "search_dialogue_no_matches",
+                "empty query": "search_empty_dialogue",
+            }
+            if dialogue_message:
+                key = dialogue_keys.get(dialogue_message)
+                return str(texts.get(key, dialogue_message) if key else dialogue_message)
+            return str(texts.get("search_dialogue_no_matches", status) or status)
+
+        if search_kind == "tags":
+            tags_message = str(getattr(self.worker, "dialogue_status_message", "") or "").strip()
+            tags_keys = {
+                "no tag index (generate VLM tags on Understanding page first)": "search_tags_no_index",
+                "no tag matches": "search_tags_no_matches",
+                "empty query": "search_empty_tags",
+            }
+            if tags_message:
+                key = tags_keys.get(tags_message)
+                return str(texts.get(key, tags_message) if key else tags_message)
+            return str(texts.get("search_tags_no_matches", status) or status)
+
+        try:
+            from src.storage.config_store import get_local_model_asset_dirs
+            from src.storage.lance_search_index import lance_search_is_ready
+            from src.storage.video_id_migration import legacy_npy_vectors_present
+
+            base_dir = get_local_model_asset_dirs()["base_dir"]
+            if not lance_search_is_ready(base_dir):
+                if legacy_npy_vectors_present():
+                    return str(texts.get("search_index_not_ready_legacy_npy", status) or status)
+                return str(texts.get("search_index_not_ready", status) or status)
+        except Exception as exc:
+            logger.debug("Empty-search readiness hint skipped: %s", exc)
+
+        is_text = True
+        precision = "fast"
+        if worker_config is not None:
+            is_text = bool(getattr(worker_config, "is_text", True))
+            precision = str(getattr(worker_config, "search_precision_mode", "") or "fast").strip().lower()
+            if bool(getattr(worker_config, "video_discovery_enabled", False)):
+                precision = "video_discovery"
+
+        tip = ""
+        if is_text and search_kind not in {"dialogue", "tags"}:
+            enhance_on = False
+            try:
+                from src.storage.config_store import get_text_search_enhance_enabled
+
+                enhance_on = bool(get_text_search_enhance_enabled())
+            except Exception:
+                enhance_on = False
+            if not enhance_on:
+                tip = str(texts.get("search_empty_try_text_enhance", "") or "").strip()
+        elif not is_text:
+            if precision == "precise":
+                tip = str(texts.get("search_empty_try_clearer_image", "") or "").strip()
+            else:
+                tip = str(texts.get("search_empty_try_image_mode", "") or "").strip()
+
+        if tip:
+            return f"{status} · {tip}" if status else tip
+        return status
+
     def _display_results(self, results):
         if self._is_shutdown or not self._is_current_worker():
             return
@@ -280,32 +355,13 @@ class SearchController(QObject):
             self._result_display_context = {}
             result_view.clear()
             self._sync_results_pager()
-            status = self.parent_window.texts["no_results"]
-            search_kind = ""
-            worker_config = getattr(self.worker, "config", None)
-            if worker_config is not None:
-                search_kind = str(getattr(worker_config, "search_kind", "") or "").strip().lower()
-            if search_kind not in {"dialogue", "tags"}:
-                try:
-                    from src.storage.config_store import get_local_model_asset_dirs
-                    from src.storage.lance_search_index import lance_search_is_ready
-                    from src.storage.video_id_migration import legacy_npy_vectors_present
-
-                    base_dir = get_local_model_asset_dirs()["base_dir"]
-                    if not lance_search_is_ready(base_dir):
-                        if legacy_npy_vectors_present():
-                            status = self.parent_window.texts.get(
-                                "search_index_not_ready_legacy_npy",
-                                status,
-                            )
-                        else:
-                            status = self.parent_window.texts.get(
-                                "search_index_not_ready",
-                                status,
-                            )
-                except Exception as exc:
-                    logger.debug("Empty-search readiness hint skipped: %s", exc)
+            status = self._resolve_empty_search_status()
             self.parent_window.search_page.lbl_status.setText(status)
+            empty_message = status
+            try:
+                result_view.set_empty_message(empty_message)
+            except Exception:
+                pass
             return
 
         worker_config = getattr(self.worker, "config", None)
@@ -471,7 +527,21 @@ class SearchController(QObject):
             if warning_key == "locate_crop_low_confidence":
                 status_text = f"{status_text} · {texts.get('clip_confidence_low', '低')}"
             elif warning_key == "locate_crop_low_confidence_empty":
-                status_text = f"{status_text} · {texts.get('no_results', '无结果')}"
+                status_text = f"{status_text} · {texts.get('locate_crop_low_confidence_empty', '')}"
+        if results and search_kind not in {"dialogue", "tags"}:
+            try:
+                from src.domain.search_hit import coerce_search_hit
+
+                has_video_hit = any(
+                    str(getattr(coerce_search_hit(row), "match_kind", "") or "").strip().lower() == "video"
+                    for row in results
+                )
+            except Exception:
+                has_video_hit = False
+            if has_video_hit:
+                deep_hint = str(texts.get("search_done_deep_locate_hint", "") or "").strip()
+                if deep_hint:
+                    status_text = f"{status_text} · {deep_hint}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
     def _start_page_thumbnails(self, page_results) -> None:

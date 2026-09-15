@@ -180,10 +180,6 @@ def get_mobile_search_defaults(config=None) -> dict[str, Any]:
         "max_compose_images": _MAX_COMPOSE_IMAGES,
         "image_search_modes": [
             {
-                "id": "chunk",
-                "label": texts.get("search_image_mode_chunk", "Chunk"),
-            },
-            {
                 "id": "frame",
                 "label": texts.get("search_image_mode_frame", "Frame"),
             },
@@ -195,15 +191,19 @@ def get_mobile_search_defaults(config=None) -> dict[str, Any]:
                 "id": "precise",
                 "label": texts.get("search_image_mode_precise", "Deep search"),
             },
+            {
+                "id": "chunk",
+                "label": texts.get("search_image_mode_chunk", "Chunk"),
+            },
         ],
         "text_search_modes": [
             {
-                "id": "frame",
-                "label": texts.get("setting_search_mode_frame", "Frame"),
-            },
-            {
                 "id": "chunk",
                 "label": texts.get("setting_search_mode_chunk", "Chunk"),
+            },
+            {
+                "id": "frame",
+                "label": texts.get("setting_search_mode_frame", "Frame"),
             },
         ],
         "dialogue_search_modes": [
