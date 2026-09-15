@@ -114,6 +114,37 @@ class ResultViewModeTests(unittest.TestCase):
         self.assertTrue("…" in shown or "..." in shown)
         self.assertTrue(card.title_label.toolTip().endswith(long_name))
 
+    def test_grid_host_height_includes_last_action_row(self):
+        from ui.widgets.result_grid import ResultGrid, _BTN_H, _GRID_BOTTOM_PAD
+
+        grid = ResultGrid()
+        grid.resize(700, 240)
+        texts = {
+            "preview": "预览",
+            "preview_tip": "",
+            "locate": "定位",
+            "locate_tip": "",
+            "export_clip": "导出",
+            "export_clip_tip": "",
+            "thumb_loading": "...",
+            "result_mode_frame": "Frame",
+        }
+        hits = [
+            SearchHit(1.0, 2.0, 0.9, rf"D:\videos\clip_{i}.mp4", match_kind="frame")
+            for i in range(6)
+        ]
+
+        def _noop(*_a, **_k):
+            return None
+
+        grid.populate(hits, _noop, _noop, _noop, texts)
+        grid._sync_host_height()
+        card_h = max(card.sizeHint().height() for card in grid._cards)
+        self.assertGreaterEqual(card_h, 120)
+        # 3 rows with 2 columns at ~700px width; host must clear last action row + pad.
+        self.assertGreaterEqual(grid._host.minimumHeight(), card_h * 3 + _GRID_BOTTOM_PAD)
+        self.assertGreaterEqual(grid._cards[0].actions_host.minimumHeight(), _BTN_H)
+
 
 if __name__ == "__main__":
     unittest.main()

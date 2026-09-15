@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -25,6 +25,7 @@ from ui.widgets.thumb_cell import make_thumb_label
 # Wide enough for video-discovery actions: 预览 / 定位镜头 / 定位 / 导出 / 加入
 _CARD_MIN_WIDTH = 312
 _CARD_SPACING = 12
+_GRID_BOTTOM_PAD = 20
 _BTN_H = 30
 _BTN_W = 54
 _BTN_DEEP_W = 72
@@ -38,7 +39,7 @@ class ResultGridCard(QFrame):
         super().__init__(parent)
         self.setObjectName("ResultGridCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.setFixedWidth(_CARD_MIN_WIDTH)
 
         self._video_path = ""
@@ -86,6 +87,7 @@ class ResultGridCard(QFrame):
 
         self.actions_host = QWidget()
         self.actions_host.setObjectName("ResultGridActions")
+        self.actions_host.setMinimumHeight(_BTN_H)
         actions_layout = QVBoxLayout(self.actions_host)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(0)
@@ -253,6 +255,7 @@ class ResultGridCard(QFrame):
         layout.addWidget(row)
 
         self._on_preview = on_preview
+        self.updateGeometry()
 
 
 class ResultGrid(QScrollArea):
@@ -270,8 +273,9 @@ class ResultGrid(QScrollArea):
 
         self._host = QWidget()
         self._host.setObjectName("ResultGridHost")
+        self._host.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self._grid = QGridLayout(self._host)
-        self._grid.setContentsMargins(8, 8, 8, 8)
+        self._grid.setContentsMargins(8, 8, 8, _GRID_BOTTOM_PAD)
         self._grid.setHorizontalSpacing(_CARD_SPACING)
         self._grid.setVerticalSpacing(_CARD_SPACING)
         self._grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
@@ -291,6 +295,7 @@ class ResultGrid(QScrollArea):
             if widget is not None:
                 widget.deleteLater()
         self._cards = []
+        self._host.setMinimumHeight(0)
 
     def set_thumbnail(self, row: int, pixmap) -> None:
         if row < 0 or row >= len(self._cards):
@@ -338,6 +343,8 @@ class ResultGrid(QScrollArea):
             )
             self._cards.append(card)
         self._reflow(force=True)
+        # Layout/QSS settle on the next tick; re-measure so the last action row is scrollable.
+        QTimer.singleShot(0, self._sync_host_height)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -356,10 +363,11 @@ class ResultGrid(QScrollArea):
             and side == self._side_pad
             and self._grid.count() == len(self._cards)
         ):
+            self._sync_host_height()
             return
         self._cols = cols
         self._side_pad = side
-        self._grid.setContentsMargins(side, 8, side, 8)
+        self._grid.setContentsMargins(side, 8, side, _GRID_BOTTOM_PAD)
         self._grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         for card in self._cards:
             self._grid.removeWidget(card)
@@ -369,6 +377,42 @@ class ResultGrid(QScrollArea):
         for col in range(max(cols, 1) + 1):
             self._grid.setColumnStretch(col, 0)
             self._grid.setColumnMinimumWidth(col, 0)
+        self._sync_host_height()
+
+    def _sync_host_height(self) -> None:
+        """Force scrollable height so the last card's action row is not clipped."""
+        if not self._cards:
+            self._host.setMinimumHeight(0)
+            return
+        self._grid.activate()
+        margins = self._grid.contentsMargins()
+        cols = max(1, int(self._cols))
+        rows = (len(self._cards) + cols - 1) // cols
+        row_heights: list[int] = []
+        for row in range(rows):
+            chunk = self._cards[row * cols : (row + 1) * cols]
+            height = 0
+            for card in chunk:
+                height = max(
+                    height,
+                    int(card.sizeHint().height()),
+                    int(card.minimumSizeHint().height()),
+                    int(card.height()) if card.height() > 0 else 0,
+                )
+            row_heights.append(height)
+        spacing = max(0, int(self._grid.verticalSpacing()))
+        measured = (
+            int(margins.top())
+            + int(margins.bottom())
+            + sum(row_heights)
+            + max(0, rows - 1) * spacing
+        )
+        layout_hint = int(self._grid.sizeHint().height())
+        # Keep a little extra so the final action buttons clear the viewport edge.
+        total = max(measured, layout_hint) + 8
+        if self._host.minimumHeight() != total:
+            self._host.setMinimumHeight(total)
+            self._host.updateGeometry()
 
     def sizeHint(self) -> QSize:
         return QSize(480, 280)
