@@ -127,6 +127,9 @@ class MainWindow(
         self._update_notice_auto_show_pending = False
         self._runtime_warmup_ready = False
         self._warmup_ready_callbacks = []
+        self._warmup_started_bundle = False
+        self._clip_warmup_done = False
+        self._vlc_warmup_done = False
         self._defer_runtime_warmup = False
         self._preview_dialog_cooldown_until = 0.0
         self._preview_dialog_opening = False
@@ -180,6 +183,7 @@ class MainWindow(
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
         self.search_page.results_pager.page_changed.connect(self.search_controller.go_to_results_page)
+        self._apply_results_view_mode_from_config()
         self.video_download_controller = VideoDownloadController(self)
         self.video_download_controller.refresh_default_dir_label()
         self.video_download_controller.load_settings_from_config()
@@ -333,6 +337,7 @@ class MainWindow(
         self.search_page.btn_search.clicked.connect(self.start_search)
         self.search_page.btn_save_preset.clicked.connect(self.save_compose_as_preset)
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
+        self.search_page._results_view_group.idClicked.connect(self._on_results_view_mode_clicked)
         self.search_page.search_scope_select.editor_requested.connect(self.open_search_scope_editor)
         self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
         self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
@@ -779,6 +784,10 @@ class MainWindow(
             self._ensure_preview_chrome()
             self.search_page.expanded_chrome.apply_texts(t)
         self.search_page.results_title.setText(t["results_panel"])
+        self.search_page.btn_results_view_table.setText(t.get("results_view_table", "列表"))
+        self.search_page.btn_results_view_grid.setText(t.get("results_view_grid", "网格"))
+        self.search_page.btn_results_view_table.setToolTip(t.get("results_view_table_tip", ""))
+        self.search_page.btn_results_view_grid.setToolTip(t.get("results_view_grid_tip", ""))
         self.search_page.apply_results_float_texts(t)
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_shot_list_button()
@@ -1317,7 +1326,7 @@ class MainWindow(
         if synced_path:
             self.settings_page.input_ffmpeg_path.setText(synced_path)
         self._startup_complete = True
-        # CLIP warmup is deferred until first visual search / library sync.
+        # CLIP + VLC warmup is deferred until first visual search / library sync.
         # Show UI first; heavy orphan/index cleanup can wait until the event loop is idle.
         self.refresh_library_table()
         self.refresh_search_presets_ui()
@@ -1465,6 +1474,33 @@ class MainWindow(
         if not self._should_auto_show_update_notice():
             return
         self.show_notice()
+
+    def _on_results_view_mode_clicked(self, button_id: int) -> None:
+        mode = "grid" if int(button_id) == 1 else "table"
+        self._set_results_view_mode(mode, persist=True, rerender=True)
+
+    def _apply_results_view_mode_from_config(self) -> None:
+        from src.app.config import load_config
+
+        mode = str(load_config().get("search_results_view_mode") or "table").strip().lower()
+        self._set_results_view_mode(mode, persist=False, rerender=False)
+
+    def _set_results_view_mode(self, mode: str, *, persist: bool = True, rerender: bool = True) -> None:
+        from src.app.config import load_config, save_config
+        from ui.widgets.result_view import VIEW_GRID, VIEW_TABLE
+
+        next_mode = VIEW_GRID if str(mode or "").strip().lower() == VIEW_GRID else VIEW_TABLE
+        page = self.search_page
+        page.result_view.set_view_mode(next_mode, emit=False)
+        page.btn_results_view_table.setChecked(next_mode == VIEW_TABLE)
+        page.btn_results_view_grid.setChecked(next_mode == VIEW_GRID)
+        if persist:
+            config = load_config()
+            if str(config.get("search_results_view_mode") or "") != next_mode:
+                config["search_results_view_mode"] = next_mode
+                save_config(config)
+        if rerender and getattr(self.search_controller, "_all_results", None):
+            self.search_controller._render_current_page()
 
     def show_about(self):
         AboutDialog(

@@ -1691,6 +1691,50 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     background: __TRACK__;
     color: __HEADLINE__;
 }
+#ResultGrid {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+}
+#ResultGridHost {
+    background: transparent;
+}
+#ResultGridCard {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 10px;
+}
+#ResultGridCard:hover {
+    border-color: __ACCENT__;
+    background: __BUTTON_SOFT__;
+}
+#ResultGridRank {
+    background: __ACCENT_SOFT__;
+    color: __ACCENT__;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 700;
+}
+#ResultGridTitle {
+    color: __HEADLINE__;
+    font-size: 12px;
+    font-weight: 650;
+    background: transparent;
+    border: none;
+    padding: 0px;
+}
+#ResultGridMeta {
+    color: __MUTED__;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    padding: 0px;
+}
+#ResultGridActions {
+    background: transparent;
+    border: none;
+}
 #DownloadListTable {
     background: __FIELD__;
     border: 1px solid __LINE__;

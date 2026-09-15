@@ -465,7 +465,7 @@ class RuntimeGuiMixin:
         self.ensure_runtime_warmup(lambda: None)
 
     def ensure_runtime_warmup(self, on_ready) -> None:
-        """Warm CLIP/ONNX once, show status on search+library bars, then run ``on_ready``."""
+        """Warm CLIP + VLC once (one status line), then run ``on_ready``."""
         if callable(on_ready) is False:
             on_ready = lambda: None
         if getattr(self, "_runtime_warmup_ready", False):
@@ -476,14 +476,34 @@ class RuntimeGuiMixin:
             self._warmup_ready_callbacks = []
             callbacks = self._warmup_ready_callbacks
         callbacks.append(on_ready)
-        if self.search_controller.is_warmup_running():
-            self._apply_runtime_warmup_status()
+        if getattr(self, "_warmup_started_bundle", False):
+            self._apply_runtime_warmup_status(flush=True)
             return
-        self._apply_runtime_warmup_status()
-        self.search_controller.start_warmup()
 
-    def _apply_runtime_warmup_status(self) -> None:
-        text = self.texts.get("runtime_warmup_status", "Warming up model…")
+        self._warmup_started_bundle = True
+        self._clip_warmup_done = False
+        self._vlc_warmup_done = False
+        # Paint status before any UI-thread VLC work (Instance create can block painting).
+        self._apply_runtime_warmup_status(flush=True)
+
+        # CLIP on worker first so the status bar stays visible during load.
+        search = self.search_controller
+        if search.is_warmup_running():
+            pass
+        elif getattr(search, "_warmup_started", False):
+            self._on_clip_warmup_finished()
+        else:
+            search.start_warmup()
+
+        # Defer VLC slightly so the warmup label can paint before libvlc blocks the UI thread.
+        preview = getattr(self, "preview_controller", None)
+        if preview is not None:
+            QTimer.singleShot(40, lambda: preview.start_warmup(on_done=self._on_vlc_warmup_finished))
+        else:
+            self._on_vlc_warmup_finished()
+
+    def _apply_runtime_warmup_status(self, *, flush: bool = False) -> None:
+        text = self.texts.get("runtime_warmup_status", "Warming up model and preview…")
         search_lbl = getattr(self.search_page, "lbl_status", None)
         library_lbl = getattr(self.library_page, "lbl_status", None)
         if search_lbl is not None:
@@ -497,6 +517,27 @@ class RuntimeGuiMixin:
         if btn_sync is not None and self.ui_state.resources_ready:
             # Keep sync disabled while the engine is still loading.
             btn_sync.setEnabled(False)
+        if flush:
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
+
+    def _on_clip_warmup_finished(self) -> None:
+        self._clip_warmup_done = True
+        self._try_finish_runtime_warmup()
+
+    def _on_vlc_warmup_finished(self) -> None:
+        self._vlc_warmup_done = True
+        self._try_finish_runtime_warmup()
+
+    def _try_finish_runtime_warmup(self) -> None:
+        if getattr(self, "_runtime_warmup_ready", False):
+            return
+        if not getattr(self, "_clip_warmup_done", False):
+            return
+        if not getattr(self, "_vlc_warmup_done", False):
+            return
+        self._on_runtime_warmup_finished()
 
     def _on_runtime_warmup_finished(self) -> None:
         self._runtime_warmup_ready = True
@@ -514,7 +555,7 @@ class RuntimeGuiMixin:
             if btn_refresh is not None:
                 btn_refresh.setEnabled(True)
         ready_text = self.texts.get("ready", "")
-        warmup_text = self.texts.get("runtime_warmup_status", "Warming up model…")
+        warmup_text = self.texts.get("runtime_warmup_status", "Warming up model and preview…")
         for lbl in (
             getattr(self.search_page, "lbl_status", None),
             getattr(self.library_page, "lbl_status", None),

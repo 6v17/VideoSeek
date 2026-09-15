@@ -695,22 +695,53 @@ class SearchControllerTests(unittest.TestCase):
         self.assertIsNone(controller.warmup_worker)
         parent.push_inference_status.assert_called_once()
 
+    def test_finish_warmup_prefers_clip_gate_on_real_window_type(self):
+        from PySide6.QtCore import QObject
+
+        class _Window(QObject):
+            def __init__(self):
+                super().__init__()
+                self.clip_calls = 0
+                self.runtime_calls = 0
+                self.push_calls = 0
+
+            def _on_clip_warmup_finished(self):
+                self.clip_calls += 1
+
+            def _on_runtime_warmup_finished(self):
+                self.runtime_calls += 1
+
+            def push_inference_status(self):
+                self.push_calls += 1
+
+        parent = _Window()
+        controller = SearchController(parent)
+        controller.warmup_worker = MagicMock()
+
+        controller._finish_warmup()
+
+        self.assertEqual(parent.clip_calls, 1)
+        self.assertEqual(parent.runtime_calls, 0)
+        self.assertEqual(parent.push_calls, 0)
+
 
 class PreviewControllerTests(unittest.TestCase):
-    @patch("ui.controllers.preview_controller.warmup_vlc_runtime")
+    @patch.object(PreviewController, "ensure_vlc_instance")
     @patch("ui.controllers.preview_controller.QTimer.singleShot")
-    def test_start_warmup_starts_once(self, mock_single_shot, mock_warmup):
+    def test_start_warmup_starts_once(self, mock_single_shot, mock_ensure):
         parent = _make_parent_window()
         controller = PreviewController(parent)
+        done = MagicMock()
 
-        controller.start_warmup()
-        controller.start_warmup()
+        controller.start_warmup(on_done=done)
+        controller.start_warmup(on_done=done)
 
         mock_single_shot.assert_called_once()
         args, _kwargs = mock_single_shot.call_args
         self.assertEqual(args[0], 0)
         args[1]()
-        mock_warmup.assert_called_once_with()
+        mock_ensure.assert_called_once_with()
+        self.assertEqual(done.call_count, 2)
 
     @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
     @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))

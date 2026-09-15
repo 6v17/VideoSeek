@@ -8,7 +8,6 @@ from ui.playback.vlc_player import (
     VlcPreviewPlayer,
     create_vlc_preview_instance,
     is_http_media_url,
-    warmup_vlc_runtime,
 )
 
 logger = get_logger("preview_controller")
@@ -22,6 +21,8 @@ class PreviewController:
         self.vlc_player = None
         self._vlc_instance = None
         self._warmup_started = False
+        self._warmup_done = False
+        self._warmup_done_callbacks: list = []
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
         from src.media.export_clip import _resolve_base_clip_window
@@ -94,8 +95,13 @@ class PreviewController:
             os.remove(cache_path)
         return False
 
-    def start_warmup(self):
+    def start_warmup(self, on_done=None):
         """Warm libvlc on the UI thread (libvlc is not thread-safe for Instance create)."""
+        if callable(on_done):
+            if self._warmup_done:
+                on_done()
+                return
+            self._warmup_done_callbacks.append(on_done)
         if self._warmup_started:
             return
         self._warmup_started = True
@@ -103,9 +109,19 @@ class PreviewController:
 
     def _run_main_thread_warmup(self):
         try:
-            warmup_vlc_runtime()
+            # Keep the shared Instance so first preview does not pay create cost again.
+            self.ensure_vlc_instance()
         except Exception as exc:
             logger.warning("Preview warmup failed: %s", exc)
+        finally:
+            self._warmup_done = True
+            callbacks = list(self._warmup_done_callbacks or [])
+            self._warmup_done_callbacks = []
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("Preview warmup done callback failed")
 
     def ensure_vlc_instance(self):
         """Shared libvlc Instance for main + floating preview MediaPlayers."""

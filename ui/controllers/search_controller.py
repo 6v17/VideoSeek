@@ -173,9 +173,14 @@ class SearchController(QObject):
         pages = max(1, (len(self._all_results) + SEARCH_RESULTS_PAGE_SIZE - 1) // SEARCH_RESULTS_PAGE_SIZE)
         self._current_page = max(0, min(int(page_index), pages - 1))
         self._render_current_page()
-        table = self._result_view().table
-        if table.rowCount() > 0:
-            table.scrollToTop()
+        result_view = self._result_view()
+        if result_view.view_mode == "grid":
+            if result_view.grid.count() > 0:
+                result_view.grid.verticalScrollBar().setValue(0)
+        else:
+            table = result_view.table
+            if table.rowCount() > 0:
+                table.scrollToTop()
 
     def _sync_results_pager(self) -> None:
         pager = getattr(self.parent_window.search_page, "results_pager", None)
@@ -486,10 +491,17 @@ class SearchController(QObject):
         if self._is_shutdown:
             return
         self.warmup_worker = None
-        if hasattr(self.parent_window, "_on_runtime_warmup_finished"):
-            self.parent_window._on_runtime_warmup_finished()
-        else:
-            self.parent_window.push_inference_status()
+        parent = self.parent_window
+        # Prefer clip half of the bundled CLIP+VLC warmup gate.
+        on_clip = getattr(type(parent), "_on_clip_warmup_finished", None)
+        if callable(on_clip):
+            on_clip(parent)
+            return
+        on_runtime = getattr(type(parent), "_on_runtime_warmup_finished", None)
+        if callable(on_runtime):
+            on_runtime(parent)
+            return
+        parent.push_inference_status()
 
     def _handle_search_error(self, error_text):
         if self._is_shutdown or not self._is_current_worker():
