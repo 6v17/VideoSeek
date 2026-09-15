@@ -442,12 +442,26 @@ class LibraryIndexingGuiMixin:
             self._refresh_library_action_hints()
             self._refresh_team_client_library_chrome()
             self._refresh_remove_library_button()
-            self._refresh_cleanup_missing_button_state(probe=True)
-            self._refresh_fix_missing_vectors_button()
-            if hasattr(self, "invalidate_search_scope_entries_cache"):
+            # Reuse the same entries for button state / search scope — avoid 2–3× full scans.
+            cleanup_available = any(
+                isinstance(item, dict) and not bool(item.get("source_exists")) for item in entries
+            )
+            self._apply_cleanup_missing_button_state(
+                cleanup_available,
+                force_disabled=self._cleanup_missing_button_busy(),
+            )
+            from src.services.library_service import collect_reindexable_missing_video_ids
+
+            self._refresh_fix_missing_vectors_button(
+                count=len(collect_reindexable_missing_video_ids(entries=entries))
+            )
+            seeded_scope = False
+            if hasattr(self, "seed_visual_search_scope_entries"):
+                seeded_scope = bool(self.seed_visual_search_scope_entries(entries))
+            if not seeded_scope and hasattr(self, "invalidate_search_scope_entries_cache"):
                 self.invalidate_search_scope_entries_cache()
             if hasattr(self, "_refresh_search_scope_ui"):
-                self._refresh_search_scope_ui(force_entries=True)
+                self._refresh_search_scope_ui(force_entries=not seeded_scope)
             if hasattr(self, "_refresh_understanding_scope_options"):
                 self._refresh_understanding_scope_options()
         except Exception as exc:

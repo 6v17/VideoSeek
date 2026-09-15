@@ -858,7 +858,27 @@ def _content_fingerprint_for_path(abs_path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
-def _fingerprint_kwargs(abs_path) -> dict:
+def _fingerprint_kwargs(abs_path, saved=None) -> dict:
+    """Build file_size/content_fp for meta.
+
+    On the hot lance_reuse path, reuse a stored fingerprint when size still matches
+    so empty syncs do not re-read the first 10MiB of every ready video.
+    """
+    saved_info = saved if isinstance(saved, dict) else {}
+    saved_fp = str(saved_info.get("content_fp", "") or "").strip()
+    saved_size = saved_info.get("file_size")
+    try:
+        size = int(os.path.getsize(abs_path))
+    except OSError:
+        size = 0
+    if (
+        saved_fp
+        and size > 0
+        and saved_size is not None
+        and int(saved_size) == size
+    ):
+        return {"file_size": size, "content_fp": saved_fp}
+
     content_fp, file_size = _content_fingerprint_for_path(abs_path)
     out = {}
     if file_size:
@@ -1289,6 +1309,7 @@ def _index_video_compute(
             **base,
             "kind": "lance_reuse",
             "video_id": video_id,
+            "fingerprint_kwargs": _fingerprint_kwargs(abs_path, saved=saved),
         }
 
     cached = _resolve_reusable_cached_vectors(abs_path, saved, config)
@@ -1440,13 +1461,16 @@ def _index_video_commit(
         return None, None, False, False
 
     if kind == "lance_reuse":
+        fingerprint = result.get("fingerprint_kwargs")
+        if not isinstance(fingerprint, dict):
+            fingerprint = _fingerprint_kwargs(abs_path)
         metadata_updated = _upsert_file_record(
             lib_files,
             rel_path,
             video_id,
             video_mod_time,
             "ready",
-            **_fingerprint_kwargs(abs_path),
+            **fingerprint,
         )
         return _SKIP_VIDEO_ALREADY_INDEXED, None, metadata_updated, False
 

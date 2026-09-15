@@ -166,6 +166,35 @@ class SearchScopeGuiMixin:
     def invalidate_search_scope_entries_cache(self) -> None:
         self._search_scope_entries_dirty = True
 
+    def seed_visual_search_scope_entries(self, entries) -> bool:
+        """Reuse library-list rows for visual scope (skip another Lance details scan)."""
+        from src.services.team_mode_service import is_team_client_mode
+
+        if self._search_scope_is_dialogue() or self._search_scope_is_tags():
+            return False
+        if is_team_client_mode():
+            return False
+        rows: list[dict] = []
+        for entry in entries or []:
+            if not isinstance(entry, dict):
+                continue
+            video_id = str(entry.get("video_id") or "").strip()
+            if not video_id:
+                continue
+            rows.append(
+                {
+                    "video_id": video_id,
+                    "video_path": entry.get("video_path"),
+                    "library_path": entry.get("library_path"),
+                    "video_rel_path": entry.get("video_rel_path"),
+                    "asset_state": entry.get("asset_state"),
+                    "source_exists": entry.get("source_exists"),
+                }
+            )
+        self._search_scope_entries_cache = rows
+        self._search_scope_entries_dirty = False
+        return True
+
     def invalidate_dialogue_search_scope_entries_cache(self) -> None:
         self._dialogue_search_scope_entries_dirty = True
 

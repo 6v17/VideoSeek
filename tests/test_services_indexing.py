@@ -13,6 +13,26 @@ from src import utils
 
 
 class IndexingServiceTests(unittest.TestCase):
+    @patch("src.services.indexing_service._content_fingerprint_for_path")
+    @patch("src.services.indexing_service.os.path.getsize", return_value=2048)
+    def test_fingerprint_kwargs_reuses_saved_when_size_matches(self, _mock_size, mock_fp):
+        out = indexing_service._fingerprint_kwargs(
+            "D:\\videos\\clip.mp4",
+            saved={"content_fp": "abc123", "file_size": 2048},
+        )
+        self.assertEqual(out, {"file_size": 2048, "content_fp": "abc123"})
+        mock_fp.assert_not_called()
+
+    @patch("src.services.indexing_service._content_fingerprint_for_path", return_value=("fresh", 4096))
+    @patch("src.services.indexing_service.os.path.getsize", return_value=4096)
+    def test_fingerprint_kwargs_recomputes_when_size_drifts(self, _mock_size, mock_fp):
+        out = indexing_service._fingerprint_kwargs(
+            "D:\\videos\\clip.mp4",
+            saved={"content_fp": "abc123", "file_size": 2048},
+        )
+        self.assertEqual(out, {"file_size": 4096, "content_fp": "fresh"})
+        mock_fp.assert_called_once()
+
     @patch("src.services.library_service.save_model_metadata")
     @patch("src.services.library_service.load_model_metadata", return_value={"libraries": {"D:\\videos": {"files": {}}}})
     @patch("src.services.library_service.load_config", return_value={"meta_file": "source/meta.json"})

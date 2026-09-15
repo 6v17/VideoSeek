@@ -540,17 +540,20 @@ def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
     return demoted
 
 
-def collect_reindexable_missing_video_ids(*, config=None) -> list[str]:
+def collect_reindexable_missing_video_ids(*, config=None, entries=None) -> list[str]:
     """Video ids that need vector rebuild and still have a source file on disk.
 
     Includes ``missing_asset`` and ``broken_asset`` (legacy npy-only). Skips
     ``missing_source`` / ``sync_failed`` — those need path repair or a normal sync.
+
+    Pass ``entries`` from an existing ``list_library_video_entries`` call to avoid
+    a second full-library scan (e.g. library table refresh).
     """
     cfg = config or load_config()
-    entries = list_library_video_entries(config=cfg, register=False)
+    rows = entries if entries is not None else list_library_video_entries(config=cfg, register=False)
     ids: list[str] = []
     seen: set[str] = set()
-    for entry in entries:
+    for entry in rows:
         if not isinstance(entry, dict):
             continue
         if not bool(entry.get("source_exists")):

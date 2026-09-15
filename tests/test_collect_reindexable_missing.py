@@ -27,6 +27,16 @@ class CollectReindexableMissingTests(unittest.TestCase):
     def test_empty_when_none(self, _mock_cfg, _mock_entries):
         self.assertEqual(collect_reindexable_missing_video_ids(), [])
 
+    @patch("src.services.library_service.list_library_video_entries")
+    @patch("src.services.library_service.load_config", return_value={})
+    def test_reuses_provided_entries_without_rescanning(self, _mock_cfg, mock_entries):
+        entries = [
+            {"video_id": "x", "source_exists": True, "asset_state": "missing_asset"},
+            {"video_id": "y", "source_exists": True, "asset_state": "ready"},
+        ]
+        self.assertEqual(collect_reindexable_missing_video_ids(entries=entries), ["x"])
+        mock_entries.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
