@@ -436,11 +436,13 @@ def _try_reuse_lance_indexed_video(
     *,
     indexed_ids=None,
     library_path: str = "",
+    library_paths_by_id=None,
 ):
     """Skip vector load and Lance upsert when meta and Lance already agree on this file.
 
     Trusts ``mod_time`` before hashing. When ``indexed_ids`` is provided (scan batch
-    cache), avoids per-video Lance count queries.
+    cache), avoids per-video Lance count queries. When ``library_paths_by_id`` is
+    provided, avoids per-video library_path lookups for cross-library reuse checks.
 
     If Lance still stores another library_path for this video_id (cross-library copy
     reuse), return None so the caller re-upserts and refreshes location columns used
@@ -474,9 +476,13 @@ def _try_reuse_lance_indexed_video(
             return None
     want_lib = canonicalize_library_path(library_path) if library_path else ""
     if want_lib:
-        from src.storage.lance_search_index import get_lance_video_library_path
+        stored_lib = ""
+        if isinstance(library_paths_by_id, dict) and saved_vid in library_paths_by_id:
+            stored_lib = str(library_paths_by_id.get(saved_vid) or "")
+        else:
+            from src.storage.lance_search_index import get_lance_video_library_path
 
-        stored_lib = get_lance_video_library_path(profile_base_dir, saved_vid)
+            stored_lib = get_lance_video_library_path(profile_base_dir, saved_vid)
         if stored_lib and stored_lib != want_lib:
             return None
     return {"canonical_vid": saved_vid}
@@ -1241,6 +1247,7 @@ def _index_video_compute(
     file_index=1,
     file_total=1,
     indexed_ids=None,
+    library_paths_by_id=None,
 ) -> dict[str, Any]:
     """Decode/embed (or decide reuse) without mutating meta or writing Lance.
 
@@ -1294,6 +1301,7 @@ def _index_video_compute(
         config,
         indexed_ids=indexed_ids,
         library_path=library_path or "",
+        library_paths_by_id=library_paths_by_id,
     )
     if lance_cached is not None:
         video_id = lance_cached["canonical_vid"]
@@ -1651,6 +1659,7 @@ def process_single_video(
     file_total=1,
     indexed_ids=None,
     meta=None,
+    library_paths_by_id=None,
 ):
     """Index one video: compute then commit (serial API for tests and workers=1)."""
     rel_path = canonicalize_library_rel_path(rel_path)
@@ -1668,6 +1677,7 @@ def process_single_video(
             file_index=file_index,
             file_total=file_total,
             indexed_ids=indexed_ids,
+            library_paths_by_id=library_paths_by_id,
         )
     except InterruptedError:
         raise
@@ -1728,6 +1738,7 @@ def _run_planned_videos_with_prefetch(
     total_files: int,
     report_scan_progress,
     queue_meta_persist,
+    library_paths_by_id=None,
 ) -> tuple[list[str], bool, int]:
     """Compute up to ``workers`` videos ahead; commit in plan order on this thread."""
     failed_videos: list[str] = []
@@ -1804,6 +1815,7 @@ def _run_planned_videos_with_prefetch(
                 file_total=total_files or 1,
                 indexed_ids=indexed_ids,
                 meta=meta,
+                library_paths_by_id=library_paths_by_id,
             )
             search_assets_changed = search_assets_changed or file_search_assets_changed
             if vectors is _SKIP_VIDEO_ALREADY_INDEXED:
@@ -1835,6 +1847,7 @@ def _run_planned_videos_with_prefetch(
             file_index,
             total_files or 1,
             indexed_ids,
+            library_paths_by_id,
         )
         return abs_path, rel_path, file_index, future
 
@@ -1897,14 +1910,15 @@ def scan_target_libraries(
 
     search_assets_changed = False
     profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
-    # One Lance id set for the whole scan — reuse path avoids per-file count queries.
+    # One Lance frames scan for the whole sync: indexed ids + library_path map.
     try:
-        from src.storage.lance_search_index import get_lance_indexed_video_ids
+        from src.storage.lance_search_index import get_lance_video_index_snapshot
 
-        indexed_ids = get_lance_indexed_video_ids(profile_base_dir)
+        indexed_ids, library_paths_by_id = get_lance_video_index_snapshot(profile_base_dir)
     except Exception as exc:
-        logger.debug("Lance indexed-id cache unavailable for scan: %s", exc)
+        logger.debug("Lance indexed-id/library_path cache unavailable for scan: %s", exc)
         indexed_ids = None
+        library_paths_by_id = None
     begin_lance_index_batch(profile_base_dir, progress_callback=progress_callback)
     pending_meta_saves = 0
 
@@ -2057,6 +2071,7 @@ def scan_target_libraries(
                     total_files=total_files or 1,
                     report_scan_progress=_report_scan_progress,
                     queue_meta_persist=_queue_meta_persist,
+                    library_paths_by_id=library_paths_by_id,
                 )
                 failed_videos.extend(batch_failed)
                 search_assets_changed = search_assets_changed or batch_changed

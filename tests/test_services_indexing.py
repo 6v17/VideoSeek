@@ -23,6 +23,38 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(out, {"file_size": 2048, "content_fp": "abc123"})
         mock_fp.assert_not_called()
 
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.storage.lance_search_index.get_lance_video_library_path")
+    def test_try_reuse_uses_batch_library_path_map(self, mock_get_path, _mock_mtime, _mock_dirs):
+        saved = {"vid": "vid_a", "mod_time": 123.0, "asset_state": "ready"}
+        reused = indexing_service._try_reuse_lance_indexed_video(
+            "D:\\videos\\clip.mp4",
+            saved,
+            {},
+            indexed_ids=frozenset({"vid_a"}),
+            library_path="D:\\videos",
+            library_paths_by_id={"vid_a": utils.canonicalize_library_path("D:\\videos")},
+        )
+        self.assertEqual(reused, {"canonical_vid": "vid_a"})
+        mock_get_path.assert_not_called()
+
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.storage.lance_search_index.get_lance_video_library_path")
+    def test_try_reuse_rejects_cross_library_from_batch_map(self, mock_get_path, _mock_mtime, _mock_dirs):
+        saved = {"vid": "vid_a", "mod_time": 123.0, "asset_state": "ready"}
+        reused = indexing_service._try_reuse_lance_indexed_video(
+            "D:\\videos\\clip.mp4",
+            saved,
+            {},
+            indexed_ids=frozenset({"vid_a"}),
+            library_path="D:\\videos",
+            library_paths_by_id={"vid_a": utils.canonicalize_library_path("E:\\other")},
+        )
+        self.assertIsNone(reused)
+        mock_get_path.assert_not_called()
+
     @patch("src.services.indexing_service._content_fingerprint_for_path", return_value=("fresh", 4096))
     @patch("src.services.indexing_service.os.path.getsize", return_value=4096)
     def test_fingerprint_kwargs_recomputes_when_size_drifts(self, _mock_size, mock_fp):

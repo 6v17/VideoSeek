@@ -28,6 +28,7 @@ logger = get_logger("lance_search_index")
 _READY_CACHE: dict[str, tuple[float, bool]] = {}
 _INDEXED_VIDEO_IDS_CACHE: dict[str, tuple[float, frozenset[str]]] = {}
 _VIDEO_ROW_COUNTS_CACHE: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
+_LIBRARY_PATHS_BY_VIDEO_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _LANCE_ROW_SCAN_LIMIT = 2_000_000
 
 
@@ -54,10 +55,12 @@ def invalidate_lance_runtime_caches(profile_base_dir: str = "") -> None:
         _READY_CACHE.pop(key, None)
         _INDEXED_VIDEO_IDS_CACHE.pop(key, None)
         _VIDEO_ROW_COUNTS_CACHE.pop(key, None)
+        _LIBRARY_PATHS_BY_VIDEO_CACHE.pop(key, None)
     else:
         _READY_CACHE.clear()
         _INDEXED_VIDEO_IDS_CACHE.clear()
         _VIDEO_ROW_COUNTS_CACHE.clear()
+        _LIBRARY_PATHS_BY_VIDEO_CACHE.clear()
     try:
         from src.services.understanding_service import invalidate_ready_video_entries_cache
 
@@ -630,6 +633,144 @@ def get_lance_video_library_path(profile_base_dir: str, video_id: str) -> str:
     except Exception as exc:
         logger.debug("Failed to read Lance library_path for %s: %s", video_id, exc)
         return ""
+
+
+def get_lance_video_library_paths(profile_base_dir: str) -> dict[str, str]:
+    """Batch map ``video_id -> library_path`` from frames (mtime-cached).
+
+    First non-empty path wins per video. Empty string means the video is indexed
+    but has no stored library_path yet.
+    """
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    if not lance_search_is_ready(profile_base_dir):
+        return {}
+    state_mtime = _lance_state_mtime(profile_base_dir)
+    cached = _LIBRARY_PATHS_BY_VIDEO_CACHE.get(profile_base_dir)
+    if cached is not None and cached[0] == state_mtime:
+        return cached[1]
+
+    ids, paths = _load_lance_video_id_library_path_snapshot(profile_base_dir)
+    if ids:
+        _INDEXED_VIDEO_IDS_CACHE[profile_base_dir] = (state_mtime, ids)
+    _LIBRARY_PATHS_BY_VIDEO_CACHE[profile_base_dir] = (state_mtime, paths)
+    return paths
+
+
+def get_lance_video_index_snapshot(profile_base_dir: str) -> tuple[frozenset[str], dict[str, str]]:
+    """One frames scan for sync: indexed ids + ``video_id -> library_path``."""
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    if not lance_search_is_ready(profile_base_dir):
+        return frozenset(), {}
+    state_mtime = _lance_state_mtime(profile_base_dir)
+    cached_ids = _INDEXED_VIDEO_IDS_CACHE.get(profile_base_dir)
+    cached_paths = _LIBRARY_PATHS_BY_VIDEO_CACHE.get(profile_base_dir)
+    if (
+        cached_ids is not None
+        and cached_paths is not None
+        and cached_ids[0] == state_mtime
+        and cached_paths[0] == state_mtime
+    ):
+        return cached_ids[1], cached_paths[1]
+
+    ids, paths = _load_lance_video_id_library_path_snapshot(profile_base_dir)
+    _INDEXED_VIDEO_IDS_CACHE[profile_base_dir] = (state_mtime, ids)
+    _LIBRARY_PATHS_BY_VIDEO_CACHE[profile_base_dir] = (state_mtime, paths)
+    return ids, paths
+
+
+def _load_lance_video_id_library_path_snapshot(
+    profile_base_dir: str,
+) -> tuple[frozenset[str], dict[str, str]]:
+    db = _connect_lance(profile_base_dir)
+    if FRAMES_TABLE_NAME not in _list_table_names(db):
+        return frozenset(), {}
+    table = db.open_table(FRAMES_TABLE_NAME)
+    try:
+        pairs = _scan_all_column_pairs(table, "video_id", "library_path")
+    except Exception as exc:
+        logger.debug("Failed to list Lance video library paths for %s: %s", profile_base_dir, exc)
+        return frozenset(), {}
+    ids: set[str] = set()
+    paths: dict[str, str] = {}
+    for raw_vid, raw_lib in pairs:
+        video_id = str(raw_vid or "").strip()
+        if not video_id:
+            continue
+        ids.add(video_id)
+        if video_id in paths:
+            continue
+        paths[video_id] = canonicalize_library_path(str(raw_lib or ""))
+    return frozenset(ids), paths
+
+
+def _scan_all_column_pairs(table, column_a: str, column_b: str) -> list[tuple[object, object]]:
+    """Load aligned ``(column_a, column_b)`` pairs without the fixed 2M search cap."""
+    column_a = str(column_a or "").strip()
+    column_b = str(column_b or "").strip()
+    if not column_a or not column_b:
+        return []
+    try:
+        total_rows = int(table.count_rows())
+    except Exception:
+        total_rows = -1
+    if total_rows == 0:
+        return []
+
+    def _pairs_from_arrow(arrow) -> list[tuple[object, object]]:
+        if arrow.num_rows <= 0:
+            return []
+        if column_a not in arrow.column_names or column_b not in arrow.column_names:
+            return []
+        values_a = arrow[column_a].to_pylist()
+        values_b = arrow[column_b].to_pylist()
+        return list(zip(values_a, values_b))
+
+    if total_rows > 0:
+        try:
+            arrow = _load_columns_arrow(table, [column_a, column_b], limit=total_rows)
+            pairs = _pairs_from_arrow(arrow)
+            if int(arrow.num_rows) >= total_rows:
+                return pairs
+            logger.warning(
+                "Lance %s/%s listing incomplete via search limit=count: got %s/%s rows; "
+                "trying take_offsets",
+                column_a,
+                column_b,
+                arrow.num_rows,
+                total_rows,
+            )
+        except Exception as exc:
+            logger.debug("Lance search column-pair scan failed for %s/%s: %s", column_a, column_b, exc)
+
+    take_offsets = getattr(table, "take_offsets", None)
+    if total_rows > 0 and callable(take_offsets):
+        try:
+            pairs: list[tuple[object, object]] = []
+            page = 65_536
+            for start in range(0, total_rows, page):
+                end = min(start + page, total_rows)
+                builder = take_offsets(list(range(start, end)))
+                select = getattr(builder, "select", None)
+                if callable(select):
+                    builder = select([column_a, column_b])
+                arrow = builder.to_arrow()
+                pairs.extend(_pairs_from_arrow(arrow))
+            if pairs or total_rows == 0:
+                return pairs
+        except Exception as exc:
+            logger.debug(
+                "Lance take_offsets column-pair scan failed for %s/%s: %s",
+                column_a,
+                column_b,
+                exc,
+            )
+
+    try:
+        arrow = _load_columns_arrow(table, [column_a, column_b], limit=_LANCE_ROW_SCAN_LIMIT)
+    except Exception as exc:
+        logger.debug("Failed to load Lance columns %s/%s via capped search: %s", column_a, column_b, exc)
+        return []
+    return _pairs_from_arrow(arrow)
 
 
 def _count_video_ids_in_table(table, *, column: str = "video_id") -> dict[str, int]:
