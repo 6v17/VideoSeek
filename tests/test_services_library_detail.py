@@ -185,6 +185,54 @@ class LibraryDetailServiceTests(unittest.TestCase):
         self.assertEqual(summary["legacy_vector_dir_bytes"], 500)
         self.assertEqual(summary["total_storage_bytes"], expected_lance_active + 500)
 
+    @patch("src.storage.lance_store.sum_legacy_vector_npy_bytes")
+    @patch("src.storage.lance_store.read_lance_profile_summary")
+    @patch("src.storage.lance_search_index.get_lance_video_row_counts")
+    @patch("src.storage.lance_search_index.get_lance_indexed_video_ids", return_value={"vid_a"})
+    @patch("src.storage.lance_search_index.lance_search_is_ready", return_value=True)
+    @patch("src.services.library_service.get_local_model_asset_dirs", side_effect=_model_dirs_from_test_config)
+    @patch("src.services.library_service.os.path.exists")
+    @patch("src.services.library_service.list_libraries")
+    @patch("src.services.library_service.load_config")
+    def test_list_local_vector_details_skips_storage_stats_when_disabled(
+        self,
+        mock_load_config,
+        mock_list_libraries,
+        mock_exists,
+        _mock_get_index,
+        _mock_lance_ready,
+        _mock_lance_ids,
+        mock_lance_counts,
+        mock_lance_summary,
+        mock_legacy_dir_bytes,
+    ):
+        mock_load_config.return_value = {
+            "vector_dir": "source/vector",
+            "index_dir": "source/index",
+        }
+        mock_list_libraries.return_value = {
+            "D:/videos": {
+                "files": {
+                    "a.mp4": {"vid": "vid_a", "asset_state": "ready"},
+                }
+            }
+        }
+        mock_exists.return_value = True
+
+        result = library_service.list_local_vector_details(
+            validate_contents=False,
+            include_storage_stats=False,
+        )
+
+        self.assertFalse(result["storage_stats_ready"])
+        self.assertEqual(result["storage_summary"]["total_storage_bytes"], 0)
+        self.assertEqual(result["entries"][0]["lance_frame_count"], 0)
+        mock_lance_counts.assert_not_called()
+        mock_lance_summary.assert_not_called()
+        mock_legacy_dir_bytes.assert_not_called()
+        # Fast path should not probe filesystem exists() for each video/npy.
+        mock_exists.assert_not_called()
+
     @patch("src.storage.lance_store.compact_lance_storage")
     @patch("src.storage.lance_store.garbage_collect_orphan_lance_videos", return_value=[])
     @patch("src.services.library_service.garbage_collect_orphan_library_indexes")

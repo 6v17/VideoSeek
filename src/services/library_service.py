@@ -939,6 +939,7 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
             "legacy_vector_dir_bytes": legacy_vector_dir_bytes,
             "total_storage_bytes": total_storage_bytes,
         },
+        "storage_stats_ready": bool(include_storage_stats),
         "entries": entries,
         "total_entries": len(entries),
         # Deprecated keys retained for exported JSON compatibility.

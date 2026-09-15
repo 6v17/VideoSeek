@@ -2625,7 +2625,8 @@ class LibraryIndexingGuiMixin:
 
     def show_local_vector_details(self):
         try:
-            detail = list_local_vector_details(validate_contents=False)
+            # Fast first paint: skip dir-size / row-count scans on the UI thread.
+            detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
             headers = self.texts["library_vectors_headers"]
             ready_state_text = self._local_vector_asset_state_text("ready")
             rows, payloads = self._build_local_vector_detail_rows(detail)
@@ -2683,12 +2684,22 @@ class LibraryIndexingGuiMixin:
 
     def _format_local_vector_subtitle(self, detail):
         storage_summary = detail.get("storage_summary") or {}
+        lance_summary = detail.get("lance_summary") or {}
+        if not bool(detail.get("storage_stats_ready", True)):
+            return self.texts.get(
+                "library_vectors_subtitle_loading",
+                "{total} entries | Lance: {lance_dir} | {video_count} videos | loading storage stats…",
+            ).format(
+                total=detail["total_entries"],
+                lance_dir=detail.get("lance_dir", ""),
+                video_count=int(lance_summary.get("indexed_video_count", 0) or 0),
+            )
         return self.texts["library_vectors_subtitle"].format(
             total=detail["total_entries"],
             lance_dir=detail.get("lance_dir", ""),
-            frame_rows=int((detail.get("lance_summary") or {}).get("frame_rows", 0) or 0),
-            chunk_rows=int((detail.get("lance_summary") or {}).get("chunk_rows", 0) or 0),
-            video_count=int((detail.get("lance_summary") or {}).get("indexed_video_count", 0) or 0),
+            frame_rows=int(lance_summary.get("frame_rows", 0) or 0),
+            chunk_rows=int(lance_summary.get("chunk_rows", 0) or 0),
+            video_count=int(lance_summary.get("indexed_video_count", 0) or 0),
             total_storage=format_byte_size(storage_summary.get("total_storage_bytes", 0)),
             lance_storage=format_byte_size(
                 storage_summary.get("lance_active_bytes", storage_summary.get("lance_dir_bytes", 0))
@@ -2725,10 +2736,12 @@ class LibraryIndexingGuiMixin:
         if dialog is not None and dialog.isVisible():
             dialog.status_hint.setText(message)
             try:
-                detail = list_local_vector_details(validate_contents=False)
+                detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
                 rows, payloads = self._build_local_vector_detail_rows(detail)
                 dialog.set_rows(rows, payloads)
                 dialog.set_subtitle(self._format_local_vector_subtitle(detail))
+                dialog.set_summary_text(self.texts["library_vectors_validation_loading"])
+                self._start_local_vector_detail_validation(dialog)
             except Exception:
                 pass
         else:
@@ -2787,6 +2800,7 @@ class LibraryIndexingGuiMixin:
             return
         rows, payloads = self._build_local_vector_detail_rows(detail)
         dialog.set_rows(rows, payloads)
+        dialog.set_subtitle(self._format_local_vector_subtitle(detail))
         dialog.set_summary_text(self.texts["library_vectors_validation_done"])
 
     def _fail_local_vector_detail_validation(self, dialog):

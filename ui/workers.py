@@ -1210,7 +1210,9 @@ class LocalVectorDetailsWorker(QThread):
         try:
             from src.services.library_service import list_local_vector_details
 
-            self.result_ready.emit(list_local_vector_details(validate_contents=True))
+            self.result_ready.emit(
+                list_local_vector_details(validate_contents=True, include_storage_stats=True)
+            )
         except Exception as exc:
             logger.warning("local_vector_details_worker_failed: %s", exc)
             self.error_signal.emit(str(exc))
