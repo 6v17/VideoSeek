@@ -121,6 +121,21 @@ class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
         self.std = np.array(std, dtype=np.float32).reshape(1, 1, 3)
 
     @staticmethod
+    def _tokenizer_do_lower_case(model_dir) -> bool:
+        """Match HF/Chinese-CLIP pack defaults (do_lower_case=true)."""
+        config_path = os.path.join(model_dir, "tokenizer_config.json")
+        if not os.path.isfile(config_path):
+            return True
+        try:
+            with open(config_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, dict) and "do_lower_case" in payload:
+                return bool(payload.get("do_lower_case"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+        return True
+
+    @staticmethod
     def _build_tokenizer(model_dir):
         vocab_path = os.path.join(model_dir, "vocab.txt")
         if not os.path.isfile(vocab_path):
@@ -132,7 +147,8 @@ class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
                 "Chinese CLIP requires the `tokenizers` package for Bert WordPiece vocab loading."
             ) from exc
 
-        tokenizer = BertWordPieceTokenizer(str(vocab_path), lowercase=False)
+        lowercase = ChineseCLIPOnnxEngine._tokenizer_do_lower_case(model_dir)
+        tokenizer = BertWordPieceTokenizer(str(vocab_path), lowercase=lowercase)
         tokenizer.enable_truncation(max_length=512)
         return tokenizer
 
