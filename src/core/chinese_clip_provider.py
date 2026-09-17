@@ -18,7 +18,7 @@ from src.storage.config_store import get_effective_prefer_gpu
 
 
 class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
-    """Chinese CLIP ONNX inference (512-d projected features)."""
+    """Chinese CLIP ONNX inference (projected features; Large is 768-d)."""
 
     def __init__(self, model_dir, prefer_gpu=None, image_size=224):
         self.model_dir = os.path.normpath(os.path.abspath(os.fspath(model_dir)))
@@ -79,12 +79,15 @@ class ChineseCLIPOnnxEngine(OnnxVisionBatchMixin):
         return "pixel_values"
 
     def preprocess_into(self, img_bgr, out_chw):
+        from src.core.vision_preprocess import resize_for_clip_rgb
+        from src.services.embedding_preprocess import resolve_embedding_preprocess
+
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        h, w = int(img.shape[0]), int(img.shape[1])
         size = self.image_size
+        h, w = int(img.shape[0]), int(img.shape[1])
+        # FFmpeg indexing already emits locked square frames; keep that path cheap.
         if h != size or w != size:
-            interp = cv2.INTER_AREA if (h > size or w > size) else cv2.INTER_LINEAR
-            img = cv2.resize(img, (size, size), interpolation=interp)
+            img = resize_for_clip_rgb(img, size, resolve_embedding_preprocess())
         tensor = img.astype(np.float32, copy=False)
         tensor *= 1.0 / 255.0
         tensor -= self.mean

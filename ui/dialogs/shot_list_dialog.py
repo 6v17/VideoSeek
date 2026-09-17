@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
+    QMenu,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -73,6 +74,8 @@ class ShotListDialog(VSDialogShell):
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_row_menu)
         self.table.itemSelectionChanged.connect(self._sync_selection)
         self.table.cellDoubleClicked.connect(self._handle_double_click)
         headers = self.texts.get(
@@ -93,69 +96,65 @@ class ShotListDialog(VSDialogShell):
         self.content_layout.addWidget(card, 1)
 
         self.clear_footer(keep_stretch=False)
-        self.btn_export_manifest = QPushButton(self.texts.get("shot_list_export_manifest", "Export manifest"))
-        self.btn_export_fcpxml = QPushButton(
-            self.texts.get("shot_list_export_fcpxml", "导出剪辑 XML")
-        )
-        self.btn_export_jianying = QPushButton(
-            self.texts.get("shot_list_export_jianying", "导出剪映草稿")
-        )
-        self.btn_batch_export = QPushButton(self.texts.get("shot_list_batch_export", "Batch export clips"))
-        self.btn_export_manifest.setObjectName("GhostButton")
-        self.btn_export_fcpxml.setObjectName("AccentGhostButton")
-        self.btn_export_fcpxml.setToolTip(
-            self.texts.get(
-                "shot_list_export_fcpxml_tip",
-                "默认导出 Premiere / 达芬奇可用的 FCP7 XML（*.xml）；也可选 FCPXML 给达芬奇。需本地视频文件。",
-            )
-        )
-        self.btn_export_jianying.setObjectName("SuccessGhostButton")
-        self.btn_export_jianying.setToolTip(
-            self.texts.get(
-                "shot_list_export_jianying_tip",
-                "新建一份 VideoSeek 剪映草稿，按素材篮顺序铺到时间线。帧命中会展开为约 6 秒，便于在剪映里拉长缩短。",
-            )
-        )
-        self.btn_batch_export.setObjectName("GhostButton")
-        self.btn_batch_export.setEnabled(self.ffmpeg_available)
-        if not self.ffmpeg_available:
-            self.btn_batch_export.setToolTip(
-                self.texts.get("shot_list_batch_export_ffmpeg_required", "FFmpeg is required for clip export.")
-            )
-        if not self.jianying_available:
-            self.btn_export_jianying.setEnabled(False)
-            self.btn_export_jianying.setToolTip(
-                self.texts.get(
-                    "shot_list_export_jianying_missing",
-                    "未安装 pyJianYingDraft。请在 VideoSeek 环境执行：pip install pyJianYingDraft",
-                )
-            )
-        self.footer_layout.addWidget(self.btn_export_manifest)
-        self.footer_layout.addWidget(self.btn_export_fcpxml)
-        self.footer_layout.addWidget(self.btn_export_jianying)
-        self.footer_layout.addWidget(self.btn_batch_export)
 
         self.btn_move_up = QPushButton(self.texts.get("shot_list_move_up", "Move up"))
         self.btn_move_down = QPushButton(self.texts.get("shot_list_move_down", "Move down"))
         self.btn_remove = QPushButton(self.texts.get("shot_list_remove", "Remove"))
         self.btn_clear = QPushButton(self.texts.get("shot_list_clear", "Clear all"))
-        self.btn_preview = QPushButton(self.texts.get("preview", "Preview"))
-        self.btn_locate = QPushButton(self.texts.get("locate", "Locate"))
         self.btn_move_up.setObjectName("NeutralToolButton")
         self.btn_move_down.setObjectName("NeutralToolButton")
         self.btn_remove.setObjectName("DangerGhostButton")
         self.btn_clear.setObjectName("DangerGhostButton")
-        self.btn_preview.setObjectName("GhostButton")
-        self.btn_locate.setObjectName("GhostButton")
-        for button in (
-            self.btn_move_up,
-            self.btn_move_down,
-            self.btn_remove,
-            self.btn_clear,
-            self.btn_preview,
-            self.btn_locate,
-        ):
+        for button in (self.btn_move_up, self.btn_move_down, self.btn_remove, self.btn_clear):
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.setAutoDefault(False)
+            button.setDefault(False)
             self.footer_layout.addWidget(button)
+
+        self.btn_export = QPushButton(self.texts.get("shot_list_export", "Export"))
+        self.btn_export.setObjectName("AccentGhostButton")
+        self.btn_export.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_export.setAutoDefault(False)
+        self.btn_export.setDefault(False)
+        self._export_menu = QMenu(self.btn_export)
+        self._action_export_manifest = self._export_menu.addAction(
+            self.texts.get("shot_list_export_manifest", "Export manifest")
+        )
+        self._action_export_fcpxml = self._export_menu.addAction(
+            self.texts.get("shot_list_export_fcpxml", "导出剪辑 XML")
+        )
+        self._action_export_fcpxml.setToolTip(
+            self.texts.get(
+                "shot_list_export_fcpxml_tip",
+                "默认导出 Premiere / 达芬奇可用的 FCP7 XML（*.xml）；也可选 FCPXML 给达芬奇。需本地视频文件。",
+            )
+        )
+        self._action_export_jianying = self._export_menu.addAction(
+            self.texts.get("shot_list_export_jianying", "导出剪映草稿")
+        )
+        self._action_export_jianying.setToolTip(
+            self.texts.get(
+                "shot_list_export_jianying_tip",
+                "新建一份 VideoSeek 剪映草稿，按素材篮顺序铺到时间线。帧命中会展开为约 6 秒，便于在剪映里拉长缩短。",
+            )
+        )
+        self._action_batch_export = self._export_menu.addAction(
+            self.texts.get("shot_list_batch_export", "Batch export clips")
+        )
+        if not self.ffmpeg_available:
+            self._action_batch_export.setToolTip(
+                self.texts.get("shot_list_batch_export_ffmpeg_required", "FFmpeg is required for clip export.")
+            )
+        if not self.jianying_available:
+            self._action_export_jianying.setToolTip(
+                self.texts.get(
+                    "shot_list_export_jianying_missing",
+                    "未安装 pyJianYingDraft。请在 VideoSeek 环境执行：pip install pyJianYingDraft",
+                )
+            )
+        self.btn_export.setMenu(self._export_menu)
+        self.footer_layout.addWidget(self.btn_export)
+
         self.footer_layout.addStretch(1)
         self.btn_close = QPushButton(self.texts.get("close", "Close"))
         self.btn_close.setObjectName("PrimaryButton")
@@ -165,12 +164,10 @@ class ShotListDialog(VSDialogShell):
         self.btn_move_down.clicked.connect(self._move_down)
         self.btn_remove.clicked.connect(self._remove_selected)
         self.btn_clear.clicked.connect(self._clear_all)
-        self.btn_preview.clicked.connect(self._preview_selected)
-        self.btn_locate.clicked.connect(self._locate_selected)
-        self.btn_export_manifest.clicked.connect(self._export_manifest)
-        self.btn_export_fcpxml.clicked.connect(self._export_fcpxml)
-        self.btn_export_jianying.clicked.connect(self._export_jianying)
-        self.btn_batch_export.clicked.connect(self._batch_export)
+        self._action_export_manifest.triggered.connect(self._export_manifest)
+        self._action_export_fcpxml.triggered.connect(self._export_fcpxml)
+        self._action_export_jianying.triggered.connect(self._export_jianying)
+        self._action_batch_export.triggered.connect(self._batch_export)
         self.btn_close.clicked.connect(self.accept)
 
         self._reload_table()
@@ -178,7 +175,10 @@ class ShotListDialog(VSDialogShell):
     def _reload_table(self) -> None:
         items = self.store.list_items()
         self.set_body(
-            self.texts.get("shot_list_subtitle", "{count} clips collected").format(count=len(items))
+            self.texts.get(
+                "shot_list_subtitle",
+                "{count} clips collected · double-click to preview",
+            ).format(count=len(items))
         )
         self.table.setRowCount(0)
         for row, item in enumerate(items):
@@ -221,19 +221,38 @@ class ShotListDialog(VSDialogShell):
             item = self.table.item(row, 0)
             self._selected_item_id = str(item.data(Qt.UserRole) if item is not None else "")
         has_selection = bool(self._selected_item_id)
-        for button in (
-            self.btn_move_up,
-            self.btn_move_down,
-            self.btn_remove,
-            self.btn_preview,
-            self.btn_locate,
-        ):
+        has_items = self.store.count() > 0
+        for button in (self.btn_move_up, self.btn_move_down, self.btn_remove):
             button.setEnabled(has_selection)
-        self.btn_clear.setEnabled(self.store.count() > 0)
-        self.btn_export_manifest.setEnabled(self.store.count() > 0)
-        self.btn_export_fcpxml.setEnabled(self.store.count() > 0)
-        self.btn_export_jianying.setEnabled(self.store.count() > 0 and self.jianying_available)
-        self.btn_batch_export.setEnabled(self.store.count() > 0 and self.ffmpeg_available)
+        self.btn_clear.setEnabled(has_items)
+        self.btn_export.setEnabled(has_items)
+        self._action_export_manifest.setEnabled(has_items)
+        self._action_export_fcpxml.setEnabled(has_items)
+        self._action_export_jianying.setEnabled(has_items and self.jianying_available)
+        self._action_batch_export.setEnabled(has_items and self.ffmpeg_available)
+
+    def _show_row_menu(self, pos) -> None:
+        index = self.table.indexAt(pos)
+        if index.isValid():
+            self.table.selectRow(index.row())
+        if not self._selected_item_id:
+            return
+        menu = QMenu(self)
+        action_preview = None
+        action_locate = None
+        if self.on_preview is not None:
+            action_preview = menu.addAction(self.texts.get("preview", "Preview"))
+        if self.on_locate is not None:
+            action_locate = menu.addAction(self.texts.get("locate", "Locate"))
+        if menu.isEmpty():
+            return
+        chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen is action_preview:
+            self._preview_selected()
+        elif chosen is action_locate:
+            self._locate_selected()
 
     def _export_manifest(self) -> None:
         if self.on_export_manifest is not None:

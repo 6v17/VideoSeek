@@ -448,6 +448,14 @@ def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts
     return container
 
 
+def _configure_table_action_button(button: QPushButton) -> QPushButton:
+    """Table action buttons must not steal Space (preview transport owns it)."""
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.setAutoDefault(False)
+    button.setDefault(False)
+    return button
+
+
 def _build_result_actions(
     video_path,
     start_sec,
@@ -467,7 +475,7 @@ def _build_result_actions(
     layout.setSpacing(12)
     layout.setAlignment(Qt.AlignCenter)
 
-    preview_button = QPushButton(texts["preview"])
+    preview_button = _configure_table_action_button(QPushButton(texts["preview"]))
     preview_button.setProperty("class", "TableBtn")
     preview_button.setFixedSize(74, 32)
     preview_button.setCursor(Qt.PointingHandCursor)
@@ -476,7 +484,7 @@ def _build_result_actions(
         lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_preview(path, clip_start, clip_end)
     )
 
-    locate_button = QPushButton(texts["locate"])
+    locate_button = _configure_table_action_button(QPushButton(texts["locate"]))
     locate_button.setProperty("class", "TableLocateBtn")
     locate_button.setFixedSize(74, 32)
     locate_button.setCursor(Qt.PointingHandCursor)
@@ -486,7 +494,9 @@ def _build_result_actions(
     layout.addWidget(preview_button)
 
     if str(match_kind or "") == "video" and on_deep_locate is not None:
-        deep_button = QPushButton(_fallback_text(texts, "deep_locate", "定位镜头", "Find shot"))
+        deep_button = _configure_table_action_button(
+            QPushButton(_fallback_text(texts, "deep_locate", "定位镜头", "Find shot"))
+        )
         deep_button.setProperty("class", "TableBtn")
         deep_button.setFixedSize(80, 32)
         deep_button.setCursor(Qt.PointingHandCursor)
@@ -500,7 +510,9 @@ def _build_result_actions(
 
     layout.addWidget(locate_button)
 
-    export_button = QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
+    export_button = _configure_table_action_button(
+        QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
+    )
     export_button.setProperty("class", "TableBtn")
     export_button.setFixedSize(74, 32)
     export_button.setCursor(Qt.PointingHandCursor)
@@ -511,7 +523,9 @@ def _build_result_actions(
     layout.addWidget(export_button)
 
     if on_add_to_shot_list is not None:
-        add_button = QPushButton(_fallback_text(texts, "shot_list_add", "加入", "Add"))
+        add_button = _configure_table_action_button(
+            QPushButton(_fallback_text(texts, "shot_list_add", "加入", "Add"))
+        )
         add_button.setProperty("class", "TableBtn")
         add_button.setFixedSize(58, 32)
         add_button.setCursor(Qt.PointingHandCursor)
@@ -554,19 +568,19 @@ def _build_link_result_actions(video_path, match_sec, source_link, on_preview, o
     layout.setSpacing(8)
     layout.setAlignment(Qt.AlignCenter)
 
-    preview_button = QPushButton(texts["preview"])
+    preview_button = _configure_table_action_button(QPushButton(texts["preview"]))
     preview_button.setProperty("class", "TableBtn")
     preview_button.setFixedSize(58, 30)
     preview_button.setCursor(Qt.PointingHandCursor)
     preview_button.clicked.connect(lambda _, path=video_path, sec=match_sec: on_preview(path, sec))
 
-    locate_button = QPushButton(texts["locate"])
+    locate_button = _configure_table_action_button(QPushButton(texts["locate"]))
     locate_button.setProperty("class", "TableLocateBtn")
     locate_button.setFixedSize(58, 30)
     locate_button.setCursor(Qt.PointingHandCursor)
     locate_button.clicked.connect(lambda _, path=video_path: on_locate(path))
 
-    source_button = QPushButton(texts["open_link"])
+    source_button = _configure_table_action_button(QPushButton(texts["open_link"]))
     source_button.setProperty("class", "TableBtn")
     source_button.setFixedSize(58, 30)
     source_button.setCursor(Qt.PointingHandCursor)

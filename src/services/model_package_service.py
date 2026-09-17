@@ -11,6 +11,7 @@ import zipfile
 from src.app.config import load_config, save_config
 from src.app.logging_utils import get_logger
 from src.storage.config_store import (
+    _read_on_disk_embedding_dimension,
     get_config_schema_version,
     get_data_paths,
     iter_provider_resource_dir_candidates,
@@ -82,20 +83,117 @@ def _optional_positive_int(value):
     return number if number > 0 else None
 
 
-def _runtime_extras_from_manifest(manifest):
-    """Copy optional numeric runtime fields declared on model_manifest.json."""
+def _runtime_extras_from_manifest(manifest, *, resource_dir: str = ""):
+    """Copy optional numeric runtime fields; prefer HF config projection_dim when present."""
     extras = {}
     if not isinstance(manifest, dict):
         return extras
     dimension = _optional_positive_int(
-        manifest.get("embedding_dimension", manifest.get("dimension"))
+        _read_on_disk_embedding_dimension(resource_dir)
+        if resource_dir
+        else None
     )
+    if dimension is None:
+        dimension = _optional_positive_int(
+            manifest.get("embedding_dimension", manifest.get("dimension"))
+        )
     if dimension is not None:
         extras["embedding_dimension"] = dimension
     image_size = _optional_positive_int(manifest.get("image_size"))
     if image_size is not None:
         extras["image_size"] = image_size
     return extras
+
+
+def _apply_embedding_dimension_to_profile(profile: dict, dimension: int) -> bool:
+    """Write dimension into profile / runtime / capabilities. Returns True if changed."""
+    dimension = int(dimension)
+    if dimension <= 0 or not isinstance(profile, dict):
+        return False
+    changed = False
+    runtime = dict(profile.get("runtime") or {})
+    capabilities = dict(profile.get("capabilities") or {})
+    if int(profile.get("embedding_dimension") or 0) != dimension:
+        profile["embedding_dimension"] = dimension
+        changed = True
+    if int(runtime.get("embedding_dimension") or 0) != dimension:
+        runtime["embedding_dimension"] = dimension
+        profile["runtime"] = runtime
+        changed = True
+    if int(capabilities.get("embedding_dimension") or 0) != dimension:
+        capabilities["embedding_dimension"] = dimension
+        profile["capabilities"] = capabilities
+        changed = True
+    return changed
+
+
+def _rewrite_manifest_embedding_dimension(resource_dir: str, dimension: int) -> bool:
+    """Fix stale model_manifest.json embedding_dimension in place."""
+    dimension = int(dimension)
+    if dimension <= 0:
+        return False
+    manifest_path = os.path.join(str(resource_dir or "").strip(), "model_manifest.json")
+    if not os.path.isfile(manifest_path):
+        return False
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            return False
+        current = _optional_positive_int(payload.get("embedding_dimension", payload.get("dimension")))
+        if current == dimension:
+            return False
+        payload["embedding_dimension"] = dimension
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        return True
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        logger.debug("rewrite manifest embedding_dimension failed: %s", exc)
+        return False
+
+
+def heal_stale_model_embedding_dimensions(config=None) -> dict:
+    """Align saved profiles + on-disk manifests with HF/config truth (e.g. Large 512→768)."""
+    cfg = dict(config or load_config())
+    if get_config_schema_version(config=cfg) < 2:
+        return {"healed": 0, "manifests_rewritten": 0, "changed": False}
+    models = cfg.get("models")
+    if not isinstance(models, dict):
+        return {"healed": 0, "manifests_rewritten": 0, "changed": False}
+    profiles = models.get("profiles")
+    if not isinstance(profiles, list) or not profiles:
+        return {"healed": 0, "manifests_rewritten": 0, "changed": False}
+
+    healed = 0
+    manifests_rewritten = 0
+    config_changed = False
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        resource_dir = _resolve_profile_resource_dir(profile)
+        if not resource_dir:
+            continue
+        disk_dimension = _optional_positive_int(_read_on_disk_embedding_dimension(resource_dir))
+        if disk_dimension is None:
+            continue
+        if _apply_embedding_dimension_to_profile(profile, disk_dimension):
+            healed += 1
+            config_changed = True
+        if _rewrite_manifest_embedding_dimension(resource_dir, disk_dimension):
+            manifests_rewritten += 1
+
+    if config_changed:
+        if config is None:
+            save_config(cfg)
+        else:
+            pass
+
+    return {
+        "healed": healed,
+        "manifests_rewritten": manifests_rewritten,
+        "changed": bool(config_changed or manifests_rewritten),
+    }
 
 
 def _resolve_profile_resource_dir(profile):
@@ -487,7 +585,11 @@ def import_model_packages(model_root, manifest_files=None):
             "model_dir": root,
             "model_variant": variant,
         }
-        runtime.update(_runtime_extras_from_manifest(manifest))
+        runtime.update(_runtime_extras_from_manifest(manifest, resource_dir=effective_resource_dir))
+        if "embedding_dimension" in runtime:
+            _rewrite_manifest_embedding_dimension(
+                effective_resource_dir, int(runtime["embedding_dimension"])
+            )
         capabilities = {
             "text_query": True,
             "image_query": True,
@@ -831,6 +933,10 @@ def rediscover_model_profiles(model_root: str | None = None) -> dict:
 
     manifests = _discover_manifest_files(root)
     import_result = import_model_packages(root, manifest_files=manifests or None)
+    try:
+        heal_stale_model_embedding_dimensions()
+    except Exception as exc:
+        logger.debug("heal_stale_model_embedding_dimensions after rediscover failed: %s", exc)
     prune_result = prune_incomplete_model_profiles()
     active_before = str(import_result.get("active_profile", "") or "").strip()
     active_after = str(prune_result.get("active_profile", "") or active_before).strip()

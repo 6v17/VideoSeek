@@ -2801,26 +2801,30 @@ QProgressBar::chunk {
 }
 QScrollBar:vertical {
     background: transparent;
-    width: 8px;
+    width: 10px;
     margin: 2px 1px 2px 1px;
 }
 QScrollBar::handle:vertical {
     background: __SCROLL__;
-    border-radius: 4px;
+    border-radius: 5px;
     min-height: 28px;
 }
 QScrollBar::handle:vertical:hover {
     background: __LINE_STRONG__;
 }
 QScrollBar:horizontal {
-    background: transparent;
-    height: 8px;
-    margin: 1px 2px 1px 2px;
+    /* Bottom bars need a real hit target — 8px was effectively unclickable. */
+    background: __LINE__;
+    height: 14px;
+    margin: 2px 4px 3px 4px;
+    border-radius: 7px;
 }
 QScrollBar::handle:horizontal {
     background: __SCROLL__;
-    border-radius: 4px;
-    min-width: 28px;
+    border-radius: 6px;
+    min-width: 40px;
+    min-height: 10px;
+    margin: 2px 1px;
 }
 QScrollBar::handle:horizontal:hover {
     background: __LINE_STRONG__;
@@ -2829,6 +2833,13 @@ QScrollBar::add-line, QScrollBar::sub-line {
     border: none;
     width: 0;
     height: 0;
+}
+#ResourceDialogTable QScrollBar:horizontal,
+#DialogRulesTable QScrollBar:horizontal,
+#ResultTable QScrollBar:horizontal,
+#DataTable QScrollBar:horizontal {
+    height: 16px;
+    margin: 3px 6px 4px 6px;
 }
 QPushButton[class="TableBtn"], QPushButton[class="TableLocateBtn"], QPushButton[class="TableDeleteBtn"] {
     background: transparent;

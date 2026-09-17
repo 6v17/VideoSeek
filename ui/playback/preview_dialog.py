@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -19,6 +20,12 @@ from PySide6.QtWidgets import (
 from src.app.logging_utils import get_logger
 from src.app.path_display import video_display_name
 from src.utils import format_timecode_seconds
+from ui.playback.preview_keyboard import (
+    PreviewTransportKeyFilter,
+    clamp_seek_ms,
+    resolve_display_time_ms,
+    resolve_seek_base_ms,
+)
 from ui.playback.vlc_player import VlcPreviewPlayer
 
 logger = get_logger("preview_dialog")
@@ -308,6 +315,17 @@ class PreviewDialog(QDialog):
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
+        self._transport_key_filter = PreviewTransportKeyFilter(
+            self,
+            is_active=self._keyboard_transport_active,
+            on_toggle=self._toggle_play,
+            on_seek=self._nudge_seek,
+            parent=self,
+        )
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._transport_key_filter)
+
         self.load_preview(
             video_path,
             start_sec,
@@ -508,12 +526,15 @@ class PreviewDialog(QDialog):
         QTimer.singleShot(0, player.rebind_output_window)
         QTimer.singleShot(50, player.rebind_output_window)
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Space:
-            self._toggle_play()
-            event.accept()
-            return
-        super().keyPressEvent(event)
+    def _keyboard_transport_active(self) -> bool:
+        return (
+            not self._closing
+            and not self._close_requested
+            and self.isVisible()
+            and bool(str(self.video_path or "").strip())
+            and self.player is not None
+            and self.player.is_available()
+        )
 
     def _start_playback_if(self, token):
         if token != self._play_token or self._closing or self._close_requested:
@@ -559,6 +580,30 @@ class PreviewDialog(QDialog):
         if player.resume():
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
 
+    def _nudge_seek(self, delta_ms: int) -> None:
+        if self._closing:
+            return
+        player = self._ensure_player()
+        if player is None or not player.is_available():
+            return
+        try:
+            from src.services.search_telemetry import mark_playback_user_adjusted
+
+            mark_playback_user_adjusted()
+        except Exception as exc:
+            logger.debug("Preview dialog seek-nudge telemetry skipped: %s", exc)
+        total_ms = self._effective_total_ms(player)
+        current_ms = resolve_seek_base_ms(player.get_time(), self._pending_ui_seek_ms)
+        new_time = clamp_seek_ms(current_ms, delta_ms, total_ms)
+        if player.has_locked_window():
+            player.unlock_full_playback()
+            self._apply_detail_label()
+        self._pending_ui_seek_ms = new_time
+        # Seek in place — never resume()/media_new here (that reopened early clips at 0).
+        player.set_time(new_time, unlock=True)
+        self._extend_close_guard(1.0)
+        self._sync_ui()
+
     def _unlock_full_playback(self):
         if self._closing:
             return
@@ -603,6 +648,7 @@ class PreviewDialog(QDialog):
             player.resume()
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         self._slider_dragging = False
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _sync_ui(self):
         if self._closing:
@@ -635,15 +681,9 @@ class PreviewDialog(QDialog):
         return self._known_total_ms
 
     def _resolve_display_time_ms(self, current_ms):
-        pending_seek_ms = self._pending_ui_seek_ms
-        if pending_seek_ms is None:
-            return current_ms
-        if abs(current_ms - pending_seek_ms) <= 800 or current_ms > pending_seek_ms:
-            self._pending_ui_seek_ms = None
-            return current_ms
-        if current_ms <= 250 and pending_seek_ms > 250:
-            return pending_seek_ms
-        return current_ms
+        display_ms, pending = resolve_display_time_ms(current_ms, self._pending_ui_seek_ms)
+        self._pending_ui_seek_ms = pending
+        return display_ms
 
     def _toggle_fullscreen(self):
         if self._closing:

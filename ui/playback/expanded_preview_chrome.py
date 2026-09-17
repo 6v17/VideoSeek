@@ -7,6 +7,7 @@ import os
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -20,6 +21,12 @@ from PySide6.QtWidgets import (
 from src.app.logging_utils import get_logger
 from src.app.path_display import video_display_name
 from src.utils import format_timecode_seconds
+from ui.playback.preview_keyboard import (
+    PreviewTransportKeyFilter,
+    clamp_seek_ms,
+    resolve_display_time_ms,
+    resolve_seek_base_ms,
+)
 
 logger = get_logger("expanded_preview_chrome")
 
@@ -145,7 +152,36 @@ class ExpandedPreviewChrome(QWidget):
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._transport_key_filter = None
+        self._install_transport_keyboard()
+
         self.setVisible(False)
+
+    def _install_transport_keyboard(self) -> None:
+        if self._transport_key_filter is not None:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        self._transport_key_filter = PreviewTransportKeyFilter(
+            self,
+            is_active=self._keyboard_transport_active,
+            on_toggle=self._toggle_play,
+            on_seek=self._nudge_seek,
+            parent=self,
+        )
+        app.installEventFilter(self._transport_key_filter)
+
+    def _keyboard_transport_active(self) -> bool:
+        if not self.isVisible() or not str(self.video_path or "").strip():
+            return False
+        player = self.player
+        return player is not None and player.is_available()
+
+    def claim_keyboard_focus(self) -> None:
+        """Take focus after starting preview so Space is not left on result buttons."""
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def apply_texts(self, texts: dict):
         self.texts = texts or {}
@@ -242,6 +278,26 @@ class ExpandedPreviewChrome(QWidget):
         if player.resume():
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
 
+    def _nudge_seek(self, delta_ms: int) -> None:
+        player = self.player
+        if player is None or not player.is_available():
+            return
+        try:
+            from src.services.search_telemetry import mark_playback_user_adjusted
+
+            mark_playback_user_adjusted()
+        except Exception as exc:
+            logger.debug("Expanded preview seek-nudge telemetry skipped: %s", exc)
+        total_ms = self._effective_total_ms(player)
+        current_ms = resolve_seek_base_ms(player.get_time(), self._pending_ui_seek_ms)
+        new_time = clamp_seek_ms(current_ms, delta_ms, total_ms)
+        if player.has_locked_window():
+            player.unlock_full_playback()
+        self._pending_ui_seek_ms = new_time
+        # Seek in place — never resume()/media_new here (that reopened early clips at 0).
+        player.set_time(new_time, unlock=True)
+        self._sync_ui()
+
     def _unlock_full_playback(self):
         try:
             from src.services.search_telemetry import mark_playback_user_adjusted
@@ -281,6 +337,8 @@ class ExpandedPreviewChrome(QWidget):
             player.resume()
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         self._slider_dragging = False
+        # Keep Space bound to transport after scrubbing (do not leave focus on the slider).
+        self.claim_keyboard_focus()
 
     def _sync_ui(self):
         player = self.player
@@ -311,15 +369,9 @@ class ExpandedPreviewChrome(QWidget):
         return self._known_total_ms
 
     def _resolve_display_time_ms(self, current_ms):
-        pending_seek_ms = self._pending_ui_seek_ms
-        if pending_seek_ms is None:
-            return current_ms
-        if abs(current_ms - pending_seek_ms) <= 800 or current_ms > pending_seek_ms:
-            self._pending_ui_seek_ms = None
-            return current_ms
-        if current_ms <= 250 and pending_seek_ms > 250:
-            return pending_seek_ms
-        return current_ms
+        display_ms, pending = resolve_display_time_ms(current_ms, self._pending_ui_seek_ms)
+        self._pending_ui_seek_ms = pending
+        return display_ms
 
     def reset(self):
         """Clear chrome after stop/clear — keep widget layout, drop active clip UI."""

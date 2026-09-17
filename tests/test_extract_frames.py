@@ -45,7 +45,10 @@ class ExtractFramesTests(unittest.TestCase):
         self.assertEqual(frames[0].shape, (224, 224, 3))
         self.assertEqual(timestamps, [0.0])
         command = mock_popen.call_args.args[0]
-        self.assertIn("fps=2.000000,scale=224:224:flags=fast_bilinear", command)
+        self.assertIn(
+            "fps=2.000000,scale=224:224:force_original_aspect_ratio=increase:flags=bicubic,crop=224:224",
+            command,
+        )
 
     @patch("src.core.extract_frames.subprocess.Popen")
     @patch("src.core.extract_frames.get_ffmpeg_path", return_value="ffmpeg")
@@ -327,7 +330,7 @@ class ExtractFramesTests(unittest.TestCase):
         self.assertIn("-hwaccel", command)
         self.assertIn("d3d11va", command)
         self.assertIn(
-            "hwdownload,format=p010le,format=yuv420p,fps=1.500000,scale=224:224:flags=fast_bilinear",
+            "hwdownload,format=p010le,format=yuv420p,fps=1.500000,scale=224:224:force_original_aspect_ratio=increase:flags=bicubic,crop=224:224",
             command,
         )
 
@@ -337,14 +340,20 @@ class ExtractFramesTests(unittest.TestCase):
 
         self.assertIn("-hwaccel", command)
         self.assertIn("d3d11va", command)
-        self.assertIn("hwdownload,format=nv12,fps=1.500000,scale=224:224:flags=fast_bilinear", command)
+        self.assertIn(
+            "hwdownload,format=nv12,fps=1.500000,scale=224:224:force_original_aspect_ratio=increase:flags=bicubic,crop=224:224",
+            command,
+        )
 
     @patch("src.core.extract_frames.get_ffmpeg_path", return_value="ffmpeg")
-    def test_build_cpu_command_unchanged(self, _mock_ffmpeg):
+    def test_build_cpu_command_uses_aspect_preserving_crop(self, _mock_ffmpeg):
         command = _build_cpu_extract_command("D:/video.mp4", 1.5)
 
         self.assertNotIn("-hwaccel", command)
-        self.assertIn("fps=1.500000,scale=224:224:flags=fast_bilinear", command)
+        self.assertIn(
+            "fps=1.500000,scale=224:224:force_original_aspect_ratio=increase:flags=bicubic,crop=224:224",
+            command,
+        )
 
 
 class VideoProbeTests(unittest.TestCase):

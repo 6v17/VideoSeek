@@ -37,6 +37,15 @@ class CollectReindexableMissingTests(unittest.TestCase):
         self.assertEqual(collect_reindexable_missing_video_ids(entries=entries), ["x"])
         mock_entries.assert_not_called()
 
+    @patch("src.services.library_service.list_library_video_entries")
+    @patch("src.services.library_service.load_config", return_value={})
+    def test_ready_never_force_queued(self, _mock_cfg, mock_entries):
+        mock_entries.return_value = [
+            {"video_id": "old", "source_exists": True, "asset_state": "ready"},
+            {"video_id": "ok", "source_exists": True, "asset_state": "ready"},
+        ]
+        self.assertEqual(collect_reindexable_missing_video_ids(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

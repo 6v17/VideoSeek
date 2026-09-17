@@ -336,6 +336,108 @@ class ModelResourceDirTests(unittest.TestCase):
 
             self.assertEqual(os.path.normcase(resolved), os.path.normcase(legacy_dir))
 
+    def test_get_active_embedding_spec_prefers_on_disk_manifest_dimension(self):
+        from src.storage.config_store import get_active_embedding_spec
+
+        with tempfile.TemporaryDirectory() as model_root:
+            resource_dir = Path(model_root) / "chinese-clip" / "vit-large-patch14"
+            resource_dir.mkdir(parents=True)
+            (resource_dir / "model_manifest.json").write_text(
+                json.dumps({"embedding_dimension": 512}),
+                encoding="utf-8",
+            )
+            (resource_dir / "config.json").write_text(
+                json.dumps({"projection_dim": 768}),
+                encoding="utf-8",
+            )
+            config = {
+                "schema_version": 2,
+                "models": {
+                    "active_profile": "chinese_clip_vit_large_patch14",
+                    "profiles": [
+                        {
+                            "id": "chinese_clip_vit_large_patch14",
+                            "provider": "chinese_clip_onnx",
+                            "embedding_dimension": 512,
+                            "runtime": {
+                                "model_dir": model_root,
+                                "model_variant": "vit-large-patch14",
+                                "embedding_dimension": 512,
+                            },
+                            "capabilities": {"embedding_dimension": 512},
+                        }
+                    ],
+                }
+            }
+
+            spec = get_active_embedding_spec(config=config)
+
+            self.assertEqual(spec["dimension"], 768)
+            self.assertEqual(spec["provider"], "chinese_clip_onnx")
+
+    def test_heal_stale_model_embedding_dimensions_rewrites_profile_and_manifest(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            resource_dir = Path(model_root) / "chinese-clip" / "vit-large-patch14"
+            resource_dir.mkdir(parents=True)
+            for name in (
+                "chinese_clip_image.onnx",
+                "chinese_clip_text.onnx",
+                "vocab.txt",
+                "preprocessor_config.json",
+                "config.json",
+            ):
+                (resource_dir / name).write_bytes(b"x" if name.endswith(".onnx") else b"{}")
+            (resource_dir / "config.json").write_text(
+                json.dumps({"projection_dim": 768}),
+                encoding="utf-8",
+            )
+            (resource_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "chinese_clip_vit_large_patch14",
+                        "provider": "chinese_clip_onnx",
+                        "variant": "vit-large-patch14",
+                        "embedding_dimension": 512,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "schema_version": 2,
+                "models": {
+                    "active_profile": "chinese_clip_vit_large_patch14",
+                    "profiles": [
+                        {
+                            "id": "chinese_clip_vit_large_patch14",
+                            "provider": "chinese_clip_onnx",
+                            "embedding_dimension": 512,
+                            "runtime": {
+                                "model_dir": model_root,
+                                "model_variant": "vit-large-patch14",
+                                "embedding_dimension": 512,
+                            },
+                            "capabilities": {"embedding_dimension": 512},
+                        }
+                    ],
+                },
+            }
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config") as mock_save,
+                patch("src.services.model_package_service.get_config_schema_version", return_value=2),
+            ):
+                result = model_package_service.heal_stale_model_embedding_dimensions()
+
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["healed"], 1)
+            self.assertEqual(result["manifests_rewritten"], 1)
+            profile = config["models"]["profiles"][0]
+            self.assertEqual(profile["embedding_dimension"], 768)
+            self.assertEqual(profile["runtime"]["embedding_dimension"], 768)
+            manifest = json.loads((resource_dir / "model_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["embedding_dimension"], 768)
+            self.assertTrue(mock_save.called)
+
 
 class RediscoverModelProfilesTests(unittest.TestCase):
     def test_ensure_default_clip_manifest_skips_when_onnx_missing(self):

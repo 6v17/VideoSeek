@@ -1,3 +1,4 @@
+import json
 import os
 
 from typing import List
@@ -194,6 +195,51 @@ def get_active_model_resource_dir(config=None):
     return resolve_model_resource_dir(model_root, provider, model_variant)
 
 
+def _read_projection_dim_from_hf_config(model_resource_dir: str) -> int:
+    """HF ``config.json`` projection_dim is authoritative for CLIP-family packs."""
+    config_path = os.path.join(str(model_resource_dir or "").strip(), "config.json")
+    if not os.path.isfile(config_path):
+        return 0
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        raw = payload.get("projection_dim")
+        if raw is None and isinstance(payload.get("text_config"), dict):
+            raw = payload["text_config"].get("projection_dim")
+        dimension = int(raw)
+        return dimension if dimension > 0 else 0
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def _read_on_disk_embedding_dimension(model_resource_dir: str) -> int:
+    """Prefer HF config projection_dim, then packaged manifest, over stale profile metadata.
+
+    Older Large packs wrongly shipped ``model_manifest.json`` with 512 while ONNX/config
+    are 768 — config.json wins when present.
+    """
+    root = str(model_resource_dir or "").strip()
+    if not root or not os.path.isdir(root):
+        return 0
+
+    dimension = _read_projection_dim_from_hf_config(root)
+    if dimension > 0:
+        return dimension
+
+    manifest_path = os.path.join(root, "model_manifest.json")
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            raw = payload.get("embedding_dimension", payload.get("dimension"))
+            dimension = int(raw)
+            if dimension > 0:
+                return dimension
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return 0
+
+
 def get_active_embedding_spec(config=None):
     cfg = dict(config or load_config())
     profile = get_active_model_profile(config=cfg)
@@ -227,6 +273,14 @@ def get_active_embedding_spec(config=None):
         dimension = int(raw_dimension)
     except (TypeError, ValueError):
         dimension = 0
+
+    # Packaged model files are source of truth (fixes stale 512d labels for Large=768).
+    try:
+        disk_dimension = _read_on_disk_embedding_dimension(get_active_model_resource_dir(config=cfg))
+    except Exception:
+        disk_dimension = 0
+    if disk_dimension > 0:
+        dimension = disk_dimension
 
     return {
         "model_id": profile_id,

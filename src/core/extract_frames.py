@@ -25,10 +25,7 @@ def get_video_stream_info(path):
 
     return _impl(path)
 
-# Software decode + CPU filters; FFmpeg outputs 224×224 BGR rawvideo on stdout.
-_VF_CPU = "fps={fps:.6f},scale=224:224:flags=fast_bilinear"
-_VF_HW = "hwdownload,format=nv12," + _VF_CPU
-_VF_HW_10BIT = "hwdownload,format=p010le,format=yuv420p," + _VF_CPU
+# Software decode + CPU filters; FFmpeg outputs 224×224 BGR (geometry from profile lock).
 _FRAME_SIZE = 224 * 224 * 3
 _DEFAULT_READ_TIMEOUT_SEC = 600.0
 _DECODE_BACKEND_CPU = "cpu"
@@ -114,6 +111,18 @@ def _build_startupinfo():
     return startupinfo
 
 
+def _build_frame_vf(fps):
+    """fps + square geometry from the active profile lock (stretch or center-crop)."""
+    from src.core.vision_preprocess import clip_frame_vf
+    from src.services.embedding_preprocess import resolve_embedding_preprocess
+
+    return clip_frame_vf(
+        fps=float(fps),
+        size=224,
+        preprocess=resolve_embedding_preprocess(),
+    )
+
+
 def _build_cpu_extract_command(video_path, fps):
     ffmpeg_bin = get_ffmpeg_path()
     return [
@@ -126,7 +135,7 @@ def _build_cpu_extract_command(video_path, fps):
         "-i",
         video_path,
         "-vf",
-        _VF_CPU.format(fps=float(fps)),
+        _build_frame_vf(fps),
         "-sn",
         "-f",
         "image2pipe",
@@ -140,7 +149,11 @@ def _build_cpu_extract_command(video_path, fps):
 
 def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False):
     ffmpeg_bin = get_ffmpeg_path()
-    vf_template = _VF_HW_10BIT if ten_bit else _VF_HW
+    prefix = (
+        "hwdownload,format=p010le,format=yuv420p,"
+        if ten_bit
+        else "hwdownload,format=nv12,"
+    )
     return [
         ffmpeg_bin,
         "-hide_banner",
@@ -155,7 +168,7 @@ def _build_d3d11va_extract_command(video_path, fps, *, ten_bit=False):
         "-i",
         video_path,
         "-vf",
-        vf_template.format(fps=float(fps)),
+        prefix + _build_frame_vf(fps),
         "-sn",
         "-f",
         "image2pipe",

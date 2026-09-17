@@ -2649,19 +2649,10 @@ class UnderstandingGuiMixin:
             issue_row_predicate=lambda row, invalid_text=invalid_state_text: row[12] == invalid_text,
             extra_actions=[
                 {
-                    "label": self.texts["details_open_selected"],
-                    "object_name": "AccentGhostButton",
-                    "handler": self._open_selected_evidence_detail_path,
-                },
-                {
-                    "label": self.texts["details_copy_selected"],
-                    "object_name": "GhostButton",
-                    "handler": self._copy_selected_evidence_detail_path,
-                },
-                {
                     "label": self.texts.get("library_evidence_open_dir", "Open Evidence Folder"),
                     "object_name": "AccentGhostButton",
                     "handler": self._open_evidence_detail_folder,
+                    "context": False,
                 },
                 {
                     "label": self.texts.get("library_evidence_delete_selected", "Delete Selected"),
@@ -2672,6 +2663,7 @@ class UnderstandingGuiMixin:
                     "label": self.texts.get("library_evidence_clear_all", "Clear All Evidence"),
                     "object_name": "DangerGhostButton",
                     "handler": self._clear_all_evidence_records,
+                    "context": False,
                 },
             ],
             row_double_click_handler=self._open_evidence_detail_payload,

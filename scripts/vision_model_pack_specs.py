@@ -16,7 +16,7 @@ LARGE_224_PACKS: list[dict[str, Any]] = [
         "provider_dir": "chinese-clip",
         "variant": "vit-large-patch14",
         "hf_id": "OFA-Sys/chinese-clip-vit-large-patch14",
-        "embedding_dimension": 512,
+        "embedding_dimension": 768,
         "image_size": 224,
         "display_name": "Chinese CLIP vit-large-patch14",
     },

@@ -203,6 +203,10 @@ class ResultGridCard(QFrame):
             btn.setProperty("class", btn_class)
             btn.setFixedSize(width, _BTN_H)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Avoid Space re-firing the last clicked action (preview play/pause owns Space).
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
             if tip:
                 btn.setToolTip(tip)
             btn.clicked.connect(slot)

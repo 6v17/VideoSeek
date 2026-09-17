@@ -634,6 +634,103 @@ def set_stored_chunk_config(profile_base_dir: str, video_id: str, chunk_config: 
             conn.commit()
 
 
+_VECTOR_SCHEMA_EXTRA_KEY = "vector_schema"
+
+
+def get_profile_meta_flag(profile_base_dir: str, key: str) -> str:
+    key = str(key or "").strip()
+    if not key:
+        return ""
+    ensure_profile_library_db(profile_base_dir, migrate=False)
+    with _db(profile_base_dir) as conn:
+        row = conn.execute("SELECT value FROM meta_kv WHERE key = ?", (key,)).fetchone()
+    if row is None:
+        return ""
+    return str(row["value"] or "").strip()
+
+
+def set_profile_meta_flag(profile_base_dir: str, key: str, value: str) -> None:
+    key = str(key or "").strip()
+    if not key:
+        return
+    ensure_profile_library_db(profile_base_dir, migrate=False)
+    with _WRITE_LOCK:
+        with _db(profile_base_dir) as conn:
+            conn.execute(
+                "INSERT INTO meta_kv(key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value or "")),
+            )
+            _bump_revision(conn)
+            conn.commit()
+
+
+def get_video_vector_schema(profile_base_dir: str, video_id: str) -> str:
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return ""
+    ensure_profile_library_db(profile_base_dir, migrate=False)
+    with _db(profile_base_dir) as conn:
+        row = conn.execute(
+            "SELECT extras_json FROM video_index_state WHERE video_id = ?",
+            (video_id,),
+        ).fetchone()
+    if row is None:
+        return ""
+    extras = _json_loads(str(row["extras_json"] or ""), {})
+    if not isinstance(extras, dict):
+        return ""
+    return str(extras.get(_VECTOR_SCHEMA_EXTRA_KEY, "") or "").strip()
+
+
+def load_video_vector_schemas(profile_base_dir: str) -> dict[str, str]:
+    """Map video_id → vector_schema stamp (missing means unstamped / pre-release)."""
+    ensure_profile_library_db(profile_base_dir, migrate=False)
+    out: dict[str, str] = {}
+    with _db(profile_base_dir) as conn:
+        rows = conn.execute("SELECT video_id, extras_json FROM video_index_state").fetchall()
+    for row in rows:
+        video_id = str(row["video_id"] or "").strip()
+        if not video_id:
+            continue
+        extras = _json_loads(str(row["extras_json"] or ""), {})
+        if not isinstance(extras, dict):
+            continue
+        schema = str(extras.get(_VECTOR_SCHEMA_EXTRA_KEY, "") or "").strip()
+        if schema:
+            out[video_id] = schema
+    return out
+
+
+def set_video_vector_schema(profile_base_dir: str, video_id: str, schema: str) -> None:
+    video_id = str(video_id or "").strip()
+    schema = str(schema or "").strip()
+    if not video_id or not schema:
+        return
+    ensure_profile_library_db(profile_base_dir, migrate=False)
+    with _WRITE_LOCK:
+        with _db(profile_base_dir) as conn:
+            existing = conn.execute(
+                "SELECT extras_json FROM video_index_state WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            extras = _json_loads(str(existing["extras_json"] or ""), {}) if existing else {}
+            if not isinstance(extras, dict):
+                extras = {}
+            extras[_VECTOR_SCHEMA_EXTRA_KEY] = schema
+            conn.execute(
+                """
+                INSERT INTO video_index_state(video_id, extras_json)
+                VALUES (?, ?)
+                ON CONFLICT(video_id) DO UPDATE SET
+                  extras_json = excluded.extras_json
+                """,
+                (video_id, _json_dumps(extras)),
+            )
+            _bump_revision(conn)
+            conn.commit()
+
+
 def get_dialogue_index_state(profile_base_dir: str, video_id: str) -> str:
     video_id = str(video_id or "").strip()
     if not video_id:

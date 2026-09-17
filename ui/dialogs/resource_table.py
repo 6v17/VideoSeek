@@ -1,6 +1,7 @@
 import json
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -124,13 +125,16 @@ class ResourceTableDialog(VSDialogShell):
         self.table.setSelectionMode(self.selection_mode)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        # Wide detail tables must keep column widths and scroll — never squeeze into the viewport.
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.verticalHeader().setVisible(False)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setAlternatingRowColors(False)
         self.table.setShowGrid(False)
         self.table.setSortingEnabled(self.allow_sorting)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.setMinimumHeight(320)
         self.content_layout.addWidget(self.table, 1)
 
@@ -164,41 +168,47 @@ class ResourceTableDialog(VSDialogShell):
         self.content_layout.addWidget(status_card)
 
         self.clear_footer(keep_stretch=False)
+        self._utility_menu = None
+        self.btn_copy = QPushButton(self.texts["details_copy_json"])
+        self.btn_export = QPushButton(self.texts["details_export_json"])
+        self.btn_copy_row = QPushButton(self._inline_text("复制选中行", "Copy Selected"))
+        self.btn_copy.hide()
+        self.btn_export.hide()
+        self.btn_copy_row.hide()
         if self.show_utility_actions:
-            self.btn_copy = self.add_footer_button(
-                self.texts["details_copy_json"],
+            self.btn_utility = self.add_footer_button(
+                self.texts.get("details_export_menu", self._inline_text("导出", "Export")),
                 object_name="GhostButton",
-                on_click=self._copy_json,
             )
-            self.btn_export = self.add_footer_button(
-                self.texts["details_export_json"],
-                object_name="GhostButton",
-                on_click=self._export_json,
-            )
-            self.btn_copy_row = self.add_footer_button(
-                self._inline_text("复制选中行", "Copy Selected"),
-                object_name="GhostButton",
-                on_click=self._copy_selected_row,
-            )
+            self.btn_utility.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.btn_utility.setAutoDefault(False)
+            self.btn_utility.setDefault(False)
+            self._utility_menu = QMenu(self.btn_utility)
+            self._utility_menu.addAction(self.texts["details_copy_json"], self._copy_json)
+            self._utility_menu.addAction(self.texts["details_export_json"], self._export_json)
+            self.btn_utility.setMenu(self._utility_menu)
         else:
-            self.btn_copy = QPushButton(self.texts["details_copy_json"])
-            self.btn_export = QPushButton(self.texts["details_export_json"])
-            self.btn_copy_row = QPushButton(self._inline_text("复制选中行", "Copy Selected"))
-            self.btn_copy.hide()
-            self.btn_export.hide()
-            self.btn_copy_row.hide()
+            self.btn_utility = QPushButton(self.texts.get("details_export_menu", "Export"))
+            self.btn_utility.hide()
+
+        self._footer_extra_buttons = []
         for action in self.extra_actions:
+            if action.get("footer", True) is False:
+                continue
             object_name = str(action.get("object_name", "") or "").strip() or "GhostButton"
-            # Legacy callers used "Ghost"; map to the Fluent token.
             if object_name == "Ghost":
                 object_name = "GhostButton"
-            self.add_footer_button(
+            button = self.add_footer_button(
                 action.get("label", "Action"),
                 object_name=object_name,
                 on_click=lambda _checked=False, handler=action.get("handler"): (
                     handler(self) if callable(handler) else None
                 ),
             )
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.setAutoDefault(False)
+            button.setDefault(False)
+            self._footer_extra_buttons.append(button)
         self.add_footer_stretch()
         if self.confirm_mode:
             self.btn_cancel = self.add_footer_button(
@@ -233,6 +243,9 @@ class ResourceTableDialog(VSDialogShell):
             self.table.itemDoubleClicked.connect(self._handle_item_double_click)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.table)
+        copy_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        copy_shortcut.activated.connect(self._copy_selected_cell)
 
     def _inline_text(self, zh_text, en_text):
         return en_text if self.texts["close"].lower() == "close" else zh_text
@@ -319,27 +332,44 @@ class ResourceTableDialog(VSDialogShell):
     def _apply_column_layout(self):
         if not self.headers:
             return
+        header = self.table.horizontalHeader()
         stretch_col = self.stretch_column
         if stretch_col < 0 or stretch_col >= len(self.headers):
             stretch_col = len(self.headers) - 1
 
+        fixed_keys = {int(k) for k in self.fixed_column_widths.keys()}
+        fixed_total = 0
         for col in range(len(self.headers)):
+            if col in fixed_keys:
+                continue
+            # Size from content once, then lock to Interactive so Qt cannot
+            # re-squeeze columns into the viewport (that hides the H-scrollbar).
             self.table.resizeColumnToContents(col)
             width = self.table.columnWidth(col)
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Interactive)
+            header.setSectionResizeMode(col, QHeaderView.Interactive)
             self.table.setColumnWidth(col, max(80, min(width, 620)))
 
         for col, width in self.fixed_column_widths.items():
             col_index = int(col)
             col_width = int(width)
             if 0 <= col_index < len(self.headers) and col_width > 0:
-                self.table.horizontalHeader().setSectionResizeMode(col_index, QHeaderView.Fixed)
+                header.setSectionResizeMode(col_index, QHeaderView.Fixed)
                 self.table.setColumnWidth(col_index, col_width)
+                fixed_total += col_width
 
-        if 0 <= stretch_col < len(self.headers) and stretch_col not in {
-            int(k) for k in self.fixed_column_widths.keys()
-        }:
-            self.table.setColumnWidth(stretch_col, max(self.table.columnWidth(stretch_col), 360))
+        if 0 <= stretch_col < len(self.headers) and stretch_col not in fixed_keys:
+            viewport_w = max(0, int(self.table.viewport().width()) or int(self.table.width()) or 0)
+            # Only stretch when fixed columns already fit; otherwise keep a real
+            # minimum width so horizontal scrolling stays available.
+            if viewport_w > 0 and fixed_total + 120 < viewport_w:
+                header.setSectionResizeMode(stretch_col, QHeaderView.Stretch)
+            else:
+                header.setSectionResizeMode(stretch_col, QHeaderView.Interactive)
+                self.table.setColumnWidth(
+                    stretch_col, max(self.table.columnWidth(stretch_col), 360)
+                )
+
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     def _update_details(self):
         return
@@ -371,10 +401,21 @@ class ResourceTableDialog(VSDialogShell):
 
     def _copy_selected_cell(self):
         item = self.table.currentItem()
-        if item is None:
+        if item is not None and str(item.text() or "").strip():
+            QApplication.clipboard().setText(item.text())
+            self.status_hint.setText(self.texts["details_copy_done"])
+            return
+        # Row selection with no focused cell: copy the row as TSV (spreadsheet-style Ctrl+C).
+        selected_indexes = self.table.selectionModel().selectedRows()
+        if not selected_indexes:
             self.status_hint.setText(self.texts["details_nothing_selected"])
             return
-        QApplication.clipboard().setText(item.text())
+        row_index = selected_indexes[0].row()
+        if not (0 <= row_index < len(self.filtered_rows)):
+            self.status_hint.setText(self.texts["details_nothing_selected"])
+            return
+        row_data = self.filtered_rows[row_index]
+        QApplication.clipboard().setText("\t".join(str(value) for value in row_data))
         self.status_hint.setText(self.texts["details_copy_done"])
 
     def _export_json(self):
@@ -441,9 +482,12 @@ class ResourceTableDialog(VSDialogShell):
             action_open = menu.addAction(self._inline_text("打开当前项", "Open Item"))
 
         extra_action_map = {}
-        if self.get_selected_payloads():
+        context_actions = [
+            action for action in self.extra_actions if action.get("context", True) is not False
+        ]
+        if self.get_selected_payloads() and context_actions:
             menu.addSeparator()
-            for action in self.extra_actions:
+            for action in context_actions:
                 menu_action = menu.addAction(action.get("label", self._inline_text("操作", "Action")))
                 extra_action_map[menu_action] = action
 

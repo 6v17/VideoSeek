@@ -64,6 +64,43 @@ class VlcSameFileSeekTests(unittest.TestCase):
         self.assertEqual(mock_mp.set_time.call_args[0][0], 0)
 
 
+class VlcResumeSeekTests(unittest.TestCase):
+    def _player(self):
+        from PySide6.QtWidgets import QApplication, QWidget
+
+        from ui.playback.vlc_player import VlcPreviewPlayer
+
+        if QApplication.instance() is None:
+            self._app = QApplication([])
+        host = QWidget()
+        self.addCleanup(host.deleteLater)
+        mock_mp = MagicMock()
+        mock_mp.play.return_value = 0
+        mock_mp.get_time.return_value = 12000
+        mock_mp.get_length.return_value = 120000
+        mock_mp.is_playing.return_value = False
+        mock_instance = MagicMock()
+        mock_instance.media_player_new.return_value = mock_mp
+        mock_instance.media_new.return_value = MagicMock()
+        player = VlcPreviewPlayer(host, shared_instance=mock_instance)
+        player._owns_instance = False
+        return player, mock_mp, mock_instance
+
+    @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    def test_resume_after_set_time_does_not_reload_media(self, _mock_timer):
+        player, mock_mp, mock_instance = self._player()
+        self.assertTrue(player.play("D:/videos/clip.mp4", 10.0, stop_sec=16.0))
+        mock_instance.media_new.reset_mock()
+        mock_mp.set_time.reset_mock()
+
+        player.set_time(15000, unlock=True)
+        self.assertTrue(player.resume())
+
+        mock_instance.media_new.assert_not_called()
+        mock_mp.set_time.assert_called()
+        mock_mp.play.assert_called()
+
+
 class PreviewSurfaceIdleTests(unittest.TestCase):
     def test_stop_preview_covers_vlc_frame_with_placeholder(self):
         from ui.controllers.preview_controller import PreviewController

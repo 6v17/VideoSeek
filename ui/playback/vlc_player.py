@@ -462,14 +462,21 @@ class VlcPreviewPlayer:
     def resume(self):
         if self._player is None or self._released or not self._session_active:
             return False
-        if self._pending_seek_ms is not None and self._restart_from_ms(self._pending_seek_ms):
-            return True
+        # Only recreate media at EOF / invalid clock. Do NOT restart merely because
+        # set_time() left a pending seek — that snaps early clips back to 0 under
+        # rapid keyboard / slider seeks.
         if self._should_restart_media():
             restart_ms = self._pending_seek_ms
             if restart_ms is None:
                 restart_ms = 0
             if self._restart_from_ms(restart_ms):
                 return True
+        pending = self._pending_seek_ms
+        if pending is not None:
+            try:
+                self._player.set_time(int(pending))
+            except Exception as exc:
+                _log_vlc_debug("resume apply pending seek", exc)
         result = self._player.play()
         if result == -1:
             return False

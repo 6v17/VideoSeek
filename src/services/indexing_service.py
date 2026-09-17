@@ -105,10 +105,30 @@ def _sync_video_vectors_to_lance(
         if error:
             logger.error("Lance upsert rejected for %s: %s", video_id, error)
             return False
+        _stamp_video_vector_schema(video_id, config)
         return True
     except Exception as exc:
         logger.error("Failed to sync Lance vectors for %s: %s", video_id, exc, exc_info=True)
         return False
+
+
+def _stamp_video_vector_schema(video_id, config) -> None:
+    """Record the profile-locked preprocess mode on the video row (audit only)."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return
+    try:
+        from src.services.embedding_preprocess import resolve_embedding_preprocess
+        from src.storage.profile_library_store import set_video_vector_schema
+
+        schema = str(resolve_embedding_preprocess(config) or "").strip()
+        if not schema:
+            return
+        profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
+        set_video_vector_schema(profile_base_dir, video_id, schema)
+    except Exception as exc:
+        logger.debug("Failed to stamp vector_schema for %s: %s", video_id, exc)
+
 
 
 def _delete_lance_video_vectors(video_id, config) -> None:

@@ -271,6 +271,7 @@ class PreviewGuiMixin:
         chrome.bind_player(player)
         chrome.attach_clip(video_path, start_sec, end_sec, suggested_sec=suggested_sec)
         chrome.show_chrome()
+        chrome.claim_keyboard_focus()
         if player is not None and player.is_available():
             QTimer.singleShot(0, player.rebind_output_window)
             QTimer.singleShot(80, player.rebind_output_window)
@@ -487,18 +488,6 @@ class PreviewGuiMixin:
                 3: 92,
                 4: 92,
             },
-            extra_actions=[
-                {
-                    "label": self.texts["details_open_selected"],
-                    "object_name": "GhostButton",
-                    "handler": self._open_selected_preview_export_path,
-                },
-                {
-                    "label": self.texts["details_copy_selected"],
-                    "object_name": "GhostButton",
-                    "handler": self._copy_selected_preview_export_path,
-                },
-            ],
             row_double_click_handler=self._open_preview_export_payload,
         ).exec()
 

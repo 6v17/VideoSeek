@@ -55,6 +55,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIsNone(reused)
         mock_get_path.assert_not_called()
 
+
     @patch("src.services.indexing_service._content_fingerprint_for_path", return_value=("fresh", 4096))
     @patch("src.services.indexing_service.os.path.getsize", return_value=4096)
     def test_fingerprint_kwargs_recomputes_when_size_drifts(self, _mock_size, mock_fp):

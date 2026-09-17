@@ -2558,18 +2558,6 @@ class LibraryIndexingGuiMixin:
                 4: 180,
             },
             issue_row_predicate=lambda _row: True,
-            extra_actions=[
-                {
-                    "label": self.texts["details_open_selected"],
-                    "object_name": "GhostButton",
-                    "handler": self._open_selected_index_issue_path,
-                },
-                {
-                    "label": self.texts["details_copy_selected"],
-                    "object_name": "GhostButton",
-                    "handler": self._copy_selected_index_issue_path,
-                },
-            ],
             row_double_click_handler=self._open_index_issue_payload,
         ).exec()
 
@@ -2659,19 +2647,10 @@ class LibraryIndexingGuiMixin:
                 issue_row_predicate=lambda row, ready_text=ready_state_text: row[10] != ready_text,
                 extra_actions=[
                     {
-                        "label": self.texts["details_open_selected"],
-                        "object_name": "GhostButton",
-                        "handler": self._open_selected_vector_detail_path,
-                    },
-                    {
-                        "label": self.texts["details_copy_selected"],
-                        "object_name": "GhostButton",
-                        "handler": self._copy_selected_vector_detail_path,
-                    },
-                    {
                         "label": self.texts["library_vectors_legacy_cleanup"],
                         "object_name": "GhostButton",
                         "handler": self._cleanup_legacy_vector_sidecars,
+                        "context": False,
                     },
                 ],
                 row_double_click_handler=self._open_vector_detail_payload,
