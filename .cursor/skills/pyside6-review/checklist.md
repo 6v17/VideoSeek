@@ -30,7 +30,7 @@ IDs are stable; cite them in findings when helpful (e.g. `THR-02`).
 | ARC-02 | Controllers own orchestration; pages/mixins bind UI only |
 | ARC-03 | New MainWindow behavior lands in `gui_*.py` mixin, not dumped into `gui.py` |
 | ARC-04 | Team client / server mode gates mutating actions (add library, sync, index) |
-| ARC-05 | Do not import Pro-only clone UI into OSS paths |
+| ARC-05 | Do not import clone plugin UI into core OSS paths; load via plugin hooks |
 
 ## Widgets & styling (`UI`)
 

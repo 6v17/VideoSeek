@@ -218,7 +218,7 @@ def ensure_plugin_search_paths() -> List[str]:
         if os.path.isdir(os.path.join(root, "videoseek_plugin_clone")):
             _add_path(root)
 
-    # Legacy in-tree path (VideoSeek-Pro transitional checkout).
+    # Optional in-tree plugin checkout (e.g. plugins/clone next to the app).
     legacy = os.path.join(_app_repo_root(), "plugins", "clone")
     if os.path.isdir(os.path.join(legacy, "videoseek_plugin_clone")):
         _add_path(legacy)
