@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 from src.domain.search_hit import SearchHit
 from src.web.agent_api import (
-    AgentManifestRequest,
     AgentSearchRequest,
     AgentSearchScope,
     _enrich_hit_payload,
@@ -102,7 +101,7 @@ class AgentApiP0Tests(unittest.TestCase):
         self.assertEqual(len(deduped), 2)
 
     def test_export_manifest_from_sources(self):
-        body = AgentManifestRequest(
+        payload = execute_export_manifest(
             project="test",
             sources=[
                 {
@@ -126,7 +125,6 @@ class AgentApiP0Tests(unittest.TestCase):
             ],
             dedupe=False,
         )
-        payload = execute_export_manifest(body)
         self.assertTrue(payload["ok"])
         self.assertEqual(len(payload["manifest"]["items"]), 1)
         self.assertEqual(payload["manifest"]["items"][0]["start_timecode"], "00:00:01")

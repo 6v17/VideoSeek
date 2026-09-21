@@ -7,7 +7,7 @@ import os
 from PySide6.QtWidgets import QFileDialog
 
 from src.domain.search_hit import SearchHit
-from src.services.agent_clip_service import _MAX_BATCH_EXPORT_CLIPS
+from src.services.clip_export_service import MAX_BATCH_EXPORT_CLIPS
 from src.services.jianying_draft_service import (
     JianyingDraftError,
     export_shot_list_to_jianying_draft,
@@ -243,11 +243,11 @@ class ShotListGuiMixin:
         items = self.shot_list.list_items()
         if not items:
             return
-        if len(items) > _MAX_BATCH_EXPORT_CLIPS:
+        if len(items) > MAX_BATCH_EXPORT_CLIPS:
             self.show_error_dialog(
                 self.texts.get("shot_list_batch_export", "Batch export clips"),
                 self.texts.get("shot_list_batch_export_limit", "Too many clips (max {limit}).").format(
-                    limit=_MAX_BATCH_EXPORT_CLIPS
+                    limit=MAX_BATCH_EXPORT_CLIPS
                 ),
             )
             return

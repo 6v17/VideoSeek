@@ -98,15 +98,16 @@ class AgentStarterServiceTests(unittest.TestCase):
         self.assertNotIn("可选工作流", text)
         self.assertNotIn('"query":', text)
 
-    @patch("src.web.agent_api.list_agent_search_presets")
-    def test_search_preset_summaries_from_agent_api(self, mock_list):
-        mock_list.return_value = {
-            "ok": True,
-            "presets": [
-                {"id": "builtin_smile", "name": "开心", "query": "a person with a big smile", "summary": "a person with a big smile"},
-                {"id": "custom_broll", "name": "B-roll", "query": "产品特写 桌面", "summary": "产品特写 桌面", "reference_image_count": 2},
-            ],
-        }
+    @patch("src.services.search_preset_service.resolve_preset_ref_paths")
+    @patch("src.services.search_preset_service.list_presets")
+    def test_search_preset_summaries_from_preset_service(self, mock_list, mock_refs):
+        mock_list.return_value = [
+            {"id": "builtin_smile", "name": "开心", "query": "a person with a big smile"},
+            {"id": "custom_broll", "name": "B-roll", "query": "产品特写 桌面"},
+        ]
+        mock_refs.side_effect = lambda preset, config=None: (
+            ["a.png", "b.png"] if preset.get("id") == "custom_broll" else []
+        )
         summaries, total = _search_preset_summaries(limit=10)
         self.assertEqual(total, 2)
         self.assertEqual(len(summaries), 2)

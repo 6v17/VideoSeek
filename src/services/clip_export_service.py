@@ -1,4 +1,4 @@
-"""Agent API clip export (FFmpeg), shared with desktop preview export."""
+"""Shared FFmpeg clip export (Agent API + desktop shot list)."""
 
 from __future__ import annotations
 
@@ -13,24 +13,24 @@ from src.app.logging_utils import get_logger
 from src.services.search_scope import normalize_scope_path, video_path_under_library_root
 from src.utils import (
     EXPORT_ENCODE_MODE_COPY,
-    EXPORT_ENCODE_MODE_ORIGINAL,
     export_original_clip,
     get_ffmpeg_path,
     normalize_export_encode_mode,
     resolve_export_clip_window,
 )
 
-logger = get_logger("agent_clip_service")
+logger = get_logger("clip_export_service")
 
-_EXPORT_CLIP_TIMEOUT_SEC = 120.0
-_BATCH_EXPORT_TIMEOUT_MIN_SEC = 120.0
-_BATCH_EXPORT_TIMEOUT_MAX_SEC = 900.0
-_MAX_BATCH_EXPORT_CLIPS = 64
-_MAX_BATCH_EXPORT_WORKERS = 8
-_MAX_CONCURRENT_ORIGINAL_EXPORTS = 1
-_MAX_CONCURRENT_COPY_EXPORTS = 3
-_original_export_semaphore = threading.Semaphore(_MAX_CONCURRENT_ORIGINAL_EXPORTS)
-_copy_export_semaphore = threading.Semaphore(_MAX_CONCURRENT_COPY_EXPORTS)
+EXPORT_CLIP_TIMEOUT_SEC = 120.0
+BATCH_EXPORT_TIMEOUT_MIN_SEC = 120.0
+BATCH_EXPORT_TIMEOUT_MAX_SEC = 900.0
+MAX_BATCH_EXPORT_CLIPS = 64
+MAX_BATCH_EXPORT_WORKERS = 8
+MAX_CONCURRENT_ORIGINAL_EXPORTS = 1
+MAX_CONCURRENT_COPY_EXPORTS = 3
+
+_original_export_semaphore = threading.Semaphore(MAX_CONCURRENT_ORIGINAL_EXPORTS)
+_copy_export_semaphore = threading.Semaphore(MAX_CONCURRENT_COPY_EXPORTS)
 
 
 def resolve_clip_window(
@@ -54,7 +54,7 @@ def resolve_clip_window(
     )
 
 
-def _output_path_allowed(output_path: str, config=None) -> bool:
+def output_path_allowed(output_path: str, config=None) -> bool:
     """Reject writes into indexed library roots (avoid overwriting source media)."""
     from src.services.library_service import list_libraries
 
@@ -77,7 +77,7 @@ def _meta_encode_mode_label(encode_mode: str) -> str:
     return "libx264_crf18"
 
 
-def execute_agent_export_clip(
+def execute_export_clip(
     *,
     video_path: str,
     start_sec: float,
@@ -101,7 +101,7 @@ def execute_agent_export_clip(
         raise ValueError("output_path is required.")
     if not destination.lower().endswith((".mp4", ".mkv", ".mov")):
         raise ValueError("output_path must end with .mp4, .mkv, or .mov")
-    if not _output_path_allowed(destination, config=cfg):
+    if not output_path_allowed(destination, config=cfg):
         raise ValueError("output_path must not be inside an indexed library root.")
 
     start = float(start_sec)
@@ -125,7 +125,7 @@ def execute_agent_export_clip(
 
     started = time.perf_counter()
     semaphore = _export_semaphore_for_mode(encode_mode)
-    acquired = semaphore.acquire(timeout=_EXPORT_CLIP_TIMEOUT_SEC)
+    acquired = semaphore.acquire(timeout=EXPORT_CLIP_TIMEOUT_SEC)
     if not acquired:
         raise RuntimeError("Clip export queue is busy. Retry shortly.")
     try:
@@ -196,16 +196,16 @@ def _batch_export_item_encode_mode(item, default_encode_mode: str) -> str:
     return normalize_export_encode_mode(default_encode_mode)
 
 
-def _resolve_batch_export_timeout_sec(item_count: int, encode_mode: str) -> float:
+def resolve_batch_export_timeout_sec(item_count: int, encode_mode: str) -> float:
     count = max(1, int(item_count))
-    per_item = _EXPORT_CLIP_TIMEOUT_SEC
+    per_item = EXPORT_CLIP_TIMEOUT_SEC
     mode = normalize_export_encode_mode(encode_mode)
     if mode == EXPORT_ENCODE_MODE_COPY:
-        lanes = max(1, _MAX_CONCURRENT_COPY_EXPORTS)
+        lanes = max(1, MAX_CONCURRENT_COPY_EXPORTS)
         estimated = (count / float(lanes)) * per_item + 15.0
     else:
         estimated = count * per_item + 15.0
-    return min(_BATCH_EXPORT_TIMEOUT_MAX_SEC, max(_BATCH_EXPORT_TIMEOUT_MIN_SEC, estimated * 1.05))
+    return min(BATCH_EXPORT_TIMEOUT_MAX_SEC, max(BATCH_EXPORT_TIMEOUT_MIN_SEC, estimated * 1.05))
 
 
 def _run_batch_export_item(
@@ -222,7 +222,7 @@ def _run_batch_export_item(
     if silent is None:
         silent = default_silent
     try:
-        payload = execute_agent_export_clip(
+        payload = execute_export_clip(
             video_path=video_path,
             start_sec=float(getattr(item, "start_sec")),
             end_sec=float(getattr(item, "end_sec")),
@@ -270,13 +270,13 @@ def _run_batch_export_item(
         )
 
 
-def execute_agent_batch_export_clips(body) -> Dict[str, Any]:
-    """Export multiple clips in one Agent API call (parallel when continue_on_error)."""
+def execute_batch_export_clips(body) -> Dict[str, Any]:
+    """Export multiple clips (parallel when continue_on_error)."""
     items: Sequence = list(getattr(body, "items", None) or [])
     if not items:
         raise ValueError("Provide at least one entry in items.")
-    if len(items) > _MAX_BATCH_EXPORT_CLIPS:
-        raise ValueError(f"Batch size exceeds limit ({_MAX_BATCH_EXPORT_CLIPS}).")
+    if len(items) > MAX_BATCH_EXPORT_CLIPS:
+        raise ValueError(f"Batch size exceeds limit ({MAX_BATCH_EXPORT_CLIPS}).")
 
     cfg = load_config()
     default_encode_mode = normalize_export_encode_mode(
@@ -295,7 +295,7 @@ def execute_agent_batch_export_clips(body) -> Dict[str, Any]:
 
     if continue_on_error:
         ordered: List[Optional[Dict[str, Any]]] = [None] * len(items)
-        workers = min(_MAX_BATCH_EXPORT_WORKERS, len(items))
+        workers = min(MAX_BATCH_EXPORT_WORKERS, len(items))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(
@@ -326,7 +326,7 @@ def execute_agent_batch_export_clips(body) -> Dict[str, Any]:
     succeeded = sum(1 for entry in results if entry.get("ok"))
     failed = len(results) - succeeded
 
-    batch_timeout_sec = _resolve_batch_export_timeout_sec(len(items), default_encode_mode)
+    batch_timeout_sec = resolve_batch_export_timeout_sec(len(items), default_encode_mode)
     return {
         "api_version": "1",
         "ok": failed == 0,
@@ -340,6 +340,6 @@ def execute_agent_batch_export_clips(body) -> Dict[str, Any]:
             "encode_mode_default": default_encode_mode,
             "batch_timeout_sec": int(batch_timeout_sec),
             "elapsed_ms": int((time.perf_counter() - started) * 1000),
-            "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
+            "max_batch_export_clips": MAX_BATCH_EXPORT_CLIPS,
         },
     }

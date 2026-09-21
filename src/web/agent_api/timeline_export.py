@@ -118,7 +118,7 @@ def _resolve_xml_write_path(
     format_key: str,
     project: str,
 ) -> str:
-    from src.services.agent_clip_service import _output_path_allowed
+    from src.services.clip_export_service import output_path_allowed
 
     explicit = str(write_path or "").strip()
     if explicit:
@@ -133,7 +133,7 @@ def _resolve_xml_write_path(
     root = os.path.normpath(os.path.abspath(os.path.expanduser(directory)))
     if not root:
         raise ValueError("output_dir is empty.")
-    if not _output_path_allowed(root):
+    if not output_path_allowed(root):
         raise ValueError("output_dir must not be inside an indexed library root.")
     os.makedirs(root, exist_ok=True)
     ext = ".fcpxml" if format_key == "fcpxml" else ".xml"
@@ -149,7 +149,7 @@ def _resolve_xml_write_path(
 
 
 def _ensure_write_path(write_path: str, *, format_key: str) -> str:
-    from src.services.agent_clip_service import _output_path_allowed
+    from src.services.clip_export_service import output_path_allowed
 
     target = os.path.normpath(os.path.abspath(os.path.expanduser(str(write_path or "").strip())))
     if not target:
@@ -162,7 +162,7 @@ def _ensure_write_path(write_path: str, *, format_key: str) -> str:
         if not lower.endswith(".xml"):
             target = f"{target}.xml"
     parent = os.path.dirname(target)
-    if parent and not _output_path_allowed(parent):
+    if parent and not output_path_allowed(parent):
         raise ValueError("write_path must not be inside an indexed library root.")
     if parent:
         os.makedirs(parent, exist_ok=True)

@@ -86,7 +86,7 @@ class AgentApiHelperTests(unittest.TestCase):
         from src.web.agent_api.export_ops import resolve_export_clip_output_path
 
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.web.agent_api.export_ops._output_path_allowed", return_value=True):
+            with patch("src.web.agent_api.export_ops.output_path_allowed", return_value=True):
                 out = resolve_export_clip_output_path(
                     output_dir=tmp,
                     video_path="D:/lib/ep01.mp4",

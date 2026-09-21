@@ -20,7 +20,11 @@ src.services.library_service = sys.modules["src.services.library_service"]
 
 from types import SimpleNamespace
 
-from src.services.agent_clip_service import execute_agent_batch_export_clips, execute_agent_export_clip, resolve_clip_window
+from src.services.clip_export_service import (
+    execute_batch_export_clips,
+    execute_export_clip,
+    resolve_clip_window,
+)
 from src.utils import EXPORT_ENCODE_MODE_COPY, EXPORT_ENCODE_MODE_ORIGINAL, resolve_export_clip_window
 from src.services.agent_library_service import list_agent_libraries, list_agent_library_videos, list_agent_videos
 
@@ -187,18 +191,18 @@ class AgentClipServiceTests(unittest.TestCase):
         )
         self.assertEqual(clip_duration, 10.0)
 
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     @patch("src.utils.has_ffmpeg", return_value=True)
-    @patch("src.services.agent_clip_service.export_original_clip")
+    @patch("src.services.clip_export_service.export_original_clip")
     @patch("src.utils.get_video_duration_seconds", return_value=100.0)
-    def test_execute_agent_export_clip(self, _duration, mock_export, _ffmpeg, _allowed):
+    def test_execute_export_clip(self, _duration, mock_export, _ffmpeg, _allowed):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "src.mp4")
             output = os.path.join(tmp, "out.mp4")
             with open(source, "wb") as handle:
                 handle.write(b"0")
             mock_export.return_value = type("R", (), {"returncode": 0, "stderr": b""})()
-            payload = execute_agent_export_clip(
+            payload = execute_export_clip(
                 video_path=source,
                 start_sec=1.0,
                 end_sec=4.0,
@@ -210,10 +214,10 @@ class AgentClipServiceTests(unittest.TestCase):
             mock_export.assert_called_once()
             self.assertEqual(mock_export.call_args.kwargs.get("encode_mode"), "copy")
 
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     @patch("src.utils.has_ffmpeg", return_value=True)
-    @patch("src.services.agent_clip_service.export_original_clip")
-    @patch("src.services.agent_clip_service.resolve_clip_window", return_value=(10.0, 6.0))
+    @patch("src.services.clip_export_service.export_original_clip")
+    @patch("src.services.clip_export_service.resolve_clip_window", return_value=(10.0, 6.0))
     def test_execute_agent_export_clip_frame_point(self, mock_window, mock_export, _ffmpeg, _allowed):
         mock_export.return_value = type("R", (), {"returncode": 0, "stderr": b""})()
         with tempfile.TemporaryDirectory() as tmp:
@@ -221,7 +225,7 @@ class AgentClipServiceTests(unittest.TestCase):
             output = os.path.join(tmp, "out.mp4")
             with open(source, "wb") as handle:
                 handle.write(b"0")
-            payload = execute_agent_export_clip(
+            payload = execute_export_clip(
                 video_path=source,
                 start_sec=12.0,
                 end_sec=12.0,
@@ -232,10 +236,10 @@ class AgentClipServiceTests(unittest.TestCase):
         mock_window.assert_called_once()
         self.assertIsNone(mock_window.call_args.kwargs.get("end_sec"))
 
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     @patch("src.utils.has_ffmpeg", return_value=True)
-    @patch("src.services.agent_clip_service.execute_agent_export_clip")
-    def test_execute_agent_batch_export_clips(self, mock_export, _ffmpeg, _allowed):
+    @patch("src.services.clip_export_service.execute_export_clip")
+    def test_execute_batch_export_clips(self, mock_export, _ffmpeg, _allowed):
         mock_export.side_effect = lambda **kwargs: {
             "output_path": kwargs["output_path"],
             "client_request_id": kwargs.get("client_request_id"),
@@ -269,15 +273,15 @@ class AgentClipServiceTests(unittest.TestCase):
                     ),
                 ],
             )
-            payload = execute_agent_batch_export_clips(body)
+            payload = execute_batch_export_clips(body)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["meta"]["succeeded"], 2)
             self.assertEqual(len(payload["results"]), 2)
             self.assertEqual(mock_export.call_count, 2)
 
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     @patch("src.utils.has_ffmpeg", return_value=True)
-    @patch("src.services.agent_clip_service.execute_agent_export_clip")
+    @patch("src.services.clip_export_service.execute_export_clip")
     def test_execute_agent_batch_export_clips_partial_failure(self, mock_export, _ffmpeg, _allowed):
         def side_effect(**kwargs):
             if kwargs.get("start_sec") == 5.0:
@@ -314,20 +318,20 @@ class AgentClipServiceTests(unittest.TestCase):
                     ),
                 ],
             )
-            payload = execute_agent_batch_export_clips(body)
+            payload = execute_batch_export_clips(body)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["meta"]["succeeded"], 1)
             self.assertEqual(payload["meta"]["failed"], 1)
             self.assertFalse(payload["results"][1]["ok"])
 
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=False)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=False)
     def test_execute_agent_export_clip_rejects_library_output(self, _allowed):
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "src.mp4")
             with open(source, "wb") as handle:
                 handle.write(b"0")
             with self.assertRaises(ValueError):
-                execute_agent_export_clip(
+                execute_export_clip(
                     video_path=source,
                     start_sec=1.0,
                     end_sec=4.0,

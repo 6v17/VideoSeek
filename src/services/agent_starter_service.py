@@ -46,10 +46,11 @@ def _format_doc_reference(*, locale: str, api_base: str) -> str:
 def _search_preset_summaries(*, limit: int = STARTER_PRESET_SNAPSHOT_LIMIT) -> Tuple[List[Dict[str, Any]], int]:
     """Compact preset list for paste block (id/name only; full list via GET /search/presets)."""
     try:
-        from src.web.agent_api import list_agent_search_presets
+        from src.app.config import load_config
+        from src.services.search_preset_service import list_presets, resolve_preset_ref_paths
 
-        payload = list_agent_search_presets()
-        presets = payload.get("presets") or []
+        cfg = load_config()
+        presets = list_presets(config=cfg)
     except Exception:
         return [], 0
     total = 0
@@ -67,7 +68,11 @@ def _search_preset_summaries(*, limit: int = STARTER_PRESET_SNAPSHOT_LIMIT) -> T
             "id": preset_id,
             "name": str(item.get("name", "") or "").strip(),
         }
-        if int(item.get("reference_image_count") or 0) > 0:
+        try:
+            ref_count = len(resolve_preset_ref_paths(item, config=cfg))
+        except Exception:
+            ref_count = 0
+        if ref_count > 0:
             entry["image"] = True
         summaries.append(entry)
     return summaries, total

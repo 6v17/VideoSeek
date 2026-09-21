@@ -8,7 +8,7 @@ import time
 from typing import Optional
 
 from src.app.logging_utils import get_logger
-from src.services.agent_clip_service import execute_agent_batch_export_clips, execute_agent_export_clip
+from src.services.clip_export_service import execute_batch_export_clips, execute_export_clip
 from src.services.agent_library_service import (
     list_agent_libraries,
     list_agent_subtitle_libraries,
@@ -484,7 +484,7 @@ class AgentApiService:
             )
             payload = await asyncio.wait_for(
                 asyncio.to_thread(
-                    execute_agent_export_clip,
+                    execute_export_clip,
                     video_path=body.video_path,
                     start_sec=body.start_sec,
                     end_sec=body.end_sec,
@@ -516,15 +516,15 @@ class AgentApiService:
         return JSONResponse(payload)
 
     async def _export_clips_batch(self, body: AgentBatchExportClipsRequest):
-        from src.services.agent_clip_service import _resolve_batch_export_timeout_sec
+        from src.services.clip_export_service import resolve_batch_export_timeout_sec
         from src.utils import normalize_export_encode_mode
 
         started = time.perf_counter()
         default_mode = normalize_export_encode_mode(body.encode_mode or "copy")
-        timeout_sec = _resolve_batch_export_timeout_sec(len(body.items or []), default_mode)
+        timeout_sec = resolve_batch_export_timeout_sec(len(body.items or []), default_mode)
         try:
             payload = await asyncio.wait_for(
-                asyncio.to_thread(execute_agent_batch_export_clips, body),
+                asyncio.to_thread(execute_batch_export_clips, body),
                 timeout=timeout_sec,
             )
         except asyncio.TimeoutError:

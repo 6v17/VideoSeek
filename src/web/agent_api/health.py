@@ -12,7 +12,7 @@ from src.services.search_index_schema import (
     needs_search_index_upgrade,
 )
 from src.services.search_request_service import default_agent_image_precision_mode
-from src.services.agent_clip_service import _MAX_BATCH_EXPORT_CLIPS
+from src.services.clip_export_service import MAX_BATCH_EXPORT_CLIPS
 from src.storage.config_store import (
     get_active_embedding_spec,
     get_local_model_asset_dirs,
@@ -268,7 +268,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "search_timeout_precise_sec": timeouts["search_timeout_precise_sec"],
         "agent_api_default_image_precision": default_agent_image_precision_mode(config),
         "max_batch_queries": MAX_BATCH_QUERIES,
-        "max_batch_export_clips": _MAX_BATCH_EXPORT_CLIPS,
+        "max_batch_export_clips": MAX_BATCH_EXPORT_CLIPS,
         "max_batch_frame_extract": _max_batch_frame_extract(),
         "batch_timeout_sec": timeouts["batch_timeout_sec"],
         "search_telemetry_enabled": is_telemetry_enabled(config),

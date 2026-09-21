@@ -82,7 +82,7 @@ class TimelineExecuteTests(unittest.TestCase):
 
     @patch("src.web.agent_api.timeline_export.os.path.isfile", return_value=True)
     @patch("src.services.fcpxml_export_service.export_shot_list_nle_xml")
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     def test_fcpxml_dispatch(self, _allowed, mock_export, _isfile):
         mock_export.return_value = {
             "ok": True,
@@ -117,7 +117,7 @@ class TimelineExecuteTests(unittest.TestCase):
 
     @patch("src.web.agent_api.timeline_export.os.path.isfile", return_value=True)
     @patch("src.services.fcpxml_export_service.export_shot_list_nle_xml")
-    @patch("src.services.agent_clip_service._output_path_allowed", return_value=True)
+    @patch("src.services.clip_export_service.output_path_allowed", return_value=True)
     def test_fcpxml_output_dir_auto_name(self, _allowed, mock_export, _isfile):
         mock_export.return_value = {
             "ok": True,

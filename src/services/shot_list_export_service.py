@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Sequence
 
 from src.services.shot_list_service import ShotListItem
 
-_MAX_BATCH_EXPORT_CLIPS = 64  # keep aligned with agent_clip_service._MAX_BATCH_EXPORT_CLIPS
+from src.services.clip_export_service import MAX_BATCH_EXPORT_CLIPS
 
 
 def _sanitize_export_filename_stem(stem: str) -> str:
@@ -22,9 +22,9 @@ def _normalize_export_output_dir(output_dir: str) -> str:
     normalized = os.path.normpath(os.path.abspath(os.path.expanduser(str(output_dir or "").strip())))
     if not normalized:
         raise ValueError("output_dir is required.")
-    from src.services.agent_clip_service import _output_path_allowed
+    from src.services.clip_export_service import output_path_allowed
 
-    if not _output_path_allowed(normalized):
+    if not output_path_allowed(normalized):
         raise ValueError("output_dir must not be inside an indexed library root.")
     os.makedirs(normalized, exist_ok=True)
     return normalized
@@ -55,18 +55,17 @@ def export_shot_list_manifest(
     write_path: str,
     project: str = "VideoSeek",
 ) -> Dict[str, Any]:
-    from src.web.agent_api import AgentManifestRequest, execute_export_manifest
+    from src.services.manifest_export_service import execute_export_manifest
 
     manifest_items = build_manifest_items_from_shot_list(items)
     if not manifest_items:
         raise ValueError("Shot list is empty.")
-    body = AgentManifestRequest(
+    return execute_export_manifest(
         project=str(project or "VideoSeek"),
         items=manifest_items,
         dedupe=False,
         write_path=str(write_path),
     )
-    return execute_export_manifest(body)
 
 
 def export_shot_list_fcpxml(
@@ -92,8 +91,8 @@ def build_shot_list_batch_export_items(
     output_dir: str,
 ) -> List[SimpleNamespace]:
     normalized_dir = _normalize_export_output_dir(output_dir)
-    if len(items) > _MAX_BATCH_EXPORT_CLIPS:
-        raise ValueError(f"Shot list exceeds batch export limit ({_MAX_BATCH_EXPORT_CLIPS}).")
+    if len(items) > MAX_BATCH_EXPORT_CLIPS:
+        raise ValueError(f"Shot list exceeds batch export limit ({MAX_BATCH_EXPORT_CLIPS}).")
 
     batch_items: List[SimpleNamespace] = []
     used_names: set[str] = set()
@@ -129,7 +128,7 @@ def export_shot_list_clips(
     continue_on_error: bool = True,
     silent: bool | None = None,
 ) -> Dict[str, Any]:
-    from src.services.agent_clip_service import execute_agent_batch_export_clips
+    from src.services.clip_export_service import execute_batch_export_clips
 
     batch_items = build_shot_list_batch_export_items(items, output_dir)
     if not batch_items:
@@ -140,4 +139,4 @@ def export_shot_list_clips(
         silent=silent,
         continue_on_error=bool(continue_on_error),
     )
-    return execute_agent_batch_export_clips(body)
+    return execute_batch_export_clips(body)
