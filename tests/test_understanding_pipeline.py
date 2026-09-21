@@ -109,6 +109,18 @@ class UnderstandingKeyframeSampleTests(unittest.TestCase):
         self.assertGreater(first, 10.0)
         self.assertLess(last, 20.0)
 
+    def test_interior_quad_samples_four_times(self):
+        sample = resolve_chunk_sample(0.0, 10.0, strategy="interior_quad")
+        self.assertEqual(sample["strategy"], "interior_quad")
+        self.assertEqual(len(sample["timestamps_sec"]), 4)
+        self.assertAlmostEqual(sample["timestamps_sec"][0], 1.2)
+        self.assertAlmostEqual(sample["timestamps_sec"][-1], 8.8)
+
+    def test_interior_quad_short_span_falls_back_to_pair(self):
+        sample = resolve_chunk_sample(0.0, 1.5, strategy="interior_quad")
+        self.assertEqual(sample["strategy"], "interior_pair")
+        self.assertEqual(len(sample["timestamps_sec"]), 2)
+
     def test_interior_pair_spreads_short_shot(self):
         sample = resolve_chunk_sample(0.0, 1.5, strategy="interior_pair")
         first, last = sample["timestamps_sec"]

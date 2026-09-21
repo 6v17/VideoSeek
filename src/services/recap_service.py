@@ -1277,6 +1277,76 @@ def apply_recap_skip_marks(
     return out
 
 
+RECAP_VISUAL_EVIDENCE_TAGS = frozenset({"动作", "反应", "物品", "变化", "场面"})
+RECAP_CLIMAX_IMPORTANCE = 0.85
+
+
+def _cue_span(cue: Mapping[str, Any]) -> tuple[float, float] | None:
+    if "start" in cue or "end" in cue:
+        try:
+            start = float(cue.get("start") or 0.0)
+            end = float(cue.get("end") if cue.get("end") is not None else start)
+        except (TypeError, ValueError):
+            return None
+        if end < start:
+            start, end = end, start
+        return start, end
+    return _time_span(cue.get("t"))
+
+
+def _beat_evidence_tags(beat: Mapping[str, Any]) -> set[str]:
+    tags: set[str] = set()
+    for raw in beat.get("evidence_required") or []:
+        text = str(raw or "").strip()
+        if text:
+            tags.add(text)
+    return tags
+
+
+def _beat_needs_visual_motion(beat: Mapping[str, Any]) -> bool:
+    """Unknown requirements still get a caption. Dialogue-only beats can skip."""
+    tags = _beat_evidence_tags(beat)
+    if not tags:
+        return True
+    return bool(tags & RECAP_VISUAL_EVIDENCE_TAGS)
+
+
+def _asr_covers_span(
+    span: tuple[float, float],
+    cues: Sequence[Mapping[str, Any]] | None,
+) -> bool:
+    duration = max(0.0, float(span[1]) - float(span[0]))
+    if duration <= 0.0:
+        return False
+    covered = 0.0
+    for cue in cues or []:
+        cue_span = _cue_span(cue)
+        if cue_span:
+            covered += _overlap_sec(span, cue_span)
+    need = min(8.0, max(2.0, duration * 0.25))
+    return covered >= need
+
+
+def _chunk_motion_beats(
+    chunk: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]] | None,
+    *,
+    pad_sec: float,
+) -> list[Mapping[str, Any]]:
+    span = _time_span(chunk.get("t"))
+    if not span:
+        return []
+    matched: list[Mapping[str, Any]] = []
+    for beat in beats or []:
+        beat_span = _time_span(beat.get("t"))
+        if not beat_span:
+            continue
+        window = (beat_span[0] - pad_sec, beat_span[1] + pad_sec)
+        if _overlap_sec(span, window) > 0.4:
+            matched.append(beat)
+    return matched
+
+
 def recap_motion_gap_chunk_indices(
     pack: Mapping[str, Any],
     beats: Sequence[Mapping[str, Any]] | None,
@@ -1292,6 +1362,7 @@ def recap_motion_gap_chunk_indices(
         windows.append((span[0] - pad, span[1] + pad))
     if not windows:
         return []
+    cues = list(pack.get("ocr") or [])
     indices: list[int] = []
     for chunk in pack.get("chunks") or []:
         if str(chunk.get("skip") or "").strip() or str(chunk.get("cap") or "").strip():
@@ -1301,11 +1372,46 @@ def recap_motion_gap_chunk_indices(
             continue
         if not any(_overlap_sec(span, window) > 0.4 for window in windows):
             continue
+        overlapping = _chunk_motion_beats(chunk, beats, pad_sec=pad)
+        if overlapping and cues and all(
+            (not _beat_needs_visual_motion(beat)) and _asr_covers_span(_time_span(beat.get("t")) or span, cues)
+            for beat in overlapping
+        ):
+            continue
         try:
             indices.append(int(chunk.get("i")))
         except (TypeError, ValueError):
             continue
     return indices
+
+
+def recap_motion_dense_chunk_indices(
+    pack: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]] | None,
+    gap_indices: Sequence[int],
+    *,
+    pad_sec: float = 24.0,
+) -> list[int]:
+    """Climax beats that still need a picture get a 4-frame grid in one call."""
+    wanted = {int(index) for index in gap_indices}
+    if not wanted:
+        return []
+    pad = max(0.0, float(pad_sec or 0.0))
+    dense: list[int] = []
+    for chunk in pack.get("chunks") or []:
+        try:
+            index = int(chunk.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if index not in wanted:
+            continue
+        if any(
+            _beat_needs_visual_motion(beat)
+            and float(beat.get("importance") or 0.0) >= RECAP_CLIMAX_IMPORTANCE
+            for beat in _chunk_motion_beats(chunk, beats, pad_sec=pad)
+        ):
+            dense.append(index)
+    return dense
 
 
 def fill_recap_motion_for_beats(
@@ -1318,10 +1424,15 @@ def fill_recap_motion_for_beats(
     on_progress: Callable[[int, int], None] | None = None,
     chunk_completed_callback: Callable[..., None] | None = None,
 ) -> tuple[dict[str, Any], list[str], int]:
-    """VLM only beat windows that still lack motion captions. Skip OP/ED."""
+    """VLM only beat windows that still lack motion captions.
+
+    Dialogue-covered beats that do not ask for action/scene are skipped.
+    Climax windows use a four-frame grid in one call.
+    """
     indices = recap_motion_gap_chunk_indices(pack, beats)
     if not indices:
         return dict(pack), [], 0
+    dense = recap_motion_dense_chunk_indices(pack, beats, indices)
     from src.core.understanding.base import UnderstandingStoppedError
     from src.services.understanding_service import generate_evidence_for_video
 
@@ -1354,6 +1465,7 @@ def fill_recap_motion_for_beats(
             config=config,
             mode=UNDERSTANDING_MODE_MOTION,
             chunk_indices=indices,
+            dense_chunk_indices=dense,
             should_stop_callback=should_stop_callback,
             chunk_completed_callback=_on_chunk,
         )

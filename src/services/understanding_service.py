@@ -185,6 +185,7 @@ def _run_single_chunk(
     config: Mapping[str, Any],
     model_dir: str | None,
     should_stop_callback=None,
+    sample_strategy: str | None = None,
 ) -> dict[str, Any]:
     if should_stop_callback and should_stop_callback():
         raise UnderstandingStoppedError("Evidence generation stopped by user")
@@ -198,6 +199,7 @@ def _run_single_chunk(
         chunk=chunk,
         chunk_index=chunk_index,
         should_stop_callback=should_stop_callback,
+        sample_strategy=sample_strategy,
     )
 
 
@@ -249,6 +251,7 @@ def _run_pending_chunks(
     should_stop_callback=None,
     chunk_completed_callback=None,
     only_indices: set[int] | None = None,
+    dense_indices: set[int] | None = None,
 ) -> str:
     pending_indices = [
         index
@@ -290,6 +293,13 @@ def _run_pending_chunks(
         if chunk_completed_callback:
             chunk_completed_callback(chunk_index, total, result)
 
+    def _sample_strategy(chunk_index: int) -> str | None:
+        if dense_indices and chunk_index in dense_indices:
+            from src.core.understanding.pipeline import KEYFRAME_STRATEGY_INTERIOR_QUAD
+
+            return KEYFRAME_STRATEGY_INTERIOR_QUAD
+        return None
+
     def _run_sequential() -> None:
         _emit_resumed_chunks()
         for chunk_index in pending_indices:
@@ -303,6 +313,7 @@ def _run_pending_chunks(
                 config=config,
                 model_dir=model_dir,
                 should_stop_callback=should_stop_callback,
+                sample_strategy=_sample_strategy(chunk_index),
             )
             _handle_chunk_done(chunk_index, dict(result))
 
@@ -343,6 +354,7 @@ def _run_pending_chunks(
                 config=config,
                 model_dir=model_dir,
                 should_stop_callback=_should_stop,
+                sample_strategy=_sample_strategy(chunk_index),
             )
             return chunk_index, dict(result), time.monotonic() - started, None
         except UnderstandingStoppedError:
@@ -937,6 +949,7 @@ def _run_video_evidence_generation(
     chunk_completed_callback=None,
     mode: str | None = None,
     chunk_indices: Sequence[int] | None = None,
+    dense_chunk_indices: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     cfg = _config_with_understanding_mode(config, mode)
     output_mode = normalize_understanding_mode(
@@ -948,6 +961,7 @@ def _run_video_evidence_generation(
     completed = _load_resumable_chunk_payloads(existing_bundle, chunks)
     resumed_count = len(completed)
     only_indices: set[int] | None = None
+    dense_indices: set[int] | None = None
     if chunk_indices:
         only_indices = set()
         for raw_index in chunk_indices:
@@ -969,6 +983,19 @@ def _run_video_evidence_generation(
                 "resumed_from": resumed_count,
                 "partial": True,
             }
+    if dense_chunk_indices:
+        dense_indices = set()
+        for raw_index in dense_chunk_indices:
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError):
+                continue
+            if only_indices is not None and index not in only_indices:
+                continue
+            if 0 <= index < total:
+                dense_indices.add(index)
+        if not dense_indices:
+            dense_indices = None
 
     if resumed_count:
         logger.info(
@@ -998,6 +1025,7 @@ def _run_video_evidence_generation(
             should_stop_callback=should_stop_callback,
             chunk_completed_callback=chunk_completed_callback,
             only_indices=only_indices,
+            dense_indices=dense_indices,
         )
 
         saved_count = len(completed)
@@ -1181,6 +1209,7 @@ def generate_evidence_for_video(
     chunk_completed_callback=None,
     mode: str | None = None,
     chunk_indices: Sequence[int] | None = None,
+    dense_chunk_indices: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     from src.services.indexing_service import load_video_chunks_by_id
 
@@ -1216,6 +1245,7 @@ def generate_evidence_for_video(
         chunk_completed_callback=chunk_completed_callback,
         mode=mode,
         chunk_indices=chunk_indices,
+        dense_chunk_indices=dense_chunk_indices,
     )
 
 

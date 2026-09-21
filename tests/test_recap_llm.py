@@ -233,6 +233,34 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(recap_motion_gap_chunk_indices(padded, beats), [2, 4])
         self.assertEqual(recap_motion_gap_chunk_indices(padded, beats, pad_sec=0.0), [2])
 
+    def test_recap_motion_gap_skips_dialogue_only_when_asr_covers(self):
+        from src.services.recap_service import (
+            recap_motion_dense_chunk_indices,
+            recap_motion_gap_chunk_indices,
+        )
+
+        pack = {
+            "ocr": [{"start": 90.0, "end": 130.0, "text": "我们把计划说完了"}],
+            "chunks": [
+                {"i": 2, "t": [90.0, 130.0], "cap": "", "skip": ""},
+                {"i": 3, "t": [200.0, 240.0], "cap": "", "skip": ""},
+            ],
+        }
+        dialogue_beats = [
+            {"id": 1, "t": [90.0, 130.0], "importance": 0.4, "evidence_required": ["对话", "人物"]},
+        ]
+        self.assertEqual(recap_motion_gap_chunk_indices(pack, dialogue_beats), [])
+        visual_beats = [
+            {"id": 2, "t": [200.0, 240.0], "importance": 0.9, "evidence_required": ["动作", "场面"]},
+        ]
+        self.assertEqual(recap_motion_gap_chunk_indices(pack, visual_beats), [3])
+        self.assertEqual(recap_motion_dense_chunk_indices(pack, visual_beats, [3]), [3])
+        quiet = {
+            "ocr": [],
+            "chunks": pack["chunks"],
+        }
+        self.assertEqual(recap_motion_gap_chunk_indices(quiet, dialogue_beats), [2])
+
     def test_fill_recap_motion_for_beats_skips_when_no_gaps(self):
         from src.services.recap_service import fill_recap_motion_for_beats
 

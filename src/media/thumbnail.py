@@ -158,3 +158,38 @@ def compose_side_by_side_bgr(left_bgr, right_bgr, *, left_caption: str = "", rig
         left_r = draw_top_caption_bar(left_r, captions[0] if len(captions) > 0 else "")
         right_r = draw_top_caption_bar(right_r, captions[1] if len(captions) > 1 else "")
     return cv2.hconcat([left_r, right_r])
+
+
+def compose_quad_bgr(frames, *, captions: list[str] | None = None):
+    """2x2 grid in input order: top-left, top-right, bottom-left, bottom-right."""
+    usable = [frame for frame in list(frames or []) if frame is not None and getattr(frame, "size", 0)]
+    if len(usable) < 4:
+        if len(usable) >= 2:
+            return compose_side_by_side_bgr(usable[0], usable[1])
+        return usable[0] if usable else None
+    cv2 = _cv2()
+    height = min(int(frame.shape[0]) for frame in usable[:4])
+    if height <= 0:
+        return usable[0]
+
+    def _resize(frame):
+        if int(frame.shape[0]) == height:
+            return frame
+        width = max(1, int(round(frame.shape[1] * (height / float(frame.shape[0])))))
+        return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+
+    cells = [_resize(frame) for frame in usable[:4]]
+    labels = list(captions or [])
+    if any(str(label or "").strip() for label in labels[:4]):
+        cells = [
+            draw_top_caption_bar(cell, str(labels[index] if index < len(labels) else ""))
+            for index, cell in enumerate(cells)
+        ]
+    top = cv2.hconcat(cells[:2])
+    bottom = cv2.hconcat(cells[2:4])
+    width = min(int(top.shape[1]), int(bottom.shape[1]))
+    if int(top.shape[1]) != width:
+        top = cv2.resize(top, (width, int(top.shape[0])), interpolation=cv2.INTER_AREA)
+    if int(bottom.shape[1]) != width:
+        bottom = cv2.resize(bottom, (width, int(bottom.shape[0])), interpolation=cv2.INTER_AREA)
+    return cv2.vconcat([top, bottom])

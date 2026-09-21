@@ -20,8 +20,11 @@ TASK_TO_VISION_KEY = {
 
 KEYFRAME_STRATEGY_MIDPOINT = "midpoint"
 KEYFRAME_STRATEGY_INTERIOR_PAIR = "interior_pair"
+KEYFRAME_STRATEGY_INTERIOR_QUAD = "interior_quad"
 KEYFRAME_STRATEGY_START_END = "start_end"  # accepted alias; samples are still interior
 MIN_TWO_FRAME_SPAN_SEC = 0.8
+MIN_QUAD_SPAN_SEC = 2.4
+QUAD_SAMPLE_FRACTIONS = (0.12, 0.37, 0.63, 0.88)
 # Near shot edges so motion is visible; keep a small inset so we do not sit on the cut.
 INTERIOR_PAIR_LO = 0.12
 INTERIOR_PAIR_HI = 0.88
@@ -47,6 +50,19 @@ def format_motion_vlm_context(
     end = float(chunk_end_sec)
     span = max(0.0, end - start)
     lang = normalize_caption_language(language)
+    if len(stamps) >= 4:
+        ordered = "、".join(f"{stamp:.1f}s" for stamp in stamps[:4])
+        if lang == CAPTION_LANGUAGE_ZH:
+            return (
+                f"四宫格按时间从早到晚：左上、右上、左下、右下（{ordered}）。"
+                f"该语义段范围 {start:.1f}–{end:.1f} 秒（时长 {span:.1f} 秒）。"
+                "按这个顺序写画面变化；不要把四格当成同时发生的分屏。"
+            )
+        return (
+            f"2x2 grid in time order: top-left, top-right, bottom-left, bottom-right ({ordered}). "
+            f"Chunk spans {start:.1f}–{end:.1f}s ({span:.1f}s). "
+            "Describe change in that order; this is not a simultaneous split screen."
+        )
     if len(stamps) >= 2:
         earlier, later = stamps[0], stamps[1]
         gap = max(0.0, later - earlier)
@@ -108,6 +124,16 @@ def resolve_chunk_sample(start_sec: float, end_sec: float, *, strategy: str) -> 
         end = start
     duration = end - start
     requested = str(strategy or KEYFRAME_STRATEGY_MIDPOINT).strip() or KEYFRAME_STRATEGY_MIDPOINT
+    if requested == KEYFRAME_STRATEGY_INTERIOR_QUAD:
+        if duration >= MIN_QUAD_SPAN_SEC:
+            stamps = [start + duration * fraction for fraction in QUAD_SAMPLE_FRACTIONS]
+            if stamps[-1] - stamps[0] >= MIN_TWO_FRAME_SPAN_SEC:
+                return {
+                    "timestamp_sec": float(stamps[0]),
+                    "timestamps_sec": [float(stamp) for stamp in stamps],
+                    "strategy": KEYFRAME_STRATEGY_INTERIOR_QUAD,
+                }
+        requested = KEYFRAME_STRATEGY_INTERIOR_PAIR
     use_pair = requested in TWO_FRAME_STRATEGIES and duration >= MIN_TWO_FRAME_SPAN_SEC
     if use_pair:
         first = start + duration * INTERIOR_PAIR_LO
@@ -259,10 +285,15 @@ class UnderstandingPipeline:
         chunk: Mapping[str, Any],
         chunk_index: int,
         should_stop_callback=None,
+        sample_strategy: str | None = None,
     ) -> dict[str, Any]:
         start_sec = float(chunk.get("start", 0.0))
         end_sec = float(chunk.get("end", start_sec))
-        sample = resolve_chunk_sample(start_sec, end_sec, strategy=self.keyframe_strategy)
+        sample = resolve_chunk_sample(
+            start_sec,
+            end_sec,
+            strategy=str(sample_strategy or self.keyframe_strategy),
+        )
         timestamps = list(sample.get("timestamps_sec") or [sample["timestamp_sec"]])
         from src.services.understanding_resource_service import (
             UNDERSTANDING_MODE_MOTION,
@@ -284,7 +315,11 @@ class UnderstandingPipeline:
                 language=language,
             )
         frames = [self._decode_sample_frame(video_path, stamp) for stamp in timestamps]
-        if len(frames) >= 2:
+        if len(frames) >= 4:
+            from src.media.thumbnail import compose_quad_bgr
+
+            frame_bgr = compose_quad_bgr(frames[:4])
+        elif len(frames) >= 2:
             frame_bgr = compose_side_by_side_bgr(
                 frames[0],
                 frames[1],

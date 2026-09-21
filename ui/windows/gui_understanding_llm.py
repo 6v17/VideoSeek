@@ -577,7 +577,12 @@ class UnderstandingLlmGuiMixin:
         self.understanding_page.lbl_status.setText(
             (message.split("\n", 1)[0] + (" · " + warn_lines[0] if warn_lines else ""))
         )
-        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+        has_warnings = bool(result.get("warnings"))
+        self.show_info_dialog(
+            self.texts.get("warning_title", "Warning") if has_warnings else self.texts.get("success_title", "Success"),
+            message,
+            kind="warning" if has_warnings else "success",
+        )
         self._sync_recap_export_button()
         if stage == "plan" and not result.get("cuts_path"):
             self.edit_current_recap_beats()
