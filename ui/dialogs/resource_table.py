@@ -1,7 +1,7 @@
 import json
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -13,13 +13,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPlainTextEdit,
     QPushButton,
     QTableWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.app.i18n import get_texts
-from ui.widgets.scaffold import VSCard
+from ui.widgets.styles import theme_color_map
 
 from .common import SortableTableWidgetItem
 from .shell import VSDialogShell
@@ -54,11 +55,12 @@ class ResourceTableDialog(VSDialogShell):
             parent,
             title=resolved_title,
             body=str(subtitle or ""),
-            minimum_width=860,
+            minimum_width=900,
             outer_margins=(14, 14, 14, 14),
-            card_margins=(18, 16, 18, 14),
-            card_spacing=12,
+            card_margins=(20, 18, 20, 14),
+            card_spacing=14,
         )
+        self.is_dark = bool(is_dark)
         self.texts = get_texts(language)
         self.rows = list(rows or [])
         self.headers = list(headers or [])
@@ -78,44 +80,55 @@ class ResourceTableDialog(VSDialogShell):
         self.filtered_rows = list(self.rows)
         self.filtered_payloads = list(self.row_payloads)
         self.subtitle_label = self.body_label
+        self._issue_brush = QBrush(QColor(theme_color_map(self.is_dark).get("WARN", "#c98700")))
 
-        self.setMinimumSize(860, 540)
-        self.resize(1040, 640)
+        self.setMinimumSize(920, 560)
+        self.resize(1100, 660)
 
-        toolbar_card = VSCard(object_name="ToolbarCard", margins=(14, 12, 14, 12), spacing=10)
-        toolbar_layout = toolbar_card.content_layout
+        # Flat filter + counts — no nested KPI cards.
+        toolbar = QWidget()
+        toolbar.setObjectName("DialogToolbar")
+        toolbar_layout = QVBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(8)
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
         self.input_filter = QLineEdit()
         self.input_filter.setObjectName("SearchInput")
         self.input_filter.setPlaceholderText(self.texts["details_filter_placeholder"])
+        self.input_filter.setClearButtonEnabled(True)
         self.toggle_issues = QCheckBox(self.texts["details_show_issues"])
         self.btn_reset_filter = QPushButton(self.texts["details_reset_filter"])
         self.btn_reset_filter.setObjectName("GhostButton")
         self.btn_reset_filter.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_issues.setVisible(callable(self.issue_row_predicate))
         filter_row.addWidget(self.input_filter, 1)
-        filter_row.addWidget(self.toggle_issues)
-        filter_row.addWidget(self.btn_reset_filter)
+        filter_row.addWidget(self.toggle_issues, 0, Qt.AlignmentFlag.AlignVCenter)
+        filter_row.addWidget(self.btn_reset_filter, 0)
         toolbar_layout.addLayout(filter_row)
 
-        summary_row = QHBoxLayout()
-        summary_row.setSpacing(8)
-        self.summary_total = self._build_summary_card(self.texts["details_total_label"], "0")
-        self.summary_visible = self._build_summary_card(self.texts["details_visible_label"], "0")
-        self.summary_issues = self._build_summary_card(self.texts["details_issues_label"], "0")
-        summary_row.addWidget(self.summary_total, 1)
-        summary_row.addWidget(self.summary_visible, 1)
-        summary_row.addWidget(self.summary_issues, 1)
-        toolbar_layout.addLayout(summary_row)
+        self.meta_label = QLabel("")
+        self.meta_label.setObjectName("DialogMetaLine")
+        self.meta_label.setWordWrap(True)
+        # Back-compat aliases used by older callers / tests that poke summary_* cards.
+        self.summary_total = self.meta_label
+        self.summary_visible = self.meta_label
+        self.summary_issues = self.meta_label
+        toolbar_layout.addWidget(self.meta_label)
 
         self.summary_hint = QLabel(self.summary_text)
         self.summary_hint.setObjectName("Hint")
         self.summary_hint.setWordWrap(True)
         self.summary_hint.setVisible(bool(self.summary_text))
         toolbar_layout.addWidget(self.summary_hint)
-        self.content_layout.addWidget(toolbar_card)
+        self.content_layout.addWidget(toolbar)
+
+        table_host = QFrame()
+        table_host.setObjectName("DialogTableHost")
+        table_host_layout = QVBoxLayout(table_host)
+        table_host_layout.setContentsMargins(0, 0, 0, 0)
+        table_host_layout.setSpacing(0)
 
         self.table = QTableWidget(0, len(self.headers))
         self.table.setObjectName("ResourceDialogTable")
@@ -125,47 +138,25 @@ class ResourceTableDialog(VSDialogShell):
         self.table.setSelectionMode(self.selection_mode)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        # Wide detail tables must keep column widths and scroll — never squeeze into the viewport.
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setAlternatingRowColors(False)
         self.table.setShowGrid(False)
         self.table.setSortingEnabled(self.allow_sorting)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.table.setMinimumHeight(320)
-        self.content_layout.addWidget(self.table, 1)
+        self.table.horizontalHeader().setHighlightSections(False)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.table.setMinimumHeight(340)
+        table_host_layout.addWidget(self.table)
+        self.content_layout.addWidget(table_host, 1)
 
-        details_card = VSCard(object_name="DetailsCard", margins=(14, 12, 14, 12), spacing=6)
-        details_layout = details_card.content_layout
-        details_title = QLabel(self._inline_text("选中项详情", "Selected Details"))
-        details_title.setObjectName("DialogInlineTitle")
-        details_hint = QLabel(
-            self._inline_text("只显示当前选中行的关键信息。", "Shows the key fields for the selected row.")
-        )
-        details_hint.setObjectName("Hint")
-        details_hint.setWordWrap(True)
-        self.details_text = QPlainTextEdit()
-        self.details_text.setObjectName("DialogPlainBody")
-        self.details_text.setReadOnly(True)
-        self.details_text.setMaximumHeight(96)
-        details_layout.addWidget(details_title)
-        details_layout.addWidget(details_hint)
-        details_layout.addWidget(self.details_text)
-        self.details_card = details_card
-        self.details_card.hide()
-
-        status_card = QFrame()
-        status_card.setObjectName("StatusCard")
-        status_layout = QHBoxLayout(status_card)
-        status_layout.setContentsMargins(12, 10, 12, 10)
         self.status_hint = QLabel("")
-        self.status_hint.setObjectName("Hint")
+        self.status_hint.setObjectName("DialogStatusHint")
         self.status_hint.setWordWrap(True)
-        status_layout.addWidget(self.status_hint)
-        self.content_layout.addWidget(status_card)
+        self.content_layout.addWidget(self.status_hint)
 
         self.clear_footer(keep_stretch=False)
         self._utility_menu = None
@@ -264,18 +255,6 @@ class ResourceTableDialog(VSDialogShell):
         self.summary_hint.setText(self.summary_text)
         self.summary_hint.setVisible(bool(self.summary_text))
 
-    def _build_summary_card(self, label_text, value_text):
-        card = VSCard(object_name="SummaryCard", margins=(12, 10, 12, 10), spacing=2)
-        layout = card.content_layout
-        value = QLabel(value_text)
-        value.setObjectName("SummaryValue")
-        label = QLabel(label_text)
-        label.setObjectName("SummaryLabel")
-        layout.addWidget(value)
-        layout.addWidget(label)
-        card.value_label = value
-        return card
-
     def _is_issue_row(self, row_data):
         if not callable(self.issue_row_predicate):
             return False
@@ -305,29 +284,35 @@ class ResourceTableDialog(VSDialogShell):
         for row_data in self.filtered_rows:
             row_index = self.table.rowCount()
             self.table.insertRow(row_index)
+            is_issue = self._is_issue_row(row_data)
             for col_index, value in enumerate(row_data):
                 item = SortableTableWidgetItem(value)
                 if col_index == 0:
                     item.setTextAlignment(Qt.AlignCenter)
-                if self._is_issue_row(row_data):
-                    item.setForeground(Qt.GlobalColor.red)
+                if is_issue:
+                    item.setForeground(self._issue_brush)
                 self.table.setItem(row_index, col_index, item)
         self.table.setSortingEnabled(self.allow_sorting)
 
         total_rows = len(self.rows)
         visible_rows = len(self.filtered_rows)
         issue_rows = sum(1 for row in self.rows if self._is_issue_row(row))
-        self.summary_total.value_label.setText(str(total_rows))
-        self.summary_visible.value_label.setText(str(visible_rows))
-        self.summary_issues.value_label.setText(str(issue_rows))
-        self.status_hint.setText(
-            self.texts["details_empty"]
-            if not self.filtered_rows
-            else self.texts["details_showing_count"].format(
-                visible=visible_rows,
-                total=total_rows,
-            )
+        self.meta_label.setText(
+            self.texts.get(
+                "details_meta_line",
+                "{total} total · {visible} shown · {issues} issues",
+            ).format(total=total_rows, visible=visible_rows, issues=issue_rows)
         )
+        self.meta_label.setVisible(True)
+        if not self.filtered_rows:
+            self.status_hint.setText(self.texts["details_empty"])
+        else:
+            self.status_hint.setText(
+                self.texts["details_showing_count"].format(
+                    visible=visible_rows,
+                    total=total_rows,
+                )
+            )
 
     def _apply_column_layout(self):
         if not self.headers:
@@ -342,8 +327,6 @@ class ResourceTableDialog(VSDialogShell):
         for col in range(len(self.headers)):
             if col in fixed_keys:
                 continue
-            # Size from content once, then lock to Interactive so Qt cannot
-            # re-squeeze columns into the viewport (that hides the H-scrollbar).
             self.table.resizeColumnToContents(col)
             width = self.table.columnWidth(col)
             header.setSectionResizeMode(col, QHeaderView.Interactive)
@@ -359,8 +342,6 @@ class ResourceTableDialog(VSDialogShell):
 
         if 0 <= stretch_col < len(self.headers) and stretch_col not in fixed_keys:
             viewport_w = max(0, int(self.table.viewport().width()) or int(self.table.width()) or 0)
-            # Only stretch when fixed columns already fit; otherwise keep a real
-            # minimum width so horizontal scrolling stays available.
             if viewport_w > 0 and fixed_total + 120 < viewport_w:
                 header.setSectionResizeMode(stretch_col, QHeaderView.Stretch)
             else:
@@ -370,9 +351,6 @@ class ResourceTableDialog(VSDialogShell):
                 )
 
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-    def _update_details(self):
-        return
 
     def _copy_json(self):
         QApplication.clipboard().setText(
@@ -405,7 +383,6 @@ class ResourceTableDialog(VSDialogShell):
             QApplication.clipboard().setText(item.text())
             self.status_hint.setText(self.texts["details_copy_done"])
             return
-        # Row selection with no focused cell: copy the row as TSV (spreadsheet-style Ctrl+C).
         selected_indexes = self.table.selectionModel().selectedRows()
         if not selected_indexes:
             self.status_hint.setText(self.texts["details_nothing_selected"])

@@ -2724,27 +2724,30 @@ class LibraryIndexingGuiMixin:
     def _format_local_vector_subtitle(self, detail):
         storage_summary = detail.get("storage_summary") or {}
         lance_summary = detail.get("lance_summary") or {}
+        lance_dir = str(detail.get("lance_dir", "") or "").strip()
         if not bool(detail.get("storage_stats_ready", True)):
-            return self.texts.get(
+            line = self.texts.get(
                 "library_vectors_subtitle_loading",
-                "{total} entries | Lance: {lance_dir} | {video_count} videos | loading storage stats…",
+                "{total} entries · {video_count} videos · loading storage stats…",
             ).format(
                 total=detail["total_entries"],
-                lance_dir=detail.get("lance_dir", ""),
                 video_count=int(lance_summary.get("indexed_video_count", 0) or 0),
             )
-        return self.texts["library_vectors_subtitle"].format(
-            total=detail["total_entries"],
-            lance_dir=detail.get("lance_dir", ""),
-            frame_rows=int(lance_summary.get("frame_rows", 0) or 0),
-            chunk_rows=int(lance_summary.get("chunk_rows", 0) or 0),
-            video_count=int(lance_summary.get("indexed_video_count", 0) or 0),
-            total_storage=format_byte_size(storage_summary.get("total_storage_bytes", 0)),
-            lance_storage=format_byte_size(
-                storage_summary.get("lance_active_bytes", storage_summary.get("lance_dir_bytes", 0))
-            ),
-            legacy_storage=format_byte_size(storage_summary.get("legacy_vector_dir_bytes", 0)),
-        )
+        else:
+            line = self.texts["library_vectors_subtitle"].format(
+                total=detail["total_entries"],
+                frame_rows=int(lance_summary.get("frame_rows", 0) or 0),
+                chunk_rows=int(lance_summary.get("chunk_rows", 0) or 0),
+                video_count=int(lance_summary.get("indexed_video_count", 0) or 0),
+                total_storage=format_byte_size(storage_summary.get("total_storage_bytes", 0)),
+            )
+        if lance_dir:
+            path_hint = self.texts.get(
+                "library_vectors_lance_path_hint",
+                "Lance: {lance_dir}",
+            ).format(lance_dir=lance_dir)
+            return f"{line}\n{path_hint}"
+        return line
 
     def _cleanup_legacy_vector_sidecars(self, dialog):
         if not self.show_confirm_dialog(

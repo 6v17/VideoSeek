@@ -2084,6 +2084,27 @@ QFrame#Card, #DialogCard {
     border: 1px solid __LINE__;
     border-radius: 10px;
 }
+#DialogToolbar {
+    background: transparent;
+    border: none;
+}
+#DialogTableHost {
+    background: transparent;
+    border: none;
+}
+#DialogMetaLine {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+    padding: 0 2px;
+}
+#DialogStatusHint {
+    color: __MUTED__;
+    font-size: 12px;
+    background: transparent;
+    padding: 2px 2px 0 2px;
+}
 #AppBusyDialog #DialogFooter,
 QDialog#VSDialogShell #DialogFooter {
     margin-top: 2px;
@@ -2483,13 +2504,14 @@ QListWidget#DialogueLibraryList::item:selected {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __LINE__;
-    border-radius: 8px;
+    border-radius: 10px;
     gridline-color: transparent;
     outline: none;
+    padding: 2px;
 }
 #DialogRulesTable::item, #ResourceDialogTable::item {
-    background: __FIELD__;
-    padding: 6px 8px;
+    background: transparent;
+    padding: 8px 10px;
     border: none;
     border-bottom: 1px solid __LINE__;
 }
@@ -2520,11 +2542,12 @@ QListWidget#DialogueLibraryList::item:selected {
 }
 #DialogRulesTable QHeaderView::section, #ResourceDialogTable QHeaderView::section {
     color: __MUTED__;
-    background: __FIELD__;
+    background: __PANEL__;
     border: none;
     border-bottom: 1px solid __LINE__;
-    padding: 10px 8px;
+    padding: 11px 10px;
     font-weight: 700;
+    font-size: 12px;
 }
 QDialog QCheckBox {
     color: __MUTED__;
