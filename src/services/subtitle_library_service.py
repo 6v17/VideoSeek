@@ -154,6 +154,7 @@ def register_subtitle_library_videos(*, config=None, library_path: str | None = 
             # Subtitle registry does not track CLIP asset_state.
             next_info.pop("asset_state", None)
             next_info.pop("sync_failure_reason", None)
+            next_info.pop("sync_failure_detail", None)
 
             if next_info != previous:
                 lib_files[rel_path] = next_info

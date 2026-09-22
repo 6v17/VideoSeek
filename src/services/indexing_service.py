@@ -194,13 +194,15 @@ def _mark_lance_sync_failed(
     abs_path,
     detail="",
 ):
+    failure_detail = detail or "Lance vector sync failed."
     metadata_updated = _upsert_file_record(
         lib_files,
         rel_path,
         video_id,
         video_mod_time,
         "sync_failed",
-        sync_failure_reason="processing_error",
+        sync_failure_reason="lance_sync_failed",
+        sync_failure_detail=failure_detail,
     )
     _emit_issue(
         issue_callback,
@@ -208,8 +210,8 @@ def _mark_lance_sync_failed(
         rel_path,
         abs_path,
         action="skipped",
-        reason="processing_error",
-        detail=detail or "Lance vector sync failed.",
+        reason="lance_sync_failed",
+        detail=failure_detail,
     )
     return metadata_updated
 
@@ -251,6 +253,7 @@ def _upsert_file_record(
     asset_state,
     sync_failure_reason="",
     *,
+    sync_failure_detail="",
     file_size=None,
     content_fp="",
 ):
@@ -270,8 +273,14 @@ def _upsert_file_record(
         updated["content_fp"] = content_fp
     if asset_state == "sync_failed":
         updated["sync_failure_reason"] = str(sync_failure_reason or "").strip().lower() or "processing_error"
+        detail = str(sync_failure_detail or "").strip()
+        if detail:
+            updated["sync_failure_detail"] = detail[:500]
+        else:
+            updated.pop("sync_failure_detail", None)
     else:
         updated.pop("sync_failure_reason", None)
+        updated.pop("sync_failure_detail", None)
     if updated == previous and key in lib_files and rel_path == key:
         return False
     lib_files[key] = updated
@@ -294,40 +303,135 @@ def _classify_exception_failure_reason(exc):
     if not detail:
         return "processing_error"
 
+    # Memory first: ONNX OOM messages often include the .onnx path.
     oom_markers = (
         "out of memory",
         "not enough memory",
         "insufficient memory",
         "cannot allocate memory",
         "failed to allocate memory",
+        "gpu memory",
+        "video memory",
+        "graphics memory",
         "bad alloc",
         "bad_alloc",
         "memoryerror",
     )
-    if not any(marker in detail for marker in oom_markers):
-        return "processing_error"
+    if any(marker in detail for marker in oom_markers) or (
+        "allocate" in detail and "memory" in detail
+    ):
+        gpu_markers = (
+            "gpu",
+            "directml",
+            "dml",
+            "directx",
+            "d3d12",
+            "cuda",
+            "vram",
+            "video memory",
+            "graphics memory",
+        )
+        if any(marker in detail for marker in gpu_markers):
+            return "gpu_out_of_memory"
+        return "system_out_of_memory"
 
-    gpu_markers = (
-        "gpu",
-        "directml",
-        "dml",
-        "directx",
-        "d3d12",
-        "cuda",
-        "vram",
-        "video memory",
-        "graphics memory",
+    disk_markers = (
+        "no space left",
+        "not enough space",
+        "disk full",
+        "disk quota exceeded",
+        "errno 28",
+        "os error 28",
+        "winerror 112",
     )
-    if any(marker in detail for marker in gpu_markers):
-        return "gpu_out_of_memory"
-    return "system_out_of_memory"
+    if any(marker in detail for marker in disk_markers):
+        return "disk_full"
+
+    permission_markers = (
+        "permission denied",
+        "access is denied",
+        "errno 13",
+        "os error 13",
+        "winerror 5",
+    )
+    if any(marker in detail for marker in permission_markers):
+        return "permission_denied"
+
+    ffmpeg_markers = (
+        "ffmpeg is not available",
+        "ffmpeg not found",
+        "ffmpeg was not found",
+        "cannot find ffmpeg",
+        "failed to execute ffmpeg",
+        "winerror 2",  # file not found — only with ffmpeg below
+    )
+    if "ffmpeg" in detail and any(marker in detail for marker in ffmpeg_markers + ("not available", "not found", "cannot find", "failed")):
+        return "ffmpeg_unavailable"
+
+    model_markers = (
+        "invalidprotobuf",
+        "protobuf parsing",
+        "onnxruntime",
+        "failed to load model",
+        "cannot load the model",
+        "unable to load model",
+        "load model from",
+        "missing model files",
+        "visual onnx session",
+        "inference session",
+        ".onnx",
+        "model_manifest",
+        "checksum",
+        "downloaded files are incomplete",
+        "ort.capi",
+        "loadlibrary",
+        "dll load failed",
+        "could not find module",
+        "directml.dll",
+    )
+    if any(marker in detail for marker in model_markers):
+        if (
+            ".onnx" in detail
+            or "protobuf" in detail
+            or "onnxruntime" in detail
+            or "model_manifest" in detail
+            or "checksum" in detail
+            or "downloaded files are incomplete" in detail
+            or "files are incomplete" in detail
+            or "inference session" in detail
+            or "visual onnx session" in detail
+            or "missing model files" in detail
+            or "load model" in detail
+            or "loadlibrary" in detail
+            or "dll load failed" in detail
+            or "could not find module" in detail
+            or "directml.dll" in detail
+            or ("model" in detail and ("no such file" in detail or "not found" in detail or "missing" in detail))
+        ):
+            return "model_corrupt"
+
+    return "processing_error"
+
+
+def _generate_failed_detail(failure_reason, vectors, timestamps):
+    reason = str(failure_reason or "").strip().lower()
+    if reason == "vector_timestamp_mismatch":
+        try:
+            return f"vectors={len(vectors)} timestamps={len(timestamps)}"
+        except TypeError:
+            return "Vector and timestamp counts do not match."
+    if reason == "too_short":
+        return "Video duration is under 1 second."
+    if reason == "no_frames":
+        return "No frames could be extracted."
+    return ""
 
 
 def _classify_sync_failure_reason(abs_path, vectors, timestamps, exc=None):
     if exc is not None:
         if isinstance(exc, FrameExtractionError):
             if exc.frame_count > 0:
-                return "processing_error"
+                return "decode_error"
             duration = get_video_duration_seconds(abs_path)
             if duration is not None and float(duration) < 1.0:
                 return "too_short"
@@ -480,7 +584,19 @@ def _try_reuse_lance_indexed_video(
     saved_mtime = saved.get("mod_time")
     if saved_mtime is None or float(saved_mtime) != float(video_mod_time):
         return None
-    # mtime unchanged → keep saved_vid; do not re-hash the file body.
+    # Same mtime but different size → treat as replaced content (common on some copies).
+    saved_size = saved.get("file_size")
+    if saved_size is not None:
+        try:
+            current_size = os.path.getsize(abs_path)
+        except OSError:
+            return None
+        try:
+            if int(saved_size) != int(current_size):
+                return None
+        except (TypeError, ValueError):
+            return None
+    # mtime (+ size when known) unchanged → keep saved_vid; do not re-hash the file body.
     profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
     if indexed_ids is not None:
         if saved_vid not in indexed_ids:
@@ -1191,6 +1307,7 @@ def relink_relocated_library_sources(meta, root_path, lib_files, *, known_abs_pa
             # Prefer ready so reuse path can refresh Lance location without re-embed.
             transferred["asset_state"] = "ready"
             transferred.pop("sync_failure_reason", None)
+            transferred.pop("sync_failure_detail", None)
         lib_files[matched_rel] = transferred
 
         src_files = _library_files_dict(meta, src_root)
@@ -1441,6 +1558,7 @@ def _index_video_compute(
             "kind": "generate_failed",
             "video_id": video_id,
             "failure_reason": failure_reason,
+            "detail": _generate_failed_detail(failure_reason, vectors, timestamps),
             "vectors": vectors,
             "timestamps": timestamps,
         }
@@ -1557,6 +1675,7 @@ def _index_video_commit(
 
     if kind == "generate_failed":
         failure_reason = str(result.get("failure_reason") or "sync_failed")
+        failure_detail = str(result.get("detail") or "").strip()
         metadata_updated = _upsert_file_record(
             lib_files,
             rel_path,
@@ -1564,6 +1683,7 @@ def _index_video_commit(
             video_mod_time,
             "sync_failed",
             sync_failure_reason=failure_reason,
+            sync_failure_detail=failure_detail,
         )
         _emit_issue(
             issue_callback,
@@ -1572,6 +1692,7 @@ def _index_video_commit(
             abs_path,
             action="skipped",
             reason=failure_reason,
+            detail=failure_detail,
         )
         return None, None, metadata_updated, had_saved_vid
 
@@ -1650,6 +1771,7 @@ def _index_video_commit(
                 video_mod_time,
                 "sync_failed",
                 sync_failure_reason=failure_reason,
+                sync_failure_detail=str(result.get("detail") or ""),
             )
         _emit_issue(
             issue_callback,

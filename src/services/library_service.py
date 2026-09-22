@@ -325,6 +325,7 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
             next_info["asset_state"] = state
             if state != "sync_failed":
                 next_info.pop("sync_failure_reason", None)
+                next_info.pop("sync_failure_detail", None)
 
             if next_info != previous:
                 lib_files[rel_path] = next_info
@@ -445,6 +446,7 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
                     "asset_state": asset_state,
                     "source_exists": source_exists,
                     "sync_failure_reason": str(info.get("sync_failure_reason", "") or "").strip().lower(),
+                    "sync_failure_detail": str(info.get("sync_failure_detail", "") or "").strip(),
                 }
             )
     if demoted:
@@ -915,6 +917,7 @@ def list_local_vector_details(validate_contents=False, *, include_storage_stats=
                     "legacy_npy_exists": legacy_npy_exists,
                     "legacy_npy_file": legacy_npy_file if legacy_npy_exists else "",
                     "sync_failure_reason": str(info.get("sync_failure_reason", "")).strip().lower(),
+                    "sync_failure_detail": str(info.get("sync_failure_detail", "") or "").strip(),
                     # Legacy export fields kept for older tooling / migration UI.
                     "vector_file": legacy_npy_file,
                     "vector_exists": lance_ready,

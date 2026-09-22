@@ -55,6 +55,36 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIsNone(reused)
         mock_get_path.assert_not_called()
 
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.os.path.getsize", return_value=9999)
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    def test_try_reuse_rejects_same_mtime_when_file_size_changed(self, _mock_mtime, _mock_size, _mock_dirs):
+        saved = {
+            "vid": "vid_a",
+            "mod_time": 123.0,
+            "file_size": 2048,
+            "asset_state": "ready",
+        }
+        reused = indexing_service._try_reuse_lance_indexed_video(
+            "D:\\videos\\clip.mp4",
+            saved,
+            {},
+            indexed_ids=frozenset({"vid_a"}),
+            library_path="D:\\videos",
+            library_paths_by_id={"vid_a": utils.canonicalize_library_path("D:\\videos")},
+        )
+        self.assertIsNone(reused)
+
+    def test_classify_frame_extraction_midstream_as_decode_error(self):
+        from src.core.extract_frames import FrameExtractionError
+
+        reason = indexing_service._classify_sync_failure_reason(
+            "D:\\videos\\clip.mp4",
+            None,
+            None,
+            exc=FrameExtractionError("pipe ended", frame_count=12, exit_code=1),
+        )
+        self.assertEqual(reason, "decode_error")
 
     @patch("src.services.indexing_service._content_fingerprint_for_path", return_value=("fresh", 4096))
     @patch("src.services.indexing_service.os.path.getsize", return_value=4096)
@@ -989,6 +1019,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertTrue(metadata_updated)
         self.assertTrue(search_assets_changed)
         self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
+        self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "lance_sync_failed")
         mock_sync_lance.assert_called_once()
 
     @patch("src.services.indexing_service._safe_delete_unreferenced_video_data")
@@ -1064,11 +1095,10 @@ class IndexingServiceTests(unittest.TestCase):
         mock_sync_lance.assert_not_called()
 
     @patch("src.services.indexing_service.build_chunk_config", return_value={})
-    @patch("src.services.indexing_service.assess_index_timestamp_health", return_value={})
     @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=False)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
     @patch(
-        "src.services.indexing_service.generate_vectors_and_index_for_video",
+        "src.core.clip_embedding.generate_vectors_and_index_for_video",
         return_value=(np.array([[1.0, 0.0]], dtype=np.float32), np.array([0.0], dtype=np.float32), None, []),
     )
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
@@ -1088,7 +1118,6 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_generate,
         _mock_model_dirs,
         mock_sync_lance,
-        _mock_health,
         _mock_chunk_cfg,
     ):
         lib_files = {}
@@ -1106,6 +1135,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertTrue(metadata_updated)
         self.assertFalse(search_assets_changed)
         self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
+        self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "lance_sync_failed")
         mock_sync_lance.assert_called_once()
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
@@ -1145,9 +1175,10 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
     @patch(
-        "src.services.indexing_service.generate_vectors_and_index_for_video",
+        "src.core.clip_embedding.generate_vectors_and_index_for_video",
         side_effect=RuntimeError("DirectML device lost: GPU out of memory"),
     )
+    @patch("src.services.indexing_service._try_reuse_lance_indexed_video", return_value=None)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -1158,6 +1189,7 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_getmtime,
         _mock_video_hash,
         _mock_legacy_hash,
+        _mock_reuse,
         _mock_generate,
         _mock_model_dirs,
     ):
@@ -1179,8 +1211,53 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertTrue(metadata_updated)
         self.assertFalse(search_assets_changed)
         self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "gpu_out_of_memory")
+        self.assertIn("GPU out of memory", lib_files["clip.mp4"]["sync_failure_detail"])
         self.assertEqual(issues[0]["reason"], "gpu_out_of_memory")
         self.assertIn("GPU out of memory", issues[0]["detail"])
+
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch(
+        "src.core.clip_embedding.generate_vectors_and_index_for_video",
+        side_effect=RuntimeError(
+            "InvalidProtobuf: Unable to parse graph from chinese_clip_image.onnx"
+        ),
+    )
+    @patch("src.services.indexing_service._try_reuse_lance_indexed_video", return_value=None)
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    def test_process_single_video_classifies_model_corrupt_and_keeps_detail(
+        self,
+        _mock_stream,
+        _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
+        _mock_reuse,
+        _mock_generate,
+        _mock_model_dirs,
+    ):
+        lib_files = {}
+        issues = []
+
+        vectors, timestamps, metadata_updated, search_assets_changed = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+            library_path="D:\\videos",
+            issue_callback=issues.append,
+        )
+
+        self.assertIsNone(vectors)
+        self.assertIsNone(timestamps)
+        self.assertTrue(metadata_updated)
+        self.assertFalse(search_assets_changed)
+        self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "model_corrupt")
+        self.assertIn("InvalidProtobuf", lib_files["clip.mp4"]["sync_failure_detail"])
+        self.assertEqual(issues[0]["reason"], "model_corrupt")
+        self.assertIn("chinese_clip_image.onnx", issues[0]["detail"])
 
     def test_classify_sync_failure_reason_uses_system_oom_for_generic_memoryerror(self):
         reason = indexing_service._classify_sync_failure_reason(
@@ -1191,6 +1268,89 @@ class IndexingServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(reason, "system_out_of_memory")
+
+    def test_classify_sync_failure_reason_uses_model_corrupt_for_onnx(self):
+        reason = indexing_service._classify_sync_failure_reason(
+            "D:\\videos\\clip.mp4",
+            None,
+            None,
+            exc=RuntimeError(
+                "InvalidProtobuf: Unable to parse graph from chinese_clip_image.onnx"
+            ),
+        )
+        self.assertEqual(reason, "model_corrupt")
+
+    def test_classify_prefers_oom_over_onnx_path_in_message(self):
+        reason = indexing_service._classify_sync_failure_reason(
+            "D:\\videos\\clip.mp4",
+            None,
+            None,
+            exc=RuntimeError("Failed to allocate GPU memory for chinese_clip_image.onnx"),
+        )
+        self.assertEqual(reason, "gpu_out_of_memory")
+
+    def test_classify_sync_failure_reason_disk_full_and_permission(self):
+        self.assertEqual(
+            indexing_service._classify_sync_failure_reason(
+                "D:\\videos\\clip.mp4",
+                None,
+                None,
+                exc=OSError(28, "No space left on device"),
+            ),
+            "disk_full",
+        )
+        self.assertEqual(
+            indexing_service._classify_sync_failure_reason(
+                "D:\\videos\\clip.mp4",
+                None,
+                None,
+                exc=PermissionError("Access is denied"),
+            ),
+            "permission_denied",
+        )
+
+    def test_classify_sync_failure_reason_ffmpeg_unavailable(self):
+        reason = indexing_service._classify_sync_failure_reason(
+            "D:\\videos\\clip.mp4",
+            None,
+            None,
+            exc=RuntimeError("FFmpeg is not available"),
+        )
+        self.assertEqual(reason, "ffmpeg_unavailable")
+
+    def test_classify_sync_failure_reason_missing_model_files(self):
+        reason = indexing_service._classify_sync_failure_reason(
+            "D:\\videos\\clip.mp4",
+            None,
+            None,
+            exc=FileNotFoundError(
+                "Missing model files: clip_visual.onnx. Place them under the active profile directory"
+            ),
+        )
+        self.assertEqual(reason, "model_corrupt")
+
+    def test_upsert_file_record_keeps_sync_failure_detail(self):
+        lib_files = {}
+        indexing_service._upsert_file_record(
+            lib_files,
+            "clip.mp4",
+            "vid_a",
+            123.0,
+            "sync_failed",
+            sync_failure_reason="model_corrupt",
+            sync_failure_detail="InvalidProtobuf: bad onnx",
+        )
+        self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "model_corrupt")
+        self.assertEqual(lib_files["clip.mp4"]["sync_failure_detail"], "InvalidProtobuf: bad onnx")
+        indexing_service._upsert_file_record(
+            lib_files,
+            "clip.mp4",
+            "vid_a",
+            124.0,
+            "ready",
+        )
+        self.assertNotIn("sync_failure_reason", lib_files["clip.mp4"])
+        self.assertNotIn("sync_failure_detail", lib_files["clip.mp4"])
 
     @patch.dict("src.services.indexing_service.os.environ", {"VIDEOSEEK_DEBUG_FORCE_GPU_OOM": "1"}, clear=False)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})

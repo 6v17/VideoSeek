@@ -51,13 +51,30 @@ class LibraryIndexingGuiMixin:
         key = f"library_asset_state_{state}"
         return self.texts.get(key, state)
 
+    def _visual_row_status_text(self, item: dict) -> str:
+        state = str(item.get("asset_state") or "").strip().lower()
+        if state == "sync_failed":
+            reason_key = str(item.get("sync_failure_reason") or "").strip().lower()
+            reason_text = (
+                self.texts.get(f"library_sync_failure_reason_{reason_key}", reason_key)
+                if reason_key
+                else ""
+            )
+            label = reason_text or self._asset_state_label(state)
+            return self._format_failure_with_detail(
+                label,
+                item.get("sync_failure_detail", ""),
+                limit=96,
+            )
+        return self._asset_state_label(state or "missing_asset")
+
     @staticmethod
     def _visual_asset_status_tone(asset_state: str) -> str:
         state = str(asset_state or "").strip().lower()
         if state == "ready":
             return "ready"
         # Missing/broken vectors: yellow “needs sync” cue (no extra button required).
-        if state in {"missing_asset", "broken_asset"}:
+        if state in {"missing_asset", "broken_asset", "sync_failed"}:
             return "fix"
         return "pending"
 
@@ -79,7 +96,7 @@ class LibraryIndexingGuiMixin:
                 rows.append(
                     {
                         **item,
-                        "status_text": self._asset_state_label(state),
+                        "status_text": self._visual_row_status_text({**item, "asset_state": state}),
                         "status_tone": self._visual_asset_status_tone(state),
                     }
                 )
@@ -94,7 +111,7 @@ class LibraryIndexingGuiMixin:
             rows.append(
                 {
                     **item,
-                    "status_text": self._asset_state_label(state),
+                    "status_text": self._visual_row_status_text(item),
                     "status_tone": self._visual_asset_status_tone(state),
                 }
             )
@@ -214,7 +231,7 @@ class LibraryIndexingGuiMixin:
                 rows.append(
                     {
                         **item,
-                        "status_text": self._asset_state_label(state),
+                        "status_text": self._visual_row_status_text({**item, "asset_state": state}),
                         "status_tone": self._visual_asset_status_tone(state),
                     }
                 )
@@ -2385,6 +2402,33 @@ class LibraryIndexingGuiMixin:
             self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
             return
 
+        model_corrupt_count = sum(1 for item in issue_list if item.get("reason") == "model_corrupt")
+        if model_corrupt_count > 0:
+            message = self.texts["index_issues_model_corrupt_guidance"].format(
+                count=model_corrupt_count,
+                button=self.texts["index_issues_button"],
+            )
+            self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
+            return
+
+        disk_full_count = sum(1 for item in issue_list if item.get("reason") == "disk_full")
+        if disk_full_count > 0:
+            message = self.texts["index_issues_disk_full_guidance"].format(
+                count=disk_full_count,
+                button=self.texts["index_issues_button"],
+            )
+            self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
+            return
+
+        ffmpeg_count = sum(1 for item in issue_list if item.get("reason") == "ffmpeg_unavailable")
+        if ffmpeg_count > 0:
+            message = self.texts["index_issues_ffmpeg_guidance"].format(
+                count=ffmpeg_count,
+                button=self.texts["index_issues_button"],
+            )
+            self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
+            return
+
         gpu_issue_count = sum(1 for item in issue_list if item.get("reason") == "gpu_out_of_memory")
         system_issue_count = sum(1 for item in issue_list if item.get("reason") == "system_out_of_memory")
         if gpu_issue_count <= 0 and system_issue_count <= 0:
@@ -2531,7 +2575,10 @@ class LibraryIndexingGuiMixin:
                     item.get("library_path", ""),
                     item.get("video_rel_path", ""),
                     self._format_index_issue_action(item.get("action")),
-                    self._format_index_issue_reason(item.get("reason")),
+                    self._format_failure_with_detail(
+                        self._format_index_issue_reason(item.get("reason")),
+                        item.get("detail", ""),
+                    ),
                 ]
             )
             payloads.append(item)
@@ -2555,7 +2602,7 @@ class LibraryIndexingGuiMixin:
             fixed_column_widths={
                 0: 52,
                 3: 120,
-                4: 180,
+                4: 280,
             },
             issue_row_predicate=lambda _row: True,
             row_double_click_handler=self._open_index_issue_payload,
@@ -2573,6 +2620,19 @@ class LibraryIndexingGuiMixin:
             f"index_issue_reason_{reason_key}",
             self.texts.get(f"library_sync_failure_reason_{reason_key}", reason_key),
         )
+
+    def _format_failure_with_detail(self, reason_text, detail, *, limit: int = 180):
+        label = str(reason_text or "").strip()
+        extra = " ".join(str(detail or "").strip().split())
+        if not extra:
+            return label
+        if len(extra) > limit:
+            extra = extra[: max(0, limit - 1)].rstrip() + "…"
+        if not label:
+            return extra
+        if extra.lower() in label.lower() or label.lower() in extra.lower():
+            return extra if len(extra) >= len(label) else label
+        return f"{label} — {extra}"
 
     def _open_index_issue_payload(self, dialog, payload, item=None):
         target_path = str(payload.get("abs_path", "")).strip()
@@ -2753,7 +2813,10 @@ class LibraryIndexingGuiMixin:
                     self.texts["details_yes"] if item.get("legacy_npy_exists") else self.texts["details_no"],
                     self.texts["details_yes"] if item.get("source_exists") else self.texts["details_no"],
                     self._local_vector_asset_state_text(item.get("asset_state", "")),
-                    self._local_vector_failure_reason_text(item.get("sync_failure_reason", "")),
+                    self._format_failure_with_detail(
+                        self._local_vector_failure_reason_text(item.get("sync_failure_reason", "")),
+                        item.get("sync_failure_detail", ""),
+                    ),
                 ]
             )
             payloads.append(payload)
