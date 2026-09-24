@@ -28,6 +28,8 @@ from src.services.recap_service import (
     sanitize_generic_role_labels,
     scrub_generic_role_labels_vo,
     scrub_unattested_people_names,
+    scrub_verbatim_source_dialogue_vo,
+    scrub_unevidenced_vo,
     merge_same_beat_mainline_vo,
     clear_redundant_insert_vo,
     scrub_intra_line_duplicate_vo,
@@ -73,6 +75,7 @@ from src.services.recap_service import (
     coalesce_recap_cuts,
     clamp_recap_vo_to_picture,
     clamp_insert_cuts_to_beat,
+    clamp_cuts_to_beat_window,
     ensure_main_cut_per_beat,
     _looks_like_insert_cut,
     restore_recap_vo_text,
@@ -102,6 +105,7 @@ from src.services.recap_service import (
     tts_char_budget,
     vo_needed_sec,
     vo_sec,
+    VO_COVER_RATIO,
     default_recap_caption_prompt,
     default_recap_match_prompt,
     default_recap_plan_prompt,
@@ -110,20 +114,31 @@ from src.services.recap_service import (
     RECAP_CAPTION_SYSTEM,
     RECAP_CAPTION_SYSTEM_EN,
     RECAP_EVIDENCE_POLICY,
+    RECAP_EVIDENCE_POLICY_EN,
     RECAP_FACT_POLICY,
     RECAP_GAP_SYSTEM,
     RECAP_NAME_POLICY,
     RECAP_PLAN_GAP_SYSTEM,
     RECAP_PLAN_HEAD_SYSTEM,
+    RECAP_PLAN_ACT_SYSTEM,
     RECAP_PLAN_SYSTEM,
     RECAP_PLAN_SYSTEM_EN,
+    scrub_unevidenced_beats,
+    split_story_into_plan_acts,
+    clamp_beats_to_act_window,
     RECAP_SYSTEM,
     RECAP_SYSTEM_EN,
     RECAP_VO_CONTINUITY_POLICY,
+    RECAP_VO_DRAFT_SYSTEM,
+    RECAP_VO_DRAFT_SYSTEM_EN,
     RECAP_VO_POLISH_SYSTEM,
     RECAP_VO_POLISH_SYSTEM_EN,
     RECAP_VO_STYLE_POLICY,
     TTS_SPEED,
+    draft_recap_vo_for_beats,
+    parse_vo_drafts,
+    stamp_beat_vo_onto_cuts,
+    default_recap_vo_draft_prompt,
 )
 from src.services.understanding_resource_service import normalize_understanding_config
 
@@ -233,7 +248,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(recap_motion_gap_chunk_indices(padded, beats), [2, 4])
         self.assertEqual(recap_motion_gap_chunk_indices(padded, beats, pad_sec=0.0), [2])
 
-    def test_recap_motion_gap_skips_dialogue_only_when_asr_covers(self):
+    def test_recap_motion_gap_always_fills_missing_caps_in_beat_window(self):
         from src.services.recap_service import (
             recap_motion_dense_chunk_indices,
             recap_motion_gap_chunk_indices,
@@ -249,17 +264,70 @@ class RecapPackTests(unittest.TestCase):
         dialogue_beats = [
             {"id": 1, "t": [90.0, 130.0], "importance": 0.4, "evidence_required": ["对话", "人物"]},
         ]
-        self.assertEqual(recap_motion_gap_chunk_indices(pack, dialogue_beats), [])
+        # Dialogue coverage must NOT skip VLM — picture still has to match the VO.
+        self.assertEqual(recap_motion_gap_chunk_indices(pack, dialogue_beats), [2])
         visual_beats = [
             {"id": 2, "t": [200.0, 240.0], "importance": 0.9, "evidence_required": ["动作", "场面"]},
         ]
         self.assertEqual(recap_motion_gap_chunk_indices(pack, visual_beats), [3])
         self.assertEqual(recap_motion_dense_chunk_indices(pack, visual_beats, [3]), [3])
-        quiet = {
-            "ocr": [],
-            "chunks": pack["chunks"],
+
+    def test_snap_cuts_to_capped_chunks_pulls_empty_cap_pick(self):
+        from src.services.recap_service import snap_cuts_to_capped_chunks
+
+        pack = {
+            "duration_sec": 300.0,
+            "chunks": [
+                {"i": 0, "t": [10.0, 40.0], "cap": "柜台推回支票", "skip": ""},
+                {"i": 1, "t": [40.0, 70.0], "cap": "", "skip": ""},
+            ],
         }
-        self.assertEqual(recap_motion_gap_chunk_indices(quiet, dialogue_beats), [2])
+        beats = [{"id": 1, "event": "拒收支票", "needed_visual": "柜台推支票", "t": [10.0, 60.0]}]
+        cuts = [
+            {
+                "beat_id": 1,
+                "chunk_index": 1,
+                "src_in": 45.0,
+                "src_out": 53.0,
+                "reason": "时间兜底",
+            }
+        ]
+        out = snap_cuts_to_capped_chunks(cuts, pack, beats)
+        self.assertLess(float(out[0]["src_out"]), 42.0)
+        self.assertEqual(int(out[0].get("chunk_index")), 0)
+        self.assertIn("最佳画面描述", str(out[0].get("reason") or ""))
+
+    def test_snap_cuts_prefers_cap_that_matches_event_not_wrong_capped_scene(self):
+        from src.services.recap_service import snap_cuts_to_capped_chunks
+
+        pack = {
+            "duration_sec": 300.0,
+            "chunks": [
+                {"i": 0, "t": [10.0, 40.0], "cap": "走廊里两人走过", "skip": ""},
+                {"i": 1, "t": [40.0, 70.0], "cap": "店长在柜台把支票推回去拒收", "skip": ""},
+            ],
+        }
+        beats = [
+            {
+                "id": 1,
+                "event": "店长当面拒收支票",
+                "needed_visual": "柜台推回支票",
+                "t": [10.0, 70.0],
+            }
+        ]
+        # LLM picked a capped but wrong scene (hallway walk).
+        cuts = [
+            {
+                "beat_id": 1,
+                "chunk_index": 0,
+                "src_in": 12.0,
+                "src_out": 20.0,
+                "reason": "看起来有人在动",
+            }
+        ]
+        out = snap_cuts_to_capped_chunks(cuts, pack, beats)
+        self.assertEqual(int(out[0].get("chunk_index")), 1)
+        self.assertGreaterEqual(float(out[0]["src_in"]), 40.0)
 
     def test_fill_recap_motion_for_beats_skips_when_no_gaps(self):
         from src.services.recap_service import fill_recap_motion_for_beats
@@ -364,7 +432,8 @@ class RecapPackTests(unittest.TestCase):
         )
         self.assertEqual(len(clips), 1)
         self.assertLessEqual(clips[0]["src_out"] - clips[0]["src_in"], 12.0)
-        self.assertGreater(clips[0]["src_in"], 107.0)
+        # Keep establishing head — do not chop into a later stub.
+        self.assertAlmostEqual(clips[0]["src_in"], 107.0, places=2)
         self.assertAlmostEqual(clips[0]["duration"], clips[0]["src_out"] - clips[0]["src_in"], places=3)
 
     def test_normalize_accepts_duration_field(self):
@@ -434,6 +503,80 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(stashed[1]["vo"], "")
         self.assertEqual(stashed[1]["vo_draft"], "已有草稿")
 
+    def test_parse_vo_drafts_and_stamp_onto_first_master(self):
+        drafts = parse_vo_drafts(
+            json.dumps({"drafts": [{"id": 1, "text": "店长拒收支票。"}, {"id": 2, "text": ""}]}),
+            [{"id": 1}, {"id": 2}],
+        )
+        self.assertEqual(drafts[1], "店长拒收支票。")
+        self.assertEqual(drafts.get(2), "")
+        cuts = stamp_beat_vo_onto_cuts(
+            [
+                {"beat_id": 1, "role": "insert", "vo_draft": "脏草稿", "src_in": 1.0, "src_out": 3.0},
+                {"beat_id": 1, "src_in": 3.0, "src_out": 10.0, "vo": "", "vo_draft": ""},
+                {"beat_id": 1, "src_in": 10.0, "src_out": 14.0, "vo": "", "vo_draft": ""},
+            ],
+            [{"id": 1, "vo": "店长拒收支票。"}],
+        )
+        self.assertEqual(cuts[0]["vo"], "")
+        self.assertEqual(cuts[0]["vo_draft"], "")
+        self.assertEqual(cuts[1]["vo"], "店长拒收支票。")
+        self.assertEqual(cuts[1]["vo_draft"], "店长拒收支票。")
+        self.assertEqual(cuts[2]["vo"], "")
+
+    def test_draft_recap_vo_for_beats_writes_vo(self):
+        pack = {
+            "duration_sec": 100.0,
+            "people": [],
+            "chunks": [{"i": 0, "t": [0.0, 40.0], "cap": "柜台推支票", "skip": ""}],
+            "ocr": [{"start": 5.0, "end": 8.0, "text": "不行", "speaker": "店长"}],
+        }
+        allocated = [
+            {
+                "id": 1,
+                "event": "拒收支票",
+                "importance": 0.9,
+                "budget_sec": 12.0,
+                "t": [0.0, 40.0],
+                "evidence_required": ["动作"],
+                "needed_visual": "柜台",
+            }
+        ]
+        with patch(
+            "src.services.recap_service.call_remote_llm",
+            return_value=json.dumps({"drafts": [{"id": 1, "text": "店长当面把支票推了回去。"}]}),
+        ):
+            out = draft_recap_vo_for_beats(pack, allocated)
+        self.assertIn("推了回去", out[0]["vo"])
+
+    def test_recap_user_prompt_includes_beat_vo(self):
+        prompt = recap_user_prompt(
+            {"duration_sec": 100.0, "people": [], "chunks": [], "ocr": []},
+            [{"id": 1, "event": "拒收", "vo": "店长拒收。", "budget_sec": 10.0, "t": [1.0, 20.0]}],
+        )
+        self.assertIn("beat.vo", prompt)
+        self.assertNotIn("不要写 vo，正式口播由铺字幕阶段完成", prompt)
+        self.assertIn("店长拒收。", prompt)
+
+    def test_fit_keeps_draft_when_polish_returns_empty(self):
+        clips = [
+            {
+                "tl_in": 0.0,
+                "tl_out": 8.0,
+                "src_in": 1.0,
+                "src_out": 9.0,
+                "vo": "",
+                "vo_draft": "店长拒收支票。",
+                "beat_id": 1,
+            }
+        ]
+        with patch(
+            "src.services.recap_service.call_remote_llm",
+            return_value=json.dumps({"captions": [{"text": "", "from": 1, "to": 1}]}),
+        ):
+            out = fit_recap_captions_to_tts(clips)
+        self.assertEqual(out[0]["vo"], "店长拒收支票。")
+
     def test_parse_cut_list_repairs_missing_commas(self):
         pack = {"duration_sec": 20.0, "chunks": [{"i": 0, "t": [0.0, 8.0], "tags": [], "cap": ""}]}
         raw = """{"title":"试水","clips":[
@@ -456,7 +599,7 @@ class RecapPackTests(unittest.TestCase):
     def test_vo_sec(self):
         self.assertAlmostEqual(vo_sec("一二三四五", chars_per_sec=5.0), 1.0)
         self.assertAlmostEqual(vo_sec("一二三四五"), round(5.0 / (5.0 * TTS_SPEED), 2))
-        self.assertAlmostEqual(TTS_SPEED, 1.35)
+        self.assertAlmostEqual(TTS_SPEED, 1.25)
 
     def test_tts_budget_keeps_whole_sentences(self):
         vo = "一二三四五" * 5 + "一二三"
@@ -492,7 +635,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertAlmostEqual(captions[0]["tl_out"], 6.0)
         self.assertEqual(captions[1]["from"], 3)
         self.assertAlmostEqual(captions[1]["tl_in"], 11.0)
-        self.assertLessEqual(vo_needed_sec("监考官宣布考试开始。"), 6.0 * 0.87)
+        self.assertLessEqual(vo_needed_sec("监考官宣布考试开始。"), 6.0 * VO_COVER_RATIO)
 
     def test_pack_captions_keeps_distinct_vo_shots(self):
         clips = [
@@ -601,7 +744,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertGreaterEqual(recap_cuts_duration(out), vo_needed_sec(vo) - 0.35)
 
     def test_pad_cuts_can_grow_past_twelve_seconds(self):
-        vo = "一二三四五" * 20  # ~16.5s at 1.35x
+        vo = "一二三四五" * 20  # ~16s at 1.25x
         pack = {
             "duration_sec": 80.0,
             "chunks": [{"i": 0, "t": [10.0, 70.0], "skip": ""}],
@@ -1053,6 +1196,28 @@ class RecapPackTests(unittest.TestCase):
         )
         self.assertEqual(strong["match_status"], MATCH_STATUS_OK)
         self.assertTrue(strong["evidence_support"]["asr"])
+
+        wrong_act = score_recap_cut_match(
+            {
+                "src_in": 400.0,
+                "src_out": 408.0,
+                "reason": "店长当面拒收支票",
+                "beat_id": 1,
+            },
+            beat={
+                "id": 1,
+                "event": "店长当面拒收支票",
+                "evidence_required": ["人物", "动作"],
+                "t": [10.0, 20.0],
+            },
+            pack={
+                "ocr": [{"start": 400.0, "end": 404.0, "speaker": "店长", "text": "不能收"}],
+                "chunks": [{"i": 9, "t": [398.0, 410.0], "cap": "店长推回支票"}],
+            },
+            people=[{"id": "s1", "label": "店长"}],
+        )
+        self.assertEqual(wrong_act["match_status"], MATCH_STATUS_WEAK)
+        self.assertLess(float(wrong_act.get("time_score", 1.0)), 0.4)
         self.assertTrue(strong["evidence_support"]["vlm"])
         reason_only = score_recap_cut_match(
             {
@@ -1832,33 +1997,47 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(out[0]["vo"], "开场。")
 
     def test_recap_prompt_asks_for_narration_not_translation(self):
-        self.assertIn("不写 vo", RECAP_SYSTEM)
+        self.assertIn("beat.vo", RECAP_SYSTEM)
+        self.assertIn("不写新旁白", RECAP_SYSTEM)
         self.assertIn("role=insert", RECAP_SYSTEM)
         self.assertIn("role=bridge", RECAP_SYSTEM)
         self.assertIn("弱证据", RECAP_SYSTEM)
         self.assertIn("禁止男主", RECAP_SYSTEM)
         self.assertIn("不写剪辑表", RECAP_PLAN_SYSTEM)
-        self.assertIn("18–28", RECAP_PLAN_SYSTEM)
-        self.assertIn("密稿可删", RECAP_PLAN_SYSTEM)
+        self.assertIn("证据优先", RECAP_PLAN_SYSTEM)
+        self.assertIn("宁少勿编", RECAP_PLAN_SYSTEM)
         self.assertIn("最多 32", RECAP_PLAN_SYSTEM)
         self.assertIn("进入拍", RECAP_PLAN_SYSTEM)
         self.assertIn("evidence_required", RECAP_PLAN_SYSTEM)
         self.assertIn("needed_visual", RECAP_PLAN_SYSTEM)
         self.assertIn("importance≥0.85", RECAP_PLAN_SYSTEM)
         self.assertIn("XX说", RECAP_PLAN_SYSTEM)
+        self.assertIn("本幕 asr", RECAP_PLAN_ACT_SYSTEM)
+        self.assertIn("宁可少写", RECAP_PLAN_ACT_SYSTEM)
         self.assertIn("绝对证据", RECAP_CAPTION_SYSTEM)
         self.assertIn("同 beat_id", RECAP_CAPTION_SYSTEM)
-        self.assertIn("对白/心理复读机", RECAP_CAPTION_SYSTEM)
-        self.assertIn("禁止男主", RECAP_CAPTION_SYSTEM)
+        self.assertIn("解说草稿", RECAP_CAPTION_SYSTEM)
+        self.assertIn("掐头去尾", RECAP_CAPTION_SYSTEM)
+        self.assertIn("男主", RECAP_FACT_POLICY)
         self.assertIn("镜头 ≠ 场景", RECAP_VO_CONTINUITY_POLICY)
+        self.assertIn("口播＝解说稿", RECAP_VO_STYLE_POLICY)
         self.assertIn("场面转到", RECAP_VO_STYLE_POLICY)
+        self.assertIn("按台词做整体剧情推理", RECAP_EVIDENCE_POLICY)
+        self.assertIn("禁止用常识", RECAP_EVIDENCE_POLICY)
+        self.assertIn("渲染氛围", RECAP_EVIDENCE_POLICY)
         self.assertIn("张冠李戴", RECAP_EVIDENCE_POLICY)
+        self.assertIn("directly support", RECAP_EVIDENCE_POLICY_EN)
+        self.assertIn("atmosphere", RECAP_EVIDENCE_POLICY_EN)
+        self.assertIn("Infer causality from asr", RECAP_PLAN_SYSTEM_EN)
         self.assertIn("自相矛盾", RECAP_FACT_POLICY)
         self.assertIn("同一个「他」", RECAP_NAME_POLICY)
         self.assertIn("真空洞", RECAP_GAP_SYSTEM)
         self.assertIn("只改旁白", RECAP_VO_POLISH_SYSTEM)
         self.assertIn("不改镜头", RECAP_VO_POLISH_SYSTEM)
-        for body in (RECAP_PLAN_SYSTEM, RECAP_SYSTEM, RECAP_GAP_SYSTEM, RECAP_CAPTION_SYSTEM, RECAP_VO_POLISH_SYSTEM):
+        self.assertIn("只写旁白草稿", RECAP_VO_DRAFT_SYSTEM)
+        self.assertIn("draft recap narration", RECAP_VO_DRAFT_SYSTEM_EN)
+        self.assertEqual(default_recap_vo_draft_prompt("zh"), RECAP_VO_DRAFT_SYSTEM)
+        for body in (RECAP_PLAN_SYSTEM, RECAP_SYSTEM, RECAP_GAP_SYSTEM, RECAP_CAPTION_SYSTEM, RECAP_VO_POLISH_SYSTEM, RECAP_VO_DRAFT_SYSTEM):
             self.assertNotIn("店长", body)
             self.assertNotIn("支票", body)
             self.assertNotIn("柜台", body)
@@ -1879,7 +2058,7 @@ class RecapPackTests(unittest.TestCase):
         )
         self.assertIn("店长", named_plan)
         self.assertIn("people", RECAP_PLAN_SYSTEM)
-        self.assertIn("禁止男主", RECAP_PLAN_SYSTEM)
+        self.assertIn("男主", RECAP_FACT_POLICY)
         self.assertIn("speaker", RECAP_NAME_POLICY)
         self.assertIn("称呼词典", RECAP_NAME_POLICY)
 
@@ -2020,7 +2199,68 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(len(dropped), 1)
         self.assertNotEqual(dropped[0].get("role"), "insert")
 
-    def test_apply_recap_duration_fills_beat_budget(self):
+    def test_clamp_cuts_to_beat_window_snaps_wrong_act(self):
+        pack = {
+            "duration_sec": 500.0,
+            "chunks": [
+                {"i": 0, "t": [10.0, 40.0], "skip": "", "cap": "柜台争吵"},
+                {"i": 1, "t": [400.0, 430.0], "skip": "", "cap": "后期对峙"},
+            ],
+        }
+        beats = [{"id": 1, "event": "柜台拒收", "t": [10.0, 40.0]}]
+        cuts = [
+            {
+                "name": "错场",
+                "beat_id": 1,
+                "chunk_index": 1,
+                "src_in": 405.0,
+                "src_out": 413.0,
+                "vo": "",
+                "reason": "看起来像在吵",
+            }
+        ]
+        fixed = clamp_cuts_to_beat_window(cuts, pack, beats)
+        self.assertEqual(len(fixed), 1)
+        self.assertLess(float(fixed[0]["src_out"]), 55.0)
+        self.assertGreaterEqual(float(fixed[0]["src_in"]), 0.0)
+        self.assertLessEqual(float(fixed[0]["src_in"]), 40.0)
+
+    def test_split_story_into_plan_acts_and_scrub_empty_windows(self):
+        pack = {
+            "duration_sec": 1440.0,
+            "ocr": [
+                {"start": 10.0, "end": 12.0, "text": "你好"},
+                {"start": 400.0, "end": 402.0, "text": "对峙"},
+                {"start": 1200.0, "end": 1202.0, "text": "结束"},
+            ],
+            "chunks": [
+                {"i": 0, "t": [0.0, 50.0], "cap": "开场"},
+                {"i": 1, "t": [400.0, 460.0], "cap": "中段"},
+                {"i": 2, "t": [1200.0, 1280.0], "cap": "收尾"},
+            ],
+        }
+        acts = split_story_into_plan_acts(pack, target_sec=420.0)
+        self.assertGreaterEqual(len(acts), 2)
+        self.assertAlmostEqual(acts[0][0], 0.0, delta=30.0)
+        clamped = clamp_beats_to_act_window(
+            [
+                {"id": 1, "event": "开场", "t": [10.0, 30.0]},
+                {"id": 2, "event": "跑出去", "t": [900.0, 920.0]},
+            ],
+            (0.0, 100.0),
+        )
+        self.assertEqual(len(clamped), 1)
+        self.assertEqual(clamped[0]["id"], 1)
+        cleaned = scrub_unevidenced_beats(
+            [
+                {"id": 1, "event": "有证据", "importance": 0.9, "t": [10.0, 20.0]},
+                {"id": 2, "event": "纯编造高潮", "importance": 0.95, "t": [700.0, 720.0]},
+            ],
+            pack,
+        )
+        self.assertEqual([b["id"] for b in cleaned], [1])
+
+    def test_apply_recap_duration_does_not_pad_short_beats(self):
         pack = {
             "duration_sec": 80.0,
             "chunks": [{"i": 0, "t": [10.0, 50.0], "skip": ""}],
@@ -2045,7 +2285,8 @@ class RecapPackTests(unittest.TestCase):
             },
         ]
         out = apply_recap_duration(cuts, pack, beats, target_sec=20.0, min_sec=18.0)
-        self.assertGreaterEqual(recap_cuts_duration(out), 18.0)
+        # Soft ceiling: keep evidence as-is; do not stretch to spend the beat budget.
+        self.assertAlmostEqual(recap_cuts_duration(out), 7.0, delta=0.2)
 
     def test_apply_recap_duration_trims_over_budget(self):
         pack = {
@@ -2161,6 +2402,29 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(beats[0]["evidence_required"], ["人物", "动作", "物品"])
         self.assertEqual(beats[1]["evidence_required"], ["场面"])
 
+    def test_allocate_story_beats_request_enter_land_shots(self):
+        beats = [
+            {
+                "id": 1,
+                "event": "少年走进考场入座",
+                "importance": 0.55,
+                "needed_visual": "进门入座",
+                "t": [40.0, 55.0],
+            },
+            {
+                "id": 2,
+                "event": "第一次刺中失手",
+                "importance": 0.9,
+                "needed_visual": "刺击",
+                "t": [500.0, 508.0],
+            },
+        ]
+        allocated = allocate_beat_budgets(beats, target_sec=180.0)
+        enter = next(item for item in allocated if "走进" in item["event"])
+        climax = next(item for item in allocated if "失手" in item["event"])
+        self.assertGreaterEqual(enter["shots"], 2)
+        self.assertGreaterEqual(climax["shots"], 3)
+
     def test_allocate_beat_budgets_prefers_plot_weight_not_source_duration(self):
         fillers = [
             {
@@ -2186,7 +2450,9 @@ class RecapPackTests(unittest.TestCase):
         walk = next(item for item in allocated if item["event"] == "走廊走路")
         self.assertGreater(four["budget_sec"], walk["budget_sec"])
         self.assertGreaterEqual(four["budget_sec"], 16.0)
-        self.assertAlmostEqual(sum(item["budget_sec"] for item in allocated), 180.0, delta=1.5)
+        total = sum(item["budget_sec"] for item in allocated)
+        self.assertLessEqual(total, 180.0 + 1.5)
+        self.assertGreaterEqual(total, len(allocated) * 6.0)
         self.assertEqual(beat_evidence_score(80.0), beat_evidence_score(12.0))
 
     def test_allocate_keeps_short_climax_budget(self):
@@ -2273,9 +2539,18 @@ class RecapPackTests(unittest.TestCase):
     def test_split_and_missing_beats(self):
         beats = [{"id": index, "event": str(index), "t": [float(index * 10), float(index * 10 + 4)]} for index in range(1, 13)]
         waves = split_beats_for_match(beats)
-        self.assertEqual(len(waves), 2)
-        self.assertEqual(len(waves[0]), 7)
+        self.assertEqual(len(waves), 3)
+        self.assertEqual(len(waves[0]), 4)
         self.assertEqual(waves[-1][-1]["id"], 12)
+        # Far-apart beats must not share a wave even under the per-wave count.
+        far = [
+            {"id": 1, "event": "a", "t": [10.0, 20.0]},
+            {"id": 2, "event": "b", "t": [200.0, 220.0]},
+            {"id": 3, "event": "c", "t": [240.0, 250.0]},
+        ]
+        far_waves = split_beats_for_match(far)
+        self.assertEqual(len(far_waves), 2)
+        self.assertEqual([b["id"] for b in far_waves[0]], [1])
         cuts = [{"beat_id": 1, "src_in": 10.0, "src_out": 14.0}]
         missing = missing_match_beats(beats, cuts)
         self.assertTrue(any(item["id"] == 12 for item in missing))
@@ -2314,7 +2589,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(ranked, [(100.0, 500.0), (600.0, 680.0)])
         self.assertEqual(len(ranked), 2)
         self.assertEqual(ranked[0], (100.0, 500.0))
-        self.assertIn("密稿可删", RECAP_PLAN_GAP_SYSTEM)
+        self.assertIn("密稿供用户删减", RECAP_PLAN_GAP_SYSTEM)
         self.assertIn("长空档", RECAP_PLAN_GAP_SYSTEM)
         trimmed = trim_story_beats_to_limit(
             [
@@ -2341,6 +2616,143 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn((181.0, 286.0), ranked)
         self.assertEqual(len(ranked), 2)
         self.assertEqual(ranked[0], (181.0, 286.0))
+
+    def test_scrub_verbatim_source_dialogue_vo_drops_japanese_and_asr_paste(self):
+        clips = [
+            {
+                "src_in": 10.0,
+                "src_out": 18.0,
+                "vo": "他低声说「ありがとう」然后离开。",
+            },
+            {
+                "src_in": 20.0,
+                "src_out": 28.0,
+                "vo": "だから僕は行かない",
+            },
+            {
+                "src_in": 30.0,
+                "src_out": 40.0,
+                "vo": "少年答完题，局面转向下一轮。",
+            },
+        ]
+        pack = {
+            "ocr": [
+                {"start": 10.0, "end": 14.0, "text": "ありがとう"},
+                {"start": 20.0, "end": 24.0, "text": "だから僕は行かない"},
+            ],
+            "chunks": [],
+        }
+        out = scrub_verbatim_source_dialogue_vo(clips, pack=pack)
+        self.assertNotIn("ありがとう", out[0]["vo"])
+        self.assertNotIn("だから", out[1]["vo"])
+        self.assertEqual(out[1]["vo"], "")
+        self.assertIn("少年答完题", out[2]["vo"])
+        self.assertTrue(out[2]["vo"].endswith("。"))
+
+    def test_scrub_unevidenced_vo_drops_invented_speech_without_asr(self):
+        clips = [
+            {
+                "src_in": 10.0,
+                "src_out": 18.0,
+                "vo": "监考官宣布考试开始，全场瞬间安静。",
+                "event": "监考官宣布开考",
+                "beat_id": 1,
+            },
+            {
+                "src_in": 20.0,
+                "src_out": 28.0,
+                "vo": "少年走进教室坐下。",
+                "beat_id": 2,
+            },
+            {
+                "src_in": 30.0,
+                "src_out": 38.0,
+                "vo": "店长告诉他支票无效。",
+                "beat_id": 3,
+                "match_status": "weak_match",
+            },
+        ]
+        pack = {
+            "ocr": [],
+            "chunks": [
+                {"i": 2, "t": [20.0, 28.0], "cap": "少年推门进教室，在空位坐下", "skip": ""},
+            ],
+        }
+        out = scrub_unevidenced_vo(clips, pack=pack, beats=[
+            {"id": 1, "event": "监考官宣布开考"},
+            {"id": 2, "event": "少年走进教室"},
+            {"id": 3, "event": "店长拒收支票"},
+        ])
+        # No asr/caps + outline parrot / invented announce → cleared
+        self.assertEqual(out[0]["vo"], "")
+        # Caps-backed visible action without speech act → kept
+        self.assertIn("走进", out[1]["vo"])
+        # Weak match invented speech without asr → cleared
+        self.assertEqual(out[2]["vo"], "")
+
+        # JP asr + Chinese narrative (no quotes) must survive — that is the actual commentary.
+        jp_pack = {
+            "ocr": [{"start": 10.0, "end": 16.0, "speaker": "店长", "text": "これは受け取れません"}],
+            "chunks": [{"i": 0, "t": [10.0, 20.0], "cap": "店长推回支票", "skip": ""}],
+        }
+        kept = scrub_unevidenced_vo(
+            [
+                {
+                    "src_in": 12.0,
+                    "src_out": 18.0,
+                    "vo": "店长当场拒收支票，两人僵在柜台前。",
+                    "beat_id": 1,
+                }
+            ],
+            pack=jp_pack,
+            beats=[{"id": 1, "event": "拒收支票", "t": [10.0, 25.0]}],
+        )
+        self.assertIn("拒收", kept[0]["vo"])
+
+    def test_split_clips_for_captions_keeps_same_beat_together(self):
+        from src.services.recap_service import split_clips_for_captions
+
+        clips = [
+            {"beat_id": 1, "name": "a"},
+            {"beat_id": 1, "name": "b"},
+            {"beat_id": 2, "name": "c"},
+            {"beat_id": 2, "name": "d"},
+            {"beat_id": 3, "name": "e"},
+        ]
+        waves = split_clips_for_captions(clips, per_wave=3)
+        self.assertEqual([[c["name"] for c in w] for w in waves], [["a", "b"], ["c", "d", "e"]])
+
+        # JP asr + Chinese narrative (no quotes) must survive — that is the actual commentary.
+        jp_pack = {
+            "ocr": [{"start": 10.0, "end": 16.0, "speaker": "店长", "text": "これは受け取れません"}],
+            "chunks": [{"i": 0, "t": [10.0, 20.0], "cap": "店长推回支票", "skip": ""}],
+        }
+        kept = scrub_unevidenced_vo(
+            [
+                {
+                    "src_in": 12.0,
+                    "src_out": 18.0,
+                    "vo": "店长当场拒收支票，两人僵在柜台前。",
+                    "beat_id": 1,
+                }
+            ],
+            pack=jp_pack,
+            beats=[{"id": 1, "event": "拒收支票", "t": [10.0, 25.0]}],
+        )
+        self.assertIn("拒收", kept[0]["vo"])
+
+    def test_split_clips_for_captions_keeps_same_beat_together(self):
+        from src.services.recap_service import split_clips_for_captions
+
+        clips = [
+            {"beat_id": 1, "name": "a"},
+            {"beat_id": 1, "name": "b"},
+            {"beat_id": 2, "name": "c"},
+            {"beat_id": 2, "name": "d"},
+            {"beat_id": 3, "name": "e"},
+        ]
+        waves = split_clips_for_captions(clips, per_wave=3)
+        self.assertEqual([[c["name"] for c in w] for w in waves], [["a", "b"], ["c", "d", "e"]])
 
     def test_sanitize_generic_role_labels_in_beats_and_vo(self):
         # Code patches removed: sanitize/scrub are identity; LLM stages own wording.
@@ -2620,7 +3032,9 @@ class RecapPackTests(unittest.TestCase):
         allocated = allocate_beat_budgets(beats, target_sec=330.0)
         self.assertEqual(len(allocated), 22)
         self.assertEqual([item["id"] for item in allocated], list(range(1, 23)))
-        self.assertAlmostEqual(sum(item["budget_sec"] for item in allocated), 330.0, delta=2.0)
+        total = sum(item["budget_sec"] for item in allocated)
+        self.assertLessEqual(total, 330.0 + 2.0)
+        self.assertGreaterEqual(total, 22 * 6.0)
         self.assertLessEqual(max(item["budget_sec"] for item in allocated), 24.0)
         self.assertGreaterEqual(min(item["budget_sec"] for item in allocated), 6.0)
 
@@ -2675,6 +3089,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(default_recap_match_prompt("en"), RECAP_SYSTEM_EN)
         self.assertEqual(default_recap_caption_prompt("en"), RECAP_CAPTION_SYSTEM_EN)
         self.assertEqual(default_recap_polish_prompt("en"), RECAP_VO_POLISH_SYSTEM_EN)
+        self.assertEqual(default_recap_vo_draft_prompt("en"), RECAP_VO_DRAFT_SYSTEM_EN)
         self.assertIn("Write the VO in English", RECAP_CAPTION_SYSTEM_EN)
         self.assertIn("story planner", RECAP_PLAN_SYSTEM_EN)
         self.assertIn("evidence_required", RECAP_PLAN_SYSTEM_EN)
@@ -2734,7 +3149,7 @@ class RecapPackTests(unittest.TestCase):
                 delta=0.2,
             )
 
-    def test_people_from_dialogue_skips_auto_labels(self):
+    def test_people_from_dialogue_keeps_auto_and_named(self):
         people = people_from_dialogue_speakers(
             [
                 {"speaker": "声线1", "text": "你好"},
@@ -2743,7 +3158,7 @@ class RecapPackTests(unittest.TestCase):
                 {"speaker": "Voice 2", "text": "走"},
             ]
         )
-        self.assertEqual([item["label"] for item in people], ["店长"])
+        self.assertEqual([item["label"] for item in people], ["店长", "声线1", "Voice 2"])
         stats = recap_speaker_stats(
             [
                 {"speaker": "声线1"},
@@ -2867,7 +3282,7 @@ class RecapPackTests(unittest.TestCase):
             def fake_llm(*, system, user, **kwargs):
                 del user, kwargs
                 systems.append(system)
-                if system == RECAP_PLAN_SYSTEM:
+                if system in (RECAP_PLAN_SYSTEM, RECAP_PLAN_ACT_SYSTEM):
                     first = [10.0, 40.0] if cover_opening else [400.0, 460.0]
                     return json.dumps(
                         {
@@ -2925,9 +3340,21 @@ class RecapPackTests(unittest.TestCase):
                             ],
                         }
                     )
+                if system == RECAP_VO_DRAFT_SYSTEM:
+                    return json.dumps(
+                        {
+                            "drafts": [
+                                {"id": 1, "text": "开场店长开口对峙。"},
+                                {"id": 2, "text": "门外收尾。"},
+                                {"id": 3, "text": "中段柜台对峙。"},
+                                {"id": 9, "text": "冷开场门口。"},
+                            ]
+                        }
+                    )
                 if system == RECAP_SYSTEM:
                     match_calls["n"] += 1
-                    if fail_close and match_calls["n"] > 1:
+                    # Fixture keeps ~2 far-apart beats → 2 match waves; 3rd call is leftover close.
+                    if fail_close and match_calls["n"] > 2:
                         raise RuntimeError("close boom")
                     clips = [
                         {
@@ -2987,6 +3414,10 @@ class RecapPackTests(unittest.TestCase):
                     "src.services.understanding_service.resolve_current_media_path",
                     return_value=str(video),
                 ),
+                patch(
+                    "src.services.recap_service.compact_ocr_cues_in_span",
+                    side_effect=lambda *_args, **_kwargs: list(pack.get("ocr") or []),
+                ),
             ):
                 if start_from in {"match", "captions"}:
                     generate_recap_timeline("vid", tmp, start_from="plan_only")
@@ -3001,11 +3432,13 @@ class RecapPackTests(unittest.TestCase):
     def test_generate_fills_story_gaps_and_stashes_match_vo(self):
         result, systems, caption_in = self._generate_long_recap()
         self.assertIn(RECAP_PLAN_GAP_SYSTEM, systems)
+        self.assertIn(RECAP_VO_DRAFT_SYSTEM, systems)
         self.assertNotIn(RECAP_PLAN_HEAD_SYSTEM, systems)
         self.assertEqual(result.get("warnings"), [])
         self.assertGreaterEqual(int(result.get("clip_count") or 0), 1)
-        self.assertTrue(any(str(item.get("vo") or "") == "" for item in caption_in))
-        self.assertTrue(any(str(item.get("vo_draft") or "") == "不该留下的口播" for item in caption_in))
+        # VO-first stamps beat.vo onto the first master; match accidental VO is overwritten.
+        self.assertTrue(any("对峙" in str(item.get("vo") or item.get("vo_draft") or "") for item in caption_in))
+        self.assertFalse(any(str(item.get("vo") or "") == "不该留下的口播" for item in caption_in))
 
     def test_generate_records_plan_gap_warning(self):
         result, systems, _caption_in = self._generate_long_recap(fail_gap=True)
@@ -3027,6 +3460,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertGreaterEqual(int(result.get("beat_count") or 0), 2)
         self.assertFalse(result.get("cuts_path"))
         self.assertIn(RECAP_PLAN_GAP_SYSTEM, systems)
+        self.assertIn(RECAP_VO_DRAFT_SYSTEM, systems)
         self.assertNotIn(RECAP_SYSTEM, systems)
         self.assertEqual(caption_in, [])
 
@@ -3038,6 +3472,7 @@ class RecapPackTests(unittest.TestCase):
         self.assertGreaterEqual(int(result.get("clip_count") or 0), 1)
         self.assertIn(RECAP_SYSTEM, systems)
         self.assertNotIn(RECAP_PLAN_SYSTEM, systems)
+        self.assertNotIn(RECAP_PLAN_ACT_SYSTEM, systems)
         self.assertEqual(caption_in, [])
 
     def test_recap_requires_dialogue_cues(self):

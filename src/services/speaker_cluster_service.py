@@ -19,18 +19,19 @@ from src.storage.dialogue_transcript_store import (
 
 logger = get_logger("speaker_cluster")
 
-# VAD/ASR rows are speech regions, not speaker turns. Embed the loudest ~2s
-# inside each cue (CAM++ wants a short utterance). Cluster with average
-# linkage so A~B and B~C do not force A=C, unlike union-find / single linkage.
+# VAD/ASR rows are speech regions, not speaker turns. Take a few short CAM++
+# windows per cue (not the whole span), then majority-vote the cue label.
+# 0.55 is the middle ground: 0.50 mega-merged voices, 0.62 exploded into dozens.
+# Absorb folds stray 1–2 cue fragments into a nearby larger voice.
 MIN_EMBED_SEC = 0.4
 WINDOW_SEC = 2.0
 HOP_SEC = 0.75
-MAX_WINDOWS_PER_CUE = 1
+MAX_WINDOWS_PER_CUE = 3
 MIN_WINDOW_RMS = 5.0e-4
-COSINE_THRESHOLD = 0.50
+COSINE_THRESHOLD = 0.55
 ABSORB_MAX_SIZE = 2
 ABSORB_MIN_TARGET_SIZE = 3
-ABSORB_SIM = 0.40
+ABSORB_SIM = 0.48
 ProgressCallback = Callable[[float, str], None]
 
 
@@ -132,7 +133,7 @@ def _absorb_tiny_clusters(
     min_target: int = ABSORB_MIN_TARGET_SIZE,
     sim: float = ABSORB_SIM,
 ) -> list[int]:
-    """Fold 1–2 shot clusters into the nearest larger voice when they still match."""
+    """Fold 1–2 cue fragments into the nearest larger voice when they still match."""
     embs = l2_normalize(embeddings)
     raw = list(labels)
     cutoff = float(sim)
@@ -351,11 +352,19 @@ def cluster_video_speakers(
     for index, item in enumerate(candidates):
         if _stopped():
             raise UnderstandingStoppedError("stopped")
+        span_sec = float(item["end"]) - float(item["start"])
+        if span_sec < 2.5:
+            max_windows = 1
+        elif span_sec < 5.0:
+            max_windows = 2
+        else:
+            max_windows = MAX_WINDOWS_PER_CUE
         windows = embed_windows_for_span(
             audio,
             start_sec=item["start"],
             end_sec=item["end"],
             sample_rate=sr,
+            max_windows=max_windows,
         )
         _progress(0.1 + 0.8 * ((index + 1) / max(1, total)), f"embed:{index + 1}:{total}")
         if not windows:
@@ -391,18 +400,22 @@ def cluster_video_speakers(
         np.stack(window_vectors, axis=0),
         seed_order=seed_order,
     )
-    best: list[tuple[float, int] | None] = [None] * len(usable)
+    # Majority vote per cue (energy as tie-break). One loud SFX window must not
+    # override two consistent speech windows from the same talker.
+    votes: list[dict[int, float]] = [dict() for _ in usable]
     for cue_index, label, energy in zip(window_cues, window_labels, window_energy):
-        current = best[cue_index]
-        if current is None or float(energy) > current[0] or (
-            float(energy) == current[0] and int(label) < current[1]
-        ):
-            best[cue_index] = (float(energy), int(label))
+        bucket = votes[cue_index]
+        key = int(label)
+        bucket[key] = float(bucket.get(key, 0.0)) + float(energy)
     assignments = {}
-    for item, picked in zip(usable, best):
-        if picked is None:
+    for item, bucket in zip(usable, votes):
+        if not bucket:
             continue
-        assignments[int(item["seg_index"])] = speaker_cluster_label(picked[1])
+        best_label = max(
+            bucket.items(),
+            key=lambda pair: (pair[1], -pair[0]),
+        )[0]
+        assignments[int(item["seg_index"])] = speaker_cluster_label(best_label)
     updated = update_dialogue_segment_speakers(vid, assignments, config=config)
     speaker_count = len({label for label in assignments.values()})
     _progress(1.0, "done")
