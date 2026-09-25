@@ -162,48 +162,43 @@ DESCRIPTION_LANGUAGE_PROMPTS = {
 # Motion mode: stitched earlier/later frames from the same chunk. Describe change only; optional tags.
 MOTION_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: (
-        "这是一张视频时间片段拼接图。\n"
+        "这是一张视频时间片段拼接图。左侧帧早于右侧帧，图上有时间标注。\n"
+        "只根据画面写短字段，不要写长散文，不要编对白/动机/人物关系。\n"
         "\n"
-        "左侧帧早于右侧帧，图片中有时间标注。\n"
-        "请比较两帧之间的可见变化，只描述该时间段内实际发生的变化。\n"
+        "只输出一个 JSON 对象（可空字段留空字符串或省略）：\n"
+        '{"visible":"谁/在哪/在干什么（只写看见的）",'
+        '"change":"先…再…（两帧之间发生了什么）",'
+        '"tags":["人物","动作","场面"],'
+        '"inferred":"弱推理叙事功能（可空）",'
+        '"inferred_weight":0.0}\n'
         "\n"
-        "要求：\n"
-        "1. 用2-3句中文描述变化。\n"
-        "2. 描述可见的人物、动作、物体、环境、表情和镜头变化。\n"
-        "3. 可以判断片段类型（对话、动作、情绪反应、场景展示、过渡等），"
-        "但不要编造剧情、人物关系或背景原因。\n"
-        "4. 不输出故事总结，不输出 Markdown。\n"
-        "\n"
-        "最后输出 JSON：\n"
-        '{"tags":["男人","起身","手机","室内","近景"]}\n'
-        "\n"
-        "标签规则：\n"
-        "- 只输出画面可确认的信息。\n"
-        "- 标签控制在2-6个字，共2-6个。\n"
-        "- 优先人物、动作、场景、镜头类型。\n"
-        "- 不输出剧情和评价词。"
+        "规则：\n"
+        "1. visible：主体内容，只写可见事实，一句内。\n"
+        "2. change：内容变化；单帧可空。\n"
+        "3. tags：2–6 个短标签（2–6 字），优先人物/动作/场面/镜头；可搜可过滤。\n"
+        "4. inferred：弱推理（如像对质/像告别），看不清就空着；禁止写成硬事实。\n"
+        "5. inferred_weight：0～1；画面直白才高（少用），模糊则低或 0；空 inferred 时用 0。\n"
+        "6. 不输出 Markdown，不输出故事总结。"
     ),
     CAPTION_LANGUAGE_EN: (
-        "This is a stitched image of two frames from the same video span.\n"
+        "This is a stitched image of two frames from the same video span. "
+        "Left is earlier than right; the image is time-labeled.\n"
+        "Write short fields only—no long prose, no invented dialogue/motives/relationships.\n"
         "\n"
-        "The left frame is earlier than the right. The image is time-labeled.\n"
-        "Compare the two frames and describe only visible changes that actually happen in this span.\n"
+        "Output one JSON object (empty fields may be \"\" or omitted):\n"
+        '{"visible":"who/where/doing what (seen only)",'
+        '"change":"first… then… (what changed between frames)",'
+        '"tags":["person","action","scene"],'
+        '"inferred":"weak narrative role (optional)",'
+        '"inferred_weight":0.0}\n'
         "\n"
-        "Requirements:\n"
-        "1. Describe the change in 2-3 English sentences.\n"
-        "2. Cover visible people, actions, objects, setting, expressions, and camera change.\n"
-        "3. You may label the beat type (dialogue, action, reaction, establishing, transition), "
-        "but do not invent plot, relationships, or off-screen causes.\n"
-        "4. No story summary. No markdown.\n"
-        "\n"
-        "Finally output JSON:\n"
-        '{"tags":["man","stands up","phone","indoor","close-up"]}\n'
-        "\n"
-        "Tag rules:\n"
-        "- Only what the picture confirms.\n"
-        "- Short tags (1-3 words), 2-6 tags total.\n"
-        "- Prefer people, action, place, shot type.\n"
-        "- No plot labels or value judgments."
+        "Rules:\n"
+        "1. visible: subject content; visible facts only; one short line.\n"
+        "2. change: what changed; empty OK for a single frame.\n"
+        "3. tags: 2–6 short tags (1–3 words); prefer people/action/place/shot; searchable.\n"
+        "4. inferred: weak guess (e.g. confrontation/farewell); leave empty if unclear; never hard fact.\n"
+        "5. inferred_weight: 0–1; high only when the picture is obvious (rare); low/0 when fuzzy; 0 if inferred empty.\n"
+        "6. No markdown. No story summary."
     ),
 }
 VIDEO_SUMMARY_LANGUAGE_PROMPTS = {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from src.services.understanding_tags import format_tags_for_display, parse_vlm_tag_list
@@ -69,6 +70,39 @@ class UnderstandingTagsTests(unittest.TestCase):
         junk = "佩戴长手套的女性角色正伸手触碰一张橙色皮质座椅"
         self.assertEqual(normalize_tag_text(junk), "")
         self.assertEqual(projectable_tags([junk, "动作", "人物"]), ["动作", "人物"])
+
+    def test_parse_motion_structured_json(self):
+        from src.services.understanding_tags import format_motion_cap_text, parse_motion_vlm_payload
+
+        raw = json.dumps(
+            {
+                "visible": "柜台前两人相对",
+                "change": "店长把支票推回去",
+                "tags": ["人物", "动作", "柜台"],
+                "inferred": "像拒收",
+                "inferred_weight": 0.4,
+            },
+            ensure_ascii=False,
+        )
+        parsed = parse_motion_vlm_payload(raw)
+        self.assertEqual(parsed["visible"], "柜台前两人相对")
+        self.assertEqual(parsed["change"], "店长把支票推回去")
+        self.assertEqual(parsed["tags"], ["人物", "动作", "柜台"])
+        self.assertEqual(parsed["inferred"], "像拒收")
+        self.assertAlmostEqual(parsed["inferred_weight"], 0.4)
+        self.assertEqual(
+            format_motion_cap_text(parsed["visible"], parsed["change"]),
+            "柜台前两人相对；店长把支票推回去",
+        )
+
+    def test_parse_motion_legacy_prose_plus_tags(self):
+        from src.services.understanding_tags import parse_motion_vlm_payload
+
+        raw = '考官微笑特写。\n{"tags":["对话"]}'
+        parsed = parse_motion_vlm_payload(raw)
+        self.assertIn("考官", parsed["visible"])
+        self.assertEqual(parsed["tags"], ["对话"])
+        self.assertEqual(parsed["inferred_weight"], 0.0)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Mapping
 
 # Short labels only — never truncate prose into fake tags (motion mode used to).
 _TAG_MAX_CHARS = 16
@@ -218,3 +218,121 @@ def parse_vlm_tag_list(raw_text: str, *, max_tags: int = _TAG_MAX_COUNT) -> List
 
 def format_tags_for_display(tags: Iterable[str], *, separator: str = " · ") -> str:
     return str(separator).join(_dedupe_tags(tags))
+
+
+def format_motion_cap_text(visible: str = "", change: str = "", *, joiner: str = "；") -> str:
+    """Compose backward-compatible one-line cap from structured motion fields."""
+    parts = [str(visible or "").strip(), str(change or "").strip()]
+    body = str(joiner).join(part for part in parts if part)
+    return body
+
+
+def _clamp_inferred_weight(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        weight = float(value)
+    except (TypeError, ValueError):
+        return None
+    if weight != weight:  # NaN
+        return None
+    return round(min(1.0, max(0.0, weight)), 3)
+
+
+def _motion_fields_from_mapping(payload: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, Mapping):
+        return None
+    visible = str(payload.get("visible") or payload.get("subject") or "").strip()
+    change = str(payload.get("change") or payload.get("delta") or "").strip()
+    inferred = str(payload.get("inferred") or payload.get("soft") or "").strip()
+    tags = _tags_from_json_payload(payload)
+    if tags is None:
+        tags = []
+    weight = _clamp_inferred_weight(payload.get("inferred_weight"))
+    if not inferred:
+        weight = 0.0 if weight is None else weight
+    # Accept if any structured field is present (including tags-only legacy JSON).
+    if not (visible or change or inferred or tags or "inferred_weight" in payload or "visible" in payload or "change" in payload):
+        return None
+    if inferred and weight is None:
+        weight = 0.35
+    if not inferred:
+        weight = 0.0
+    return {
+        "visible": visible[:120],
+        "change": change[:120],
+        "tags": _dedupe_tags(tags, limit=8),
+        "inferred": inferred[:80],
+        "inferred_weight": float(weight or 0.0),
+    }
+
+
+def parse_motion_vlm_payload(raw_text: str) -> dict[str, Any]:
+    """Parse motion VLM output into visible/change/tags/inferred(+weight).
+
+    Legacy prose + trailing ``{"tags":[...]}`` still works: prose becomes visible
+    (or visible+change if two sentences), tags from JSON.
+    """
+    text = str(raw_text or "").strip()
+    empty = {
+        "visible": "",
+        "change": "",
+        "tags": [],
+        "inferred": "",
+        "inferred_weight": 0.0,
+    }
+    if not text:
+        return empty
+
+    candidates: list[str] = []
+    fenced = _JSON_FENCE_RE.search(text)
+    if fenced:
+        candidates.append(fenced.group(1).strip())
+    candidates.append(text)
+    # Trailing object after prose.
+    brace = text.find("{")
+    if brace > 0:
+        candidates.append(text[brace:].strip())
+    candidates.append(_normalize_jsonish(text))
+
+    for candidate in candidates:
+        body = str(candidate or "").strip()
+        if not body:
+            continue
+        try:
+            parsed = json.loads(body if body[:1] in {"{", "["} else body)
+        except Exception:
+            try:
+                parsed = json.loads(_normalize_jsonish(body))
+            except Exception:
+                continue
+        if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+            parsed = parsed[0]
+        fields = _motion_fields_from_mapping(parsed if isinstance(parsed, dict) else None)
+        if fields is None:
+            continue
+        # Pure tags JSON (old motion): leave visible empty unless prose prefix exists.
+        if not fields["visible"] and not fields["change"] and brace > 0:
+            prose = text[:brace].strip()
+            prose = re.sub(r"\s+", " ", prose).strip()
+            if prose and not prose.startswith("{"):
+                # Keep one short visible line; do not invent a change from leftover tags JSON.
+                line = prose.split("\n", 1)[0].strip()
+                fields["visible"] = line[:120]
+        return fields
+
+    # No JSON object: do not invent structure from long prose beyond a short visible line.
+    tags = parse_vlm_tag_list(text)
+    if _looks_like_prose(text):
+        line = text.split("\n", 1)[0].strip()
+        json_at = line.find("{")
+        if json_at > 0:
+            line = line[:json_at].strip()
+        return {
+            "visible": line[:120],
+            "change": "",
+            "tags": tags,
+            "inferred": "",
+            "inferred_weight": 0.0,
+        }
+    return {**empty, "tags": tags}

@@ -211,6 +211,37 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(chunks[0]["cap"], "考官微笑特写。")
         self.assertEqual(chunks[0]["tags"], ["对话"])
 
+    def test_compact_motion_prefers_visible_change_fields(self):
+        evidence = {
+            "chunks": [
+                {
+                    "chunk_index": 1,
+                    "start_sec": 10.0,
+                    "end_sec": 18.0,
+                    "tags": [],
+                    "evidence": {
+                        "vision": {
+                            "image_caption": {
+                                "visible": "柜台前两人",
+                                "change": "支票被推回",
+                                "tags": ["人物", "动作"],
+                                "inferred": "像拒收",
+                                "inferred_weight": 0.35,
+                                "text": "柜台前两人；支票被推回",
+                            }
+                        }
+                    },
+                }
+            ]
+        }
+        chunks = compact_motion_chunks(evidence)
+        self.assertEqual(chunks[0]["cap"], "柜台前两人；支票被推回")
+        self.assertEqual(chunks[0]["visible"], "柜台前两人")
+        self.assertEqual(chunks[0]["change"], "支票被推回")
+        self.assertEqual(chunks[0]["tags"], ["人物", "动作"])
+        self.assertEqual(chunks[0]["inferred"], "像拒收")
+        self.assertAlmostEqual(chunks[0]["inferred_weight"], 0.35)
+
     def test_apply_recap_skip_marks_op_ed_from_asr_and_tail(self):
         from src.services.recap_service import apply_recap_skip_marks
 
@@ -2024,10 +2055,11 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("场面转到", RECAP_VO_STYLE_POLICY)
         self.assertIn("按台词做整体剧情推理", RECAP_EVIDENCE_POLICY)
         self.assertIn("禁止用常识", RECAP_EVIDENCE_POLICY)
-        self.assertIn("渲染氛围", RECAP_EVIDENCE_POLICY)
+        self.assertIn("visible+change", RECAP_EVIDENCE_POLICY)
+        self.assertIn("inferred", RECAP_EVIDENCE_POLICY)
         self.assertIn("张冠李戴", RECAP_EVIDENCE_POLICY)
         self.assertIn("directly support", RECAP_EVIDENCE_POLICY_EN)
-        self.assertIn("atmosphere", RECAP_EVIDENCE_POLICY_EN)
+        self.assertIn("visible+change", RECAP_EVIDENCE_POLICY_EN)
         self.assertIn("Infer causality from asr", RECAP_PLAN_SYSTEM_EN)
         self.assertIn("自相矛盾", RECAP_FACT_POLICY)
         self.assertIn("同一个「他」", RECAP_NAME_POLICY)

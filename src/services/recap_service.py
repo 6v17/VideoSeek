@@ -99,7 +99,8 @@ RECAP_EVIDENCE_POLICY = """【证据】
 1. asr speaker+text = 绝对证据；禁止张冠李戴；禁止发明从未说过的台词或转述。
    允许按台词做整体剧情推理，但只许推出对白能直接支撑的因果；禁止用常识/设定/脑补补洞。
 2. 对白里的称呼/人名按原句归属。
-3. VLM caps 作为剧情辅助证据，优先在解说所用台词对应时间附近挑选符合剧情解说的画面，渲染氛围；与 asr 冲突时听对白。
+3. VLM：asr > visible+change（主画面证据，合成在 cap）> tags > inferred（弱推理，带权重）。
+   inferred 不是事实、不进硬旁白依据；仅可作规划/选镜软参考。与 asr 冲突时听对白。
 4. event/reason/outline 只是剪辑意图，不是事实；口播禁止用它们补全剧情、对白。
 本镜 span 无 asr：禁止写「XX说/问/答」及任何转述台词。
 本镜 span 无 asr 且无 caps：旁白必须空着或一句极短场面用于过渡，禁止编因果。
@@ -271,7 +272,8 @@ RECAP_EVIDENCE_POLICY_EN = """[Evidence]
 1. asr speaker+text is absolute; never misattribute; never invent spoken lines or paraphrased quotes.
    You may infer overall plot from dialogue, but only causality the lines directly support—no common-sense / lore / guesswork gaps.
 2. Names/addresses in dialogue stay with the original utterance.
-3. VLM caps are supporting story evidence: prefer shots near the dialogue used in the VO that fit the narration and set atmosphere; when they conflict with asr, trust dialogue.
+3. VLM priority: asr > visible+change (main picture evidence, composed into cap) > tags > inferred (weak, weighted).
+   inferred is not fact and never hard VO evidence—optional soft hint for planning/matching only. When caps conflict with asr, trust dialogue.
 4. event/reason/outline is cut intent, not fact—never use it to invent plot or dialogue in the VO.
 No asr in this span: ban “X said/asked/answered” and any reported speech.
 No asr and no caps: leave VO empty or one tiny transitional scene beat—do not invent causality.
@@ -1240,28 +1242,68 @@ def _caption_one_liner(text: str, limit: int = 72) -> str:
 
 
 def compact_motion_chunks(evidence: Mapping[str, Any]) -> list[dict[str, Any]]:
+    from src.services.understanding_tags import format_motion_cap_text, parse_motion_vlm_payload
+
     chunks = []
     for raw in evidence.get("chunks") or []:
         if not isinstance(raw, Mapping):
             continue
         caption = ""
+        visible = ""
+        change = ""
+        inferred = ""
+        inferred_weight = 0.0
         vision = ((raw.get("evidence") or {}).get("vision") or {})
         image = vision.get("image_caption") or {}
         if isinstance(image, Mapping):
-            caption = _caption_one_liner(str(image.get("text") or ""), limit=160)
-        tags = [str(t).strip() for t in (raw.get("tags") or []) if str(t).strip()]
+            visible = str(image.get("visible") or "").strip()
+            change = str(image.get("change") or "").strip()
+            inferred = str(image.get("inferred") or "").strip()
+            try:
+                inferred_weight = float(image.get("inferred_weight") or 0.0)
+            except (TypeError, ValueError):
+                inferred_weight = 0.0
+            caption = format_motion_cap_text(visible, change)
+            parsed_tags: list[str] = []
+            if not caption or (not visible and not change) or not image.get("tags"):
+                parsed = parse_motion_vlm_payload(str(image.get("text") or image.get("raw_text") or ""))
+                visible = visible or str(parsed.get("visible") or "").strip()
+                change = change or str(parsed.get("change") or "").strip()
+                if not inferred:
+                    inferred = str(parsed.get("inferred") or "").strip()
+                    try:
+                        inferred_weight = float(parsed.get("inferred_weight") or 0.0)
+                    except (TypeError, ValueError):
+                        inferred_weight = 0.0
+                parsed_tags = [str(t).strip() for t in (parsed.get("tags") or []) if str(t).strip()]
+                caption = format_motion_cap_text(visible, change) or _caption_one_liner(
+                    str(image.get("text") or ""), limit=160
+                )
+            tags = [
+                str(t).strip()
+                for t in (image.get("tags") or parsed_tags or raw.get("tags") or [])
+                if str(t).strip()
+            ]
+        else:
+            tags = [str(t).strip() for t in (raw.get("tags") or []) if str(t).strip()]
         tags = [t for t in tags if len(t) <= 12][:8]
-        skip = "op_ed" if looks_like_op_ed_text(caption, " ".join(tags)) else ""
-        chunks.append(
-            {
-                "i": int(raw.get("chunk_index", 0) or 0),
-                "t": [round(float(raw.get("start_sec", 0.0) or 0.0), 2), round(float(raw.get("end_sec", 0.0) or 0.0), 2)],
-                "dur": round(max(0.0, float(raw.get("end_sec", 0.0) or 0.0) - float(raw.get("start_sec", 0.0) or 0.0)), 2),
-                "tags": tags,
-                "cap": caption,
-                "skip": skip,
-            }
-        )
+        skip = "op_ed" if looks_like_op_ed_text(caption, " ".join(tags), inferred) else ""
+        row = {
+            "i": int(raw.get("chunk_index", 0) or 0),
+            "t": [round(float(raw.get("start_sec", 0.0) or 0.0), 2), round(float(raw.get("end_sec", 0.0) or 0.0), 2)],
+            "dur": round(max(0.0, float(raw.get("end_sec", 0.0) or 0.0) - float(raw.get("start_sec", 0.0) or 0.0)), 2),
+            "tags": tags,
+            "cap": caption,
+            "skip": skip,
+        }
+        if visible:
+            row["visible"] = visible[:120]
+        if change:
+            row["change"] = change[:120]
+        if inferred:
+            row["inferred"] = inferred[:80]
+            row["inferred_weight"] = round(min(1.0, max(0.0, inferred_weight)), 3)
+        chunks.append(row)
     return chunks
 
 
@@ -1318,6 +1360,14 @@ def overlay_motion_captions(
                 item["cap"] = extra.get("cap") or ""
             if extra.get("tags"):
                 item["tags"] = list(extra.get("tags") or [])
+            for key in ("visible", "change", "inferred"):
+                if str(extra.get(key) or "").strip():
+                    item[key] = str(extra.get(key) or "").strip()
+            if extra.get("inferred_weight") is not None:
+                try:
+                    item["inferred_weight"] = float(extra.get("inferred_weight") or 0.0)
+                except (TypeError, ValueError):
+                    pass
             if str(extra.get("skip") or "").strip():
                 item["skip"] = str(extra.get("skip") or "").strip()
         if chunk_i is not None:
@@ -3948,6 +3998,8 @@ def _evidence_for_source_span(
     cap_limit: int = 6,
 ) -> dict[str, list[dict[str, Any]]]:
     """ASR lines + VLM caps overlapping a source span (for caption rewrite)."""
+    from src.services.understanding_tags import format_motion_cap_text
+
     if not pack:
         return {"asr": [], "caps": []}
     try:
@@ -3990,7 +4042,10 @@ def _evidence_for_source_span(
     for chunk in pack.get("chunks") or []:
         if not isinstance(chunk, Mapping):
             continue
-        cap = str(chunk.get("cap") or "").strip()
+        cap = format_motion_cap_text(
+            str(chunk.get("visible") or ""),
+            str(chunk.get("change") or ""),
+        ) or str(chunk.get("cap") or "").strip()
         if not cap:
             continue
         span = _time_span(chunk.get("t"))
@@ -3998,13 +4053,21 @@ def _evidence_for_source_span(
             continue
         if str(chunk.get("skip") or "").strip():
             continue
-        cap_rows.append(
-            {
-                "i": chunk.get("i"),
-                "t": [round(span[0], 2), round(span[1], 2)],
-                "cap": cap[:160],
-            }
-        )
+        row = {
+            "i": chunk.get("i"),
+            "t": [round(span[0], 2), round(span[1], 2)],
+            "cap": cap[:160],
+        }
+        # Soft signal only — never treat as hard fact in prompts that read caps.
+        inferred = str(chunk.get("inferred") or "").strip()
+        try:
+            weight = float(chunk.get("inferred_weight") or 0.0)
+        except (TypeError, ValueError):
+            weight = 0.0
+        if inferred and weight >= 0.55:
+            row["inferred"] = inferred[:60]
+            row["inferred_weight"] = round(min(1.0, weight), 2)
+        cap_rows.append(row)
         if len(cap_rows) >= max(1, int(cap_limit or 6)):
             break
     return {"asr": asr_rows, "caps": cap_rows}

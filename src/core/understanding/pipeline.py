@@ -254,10 +254,28 @@ class UnderstandingPipeline:
 
     def _wrap_step_result(self, component_id: str, step_name: str, infer_result: Mapping[str, Any]) -> dict[str, Any]:
         if step_name == "image_caption":
-            from src.services.understanding_resource_service import UNDERSTANDING_MODE_TAGS
-            from src.services.understanding_tags import format_tags_for_display, parse_vlm_tag_list
+            from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION, UNDERSTANDING_MODE_TAGS
+            from src.services.understanding_tags import (
+                format_motion_cap_text,
+                format_tags_for_display,
+                parse_motion_vlm_payload,
+                parse_vlm_tag_list,
+            )
 
             raw_text = str(infer_result.get("text", "") or "").strip()
+            if self.output_mode == UNDERSTANDING_MODE_MOTION:
+                motion = parse_motion_vlm_payload(raw_text)
+                display = format_motion_cap_text(motion["visible"], motion["change"]) or raw_text
+                return {
+                    "source": component_id,
+                    "text": display,
+                    "raw_text": raw_text,
+                    "tags": list(motion.get("tags") or []),
+                    "visible": motion.get("visible") or "",
+                    "change": motion.get("change") or "",
+                    "inferred": motion.get("inferred") or "",
+                    "inferred_weight": float(motion.get("inferred_weight") or 0.0),
+                }
             tags = parse_vlm_tag_list(raw_text)
             if self.output_mode == UNDERSTANDING_MODE_TAGS:
                 display_text = format_tags_for_display(tags) if tags else raw_text
