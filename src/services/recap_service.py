@@ -28,8 +28,8 @@ MAX_CLIP_SEC = 12.0
 MAX_TTS_CLIP_SEC = 36.0
 TARGET_RECAP_SEC = 330
 MIN_RECAP_SEC = 180
-MAX_RECAP_SEC = 480
-RECAP_STORY_RATIO = 0.18
+MAX_RECAP_SEC = 720
+RECAP_STORY_RATIO = 0.38
 VO_FILL_RATIO = 0.82
 VO_COVER_RATIO = 0.82
 MIN_VO_FILL = 0.70
@@ -37,23 +37,26 @@ MAX_VO_FILL = 0.90
 MIN_BEAT_BUDGET_SEC = 8.0
 MAX_BEAT_BUDGET_SEC = 24.0
 HARD_MIN_BEAT_SEC = 6.0
-MAX_STORY_BEATS = 32
-MAX_GAP_FILL_WINDOWS = 10
+MAX_STORY_BEATS = 120
+MAX_GAP_FILL_WINDOWS = 8
 MAX_PLAN_BEATS = MAX_STORY_BEATS
 RECAP_START_PLAN = "plan"
 RECAP_START_PLAN_ONLY = "plan_only"
 RECAP_START_MATCH = "match"
 RECAP_START_CAPTIONS = "captions"
-MATCH_BEATS_PER_WAVE = 4
-CAPTION_CLIPS_PER_WAVE = 10
-ENDING_COVER_RATIO = 0.90
-RECAP_OCR_LIMIT = 520
-PLAN_ACT_ASR_LIMIT = 200
-PLAN_ACT_TARGET_SEC = 420.0
+MATCH_BEATS_PER_WAVE = 5
+VO_DRAFT_BEATS_PER_WAVE = 8
+CAPTION_CLIPS_PER_WAVE = 12
+ENDING_COVER_RATIO = 0.97
+RECAP_OCR_LIMIT = 420
+PLAN_ACT_ASR_LIMIT = 160
+PLAN_ACT_TARGET_SEC = 480.0
 MAX_CAPTION_SEC = 18.0
 MIN_BRIDGE_SEC = 2.4
 SOURCE_MERGE_GAP_SEC = 1.25
 SOURCE_OVERLAP_MERGE_SEC = 0.2
+SOURCE_REUSE_RATIO = 0.42
+SOURCE_ADJACENT_REUSE_RATIO = 0.30
 MIN_FLASH_CLIP_SEC = 2.4
 MIN_STANDALONE_CLIP_SEC = 2.4
 MAX_VO_SENTENCE_CHARS = 34
@@ -70,6 +73,39 @@ MAX_WEAK_REMATCH_BEATS = 8
 _TEXTURE_BEAT_RE = re.compile(
     r"(设定|世界观|规则说明|能力说明|教室|空间|角色侧面|性格|态度|习惯|表情|换场|过渡|气氛|环境)"
 )
+_DIALOGUE_OUTCOME_RE = re.compile(
+    r"(不行|不可以|别再|不许|拒绝|拒收|拒了|收下|接住|答应|同意|成交|决定|胜负|赢了|输了|揭穿|识破|"
+    r"坦白|承认|否认|推回|还回去|交给你|就这样|算了|滚|走开|回去吧|走吧|没事了|放过|"
+    r"原谅|解决|搞定|到此为止|就到这|回头见|离开|真相|结果出来|全勾完|结束了|完了|完蛋|成立|不成立|"
+    r"refuse|reject|accept|deal|decide|won|lost|confess|deny)",
+    re.IGNORECASE,
+)
+_VO_LAND_HINT_RE = re.compile(
+    r"(拒|答应|同意|决定|收下|推回|收束|落点|结束|算了|离去|离开|揭穿|识破|赢|输|放过|解决|成交)"
+)
+RECAP_FOCUS_GENERIC = "generic"
+RECAP_FOCUS_FLEX = "flex"
+RECAP_FOCUS_ORDEAL = "ordeal"
+RECAP_FOCUS_BOND = "bond"
+RECAP_FOCUS_MODES = (
+    RECAP_FOCUS_GENERIC,
+    RECAP_FOCUS_FLEX,
+    RECAP_FOCUS_ORDEAL,
+    RECAP_FOCUS_BOND,
+)
+RECAP_FOCUS_SOFT_MIN = 0.55
+_FOCUS_FLEX_RE = re.compile(
+    r"(瞧不起|废物|弱者|蝼蚁|不可能|居然|震惊|跪下|臣服|天才|碾压|秒杀|打脸|装逼|"
+    r"小看|不堪一击|笑话|蝼蚁|不自量力|放马过来|受死)",
+)
+_FOCUS_ORDEAL_RE = re.compile(
+    r"(活下去|好痛|好冷|救救|绝望|撑不住|一个人|遗弃|饿|崩溃|好累|好怕|血|"
+    r"为什么.*我|孤单|死掉|撑不下去|好难受)",
+)
+_FOCUS_BOND_RE = re.compile(
+    r"(喜欢你|保护你|跟我走|相信我|谢谢你|别死|救你|牵手|靠近|心动|"
+    r"我会保护|交给我|一起走|不要离开)",
+)
 _OP_ED_RE = re.compile(
     r"(片头曲|片尾曲|片頭曲|オープニング|エンディング|opening\s*theme|ending\s*theme|"
     r"作词|作曲|编曲|作詞|作曲|編曲|主题曲|主題曲|主题歌|主題歌|"
@@ -85,7 +121,7 @@ _VO_WHITESPACE_RE = re.compile(r"\s+")
 RECAP_NAME_POLICY = """【人物】
 1. asr[].speaker 非空 = 谁在说，口播主语必须跟它走；禁止改成别人。
 2. 对白里自报/当面叫名才可绑人，且整集只绑同一个人。
-3. people 只是称呼词典，不是万能替身；本段 asr 未证实的人名禁止写进口播。
+3. people 只是称呼词典；本段 asr 未证实的人名禁止写进口播。
 4. 无人名且 speaker 空时用画面特征称呼；不要瞎起人名；不要把多人并成同一个「他」。
 """
 
@@ -95,67 +131,93 @@ RECAP_FACT_POLICY = """【主谓宾】
 主语只跟 asr.speaker / 对白称呼走，禁止用男主/女主或从 people 乱抓名字顶替。
 """
 
+# Plan stages: facts only — no VO narration rules (those live in RECAP_VO_WRITE_PACK).
+RECAP_EVIDENCE_POLICY_PLAN = """【证据】
+asr 与 caps 同一时间轴共读；只写材料能直接支撑的因果；禁止常识/设定脑补；禁止张冠李戴。
+VLM：visible+change 是画面主证据；inferred 软参考。
+剧情骨架 = 对白簇 + 重叠画面 + 无对白时段；禁止用 importance 决定删哪一段。
+event 不是事实；asr/cap 没有的禁止写。
+"""
+
+# VO stages: includes empty-span narration bans; asr/caps weight follows soft_focus (details in focus hints).
 RECAP_EVIDENCE_POLICY = """【证据】
-1. asr speaker+text = 绝对证据；禁止张冠李戴；禁止发明从未说过的台词或转述。
-   允许按台词做整体剧情推理，但只许推出对白能直接支撑的因果；禁止用常识/设定/脑补补洞。
-2. 对白里的称呼/人名按原句归属。
-3. VLM：asr > visible+change（主画面证据，合成在 cap）> tags > inferred（弱推理，带权重）。
-   inferred 不是事实、不进硬旁白依据；仅可作规划/选镜软参考。与 asr 冲突时听对白。
-4. event/reason/outline 只是剪辑意图，不是事实；口播禁止用它们补全剧情、对白。
-本镜 span 无 asr：禁止写「XX说/问/答」及任何转述台词。
-本镜 span 无 asr 且无 caps：旁白必须空着或一句极短场面用于过渡，禁止编因果。
-asr/cap 没有的内容，一律禁止乱编。
+1. asr speaker+text 与 caps 同一时间轴共读；禁止张冠李戴；禁止发明台词或转述。
+   允许按证据做整体剧情推理，只许推出材料直接支撑的因果；禁止用常识/设定脑补。
+2. 对白称呼/人名按原句归属。
+3. VLM：visible+change 是画面主证据；tags 弱；inferred 软参考。asr/caps 权重跟 soft_focus 走；无 focus 则两边都用、宁短勿编。
+4. 共用同一原片时间轴；禁止用 importance 决定删哪一段。
+5. event/reason/outline 不是事实；口播禁止用它们补剧情/对白。
+本镜无 asr：禁止「XX说/问/答」及转述；可按 caps 写可见推进。
+本镜无 asr 且无 caps：旁白空着或一句极短过渡。
+asr/cap 没有的，一律禁止乱编。
 """
 
 RECAP_VO_STYLE_POLICY = """【口播＝解说稿】
-你在写给人听的解说旁白，不是分镜备注、不是剧情提纲复读、不是字幕翻译。
-第三人称讲清「谁做了什么、出现什么影响、局面怎么变」；句子之间要接得上，听起来像在解说。
-禁止对白复读：禁止照抄 asr 原文/长「」引文；观众自己听得见原片。
-禁止念 caps/服装/站位/镜头；禁止「场面转到/画面中可见」报幕。
-有证据就写推进；证据不够宁可短，禁止注水编造。
+讲剧情走向与场面主内容，不是把对白改成第三人称再念。
+禁止对白复述机（「XX说/问/答/表示」）；禁止肢体流水账；禁止念 caps/站位/镜头；禁止「场面转到」。
+有证据写推进，能短则短；证据不够宁可短，禁止注水。
 """
 
 RECAP_VO_CONTINUITY_POLICY = """【连贯】
-旁白是一条故事线。镜头 ≠ 场景；一镜一句只是字幕单位，不是一镜一场。
-同一小剧场在有证据时写清进入→变化→落点；没有 asr/caps 证据时宁可短/空，禁止为「完整」编造。
-真换场/换冲突（role=bridge 或 need_transition）才承上启下：先一拍收束上一场，再落到本场推进。
-同场多镜接着往下讲，禁止每刀重开、禁止报幕冒充过渡。
-过渡只写 caps/asr 已有内容，禁止用 event 编新对质/揭秘/胜负，禁止跳远。
+旁白是一条故事线。镜头 ≠ 场景；一镜一句只是字幕单位。
+「进入→变化→落点」指剧情因果，不是肢体分镜。有证据讲清因果；没有 asr/caps 宁可短/空。
+【两端都要】新小剧场：有证据就写清进入、中间、落点；禁止丢掉对白里已有的决定/结果。
+真换场（role=bridge / need_transition）才承上启下；同场多镜接着讲。过渡只用 caps/asr 已有内容。
 """
+
+RECAP_VO_WRITE_PACK = (
+    RECAP_NAME_POLICY + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY
+)
+RECAP_PLAN_EVIDENCE_PACK = RECAP_EVIDENCE_POLICY_PLAN + RECAP_FACT_POLICY + RECAP_NAME_POLICY
 
 RECAP_EVIDENCE_REQUIRED_TAGS = ("人物", "动作", "反应", "物品", "对话", "变化", "场面")
 
 RECAP_PLAN_SYSTEM = """你是影视解说的剧情策划：只输出故事线大纲 beats，不写剪辑表、不写口播。
 
-对白时间轴是叙事骨架；Chunk 有 cap 才是视觉证据，没有就写 needed_visual，不要编看见了什么。
-【证据优先】有 asr/cap 支撑才写；禁止为凑条数虚构因果。通常 8–20 条，最多 32；宁少勿编。
-按 id 读 event 必须能听成完整故事：开场进入 → 中段展开推进 → 高潮 → 正片收束（ED 之前）。
-相邻 beats 必须递进或转场（然后呢/所以呢）；禁止丢掉中间展开；禁止大段时间空档无节拍。
-禁止孤立反应句/内心独白当大纲。进入新活动/新空间前必须有进入拍。换场写低权重过渡拍（0.2–0.4）。
-高潮/对决/揭晓/胜负单独成条，importance≥0.85。短而关键可各自成条。收束不可省略。
-event：谁做了什么、局面怎么变；禁止「XX说」对白摘要。
-每条填 evidence_required（人物/动作/反应/物品/对话/变化/场面，1–4 个）与 needed_visual。
-不要选 OP/ED/演职员表/预告。不要编对白没有的关系/动机/背景。
-【禁猜】允许按 asr 台词推理因果，但 asr/cap 撑不住的身份、胜负、动机、关系一律不要写进 event；条数不够就少写，禁止注水虚构。
-""" + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + RECAP_NAME_POLICY + """
-importance 0.05–1.0 看戏剧强度，不是原片时长。只输出 JSON。
+对白时间轴是叙事骨架；有 cap 才是视觉证据，否则写 needed_visual。
+【证据优先】有 asr/cap 支撑才写；条数不设上限：密就写密，禁止为省条数砍中间展开或落点。
+按 id 读 event 须成完整故事：开场进入 → 中段展开 → 高潮 → 正片收束（ED 前）。
+相邻 beats 须递进或转场；禁止大段空档无节拍；进入新空间前须有进入拍；换场用低权重过渡（0.2–0.4）。
+【小剧场】进入 → 中间展开 → 落点；对白里的答应/拒绝/决定/胜负须单独成落点。
+高潮/对决/揭晓 importance≥0.85。event：谁做了什么、局面怎么变；禁止「XX说」。
+每条填 evidence_required（人物/动作/反应/物品/对话/变化/场面，1–4）与 needed_visual。
+不要 OP/ED/演职员表/预告；不要编对白没有的关系/动机。
+""" + RECAP_PLAN_EVIDENCE_PACK + """
+importance 0.05–1.0 只调口播配额，绝不决定删不删。只输出 JSON。
 JSON schema:
 {"title":"...","people":[{"id":"s1","label":"人物A","look":""}],"beats":[{"id":1,"event":"谁做了什么、有什么影响、局面怎么变","importance":0.9,"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}]}
 """
 
 RECAP_PLAN_ACT_SYSTEM = """你是影视解说的分幕剧情策划：只规划【当前这一幕】的故事线 beats，不写剪辑/口播。
 
-本幕 asr 是唯一主叙事骨架；有 cap 才是视觉证据。允许按本幕台词推理因果，禁止用别幕台词、常识或脑补补洞。
-宁可少写几条有证据的，也不要为凑条数编没有 asr/cap 支撑的事件。
-本幕内按因果递进：进入 → 展开 → 本幕落点（非最后一幕时，落点可以是通向下一幕的转场）。
-承接 already 里上一幕最后几条，不要重复，不要推翻已写事实。
+本幕 asr + silent_spans + caps 是材料；有 cap 才是视觉证据。只按本幕推理，禁止别幕/常识脑补。
+撑得住就写够；禁止为省条数砍落点。
+【无对白也要管】silent_spans：有 cap 写视觉推进；无 cap 也要 needed_visual 占位，禁止跳过。
+本幕：进入 → 展开 → 落点（非末幕可接到下一幕）。多段小剧场各自要有展开与落点。
+一次写完：must_land / spine / silent_spans 须盖住。承接 already，勿重复推翻。
 event：谁做了什么、局面怎么变；禁止「XX说/觉得」；禁止男主/女主。
-每条 t 必须落在本幕时间窗内。带 evidence_required 与 needed_visual。
-不要选 OP/ED/演职员表/预告。
-""" + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + RECAP_NAME_POLICY + """
-importance 0.05–1.0。只输出 JSON。
+t 落在本幕窗内并贴 spine/silent_spans；带 evidence_required 与 needed_visual。不要 OP/ED/预告。
+""" + RECAP_PLAN_EVIDENCE_PACK + """
+importance 0.05–1.0 只调口播配额，不决定删段。只输出 JSON。
 JSON schema:
 {"title":"...","people":[{"id":"s1","label":"人物A","look":""}],"beats":[{"id":1,"event":"谁做了什么、局面怎么变","importance":0.9,"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}]}
+"""
+
+RECAP_PLAN_STRUCTURE_SYSTEM = """你是影视解说的结构分析：先通读整集时间轴与带时码台词，理解剧情阶段后，再划分解说分幕。
+不要写 beats、不要写口播、不要选镜。
+
+规则：
+1. 先根据 asr 与 chunks 理解开场/升级/转折/收束，再切幕；禁止固定分钟机械切，也禁止只在静音处乱切。
+2. 幕须首尾相接，盖住整个 story_t，禁止留空洞。
+3. silent_spans（无 asr 仍占时间）必须划进某幕，禁止跳过。
+4. 单幕约 4–10 分钟；禁止整集一幕，也禁止切得过碎（<3 分钟除非总片很短）。
+5. focus 一句话写本幕主阶段/主冲突。
+6. 可选 soft_focus：mode=flex|ordeal|bond|generic 与 confidence(0–1)。
+   flex≈装逼打脸链；ordeal≈先抑独处绝境（画面偏重）；bond≈主1收服/打动副1。
+   吃不准就 generic + 低 confidence；禁止硬套。
+
+只输出 JSON：
+{"acts":[{"t":[0.0,420.0],"focus":"开场建立与第一次冲突"},{"t":[420.0,900.0],"focus":"中段升级与对峙"}],"soft_focus":{"mode":"generic","confidence":0.2,"note":""}}
 """
 
 _RECAP_PLAN_BEAT_SCHEMA = (
@@ -165,8 +227,7 @@ _RECAP_PLAN_BEAT_SCHEMA = (
 
 RECAP_PLAN_HEAD_SYSTEM = """你只补正片开场故事节拍（2–5 条），不写剪辑/口播。
 含冷开场（如有）与片头曲后第一场及紧随推进；不要 OP 本身；不要重复已有事件。
-密稿供用户删减：开场因果宁可多一条，不要跳进中段。
-event 写局面推进；禁止「XX说」；带 evidence_required。
+开场因果宁可多一条，不要跳进中段。event 写局面推进；禁止「XX说」；带 evidence_required。
 """ + RECAP_NAME_POLICY + """
 只输出 JSON。
 JSON schema:
@@ -175,8 +236,7 @@ JSON schema:
 
 RECAP_PLAN_TAIL_SYSTEM = """你只补正片收尾故事节拍（2–5 条），不写剪辑/口播。
 不要 ED/预告；不要重复已有事件；不要从头再讲。
-密稿供用户删减：收束、余波、人物落点要盖住，禁止戛然而止。
-event 写局面推进；禁止「XX说/觉得」；带 evidence_required。
+收束、余波、人物落点要盖住。event 写局面推进；禁止「XX说/觉得」；带 evidence_required。
 """ + RECAP_NAME_POLICY + """
 只输出 JSON。
 JSON schema:
@@ -184,10 +244,9 @@ JSON schema:
 """
 
 RECAP_PLAN_GAP_SYSTEM = """你只补空档里漏掉的故事因果。
-密稿供用户删减：空档里的展开过程要补上，不要只钉一个结果。
-短空档默认 1–2 条；长空档（过程明显多步）可补到 3 条。优先进入拍与中间推进；禁止直接补场内结果。
-t 必须落在当前 gap 内；不要重复 already。
-event 写局面推进；禁止「XX说」；带 evidence_required。
+密稿供用户删减：空档里的进入、展开、落点都要盖住；禁止只钉结果跳过过程。
+短空档 1–2 条；长空档可到 3 条。对白已有答应/拒绝/决定/胜负就必须写成落点。
+t 落在 gap 内；不要重复 already。event 写局面推进；禁止「XX说」；带 evidence_required。
 """ + RECAP_NAME_POLICY + """
 只输出 JSON。
 JSON schema:
@@ -195,11 +254,9 @@ JSON schema:
 """
 
 RECAP_VO_DRAFT_SYSTEM = """你是影视解说撰稿：只写旁白草稿，不选镜、不改 beats。
-
-每条 beat 按其 t 窗内的 asr（绝对）+ caps（辅助）写第三人称解说稿；event/needed_visual 只是意图，不是事实。
-有证据时写清进入→变化→落点，听起来像解说；无 asr 禁止编台词/转述；无 asr 且无 caps 则 text 空着。
-字数约该 beat budget_sec 对应口播的 70–90%。禁止男主/女主；禁止照抄 asr 原文/日语假名。
-""" + RECAP_NAME_POLICY + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + """
+每条 beat 按其 t 窗 asr+caps 写；event/needed_visual 不是事实。字数约 budget 对应口播的 55–80%。
+先读 asr_lines「说话人：台词」；非空说话人须出现在旁白主语。对白已有决定/结果须写落点。
+""" + RECAP_VO_WRITE_PACK + """
 只输出 JSON。
 JSON schema:
 {"drafts":[{"id":1,"text":"第三人称解说。"},{"id":2,"text":""}]}
@@ -207,16 +264,16 @@ JSON schema:
 
 RECAP_SYSTEM = """你是影视解说的选镜节点：按已写好的解说稿（beat.vo）找画面，不改剧情，不写新旁白。
 
-输入：beats（含 vo 解说稿 + evidence_required）、chunks（视觉证据）、对白时间轴（asr.speaker 非空不可改）。
-画面必须能证明这段旁白；优先选 cap 与旁白/event 对得上的 chunk；证据对不上标弱证据，不要硬编。禁止男主/女主。
+输入：beats（含 vo + evidence_required）、chunks、对白时间轴（asr.speaker 非空不可改）。
+画面须能证明旁白；优先 cap 对得上的 chunk；对不上标弱证据。禁止男主/女主。
 
 【镜头】
-1. 每 beat 至少一刀；shots≥2 时必须至少两刀主线（进入/建立 + 关键变化或落点），禁止只剪结果半截。
-2. 先主镜（role 留空），特写/反应才 role=insert；换场才 role=bridge。
-3. insert 贴主镜之后、同 beat 附近；不要把主事件镜标成 insert。
-4. src 落在 chunk 内；普通镜 5–12 秒；同 beat 相邻镜要有新视觉信息。
-5. 该 beat 画面合计时长贴近 vo 口播时长，上限 budget_sec；禁止为凑时长注水。
-6. 不要 OP/ED/演职员表/预告。不要输出 vo 字段（旁白已在 beat.vo）。
+1. 每 beat 至少一刀；shots≥2 时至少两刀主线（进入 + 变化/落点）；禁止同 beat 两刀剪几乎同一段 src。
+2. 先主镜（role 空），特写/反应 role=insert；换场 role=bridge。
+3. insert 贴主镜后；不要把主事件镜标成 insert。
+4. src 落在 chunk 内；普通镜 5–12 秒；禁止跨 beat 复用已选 src。
+5. 画面合计贴近 vo 口播时长，上限 budget_sec。
+6. 不要 OP/ED/演职员表/预告。不要输出 vo 字段。
 """ + RECAP_NAME_POLICY + """
 只输出 JSON。
 JSON schema:
@@ -224,30 +281,23 @@ JSON schema:
 """
 
 RECAP_GAP_SYSTEM = """你是查漏员：画面已锁定，已有字幕不要改；只补整段 beat 仍无旁白的真空洞。
-同 beat 主线已有旁白时，后续空镜留给跨镜，不要近义复读。
-只按本镜 asr（绝对）/caps（辅助）写第三人称解说；event/reason 不是证据。
-无 asr 禁止编台词；无 asr 且无 caps 请 skip。禁止发明剧情、禁止对白复读机。
-字数对照该镜 budget，约 70–90%。有证据才写进入→变化→落点。
-""" + RECAP_NAME_POLICY + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + """
+同 beat 主线已有旁白时，后续空镜留给跨镜，不要近义复读。字数约 budget 的 55–80%。
+""" + RECAP_VO_WRITE_PACK + """
 只输出 JSON。
 JSON schema:
 {"fills":[{"i":3,"text":"第三人称解说","skip":false}]}
 """
 
-RECAP_CAPTION_SYSTEM = """你是口播润色员：画面与解说草稿已齐；不要改镜头；不要整段重写导致掐头去尾。
-
-clips/seed 里已有草稿（vo/vo_draft）时：只润色对齐本 span 的 asr/caps，保留进入→变化→落点，禁止删掉头尾语义去另起炉灶。
-无草稿的 beat 才按 asr/caps 新写；同 beat_id 连续主镜合并一条 caption（from→to）。
-事实只许来自 asr + caps；event/reason/outline 不是证据。无 asr 禁止编台词；无 asr 且无 caps 则空着。
-insert：短句或空着；bridge/真换场才承上启下。禁止近义复读、禁止把原片台词当旁白念。
-""" + RECAP_NAME_POLICY + RECAP_VO_STYLE_POLICY + RECAP_VO_CONTINUITY_POLICY + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + """
+RECAP_CAPTION_SYSTEM = """你是口播润色员：画面与解说草稿已齐；不要改镜头；有草稿只润色对齐 asr/caps，禁止掐头去尾整段重写。
+无草稿才新写；同 beat_id 连续主镜合并 caption（from→to）。insert 短句或空；bridge 才真换场。
+""" + RECAP_VO_WRITE_PACK + """
 只输出 JSON。
 JSON schema:
 {"captions":[{"text":"连贯旁白。","from":1,"to":2},{"text":"下一拍。","from":3,"to":3}]}
 """
 
 RECAP_VO_POLISH_SYSTEM = """你是终稿润色员：只改旁白文字，不改镜头、不补镜、不发明剧情。
-合并近义复读与相邻句复读，修好病句；同 beat 可收成 from→to，后续镜 text 可空；空镜可空着。
+合并近义复读与相邻句复读，修好病句；同 beat 可收成 from→to；空镜可空着。
 禁止对白复读机；已写对的人名保留。
 """ + RECAP_EVIDENCE_POLICY + RECAP_FACT_POLICY + RECAP_VO_STYLE_POLICY + """
 只输出 JSON。
@@ -258,8 +308,8 @@ JSON schema:
 RECAP_NAME_POLICY_EN = """[Characters]
 1. Non-empty asr[].speaker = who is speaking; narration subjects must follow it. Never reassign speech.
 2. Bind a name only from self-intro or direct address in dialogue, and only to one person for the whole episode.
-3. people is a nickname dictionary, not a free cast list; do not put unverified names into VO for this beat.
-4. With no name and empty speaker, use visible traits. Ban “male lead / female lead / protagonist”; do not invent names; do not merge people into one “he/she”.
+3. people is a nickname dictionary; do not put unverified names into VO for this beat.
+4. With no name and empty speaker, use visible traits. Ban lead labels; do not invent names; do not merge people into one “he/she”.
 """
 
 RECAP_FACT_POLICY_EN = """[Subject–verb–object]
@@ -268,34 +318,48 @@ Keep the same fact consistent across the episode; no contradictions.
 Subjects follow asr.speaker / dialogue address only—no lead labels or random people-table names.
 """
 
+RECAP_EVIDENCE_POLICY_PLAN_EN = """[Evidence]
+asr and caps share one clock; write only causality the materials directly support—no lore/common-sense padding; never misattribute.
+VLM: visible+change is main picture evidence; inferred is soft only.
+Spine = dialogue clusters + overlapping caps + no-ASR spans. Never use importance to drop a timed window.
+event is not fact; never write what asr/cap lack.
+"""
+
 RECAP_EVIDENCE_POLICY_EN = """[Evidence]
-1. asr speaker+text is absolute; never misattribute; never invent spoken lines or paraphrased quotes.
-   You may infer overall plot from dialogue, but only causality the lines directly support—no common-sense / lore / guesswork gaps.
+1. asr speaker+text and caps share one clock; never misattribute; never invent spoken lines or paraphrased quotes.
+   Infer plot only from what the materials directly support—no lore / common-sense padding.
 2. Names/addresses in dialogue stay with the original utterance.
-3. VLM priority: asr > visible+change (main picture evidence, composed into cap) > tags > inferred (weak, weighted).
-   inferred is not fact and never hard VO evidence—optional soft hint for planning/matching only. When caps conflict with asr, trust dialogue.
-4. event/reason/outline is cut intent, not fact—never use it to invent plot or dialogue in the VO.
-No asr in this span: ban “X said/asked/answered” and any reported speech.
-No asr and no caps: leave VO empty or one tiny transitional scene beat—do not invent causality.
+3. VLM: visible+change is main picture evidence; tags weak; inferred soft only. asr/caps weight follows soft_focus; if no focus, use both and stay short over inventing.
+4. Share one source clock. Never use importance to drop a timed window.
+5. event/reason/outline is cut intent, not fact—never invent plot or dialogue from it.
+No asr: ban “X said/asked/answered”; caps may still carry visible action.
+No asr and no caps: leave VO empty or one tiny transitional beat.
 Never invent content absent from asr/cap.
 """
 
 RECAP_VO_STYLE_POLICY_EN = """[Voiceover = recap narration]
-Write spoken recap narration people can listen to—not a shot list, outline rehash, or subtitle translation.
-Third-person: who did what, what changed because of it, and how the situation shifted; lines must connect as one VO.
-No dialogue parrot: never copy ASR verbatim (including Japanese kana, full lines, long quotes)—viewers hear the source.
-Do not read caps/costume/blocking/camera; no “the scene shifts to / visible on screen” announcer lines.
-With evidence, advance the story; without evidence, stay short—never invent.
-Write the VO in English.
+Narrate plot direction and the main picture—not dialogue restated in third person.
+Ban dialogue-paraphrase machines; no gesture walkthrough; no reading caps/blocking/camera; no “scene shifts to”.
+With evidence, advance briefly; without evidence, stay short. Write the VO in English.
 """
 
 RECAP_VO_CONTINUITY_POLICY_EN = """[Continuity]
-VO is one storyline. A cut ≠ a new scene; one line per cut is a subtitle unit, not a new scene.
-With evidence, cover enter → change → land; without asr/caps, stay short or empty—never invent for “completeness”.
-Only bridge on real scene/conflict changes (role=bridge or need_transition): one beat to close the prior scene, then advance.
-Same-scene multi-cuts continue the thread—no restart each cut, no fake transitions.
-Transitions use only facts already in caps/asr—no event-invented confrontations, reveals, or outcomes, no jumps.
+VO is one storyline. A cut ≠ a new scene; one line per cut is a subtitle unit.
+“Enter → change → land” means plot causality—not gesture-by-gesture blocking. With evidence, cover it; without asr/caps, stay short/empty.
+[Both ends] New mini-plot: with evidence, cover entry, mid, and land—never drop a decision/outcome already in dialogue.
+Only bridge on real scene changes (role=bridge / need_transition). Transitions use only facts already in caps/asr.
 """
+
+RECAP_VO_WRITE_PACK_EN = (
+    RECAP_NAME_POLICY_EN
+    + RECAP_VO_STYLE_POLICY_EN
+    + RECAP_VO_CONTINUITY_POLICY_EN
+    + RECAP_EVIDENCE_POLICY_EN
+    + RECAP_FACT_POLICY_EN
+)
+RECAP_PLAN_EVIDENCE_PACK_EN = (
+    RECAP_EVIDENCE_POLICY_PLAN_EN + RECAP_FACT_POLICY_EN + RECAP_NAME_POLICY_EN
+)
 
 _RECAP_PLAN_BEAT_SCHEMA_EN = (
     '{"id":1,"event":"who did what and how the situation changed","importance":0.9,'
@@ -304,40 +368,55 @@ _RECAP_PLAN_BEAT_SCHEMA_EN = (
 
 RECAP_PLAN_SYSTEM_EN = """You are the story planner for a film/TV recap: output storyline beats only—no cut list, no VO.
 
-The dialogue timeline is the narrative spine; a chunk is visual evidence only when it has a cap—otherwise write needed_visual, do not invent what was seen.
-[Evidence first] Write only beats asr/cap can support; ban padding invented causality. Usually 8–20 beats, max 32; fewer is better than fiction.
-Reading events by id must sound like a full story: cold open/entry → mid development → climax → wrap before ED.
-Adjacent beats must advance or bridge (and then? / so?); do not keep only endpoints and drop middle beats; no long unbeat gaps.
-No isolated reaction/inner-monologue beats. Entering a new activity/space needs an entry beat. Scene changes get low-weight bridge beats (0.2–0.4).
-Climax/duel/reveal/outcome alone, importance≥0.85. Short decisive actions may be their own beats. Ending cannot be skipped.
-event: who did what and how the situation changed; no “X said/felt/thought” dialogue digests; no lead labels.
+Dialogue timeline is the narrative spine; a chunk is visual evidence only when it has a cap—otherwise write needed_visual.
+[Evidence first] Write beats asr/cap can support; no beat-count ceiling—when dense, write dense; never cut mid-unfold or lands to stay sparse.
+Reading events by id must sound like a full story: entry → mid → climax → wrap before ED.
+Adjacent beats must advance or bridge; no long unbeat gaps; new space needs an entry beat; scene changes get low-weight bridges (0.2–0.4).
+[Mini-plots] enter → mid unfold → land; dialogue decisions/outcomes must be their own land beats.
+Climax/duel/reveal alone, importance≥0.85. event: who did what and how the situation changed; no “X said”.
 Each beat needs evidence_required (人物/动作/反应/物品/对话/变化/场面 — keep these Chinese tokens, 1–4) and needed_visual.
-Skip OP/ED/credits/trailers. Do not invent relations/motives/backstory absent from dialogue.
-[No guessing] Infer causality from asr when the lines support it; do not put identities, outcomes, motives, or relations into event without asr/cap support. Fewer beats beat fiction.
-""" + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + RECAP_NAME_POLICY_EN + """
-importance 0.05–1.0 tracks dramatic strength, not source duration. JSON only.
+Skip OP/ED/credits/trailers. Do not invent relations/motives absent from dialogue.
+""" + RECAP_PLAN_EVIDENCE_PACK_EN + """
+importance 0.05–1.0 only scales VO budget—never whether to drop a timed evidence window. JSON only.
 JSON schema:
 {"title":"...","people":[{"id":"s1","label":"Person A","look":""}],"beats":[{"id":1,"event":"who did what and how the situation changed","importance":0.9,"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}]}
 """
 
 RECAP_PLAN_ACT_SYSTEM_EN = """You plan ONE act of a film/TV recap storyline: beats for this act only—no cut list, no VO.
 
-This act’s asr is the only narrative spine; caps are visual evidence when present. Infer causality from this act’s lines when supported; do not borrow other acts, common sense, or guesswork.
-Prefer fewer evidenced beats over padding invented ones.
-Inside the act: enter → develop → land (or a bridge into the next act if not final).
-Continue from already (prior act endings); do not repeat or contradict.
+Inside this act: asr + silent_spans + caps are the material; caps are visual evidence when present.
+Infer only from this act; no other acts / common sense / guesswork. When supported, write enough—never cut lands to stay sparse.
+[Silent spans count] with caps, write visual-advance beats; without caps, still place needed_visual—never skip “no ASR” time.
+enter → develop → land (or bridge into the next act if not final). Multi mini-plots each need mid + land.
+Finish in one pass: must_land / spine / silent_spans covered. Continue from already; do not repeat or contradict.
 event: who did what and how the situation changed; no “X said/felt”; no lead labels.
-Each t must fall inside this act window. Include evidence_required and needed_visual.
-Skip OP/ED/credits/trailers.
-""" + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + RECAP_NAME_POLICY_EN + """
-importance 0.05–1.0. JSON only.
+t inside this act window, prefer spine / silent_spans; include evidence_required and needed_visual. Skip OP/ED/trailers.
+""" + RECAP_PLAN_EVIDENCE_PACK_EN + """
+importance 0.05–1.0 only scales VO budget—never drops timed evidence. JSON only.
 JSON schema:
 {"title":"...","people":[{"id":"s1","label":"Person A","look":""}],"beats":[{"id":1,"event":"who did what and how the situation changed","importance":0.9,"evidence_required":["人物","动作"],"needed_visual":"","t":[120.0,151.0]}]}
 """
 
+RECAP_PLAN_STRUCTURE_SYSTEM_EN = """You analyze recap structure: read the full timeline and timestamped dialogue first, understand story phases, THEN split into acts.
+Do not write beats, VO, or a cut list.
+
+Rules:
+1. Infer setup / escalation / turn / wrap from asr and chunks; then cut acts. Ban fixed-minute chopping and silence-only cuts.
+2. Acts must abut and cover the entire story_t window—no holes.
+3. silent_spans (no-ASR ranges that still occupy time) must land in some act—never skip them.
+4. Typical act ~4–10 minutes. Ban one act for the whole episode; ban shards under ~3 minutes unless the film is short.
+5. focus is one line naming the act’s phase/conflict.
+6. Optional soft_focus: mode=flex|ordeal|bond|generic with confidence 0–1.
+   flex≈face-slap chain; ordeal≈abandoned ordeal (lean picture); bond≈lead wins over a secondary.
+   Unsure → generic + low confidence; never force a label.
+
+JSON only:
+{"acts":[{"t":[0.0,420.0],"focus":"setup and first clash"},{"t":[420.0,900.0],"focus":"mid escalation"}],"soft_focus":{"mode":"generic","confidence":0.2,"note":""}}
+"""
+
 RECAP_PLAN_HEAD_SYSTEM_EN = """You only add opening story beats (2–5). No cuts/VO.
 Include cold open (if any) and the first post-OP scene plus immediate follow-through; not the OP itself; do not repeat existing events.
-Dense draft OK: prefer one extra opening causal beat over jumping mid-story.
+Prefer one extra opening causal beat over jumping mid-story.
 event advances the situation; no “X said/felt”; include evidence_required (Chinese tokens as in schema).
 """ + RECAP_NAME_POLICY_EN + """
 JSON only.
@@ -347,7 +426,7 @@ JSON schema:
 
 RECAP_PLAN_TAIL_SYSTEM_EN = """You only add closing story beats (2–5). No cuts/VO.
 No ED/trailers; do not repeat existing events; do not restart from the beginning.
-Dense draft OK: cover wrap, aftershock, character landing—no abrupt stop on climax flashback alone.
+Cover wrap, aftershock, character landing.
 event advances the situation; no “X said/felt”; include evidence_required.
 """ + RECAP_NAME_POLICY_EN + """
 JSON only.
@@ -356,10 +435,9 @@ JSON schema:
 """
 
 RECAP_PLAN_GAP_SYSTEM_EN = """You only fill missing causal beats inside a gap. No cuts/VO.
-Dense draft OK: fill the unfolding process, not a single endpoint.
-Short gaps: usually 1–2 beats; long multi-step gaps up to 3. Prefer entry + mid-progress; do not jump to in-scene results.
-t must fall inside the current gap; do not repeat already.
-event advances the situation; no “X said/felt” or lead labels; include evidence_required.
+Cover entry, mid unfold, and land inside the gap. Never result-only without process; never drop a decision/outcome already in dialogue.
+Short gaps: usually 1–2 beats; long multi-step gaps up to 3. t must fall inside the gap; do not repeat already.
+event advances the situation; no “X said/felt”; include evidence_required.
 """ + RECAP_NAME_POLICY_EN + """
 JSON only.
 JSON schema:
@@ -367,11 +445,9 @@ JSON schema:
 """
 
 RECAP_VO_DRAFT_SYSTEM_EN = """You draft recap narration only—no cuts, no beat edits.
-
-For each beat, write third-person English VO from asr (absolute) + caps (support) inside its t window; event/needed_visual is intent, not fact.
-With evidence: enter → change → land as spoken narration; no asr → no reported speech; no asr and no caps → empty text.
-Aim ≈ 70–90% of that beat’s budget_sec speaking length. Ban lead labels; never paste ASR verbatim.
-""" + RECAP_NAME_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + RECAP_VO_CONTINUITY_POLICY_EN + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + """
+For each beat, write English VO from asr+caps inside its t window; event/needed_visual is not fact. Aim ≈ 55–80% of budget speaking length.
+Read asr_lines as “Speaker: line”; non-empty speakers must appear as VO subjects. Dialogue decisions/outcomes must land.
+""" + RECAP_VO_WRITE_PACK_EN + """
 JSON only.
 JSON schema:
 {"drafts":[{"id":1,"text":"Third-person English VO."},{"id":2,"text":""}]}
@@ -379,16 +455,16 @@ JSON schema:
 
 RECAP_SYSTEM_EN = """You are the shot-matching node for a film/TV recap: pick frames that prove the already-written beat.vo narration—do not rewrite plot, do not write new VO.
 
-Input: beats (including vo narration + evidence_required), chunks (visual evidence), dialogue timeline (non-empty asr.speaker is fixed).
-Shots must support the narration; prefer caps that match the VO/event; mark weak evidence when misaligned—do not invent. Ban lead labels.
+Input: beats (including vo + evidence_required), chunks, dialogue timeline (non-empty asr.speaker is fixed).
+Shots must support the narration; prefer caps that match the VO/event; mark weak evidence when misaligned. Ban lead labels.
 
 [Shots]
-1. At least one cut per beat; when shots≥2, at least two primary cuts (enter + change/land)—no result-only stubs.
+1. At least one cut per beat; when shots≥2, at least two primary cuts (enter + change/land).
 2. Primary first (empty role); CU/reaction as role=insert; scene changes as role=bridge.
-3. insert after the primary, near the same beat; never mark the main-event shot as insert.
-4. src stays inside the chunk; normal shots 5–12s; adjacent shots need new visual info.
-5. Total picture for a beat should approximate vo speaking time, capped by budget_sec—no padding.
-6. Skip OP/ED/credits/trailers. Do not output a vo field (narration lives on beat.vo).
+3. insert after the primary; never mark the main-event shot as insert.
+4. src stays inside the chunk; normal shots 5–12s; never reuse a source window already taken.
+5. Total picture for a beat should approximate vo speaking time, capped by budget_sec.
+6. Skip OP/ED/credits/trailers. Do not output a vo field.
 """ + RECAP_NAME_POLICY_EN + """
 JSON only.
 JSON schema:
@@ -396,32 +472,24 @@ JSON schema:
 """
 
 RECAP_GAP_SYSTEM_EN = """You are the gap filler: picture is locked; do not change existing captions; only fill beats that still have no VO.
-If the beat’s main line already has VO, leave later empty cuts for cross-cut continuity—no near-paraphrase repeats.
-Write third-person English VO from asr (absolute) / caps (support) only; outline/event/reason are not evidence.
-No asr: never invent spoken lines; no asr and no caps: skip. No invented plot; no dialogue parrot.
-Length ≈ 70–90% of that cut’s budget when evidence exists.
-""" + RECAP_NAME_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + RECAP_VO_CONTINUITY_POLICY_EN + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + """
+If the beat’s main line already has VO, leave later empty cuts for cross-cut continuity—no near-paraphrase repeats. Length ≈ 55–80% of budget when evidence exists.
+""" + RECAP_VO_WRITE_PACK_EN + """
 JSON only.
 JSON schema:
 {"fills":[{"i":3,"text":"third-person English VO","skip":false}]}
 """
 
-RECAP_CAPTION_SYSTEM_EN = """You polish VO: picture and narration drafts are set—do not change cuts; do not rewrite from scratch and chop head/tail.
-
-When clips/seed already have draft text (vo/vo_draft): polish to align with this span’s asr/caps; keep enter → change → land.
-Only write from scratch for beats with no draft. Merge same beat_id primary cuts into one caption (from→to).
-Facts only from asr + caps; outline/event/reason are not evidence. No asr → no reported speech; no asr and no caps → empty.
-insert: short or empty; bridge / real scene change only for transitions. No near-paraphrase repeats; no dialogue parrot.
-""" + RECAP_NAME_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + RECAP_VO_CONTINUITY_POLICY_EN + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + """
+RECAP_CAPTION_SYSTEM_EN = """You polish VO: picture and narration drafts are set—do not change cuts; with drafts, polish to align asr/caps—do not rewrite from scratch and chop head/tail.
+Only write from scratch for beats with no draft. Merge same beat_id primary cuts into one caption (from→to). insert: short or empty; bridge only for real scene changes.
+""" + RECAP_VO_WRITE_PACK_EN + """
 JSON only.
 JSON schema:
 {"captions":[{"text":"Continuous English VO.","from":1,"to":2},{"text":"Next beat.","from":3,"to":3}]}
 """
 
 RECAP_VO_POLISH_SYSTEM_EN = """You polish the final VO: change narration text only—no cut changes, no new shots, no invented plot.
-Merge near-paraphrase and adjacent repeats; fix broken sentences; same beat may collapse to from→to with later text empty; empty cuts may stay empty.
-No dialogue parrot or lead labels; keep correct names already written.
-Write and keep the VO in English.
+Merge near-paraphrase and adjacent repeats; fix broken sentences; same beat may collapse to from→to with later text empty.
+No dialogue parrot or lead labels; keep correct names already written. Write and keep the VO in English.
 """ + RECAP_EVIDENCE_POLICY_EN + RECAP_FACT_POLICY_EN + RECAP_VO_STYLE_POLICY_EN + """
 JSON only.
 JSON schema:
@@ -435,6 +503,10 @@ RECAP_PLAN_LANGUAGE_PROMPTS = {
 RECAP_PLAN_ACT_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: RECAP_PLAN_ACT_SYSTEM,
     CAPTION_LANGUAGE_EN: RECAP_PLAN_ACT_SYSTEM_EN,
+}
+RECAP_PLAN_STRUCTURE_LANGUAGE_PROMPTS = {
+    CAPTION_LANGUAGE_ZH: RECAP_PLAN_STRUCTURE_SYSTEM,
+    CAPTION_LANGUAGE_EN: RECAP_PLAN_STRUCTURE_SYSTEM_EN,
 }
 RECAP_MATCH_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: RECAP_SYSTEM,
@@ -476,6 +548,10 @@ def default_recap_plan_prompt(language: str | None = None) -> str:
 
 def default_recap_plan_act_prompt(language: str | None = None) -> str:
     return RECAP_PLAN_ACT_LANGUAGE_PROMPTS[normalize_caption_language(language)]
+
+
+def default_recap_plan_structure_prompt(language: str | None = None) -> str:
+    return RECAP_PLAN_STRUCTURE_LANGUAGE_PROMPTS[normalize_caption_language(language)]
 
 
 def default_recap_match_prompt(language: str | None = None) -> str:
@@ -528,7 +604,7 @@ def recap_story_window(duration_sec: float) -> tuple[float, float]:
 
 
 def recap_target_sec(duration_sec: float) -> float:
-    """Scale recap length to the story window, clamped to about 3–8 minutes."""
+    """Scale recap length to the story window, clamped to about 3–12 minutes."""
     _start, story_end = recap_story_window(duration_sec)
     raw = max(0.0, float(story_end or 0.0)) * RECAP_STORY_RATIO
     return round(min(MAX_RECAP_SEC, max(MIN_RECAP_SEC, raw or TARGET_RECAP_SEC)), 1)
@@ -1760,6 +1836,451 @@ def compact_ocr_cues_in_span(
     return sample_timeline_items(cues, cap)
 
 
+def build_asr_vlm_spine(
+    pack: Mapping[str, Any],
+    *,
+    gap_sec: float = 12.0,
+    min_seg_sec: float = 5.0,
+    max_seg_sec: float = 48.0,
+) -> list[dict[str, Any]]:
+    """Cluster ASR on the shared clock and attach overlapping VLM caps — the plot spine."""
+    cues = sorted(
+        (row for row in (pack.get("ocr") or []) if isinstance(row, Mapping) and str(row.get("text") or "").strip()),
+        key=lambda row: float(row.get("start") or 0.0),
+    )
+    chunks = [row for row in (pack.get("chunks") or []) if isinstance(row, Mapping)]
+    if not cues:
+        return []
+    clusters: list[list[Mapping[str, Any]]] = []
+    for cue in cues:
+        start = float(cue.get("start") or 0.0)
+        end = float(cue.get("end") or start)
+        if not clusters:
+            clusters.append([cue])
+            continue
+        prev = clusters[-1]
+        prev_start = float(prev[0].get("start") or 0.0)
+        prev_end = max(float(item.get("end") or item.get("start") or 0.0) for item in prev)
+        if start - prev_end <= float(gap_sec) and (end - prev_start) <= float(max_seg_sec):
+            prev.append(cue)
+        else:
+            clusters.append([cue])
+    spine: list[dict[str, Any]] = []
+    for index, cluster in enumerate(clusters, 1):
+        lo = float(cluster[0].get("start") or 0.0)
+        hi = max(float(item.get("end") or item.get("start") or lo) for item in cluster)
+        if hi - lo < float(min_seg_sec):
+            hi = lo + float(min_seg_sec)
+        picked = cluster if len(cluster) <= 24 else sample_timeline_items(list(cluster), 24)
+        asr_rows: list[dict[str, Any]] = []
+        speakers: list[str] = []
+        for item in picked:
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            speaker = str(item.get("speaker") or "").strip()[:40]
+            row = {
+                "start": round(float(item.get("start") or lo), 2),
+                "end": round(float(item.get("end") or item.get("start") or lo), 2),
+                "text": text[:80],
+            }
+            if speaker:
+                row["speaker"] = speaker
+                if speaker not in speakers:
+                    speakers.append(speaker)
+            asr_rows.append(row)
+        caps: list[dict[str, Any]] = []
+        for chunk in chunks:
+            span = _time_span(chunk.get("t"))
+            if not span:
+                continue
+            if span[1] < lo - 2.0 or span[0] > hi + 2.0:
+                continue
+            cap = str(chunk.get("cap") or "").strip()
+            if not cap:
+                continue
+            caps.append(
+                {
+                    "i": chunk.get("i"),
+                    "t": [round(span[0], 2), round(span[1], 2)],
+                    "cap": cap[:80],
+                }
+            )
+            if len(caps) >= 8:
+                break
+        spine.append(
+            {
+                "i": index,
+                "t": [round(lo, 2), round(hi, 2)],
+                "asr": asr_rows,
+                "caps": caps,
+                "speakers": speakers[:6],
+            }
+        )
+    return expand_spine_plot_phases(spine)
+
+
+def expand_spine_plot_phases(spine: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Split dense dialogue clusters into enter / mid / land so unfold cannot vanish."""
+    out: list[dict[str, Any]] = []
+    for seg in spine or []:
+        if not isinstance(seg, Mapping):
+            continue
+        window = _time_span(seg.get("t"))
+        if not window:
+            continue
+        asr = [row for row in (seg.get("asr") or []) if isinstance(row, Mapping)]
+        caps = [row for row in (seg.get("caps") or []) if isinstance(row, Mapping)]
+        speakers = list(seg.get("speakers") or [])
+        dur = max(0.0, window[1] - window[0])
+        outcomes = [row for row in asr if _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))]
+        needs_split = dur >= 28.0 or len(asr) >= 4 or (outcomes and dur >= 18.0)
+        if not needs_split:
+            row = dict(seg)
+            row["phase"] = "full"
+            out.append(row)
+            continue
+
+        def _slice(lo: float, hi: float, phase: str) -> dict[str, Any] | None:
+            if hi - lo < 3.5:
+                return None
+            sub_asr = [
+                dict(item)
+                for item in asr
+                if float(item.get("end") or item.get("start") or 0.0) >= lo - 0.5
+                and float(item.get("start") or 0.0) <= hi + 0.5
+            ]
+            sub_caps = [
+                dict(item)
+                for item in caps
+                if (_time_span(item.get("t")) or (0.0, 0.0))[0] <= hi + 1.0
+                and (_time_span(item.get("t")) or (0.0, 0.0))[1] >= lo - 1.0
+            ]
+            if not sub_asr and not sub_caps:
+                return None
+            return {
+                "i": seg.get("i"),
+                "t": [round(lo, 2), round(hi, 2)],
+                "asr": sub_asr[:16],
+                "caps": sub_caps[:6],
+                "speakers": speakers[:6],
+                "phase": phase,
+            }
+
+        if outcomes:
+            last = outcomes[-1]
+            try:
+                cue_start = float(last.get("start") or window[0])
+                cue_end = float(last.get("end") or cue_start)
+            except (TypeError, ValueError):
+                cue_start, cue_end = window[0], window[1]
+            land_lo = max(window[0], cue_start - 8.0)
+            land_hi = min(window[1], max(cue_end + 10.0, land_lo + 8.0))
+            mid_hi = max(window[0] + 4.0, land_lo)
+            enter_hi = window[0] + max(8.0, (mid_hi - window[0]) * 0.45)
+            phases = [
+                _slice(window[0], min(enter_hi, mid_hi), "enter"),
+                _slice(min(enter_hi, mid_hi), mid_hi, "mid"),
+                _slice(land_lo, land_hi, "land"),
+            ]
+        else:
+            a = window[0]
+            b = window[0] + dur / 3.0
+            c = window[0] + 2.0 * dur / 3.0
+            d = window[1]
+            phases = [
+                _slice(a, b, "enter"),
+                _slice(b, c, "mid"),
+                _slice(c, d, "land"),
+            ]
+        kept = [item for item in phases if item is not None]
+        if len(kept) <= 1:
+            row = dict(seg)
+            row["phase"] = "full"
+            out.append(row)
+        else:
+            out.extend(kept)
+    # Re-number for stable ids in prompts.
+    for index, row in enumerate(out, 1):
+        row["i"] = index
+    return out
+
+
+def _spine_event_label(seg: Mapping[str, Any]) -> str:
+    asr = [row for row in (seg.get("asr") or []) if isinstance(row, Mapping)]
+    speakers = [str(item).strip() for item in (seg.get("speakers") or []) if str(item).strip()]
+    texts = [re.sub(r"\s+", "", str(row.get("text") or "")) for row in asr if str(row.get("text") or "").strip()]
+    who = speakers[0] if len(speakers) == 1 else ("、".join(speakers[:2]) if speakers else "")
+    phase = str(seg.get("phase") or "full").strip().lower()
+    if phase == "enter":
+        body = texts[0][:22] if texts else ""
+        if who and body:
+            return f"{who}进入局面{body}"
+        if who:
+            return f"{who}进入局面"
+        return f"进入局面{body}" if body else "进入局面"
+    if phase == "mid":
+        body = texts[len(texts) // 2][:22] if texts else ""
+        if who and body:
+            return f"{who}推进冲突{body}"
+        if who:
+            return f"{who}中间展开"
+        return f"中间展开{body}" if body else "中间展开"
+    if phase == "land" or any(_DIALOGUE_OUTCOME_RE.search(text) for text in texts):
+        for text in reversed(texts):
+            if _DIALOGUE_OUTCOME_RE.search(text):
+                body = text[:28]
+                return f"{who}{body}收束局面" if who else f"对白收束至{body}"
+        body = texts[-1][:22] if texts else ""
+        return f"{who}收束至{body}" if who else (f"对白收束至{body}" if body else "对白收束")
+    for text in reversed(texts):
+        if _DIALOGUE_OUTCOME_RE.search(text):
+            body = text[:28]
+            return f"{who}{body}收束局面" if who else f"对白收束至{body}"
+    caps = [str(row.get("cap") or "").strip() for row in (seg.get("caps") or []) if str(row.get("cap") or "").strip()]
+    if who and texts:
+        tail = texts[-1][:22]
+        return f"{who}一带对白推进至{tail}"
+    if caps:
+        return f"画面推进：{caps[0][:28]}"
+    if texts:
+        return f"对白推进至{texts[-1][:28]}"
+    return "时间轴证据推进"
+
+
+def _beat_lands_dialogue_outcome(
+    spans: Sequence[tuple[float, float]],
+    cue_start: float,
+    cue_end: float,
+    *,
+    pad_sec: float = 4.0,
+    land_tail_sec: float = 22.0,
+) -> bool:
+    """True only if some beat includes the cue and ends soon after it (not entry-only)."""
+    for span in spans:
+        if span[0] - pad_sec <= cue_start and cue_end <= span[1] + pad_sec:
+            if span[1] <= cue_end + land_tail_sec:
+                return True
+    return False
+
+
+def ensure_beats_land_dialogue_outcomes(
+    beats: Sequence[Mapping[str, Any]],
+    pack: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Force a land beat on every spoken decision/outcome — entry overlap is not enough."""
+    items = [dict(beat) for beat in beats or []]
+    cues = [row for row in (pack.get("ocr") or []) if isinstance(row, Mapping)]
+    if not cues:
+        return items
+    covered_spans = [span for span in (_time_span(beat.get("t")) for beat in items) if span]
+    used_ids = {int(beat.get("id") or 0) for beat in items if int(beat.get("id") or 0) > 0}
+    next_id = max(used_ids) + 1 if used_ids else 1
+    duration = float(pack.get("duration_sec") or 0.0)
+    story_start, story_end = recap_story_window(duration) if duration > 1.0 else (0.0, duration or 1e9)
+    for cue in cues:
+        text = str(cue.get("text") or "").strip()
+        if not text or not _DIALOGUE_OUTCOME_RE.search(text):
+            continue
+        try:
+            start = float(cue.get("start") or 0.0)
+            end = float(cue.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        if duration >= 360 and start >= story_end:
+            continue
+        if _beat_lands_dialogue_outcome(covered_spans, start, end):
+            continue
+        while next_id in used_ids:
+            next_id += 1
+        speaker = str(cue.get("speaker") or "").strip()
+        who = speaker or "对白"
+        body = re.sub(r"\s+", "", text)[:28]
+        lo = max(story_start if duration >= 360 else 0.0, start - 8.0)
+        hi = min(story_end if duration >= 360 else max(end + 14.0, duration or end + 14.0), end + 14.0)
+        if hi - lo < 3.0:
+            hi = lo + 8.0
+        beat = {
+            "id": next_id,
+            "event": f"{who}{body}收束局面"[:120],
+            "importance": 0.9,
+            "evidence_required": ["人物", "对话"] if speaker else ["对话"],
+            "needed_visual": "",
+            "t": [round(lo, 2), round(hi, 2)],
+            "spine_forced": True,
+            "outcome_forced": True,
+        }
+        items.append(beat)
+        used_ids.add(next_id)
+        covered_spans.append((lo, hi))
+        next_id += 1
+    items.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    return items
+
+
+def ensure_beats_cover_silent_spans(
+    beats: Sequence[Mapping[str, Any]],
+    pack: Mapping[str, Any],
+    *,
+    cover_pad_sec: float = 4.0,
+) -> list[dict[str, Any]]:
+    """Force beats on no-ASR picture spans that still have caps — silent time is still story time."""
+    items = [dict(beat) for beat in beats or []]
+    covered = [span for span in (_time_span(beat.get("t")) for beat in items) if span]
+    used_ids = {int(beat.get("id") or 0) for beat in items if int(beat.get("id") or 0) > 0}
+    next_id = max(used_ids) + 1 if used_ids else 1
+    for silent in story_silent_spans(pack):
+        window = _time_span(silent.get("t"))
+        if not window:
+            continue
+        caps = [row for row in (silent.get("caps") or []) if isinstance(row, Mapping)]
+        if not caps and not silent.get("has_cap"):
+            # Pure dead air with no picture note — still pin a short placeholder if long.
+            if window[1] - window[0] < 20.0:
+                continue
+        if any(
+            span[0] - cover_pad_sec <= window[0] and window[1] <= span[1] + cover_pad_sec
+            for span in covered
+        ):
+            continue
+        while next_id in used_ids:
+            next_id += 1
+        cap0 = str((caps[0] or {}).get("cap") or "").strip() if caps else ""
+        beat = {
+            "id": next_id,
+            "event": (f"无对白画面推进：{cap0}" if cap0 else "无对白时段场面推进")[:120],
+            "importance": 0.55 if cap0 else 0.4,
+            "evidence_required": ["场面", "变化"] if cap0 else ["场面"],
+            "needed_visual": cap0 or "无对白画面变化",
+            "t": [round(window[0], 2), round(window[1], 2)],
+            "spine_forced": True,
+            "silent_forced": True,
+        }
+        items.append(beat)
+        used_ids.add(next_id)
+        covered.append(window)
+        next_id += 1
+    items.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    return items
+
+
+def ensure_beats_cover_spine(
+    beats: Sequence[Mapping[str, Any]],
+    spine: Sequence[Mapping[str, Any]],
+    *,
+    cover_ratio: float = 0.35,
+) -> list[dict[str, Any]]:
+    """Insert missing spine windows the LLM skipped — shared-clock evidence is law."""
+    items = [dict(beat) for beat in beats or []]
+    if not spine:
+        return items
+    covered_spans = [_time_span(beat.get("t")) for beat in items]
+    covered_spans = [span for span in covered_spans if span]
+    used_ids = {int(beat.get("id") or 0) for beat in items if int(beat.get("id") or 0) > 0}
+    next_id = max(used_ids) + 1 if used_ids else 1
+
+    def _overlap_ratio(window: tuple[float, float], span: tuple[float, float]) -> float:
+        lo = max(window[0], span[0])
+        hi = min(window[1], span[1])
+        width = max(0.0, window[1] - window[0])
+        if width <= 0.05:
+            return 0.0
+        return max(0.0, hi - lo) / width
+
+    def _phase_dedicated(window: tuple[float, float], spans: Sequence[tuple[float, float]], phase: str) -> bool:
+        """True when a beat is about this phase — not a blob that swallows enter+mid+land."""
+        phase_dur = max(0.1, window[1] - window[0])
+        mid = 0.5 * (window[0] + window[1])
+        need = 0.55 if phase in {"enter", "mid", "land"} else float(cover_ratio)
+        for span in spans:
+            if _overlap_ratio(window, span) < need:
+                continue
+            beat_dur = max(0.0, span[1] - span[0])
+            # A whole-scene blob must not count as the mid/enter beat.
+            if phase in {"enter", "mid", "land"} and beat_dur > phase_dur + 28.0:
+                if not (span[0] <= mid <= span[1] and beat_dur <= phase_dur * 2.8):
+                    continue
+            if phase in {"enter", "mid", "land"} and not (span[0] - 2.0 <= mid <= span[1] + 2.0):
+                continue
+            return True
+        return False
+
+    for seg in spine:
+        window = _time_span(seg.get("t"))
+        if not window:
+            continue
+        if not (seg.get("asr") or seg.get("caps")):
+            continue
+        phase = str(seg.get("phase") or "full").strip().lower()
+        outcome_rows = [
+            row
+            for row in (seg.get("asr") or [])
+            if isinstance(row, Mapping) and _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))
+        ]
+        # Entry-only overlap must NOT skip a cluster that still lacks a land near the outcome.
+        if outcome_rows and phase in {"land", "full"}:
+            last = outcome_rows[-1]
+            try:
+                cue_start = float(last.get("start") or window[0])
+                cue_end = float(last.get("end") or cue_start)
+            except (TypeError, ValueError):
+                cue_start, cue_end = window[0], window[1]
+            if not _beat_lands_dialogue_outcome(covered_spans, cue_start, cue_end):
+                while next_id in used_ids:
+                    next_id += 1
+                speaker = str(last.get("speaker") or "").strip()
+                speakers = [str(item).strip() for item in (seg.get("speakers") or []) if str(item).strip()]
+                who = speaker or (speakers[0] if speakers else "")
+                body = re.sub(r"\s+", "", str(last.get("text") or ""))[:28]
+                lo = max(window[0], cue_start - 8.0)
+                hi = min(window[1] + 4.0, cue_end + 14.0)
+                if hi - lo < 3.0:
+                    hi = lo + 8.0
+                beat = {
+                    "id": next_id,
+                    "event": (f"{who}{body}收束局面" if who else f"对白收束至{body}")[:120],
+                    "importance": 0.9,
+                    "evidence_required": ["人物", "对话"] if who else ["对话"],
+                    "needed_visual": "",
+                    "t": [round(lo, 2), round(hi, 2)],
+                    "spine_forced": True,
+                    "outcome_forced": True,
+                }
+                items.append(beat)
+                used_ids.add(next_id)
+                covered_spans.append((lo, hi))
+                next_id += 1
+        if _phase_dedicated(window, covered_spans, phase):
+            continue
+        while next_id in used_ids:
+            next_id += 1
+        event = _spine_event_label(seg)
+        caps = seg.get("caps") or []
+        needed = str((caps[0] or {}).get("cap") or "").strip()[:80] if caps else ""
+        importance = 0.9 if phase == "land" or outcome_rows else (0.78 if phase == "mid" else 0.68)
+        evidence = ["对话"]
+        if caps:
+            evidence.append("变化")
+        if any(str(row.get("speaker") or "").strip() for row in (seg.get("asr") or []) if isinstance(row, Mapping)):
+            evidence.insert(0, "人物")
+        beat = {
+            "id": next_id,
+            "event": event[:120],
+            "importance": importance,
+            "evidence_required": evidence[:4],
+            "needed_visual": needed,
+            "t": [round(window[0], 2), round(window[1], 2)],
+            "spine_forced": True,
+            "phase": phase,
+        }
+        items.append(beat)
+        used_ids.add(next_id)
+        covered_spans.append(window)
+        next_id += 1
+    items.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    return items
+
+
 def split_story_into_plan_acts(
     pack: Mapping[str, Any],
     *,
@@ -1828,6 +2349,466 @@ def split_story_into_plan_acts(
             b = hi if index == pieces - 1 else lo + (index + 1) * step
             out.append((a, b))
     return out
+
+
+def story_silent_spans(
+    pack: Mapping[str, Any],
+    *,
+    min_sec: float = 12.0,
+    limit: int = 48,
+) -> list[dict[str, Any]]:
+    """Picture-time windows with little/no ASR — still belong on the story clock."""
+    duration = float(pack.get("duration_sec") or 0.0)
+    story_start, story_end = recap_story_window(duration)
+    if story_end - story_start < 1.0:
+        return []
+    spoken: list[tuple[float, float]] = []
+    for row in pack.get("ocr") or []:
+        if not isinstance(row, Mapping) or not str(row.get("text") or "").strip():
+            continue
+        try:
+            start = float(row.get("start") or 0.0)
+            end = float(row.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        if end < story_start or start > story_end:
+            continue
+        spoken.append((max(story_start, start), min(story_end, end)))
+    spoken.sort()
+    merged: list[tuple[float, float]] = []
+    for lo, hi in spoken:
+        if not merged or lo > merged[-1][1] + 1.0:
+            merged.append((lo, hi))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+    gaps: list[tuple[float, float]] = []
+    cursor = story_start
+    for lo, hi in merged:
+        if lo - cursor >= float(min_sec):
+            gaps.append((cursor, lo))
+        cursor = max(cursor, hi)
+    if story_end - cursor >= float(min_sec):
+        gaps.append((cursor, story_end))
+    chunks = [row for row in (pack.get("chunks") or []) if isinstance(row, Mapping)]
+    out: list[dict[str, Any]] = []
+    for lo, hi in gaps:
+        caps: list[dict[str, Any]] = []
+        for chunk in chunks:
+            span = _time_span(chunk.get("t"))
+            if not span:
+                continue
+            if span[1] < lo - 1.0 or span[0] > hi + 1.0:
+                continue
+            cap = str(chunk.get("cap") or "").strip()
+            if not cap:
+                continue
+            caps.append(
+                {
+                    "i": chunk.get("i"),
+                    "t": [round(span[0], 2), round(span[1], 2)],
+                    "cap": cap[:80],
+                }
+            )
+            if len(caps) >= 4:
+                break
+        out.append(
+            {
+                "t": [round(lo, 2), round(hi, 2)],
+                "kind": "no_asr",
+                "caps": caps,
+                "has_cap": bool(caps),
+            }
+        )
+        if len(out) >= max(1, int(limit or 48)):
+            break
+    return out
+
+
+def normalize_recap_focus(raw: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Clamp soft focus to known modes; low confidence → generic (no forced trope)."""
+    item = dict(raw or {})
+    mode = str(item.get("mode") or RECAP_FOCUS_GENERIC).strip().lower()
+    if mode not in RECAP_FOCUS_MODES:
+        mode = RECAP_FOCUS_GENERIC
+    try:
+        confidence = float(item.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+    if confidence < RECAP_FOCUS_SOFT_MIN:
+        mode = RECAP_FOCUS_GENERIC
+    return {
+        "mode": mode,
+        "confidence": round(confidence, 3),
+        "note": str(item.get("note") or "").strip()[:120],
+        "active": mode != RECAP_FOCUS_GENERIC and confidence >= RECAP_FOCUS_SOFT_MIN,
+    }
+
+
+def infer_recap_focus(pack: Mapping[str, Any]) -> dict[str, Any]:
+    """Heuristic soft prior from ASR patterns + speaker mix + silent picture share."""
+    texts: list[str] = []
+    speakers: set[str] = set()
+    for row in pack.get("ocr") or []:
+        if not isinstance(row, Mapping):
+            continue
+        body = str(row.get("text") or "").strip()
+        if body:
+            texts.append(body)
+        speaker = str(row.get("speaker") or "").strip()
+        if speaker:
+            speakers.add(speaker)
+    blob = "\n".join(texts)
+    flex_hits = len(_FOCUS_FLEX_RE.findall(blob))
+    ordeal_hits = len(_FOCUS_ORDEAL_RE.findall(blob))
+    bond_hits = len(_FOCUS_BOND_RE.findall(blob))
+    duration = float(pack.get("duration_sec") or 0.0)
+    story_start, story_end = recap_story_window(duration) if duration > 1.0 else (0.0, duration)
+    story_dur = max(1.0, story_end - story_start)
+    silent = story_silent_spans(pack)
+    silent_dur = sum(
+        max(0.0, (span[1] - span[0]))
+        for span in (_time_span(row.get("t")) for row in silent)
+        if span
+    )
+    silent_ratio = silent_dur / story_dur
+    speaker_n = len(speakers)
+
+    scores = {
+        RECAP_FOCUS_FLEX: float(flex_hits) + (0.8 if speaker_n >= 3 else 0.0),
+        RECAP_FOCUS_ORDEAL: float(ordeal_hits) + (1.2 if silent_ratio >= 0.22 and speaker_n <= 2 else 0.0),
+        RECAP_FOCUS_BOND: float(bond_hits) + (0.6 if 2 <= speaker_n <= 3 else 0.0),
+    }
+    best_mode, best_score = max(scores.items(), key=lambda item: item[1])
+    second = sorted(scores.values(), reverse=True)[1] if len(scores) > 1 else 0.0
+    if best_score < 2.0 or best_score < second + 1.0:
+        return normalize_recap_focus(
+            {"mode": RECAP_FOCUS_GENERIC, "confidence": 0.25, "note": "heuristic_unclear"}
+        )
+    confidence = min(0.92, 0.45 + 0.12 * best_score + 0.08 * max(0.0, best_score - second))
+    note = {
+        RECAP_FOCUS_FLEX: "heuristic_flex_npc_side",
+        RECAP_FOCUS_ORDEAL: "heuristic_ordeal_picture",
+        RECAP_FOCUS_BOND: "heuristic_bond_secondary",
+    }.get(best_mode, "")
+    return normalize_recap_focus({"mode": best_mode, "confidence": confidence, "note": note})
+
+
+def merge_recap_focus(
+    heuristic: Mapping[str, Any] | None,
+    llm_focus: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Blend LLM soft_focus with heuristic; never force when both are weak."""
+    base = normalize_recap_focus(heuristic)
+    other = normalize_recap_focus(llm_focus) if llm_focus else normalize_recap_focus(None)
+    if not other.get("active") and not base.get("active"):
+        return normalize_recap_focus(
+            {"mode": RECAP_FOCUS_GENERIC, "confidence": max(float(base.get("confidence") or 0.0), float(other.get("confidence") or 0.0)), "note": "soft_inactive"}
+        )
+    if other.get("active") and (
+        not base.get("active") or float(other.get("confidence") or 0.0) >= float(base.get("confidence") or 0.0)
+    ):
+        note = str(other.get("note") or "") or "llm_soft_focus"
+        return normalize_recap_focus(
+            {"mode": other.get("mode"), "confidence": other.get("confidence"), "note": note}
+        )
+    return base
+
+
+def parse_soft_focus_payload(text: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(_extract_json(text))
+    except (json.JSONDecodeError, TypeError, ValueError, RuntimeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    raw = payload.get("soft_focus") or payload.get("focus_prior") or payload.get("recap_focus")
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    mode = str(payload.get("mode") or "").strip().lower()
+    if mode in RECAP_FOCUS_MODES:
+        return {"mode": mode, "confidence": payload.get("confidence"), "note": payload.get("note")}
+    return None
+
+
+def recap_focus_plan_hint(focus: Mapping[str, Any] | None) -> str:
+    info = normalize_recap_focus(focus)
+    if not info.get("active"):
+        return "【软先验】未识别套路：通用进入→展开→收束；禁止硬套标签。\n"
+    mode = str(info.get("mode") or "")
+    if mode == RECAP_FOCUS_FLEX:
+        return (
+            "【软先验·flex】材料支撑时偏：轻视→打脸→收束；多写 NPC 反应，asr 偏重。"
+            "不像就退回通用。\n"
+        )
+    if mode == RECAP_FOCUS_ORDEAL:
+        return (
+            "【软先验·ordeal】材料支撑时偏：抬 silent/caps 画面权；独白与压迫场面同权。"
+            "不像就退回通用。\n"
+        )
+    if mode == RECAP_FOCUS_BOND:
+        return (
+            "【软先验·bond】材料支撑时偏：盯副1态度转折；对白推关系、画面吃反应。"
+            "不像就退回通用。\n"
+        )
+    return ""
+
+
+def recap_focus_vo_hint(focus: Mapping[str, Any] | None) -> str:
+    info = normalize_recap_focus(focus)
+    if not info.get("active"):
+        return ""
+    mode = str(info.get("mode") or "")
+    if mode == RECAP_FOCUS_FLEX:
+        return "软写法：写清谁轻视、谁被打脸、场上结果；NPC 反应可写。\n"
+    if mode == RECAP_FOCUS_ORDEAL:
+        return "软写法：绝境画面与崩溃都要落到旁白；无 asr 可用 caps。\n"
+    if mode == RECAP_FOCUS_BOND:
+        return "软写法：副1态度怎么变、主1做了什么让局面转。\n"
+    return ""
+
+
+def recap_focus_evidence_limits(
+    focus: Mapping[str, Any] | None,
+    *,
+    asr_limit: int = 20,
+    cap_limit: int = 10,
+) -> tuple[int, int]:
+    """Soft-bias how many asr vs caps rows the LLM sees for a span (never hard-drop either)."""
+    info = normalize_recap_focus(focus)
+    base_asr = max(1, int(asr_limit or 20))
+    base_cap = max(1, int(cap_limit or 10))
+    if not info.get("active"):
+        return base_asr, base_cap
+    mode = str(info.get("mode") or "")
+    if mode == RECAP_FOCUS_FLEX:
+        # Dialogue / NPC reactions drive flex; keep caps for reaction close-ups.
+        return min(36, int(round(base_asr * 1.35))), max(base_cap, int(round(base_cap * 0.9)))
+    if mode == RECAP_FOCUS_ORDEAL:
+        # Silent / picture pressure shares weight with ASR.
+        return max(base_asr, int(round(base_asr * 0.95))), min(24, int(round(base_cap * 1.5)))
+    if mode == RECAP_FOCUS_BOND:
+        # Attitude turns live in dialogue; reaction faces in caps.
+        return min(32, int(round(base_asr * 1.15))), min(16, int(round(base_cap * 1.2)))
+    return base_asr, base_cap
+
+
+def build_plan_structure_brief(
+    pack: Mapping[str, Any],
+    *,
+    asr_limit: int = 220,
+    chunk_limit: int = 100,
+) -> dict[str, Any]:
+    """Compact full-story clock for the structure LLM: timeline + timestamped lines + silent spans."""
+    duration = float(pack.get("duration_sec") or 0.0)
+    story_start, story_end = recap_story_window(duration)
+    asr_rows: list[dict[str, Any]] = []
+    for row in pack.get("ocr") or []:
+        if not isinstance(row, Mapping):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            start = float(row.get("start") or 0.0)
+            end = float(row.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        if end < story_start or start > story_end:
+            continue
+        item = {
+            "start": round(start, 2),
+            "end": round(end, 2),
+            "text": text[:100],
+        }
+        speaker = str(row.get("speaker") or "").strip()
+        if speaker:
+            item["speaker"] = speaker[:40]
+        asr_rows.append(item)
+    asr_rows = sample_timeline_items(asr_rows, max(1, int(asr_limit or 220)))
+    chunk_rows: list[dict[str, Any]] = []
+    for row in pack.get("chunks") or []:
+        if not isinstance(row, Mapping):
+            continue
+        span = _time_span(row.get("t"))
+        if not span or span[1] < story_start or span[0] > story_end:
+            continue
+        if str(row.get("skip") or "").strip():
+            continue
+        item = {
+            "i": row.get("i"),
+            "t": [round(span[0], 2), round(span[1], 2)],
+        }
+        cap = str(row.get("cap") or "").strip()
+        if cap:
+            item["cap"] = cap[:80]
+        chunk_rows.append(item)
+    chunk_rows = sample_timeline_items(chunk_rows, max(1, int(chunk_limit or 100)))
+    soft_prior = infer_recap_focus(pack)
+    return {
+        "duration_sec": round(duration, 2),
+        "story_t": [round(story_start, 2), round(story_end, 2)],
+        "people": list(pack.get("people") or [])[:16],
+        "asr": asr_rows,
+        "chunks": chunk_rows,
+        "silent_spans": story_silent_spans(pack),
+        "soft_prior": soft_prior,
+        "soft_prior_note": "仅供参考；吃不准请输出 generic+低 confidence，禁止硬套。",
+    }
+
+
+def parse_plan_act_windows(text: str) -> list[tuple[float, float]]:
+    try:
+        payload = json.loads(_extract_json(text))
+    except (json.JSONDecodeError, TypeError, ValueError, RuntimeError):
+        return []
+    if not isinstance(payload, Mapping):
+        return []
+    raw = payload.get("acts") or payload.get("windows") or payload.get("acts_t") or []
+    if not isinstance(raw, list):
+        return []
+    out: list[tuple[float, float]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        span = _time_span(item.get("t") or item.get("window") or item.get("span"))
+        if not span or span[1] - span[0] < 2.0:
+            continue
+        out.append((float(span[0]), float(span[1])))
+    out.sort(key=lambda item: item[0])
+    return out
+
+
+def normalize_plan_act_windows(
+    windows: Sequence[tuple[float, float]],
+    *,
+    story_start: float,
+    story_end: float,
+    goal_sec: float = PLAN_ACT_TARGET_SEC,
+) -> list[tuple[float, float]]:
+    """Clamp LLM act cuts to the story window, fill holes, merge crumbs, split giants."""
+    lo0 = float(story_start)
+    hi0 = float(story_end)
+    if hi0 - lo0 < 1.0:
+        return []
+    goal = max(180.0, float(goal_sec or PLAN_ACT_TARGET_SEC))
+    raw = [
+        (max(lo0, float(lo)), min(hi0, float(hi)))
+        for lo, hi in windows
+        if float(hi) - float(lo) >= 2.0
+    ]
+    raw = [(lo, hi) for lo, hi in raw if hi > lo + 1.0]
+    raw.sort(key=lambda item: item[0])
+    if not raw:
+        return [(round(lo0, 2), round(hi0, 2))]
+
+    # Merge overlaps / tiny gaps.
+    merged: list[tuple[float, float]] = [raw[0]]
+    for lo, hi in raw[1:]:
+        prev_lo, prev_hi = merged[-1]
+        if lo <= prev_hi + 8.0:
+            merged[-1] = (prev_lo, max(prev_hi, hi))
+        else:
+            merged.append((lo, hi))
+
+    # Fill holes so acts cover the whole story clock (incl. silent picture time).
+    covered: list[tuple[float, float]] = []
+    cursor = lo0
+    for lo, hi in merged:
+        if lo > cursor + 1.0:
+            covered.append((cursor, lo))
+        covered.append((max(cursor, lo), hi))
+        cursor = max(cursor, hi)
+    if cursor < hi0 - 1.0:
+        covered.append((cursor, hi0))
+    if covered and covered[0][0] > lo0 + 1.0:
+        covered.insert(0, (lo0, covered[0][0]))
+
+    # Merge crumbs under 60s into neighbors.
+    tightened: list[tuple[float, float]] = []
+    for lo, hi in covered:
+        if hi - lo < 60.0 and tightened:
+            prev_lo, _prev_hi = tightened[-1]
+            tightened[-1] = (prev_lo, hi)
+        else:
+            tightened.append((lo, hi))
+    if len(tightened) >= 2 and tightened[-1][1] - tightened[-1][0] < 60.0:
+        prev_lo, _ = tightened[-2]
+        last_hi = tightened[-1][1]
+        tightened = tightened[:-2] + [(prev_lo, last_hi)]
+
+    out: list[tuple[float, float]] = []
+    for lo, hi in tightened:
+        span = hi - lo
+        if span <= goal * 1.45:
+            out.append((round(lo, 2), round(hi, 2)))
+            continue
+        pieces = max(2, int(round(span / goal)))
+        step = span / float(pieces)
+        for index in range(pieces):
+            a = lo + index * step
+            b = hi if index == pieces - 1 else lo + (index + 1) * step
+            out.append((round(a, 2), round(b, 2)))
+    return out or [(round(lo0, 2), round(hi0, 2))]
+
+
+def resolve_plan_act_windows(
+    pack: Mapping[str, Any],
+    *,
+    config=None,
+    language: str | None = None,
+    should_stop_callback: Callable[[], bool] | None = None,
+    progress_callback: Callable[..., Any] | None = None,
+) -> tuple[list[tuple[float, float]], list[str], dict[str, Any]]:
+    """Understand timeline+ASR first, then cut acts; fall back to silence/time split."""
+    warnings: list[str] = []
+    focus = infer_recap_focus(pack)
+    duration = float(pack.get("duration_sec") or 0.0)
+    story_start, story_end = recap_story_window(duration)
+    width = max(0.0, story_end - story_start)
+    if width <= PLAN_ACT_TARGET_SEC * 1.25:
+        return ([(story_start, story_end)] if width > 1.0 else []), warnings, focus
+
+    if progress_callback is not None:
+        try:
+            progress_callback(10, {"stage": "plan_structure"})
+        except TypeError:
+            progress_callback(10, "plan_structure")
+
+    brief = build_plan_structure_brief(pack)
+    user = (
+        "下面是整集正片时间轴：asr 带时码台词，chunks 是画面时间轴，silent_spans 是无对白但仍占时间的段落。\n"
+        "先理解剧情阶段，再输出分幕 acts；silent_spans 必须划进某幕，禁止跳过。\n"
+        "soft_prior 只是本地粗判，可参考可推翻；吃不准 soft_focus 用 generic。\n"
+        f"正片窗口 story_t=[{story_start:.0f},{story_end:.0f}]，必须首尾盖住。\n\n"
+        + json.dumps(brief, ensure_ascii=False)
+    )
+    try:
+        text = call_remote_llm(
+            system=default_recap_plan_structure_prompt(language),
+            user=user,
+            config=config,
+            temperature=0.2,
+            max_tokens=2048,
+            should_stop_callback=should_stop_callback,
+        )
+        parsed = parse_plan_act_windows(text)
+        focus = merge_recap_focus(focus, parse_soft_focus_payload(text))
+        acts = normalize_plan_act_windows(
+            parsed,
+            story_start=story_start,
+            story_end=story_end,
+            goal_sec=PLAN_ACT_TARGET_SEC,
+        )
+        if acts and acts[0][0] <= story_start + 30.0 and acts[-1][1] >= story_end * 0.95:
+            return acts, warnings, focus
+        warnings.append("recap_warn_plan_structure")
+    except UnderstandingStoppedError:
+        raise
+    except Exception:
+        warnings.append("recap_warn_plan_structure")
+
+    return split_story_into_plan_acts(pack), warnings, focus
 
 
 def clamp_beats_to_act_window(
@@ -1925,28 +2906,114 @@ def recap_plan_act_user_prompt(
     lo, hi = float(window[0]), float(window[1])
     seeded = list(pack.get("people") or [])
     prior = [dict(item) for item in (already or [])][-6:]
+    spine = build_asr_vlm_spine(pack)
+    silent = [
+        row
+        for row in story_silent_spans(pack)
+        if (_time_span(row.get("t")) or (0.0, 0.0))[1] >= lo
+        and (_time_span(row.get("t")) or (0.0, 0.0))[0] <= hi
+    ]
+    focus = normalize_recap_focus(pack.get("recap_focus") if isinstance(pack, Mapping) else None)
+    focus_line = recap_focus_plan_hint(focus)
     return (
-        f"这是第 {act_index + 1}/{max(1, act_count)} 幕。只规划本幕 [{lo:.0f},{hi:.0f}] 秒内的故事线。\n"
-        f"本幕 asr 已按时间窗灌满，是唯一叙事骨架；禁止用别幕台词或常识补因果。\n"
-        "本幕通常 3–8 条有证据的 beats；宁少勿编。进入→展开→本幕落点"
-        + ("（可接到下一幕的转场）" if act_index + 1 < act_count else "（正片收束，勿写 ED）")
-        + "。\n"
-        "already 是上一幕已写事实，承接不要重复、不要推翻。\n"
-        "event：谁做了什么、局面怎么变；禁止「XX说/觉得」；禁止男主/女主。\n"
-        "每条 t 必须落在本幕时间窗内；带 evidence_required 与 needed_visual。\n"
-        "asr[].speaker 非空=谁在说。有 cap 才写看见的变化，否则写 needed_visual。\n\n"
+        f"第 {act_index + 1}/{max(1, act_count)} 幕，只规划 [{lo:.0f},{hi:.0f}] 秒。\n"
+        "spine 的 enter/mid/land 与 silent_spans 都要盖住；禁止只写进场或只写结果。\n"
+        + focus_line
+        + "有证据写够；禁止为省条数砍展开。进入→展开→本幕落点"
+        + ("（可接下一幕）" if act_index + 1 < act_count else "（正片收束，勿写 ED）")
+        + "。多段小剧场各自要落点；must_land 每条必须有对应 beat。\n"
+        "already 承接勿重复推翻。t 贴 spine/silent；有 asr 的 spine 禁止跳过。\n"
+        "importance 只调口播配额。\n\n"
         + json.dumps(
             {
                 "duration_sec": round(duration, 2),
                 "act": {"index": act_index + 1, "count": act_count, "t": [round(lo, 2), round(hi, 2)]},
                 "already": prior,
                 "people": seeded,
+                "spine": spine,
+                "silent_spans": silent,
+                "soft_focus": focus,
+                "must_land": _must_land_cues(pack),
                 "chunks": pack.get("chunks") or [],
                 "asr": pack.get("ocr") or [],
             },
             ensure_ascii=False,
         )
     )
+
+
+def _must_land_cues(pack: Mapping[str, Any], *, limit: int = 24) -> list[dict[str, Any]]:
+    """Spoken decisions/outcomes the act plan must land in one pass — no later gap LLM."""
+    out: list[dict[str, Any]] = []
+    for row in pack.get("ocr") or []:
+        if not isinstance(row, Mapping):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text or not _DIALOGUE_OUTCOME_RE.search(text):
+            continue
+        try:
+            start = float(row.get("start") or 0.0)
+            end = float(row.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        item = {
+            "t": [round(start, 2), round(end, 2)],
+            "text": text[:80],
+        }
+        speaker = str(row.get("speaker") or "").strip()
+        if speaker:
+            item["speaker"] = speaker[:40]
+        out.append(item)
+        if len(out) >= max(1, int(limit or 24)):
+            break
+    return out
+
+
+def finalize_recap_plan_beats(
+    beats: Sequence[Mapping[str, Any]],
+    pack: Mapping[str, Any],
+    *,
+    duration_sec: float | None = None,
+) -> list[dict[str, Any]]:
+    """Deterministic bookends/spine/lands after the one-shot act plan — zero extra LLM."""
+    duration = float(duration_sec if duration_sec is not None else pack.get("duration_sec") or 0.0)
+    items = drop_op_ed_beats([dict(beat) for beat in beats or []], duration)
+    items = scrub_unevidenced_beats(items, pack)
+    items = ensure_beats_cover_spine(items, build_asr_vlm_spine(pack))
+    items = ensure_beats_land_dialogue_outcomes(items, pack)
+    items = ensure_beats_cover_silent_spans(items, pack)
+    if duration > 1.0 and not beats_cover_opening(items, duration):
+        deadline = opening_deadline_sec(duration)
+        spine = build_asr_vlm_spine(pack)
+        head = next((seg for seg in spine if (_time_span(seg.get("t")) or (1e9, 1e9))[0] <= deadline), None)
+        if head is None:
+            cues = [
+                row
+                for row in (pack.get("ocr") or [])
+                if isinstance(row, Mapping) and float(row.get("start") or 0.0) <= deadline
+            ]
+            if cues:
+                lo = float(cues[0].get("start") or 0.0)
+                hi = max(float(cues[-1].get("end") or lo), lo + 8.0)
+                head = {"t": [lo, min(hi, deadline + 12.0)], "asr": cues[:8], "caps": [], "speakers": []}
+        if head is not None:
+            items = ensure_beats_cover_spine(items, [head], cover_ratio=0.99)
+    if duration > 1.0 and not beats_cover_ending(items, duration):
+        _story_start, story_end = recap_story_window(duration)
+        spine = build_asr_vlm_spine(pack)
+        tail = None
+        for seg in reversed(spine):
+            span = _time_span(seg.get("t"))
+            if span and span[1] >= story_end * ENDING_COVER_RATIO:
+                tail = seg
+                break
+        if tail is not None:
+            items = ensure_beats_cover_spine(items, [tail], cover_ratio=0.99)
+        items = ensure_beats_land_dialogue_outcomes(items, pack)
+        items = ensure_beats_cover_silent_spans(items, pack)
+    if len(items) > MAX_STORY_BEATS:
+        items = trim_story_beats_to_limit(items, limit=MAX_STORY_BEATS)
+    return items
 
 
 def plan_story_beats_by_acts(
@@ -1961,8 +3028,16 @@ def plan_story_beats_by_acts(
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Plan beats act-by-act with dense local ASR so the model cannot invent mid-episode plot."""
     cfg = config if config is not None else load_config()
-    acts = split_story_into_plan_acts(pack)
-    warnings: list[str] = []
+    acts, struct_warnings, focus = resolve_plan_act_windows(
+        pack,
+        config=cfg,
+        language=language,
+        should_stop_callback=should_stop_callback,
+        progress_callback=progress_callback,
+    )
+    warnings: list[str] = list(struct_warnings)
+    pack = dict(pack)
+    pack["recap_focus"] = normalize_recap_focus(focus)
     if not acts:
         return "", [], list(pack.get("people") or []), ["recap_warn_plan_acts_empty"]
 
@@ -1987,6 +3062,8 @@ def plan_story_beats_by_acts(
         pct = 12 + int(round(20.0 * float(index) / float(max(len(acts), 1))))
         _progress(min(32, pct), "planning", {"act": index + 1, "acts": len(acts)})
         act_pack = filter_pack_to_span(pack, window[0], window[1], pad_sec=4.0)
+        if pack.get("recap_focus"):
+            act_pack["recap_focus"] = pack.get("recap_focus")
         dense = compact_ocr_cues_in_span(
             video_id,
             window[0],
@@ -2020,10 +3097,12 @@ def plan_story_beats_by_acts(
             title = act_title.strip()
         act_beats = clamp_beats_to_act_window(act_beats, window)
         act_beats = drop_op_ed_beats(act_beats, float(pack.get("duration_sec") or 0.0))
+        act_beats = ensure_beats_cover_spine(act_beats, build_asr_vlm_spine(act_pack))
+        act_beats = ensure_beats_land_dialogue_outcomes(act_beats, act_pack)
         people = merge_story_people(people, act_people)
         already = merge_story_beats(already, act_beats, allowed_windows=[window])
 
-    already = scrub_unevidenced_beats(already, pack)
+    already = finalize_recap_plan_beats(already, pack)
     if not already:
         warnings.append("recap_warn_plan_acts_empty")
     return title or "解说剪辑", already, people, warnings
@@ -2175,12 +3254,13 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
         else "先列 people（稳定称呼），无人名再用画面特征。禁止男主/女主。\n"
     )
     return (
-        f"原片时长 {duration:.0f} 秒。请规划有证据支撑的故事线大纲 beats（通常 8–20 条，最多 32），不要写 clips。\n"
+        f"原片时长 {duration:.0f} 秒。请规划有证据支撑的故事线大纲 beats（有 asr/cap 就写，条数不设上限），不要写 clips。\n"
         f"从 0 秒开始覆盖开场，正片在大约 {story_end:.0f} 秒结束（片尾曲之前）。\n"
-        f"【证据优先】asr/cap 撑得住才写；禁止为凑条数虚构。禁止稀薄提纲、禁止大段无节拍空档。\n"
+        f"【证据优先】asr/cap 撑得住才写；台词密就写密，禁止为省条数砍收束。禁止稀薄提纲、禁止大段无节拍空档。\n"
         f"自检：只读全部 event 必须能听成有头有尾的故事（进入→展开→高潮→收束）。相邻纲要必须递进或转场。成片目标约 {target:.0f} 秒（软上限；禁止删进入/收束/因果来凑时长）。\n"
         "进入新活动/新空间前必须有进入拍（赶到现场、入座开始、走进房间等）；禁止直接蹦到场内「某人惊讶了」或场内结果（全勾完了/结果出来了）。\n"
         "相邻场面或活动性质变了时，中间必须有进入/离开过渡 beat；禁止上一段刚结束下一句就直接写下一段场内结果。\n"
+        "每段新小剧场：进入 → 中间过程 → 落点都要有；对白已讲清的答应/拒绝/决定/胜负必须成落点，禁止讲完过程不写结果。\n"
         "禁止孤立反应句当大纲（XX惊讶了/愣住了）；先有触发事件，再写局面变化。\n"
         "高潮/对决/身份揭晓/胜负分晓 importance≥0.85，禁止跳过最精彩的冲突。\n"
         "短而关键的动作（失手、得手、致命一击等）必须各自成条且高权重，禁止因只有几秒就并进前后大段。\n"
@@ -2211,23 +3291,35 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
     )
 
 
-def recap_user_prompt(pack: Mapping[str, Any], beats: list[Mapping[str, Any]] | None = None) -> str:
+def recap_user_prompt(
+    pack: Mapping[str, Any],
+    beats: list[Mapping[str, Any]] | None = None,
+    *,
+    used_src: Sequence[Mapping[str, Any]] | None = None,
+) -> str:
     duration = float(pack.get("duration_sec") or 0.0)
     planned = list(beats or [])
     target = recap_target_sec(duration)
+    used = list(used_src or [])
+    used_line = (
+        f"【已用画面】下面 used_src 已占用，禁止再剪重叠超过约三成的同一段原片（连续复用更禁止）。\n"
+        if used
+        else "【已用画面】本段若多刀，每刀 src 不得互相大面积重叠；更禁止连着几刀同一画面。\n"
+    )
     return (
         f"原片时长 {duration:.0f} 秒。成片目标约 {target:.0f} 秒（按原片比例，约 3–8 分钟，作软上限：不要为凑分钟注水）。本段 beats 全部都要剪进去。\n"
         f"本段 beats 配额合计 {sum(float(item.get('budget_sec') or 0.0) for item in planned):.0f} 秒：每条 beat 的进入/推进/收束画面都要有；低权重可短，不可省略进入与落点；不要漏拍、不要注水。\n"
         "先按 beats 找证据画面：id、event、vo=已写好的解说稿、evidence_required、importance、budget_sec=这拍成片配额上限、shots=建议刀数、needed_visual、t=原片范围。\n"
         "【硬约束】每条 clip 的 src_in/src_out 必须落在该 beat.t 内（允许前后各约 10 秒）；禁止跨到别的 beat 时间去「借」画面。\n"
-        "画面必须服务 beat.vo：优先选 cap 能证明这段旁白的 chunk；无 vo 时才退回按 event/evidence_required 选。"
+        + used_line
+        + "画面必须服务 beat.vo：优先选 cap 能证明这段旁白的 chunk；无 vo 时才退回按 event/evidence_required 选。"
         "无 cap 的 chunk 只能当时间兜底，reason 禁止瞎猜看见了什么；证据对不上就标弱证据，不要硬编。\n"
         "禁止改写 beat 事件或旁白去迁就画面。\n"
         "不要输出 vo 字段；正式旁白已在 beat.vo，铺字幕阶段只润色。\n"
         "同一 beat 的相邻镜头必须有新的视觉信息，不要用近似镜头重复同一事件，也不要把两刀粘成一条长镜头。\n"
         "shots>=2 时后几刀优先特写/反应，role=insert，不要为了赶时间并进主线。"
         "insert 必须贴着同一 beat 的主线动作与 beat.t：优先同 chunk/紧邻 chunk，紧跟主镜之后。"
-        "禁止整段复用同一 src_in/src_out；允许动作后紧挨着的反应特写（可与主镜同 chunk）。"
+        "禁止整段复用同一 src_in/src_out；禁止把别的 beat 已经用过的画面再剪一遍；允许动作后紧挨着的反应特写（可与主镜同 chunk，但 src 区间仍须错开）。"
         "禁止为了凑 insert 去选远晚于该 beat.t 的表情/特写。\n"
         "相邻 beats 换场/换人/换冲突时必须单独留 role=bridge 过渡镜（离开/赶到/进门/场面变化），禁止并进主线导致跳远；纯无信息走路才可并进。bridge 的 reason 只交代场面，不要编新剧情。\n"
         "每条 beat 的 clips：先保证进入→关键变化→落点都有画面；合计时长贴近 vo 口播时长，再控制不超过 budget_sec；禁止「证据够了就停」只留半截。每个 clip 给 duration。\n"
@@ -2241,6 +3333,7 @@ def recap_user_prompt(pack: Mapping[str, Any], beats: list[Mapping[str, Any]] | 
                 "duration_sec": round(duration, 2),
                 "people": pack.get("people") or [],
                 "beats": planned,
+                "used_src": used,
                 "chunks": pack.get("chunks") or [],
                 "asr": pack.get("ocr") or [],
             },
@@ -2546,14 +3639,64 @@ def activity_shift_gaps(
     return out
 
 
+def dialogue_outcome_gaps(
+    pack: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]],
+    *,
+    cover_pad_sec: float = 4.0,
+) -> list[tuple[float, float]]:
+    """Pin short windows around spoken decisions/outcomes not covered by a land beat."""
+    cues = [row for row in (pack.get("ocr") or []) if isinstance(row, Mapping)]
+    if not cues:
+        return []
+    covered: list[tuple[float, float]] = []
+    for beat in beats or []:
+        span = _time_span(beat.get("t"))
+        if span and span[1] - span[0] > 0.2:
+            covered.append((float(span[0]), float(span[1])))
+    duration = float(pack.get("duration_sec") or 0.0)
+    _story_start, story_end = recap_story_window(duration) if duration > 1.0 else (0.0, duration)
+    raw: list[tuple[float, float]] = []
+    for cue in cues:
+        text = str(cue.get("text") or "")
+        if not _DIALOGUE_OUTCOME_RE.search(text):
+            continue
+        try:
+            start = float(cue.get("start") or 0.0)
+            end = float(cue.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        if duration >= 360 and start >= story_end:
+            continue
+        # Long entry beats that merely overlap the cue do NOT count as a land.
+        if _beat_lands_dialogue_outcome(covered, start, end, pad_sec=cover_pad_sec):
+            continue
+        lo = max(0.0 if duration < 360 else _story_start, start - 8.0)
+        hi = min(story_end if duration >= 360 else max(end + 12.0, duration), end + 14.0)
+        if hi - lo < 3.0:
+            continue
+        raw.append((round(lo, 2), round(hi, 2)))
+    if not raw:
+        return []
+    raw.sort()
+    merged: list[tuple[float, float]] = [raw[0]]
+    for lo, hi in raw[1:]:
+        if lo <= merged[-1][1] + 6.0:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
 def trim_story_beats_to_limit(
     beats: Sequence[Mapping[str, Any]],
     *,
     limit: int = MAX_STORY_BEATS,
 ) -> list[dict[str, Any]]:
-    """Cap beat count so quotas stay differentiated instead of collapsing to the floor."""
+    """Safety valve only for absurd blow-ups. Never used to sparsify evidenced plans."""
     items = [dict(beat) for beat in beats]
-    if len(items) <= limit:
+    cap = max(8, int(limit or MAX_STORY_BEATS))
+    if len(items) <= cap:
         return items
     by_time = sorted(
         items,
@@ -2576,7 +3719,24 @@ def trim_story_beats_to_limit(
         if importance >= 0.85:
             hard.add(beat_id)
         elif _TEXTURE_BEAT_RE.search(event) or any(
-            token in event for token in ("进入", "赶到", "走进", "离开", "收束", "结局", "落点", "余波")
+            token in event
+            for token in (
+                "进入",
+                "赶到",
+                "走进",
+                "离开",
+                "收束",
+                "结局",
+                "落点",
+                "余波",
+                "答应",
+                "拒绝",
+                "决定",
+                "胜负",
+                "结果",
+                "收下",
+                "推回",
+            )
         ):
             hard.add(beat_id)
     ranked = sorted(
@@ -2588,9 +3748,9 @@ def trim_story_beats_to_limit(
         ),
         reverse=True,
     )
-    kept_ids = {int(item.get("id") or 0) for item in ranked[:limit]}
+    kept_ids = {int(item.get("id") or 0) for item in ranked[:cap]}
     kept = [item for item in by_time if int(item.get("id") or 0) in kept_ids]
-    return kept or by_time[:limit]
+    return kept or by_time[:cap]
 
 
 def drop_op_ed_beats(
@@ -2711,9 +3871,9 @@ def recap_plan_gap_user_prompt(
     windows = [{"t": [round(float(lo), 2), round(float(hi), 2)]} for lo, hi in gaps]
     return (
         f"原片时长 {duration:.0f} 秒。下面 gaps 是当前要检查的正片空档。\n"
-        "每个 gap 短空档补 1–2 条，长空档可到 3 条；展开过程要盖住。t 必须落在对应 gap 内。\n"
-        "若空档两端活动变了，优先补进入拍，禁止直接补场内结果。\n"
-        "密稿供用户删减：补关键过程与中间推进，不要只钉结果；不要拆成表情碎拍。不要重复 already，不要补纯走路气氛。\n\n"
+        "每个 gap 短空档补 1–2 条，长空档可到 3 条；进入/展开/落点都要盖住。t 必须落在对应 gap 内。\n"
+        "若空档两端活动变了，优先补进入拍，但 gap 内对白已有的决定/结果必须写成落点，禁止丢掉收束。\n"
+        "密稿供用户删减：补关键过程与对白支撑的落点；不要只钉半截，也不要拆成表情碎拍。不要重复 already，不要补纯走路气氛。\n\n"
         + json.dumps(
             {
                 "duration_sec": round(duration, 2),
@@ -3606,6 +4766,9 @@ def allocate_beat_budgets(
             weight = max(weight, importance * 0.85)
         if importance >= 0.85 and span_dur <= 12.0:
             weight = max(weight, importance * 0.92)
+        # Shared-clock evidence beats must not starve because LLM set low importance.
+        if beat.get("spine_forced") or evid_score >= 0.35 or span_dur >= 10.0:
+            weight = max(weight, 0.48)
         scored.append((dict(beat), evidence, weight))
     budgets = _fit_budgets_to_target(
         [item[2] for item in scored],
@@ -3635,12 +4798,66 @@ def allocate_beat_budgets(
     return allocated
 
 
+def _format_asr_speaker_line(item: Mapping[str, Any]) -> str:
+    speaker = str(item.get("speaker") or "").strip() or "未标注说话人"
+    text = str(item.get("text") or "").strip()
+    if not text:
+        return ""
+    return f"{speaker}：{text}"
+
+
+def beat_vo_drops_dialogue_land(
+    beat: Mapping[str, Any],
+    pack: Mapping[str, Any] | None,
+) -> bool:
+    """True when this beat's ASR has a spoken outcome but VO never lands it / names speakers."""
+    span = _time_span(beat.get("t"))
+    if not span:
+        return False
+    evidence = _evidence_for_source_span(
+        pack,
+        span[0],
+        span[1],
+        pad_sec=2.0,
+        asr_limit=20,
+        cap_limit=4,
+    )
+    asr = [row for row in (evidence.get("asr") or []) if isinstance(row, Mapping)]
+    if not asr:
+        return False
+    outcomes = [row for row in asr if _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))]
+    speakers = [
+        str(row.get("speaker") or "").strip()
+        for row in asr
+        if str(row.get("speaker") or "").strip()
+    ]
+    vo = str(beat.get("vo") or "").strip()
+    if not vo:
+        return bool(outcomes or speakers)
+    if speakers and not any(label in vo for label in speakers):
+        return True
+    if not outcomes:
+        return False
+    if _VO_LAND_HINT_RE.search(vo):
+        return False
+    for row in outcomes:
+        matched = _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))
+        if matched and matched.group(0) in vo:
+            return False
+        snippet = re.sub(r"\s+", "", str(row.get("text") or ""))[:8]
+        if snippet and snippet in re.sub(r"\s+", "", vo):
+            return False
+    return True
+
+
 def recap_vo_draft_user_prompt(
     pack: Mapping[str, Any],
     beats: Sequence[Mapping[str, Any]],
     *,
     prev_vo: str = "",
 ) -> str:
+    focus = normalize_recap_focus(pack.get("recap_focus") if isinstance(pack, Mapping) else None)
+    asr_lim, cap_lim = recap_focus_evidence_limits(focus, asr_limit=20, cap_limit=10)
     rows: list[dict[str, Any]] = []
     for beat in beats:
         if not isinstance(beat, Mapping):
@@ -3658,9 +4875,16 @@ def recap_vo_draft_user_prompt(
             span[0],
             span[1],
             pad_sec=2.0,
-            asr_limit=14,
-            cap_limit=8,
+            asr_limit=asr_lim,
+            cap_limit=cap_lim,
         )
+        asr_rows = list(evidence.get("asr") or [])
+        # Always surface speaker on the line — empty speaker field is easy for the model to ignore.
+        asr_lines = [
+            line
+            for line in (_format_asr_speaker_line(row) for row in asr_rows if isinstance(row, Mapping))
+            if line
+        ]
         row: dict[str, Any] = {
             "id": beat_id,
             "event": str(beat.get("event") or "").strip()[:120],
@@ -3669,27 +4893,65 @@ def recap_vo_draft_user_prompt(
             "budget_sec": round(budget, 1),
             "budget_chars": tts_char_budget(budget),
             "t": [round(span[0], 2), round(span[1], 2)],
-            "asr": evidence.get("asr") or [],
+            "asr": asr_rows,
+            "asr_lines": asr_lines,
             "caps": evidence.get("caps") or [],
         }
         required = normalize_evidence_required(beat.get("evidence_required"))
         if required:
             row["evidence_required"] = required
-        if not evidence.get("asr") and not evidence.get("caps"):
+        if beat.get("outcome_forced"):
+            row["must_land"] = True
+        if not asr_rows and not evidence.get("caps"):
             row["hint"] = "无 asr/caps：text 必须空着"
-        elif not evidence.get("asr"):
+        elif not asr_rows:
             row["hint"] = "无 asr：只写 caps 可见动作；禁止转述台词"
         else:
-            row["hint"] = "写进入→变化→落点；约 70–90% budget_chars"
+            speakers = sorted(
+                {
+                    str(item.get("speaker") or "").strip()
+                    for item in asr_rows
+                    if str(item.get("speaker") or "").strip()
+                }
+            )
+            outcome_bits = [
+                str(item.get("text") or "").strip()[:24]
+                for item in asr_rows
+                if _DIALOGUE_OUTCOME_RE.search(str(item.get("text") or ""))
+            ]
+            land_note = (
+                "；本窗对白已有落点（"
+                + "、".join(outcome_bits[:3])
+                + "）必须写进旁白最后半句，禁止丢掉收束跳下一段"
+                if outcome_bits
+                else "；有决定/结果必须写落点，禁止进门后直接下场"
+            )
+            speaker_note = (
+                "；主语必须出现 asr_lines 里的说话人（"
+                + "、".join(speakers[:6])
+                + "），禁止并成「他/她」"
+                if speakers
+                else "；asr_lines 已标「未标注说话人」时用画面特征称呼，仍禁止并成同一个他"
+            )
+            row["speakers"] = speakers
+            row["hint"] = (
+                "先读 asr_lines（说话人：台词）理解局面再写解说；禁止他说/她表示式对白复述；禁止低头抬头抬手"
+                + speaker_note
+                + land_note
+                + "；约 55–80% budget_chars"
+            )
         rows.append(row)
+    focus_line = recap_focus_vo_hint(focus)
     return (
-        "按 beats 写解说草稿。事实只来自该 beat 的 asr/caps；event 不是证据。\n"
-        "有证据写完整小剧场；无证据空着。禁止掐头去尾式乱跳。\n"
+        "按 beats 写解说草稿。事实只来自该 beat 的 asr_lines/asr/caps；event 不是证据。\n"
+        "说话人非空须出现在旁白主语；对白落点写完再下场。\n"
+        + focus_line
         + (f"上一句旁白：{prev_vo}\n" if str(prev_vo or "").strip() else "")
         + "\n"
         + json.dumps(
             {
                 "people": pack.get("people") or [],
+                "soft_focus": focus,
                 "beats": rows,
             },
             ensure_ascii=False,
@@ -3764,7 +5026,12 @@ def draft_recap_vo_for_beats(
             continue
         if beat_id > 0:
             by_id[beat_id] = beat
-    waves = split_beats_for_match(pending, per_wave=MATCH_BEATS_PER_WAVE)
+    waves = split_beats_for_match(
+        pending,
+        per_wave=VO_DRAFT_BEATS_PER_WAVE,
+        max_span_sec=220.0,
+        max_gap_sec=72.0,
+    )
     prev = ""
     for wave_i, wave in enumerate(waves):
         if progress_callback:
@@ -3777,7 +5044,7 @@ def draft_recap_vo_for_beats(
                 user=recap_vo_draft_user_prompt(pack, wave, prev_vo=prev),
                 config=config,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=2048,
                 should_stop_callback=should_stop_callback,
             )
             drafts = parse_vo_drafts(text, wave)
@@ -3894,31 +5161,25 @@ def recap_caption_user_prompt(
     has_draft = any(
         str(clip.get("vo") or clip.get("vo_draft") or "").strip() for clip in clips or []
     )
+    focus = normalize_recap_focus(pack.get("recap_focus") if isinstance(pack, Mapping) else None)
+    focus_line = recap_focus_vo_hint(focus)
     return (
-        f"画面已锁定，本段 {total:.0f} 秒。TTS 预设 {TTS_SPEED:.2f} 倍，不要真去合成语音。\n"
-        f"1.0 倍约 {BASE_CHARS_PER_SEC:.0f} 字/秒，当前约 {CHARS_PER_SEC:.2f} 字/秒，fill={VO_FILL_RATIO}。\n"
+        f"画面已锁定，本段 {total:.0f} 秒。TTS 预设 {TTS_SPEED:.2f} 倍（约 {CHARS_PER_SEC:.2f} 字/秒，fill={VO_FILL_RATIO}）。\n"
         + (
-            "seed/clips 已有解说草稿：只润色对齐 asr/caps，保留进入→变化→落点，禁止整段重写掐头去尾。\n"
+            "有草稿：只润色对齐 asr/caps，保留进入→变化→落点，禁止掐头去尾重写。\n"
             if has_draft
-            else "无草稿的镜头才新写解说稿旁白。\n"
+            else "无草稿：按 asr/caps 新写。\n"
         )
-        + "同一 beat_id 的连续主镜必须合并一条 caption（from=首 to=末），按合并总时长的 budget 写约 70–90% 字数。\n"
-        "听起来要像在讲故事，不要写成「镜头1/镜头2」说明书，也不要复读 outline。\n"
-        "【硬证据】事实只许来自该 span 的 asr[] 与 caps[]。outline/event/reason 不是证据，禁止用来补剧情或台词。\n"
-        "有 asr/caps 时写进入→变化→落点；无 asr 禁止写任何人说过的话或转述；无 asr 且无 caps 则 text 空着。\n"
-        "禁止为了「完整」编造未证实情节；禁止掐头去尾式乱跳，也禁止用大纲填洞。\n"
-        "跨镜是为了把一件事讲完；禁止同拍主镜拆成一镜一句近义复读。\n"
-        "role=insert 才 from=to 短句或空着；禁止同事实近义复读。\n"
-        "asr 禁止照抄原文/日语假名/长引号对白；copy_ban=true 尤其禁止贴进口播，可提炼动作关系。\n"
-        "people 只是称呼词典：本段 asr.speaker/对白没出现的人名禁止写进口播。禁止男主/女主。\n"
-        "need_transition / role=bridge 才真换场：先收住上一场再开本场。\n"
-        "weak_match：只写 caps 可见场面短句或空着，禁止编结果。\n"
-        "上一句旁白是接榫，本句要接得上。只输出 captions。\n"
+        + "同 beat_id 连续主镜合并 from→to；insert 短句或空；bridge 才真换场。\n"
+        + "事实只来自 asr[]/caps[]；outline 非证据。weak_match 只写 caps 短句或空着。\n"
+        + focus_line
+        + "上一句旁白是接榫。只输出 captions。\n"
         + (f"上一句旁白：{prev_caption}\n" if str(prev_caption or "").strip() else "")
         + "\n"
         + json.dumps(
             {
                 "people": list(people or []),
+                "soft_focus": focus,
                 "clips": rows,
                 "seed": seed,
             },
@@ -4424,6 +5685,9 @@ def _caption_clip_rows(
 ) -> list[dict[str, Any]]:
     by_id = _beats_by_id(beats)
     items = list(clips or [])
+    focus = normalize_recap_focus(pack.get("recap_focus") if isinstance(pack, Mapping) else None)
+    asr_main, cap_main = recap_focus_evidence_limits(focus, asr_limit=20, cap_limit=10)
+    asr_ins, cap_ins = recap_focus_evidence_limits(focus, asr_limit=16, cap_limit=8)
     rows: list[dict[str, Any]] = []
     for index, clip in enumerate(items, 1):
         start = float(clip.get("tl_in") or 0.0)
@@ -4466,7 +5730,7 @@ def _caption_clip_rows(
             ev_out = max(src_out, beat_span[1])
             evidence = (
                 _evidence_for_source_span(
-                    pack, ev_in, ev_out, pad_sec=4.0, asr_limit=20, cap_limit=10
+                    pack, ev_in, ev_out, pad_sec=4.0, asr_limit=asr_main, cap_limit=cap_main
                 )
                 if pack is not None
                 else {"asr": [], "caps": []}
@@ -4474,7 +5738,7 @@ def _caption_clip_rows(
         else:
             evidence = (
                 _evidence_for_source_span(
-                    pack, src_in, src_out, pad_sec=8.0, asr_limit=16, cap_limit=8
+                    pack, src_in, src_out, pad_sec=8.0, asr_limit=asr_ins, cap_limit=cap_ins
                 )
                 if pack is not None
                 else {"asr": [], "caps": []}
@@ -5412,6 +6676,11 @@ def polish_recap_vo(
     work = [dict(clip) for clip in clips]
     if not any(str(clip.get("vo") or "").strip() for clip in work):
         return work
+    # Economy: VO-first draft already dense enough — skip another billable rewrite.
+    if recap_vo_coverage_ratio(work) >= 0.82:
+        if progress_callback:
+            progress_callback(91, "polish_skip")
+        return work
     if progress_callback:
         progress_callback(91, "polish")
     polish_system = resolve_recap_prompt(
@@ -5430,7 +6699,7 @@ def polish_recap_vo(
                 user=recap_vo_polish_user_prompt(wave, people=people, prev_caption=prev),
                 config=config,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=2048,
                 should_stop_callback=should_stop_callback,
             )
             caps = parse_vo_polish_cues(text, wave)
@@ -5462,6 +6731,45 @@ def scrub_restated_insert_vo(clips: Sequence[Mapping[str, Any]]) -> list[dict[st
     return [dict(clip) for clip in clips or []]
 
 
+def recap_vo_coverage_ratio(clips: Sequence[Mapping[str, Any]]) -> float:
+    """Share of story picture that already has narration draft/final text.
+
+    Same-beat follow shots often keep empty ``vo`` while the head line spans them
+    for TTS — count by beat (any voiced master) so cross-shot packing doesn't
+    look "uncovered" and burn another caption/polish bill.
+    """
+    items = list(clips or [])
+    if not items:
+        return 1.0
+    mains = [
+        clip
+        for clip in items
+        if not _looks_like_insert_cut(clip) and not _is_bridge_clip(clip)
+    ]
+    rows = mains or items
+    by_beat: dict[Any, list[Mapping[str, Any]]] = {}
+    orphan: list[Mapping[str, Any]] = []
+    for clip in rows:
+        try:
+            beat_id = int(clip.get("beat_id") or 0)
+        except (TypeError, ValueError):
+            beat_id = 0
+        if beat_id > 0:
+            by_beat.setdefault(beat_id, []).append(clip)
+        else:
+            orphan.append(clip)
+    units: list[bool] = []
+    for group in by_beat.values():
+        units.append(
+            any(str(clip.get("vo") or clip.get("vo_draft") or "").strip() for clip in group)
+        )
+    for clip in orphan:
+        units.append(bool(str(clip.get("vo") or clip.get("vo_draft") or "").strip()))
+    if not units:
+        return 1.0
+    return sum(1 for hit in units if hit) / float(len(units))
+
+
 def fit_recap_captions_to_tts(
     clips: list[Mapping[str, Any]],
     *,
@@ -5478,6 +6786,13 @@ def fit_recap_captions_to_tts(
     packed = pack_captions_for_tts(laid, use_draft=True)
     work = apply_caption_cues(laid, packed) if packed else laid
     if not laid:
+        return work
+    # Economy: draft already covers most of the cut — skip another full rewrite bill.
+    if recap_vo_coverage_ratio(work) >= 0.82:
+        if progress_callback:
+            progress_callback(86, "captions_skip")
+        work = scrub_verbatim_source_dialogue_vo(work, pack=pack)
+        work = scrub_unevidenced_vo(work, pack=pack, beats=beats)
         return work
     if progress_callback:
         progress_callback(86, "captions")
@@ -5498,7 +6813,7 @@ def fit_recap_captions_to_tts(
                 ),
                 config=config,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=2048,
                 should_stop_callback=should_stop_callback,
             )
             caps = parse_caption_cues(text, wave)
@@ -6420,12 +7735,148 @@ def _should_merge_source_clips(left: Mapping[str, Any], right: Mapping[str, Any]
     return False
 
 
+def collect_used_source_spans(cuts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Marked used source windows for match prompts / reuse checks."""
+    rows: list[dict[str, Any]] = []
+    for clip in cuts or []:
+        try:
+            src_in = float(clip.get("src_in") or 0.0)
+            src_out = float(clip.get("src_out") or src_in)
+        except (TypeError, ValueError):
+            continue
+        if src_out - src_in < 0.4:
+            continue
+        row: dict[str, Any] = {
+            "src_in": round(src_in, 2),
+            "src_out": round(src_out, 2),
+        }
+        beat_id = _clip_beat_id(clip)
+        if beat_id is not None:
+            row["beat_id"] = beat_id
+        rows.append(row)
+    rows.sort(key=lambda item: (float(item["src_in"]), float(item["src_out"])))
+    return rows
+
+
+def _source_reuse_ratio(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
+    overlap = _source_overlap_sec(left, right)
+    if overlap <= 0.05:
+        return 0.0
+    left_len = max(0.01, _clip_len(left))
+    right_len = max(0.01, _clip_len(right))
+    return overlap / min(left_len, right_len)
+
+
+def drop_reused_source_cuts(
+    cuts: Sequence[Mapping[str, Any]],
+    *,
+    reuse_ratio: float = SOURCE_REUSE_RATIO,
+    adjacent_ratio: float = SOURCE_ADJACENT_REUSE_RATIO,
+) -> list[dict[str, Any]]:
+    """Hard mark: once a source window is taken, later near-copies are dropped.
+
+    Consecutive (src-ordered) overlaps use a stricter bar — the “几个连着重复” case.
+    Never strip a beat of its only remaining cut.
+    """
+    items = [dict(clip) for clip in cuts or []]
+    if len(items) < 2:
+        return items
+    items.sort(
+        key=lambda clip: (
+            float(clip.get("src_in") or 0.0),
+            int(clip.get("beat_id") or 0),
+            0 if not _looks_like_insert_cut(clip) else 1,
+        )
+    )
+    kept: list[dict[str, Any]] = []
+    kept_by_beat: dict[int, int] = {}
+
+    def _beat_count(beat_id: int | None) -> int:
+        if beat_id is None:
+            return 0
+        return int(kept_by_beat.get(beat_id) or 0)
+
+    for clip in items:
+        beat_id = _clip_beat_id(clip)
+        conflict_at: int | None = None
+        conflict_ratio = 0.0
+        for index, prev in enumerate(kept):
+            ratio = _source_reuse_ratio(prev, clip)
+            if ratio <= 0.0:
+                continue
+            is_adj = index == len(kept) - 1
+            prev_beat = _clip_beat_id(prev)
+            same_beat = (
+                beat_id is not None
+                and prev_beat is not None
+                and beat_id == prev_beat
+            )
+            # Same beat: only kill near-copies; partial overlap is trimmed later by coalesce.
+            if same_beat:
+                need = max(0.55, float(reuse_ratio))
+            else:
+                need = float(adjacent_ratio) if is_adj else float(reuse_ratio)
+            if ratio >= need:
+                conflict_at = index
+                conflict_ratio = ratio
+                break
+        if conflict_at is None:
+            kept.append(clip)
+            if beat_id is not None:
+                kept_by_beat[beat_id] = _beat_count(beat_id) + 1
+            continue
+        prev = kept[conflict_at]
+        same_beat = (
+            beat_id is not None
+            and _clip_beat_id(prev) is not None
+            and beat_id == _clip_beat_id(prev)
+        )
+        # Same-beat master + short insert nesting is intentional reaction CU — keep both.
+        if same_beat and _looks_like_insert_cut(clip) != _looks_like_insert_cut(prev):
+            short = min(_clip_len(prev), _clip_len(clip))
+            long = max(_clip_len(prev), _clip_len(clip))
+            if short <= long * 0.75:
+                kept.append(clip)
+                if beat_id is not None:
+                    kept_by_beat[beat_id] = _beat_count(beat_id) + 1
+                continue
+        # Near-identical cross-beat replay: always drop later.
+        if not same_beat and conflict_ratio >= max(0.55, float(reuse_ratio)):
+            continue
+        if not same_beat and beat_id is not None and _beat_count(beat_id) <= 0 and conflict_ratio < 0.55:
+            prev_beat = _clip_beat_id(prev)
+            if prev_beat is not None and _beat_count(prev_beat) >= 2:
+                kept.pop(conflict_at)
+                kept_by_beat[prev_beat] = _beat_count(prev_beat) - 1
+                kept.append(clip)
+                kept_by_beat[beat_id] = _beat_count(beat_id) + 1
+            else:
+                # Still a heavy cross-beat copy — prefer earlier shot.
+                continue
+            continue
+        if same_beat and conflict_ratio >= max(0.55, float(reuse_ratio)):
+            continue
+        if not same_beat:
+            continue
+        kept.append(clip)
+        if beat_id is not None:
+            kept_by_beat[beat_id] = _beat_count(beat_id) + 1
+    kept.sort(
+        key=lambda clip: (
+            float(clip.get("src_in") or 0.0),
+            int(clip.get("beat_id") or 0),
+        )
+    )
+    return kept
+
+
 def dedupe_overlapping_recap_cuts(
     cuts: Sequence[Mapping[str, Any]],
     *,
     overlap_ratio: float = 0.45,
+    cross_beat_overlap_ratio: float = 0.55,
 ) -> list[dict[str, Any]]:
-    """Drop near-duplicate source windows (same beat, heavy overlap). Keep inserts when distinct."""
+    """Drop near-duplicate source windows. Same beat and cross-beat replays both count."""
     items = [dict(clip) for clip in cuts or []]
     if len(items) < 2:
         return items
@@ -6440,26 +7891,38 @@ def dedupe_overlapping_recap_cuts(
             right = items[j]
             left_beat = _clip_beat_id(left)
             right_beat = _clip_beat_id(right)
-            if left_beat is not None and right_beat is not None and left_beat != right_beat:
-                continue
             overlap = _source_overlap_sec(left, right)
             if overlap <= 0.08:
                 continue
             left_len = max(0.01, _clip_len(left))
             right_len = max(0.01, _clip_len(right))
             ratio = overlap / min(left_len, right_len)
-            if ratio < float(overlap_ratio):
+            same_beat = (
+                left_beat is not None
+                and right_beat is not None
+                and left_beat == right_beat
+            )
+            need = float(overlap_ratio) if same_beat else float(cross_beat_overlap_ratio)
+            if ratio < need:
                 continue
             left_insert = _looks_like_insert_cut(left)
             right_insert = _looks_like_insert_cut(right)
-            # Keep a short insert over a long master when ranges mostly nest.
-            if left_insert != right_insert:
+            # Keep a short insert over a long master when ranges mostly nest (same beat only).
+            if same_beat and left_insert != right_insert:
                 if left_insert and left_len <= right_len * 0.75:
                     continue
                 if right_insert and right_len <= left_len * 0.75:
                     continue
-            # Drop the shorter / later duplicate.
-            if right_len < left_len * 0.92:
+            # Prefer keeping earlier source / voiced master; drop the replay.
+            left_vo = bool(str(left.get("vo") or left.get("vo_draft") or "").strip())
+            right_vo = bool(str(right.get("vo") or right.get("vo_draft") or "").strip())
+            if left_vo and not right_vo:
+                drop.add(j)
+                continue
+            if right_vo and not left_vo:
+                drop.add(i)
+                break
+            if float(right.get("src_in") or 0.0) + 0.05 >= float(left.get("src_in") or 0.0) and right_len <= left_len * 1.05:
                 drop.add(j)
             elif left_len < right_len * 0.92:
                 drop.add(i)
@@ -6478,6 +7941,7 @@ def coalesce_recap_cuts(cuts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
             if _clip_len(clip) > 0.04 or str(clip.get("vo") or clip.get("vo_draft") or "").strip()
         ]
     )
+    items = drop_reused_source_cuts(items)
     items.sort(
         key=lambda clip: (
             float(clip.get("src_in") or 0.0),
@@ -6552,7 +8016,8 @@ def refine_recap_cuts(
     out = snap_cuts_to_capped_chunks(out, pack, beats)
     out = clamp_insert_cuts_to_beat(out, pack, beats)
     out = pad_cuts_for_tts(out, pack, beats)
-    return coalesce_recap_cuts(out)
+    out = coalesce_recap_cuts(out)
+    return drop_reused_source_cuts(out)
 
 
 def snap_cuts_to_capped_chunks(
@@ -6587,6 +8052,7 @@ def snap_cuts_to_capped_chunks(
         return items
 
     gain = max(0.04, float(min_gain or 0.10))
+    used_chunk_spans: list[tuple[float, float]] = []
     out: list[dict[str, Any]] = []
     for clip in items:
         row = dict(clip)
@@ -6623,6 +8089,9 @@ def snap_cuts_to_capped_chunks(
             overlap = _overlap_sec(span, beat_span)
             if overlap <= 0.5:
                 continue
+            # Don't snap every beat onto the same already-used capped window.
+            if any(_overlap_sec(span, used) / max(0.2, span[1] - span[0]) >= 0.55 for used in used_chunk_spans):
+                continue
             cap = str(chunk.get("cap") or "")
             # Local ASR on the candidate chunk helps when event is dialogue-shaped.
             cand_ev = _evidence_for_source_span(
@@ -6636,6 +8105,7 @@ def snap_cuts_to_capped_chunks(
                 best = (span[0], span[1], chunk, score)
 
         if best is None:
+            used_chunk_spans.append((src_in, src_out))
             out.append(row)
             continue
         lo, hi, chunk, best_score = best
@@ -6647,6 +8117,7 @@ def snap_cuts_to_capped_chunks(
         elif current_score < 0.14 and best_score >= 0.22:
             should_move = True
         if not should_move:
+            used_chunk_spans.append((src_in, src_out))
             out.append(row)
             continue
 
@@ -6655,6 +8126,7 @@ def snap_cuts_to_capped_chunks(
         end = start + take
         # Avoid no-op rewrites.
         if abs(start - src_in) < 0.35 and abs(end - src_out) < 0.35:
+            used_chunk_spans.append((src_in, src_out))
             out.append(row)
             continue
         row["src_in"] = round(start, 3)
@@ -6666,6 +8138,7 @@ def snap_cuts_to_capped_chunks(
         tag = "已对齐最佳画面描述"
         if tag not in reason:
             row["reason"] = f"{reason}｜{tag}".strip("｜")
+        used_chunk_spans.append((start, end))
         out.append(row)
     return out
 
@@ -8066,115 +9539,13 @@ def generate_recap_timeline(
                     user=recap_plan_user_prompt(pack),
                     config=cfg,
                     temperature=0.25,
-                    max_tokens=8192,
+                    max_tokens=4096,
                     should_stop_callback=should_stop_callback,
                 )
                 plan_title, beats, people = parse_story_plan(plan_text)
-            beats = drop_op_ed_beats(beats, duration)
-            beats = scrub_unevidenced_beats(beats, pack)
+            # One-shot act plan + free deterministic spine/land/bookends — no head/gap/tail LLM stack.
+            beats = finalize_recap_plan_beats(beats, pack, duration_sec=duration)
             people = merge_story_people(pack.get("people"), people)
-            pack["people"] = people
-            _story_start, story_end = recap_story_window(duration)
-            if duration > 1.0 and not beats_cover_opening(beats, duration):
-                first_start = opening_deadline_sec(duration)
-                for beat in beats:
-                    span = _time_span(beat.get("t"))
-                    if span:
-                        first_start = min(first_start, span[0])
-                _raise_if_stopped()
-                _progress(22, "planning")
-                head_pack = filter_pack_to_span(pack, 0.0, first_start, pad_sec=12.0)
-                head_parsed = _try_story_plan_llm(
-                    system=default_recap_plan_head_prompt(caption_language),
-                    user=recap_plan_head_user_prompt(head_pack, beats),
-                    config=cfg,
-                    should_stop_callback=should_stop_callback,
-                    temperature=0.3,
-                    max_tokens=2048,
-                )
-                if head_parsed is None:
-                    warnings.append("recap_warn_plan_head")
-                    _progress(22, "plan_head_failed")
-                else:
-                    _head_title, head_beats, head_people = head_parsed
-                    del _head_title
-                    beats = drop_op_ed_beats(merge_story_beats(head_beats, beats), duration)
-                    people = merge_story_people(head_people, people)
-                    pack["people"] = people
-            if duration > 1.0 and not beats_cover_ending(beats, duration):
-                last_end = 0.0
-                for beat in beats:
-                    span = _time_span(beat.get("t"))
-                    if span:
-                        last_end = max(last_end, min(span[1], story_end))
-                _raise_if_stopped()
-                _progress(32, "closing")
-                tail_pack = filter_pack_to_span(pack, last_end, story_end, pad_sec=8.0)
-                tail_parsed = _try_story_plan_llm(
-                    system=default_recap_plan_tail_prompt(caption_language),
-                    user=recap_plan_tail_user_prompt(tail_pack, beats),
-                    config=cfg,
-                    should_stop_callback=should_stop_callback,
-                    temperature=0.3,
-                    max_tokens=2048,
-                )
-                if tail_parsed is None:
-                    warnings.append("recap_warn_plan_tail")
-                    _progress(32, "plan_tail_failed")
-                else:
-                    _tail_title, tail_beats, tail_people = tail_parsed
-                    del _tail_title
-                    beats = drop_op_ed_beats(merge_story_beats(beats, tail_beats), duration)
-                    people = merge_story_people(people, tail_people)
-            gaps = (
-                prioritize_story_gaps(
-                    story_beat_gaps(beats, duration),
-                    pin=activity_shift_gaps(
-                        beats,
-                        min_gap_sec=story_gap_min_sec(duration),
-                    ),
-                )
-                if duration > 1.0
-                else []
-            )
-            gap_failed = False
-            for gap in gaps:
-                if len(beats) >= MAX_STORY_BEATS:
-                    break
-                _raise_if_stopped()
-                _progress(38, "plot_gaps")
-                gap_pack = filter_pack_to_spans(pack, [gap], pad_sec=16.0)
-                gap_parsed = _try_story_plan_llm(
-                    system=default_recap_plan_gap_prompt(caption_language),
-                    user=recap_plan_gap_user_prompt(gap_pack, beats, [gap]),
-                    config=cfg,
-                    should_stop_callback=should_stop_callback,
-                    temperature=0.3,
-                    max_tokens=2048,
-                )
-                if gap_parsed is None:
-                    gap_failed = True
-                    continue
-                _gap_title, gap_beats, gap_people = gap_parsed
-                del _gap_title
-                room = max(0, MAX_STORY_BEATS - len(beats))
-                if room <= 0:
-                    break
-                if len(gap_beats) > room:
-                    gap_beats = sorted(
-                        gap_beats,
-                        key=lambda item: float(item.get("importance") or 0.5),
-                        reverse=True,
-                    )[:room]
-                beats = drop_op_ed_beats(
-                    merge_story_beats(beats, gap_beats, allowed_windows=[gap]),
-                    duration,
-                )
-                people = merge_story_people(people, gap_people)
-            if gap_failed:
-                warnings.append("recap_warn_plan_gaps")
-                _progress(38, "plot_gaps_failed")
-            beats = trim_story_beats_to_limit(beats, limit=MAX_STORY_BEATS)
             pack["people"] = people
             allocated = allocate_beat_budgets(
                 beats,
@@ -8248,39 +9619,27 @@ def generate_recap_timeline(
             _raise_if_stopped()
             _progress(48 + min(24, index * 14), "matching")
             wave_pack = pack_for_beats(pack, wave)
+            used_src = collect_used_source_spans(cuts)
             match_text = call_remote_llm(
                 system=match_system,
-                user=recap_user_prompt(wave_pack, wave),
+                user=recap_user_prompt(wave_pack, wave, used_src=used_src),
                 config=cfg,
                 temperature=0.25,
-                max_tokens=8192,
+                max_tokens=4096,
                 should_stop_callback=should_stop_callback,
             )
             wave_title, wave_cuts = parse_cut_list(match_text, pack)
             if wave_title and wave_title != "解说剪辑":
                 match_title = wave_title
             cuts.extend(wave_cuts)
+            cuts = drop_reused_source_cuts(cuts)
         leftover = missing_match_beats(allocated, cuts)
         if leftover:
-            _raise_if_stopped()
-            _progress(82, "matching")
-            close_pack = pack_for_beats(pack, leftover)
-            try:
-                close_text = call_remote_llm(
-                    system=match_system,
-                    user=recap_user_prompt(close_pack, leftover),
-                    config=cfg,
-                    temperature=0.3,
-                    max_tokens=4096,
-                    should_stop_callback=should_stop_callback,
-                )
-                _close_title, close_cuts = parse_cut_list(close_text, pack)
-                del _close_title
-                cuts.extend(close_cuts)
-            except RuntimeError:
-                warnings.append("recap_warn_match_close")
-                _progress(82, "match_close_failed")
+            # No second match bill — first waves must cover; leftover stays for manual rematch.
+            warnings.append("recap_warn_match_incomplete")
+            _progress(82, "match_incomplete")
         cuts.sort(key=lambda item: (float(item.get("src_in") or 0.0), int(item.get("beat_id") or 0)))
+        cuts = drop_reused_source_cuts(cuts)
         cuts = stash_match_vo_as_draft(cuts)
         cuts = stamp_beat_vo_onto_cuts(cuts, allocated)
         min_sec, _max_sec = recap_duration_bounds(target_sec)
@@ -8339,48 +9698,49 @@ def generate_recap_timeline(
         progress_callback=progress_callback,
     )
     _raise_if_stopped()
-    laid_out = fill_recap_vo_gaps(
-        laid_out,
-        config=cfg,
-        people=people,
-        beats=allocated,
-        pack=pack,
-        should_stop_callback=should_stop_callback,
-        progress_callback=progress_callback,
-    )
-    _raise_if_stopped()
-    # Second chance only for true story holes (same rule as gap-fill).
-    # Do NOT refill same-beat inserts/follow shots left empty for spanning VO —
-    # that was the main source of near-duplicate narration.
-    retry_indices = recap_gap_clip_indices(laid_out)
-    if retry_indices:
-        _progress(89, "captions")
-        try:
-            laid_out = caption_recap_clip_indices(
-                laid_out,
-                retry_indices,
-                config=cfg,
-                system_prompt=caption_system,
-                people=people,
-                beats=allocated,
-                pack=pack,
-                should_stop_callback=should_stop_callback,
-            )
-        except UnderstandingStoppedError:
-            raise
-        except (RuntimeError, json.JSONDecodeError, TypeError, ValueError):
-            pass
-    _raise_if_stopped()
-    laid_out = polish_recap_vo(
-        laid_out,
-        config=cfg,
-        system_prompt=polish_system,
-        people=people,
-        beats=allocated,
-        pack=pack,
-        should_stop_callback=should_stop_callback,
-        progress_callback=progress_callback,
-    )
+    # Economy: draft already covers the cut — skip gap/retry/polish LLM stack.
+    if recap_vo_coverage_ratio(laid_out) < 0.82:
+        laid_out = fill_recap_vo_gaps(
+            laid_out,
+            config=cfg,
+            people=people,
+            beats=allocated,
+            pack=pack,
+            should_stop_callback=should_stop_callback,
+            progress_callback=progress_callback,
+        )
+        _raise_if_stopped()
+        retry_indices = recap_gap_clip_indices(laid_out)
+        if retry_indices:
+            _progress(89, "captions")
+            try:
+                laid_out = caption_recap_clip_indices(
+                    laid_out,
+                    retry_indices,
+                    config=cfg,
+                    system_prompt=caption_system,
+                    people=people,
+                    beats=allocated,
+                    pack=pack,
+                    should_stop_callback=should_stop_callback,
+                )
+            except UnderstandingStoppedError:
+                raise
+            except (RuntimeError, json.JSONDecodeError, TypeError, ValueError):
+                pass
+        _raise_if_stopped()
+        laid_out = polish_recap_vo(
+            laid_out,
+            config=cfg,
+            system_prompt=polish_system,
+            people=people,
+            beats=allocated,
+            pack=pack,
+            should_stop_callback=should_stop_callback,
+            progress_callback=progress_callback,
+        )
+    else:
+        _progress(91, "polish_skip")
     _raise_if_stopped()
     _progress(92, "writing")
     cuts_path = write_recap_cuts_file(

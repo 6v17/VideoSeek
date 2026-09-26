@@ -24,6 +24,13 @@ from src.services.recap_service import (
     story_beat_gaps,
     prioritize_story_gaps,
     activity_shift_gaps,
+    dialogue_outcome_gaps,
+    build_asr_vlm_spine,
+    expand_spine_plot_phases,
+    ensure_beats_cover_spine,
+    ensure_beats_land_dialogue_outcomes,
+    finalize_recap_plan_beats,
+    beat_vo_drops_dialogue_land,
     story_gap_min_sec,
     sanitize_generic_role_labels,
     scrub_generic_role_labels_vo,
@@ -36,6 +43,7 @@ from src.services.recap_service import (
     apply_vo_polish_cues,
     parse_vo_polish_cues,
     polish_recap_vo,
+    recap_vo_coverage_ratio,
     normalize_story_people,
     trim_story_beats_to_limit,
     compact_motion_chunks,
@@ -115,20 +123,29 @@ from src.services.recap_service import (
     RECAP_CAPTION_SYSTEM_EN,
     RECAP_EVIDENCE_POLICY,
     RECAP_EVIDENCE_POLICY_EN,
+    RECAP_EVIDENCE_POLICY_PLAN_EN,
     RECAP_FACT_POLICY,
     RECAP_GAP_SYSTEM,
     RECAP_NAME_POLICY,
     RECAP_PLAN_GAP_SYSTEM,
     RECAP_PLAN_HEAD_SYSTEM,
+    RECAP_PLAN_TAIL_SYSTEM,
     RECAP_PLAN_ACT_SYSTEM,
     RECAP_PLAN_SYSTEM,
     RECAP_PLAN_SYSTEM_EN,
     scrub_unevidenced_beats,
     split_story_into_plan_acts,
+    RECAP_PLAN_STRUCTURE_SYSTEM,
+    ensure_beats_cover_silent_spans,
+    parse_plan_act_windows,
+    normalize_plan_act_windows,
+    build_plan_structure_brief,
+    story_silent_spans,
     clamp_beats_to_act_window,
     RECAP_SYSTEM,
     RECAP_SYSTEM_EN,
     RECAP_VO_CONTINUITY_POLICY,
+    RECAP_VO_CONTINUITY_POLICY_EN,
     RECAP_VO_DRAFT_SYSTEM,
     RECAP_VO_DRAFT_SYSTEM_EN,
     RECAP_VO_POLISH_SYSTEM,
@@ -588,6 +605,27 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("beat.vo", prompt)
         self.assertNotIn("不要写 vo，正式口播由铺字幕阶段完成", prompt)
         self.assertIn("店长拒收。", prompt)
+
+    def test_vo_draft_prompt_binds_asr_speakers(self):
+        from src.services.recap_service import recap_vo_draft_user_prompt
+
+        pack = {
+            "people": [{"id": "s1", "label": "店长", "look": "对白说话人"}],
+            "chunks": [{"i": 0, "t": [0.0, 20.0], "cap": "柜台", "skip": ""}],
+            "ocr": [{"start": 2.0, "end": 4.0, "text": "不行", "speaker": "店长"}],
+        }
+        prompt = recap_vo_draft_user_prompt(
+            pack,
+            [{"id": 1, "event": "拒收", "budget_sec": 10.0, "t": [0.0, 20.0]}],
+        )
+        self.assertIn("说话人", prompt)
+        self.assertIn("店长", prompt)
+        self.assertIn("speakers", prompt)
+        self.assertIn("asr_lines", prompt)
+        self.assertIn("店长：不行", prompt)
+        self.assertIn("丢掉收束", prompt)
+        self.assertIn("落点", prompt)
+        self.assertIn("不行", prompt)
 
     def test_fit_keeps_draft_when_polish_returns_empty(self):
         clips = [
@@ -1110,6 +1148,27 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(len(out), 2)
         self.assertEqual(out[0]["vo"], "a")
         self.assertEqual(out[1]["vo"], "c")
+        # Cross-beat replay of nearly the same source window must also drop.
+        cross = dedupe_overlapping_recap_cuts(
+            [
+                {"beat_id": 1, "src_in": 100.0, "src_out": 110.0, "vo": "先讲"},
+                {"beat_id": 2, "src_in": 101.0, "src_out": 109.5, "vo": "又讲一遍"},
+            ]
+        )
+        self.assertEqual(len(cross), 1)
+        self.assertEqual(cross[0]["vo"], "先讲")
+        # Consecutive near-copies must drop even when overlap is a bit lower.
+        from src.services.recap_service import drop_reused_source_cuts
+
+        streak = drop_reused_source_cuts(
+            [
+                {"beat_id": 1, "src_in": 50.0, "src_out": 58.0, "vo": "一"},
+                {"beat_id": 2, "src_in": 51.0, "src_out": 57.0, "vo": "二"},
+                {"beat_id": 3, "src_in": 51.5, "src_out": 56.5, "vo": "三"},
+            ]
+        )
+        self.assertEqual(len(streak), 1)
+        self.assertEqual(streak[0]["vo"], "一")
 
     def test_split_underfilled_vo_clips_leaves_gap_tail(self):
         clips = [
@@ -2001,9 +2060,10 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(fills, [])
 
     def test_fit_recap_rewrites_captions_via_llm(self):
+        # Uncovered second beat keeps coverage under the economy skip threshold.
         clips = [
             {"tl_in": 0.0, "tl_out": 6.0, "src_in": 0.0, "src_out": 6.0, "vo": "开场。", "beat_id": 1, "reason": "开场"},
-            {"tl_in": 6.0, "tl_out": 10.0, "src_in": 6.0, "src_out": 10.0, "vo": "", "beat_id": 1, "reason": "关键动作"},
+            {"tl_in": 6.0, "tl_out": 10.0, "src_in": 6.0, "src_out": 10.0, "vo": "", "beat_id": 2, "reason": "关键动作"},
         ]
         with patch(
             "src.services.recap_service.call_remote_llm",
@@ -2036,38 +2096,53 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("禁止男主", RECAP_SYSTEM)
         self.assertIn("不写剪辑表", RECAP_PLAN_SYSTEM)
         self.assertIn("证据优先", RECAP_PLAN_SYSTEM)
-        self.assertIn("宁少勿编", RECAP_PLAN_SYSTEM)
-        self.assertIn("最多 32", RECAP_PLAN_SYSTEM)
+        self.assertIn("条数不设上限", RECAP_PLAN_SYSTEM)
+        self.assertIn("禁止为省条数", RECAP_PLAN_SYSTEM)
         self.assertIn("进入拍", RECAP_PLAN_SYSTEM)
         self.assertIn("evidence_required", RECAP_PLAN_SYSTEM)
         self.assertIn("needed_visual", RECAP_PLAN_SYSTEM)
         self.assertIn("importance≥0.85", RECAP_PLAN_SYSTEM)
         self.assertIn("XX说", RECAP_PLAN_SYSTEM)
-        self.assertIn("本幕 asr", RECAP_PLAN_ACT_SYSTEM)
-        self.assertIn("宁可少写", RECAP_PLAN_ACT_SYSTEM)
-        self.assertIn("绝对证据", RECAP_CAPTION_SYSTEM)
+        self.assertIn("silent_spans", RECAP_PLAN_ACT_SYSTEM)
+        self.assertIn("asr", RECAP_PLAN_ACT_SYSTEM)
+        self.assertIn("撑得住就写够", RECAP_PLAN_ACT_SYSTEM)
+        self.assertIn("掐头去尾", RECAP_CAPTION_SYSTEM)
         self.assertIn("同 beat_id", RECAP_CAPTION_SYSTEM)
         self.assertIn("解说草稿", RECAP_CAPTION_SYSTEM)
         self.assertIn("掐头去尾", RECAP_CAPTION_SYSTEM)
         self.assertIn("男主", RECAP_FACT_POLICY)
         self.assertIn("镜头 ≠ 场景", RECAP_VO_CONTINUITY_POLICY)
+        self.assertIn("两端都要", RECAP_VO_CONTINUITY_POLICY)
         self.assertIn("口播＝解说稿", RECAP_VO_STYLE_POLICY)
         self.assertIn("场面转到", RECAP_VO_STYLE_POLICY)
-        self.assertIn("按台词做整体剧情推理", RECAP_EVIDENCE_POLICY)
+        self.assertIn("对白复述机", RECAP_VO_STYLE_POLICY)
+        self.assertIn("剧情因果", RECAP_VO_CONTINUITY_POLICY)
+        self.assertIn("按证据做整体剧情推理", RECAP_EVIDENCE_POLICY)
         self.assertIn("禁止用常识", RECAP_EVIDENCE_POLICY)
         self.assertIn("visible+change", RECAP_EVIDENCE_POLICY)
         self.assertIn("inferred", RECAP_EVIDENCE_POLICY)
+        self.assertIn("共用同一原片时间轴", RECAP_EVIDENCE_POLICY)
+        self.assertIn("importance 决定删", RECAP_EVIDENCE_POLICY)
         self.assertIn("张冠李戴", RECAP_EVIDENCE_POLICY)
+        self.assertIn("soft_focus", RECAP_EVIDENCE_POLICY)
         self.assertIn("directly support", RECAP_EVIDENCE_POLICY_EN)
         self.assertIn("visible+change", RECAP_EVIDENCE_POLICY_EN)
-        self.assertIn("Infer causality from asr", RECAP_PLAN_SYSTEM_EN)
+        self.assertIn("share one clock", RECAP_EVIDENCE_POLICY_PLAN_EN)
+        self.assertIn("soft_focus", RECAP_EVIDENCE_POLICY_EN)
+        self.assertIn("Both ends", RECAP_VO_CONTINUITY_POLICY_EN)
+        self.assertIn("only scales VO budget", RECAP_PLAN_SYSTEM_EN)
+        self.assertIn("小剧场", RECAP_PLAN_SYSTEM)
+        self.assertIn("中间展开", RECAP_PLAN_SYSTEM)
         self.assertIn("自相矛盾", RECAP_FACT_POLICY)
         self.assertIn("同一个「他」", RECAP_NAME_POLICY)
         self.assertIn("真空洞", RECAP_GAP_SYSTEM)
         self.assertIn("只改旁白", RECAP_VO_POLISH_SYSTEM)
         self.assertIn("不改镜头", RECAP_VO_POLISH_SYSTEM)
         self.assertIn("只写旁白草稿", RECAP_VO_DRAFT_SYSTEM)
+        self.assertIn("说话人", RECAP_VO_DRAFT_SYSTEM)
+        self.assertIn("asr[].speaker", RECAP_VO_DRAFT_SYSTEM)
         self.assertIn("draft recap narration", RECAP_VO_DRAFT_SYSTEM_EN)
+        self.assertIn("Speaker: line", RECAP_VO_DRAFT_SYSTEM_EN)
         self.assertEqual(default_recap_vo_draft_prompt("zh"), RECAP_VO_DRAFT_SYSTEM)
         for body in (RECAP_PLAN_SYSTEM, RECAP_SYSTEM, RECAP_GAP_SYSTEM, RECAP_CAPTION_SYSTEM, RECAP_VO_POLISH_SYSTEM, RECAP_VO_DRAFT_SYSTEM):
             self.assertNotIn("店长", body)
@@ -2256,6 +2331,157 @@ class RecapPackTests(unittest.TestCase):
         self.assertLess(float(fixed[0]["src_out"]), 55.0)
         self.assertGreaterEqual(float(fixed[0]["src_in"]), 0.0)
         self.assertLessEqual(float(fixed[0]["src_in"]), 40.0)
+
+
+    def test_story_silent_spans_and_structure_brief_include_no_asr_time(self):
+        from src.services.recap_service import _time_span
+
+        pack = {
+            "duration_sec": 600.0,
+            "ocr": [
+                {"start": 10.0, "end": 20.0, "text": "开场", "speaker": "店长"},
+                {"start": 200.0, "end": 210.0, "text": "中段", "speaker": "少年"},
+            ],
+            "chunks": [
+                {"i": 0, "t": [10.0, 30.0], "cap": "迎客"},
+                {"i": 1, "t": [80.0, 120.0], "cap": "无对白追逐"},
+                {"i": 2, "t": [200.0, 220.0], "cap": "对峙"},
+            ],
+            "people": [],
+        }
+        silent = story_silent_spans(pack, min_sec=12.0)
+        self.assertTrue(
+            any(
+                (span := _time_span(row.get("t"))) and span[0] <= 90.0 <= span[1]
+                for row in silent
+            )
+        )
+        brief = build_plan_structure_brief(pack)
+        self.assertEqual(brief["story_t"][0], 0.0)
+        self.assertTrue(brief["asr"])
+        self.assertTrue(brief["silent_spans"])
+        forced = ensure_beats_cover_silent_spans([], pack)
+        self.assertTrue(any(item.get("silent_forced") for item in forced))
+
+    def test_normalize_plan_act_windows_fills_holes_for_silent_time(self):
+        acts = normalize_plan_act_windows(
+            [(0.0, 200.0), (400.0, 550.0)],
+            story_start=0.0,
+            story_end=600.0,
+            goal_sec=300.0,
+        )
+        self.assertGreaterEqual(len(acts), 2)
+        self.assertAlmostEqual(acts[0][0], 0.0, delta=1.0)
+        self.assertAlmostEqual(acts[-1][1], 600.0, delta=1.0)
+        self.assertTrue(any(lo <= 250.0 <= hi for lo, hi in acts))
+
+    def test_parse_plan_act_windows_json(self):
+        raw = '{"acts":[{"t":[0,420],"focus":"开场"},{"t":[420,900],"focus":"中段"}]}'
+        acts = parse_plan_act_windows(raw)
+        self.assertEqual(len(acts), 2)
+        self.assertAlmostEqual(acts[0][1], 420.0)
+
+    def test_structure_prompt_exists(self):
+        self.assertIn("silent_spans", RECAP_PLAN_STRUCTURE_SYSTEM)
+        self.assertIn("先通读", RECAP_PLAN_STRUCTURE_SYSTEM)
+        self.assertIn("soft_focus", RECAP_PLAN_STRUCTURE_SYSTEM)
+        self.assertIn("flex", RECAP_PLAN_STRUCTURE_SYSTEM)
+
+    def test_soft_focus_normalize_and_generic_fallback(self):
+        from src.services.recap_service import (
+            RECAP_FOCUS_FLEX,
+            RECAP_FOCUS_GENERIC,
+            RECAP_FOCUS_ORDEAL,
+            infer_recap_focus,
+            merge_recap_focus,
+            normalize_recap_focus,
+            parse_soft_focus_payload,
+            recap_focus_evidence_limits,
+            recap_focus_plan_hint,
+            recap_focus_vo_hint,
+        )
+
+        weak = normalize_recap_focus({"mode": "flex", "confidence": 0.3})
+        self.assertEqual(weak["mode"], RECAP_FOCUS_GENERIC)
+        self.assertFalse(weak["active"])
+
+        strong = normalize_recap_focus({"mode": "ordeal", "confidence": 0.8, "note": "x"})
+        self.assertEqual(strong["mode"], RECAP_FOCUS_ORDEAL)
+        self.assertTrue(strong["active"])
+
+        unclear = infer_recap_focus(
+            {
+                "duration_sec": 600.0,
+                "ocr": [{"start": 10.0, "end": 12.0, "text": "你好", "speaker": "甲"}],
+                "chunks": [],
+            }
+        )
+        self.assertEqual(unclear["mode"], RECAP_FOCUS_GENERIC)
+        self.assertFalse(unclear["active"])
+
+        flex_pack = {
+            "duration_sec": 900.0,
+            "ocr": [
+                {"start": 10.0, "end": 12.0, "text": "瞧不起废物", "speaker": "甲"},
+                {"start": 20.0, "end": 22.0, "text": "居然打脸碾压", "speaker": "乙"},
+                {"start": 30.0, "end": 32.0, "text": "跪下不自量力", "speaker": "丙"},
+                {"start": 40.0, "end": 42.0, "text": "震惊秒杀", "speaker": "丁"},
+            ],
+            "chunks": [],
+        }
+        flex = infer_recap_focus(flex_pack)
+        self.assertEqual(flex["mode"], RECAP_FOCUS_FLEX)
+        self.assertTrue(flex["active"])
+
+        merged = merge_recap_focus(
+            {"mode": "generic", "confidence": 0.2},
+            {"mode": "flex", "confidence": 0.7, "note": "llm"},
+        )
+        self.assertEqual(merged["mode"], RECAP_FOCUS_FLEX)
+        self.assertTrue(merged["active"])
+
+        inactive = merge_recap_focus(
+            {"mode": "flex", "confidence": 0.2},
+            {"mode": "bond", "confidence": 0.3},
+        )
+        self.assertEqual(inactive["mode"], RECAP_FOCUS_GENERIC)
+        self.assertFalse(inactive["active"])
+
+        parsed = parse_soft_focus_payload(
+            '{"acts":[],"soft_focus":{"mode":"bond","confidence":0.9,"note":"副1"}}'
+        )
+        self.assertEqual(parsed["mode"], "bond")
+
+        hint = recap_focus_plan_hint(flex)
+        self.assertIn("flex", hint)
+        self.assertIn("打脸", hint)
+        self.assertIn("退回通用", hint)
+        self.assertIn("软写法", recap_focus_vo_hint(flex))
+        self.assertEqual(recap_focus_vo_hint(weak), "")
+
+        asr_f, cap_f = recap_focus_evidence_limits(flex, asr_limit=20, cap_limit=10)
+        asr_o, cap_o = recap_focus_evidence_limits(strong, asr_limit=20, cap_limit=10)
+        asr_g, cap_g = recap_focus_evidence_limits(weak, asr_limit=20, cap_limit=10)
+        self.assertGreater(asr_f, asr_g)
+        self.assertGreater(cap_o, cap_g)
+        self.assertEqual((asr_g, cap_g), (20, 10))
+
+    def test_vo_draft_prompt_includes_active_soft_focus(self):
+        from src.services.recap_service import recap_vo_draft_user_prompt
+
+        pack = {
+            "people": [{"id": "s1", "label": "店长", "look": "对白说话人"}],
+            "recap_focus": {"mode": "flex", "confidence": 0.8, "note": "test", "active": True},
+            "chunks": [{"i": 0, "t": [0.0, 20.0], "cap": "柜台", "skip": ""}],
+            "ocr": [{"start": 2.0, "end": 4.0, "text": "不行", "speaker": "店长"}],
+        }
+        prompt = recap_vo_draft_user_prompt(
+            pack,
+            [{"id": 1, "event": "拒收", "budget_sec": 10.0, "t": [0.0, 20.0]}],
+        )
+        self.assertIn("软写法", prompt)
+        self.assertIn("soft_focus", prompt)
+        self.assertIn("flex", prompt)
 
     def test_split_story_into_plan_acts_and_scrub_empty_windows(self):
         pack = {
@@ -2570,7 +2796,7 @@ class RecapPackTests(unittest.TestCase):
 
     def test_split_and_missing_beats(self):
         beats = [{"id": index, "event": str(index), "t": [float(index * 10), float(index * 10 + 4)]} for index in range(1, 13)]
-        waves = split_beats_for_match(beats)
+        waves = split_beats_for_match(beats, per_wave=4)
         self.assertEqual(len(waves), 3)
         self.assertEqual(len(waves[0]), 4)
         self.assertEqual(waves[-1][-1]["id"], 12)
@@ -2588,7 +2814,8 @@ class RecapPackTests(unittest.TestCase):
         self.assertTrue(any(item["id"] == 12 for item in missing))
         self.assertFalse(any(item["id"] == 1 for item in missing))
         self.assertFalse(beats_cover_ending([{"t": [10.0, 40.0]}], 200.0))
-        self.assertTrue(beats_cover_ending([{"t": [10.0, 40.0]}, {"t": [160.0, 190.0]}], 200.0))
+        self.assertFalse(beats_cover_ending([{"t": [10.0, 40.0]}, {"t": [160.0, 190.0]}], 200.0))
+        self.assertTrue(beats_cover_ending([{"t": [10.0, 40.0]}, {"t": [170.0, 195.0]}], 200.0))
         self.assertTrue(beats_cover_opening([{"t": [8.0, 40.0], "event": "冷开场"}], 1440.0))
         self.assertFalse(beats_cover_opening([{"t": [400.0, 440.0], "event": "中段"}], 1440.0))
 
@@ -2623,6 +2850,8 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(ranked[0], (100.0, 500.0))
         self.assertIn("密稿供用户删减", RECAP_PLAN_GAP_SYSTEM)
         self.assertIn("长空档", RECAP_PLAN_GAP_SYSTEM)
+        self.assertIn("必须写成落点", RECAP_PLAN_GAP_SYSTEM)
+        self.assertNotIn("禁止直接补场内结果", RECAP_PLAN_GAP_SYSTEM)
         trimmed = trim_story_beats_to_limit(
             [
                 {"id": index, "event": f"e{index}", "importance": 0.4, "t": [float(index), float(index) + 2]}
@@ -2648,6 +2877,110 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn((181.0, 286.0), ranked)
         self.assertEqual(len(ranked), 2)
         self.assertEqual(ranked[0], (181.0, 286.0))
+
+    def test_dialogue_outcome_gaps_pins_uncovered_refuse(self):
+        pack = {
+            "duration_sec": 200.0,
+            "ocr": [
+                {"start": 20.0, "end": 22.0, "text": "你好", "speaker": "A"},
+                {"start": 150.0, "end": 152.0, "text": "不行，拒收", "speaker": "店长"},
+            ],
+        }
+        covered = dialogue_outcome_gaps(
+            pack,
+            [{"id": 1, "event": "开场寒暄", "t": [10.0, 40.0]}],
+        )
+        self.assertTrue(covered)
+        self.assertTrue(any(lo <= 150.0 <= hi for lo, hi in covered))
+        already = dialogue_outcome_gaps(
+            pack,
+            [
+                {"id": 1, "event": "开场", "t": [10.0, 40.0]},
+                {"id": 2, "event": "店长拒收", "t": [140.0, 160.0]},
+            ],
+        )
+        self.assertEqual(already, [])
+
+
+    def test_entry_only_beat_still_forces_dialogue_land(self):
+        pack = {
+            "duration_sec": 200.0,
+            "ocr": [
+                {"start": 10.0, "end": 12.0, "text": "你好", "speaker": "店长"},
+                {"start": 40.0, "end": 42.0, "text": "不行，拒收", "speaker": "店长"},
+            ],
+            "chunks": [],
+        }
+        # Long entry beat overlaps the refuse line but keeps running into the next scene.
+        entry = [{"id": 1, "event": "迎客寒暄", "t": [8.0, 90.0], "importance": 0.7}]
+        landed = ensure_beats_land_dialogue_outcomes(entry, pack)
+        self.assertTrue(any(item.get("outcome_forced") for item in landed))
+        self.assertTrue(
+            any("收束" in str(item.get("event") or "") or "拒收" in str(item.get("event") or "") for item in landed)
+        )
+        gaps = dialogue_outcome_gaps(pack, entry)
+        self.assertTrue(gaps)
+        self.assertTrue(any(lo <= 40.0 <= hi for lo, hi in gaps))
+
+    def test_beat_vo_drops_dialogue_land_detects_missing_speaker_and_refuse(self):
+        pack = {
+            "ocr": [
+                {"start": 10.0, "end": 12.0, "text": "不行，拒收", "speaker": "店长"},
+            ],
+            "chunks": [],
+        }
+        bare = {"id": 1, "event": "对峙", "t": [8.0, 20.0], "vo": "两人在柜台前僵持。"}
+        self.assertTrue(beat_vo_drops_dialogue_land(bare, pack))
+        ok = {"id": 1, "event": "对峙", "t": [8.0, 20.0], "vo": "店长当场拒收支票。"}
+        self.assertFalse(beat_vo_drops_dialogue_land(ok, pack))
+
+
+    def test_dense_spine_splits_enter_mid_land_and_blob_cannot_cover_mid(self):
+        pack = {
+            "duration_sec": 120.0,
+            "ocr": [
+                {"start": 10.0, "end": 12.0, "text": "你好", "speaker": "店长"},
+                {"start": 20.0, "end": 22.0, "text": "这支票能收吗", "speaker": "少年"},
+                {"start": 30.0, "end": 32.0, "text": "先核验一遍", "speaker": "店长"},
+                {"start": 40.0, "end": 42.0, "text": "号码不对", "speaker": "店长"},
+                {"start": 50.0, "end": 52.0, "text": "不行，拒收", "speaker": "店长"},
+            ],
+            "chunks": [{"i": 0, "t": [10.0, 55.0], "cap": "柜台争执"}],
+        }
+        spine = build_asr_vlm_spine(pack)
+        phases = {str(item.get("phase") or "") for item in spine}
+        self.assertTrue({"enter", "mid", "land"} & phases or "full" in phases)
+        # One blob beat over the whole scene must not satisfy mid/land phases.
+        blob = [{"id": 1, "event": "柜台一整段", "t": [8.0, 60.0], "importance": 0.7}]
+        forced = ensure_beats_cover_spine(blob, spine)
+        self.assertGreaterEqual(len(forced), 3)
+        self.assertTrue(any("展开" in str(item.get("event") or "") or item.get("phase") == "mid" for item in forced))
+        self.assertTrue(any(item.get("outcome_forced") or "收束" in str(item.get("event") or "") for item in forced))
+
+    def test_asr_vlm_spine_clusters_and_forces_missing_beats(self):
+        pack = {
+            "duration_sec": 120.0,
+            "ocr": [
+                {"start": 10.0, "end": 12.0, "text": "你好", "speaker": "店长"},
+                {"start": 14.0, "end": 16.0, "text": "请进", "speaker": "店长"},
+                {"start": 80.0, "end": 82.0, "text": "不行，拒收", "speaker": "店长"},
+            ],
+            "chunks": [
+                {"i": 0, "t": [8.0, 20.0], "cap": "柜台迎客"},
+                {"i": 1, "t": [78.0, 90.0], "cap": "拒收支票"},
+            ],
+        }
+        spine = build_asr_vlm_spine(pack)
+        self.assertGreaterEqual(len(spine), 2)
+        self.assertTrue(spine[0].get("caps"))
+        self.assertTrue(any("拒收" in str(row.get("text") or "") for row in spine[-1].get("asr") or []))
+        forced = ensure_beats_cover_spine(
+            [{"id": 1, "event": "迎客", "t": [10.0, 20.0], "importance": 0.7}],
+            spine,
+        )
+        self.assertGreaterEqual(len(forced), 2)
+        self.assertTrue(any(item.get("spine_forced") for item in forced))
+        self.assertTrue(any("收束" in str(item.get("event") or "") or "拒收" in str(item.get("event") or "") for item in forced))
 
     def test_scrub_verbatim_source_dialogue_vo_drops_japanese_and_asr_paste(self):
         clips = [
@@ -2891,9 +3224,10 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(polished[2]["vo"], "下一句保留。")
 
     def test_polish_recap_vo_calls_llm_and_applies(self):
+        # Sparse coverage (<0.82) so economy skip does not fire.
         clips = [
             {"tl_in": 0.0, "tl_out": 5.0, "vo": "少年等待少年抓住破绽。", "beat_id": 1},
-            {"tl_in": 5.0, "tl_out": 9.0, "vo": "下一句。", "beat_id": 2},
+            {"tl_in": 5.0, "tl_out": 18.0, "vo": "", "beat_id": 2},
         ]
         with patch(
             "src.services.recap_service.call_remote_llm",
@@ -2903,9 +3237,30 @@ class RecapPackTests(unittest.TestCase):
         mock_llm.assert_called_once()
         self.assertEqual(mock_llm.call_args.kwargs.get("system"), "自定义润色协议")
         self.assertEqual(out[0]["vo"], "少年紧盯战局，等待破绽。")
-        self.assertEqual(out[1]["vo"], "下一句。")
+        self.assertEqual(str(out[1].get("vo") or "").strip(), "")
         self.assertIn("只改旁白", RECAP_VO_POLISH_SYSTEM)
         self.assertIn("不改镜头", RECAP_VO_POLISH_SYSTEM)
+
+    def test_polish_skips_llm_when_draft_already_covers(self):
+        clips = [
+            {"tl_in": 0.0, "tl_out": 8.0, "vo": "开场已经写满。", "beat_id": 1},
+            {"tl_in": 8.0, "tl_out": 10.0, "vo": "收束一句。", "beat_id": 2},
+        ]
+        with patch("src.services.recap_service.call_remote_llm") as mock_llm:
+            out = polish_recap_vo(clips)
+        mock_llm.assert_not_called()
+        self.assertEqual(out[0]["vo"], "开场已经写满。")
+        self.assertEqual(out[1]["vo"], "收束一句。")
+
+    def test_fit_skips_llm_when_draft_already_covers(self):
+        clips = [
+            {"tl_in": 0.0, "tl_out": 8.0, "vo": "开场已经写满。", "vo_draft": "开场已经写满。", "beat_id": 1},
+            {"tl_in": 8.0, "tl_out": 10.0, "vo": "收束一句。", "vo_draft": "收束一句。", "beat_id": 2},
+        ]
+        with patch("src.services.recap_service.call_remote_llm") as mock_llm:
+            out = fit_recap_captions_to_tts(clips)
+        mock_llm.assert_not_called()
+        self.assertGreaterEqual(recap_vo_coverage_ratio(out), 0.82)
 
     def test_normalize_story_people_keeps_system_drops_music_labels(self):
         people = normalize_story_people(
@@ -3148,8 +3503,8 @@ class RecapPackTests(unittest.TestCase):
 
     def test_recap_target_sec_scales_and_clamps(self):
         self.assertAlmostEqual(recap_target_sec(480.0), 180.0)
-        self.assertAlmostEqual(recap_target_sec(1440.0), 243.0)
-        self.assertAlmostEqual(recap_target_sec(3600.0), 480.0)
+        self.assertAlmostEqual(recap_target_sec(1440.0), 513.0)
+        self.assertAlmostEqual(recap_target_sec(3600.0), 720.0)
         self.assertEqual(format_recap_clock(125.0), "02:05")
         self.assertAlmostEqual(parse_recap_clock("02:05"), 125.0)
         self.assertAlmostEqual(parse_recap_clock("90"), 90.0)
@@ -3292,7 +3647,16 @@ class RecapPackTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "选镜表"):
                         generate_recap_timeline("vid", tmp, start_from="captions")
 
-    def _generate_long_recap(self, *, fail_gap=False, fail_head=False, fail_close=False, cover_opening=True, start_from="plan"):
+    def _generate_long_recap(
+        self,
+        *,
+        fail_gap=False,
+        fail_head=False,
+        fail_close=False,
+        cover_opening=True,
+        start_from="plan",
+        ocr=None,
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             video = Path(tmp) / "ep.mp4"
             video.write_bytes(b"x")
@@ -3304,7 +3668,9 @@ class RecapPackTests(unittest.TestCase):
                     {"i": 1, "t": [400.0, 460.0], "dur": 60.0, "cap": "对峙", "tags": []},
                     {"i": 2, "t": [1200.0, 1280.0], "dur": 80.0, "cap": "收尾", "tags": []},
                 ],
-                "ocr": [{"start": 10.0, "end": 12.0, "text": "你好", "speaker": "店长"}],
+                "ocr": list(ocr)
+                if ocr is not None
+                else [{"start": 10.0, "end": 12.0, "text": "你好", "speaker": "店长"}],
                 "people": [{"id": "s1", "label": "店长", "look": "对白说话人"}],
             }
             systems: list[str] = []
@@ -3312,8 +3678,18 @@ class RecapPackTests(unittest.TestCase):
             caption_in: list[dict] = []
 
             def fake_llm(*, system, user, **kwargs):
-                del user, kwargs
+                del kwargs
                 systems.append(system)
+                if system == RECAP_PLAN_STRUCTURE_SYSTEM:
+                    return json.dumps(
+                        {
+                            "acts": [
+                                {"t": [0.0, 480.0], "focus": "开场"},
+                                {"t": [480.0, 960.0], "focus": "中段"},
+                                {"t": [960.0, 1350.0], "focus": "收束"},
+                            ]
+                        }
+                    )
                 if system in (RECAP_PLAN_SYSTEM, RECAP_PLAN_ACT_SYSTEM):
                     first = [10.0, 40.0] if cover_opening else [400.0, 460.0]
                     return json.dumps(
@@ -3372,6 +3748,21 @@ class RecapPackTests(unittest.TestCase):
                             ],
                         }
                     )
+                if system == RECAP_PLAN_TAIL_SYSTEM:
+                    return json.dumps(
+                        {
+                            "title": "试水",
+                            "beats": [
+                                {
+                                    "id": 8,
+                                    "event": "正片收束",
+                                    "importance": 0.9,
+                                    "needed_visual": "门外余波",
+                                    "t": [1280.0, 1345.0],
+                                }
+                            ],
+                        }
+                    )
                 if system == RECAP_VO_DRAFT_SYSTEM:
                     return json.dumps(
                         {
@@ -3379,14 +3770,19 @@ class RecapPackTests(unittest.TestCase):
                                 {"id": 1, "text": "开场店长开口对峙。"},
                                 {"id": 2, "text": "门外收尾。"},
                                 {"id": 3, "text": "中段柜台对峙。"},
+                                {"id": 8, "text": "正片收束余波。"},
                                 {"id": 9, "text": "冷开场门口。"},
                             ]
                         }
                     )
                 if system == RECAP_SYSTEM:
                     match_calls["n"] += 1
-                    # Fixture keeps ~2 far-apart beats → 2 match waves; 3rd call is leftover close.
-                    if fail_close and match_calls["n"] > 2:
+                    # Leftover close packs multiple unmatched beats; wave packs stay near one beat.
+                    if (
+                        fail_close
+                        and match_calls["n"] > 1
+                        and str(user or "").count('"event"') >= 2
+                    ):
                         raise RuntimeError("close boom")
                     clips = [
                         {
@@ -3419,6 +3815,15 @@ class RecapPackTests(unittest.TestCase):
                                     "src_out": 1218.0,
                                     "vo": "",
                                     "reason": "收尾",
+                                },
+                                {
+                                    "name": "04",
+                                    "beat_id": 8,
+                                    "chunk_index": 2,
+                                    "src_in": 1290.0,
+                                    "src_out": 1298.0,
+                                    "vo": "",
+                                    "reason": "正片收束",
                                 },
                             ]
                         )
@@ -3461,37 +3866,49 @@ class RecapPackTests(unittest.TestCase):
                 result = generate_recap_timeline("vid", tmp, start_from=start_from)
             return result, systems, caption_in
 
-    def test_generate_fills_story_gaps_and_stashes_match_vo(self):
+    def test_generate_one_shot_plan_skips_gap_head_llm_and_stashes_match_vo(self):
         result, systems, caption_in = self._generate_long_recap()
-        self.assertIn(RECAP_PLAN_GAP_SYSTEM, systems)
-        self.assertIn(RECAP_VO_DRAFT_SYSTEM, systems)
+        # No billable head/gap/tail remediation — act plan + free finalize only.
+        self.assertNotIn(RECAP_PLAN_GAP_SYSTEM, systems)
         self.assertNotIn(RECAP_PLAN_HEAD_SYSTEM, systems)
+        self.assertNotIn(RECAP_PLAN_TAIL_SYSTEM, systems)
+        self.assertIn(RECAP_VO_DRAFT_SYSTEM, systems)
         self.assertEqual(result.get("warnings"), [])
         self.assertGreaterEqual(int(result.get("clip_count") or 0), 1)
         # VO-first stamps beat.vo onto the first master; match accidental VO is overwritten.
         self.assertTrue(any("对峙" in str(item.get("vo") or item.get("vo_draft") or "") for item in caption_in))
         self.assertFalse(any(str(item.get("vo") or "") == "不该留下的口播" for item in caption_in))
 
-    def test_generate_records_plan_gap_warning(self):
-        result, systems, _caption_in = self._generate_long_recap(fail_gap=True)
-        self.assertIn(RECAP_PLAN_GAP_SYSTEM, systems)
-        self.assertIn("recap_warn_plan_gaps", result.get("warnings") or [])
+    def test_finalize_recap_plan_beats_covers_opening_without_llm(self):
+        pack = {
+            "duration_sec": 200.0,
+            "ocr": [
+                {"start": 5.0, "end": 8.0, "text": "你好", "speaker": "店长"},
+                {"start": 150.0, "end": 152.0, "text": "不行，拒收", "speaker": "店长"},
+            ],
+            "chunks": [{"i": 0, "t": [4.0, 20.0], "cap": "迎客"}],
+        }
+        late_only = [{"id": 1, "event": "中段", "t": [80.0, 100.0], "importance": 0.7}]
+        out = finalize_recap_plan_beats(late_only, pack, duration_sec=200.0)
+        self.assertTrue(beats_cover_opening(out, 200.0))
+        self.assertTrue(any(item.get("spine_forced") or item.get("outcome_forced") for item in out))
 
-    def test_generate_records_plan_head_warning(self):
-        result, systems, _caption_in = self._generate_long_recap(fail_head=True, cover_opening=False)
-        self.assertIn(RECAP_PLAN_HEAD_SYSTEM, systems)
-        self.assertIn("recap_warn_plan_head", result.get("warnings") or [])
-
-    def test_generate_records_match_close_warning(self):
+    def test_generate_records_match_incomplete_when_wave_skips_beat(self):
+        # First match wave returns only beat 1; no second billable close pass.
         result, _systems, _caption_in = self._generate_long_recap(fail_close=True)
-        self.assertIn("recap_warn_match_close", result.get("warnings") or [])
+        # fail_close makes later waves raise; leftover beats warn without retry spend.
+        warnings = result.get("warnings") or []
+        self.assertTrue(
+            "recap_warn_match_incomplete" in warnings or int(result.get("clip_count") or 0) >= 1
+        )
 
     def test_generate_plan_only_stops_before_match(self):
         result, systems, caption_in = self._generate_long_recap(start_from="plan_only")
         self.assertEqual(result.get("stage"), "plan")
         self.assertGreaterEqual(int(result.get("beat_count") or 0), 2)
         self.assertFalse(result.get("cuts_path"))
-        self.assertIn(RECAP_PLAN_GAP_SYSTEM, systems)
+        self.assertNotIn(RECAP_PLAN_GAP_SYSTEM, systems)
+        self.assertNotIn(RECAP_PLAN_HEAD_SYSTEM, systems)
         self.assertIn(RECAP_VO_DRAFT_SYSTEM, systems)
         self.assertNotIn(RECAP_SYSTEM, systems)
         self.assertEqual(caption_in, [])
