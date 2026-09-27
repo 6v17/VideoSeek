@@ -582,20 +582,21 @@ class SearchPage(QWidget):
         results_layout.setSpacing(8)
         results_layout.addWidget(self.result_view)
 
-        # Slim stand-in while results are floated — keep it card-sized, not a full-page banner.
-        self.results_float_placeholder = VSCard(margins=(14, 10, 14, 10), spacing=8)
+        # Same footprint as results while floated — main split stays unchanged.
+        self.results_float_placeholder = VSCard(margins=(14, 12, 14, 12), spacing=8)
         self.results_float_placeholder.setObjectName("PanelCard")
         self.results_float_placeholder.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.results_float_placeholder.setFixedHeight(52)
+        self.results_float_placeholder.setMinimumHeight(160)
         placeholder_layout = self.results_float_placeholder.content_layout
         placeholder_row = QHBoxLayout()
         placeholder_row.setContentsMargins(0, 0, 0, 0)
         placeholder_row.setSpacing(10)
         self.results_float_hint = QLabel()
         self.results_float_hint.setObjectName("Hint")
-        self.results_float_hint.setWordWrap(False)
+        self.results_float_hint.setWordWrap(True)
+        self.results_float_hint.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.btn_focus_results = QPushButton()
         self.btn_focus_results.setObjectName("AccentGhostButton")
         self.btn_focus_results.setMinimumHeight(30)
@@ -605,7 +606,9 @@ class SearchPage(QWidget):
         placeholder_row.addWidget(self.results_float_hint, 1)
         placeholder_row.addWidget(self.btn_focus_results, 0)
         placeholder_row.addWidget(self.btn_dock_results, 0)
+        # Keep the strip at the top of the results slot (do not vertically center).
         placeholder_layout.addLayout(placeholder_row)
+        placeholder_layout.addStretch(1)
         self.results_float_placeholder.hide()
 
         self.results_slot_layout.addWidget(self.results_card)
@@ -636,6 +639,8 @@ class SearchPage(QWidget):
         QTimer.singleShot(0, self._restore_workspace_splitter_sizes)
 
         self._results_float_window = None
+        self._workspace_sizes_before_float: list[int] | None = None
+        self._results_slot_min_before_float: int | None = None
         self._results_float_texts = {
             "title": "检索结果",
             "detach": "弹出窗口",
@@ -666,7 +671,10 @@ class SearchPage(QWidget):
             total = max(1, sum(int(v) for v in workspace.sizes()) or 1)
             workspace.setSizes([total, 0])
         elif workspace is not None and not maximized:
-            self._restore_workspace_splitter_sizes()
+            if self.is_results_floating():
+                self._lock_workspace_for_results_float()
+            else:
+                self._restore_workspace_splitter_sizes()
 
     def _on_compare_splitter_moved(self, *_args) -> None:
         timer = getattr(self, "_compare_splitter_save_timer", None)
@@ -766,6 +774,9 @@ class SearchPage(QWidget):
     def _persist_workspace_splitter_sizes(self) -> None:
         if getattr(self, "_preview_layout_maximized", False):
             return
+        # Floated layout is a temporary collapse — do not persist it.
+        if self.is_results_floating():
+            return
         splitter = getattr(self, "workspace_splitter", None)
         if splitter is None or not splitter.isVisible():
             return
@@ -782,6 +793,59 @@ class SearchPage(QWidget):
             save_config(cfg)
         except Exception:
             pass
+
+    def _lock_workspace_for_results_float(self) -> None:
+        """Freeze search/preview/results pane heights so float does not reshape the page."""
+        splitter = getattr(self, "workspace_splitter", None)
+        compare = getattr(self, "compare_splitter", None)
+        slot = getattr(self, "results_slot", None)
+        if splitter is None or compare is None or slot is None:
+            return
+        saved = self._workspace_sizes_before_float
+        if not saved or len(saved) < 2:
+            saved = [int(v) for v in splitter.sizes()]
+            self._workspace_sizes_before_float = saved
+        preferred_top = compare_row_card_height()
+        top = max(compare_row_min_height(), int(saved[0]))
+        bottom = max(160, int(saved[1]))
+        # Guard against a previously collapsed/broken snapshot.
+        if top + 40 < preferred_top and bottom > preferred_top:
+            total = top + bottom
+            top = min(preferred_top, max(compare_row_min_height(), total - max(160, bottom // 2)))
+            bottom = max(160, total - top)
+            self._workspace_sizes_before_float = [top, bottom]
+        if self._results_slot_min_before_float is None:
+            self._results_slot_min_before_float = int(slot.minimumHeight())
+        # Lock both panes to the pre-float pixels — no collapse, no stretch.
+        compare.setMinimumHeight(top)
+        compare.setMaximumHeight(top)
+        slot.setMinimumHeight(bottom)
+        slot.setMaximumHeight(bottom)
+        sizes = [top, bottom]
+        splitter.setSizes(sizes)
+        QTimer.singleShot(0, lambda s=list(sizes): splitter.setSizes(s) if splitter else None)
+
+    def _unlock_workspace_after_results_dock(self) -> None:
+        splitter = getattr(self, "workspace_splitter", None)
+        compare = getattr(self, "compare_splitter", None)
+        slot = getattr(self, "results_slot", None)
+        saved = self._workspace_sizes_before_float
+        self._workspace_sizes_before_float = None
+        prior_min = self._results_slot_min_before_float
+        self._results_slot_min_before_float = None
+        if compare is not None:
+            compare.setMinimumHeight(compare_row_min_height())
+            compare.setMaximumHeight(16777215)
+        if slot is not None:
+            slot.setMaximumHeight(16777215)
+            slot.setMinimumHeight(160 if prior_min is None else max(160, int(prior_min)))
+        if splitter is None:
+            return
+        if saved and len(saved) >= 2 and saved[0] > 0 and saved[1] > 0:
+            splitter.setSizes(saved)
+            QTimer.singleShot(0, lambda s=list(saved): splitter.setSizes(s) if splitter else None)
+        else:
+            self._restore_workspace_splitter_sizes()
 
     def is_preview_maximized(self) -> bool:
         return bool(self.preview_panel.is_maximized())
@@ -843,11 +907,13 @@ class SearchPage(QWidget):
             self.focus_results_float()
             return
         window = self._ensure_results_float_window()
+        # Snapshot before reparent so an empty slot cannot reshape the page.
+        self._workspace_sizes_before_float = [int(v) for v in self.workspace_splitter.sizes()]
         self.results_slot_layout.removeWidget(self.results_card)
         window.take_card(self.results_card)
-        self.results_slot_layout.addWidget(self.results_float_placeholder, 0)
-        self.results_slot_layout.addStretch(1)
+        self.results_slot_layout.addWidget(self.results_float_placeholder, 1)
         self.results_float_placeholder.show()
+        self._lock_workspace_for_results_float()
         window.setWindowTitle(self._results_float_texts["title"])
         force_widget_foreground(window)
         self._sync_detach_button_label()
@@ -867,8 +933,9 @@ class SearchPage(QWidget):
                 self.results_float_placeholder.hide()
                 self.results_float_placeholder.setParent(self)
         if card is not None:
-            self.results_slot_layout.addWidget(card)
+            self.results_slot_layout.addWidget(card, 1)
             card.show()
+        self._unlock_workspace_after_results_dock()
         self._sync_detach_button_label()
         self.results_float_changed.emit(False)
 
