@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -11,6 +12,7 @@ from typing import Any
 
 from src.app.config import DEFAULT_CONFIG
 from src.app.logging_utils import get_app_data_dir, get_logger
+from src.storage.meta_io import _commit_meta_file
 
 logger = get_logger("search_telemetry_store")
 
@@ -252,9 +254,15 @@ def _persist_locked(state: SearchTelemetryState) -> None:
 
 def _flush_persist_async() -> None:
     global _persist_timer
-    with _lock:
-        _persist_timer = None
-    _write_dirty_state()
+    try:
+        with _lock:
+            _persist_timer = None
+        _write_dirty_state()
+    except Exception as exc:
+        # Timer threads otherwise swallow errors; keep dirty for a later flush.
+        logger.warning("Async telemetry flush failed: %s", exc)
+        with _lock:
+            _dirty = True
 
 
 def _write_dirty_state() -> None:
@@ -266,12 +274,27 @@ def _write_dirty_state() -> None:
         payload = _serialize_state(state)
         _dirty = False
     path = get_telemetry_file_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        # Compact JSON: locate samples can be thousands of rows; indent=2 was multi-MB.
-        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
-    os.replace(tmp_path, path)
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".telemetry_", suffix=".json", dir=folder)
+    os.close(fd)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            # Compact JSON: locate samples can be thousands of rows; indent=2 was multi-MB.
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+        _commit_meta_file(tmp_path, path)
+        tmp_path = ""
+    except Exception as exc:
+        logger.warning("Failed to persist search telemetry: %s", exc)
+        with _lock:
+            _dirty = True
+        raise
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def _log_summary_locked() -> None:

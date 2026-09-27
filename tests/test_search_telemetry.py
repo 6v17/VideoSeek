@@ -172,6 +172,89 @@ def test_persistence_round_trip(tmp_path):
     assert "\n  " not in raw
 
 
+def test_persist_uses_unique_temp_files(tmp_path, monkeypatch):
+    import tempfile
+
+    temps: list[str] = []
+    real_mkstemp = tempfile.mkstemp
+
+    def _tracking_mkstemp(*args, **kwargs):
+        fd, path = real_mkstemp(*args, **kwargs)
+        temps.append(path)
+        return fd, path
+
+    monkeypatch.setattr(telemetry_store.tempfile, "mkstemp", _tracking_mkstemp)
+
+    telemetry.record_crop_locate_anchor(
+        anchor_sec=10.0,
+        result_sec=10.0,
+        anchor_kept=True,
+        clip_score=0.8,
+    )
+    for _ in range(3):
+        with telemetry_store._lock:
+            telemetry_store._dirty = True
+        telemetry_store._write_dirty_state()
+
+    assert len(temps) == 3
+    assert len(set(temps)) == 3
+    assert all(".telemetry_" in name for name in temps)
+    assert not (tmp_path / "search_telemetry.json.tmp").exists()
+
+
+def test_concurrent_persist_writers_do_not_share_temp(tmp_path, monkeypatch):
+    import tempfile
+    import threading
+
+    temps: list[str] = []
+    temps_lock = threading.Lock()
+    real_mkstemp = tempfile.mkstemp
+    barrier = threading.Barrier(2)
+
+    def _tracking_mkstemp(*args, **kwargs):
+        fd, path = real_mkstemp(*args, **kwargs)
+        with temps_lock:
+            temps.append(path)
+        return fd, path
+
+    real_dump = json.dump
+
+    def _gated_dump(*args, **kwargs):
+        barrier.wait(timeout=3)
+        return real_dump(*args, **kwargs)
+
+    monkeypatch.setattr(telemetry_store.tempfile, "mkstemp", _tracking_mkstemp)
+    monkeypatch.setattr(telemetry_store.json, "dump", _gated_dump)
+
+    telemetry.record_crop_locate_anchor(
+        anchor_sec=10.0,
+        result_sec=10.0,
+        anchor_kept=True,
+        clip_score=0.8,
+    )
+    errors: list[BaseException] = []
+
+    def _writer():
+        try:
+            with telemetry_store._lock:
+                telemetry_store._dirty = True
+            telemetry_store._write_dirty_state()
+        except BaseException as exc:  # noqa: BLE001 - collect race failures
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_writer) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5.0)
+
+    assert not errors
+    assert len(temps) == 2
+    assert temps[0] != temps[1]
+    payload = json.loads((tmp_path / "search_telemetry.json").read_text(encoding="utf-8"))
+    assert payload["crop_locate"]["total"] == 1
+
+
 def test_format_telemetry_summary_contains_key_sections():
     telemetry.record_crop_locate_anchor(
         anchor_sec=1.0,
