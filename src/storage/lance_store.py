@@ -1516,6 +1516,13 @@ def video_has_lance_vectors(video_id: str, config=None) -> bool:
     return lance_video_has_vectors(model_dirs["base_dir"], video_id)
 
 
+def _read_stored_video_location(profile_base_dir: str, video_id: str) -> tuple[str, str]:
+    """Return (library_path, video_path) already stored for video_id, or empty strings."""
+    from src.storage.lance_search_index import get_lance_video_location
+
+    return get_lance_video_location(profile_base_dir, video_id)
+
+
 def upsert_profile_video_vectors_from_arrays(
     video_id: str,
     vectors,
@@ -1543,6 +1550,13 @@ def upsert_profile_video_vectors_from_arrays(
         "library_path": canonicalize_library_path(library_path) if library_path else "",
         "video_path": os.path.normpath(video_path) if video_path else "",
     }
+    # Chunk rebuild callers often omit paths; never wipe stored location to "".
+    if not location["library_path"] or not location["video_path"]:
+        existing_lib, existing_path = _read_stored_video_location(profile_base_dir, video_id)
+        if not location["library_path"] and existing_lib:
+            location["library_path"] = existing_lib
+        if not location["video_path"] and existing_path:
+            location["video_path"] = existing_path
     if chunks is None:
         from src.storage.lance_search_index import load_lance_video_chunks
 

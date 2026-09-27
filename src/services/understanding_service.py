@@ -1174,22 +1174,50 @@ def load_evidence_bundle(
         return None
     return _read_evidence_json_file(get_legacy_evidence_path(video_id, config=cfg))
 
+def _evidence_payload_is_complete(payload: Mapping[str, Any] | None) -> bool:
+    """True when provenance says generation finished with all chunks present."""
+    if not isinstance(payload, Mapping):
+        return False
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, Mapping):
+        # Legacy files without provenance were written as finished products.
+        return True
+    status = str(provenance.get("generation_status") or "").strip().lower()
+    if status and status != "completed":
+        return False
+    try:
+        chunk_total = int(provenance.get("chunk_total") or 0)
+    except (TypeError, ValueError):
+        chunk_total = 0
+    try:
+        chunks_completed = int(provenance.get("chunks_completed") or 0)
+    except (TypeError, ValueError):
+        chunks_completed = 0
+    if chunk_total > 0 and chunks_completed < chunk_total:
+        return False
+    chunks = payload.get("chunks")
+    if chunk_total > 0 and isinstance(chunks, list) and len(chunks) < chunk_total:
+        return False
+    return True
+
+
 def evidence_exists_for_video(
     video_id: str,
     *,
     config=None,
     mode: str | None = None,
 ) -> bool:
-    """Return True when this mode already has usable evidence on disk.
+    """Return True when this mode already has usable completed evidence on disk.
 
-    Mirrors ``load_evidence_bundle``: prefer the mode-specific file; if another
-    split store exists, do not treat legacy as covering this mode; only fall back
-    to legacy when no split file exists yet. Motion never uses legacy.
+    Mirrors ``load_evidence_bundle`` path selection, but also requires
+    ``generation_status == completed`` (and chunk counts when present) so
+    interrupted ``in_progress`` files are treated as resumable, not done.
     """
     cfg = dict(config or load_config())
     resolved_mode = normalize_understanding_mode(mode or UNDERSTANDING_MODE_TAGS)
-    if os.path.isfile(get_evidence_path(video_id, config=cfg, mode=resolved_mode)):
-        return True
+    primary = get_evidence_path(video_id, config=cfg, mode=resolved_mode)
+    if os.path.isfile(primary):
+        return _evidence_payload_is_complete(_read_evidence_json_file(primary))
     if resolved_mode == UNDERSTANDING_MODE_MOTION:
         return False
     if any(
@@ -1198,7 +1226,10 @@ def evidence_exists_for_video(
         if sibling != resolved_mode
     ):
         return False
-    return os.path.isfile(get_legacy_evidence_path(video_id, config=cfg))
+    legacy = get_legacy_evidence_path(video_id, config=cfg)
+    if not os.path.isfile(legacy):
+        return False
+    return _evidence_payload_is_complete(_read_evidence_json_file(legacy))
 
 def generate_evidence_for_video(
     video_id: str,

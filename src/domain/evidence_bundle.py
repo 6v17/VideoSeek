@@ -174,9 +174,13 @@ def _parse_image_caption(raw_value: object, field_name: str) -> ImageCaptionEvid
     if raw_value is None:
         return None
     payload = _require_mapping(raw_value, field_name)
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        # Empty model output is "missing caption", not a poison object for the bundle.
+        return None
     return ImageCaptionEvidence(
         source=_require_text(payload.get("source"), f"{field_name}.source"),
-        text=_require_text(payload.get("text"), f"{field_name}.text"),
+        text=text,
     )
 
 

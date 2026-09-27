@@ -73,6 +73,69 @@ def profile_has_npy_vectors(profile_base_dir: str) -> bool:
     return any(name.lower().endswith("_vectors.npy") for name in os.listdir(vector_dir))
 
 
+def _video_id_from_legacy_path(path: str) -> str:
+    name = os.path.basename(str(path or ""))
+    lower = name.lower()
+    for suffix in ("_vectors.npy", "_index.faiss", "_chunk_cache.npz"):
+        if lower.endswith(suffix):
+            return name[: -len(suffix)]
+    return ""
+
+
+def list_disk_npy_video_ids(profile_base_dir: str) -> set[str]:
+    vector_dir = os.path.join(profile_base_dir, "vector")
+    if not os.path.isdir(vector_dir):
+        return set()
+    ids: set[str] = set()
+    for name in os.listdir(vector_dir):
+        if name.lower().endswith("_vectors.npy"):
+            video_id = name[: -len("_vectors.npy")]
+            if video_id:
+                ids.add(video_id)
+    return ids
+
+
+def filter_legacy_paths_already_in_lance(
+    profile_base_dir: str,
+    paths: list[str],
+    *,
+    indexed_ids: frozenset[str] | None = None,
+) -> list[str]:
+    """Keep only legacy files whose video_id is already present in Lance.
+
+    Global/library index trees (no per-video id) are kept only when every disk
+    npy id is already indexed — otherwise a partial import must retain them.
+    """
+    from src.storage.lance_search_index import get_lance_indexed_video_ids
+
+    indexed = indexed_ids if indexed_ids is not None else get_lance_indexed_video_ids(profile_base_dir)
+    disk_npy_ids = list_disk_npy_video_ids(profile_base_dir)
+    all_npy_indexed = bool(disk_npy_ids) and disk_npy_ids.issubset(indexed)
+    pending: list[str] = []
+    for path in paths:
+        video_id = _video_id_from_legacy_path(path)
+        if video_id:
+            if video_id in indexed:
+                pending.append(path)
+            continue
+        # Non-per-video artifacts (global faiss/npy, library_indexes).
+        if all_npy_indexed or not disk_npy_ids:
+            pending.append(path)
+    return pending
+
+
+def profile_has_unimported_npy(profile_base_dir: str) -> bool:
+    from src.storage.lance_search_index import get_lance_indexed_video_ids, lance_search_is_ready
+
+    disk_ids = list_disk_npy_video_ids(profile_base_dir)
+    if not disk_ids:
+        return False
+    if not lance_search_is_ready(profile_base_dir):
+        return True
+    indexed = get_lance_indexed_video_ids(profile_base_dir)
+    return not disk_ids.issubset(indexed)
+
+
 def cleanup_legacy_vector_paths(paths: list[str]) -> int:
     removed = 0
     for path in paths:
@@ -210,11 +273,12 @@ def needs_lance_startup_migration(config=None) -> bool:
     pending_cleanup = False
     for root in profiles:
         base_dir = root["base_dir"]
-        if profile_has_npy_vectors(base_dir) and not lance_search_is_ready(base_dir):
+        if profile_has_unimported_npy(base_dir):
             pending_import = True
         if lance_search_is_ready(base_dir):
             legacy_paths = collect_legacy_vector_paths(base_dir)
-            if legacy_paths:
+            # Only treat cleanup as pending when every npy is already in Lance.
+            if legacy_paths and not profile_has_unimported_npy(base_dir):
                 pending_cleanup = True
 
     return pending_import or pending_cleanup
@@ -255,13 +319,15 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
         _emit(progress_callback, percent, f"正在迁移 Lance 向量：{label}")
 
         profile_failed = 0
-        needs_import = profile_has_npy_vectors(base_dir) and (
-            not lance_search_is_ready(base_dir) or previous_failed > 0
+        needs_import = profile_has_unimported_npy(base_dir) or (
+            profile_has_npy_vectors(base_dir) and previous_failed > 0
         )
         if needs_import:
+            # Resume into an existing Lance table when partial import already ran.
+            replace_existing = not lance_search_is_ready(base_dir)
             summary = import_npy_to_lance(
                 base_dir,
-                replace_existing=True,
+                replace_existing=replace_existing,
             )
             if summary.get("videos_imported"):
                 profiles_migrated += 1
@@ -274,19 +340,28 @@ def run_lance_startup_migration(config=None, progress_callback: ProgressCallback
                     logger.warning("Lance import issue (%s): %s", label, error)
 
         if lance_search_is_ready(base_dir):
+            from src.storage.lance_search_index import get_lance_indexed_video_ids
+
+            indexed_ids = get_lance_indexed_video_ids(base_dir)
             legacy_paths = collect_legacy_vector_paths(base_dir)
-            # Keep ``*_vectors.npy`` when:
-            # - migration was already fully complete (sidecars by design), or
-            # - this profile still has import failures (needed for retry).
+            # Never delete npy that Lance does not yet hold — partial imports must retry.
             if previously_complete or profile_failed > 0:
                 legacy_paths = _legacy_cleanup_paths(legacy_paths)
+            else:
+                legacy_paths = filter_legacy_paths_already_in_lance(
+                    base_dir,
+                    legacy_paths,
+                    indexed_ids=indexed_ids,
+                )
             removed = cleanup_legacy_vector_paths(legacy_paths)
             if removed:
                 legacy_removed += removed
                 upgraded = True
             _mark_profile_search_index_ready(base_dir)
 
-    completed = videos_failed == 0
+    # Complete only when every disk npy is in Lance and this run had no failures.
+    still_pending = any(profile_has_unimported_npy(root["base_dir"]) for root in profiles)
+    completed = videos_failed == 0 and not still_pending
     _write_lance_migration_state(
         runtime_config,
         {

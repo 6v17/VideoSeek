@@ -71,6 +71,11 @@ class LanceMigrationRunnerTests(unittest.TestCase):
                 ),
                 patch.object(
                     lance_migration_module,
+                    "profile_has_unimported_npy",
+                    return_value=False,
+                ),
+                patch.object(
+                    lance_migration_module,
                     "_read_lance_migration_state",
                     return_value={},
                 ),
@@ -274,6 +279,15 @@ class LanceMigrationRunnerTests(unittest.TestCase):
                 ),
                 patch.object(
                     lance_migration_module,
+                    "profile_has_unimported_npy",
+                    return_value=False,
+                ),
+                patch(
+                    "src.storage.lance_search_index.get_lance_indexed_video_ids",
+                    return_value=frozenset({"vid001"}),
+                ),
+                patch.object(
+                    lance_migration_module,
                     "import_npy_to_lance",
                 ) as import_mock,
                 patch.object(
@@ -293,6 +307,34 @@ class LanceMigrationRunnerTests(unittest.TestCase):
                 result = lance_migration_module.run_lance_startup_migration(config)
             import_mock.assert_not_called()
             self.assertFalse(result.get("upgraded"))
+
+    def test_filter_legacy_paths_keeps_unimported_npy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_dir = os.path.join(tmp, "profile")
+            self._write_npy_vector(profile_dir, "vid_a")
+            self._write_npy_vector(profile_dir, "vid_b")
+            paths = [
+                os.path.join(profile_dir, "vector", "vid_a_vectors.npy"),
+                os.path.join(profile_dir, "vector", "vid_b_vectors.npy"),
+                os.path.join(profile_dir, "global", "cross_video_vectors.npy"),
+            ]
+            os.makedirs(os.path.join(profile_dir, "global"), exist_ok=True)
+            open(paths[2], "wb").close()
+            kept = lance_migration_module.filter_legacy_paths_already_in_lance(
+                profile_dir,
+                paths,
+                indexed_ids=frozenset({"vid_a"}),
+            )
+            self.assertEqual(kept, [paths[0]])
+            self.assertTrue(lance_migration_module.profile_has_unimported_npy(profile_dir))
+            with patch(
+                "src.storage.lance_search_index.get_lance_indexed_video_ids",
+                return_value=frozenset({"vid_a", "vid_b"}),
+            ), patch(
+                "src.storage.lance_search_index.lance_search_is_ready",
+                return_value=True,
+            ):
+                self.assertFalse(lance_migration_module.profile_has_unimported_npy(profile_dir))
 
     def test_run_lance_startup_migration_writes_state(self):
         with tempfile.TemporaryDirectory() as tmp:

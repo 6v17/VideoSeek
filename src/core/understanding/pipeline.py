@@ -390,9 +390,20 @@ class UnderstandingPipeline:
                         step_name,
                         infer_result,
                     )
-                    evidence["vision"][vision_key] = wrapped
-                    if step_name == "image_caption":
-                        tags = list(wrapped.get("tags") or [])
+                    if step_name == "image_caption" and not str(
+                        (wrapped or {}).get("text") or ""
+                    ).strip():
+                        # Empty VLM text is reproducible poison if stored as image_caption.
+                        logger.warning(
+                            "Empty image caption for %s chunk %s (%s); omitting",
+                            video_path,
+                            chunk_index,
+                            component_id,
+                        )
+                    else:
+                        evidence["vision"][vision_key] = wrapped
+                        if step_name == "image_caption":
+                            tags = list(wrapped.get("tags") or [])
                 except UnderstandingStoppedError:
                     raise
                 except Exception as exc:

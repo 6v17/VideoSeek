@@ -612,6 +612,100 @@ class UnderstandingServiceTests(unittest.TestCase):
             loaded = json.loads(Path(written_paths[-1]).read_text(encoding="utf-8"))
             self.assertEqual(loaded["summary"]["text"], "Quiet workspace.")
 
+    def test_evidence_exists_requires_completed_status(self):
+        from src.services.understanding_service import evidence_exists_for_video
+
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence_dir = Path(tmp) / "evidence" / "tags"
+            evidence_dir.mkdir(parents=True)
+            path = evidence_dir / "vid.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "video": {"video_id": "vid", "video_path": "a.mp4"},
+                        "provenance": {
+                            "generation_status": "in_progress",
+                            "chunk_total": 10,
+                            "chunks_completed": 3,
+                        },
+                        "chunks": [{"chunk_index": 0}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {"data_root": tmp}
+            with patch(
+                "src.services.understanding_service.get_evidence_path",
+                return_value=str(path),
+            ):
+                self.assertFalse(evidence_exists_for_video("vid", config=config, mode="tags"))
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "video": {"video_id": "vid", "video_path": "a.mp4"},
+                        "provenance": {
+                            "generation_status": "completed",
+                            "chunk_total": 1,
+                            "chunks_completed": 1,
+                        },
+                        "chunks": [{"chunk_index": 0}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "src.services.understanding_service.get_evidence_path",
+                return_value=str(path),
+            ):
+                self.assertTrue(evidence_exists_for_video("vid", config=config, mode="tags"))
+
+    def test_empty_image_caption_is_omitted_not_invalid(self):
+        payload = {
+            "schema_version": 1,
+            "video": {
+                "video_id": "v1",
+                "video_path": "a.mp4",
+                "video_rel_path": "a.mp4",
+                "library_path": "/lib",
+                "duration_sec": 1.0,
+                "source_exists": True,
+            },
+            "provenance": {
+                "understanding_profile_id": "p",
+                "components": {},
+                "chunk_source": {
+                    "search_profile_id": "c",
+                    "search_provider": "clip",
+                    "search_variant": "vit",
+                },
+                "keyframe_strategy": "midpoint",
+                "generated_at": "2026-01-01T00:00:00Z",
+            },
+            "chunks": [
+                {
+                    "chunk_index": 0,
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "sample": {
+                        "strategy": "midpoint",
+                        "timestamp_sec": 0.5,
+                        "timestamps_sec": [0.5],
+                    },
+                    "tags": [],
+                    "evidence": {
+                        "vision": {
+                            "image_caption": {"source": "remote", "text": ""},
+                        },
+                        "audio": {},
+                    },
+                }
+            ],
+        }
+        bundle = validate_evidence_bundle(payload)
+        self.assertIsNone(bundle.chunks[0].evidence.vision.image_caption)
+
 
 class CaptionConcurrencyControllerTests(unittest.TestCase):
     def test_increases_after_fast_success_streak(self):

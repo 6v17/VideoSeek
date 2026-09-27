@@ -1155,7 +1155,7 @@ def generate_vectors_and_index_for_video(
 
     if not vector_parts:
         logger.info("Per-video index %s: total %.2fs (no vectors)", log_tag, time.perf_counter() - wall_start)
-        return [], [], None
+        return [], [], None, []
 
     if progress_reporter is not None:
         progress_reporter.emit("chunk", force=True)

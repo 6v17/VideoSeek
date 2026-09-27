@@ -614,25 +614,38 @@ def lance_video_has_vectors(profile_base_dir: str, video_id: str) -> bool:
 
 def get_lance_video_library_path(profile_base_dir: str, video_id: str) -> str:
     """Return one stored ``library_path`` for ``video_id``, or empty string."""
+    library_path, _video_path = get_lance_video_location(profile_base_dir, video_id)
+    return library_path
+
+
+def get_lance_video_location(profile_base_dir: str, video_id: str) -> tuple[str, str]:
+    """Return ``(library_path, video_path)`` stored for ``video_id``, or empty strings."""
     video_id = str(video_id or "").strip()
     if not video_id or not lance_search_is_ready(profile_base_dir):
-        return ""
+        return "", ""
     try:
         db = _connect_lance(profile_base_dir)
         if FRAMES_TABLE_NAME not in _list_table_names(db):
-            return ""
+            return "", ""
         table = db.open_table(FRAMES_TABLE_NAME)
         where = _build_scope_where(video_id=video_id)
-        builder = table.search().select(["library_path"])
+        builder = table.search().select(["library_path", "video_path"])
         if where:
             builder = builder.where(where)
         arrow = builder.limit(1).to_arrow()
-        if arrow.num_rows <= 0 or "library_path" not in arrow.column_names:
-            return ""
-        return canonicalize_library_path(str(arrow["library_path"][0].as_py() or ""))
+        if arrow.num_rows <= 0:
+            return "", ""
+        library_path = ""
+        video_path = ""
+        if "library_path" in arrow.column_names:
+            library_path = canonicalize_library_path(str(arrow["library_path"][0].as_py() or ""))
+        if "video_path" in arrow.column_names:
+            raw = str(arrow["video_path"][0].as_py() or "").strip()
+            video_path = os.path.normpath(raw) if raw else ""
+        return library_path, video_path
     except Exception as exc:
-        logger.debug("Failed to read Lance library_path for %s: %s", video_id, exc)
-        return ""
+        logger.debug("Failed to read Lance location for %s: %s", video_id, exc)
+        return "", ""
 
 
 def get_lance_video_library_paths(profile_base_dir: str) -> dict[str, str]:
