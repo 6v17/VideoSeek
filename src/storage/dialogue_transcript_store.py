@@ -983,6 +983,13 @@ def _fuzzy_probe_needles(query: str) -> list[str]:
     return keys[:80]
 
 
+def _fuzzy_candidate_cap(max_hits: int | None) -> int:
+    """Upper bound on fuzzy SQL candidates before in-process ranking."""
+    if max_hits is None:
+        return 500
+    return max(500, min(8000, int(max_hits) * 100))
+
+
 def iter_matching_transcript_segment_rows(
     query: str,
     *,
@@ -1109,12 +1116,11 @@ def iter_matching_transcript_segment_rows(
             return
 
         # Fuzzy: OR any scatter char; complete subfields first, then hit rate.
+        # Candidate fetch is per-video so ORDER BY video_id + LIMIT cannot starve later ids.
         probes = _fuzzy_probe_needles(needle)
         if not probes:
             return
-        candidate_cap = 500
-        if max_hits is not None:
-            candidate_cap = max(500, min(8000, max_hits * 100))
+        candidate_cap = _fuzzy_candidate_cap(max_hits)
 
         or_parts = [f"instr(s.text_cf, ?) > 0" for _ in probes]
         where_params: list[Any] = list(probes)
@@ -1149,45 +1155,41 @@ def iter_matching_transcript_segment_rows(
                 seen_keys.add(key)
                 scored.append((subfield_len, _row_dict(row, score=score)))
 
-        order_sql = " ORDER BY t.video_id, s.start_sec, s.end_sec, s.seg_index"
+        within_video_order = " ORDER BY s.start_sec, s.end_sec, s.seg_index"
 
         if want_video:
-            params = [*where_params, want_video]
+            target_ids = [want_video]
+        elif want_ids is not None:
+            target_ids = list(want_ids)
+        else:
+            id_sql = (
+                "SELECT DISTINCT t.video_id AS video_id"
+                " FROM segments s"
+                " JOIN transcripts t ON t.video_id = s.video_id"
+                f" WHERE {where_sql}"
+            )
+            target_ids = [
+                str(row["video_id"] or "").strip()
+                for row in conn.execute(id_sql, list(where_params))
+                if str(row["video_id"] or "").strip()
+            ]
+
+        if not target_ids:
+            return
+
+        per_video = max(8, candidate_cap // max(1, len(target_ids)))
+        # Hard ceiling per video so a single chatty video cannot dominate.
+        per_video = min(per_video, candidate_cap)
+
+        for vid in target_ids:
+            params = [*where_params, vid]
             sql = (
                 select_cols
                 + " WHERE "
                 + where_sql
                 + " AND t.video_id = ?"
-                + order_sql
-                + f" LIMIT {candidate_cap}"
-            )
-            _collect(sql, params)
-        elif want_ids is not None:
-            remaining = candidate_cap
-            for chunk in _chunked(want_ids):
-                if remaining <= 0:
-                    break
-                placeholders = ",".join("?" * len(chunk))
-                params = [*where_params, *chunk]
-                sql = (
-                    select_cols
-                    + " WHERE "
-                    + where_sql
-                    + f" AND t.video_id IN ({placeholders})"
-                    + order_sql
-                    + f" LIMIT {remaining}"
-                )
-                before = len(scored)
-                _collect(sql, params)
-                remaining = max(0, remaining - (len(scored) - before))
-        else:
-            params = list(where_params)
-            sql = (
-                select_cols
-                + " WHERE "
-                + where_sql
-                + order_sql
-                + f" LIMIT {candidate_cap}"
+                + within_video_order
+                + f" LIMIT {per_video}"
             )
             _collect(sql, params)
 

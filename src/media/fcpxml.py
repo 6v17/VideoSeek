@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from xml.dom import minidom
 import xml.etree.ElementTree as ET
+
+
+def atomic_write_text(path: str | Path, text: str) -> Path:
+    """Write text via ``*.tmp`` + ``os.replace`` so readers never see a partial file."""
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = Path(f"{dest}.tmp")
+    temp_path.write_text(text, encoding="utf-8")
+    os.replace(temp_path, dest)
+    return dest
 
 
 def fps_fraction(fps: float) -> tuple[int, int]:
@@ -46,7 +57,6 @@ def srt_clock(seconds: float) -> str:
 
 
 def write_srt(clips: Sequence[Mapping[str, Any]], path: str | Path) -> Path:
-    dest = Path(path)
     cues = merge_vo_cues(clips)
     lines: list[str] = []
     for index, cue in enumerate(cues, 1):
@@ -54,8 +64,7 @@ def write_srt(clips: Sequence[Mapping[str, Any]], path: str | Path) -> Path:
         lines.append(f"{srt_clock(cue['tl_in'])} --> {srt_clock(cue['tl_out'])}")
         lines.append(str(cue.get("text") or "").strip())
         lines.append("")
-    dest.write_text("\n".join(lines), encoding="utf-8")
-    return dest
+    return atomic_write_text(path, "\n".join(lines))
 
 
 def merge_vo_cues(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -233,6 +242,4 @@ def layout_clips_on_timeline(
 
 
 def write_cuts_json(payload: Mapping[str, Any], path: str | Path) -> Path:
-    dest = Path(path)
-    dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return dest
+    return atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))

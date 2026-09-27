@@ -80,10 +80,21 @@ class TeamModeController(QObject):
             )
         return cfg
 
+    def _resolve_api_bind_host(self) -> str:
+        """Prefer LAN IP over 0.0.0.0; allow explicit override via env."""
+        env_host = str(os.environ.get("VIDEOSEEK_AGENT_API_HOST", "") or "").strip()
+        if env_host:
+            return env_host
+        lan = str(detect_lan_ip() or "").strip()
+        if lan and lan not in {"0.0.0.0", "::"}:
+            return lan
+        logger.warning("LAN IP unavailable; team API falling back to bind 0.0.0.0")
+        return "0.0.0.0"
+
     def start_server(self, progress_callback: ProgressCallback = None) -> dict:
         cfg = self._heal_preferred_ports_in_config(load_config())
         preferred_api, preferred_media = get_preferred_team_ports()
-        host = os.environ.get("VIDEOSEEK_AGENT_API_HOST", "0.0.0.0")
+        host = self._resolve_api_bind_host()
         port_notes: list[str] = []
 
         self._emit_progress(progress_callback, "allocating_ports")

@@ -106,3 +106,55 @@ class RemoteVlCaptionTests(unittest.TestCase):
         image = np.zeros((8, 8, 3), dtype=np.uint8)
         with self.assertRaises(UnderstandingStoppedError):
             component.infer(image)
+
+    def test_infer_stop_during_inflight_does_not_wait_for_timeout(self):
+        import threading
+        import time
+
+        image = np.zeros((8, 8, 3), dtype=np.uint8)
+        release = threading.Event()
+        stop = {"flag": False}
+        entered = threading.Event()
+
+        class _BlockingResponse:
+            def read(self):
+                entered.set()
+                release.wait(timeout=30)
+                return json.dumps({"choices": [{"message": {"content": "late"}}]}).encode("utf-8")
+
+            def close(self):
+                release.set()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote")
+        component.bind_should_stop_callback(lambda: stop["flag"])
+        config = {
+            "understanding": {
+                "remote_vlm": {
+                    "base_url": "http://127.0.0.1:1234/v1",
+                    "model": "qwen3-vl-8b-instruct",
+                    "timeout_sec": 30,
+                    "max_tokens": 64,
+                }
+            }
+        }
+        started = time.monotonic()
+        with (
+            patch("src.core.understanding.components.remote_vl_caption.load_config", return_value=config),
+            patch("urllib.request.urlopen", return_value=_BlockingResponse()),
+        ):
+            def _arm_stop():
+                self.assertTrue(entered.wait(timeout=2.0))
+                stop["flag"] = True
+
+            arm = threading.Thread(target=_arm_stop, daemon=True)
+            arm.start()
+            with self.assertRaises(UnderstandingStoppedError):
+                component.infer(image)
+            arm.join(timeout=2.0)
+        self.assertLess(time.monotonic() - started, 5.0)

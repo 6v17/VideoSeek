@@ -355,6 +355,60 @@ class ExtractFramesTests(unittest.TestCase):
             command,
         )
 
+    @patch("src.core.extract_frames._stream_rawvideo_frames")
+    @patch("src.core.extract_frames.get_video_stream_info", return_value={"pix_fmt": "yuv420p", "profile": "main"})
+    @patch("src.core.extract_frames.system_has_nvidia_gpu", return_value=False)
+    @patch("src.core.extract_frames.ffmpeg_supports_d3d11va", return_value=True)
+    @patch("src.core.extract_frames.is_experimental_hw_decode_enabled", return_value=True)
+    @patch("src.core.extract_frames.load_config", return_value={"fps": 1, "experimental_hw_decode": True})
+    @patch("src.core.extract_frames.resolve_sampling_fps", return_value=2.0)
+    @patch("src.core.extract_frames.get_video_duration_seconds", return_value=10.0)
+    def test_partial_hw_failure_does_not_fallback_and_replay(
+        self,
+        _mock_duration,
+        _mock_resolve_fps,
+        _mock_load_config,
+        _mock_enabled,
+        _mock_probe,
+        _mock_nvidia,
+        _mock_stream_info,
+        mock_stream,
+    ):
+        mock_stream.side_effect = FrameExtractionError("timed out mid-stream", frame_count=12)
+
+        with self.assertRaises(FrameExtractionError) as ctx:
+            list(stream_frames_with_ffmpeg("D:/video.mp4"))
+
+        self.assertEqual(ctx.exception.frame_count, 12)
+        mock_stream.assert_called_once()
+        self.assertEqual(mock_stream.call_args.kwargs["decode_backend"], "d3d11va")
+
+    @patch("src.core.extract_frames._read_pipe_bytes")
+    @patch("src.core.extract_frames.subprocess.Popen")
+    @patch("src.core.extract_frames.get_ffmpeg_path", return_value="ffmpeg")
+    def test_timeout_without_count_is_rewrapped_with_yielded_frames(
+        self,
+        _mock_ffmpeg,
+        mock_popen,
+        mock_read,
+    ):
+        from src.core.extract_frames import _stream_rawvideo_frames
+
+        frame_bytes = np.zeros((224, 224, 3), dtype=np.uint8).tobytes()
+        process = MagicMock()
+        process.stdout = MagicMock()
+        process.wait.return_value = 0
+        mock_popen.return_value = process
+        mock_read.side_effect = [
+            frame_bytes,
+            FrameExtractionError("Timed out while reading FFmpeg output after 600s"),
+        ]
+
+        with self.assertRaises(FrameExtractionError) as ctx:
+            list(_stream_rawvideo_frames("D:/video.mp4", 1.0, decode_backend="d3d11va"))
+
+        self.assertEqual(ctx.exception.frame_count, 1)
+
 
 class VideoProbeTests(unittest.TestCase):
     @patch("src.media.probe.get_ffprobe_path", return_value="ffprobe")

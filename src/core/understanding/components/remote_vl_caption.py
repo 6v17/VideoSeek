@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import base64
-import concurrent.futures
 import json
-import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping
@@ -13,6 +11,7 @@ import numpy as np
 
 from src.app.config import load_config
 from src.core.understanding.base import UnderstandingComponent, UnderstandingStoppedError, merge_params
+from src.services.cancellable_http import urlopen_json_with_stop
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -39,23 +38,12 @@ def _post_json_with_stop(
     timeout_sec: float,
     should_stop_callback: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    def _do_post() -> dict[str, Any]:
-        with urllib.request.urlopen(request, timeout=max(5.0, timeout_sec)) as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    deadline = time.monotonic() + max(5.0, float(timeout_sec))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_do_post)
-        while True:
-            if should_stop_callback and should_stop_callback():
-                raise UnderstandingStoppedError("Evidence generation stopped by user")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(f"remote VLM timed out after {timeout_sec:.0f}s")
-            try:
-                return future.result(timeout=min(0.25, remaining))
-            except concurrent.futures.TimeoutError:
-                continue
+    return urlopen_json_with_stop(
+        request,
+        timeout_sec=timeout_sec,
+        should_stop_callback=should_stop_callback,
+        stop_message="Evidence generation stopped by user",
+    )
 
 
 class RemoteVlCaptionComponent(UnderstandingComponent):

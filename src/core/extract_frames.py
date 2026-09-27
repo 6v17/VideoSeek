@@ -521,7 +521,18 @@ def _stream_rawvideo_frames(
             decode_backend,
         )
         _set_last_frame_decode_backend(decode_backend)
-    except (FrameExtractionError, InterruptedError):
+    except InterruptedError:
+        raise
+    except FrameExtractionError as exc:
+        # Timeouts / pipe errors raised without count must still report yielded frames
+        # so HW→CPU fallback does not replay from t=0 and duplicate into the index.
+        if count > 0 and int(getattr(exc, "frame_count", 0) or 0) <= 0:
+            raise FrameExtractionError(
+                str(exc),
+                video_path=str(getattr(exc, "video_path", "") or video_path),
+                exit_code=getattr(exc, "exit_code", None),
+                frame_count=count,
+            ) from exc
         raise
     except Exception as exc:
         logger.error("Frame extraction crashed for %s: %s", video_path, exc)

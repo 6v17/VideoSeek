@@ -392,8 +392,14 @@ def call_remote_llm(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        from src.services.cancellable_http import urlopen_json_with_stop
+
+        body = urlopen_json_with_stop(
+            request,
+            timeout_sec=timeout_sec,
+            should_stop_callback=should_stop_callback,
+            stop_message="LLM call stopped by user",
+        )
     except UnderstandingStoppedError:
         raise
     except urllib.error.HTTPError as exc:

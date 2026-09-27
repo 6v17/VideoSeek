@@ -515,6 +515,41 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 canonicalize_library_path(lib_keep),
             )
 
+    def test_fuzzy_candidate_cap_does_not_starve_later_video_ids(self):
+        """Per-video candidate fetch must reach dictionary-later video ids (M4)."""
+        from src.storage import dialogue_transcript_store as store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ), mock.patch.object(store, "_fuzzy_candidate_cap", return_value=5):
+                for index in range(12):
+                    store.save_dialogue_transcript(
+                        f"aaa_{index:03d}",
+                        [{"start": 0.0, "end": 1.0, "text": "赞助商提供", "language": "zh"}],
+                        library_path=tmp,
+                        video_path=os.path.join(tmp, f"a{index}.mp4"),
+                    )
+                store.save_dialogue_transcript(
+                    "zzz_late",
+                    [{"start": 0.0, "end": 1.0, "text": "赞助商提供", "language": "zh"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "late.mp4"),
+                )
+                hits = list(
+                    store.iter_matching_transcript_segment_rows(
+                        "赞住商",
+                        match_mode="fuzzy",
+                        limit=50,
+                    )
+                )
+            video_ids = {row["video_id"] for row in hits}
+            self.assertIn("zzz_late", video_ids)
+            self.assertTrue(any(vid.startswith("aaa_") for vid in video_ids))
+
 
 if __name__ == "__main__":
     unittest.main()

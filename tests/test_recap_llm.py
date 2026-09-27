@@ -201,6 +201,66 @@ class LlmSettingsTests(unittest.TestCase):
         self.assertEqual(settings["base_url"], "https://example.com/v1")
         self.assertEqual(settings["model"], "my-model")
 
+    def test_call_remote_llm_stop_during_inflight_returns_quickly(self):
+        import threading
+        import time
+
+        from src.core.understanding.base import UnderstandingStoppedError
+        from src.services.llm_settings import call_remote_llm
+
+        release = threading.Event()
+        entered = threading.Event()
+        stop = {"flag": False}
+
+        class _BlockingResponse:
+            def read(self):
+                entered.set()
+                release.wait(timeout=30)
+                return json.dumps({"choices": [{"message": {"content": "late"}}]}).encode("utf-8")
+
+            def close(self):
+                release.set()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        config = {
+            "understanding": {
+                "remote_llm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "custom",
+                    "base_url": "http://127.0.0.1:9/v1",
+                    "model": "test-model",
+                    "timeout_sec": 30,
+                    "max_tokens": 256,
+                }
+            }
+        }
+        started = time.monotonic()
+        with (
+            patch("src.services.llm_settings.load_config", return_value=config),
+            patch("src.services.llm_settings.get_remote_llm_settings", return_value=config["understanding"]["remote_llm"]),
+            patch("urllib.request.urlopen", return_value=_BlockingResponse()),
+        ):
+            def _arm_stop():
+                self.assertTrue(entered.wait(timeout=2.0))
+                stop["flag"] = True
+
+            arm = threading.Thread(target=_arm_stop, daemon=True)
+            arm.start()
+            with self.assertRaises(UnderstandingStoppedError):
+                call_remote_llm(
+                    system="",
+                    user="hello",
+                    config=config,
+                    should_stop_callback=lambda: stop["flag"],
+                )
+            arm.join(timeout=2.0)
+        self.assertLess(time.monotonic() - started, 5.0)
+
 
 class RecapPackTests(unittest.TestCase):
     def test_compact_motion_strips_json_tags(self):
@@ -3495,11 +3555,54 @@ class RecapPackTests(unittest.TestCase):
                 people=[{"id": "p1", "label": "监考官", "look": "讲台"}],
             )
             self.assertEqual(written.name, "ep01_recap_beats.json")
+            self.assertFalse(Path(f"{written}.tmp").exists())
             loaded = load_recap_beats(str(video))
             self.assertEqual(loaded["title"], "入学")
             self.assertEqual(loaded["beats"][0]["event"], "开场")
             self.assertEqual(loaded["people"][0]["label"], "监考官")
             self.assertEqual(loaded["stage"], "plan")
+
+    def test_recap_sidecar_writes_use_os_replace(self):
+        from src.services.recap_service import write_recap_cuts_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "ep.mp4"
+            video.write_bytes(b"x")
+            beats_path = recap_beats_path_for_video(str(video))
+            cuts_path = recap_cuts_path_for_video(str(video))
+            with patch("src.media.fcpxml.os.replace", wraps=os.replace) as replace:
+                write_recap_beats_file(
+                    beats_path,
+                    title="t",
+                    video_id="v1",
+                    allocated=[{"id": 1, "event": "开场", "budget_sec": 12.0}],
+                )
+                write_recap_cuts_file(
+                    cuts_path,
+                    title="t",
+                    video_path=str(video),
+                    video_id="v1",
+                    info={"fps": 24.0},
+                    laid_out=[
+                        {
+                            "name": "01",
+                            "beat_id": 1,
+                            "src_in": 0.0,
+                            "src_out": 4.0,
+                            "duration": 4.0,
+                            "tl_in": 0.0,
+                            "tl_out": 4.0,
+                            "vo": "旁白。",
+                        }
+                    ],
+                    beats_path=str(beats_path),
+                    stage="captions",
+                )
+            self.assertGreaterEqual(replace.call_count, 2)
+            self.assertTrue(beats_path.is_file())
+            self.assertTrue(cuts_path.is_file())
+            self.assertFalse(Path(f"{beats_path}.tmp").exists())
+            self.assertFalse(Path(f"{cuts_path}.tmp").exists())
 
     def test_recap_target_sec_scales_and_clamps(self):
         self.assertAlmostEqual(recap_target_sec(480.0), 180.0)

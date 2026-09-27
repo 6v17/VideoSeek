@@ -334,7 +334,7 @@ def _run_pending_chunks(
                     break
                 if attempt < 3 and not (should_stop_callback and should_stop_callback()):
                     logger.warning(
-                        "Understanding chunk %s returned empty evidence (attempt %s/2)",
+                        "Understanding chunk %s returned empty evidence (attempt %s/3)",
                         chunk_index,
                         attempt,
                     )

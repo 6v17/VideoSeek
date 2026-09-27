@@ -179,8 +179,16 @@ def execute_export_manifest(
     manifest = {"version": 1, "project": project, "items": deduped}
     written_path = None
     if write_path:
+        from src.services.clip_export_service import output_path_allowed
+
         target = os.path.normpath(os.path.abspath(os.path.expanduser(str(write_path).strip())))
+        if not target:
+            raise ValueError("write_path is empty.")
         parent = os.path.dirname(target)
+        # Refuse writes under indexed library roots (same guard as timeline XML export).
+        check_root = parent or target
+        if not output_path_allowed(check_root):
+            raise ValueError("write_path must not be inside an indexed library root.")
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(target, "w", encoding="utf-8") as handle:

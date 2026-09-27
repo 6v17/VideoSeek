@@ -11,7 +11,13 @@ from typing import Any, Callable, Mapping, Sequence
 
 from src.app.config import load_config
 from src.core.understanding.base import UnderstandingStoppedError
-from src.media.fcpxml import layout_clips_on_timeline, write_cuts_json, write_fcpxml, write_srt
+from src.media.fcpxml import (
+    atomic_write_text,
+    layout_clips_on_timeline,
+    write_cuts_json,
+    write_fcpxml,
+    write_srt,
+)
 from src.services.llm_settings import call_remote_llm, get_remote_llm_settings
 from src.services.understanding_resource_service import (
     CAPTION_LANGUAGE_EN,
@@ -9274,8 +9280,8 @@ def write_recap_beats_file(
     people: list[Mapping[str, Any]] | None = None,
     stage: str = RECAP_START_PLAN,
 ) -> Path:
-    path = Path(dest)
-    path.write_text(
+    return atomic_write_text(
+        dest,
         json.dumps(
             {
                 "title": title,
@@ -9288,9 +9294,7 @@ def write_recap_beats_file(
             ensure_ascii=False,
             indent=2,
         ),
-        encoding="utf-8",
     )
-    return path
 
 
 def save_recap_plan_edits(

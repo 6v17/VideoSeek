@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import types
@@ -33,7 +34,10 @@ if "fastapi" not in sys.modules:
             return decorator
 
     class _HTTPException(Exception):
-        pass
+        def __init__(self, status_code=400, detail=""):
+            self.status_code = status_code
+            self.detail = detail
+            super().__init__(f"{status_code}: {detail}")
 
     class _StaticFiles:
         def __init__(self, directory=None, **_kwargs):
@@ -143,6 +147,57 @@ class MobileBridgeServiceTests(unittest.TestCase):
             self.assertEqual(removed, 2)
             self.assertEqual(len(remaining), 1)
             self.assertTrue(remaining[0].name.startswith("upload_"))
+
+    def test_resolve_mobile_bridge_host_prefers_lan_over_all_interfaces(self):
+        from src.web.mobile_bridge import resolve_mobile_bridge_host
+
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("VIDEOSEEK_MOBILE_BRIDGE_HOST", None)
+            with patch("src.services.team_paths.detect_lan_ip", return_value="192.168.1.20"):
+                self.assertEqual(resolve_mobile_bridge_host("0.0.0.0"), "192.168.1.20")
+                self.assertEqual(resolve_mobile_bridge_host(None), "192.168.1.20")
+
+        with patch.dict("os.environ", {"VIDEOSEEK_MOBILE_BRIDGE_HOST": "0.0.0.0"}):
+            self.assertEqual(resolve_mobile_bridge_host(None), "0.0.0.0")
+
+    def test_read_upload_limited_rejects_oversized_payload(self):
+        import asyncio
+
+        from src.web.mobile_bridge import MAX_MOBILE_UPLOAD_BYTES, MobileBridgeService
+
+        class _FakeUpload:
+            filename = "big.jpg"
+            content_type = "image/jpeg"
+
+            def __init__(self, chunks):
+                self._chunks = list(chunks)
+
+            async def read(self, size=-1):
+                if not self._chunks:
+                    return b""
+                return self._chunks.pop(0)
+
+        with patch(
+            "src.web.mobile_bridge.get_data_storage_paths",
+            return_value={"mobile_upload_dir": "D:/tmp/uploads"},
+        ), patch("src.web.mobile_bridge.get_app_data_dir", return_value="D:/VideoSeek"), patch(
+            "src.web.mobile_bridge.os.path.isdir", return_value=False
+        ), patch(
+            "src.web.mobile_bridge.get_resource_path",
+            side_effect=lambda relative: f"D:/bundle/{relative}",
+        ):
+            service = MobileBridgeService(on_search_requested=lambda *_a: None)
+
+        oversized = [
+            b"x" * (1024 * 1024),
+            b"y" * (MAX_MOBILE_UPLOAD_BYTES),
+        ]
+        with self.assertRaises(Exception) as ctx:
+            asyncio.run(service._read_upload_limited(_FakeUpload(oversized)))
+        exc = ctx.exception
+        status = getattr(exc, "status_code", None)
+        detail = str(getattr(exc, "detail", "") or exc)
+        self.assertTrue(status == 413 or "limit" in detail.lower() or "exceed" in detail.lower())
 
 
 if __name__ == "__main__":

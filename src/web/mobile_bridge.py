@@ -35,6 +35,31 @@ from src.utils import ensure_folder_exists, get_app_data_dir, get_resource_path
 
 logger = get_logger("mobile_bridge")
 
+# Cap phone→PC image uploads (M12): avoid unbounded memory from ``file.read()``.
+MAX_MOBILE_UPLOAD_BYTES = 20 * 1024 * 1024
+_MOBILE_UPLOAD_READ_CHUNK = 1024 * 1024
+
+
+def resolve_mobile_bridge_host(preferred: str | None = None) -> str:
+    """Bind host for the phone bridge: env / explicit, else LAN IP, else 0.0.0.0."""
+    env_host = str(os.environ.get("VIDEOSEEK_MOBILE_BRIDGE_HOST", "") or "").strip()
+    if env_host:
+        return env_host
+    text = str(preferred or "").strip()
+    if text and text not in {"0.0.0.0", "::"}:
+        return text
+    try:
+        from src.services.team_paths import detect_lan_ip
+
+        lan = str(detect_lan_ip() or "").strip()
+        if lan and lan not in {"0.0.0.0", "::"}:
+            return lan
+    except Exception:
+        pass
+    logger.warning("LAN IP unavailable; mobile bridge falling back to bind 0.0.0.0")
+    return "0.0.0.0"
+
+
 _FALLBACK_UPLOAD_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -205,12 +230,12 @@ class MobileBridgeService:
     def __init__(
         self,
         on_search_requested: Callable[[dict], None],
-        host: str = "0.0.0.0",
+        host: str | None = None,
         port: int = 8918,
     ):
         if _IMPORT_ERROR is not None:
             raise RuntimeError("Missing FastAPI runtime. Install `fastapi` and `uvicorn`.") from _IMPORT_ERROR
-        self.host = str(host)
+        self.host = resolve_mobile_bridge_host(host)
         self.port = int(port)
         self.token = secrets.token_urlsafe(18)
         self.upload_dir = str(get_data_storage_paths().get("mobile_upload_dir", "") or "")
@@ -324,6 +349,26 @@ class MobileBridgeService:
         logger.warning("Mobile bridge page missing, using embedded fallback: %s", self._template_path)
         return _FALLBACK_UPLOAD_PAGE
 
+    async def _read_upload_limited(self, file: UploadFile) -> bytes:
+        """Read upload body with a hard size cap (rejects before buffering the rest)."""
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await file.read(_MOBILE_UPLOAD_READ_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_MOBILE_UPLOAD_BYTES:
+                limit_mb = MAX_MOBILE_UPLOAD_BYTES // (1024 * 1024)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Image exceeds the {limit_mb}MB upload limit.",
+                )
+            chunks.append(chunk)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Empty image upload.")
+        return b"".join(chunks)
+
     async def _save_upload_file(self, file: UploadFile) -> str:
         if file is None or not file.filename:
             raise HTTPException(status_code=400, detail="No image file received.")
@@ -334,7 +379,7 @@ class MobileBridgeService:
         filename = f"{int(time.time() * 1000)}_{uuid.uuid4().hex}{suffix}"
         target_path = os.path.join(self.upload_dir, filename)
         ensure_folder_exists(target_path)
-        payload = await file.read()
+        payload = await self._read_upload_limited(file)
         with open(target_path, "wb") as handle:
             handle.write(payload)
         return target_path
