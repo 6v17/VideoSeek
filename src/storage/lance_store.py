@@ -1516,8 +1516,8 @@ def video_has_lance_vectors(video_id: str, config=None) -> bool:
     return lance_video_has_vectors(model_dirs["base_dir"], video_id)
 
 
-def _read_stored_video_location(profile_base_dir: str, video_id: str) -> tuple[str, str]:
-    """Return (library_path, video_path) already stored for video_id, or empty strings."""
+def _read_stored_video_location(profile_base_dir: str, video_id: str) -> tuple[str, str] | None:
+    """Return stored (library_path, video_path), empty strings if missing, or None on read failure."""
     from src.storage.lance_search_index import get_lance_video_location
 
     return get_lance_video_location(profile_base_dir, video_id)
@@ -1552,7 +1552,13 @@ def upsert_profile_video_vectors_from_arrays(
     }
     # Chunk rebuild callers often omit paths; never wipe stored location to "".
     if not location["library_path"] or not location["video_path"]:
-        existing_lib, existing_path = _read_stored_video_location(profile_base_dir, video_id)
+        existing = _read_stored_video_location(profile_base_dir, video_id)
+        if existing is None:
+            return {
+                "error": "could not read stored video location; refusing path overwrite",
+                "video_id": video_id,
+            }
+        existing_lib, existing_path = existing
         if not location["library_path"] and existing_lib:
             location["library_path"] = existing_lib
         if not location["video_path"] and existing_path:

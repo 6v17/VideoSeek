@@ -441,6 +441,53 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 self.assertEqual(rename_dialogue_speakers("v1", "店长", "店长"), 0)
                 self.assertEqual(rename_dialogue_speakers("v1", "", "旁白"), 0)
 
+    def test_library_scope_limit_does_not_starve_target_lib(self):
+        """LIMIT must apply after library filter, not before (M3/M4)."""
+        from src.storage.dialogue_transcript_store import (
+            iter_matching_transcript_segment_rows,
+            save_dialogue_transcript,
+        )
+        from src.storage.video_identity import canonicalize_library_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            lib_other = os.path.join(tmp, "lib_other")
+            lib_keep = os.path.join(tmp, "lib_keep")
+            os.makedirs(data_dir, exist_ok=True)
+            os.makedirs(lib_other, exist_ok=True)
+            os.makedirs(lib_keep, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                for index in range(5):
+                    save_dialogue_transcript(
+                        f"vid_other_{index}",
+                        [{"start": 0.0, "end": 1.0, "text": "shared keyword hit", "language": "en"}],
+                        library_path=lib_other,
+                        video_path=os.path.join(lib_other, f"{index}.mp4"),
+                    )
+                save_dialogue_transcript(
+                    "vid_keep",
+                    [{"start": 0.0, "end": 1.0, "text": "shared keyword hit", "language": "en"}],
+                    library_path=lib_keep,
+                    video_path=os.path.join(lib_keep, "keep.mp4"),
+                )
+                hits = list(
+                    iter_matching_transcript_segment_rows(
+                        "shared keyword",
+                        library_path=lib_keep,
+                        limit=3,
+                        match_mode="exact",
+                    )
+                )
+            self.assertEqual(len(hits), 1)
+            self.assertEqual(hits[0]["video_id"], "vid_keep")
+            self.assertEqual(
+                canonicalize_library_path(hits[0]["library_path"]),
+                canonicalize_library_path(lib_keep),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

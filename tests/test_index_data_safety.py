@@ -344,5 +344,33 @@ class LanceUpsertRestoreTests(unittest.TestCase):
                 self.assertFalse(os.path.isfile(lance_store._upsert_journal_path(profile_dir)))
 
 
+class UpsertPathPreserveTests(unittest.TestCase):
+    def test_upsert_refuses_empty_paths_when_location_read_fails(self):
+        from src.storage.lance_store import upsert_profile_video_vectors_from_arrays
+
+        vectors = np.random.randn(2, 8).astype(np.float32)
+        timestamps = np.asarray([0.0, 1.0], dtype=np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_dir = os.path.join(tmp, "profile")
+            os.makedirs(profile_dir, exist_ok=True)
+            with patch(
+                "src.storage.config_store.get_local_model_asset_dirs",
+                return_value={"base_dir": profile_dir, "vector_dir": os.path.join(profile_dir, "vector")},
+            ), patch(
+                "src.storage.lance_store._read_stored_video_location",
+                return_value=None,
+            ):
+                result = upsert_profile_video_vectors_from_arrays(
+                    "vid_path",
+                    vectors,
+                    timestamps,
+                    config={},
+                    library_path="",
+                    video_path="",
+                    chunks=[],
+                )
+            self.assertIn("refusing path overwrite", str(result.get("error") or ""))
+
+
 if __name__ == "__main__":
     unittest.main()

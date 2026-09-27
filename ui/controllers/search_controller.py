@@ -254,7 +254,7 @@ class SearchController(QObject):
             thread.thumb_ready.disconnect(self._on_thumb_ready)
         except (RuntimeError, TypeError):
             pass
-        shutdown_thread(thread, stop_first=True, allow_terminate=True, wait_ms=1500)
+        shutdown_thread(thread, stop_first=True, allow_terminate=False, wait_ms=1500)
 
     def _on_thumb_ready(self, row, image):
         if self._is_shutdown:

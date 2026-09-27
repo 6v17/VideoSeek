@@ -1008,6 +1008,9 @@ def iter_matching_transcript_segment_rows(
         if mode == "exact":
             yielded = 0
             base_select = select_cols + " WHERE instr(s.text_cf, ?) > 0"
+            if want_lib:
+                # Push library scope into SQL so LIMIT cannot exhaust on other libs first.
+                base_select += " AND t.library_path = ?"
 
             def _emit_exact(sql: str, params: list[Any]) -> Iterator[dict[str, Any]]:
                 nonlocal yielded
@@ -1028,9 +1031,16 @@ def iter_matching_transcript_segment_rows(
             if max_hits is not None:
                 order_limit += f" LIMIT {max(1, max_hits - yielded)}"
 
+            def _exact_params(*extra: Any) -> list[Any]:
+                params: list[Any] = [needle]
+                if want_lib:
+                    params.append(want_lib)
+                params.extend(extra)
+                return params
+
             if want_video:
                 sql = base_select + " AND t.video_id = ?" + order_limit
-                yield from _emit_exact(sql, [needle, want_video])
+                yield from _emit_exact(sql, _exact_params(want_video))
                 return
 
             if want_ids is not None:
@@ -1043,14 +1053,14 @@ def iter_matching_transcript_segment_rows(
                         + f" AND t.video_id IN ({placeholders})"
                         + " ORDER BY t.video_id, s.start_sec, s.end_sec, s.seg_index"
                     )
-                    params: list[Any] = [needle, *chunk]
+                    params = _exact_params(*chunk)
                     if max_hits is not None:
                         sql += f" LIMIT {max(1, max_hits - yielded)}"
                     yield from _emit_exact(sql, params)
                 return
 
             sql = base_select + order_limit
-            yield from _emit_exact(sql, [needle])
+            yield from _emit_exact(sql, _exact_params())
             return
 
         # Fuzzy: OR any scatter char; complete subfields first, then hit rate.
@@ -1064,6 +1074,9 @@ def iter_matching_transcript_segment_rows(
         or_parts = [f"instr(s.text_cf, ?) > 0" for _ in probes]
         where_params: list[Any] = list(probes)
         where_sql = "(" + " OR ".join(or_parts) + ")"
+        if want_lib:
+            where_sql = f"({where_sql}) AND t.library_path = ?"
+            where_params = [*where_params, want_lib]
         scored: list[tuple[int, dict[str, Any]]] = []
         seen_keys: set[tuple[str, float, float, str]] = set()
 

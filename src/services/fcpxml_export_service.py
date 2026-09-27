@@ -75,6 +75,11 @@ def fcpxml_time(seconds: float, fps: float) -> str:
     num, den = _frame_duration_rational(rate)
     # Snap to whole frames in this timebase: frames = round(seconds / frameDuration)
     frames = max(0, int(round(float(seconds) * den / num)))
+    return _fcpxml_time_from_frames(frames, num, den)
+
+
+def _fcpxml_time_from_frames(frames: int, num: int, den: int) -> str:
+    frames = max(0, int(frames))
     if frames == 0:
         return "0s"
     return f"{frames * num}/{den}s"
@@ -604,19 +609,33 @@ def build_fcpxml_document(
             "                    <spine>",
         ]
     )
+    # Integer frame cursor so consecutive offset/duration never drift (same as FCP7).
+    tl_cursor = 0
     for clip in spine_clips:
         clip_fps = float(clip["fps"])
+        dur_frames = max(1, _seconds_to_frames(clip["duration"], project_fps))
         lines.append(
             (
                 f'                        <asset-clip name="{_xml_escape(clip["name"])}" '
                 f'ref="{clip["ref"]}" '
-                f'offset="{fcpxml_time(clip["offset"], project_fps)}" '
+                f'offset="{_fcpxml_time_from_frames(tl_cursor, seq_frame_num, seq_frame_den)}" '
                 f'start="{fcpxml_time(clip["start"], clip_fps)}" '
-                f'duration="{fcpxml_time(clip["duration"], clip_fps)}" '
+                f'duration="{_fcpxml_time_from_frames(dur_frames, seq_frame_num, seq_frame_den)}" '
                 f'format="{clip["format_id"]}" '
                 f'tcFormat="NDF"/>'
             )
         )
+        tl_cursor += dur_frames
+    sequence_duration_frames = max(1, tl_cursor)
+    # Patch sequence duration to the frame-accurate total (replaces float sum).
+    for index, line in enumerate(lines):
+        if 'duration="' in line and "<sequence " in line:
+            lines[index] = (
+                f'                <sequence format="r1" '
+                f'duration="{_fcpxml_time_from_frames(sequence_duration_frames, seq_frame_num, seq_frame_den)}" '
+                f'tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">'
+            )
+            break
     lines.extend(
         [
             "                    </spine>",

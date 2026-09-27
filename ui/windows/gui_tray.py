@@ -203,6 +203,11 @@ class TrayGuiMixin:
         self.video_download_controller.shutdown()
         from ui.threading_utils import shutdown_thread
 
+        # Stop ASR / recap / rematch workers owned by the understanding mixins (not
+        # UnderstandingController) so closeEvent cannot leave them writing after teardown.
+        if hasattr(self, "shutdown_understanding_side_workers"):
+            self.shutdown_understanding_side_workers()
+
         shutdown_thread(getattr(self, "_model_package_import_worker", None), stop_first=True)
         shutdown_thread(getattr(self, "_startup_migration_worker", None), stop_first=True, wait_ms=2000)
         shutdown_thread(getattr(self, "dialogue_index_worker", None), stop_first=True, wait_ms=2000)

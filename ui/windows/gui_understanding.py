@@ -1926,6 +1926,25 @@ class UnderstandingGuiMixin:
             self.understanding_page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
             self.understanding_page.btn_stop.setEnabled(False)
 
+    def shutdown_understanding_side_workers(self):
+        """Stop and join ASR/recap side workers on app quit (all of them, not just one)."""
+        from ui.threading_utils import shutdown_thread
+
+        for attr in (
+            "_recap_rematch_weak_worker",
+            "_recap_rematch_beat_worker",
+            "_recap_clip_caption_worker",
+            "_recap_worker",
+            "_asr_worker",
+            "_speaker_cluster_worker",
+            "_asr_connection_test_worker",
+        ):
+            worker = getattr(self, attr, None)
+            if worker is None:
+                continue
+            shutdown_thread(worker, stop_first=True, allow_terminate=False, wait_ms=3000)
+            setattr(self, attr, None)
+
     def _update_understanding_progress(self, value, text):
         if hasattr(self, "_sync_tray_stop_action"):
             self._sync_tray_stop_action()

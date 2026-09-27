@@ -614,12 +614,21 @@ def lance_video_has_vectors(profile_base_dir: str, video_id: str) -> bool:
 
 def get_lance_video_library_path(profile_base_dir: str, video_id: str) -> str:
     """Return one stored ``library_path`` for ``video_id``, or empty string."""
-    library_path, _video_path = get_lance_video_location(profile_base_dir, video_id)
+    location = get_lance_video_location(profile_base_dir, video_id)
+    if location is None:
+        return ""
+    library_path, _video_path = location
     return library_path
 
 
-def get_lance_video_location(profile_base_dir: str, video_id: str) -> tuple[str, str]:
-    """Return ``(library_path, video_path)`` stored for ``video_id``, or empty strings."""
+def get_lance_video_location(
+    profile_base_dir: str, video_id: str
+) -> tuple[str, str] | None:
+    """Return ``(library_path, video_path)`` for ``video_id``.
+
+    - ``("", "")`` when Lance is empty / video missing (safe to write new paths)
+    - ``None`` when the read failed (caller must not overwrite stored paths with "")
+    """
     video_id = str(video_id or "").strip()
     if not video_id or not lance_search_is_ready(profile_base_dir):
         return "", ""
@@ -645,7 +654,7 @@ def get_lance_video_location(profile_base_dir: str, video_id: str) -> tuple[str,
         return library_path, video_path
     except Exception as exc:
         logger.debug("Failed to read Lance location for %s: %s", video_id, exc)
-        return "", ""
+        return None
 
 
 def get_lance_video_library_paths(profile_base_dir: str) -> dict[str, str]:

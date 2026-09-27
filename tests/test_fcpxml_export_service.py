@@ -276,6 +276,44 @@ class FcpxmlExportServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 export_shot_list_fcpxml(items, write_path=out)
 
+    def test_fcpxml_spine_offsets_are_frame_contiguous(self):
+        """Independent round(seconds) must not leave gaps between consecutive clips."""
+        import re
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "clip.mp4")
+            with open(path, "wb") as handle:
+                handle.write(b"fake")
+            # 18s + 6s at 24fps: float-round per clip can disagree with sum of parts.
+            items = [
+                ShotListItem("a", path, 0.0, 18.0, 0.9),
+                ShotListItem("b", path, 0.0, 6.0, 0.8),
+            ]
+            with patch(
+                "src.services.fcpxml_export_service._probe_media",
+                return_value=_probe(duration=120.0, fps=24.0),
+            ):
+                xml_text, _meta = build_fcpxml_document(items, project_name="Contig", fps=24.0)
+            clips = re.findall(
+                r'<asset-clip[^>]*offset="([^"]+)"[^>]*duration="([^"]+)"',
+                xml_text,
+            )
+            self.assertEqual(len(clips), 2)
+
+            def _frames(token: str) -> int:
+                if token == "0s":
+                    return 0
+                num_s, den_s = token.rstrip("s").split("/")
+                # frameDuration is 1/24s → encoded as frames/24s
+                self.assertEqual(int(den_s), 24)
+                return int(num_s)
+
+            o0, d0 = clips[0]
+            o1, d1 = clips[1]
+            self.assertEqual(_frames(o0), 0)
+            self.assertEqual(_frames(o1), _frames(d0))
+            self.assertEqual(_frames(o1) + _frames(d1), _frames(d0) + _frames(d1))
+
 
 if __name__ == "__main__":
     unittest.main()
