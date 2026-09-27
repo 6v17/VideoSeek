@@ -41,9 +41,6 @@ def pytest_configure(config) -> None:
 
 
 def pytest_runtest_setup(item) -> None:
-    nodeid = item.nodeid.replace("\\", "/")
-    if "test_z_qt_controllers.py" in nodeid:
-        return
     for module_name in _PROTECTED_MODULES:
         _ensure_real_module(module_name)
     for module_name in _UI_STUB_MODULES:

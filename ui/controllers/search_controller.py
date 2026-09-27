@@ -40,7 +40,8 @@ class SearchController(QObject):
         if worker is None:
             return
         self._disconnect_search_worker(worker)
-        shutdown_thread(worker, allow_terminate=True, wait_ms=1500)
+        # Never terminate(): encode holds _INFERENCE_LOCK; hard-kill can deadlock the app.
+        shutdown_thread(worker, stop_first=True, allow_terminate=False, wait_ms=1500)
         if worker is self.worker:
             self.worker = None
 
@@ -113,6 +114,12 @@ class SearchController(QObject):
         Older code searched with a cached query_vector and skipped compose/text-enhance,
         so chip results disagreed with a manual Compose search of the same content.
         """
+        if self.is_search_running():
+            page = getattr(self.parent_window, "search_page", None)
+            if page is not None and hasattr(page, "lbl_status"):
+                texts = getattr(self.parent_window, "texts", {}) or {}
+                page.lbl_status.setText(texts.get("search_busy", texts.get("searching", "Searching...")))
+            return
         from src.services.search_preset_model import get_preset
 
         preset = get_preset(str(preset_id or "").strip())
@@ -196,7 +203,7 @@ class SearchController(QObject):
         self._is_shutdown = True
         self.stop_thumbnail_loading()
         self._disconnect_search_worker(self.worker)
-        shutdown_thread(self.worker, allow_terminate=True, wait_ms=2000)
+        shutdown_thread(self.worker, stop_first=True, allow_terminate=False, wait_ms=2000)
         self.worker = None
         self._disconnect_warmup_worker(self.warmup_worker)
         shutdown_thread(self.warmup_worker, allow_terminate=True, wait_ms=2000)

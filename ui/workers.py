@@ -180,6 +180,14 @@ class SearchWorker(QThread):
         self.locate_warning_key = None
         self.dialogue_status_message = ""
         self.dialogue_matched_by = ""
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def _should_stop(self) -> bool:
+        return bool(self._stop_requested or self.isInterruptionRequested())
 
     def _emit_progress(self, phase: str, message: str = "") -> None:
         key = str(message or phase or "").strip()
@@ -189,6 +197,8 @@ class SearchWorker(QThread):
     def run(self):
         config = self.config
         try:
+            if self._should_stop():
+                raise InterruptedError("search stopped")
             from src.app.config import load_config
             from src.services.team_mode_service import is_team_client_mode
             from src.services.search_service import (
@@ -235,6 +245,8 @@ class SearchWorker(QThread):
                 text_enhance = None
                 if kind not in {"dialogue", "tags"} and bool(is_text) and query_vector is None:
                     text_enhance = bool(get_text_search_enhance_enabled(app_cfg))
+                if self._should_stop():
+                    raise InterruptedError("search stopped")
                 results = run_team_client_search(
                     server_url=str(app_cfg.get("team_server_url") or ""),
                     query_data=query_data,
@@ -316,6 +328,7 @@ class SearchWorker(QThread):
                     locate_score_margin=config.locate_score_margin,
                     video_discovery_enabled=config.video_discovery_enabled,
                     progress_callback=self._emit_progress,
+                    should_stop_callback=self._should_stop,
                 )
             else:
                 base_kwargs = {
@@ -335,6 +348,7 @@ class SearchWorker(QThread):
                     locate_score_margin=config.locate_score_margin,
                     video_discovery_enabled=config.video_discovery_enabled,
                     progress_callback=self._emit_progress,
+                    should_stop_callback=self._should_stop,
                     **base_kwargs,
                 )
             results = filter_hits_by_min_score(results, config.min_score)
@@ -347,6 +361,8 @@ class SearchWorker(QThread):
                 pixel_query_data=config.pixel_query_data,
             )
             self.result_ready.emit(list(results) if results is not None else [])
+        except InterruptedError:
+            logger.info("Search worker stopped")
         except Exception as exc:
             logger.exception("Search worker failed")
             error_text = str(exc).strip() or repr(exc)

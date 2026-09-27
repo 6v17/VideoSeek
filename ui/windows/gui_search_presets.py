@@ -61,6 +61,9 @@ class SearchPresetsGuiMixin:
         if not self._validate_search_scope():
             self.search_page.lbl_status.setText(self.texts.get("search_scope_none_selected", ""))
             return
+        if self.search_controller.is_search_running():
+            self.search_page.lbl_status.setText(self.texts.get("search_busy", self.texts["searching"]))
+            return
         self.switch_page("search")
         self.search_controller.start_preset_search(preset_id)
 

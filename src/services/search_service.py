@@ -27,8 +27,11 @@ from src.services.search_profiling import (
 )
 from src.services.search_progress import (
     clear_search_progress_callback,
+    clear_search_stop_callback,
     emit_search_progress,
+    ensure_search_not_stopped,
     set_search_progress_callback,
+    set_search_stop_callback,
 )
 from src.services.search_assets import (
     _CHUNK_ASSET_INFO,
@@ -390,6 +393,7 @@ def run_search(
     locate_score_margin: float | None = None,
     profile: bool | None = None,
     progress_callback=None,
+    should_stop_callback=None,
     video_discovery_enabled: bool | None = None,
     text_enhance: bool | None = None,
 ) -> List[SearchHit]:
@@ -412,7 +416,9 @@ def run_search(
     logger.info("Running %s search (is_text=%s, precise_image=%s)", mode, is_text, precise_image)
     _reset_search_index_steps()
     set_search_progress_callback(progress_callback)
+    set_search_stop_callback(should_stop_callback)
     try:
+        ensure_search_not_stopped()
         enhance_on = (
             bool(get_text_search_enhance_enabled(config))
             if text_enhance is None
@@ -448,6 +454,7 @@ def run_search(
                 path_index = load_searchable_path_index(config=config)
                 return filter_hits_with_existing_sources(enhanced, path_index=path_index, config=config)
 
+        ensure_search_not_stopped()
         results = _run_search_impl(
             query_data=query_data,
             is_text=is_text,
@@ -473,6 +480,7 @@ def run_search(
         return filter_hits_with_existing_sources(results, path_index=path_index, config=config)
     finally:
         clear_search_progress_callback()
+        clear_search_stop_callback()
 
 
 def _run_enhanced_text_search(
@@ -555,6 +563,7 @@ def run_mixed_query_search(
     locate_score_margin: float | None = None,
     profile: bool | None = None,
     progress_callback=None,
+    should_stop_callback=None,
     video_discovery_enabled: bool | None = None,
     text_enhance: bool | None = None,
 ) -> List[SearchHit]:
@@ -587,6 +596,8 @@ def run_mixed_query_search(
     pixel = pixel_query_data if pixel_query_data is not None else (refs[0] if refs else None)
 
     def _one(route_text: str):
+        if should_stop_callback and should_stop_callback():
+            raise InterruptedError("search stopped")
         vector = encode_mixed_query_vector(
             query=route_text,
             source_image_paths=refs,
@@ -610,10 +621,13 @@ def run_mixed_query_search(
             locate_score_margin=locate_score_margin,
             profile=profile,
             progress_callback=progress_callback,
+            should_stop_callback=should_stop_callback,
             video_discovery_enabled=video_discovery_enabled,
             text_enhance=False,
         )
 
+    if should_stop_callback and should_stop_callback():
+        raise InterruptedError("search stopped")
     if enhance_on and text:
         routes = select_text_search_routes(text, embed_fn=default_text_embed_fn)
         if len(routes) > 1:
@@ -648,6 +662,7 @@ def _run_search_impl(
         precise_image=precise_image,
         meta=profile_meta,
     ):
+        ensure_search_not_stopped()
         if mode == "chunk":
             results = run_chunk_search(
                 query_data,
@@ -674,10 +689,12 @@ def _run_search_impl(
             scoped,
             video_discovery_enabled=_resolve_video_discovery_enabled(config, video_discovery_enabled),
         )
+        ensure_search_not_stopped()
         with profile_phase("query_vector"):
             query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
 
         if scoped and scope_video_paths:
+            ensure_search_not_stopped()
             results = _run_frame_search_per_videos(
                 query_vector,
                 scope_video_paths,
@@ -706,6 +723,7 @@ def _run_search_impl(
             if use_video_discovery and not precise_image:
                 library_fetch_k = max(int(library_fetch_k), int(resolve_fetch_top_k(top_k, True)))
             for library_path in scope_library_paths:
+                ensure_search_not_stopped()
                 with profile_phase("load_assets"):
                     search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
                 _merge_search_index_steps(video_paths, timestamps)
@@ -938,6 +956,7 @@ def run_chunk_search(
             top_k = get_search_top_k(config)
         scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
         with profile_phase("query_vector"):
+            ensure_search_not_stopped()
             query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
 
         if scoped and scope_video_paths:
@@ -953,6 +972,7 @@ def run_chunk_search(
         ):
             merged_hits: List[SearchHit] = []
             for library_path in scope_library_paths:
+                ensure_search_not_stopped()
                 with profile_phase("load_assets"):
                     search_index, ranges, video_paths = load_library_chunk_search_assets(library_path, config)
                 if search_index is None:

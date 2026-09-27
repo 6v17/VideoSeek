@@ -101,7 +101,7 @@ class WorkersTests(unittest.TestCase):
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM"))
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"))
 
-    @patch("ui.workers.get_version_status", return_value={"ok": True})
+    @patch("src.services.version_service.get_version_status", return_value={"ok": True})
     def test_version_check_worker_emits_result(self, _mock_get_version_status):
         emitted = []
         worker = VersionCheckWorker("zh")
@@ -111,7 +111,7 @@ class WorkersTests(unittest.TestCase):
 
         self.assertEqual(emitted, [{"ok": True}])
 
-    @patch("ui.workers.get_version_status", side_effect=RuntimeError("network down"))
+    @patch("src.services.version_service.get_version_status", side_effect=RuntimeError("network down"))
     def test_version_check_worker_swallows_fetch_errors(self, _mock_get_version_status):
         emitted = []
         worker = VersionCheckWorker("zh")
@@ -130,6 +130,30 @@ class WorkersTests(unittest.TestCase):
         worker.run()
 
         self.assertEqual(errors, ["search failed"])
+
+    @patch("src.services.search_service.run_search", side_effect=InterruptedError("search stopped"))
+    def test_search_worker_interrupted_does_not_emit_error(self, mock_run_search):
+        errors = []
+        results = []
+        worker = SearchWorker(SearchConfig(query="cat", is_text=True))
+        worker.error_signal.connect(errors.append)
+        worker.result_ready.connect(results.append)
+
+        worker.run()
+
+        mock_run_search.assert_called_once()
+        self.assertEqual(errors, [])
+        self.assertEqual(results, [])
+
+    @patch("src.services.search_service.run_search")
+    def test_search_worker_passes_should_stop_callback(self, mock_run_search):
+        mock_run_search.return_value = []
+        worker = SearchWorker(SearchConfig(query="cat", is_text=True))
+        worker.run()
+        kwargs = mock_run_search.call_args.kwargs
+        self.assertTrue(callable(kwargs.get("should_stop_callback")))
+        worker.stop()
+        self.assertTrue(kwargs["should_stop_callback"]())
 
 
 if __name__ == "__main__":

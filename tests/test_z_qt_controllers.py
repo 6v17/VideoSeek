@@ -107,6 +107,9 @@ def _install_lightweight_ui_stubs():
 
 
 def _install_pyside_stub():
+    if not _USE_PYSIDE_STUB:
+        return
+
     for module_name in list(sys.modules):
         if module_name == "PySide6" or module_name.startswith("PySide6."):
             del sys.modules[module_name]
@@ -399,6 +402,11 @@ def setUpModule():
 
     _install_lightweight_ui_stubs()
     _install_pyside_stub()
+    if not _USE_PYSIDE_STUB:
+        from PySide6.QtWidgets import QApplication
+
+        if QApplication.instance() is None:
+            QApplication([])
 
     from ui.controllers.indexing_controller import IndexingController as _IndexingController
     from ui.controllers.mobile_bridge_controller import MobileBridgeController as _MobileBridgeController
@@ -418,7 +426,9 @@ def setUpModule():
 
 
 def _make_parent_window():
-    parent = MagicMock()
+    from PySide6.QtCore import QObject
+
+    parent = QObject()
     parent.language = "zh"
     parent.is_dark_mode = True
     parent.texts = {
@@ -428,6 +438,7 @@ def _make_parent_window():
         "searching": "Searching...",
         "no_results": "No results",
         "search_done": "Done in {duration:.2f}s | {count} results",
+        "search_busy": "Search in progress, please wait…",
     }
     parent.show_info_dialog = MagicMock()
     parent.open_runtime_resource_folder = MagicMock()
@@ -447,6 +458,21 @@ def _make_parent_window():
     parent.push_inference_status = MagicMock()
     parent.push_resources_status = MagicMock()
     return parent
+
+
+def _make_host_widget():
+    if _USE_PYSIDE_STUB:
+        host = _make_host_widget()
+        return host
+    from PySide6.QtWidgets import QWidget
+
+    return QWidget()
+
+
+def _make_preview_dialog_parent():
+    if _USE_PYSIDE_STUB:
+        return MagicMock()
+    return None
 
 
 class RuntimeResourceControllerTests(unittest.TestCase):
@@ -542,12 +568,13 @@ class IndexingControllerTests(unittest.TestCase):
             cleanup_missing_entries=None,
             rebuild_global_assets=False,
             index_from_vectors_only=False,
+            video_ids=None,
         )
         worker.start.assert_called_once()
 
 
 class MobileBridgeControllerTests(unittest.TestCase):
-    @patch("ui.controllers.mobile_bridge_controller.MobileBridgeService")
+    @patch("src.web.mobile_bridge.MobileBridgeService")
     def test_start_creates_service_once_and_returns_access_url(self, mock_service_cls):
         parent = _make_parent_window()
         service = MagicMock()
@@ -567,7 +594,7 @@ class MobileBridgeControllerTests(unittest.TestCase):
         self.assertEqual(url, "http://192.168.1.2:8918/?token=abc")
         self.assertEqual(statuses, ["running"])
 
-    @patch("ui.controllers.mobile_bridge_controller.MobileBridgeService")
+    @patch("src.web.mobile_bridge.MobileBridgeService")
     def test_start_reuses_running_service_without_restarting(self, mock_service_cls):
         parent = _make_parent_window()
         service = MagicMock()
@@ -635,7 +662,9 @@ class SearchControllerTests(unittest.TestCase):
         controller.start_search("cat", True)
         controller.start_search("dog", True)
 
-        mock_shutdown_thread.assert_called_once_with(first_worker, allow_terminate=False)
+        mock_shutdown_thread.assert_called_once_with(
+            first_worker, stop_first=True, allow_terminate=False, wait_ms=1500
+        )
         self.assertIs(controller.worker, second_worker)
         second_worker.start.assert_called_once()
 
@@ -653,6 +682,20 @@ class SearchControllerTests(unittest.TestCase):
         mock_get_preset.assert_called_once_with("p1")
         parent.apply_search_preset_to_ui.assert_called_once_with(preset)
         parent._start_compose_search.assert_called_once_with()
+
+    def test_start_preset_search_skips_when_search_running(self):
+        parent = _make_parent_window()
+        parent.apply_search_preset_to_ui = MagicMock()
+        parent._start_compose_search = MagicMock()
+        controller = SearchController(parent)
+        controller.worker = MagicMock()
+        controller.worker.isRunning.return_value = True
+
+        controller.start_preset_search("p1")
+
+        parent.apply_search_preset_to_ui.assert_not_called()
+        parent._start_compose_search.assert_not_called()
+        parent.search_page.lbl_status.setText.assert_called()
 
     def test_clear_results_resets_table(self):
         parent = _make_parent_window()
@@ -768,7 +811,7 @@ class SearchControllerTests(unittest.TestCase):
 
 
 class PreviewControllerTests(unittest.TestCase):
-    @patch.object(PreviewController, "ensure_vlc_instance")
+    @patch("ui.controllers.preview_controller.PreviewController.ensure_vlc_instance")
     @patch("ui.controllers.preview_controller.QTimer.singleShot")
     def test_start_warmup_starts_once(self, mock_single_shot, mock_ensure):
         parent = _make_parent_window()
@@ -786,7 +829,7 @@ class PreviewControllerTests(unittest.TestCase):
         self.assertEqual(done.call_count, 2)
 
     @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
-    @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("src.media.export_clip._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_prefers_vlc_for_direct_preview(self, mock_vlc_cls, _mock_window, _mock_instance):
         parent = _make_parent_window()
@@ -818,7 +861,7 @@ class PreviewControllerTests(unittest.TestCase):
             parent.search_page.preview_placeholder
         )
 
-    @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("src.media.export_clip._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_http_uses_vlc_without_ffmpeg_fallback(self, mock_vlc_cls, _mock_window):
         parent = _make_parent_window()
@@ -833,9 +876,9 @@ class PreviewControllerTests(unittest.TestCase):
         self.assertTrue(result)
         vlc_player.play.assert_called_once_with(url, 27.0, stop_sec=33.0)
 
-    @patch("ui.controllers.preview_controller.create_preview_clip")
-    @patch("ui.controllers.preview_controller.build_preview_cache_path", return_value="D:/cache/preview.mp4")
-    @patch("ui.controllers.preview_controller._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("src.media.export_clip.create_preview_clip")
+    @patch("src.media.export_clip.build_preview_cache_path", return_value="D:/cache/preview.mp4")
+    @patch("src.media.export_clip._resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_falls_back_to_generated_clip_when_vlc_playback_fails(
         self,
@@ -877,7 +920,7 @@ class PreviewControllerTests(unittest.TestCase):
 
         controller.stop_preview()
 
-        controller.vlc_player.suspend.assert_called_once()
+        controller.vlc_player.clear_session.assert_called_once()
         parent.media_player.pause.assert_called_once()
         parent.media_player.setSource.assert_called_once()
         controller.cleanup_previous_preview.assert_called_once()
@@ -885,6 +928,11 @@ class PreviewControllerTests(unittest.TestCase):
 
 
 class VlcPreviewPlayerTests(unittest.TestCase):
+    def setUp(self):
+        self._init_patcher = patch.object(VlcPreviewPlayer, "_initialize", lambda self: None)
+        self._init_patcher.start()
+        self.addCleanup(self._init_patcher.stop)
+
     def test_build_vlc_media_options_http_skips_start_time(self):
         from ui.playback.vlc_player import _build_vlc_media_options, normalize_http_media_url
 
@@ -903,8 +951,7 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         )
 
     def test_handle_timeout_pauses_instead_of_stopping(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         player._player = MagicMock()
         player._stop_at_ms = 33000
@@ -913,11 +960,10 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         player._handle_timeout()
 
         player._player.set_time.assert_called_once_with(33000)
-        player._player.pause.assert_called_once()
+        player._player.set_pause.assert_called_once_with(1)
 
     def test_shutdown_detaches_and_releases_player(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         mock_player = MagicMock()
         mock_instance = MagicMock()
@@ -926,7 +972,7 @@ class VlcPreviewPlayerTests(unittest.TestCase):
 
         player.shutdown()
 
-        mock_player.pause.assert_called_once()
+        mock_player.audio_set_mute.assert_called_once_with(True)
         mock_player.stop.assert_called_once()
         mock_player.release.assert_called_once()
         mock_instance.release.assert_called_once()
@@ -942,15 +988,14 @@ class VlcPreviewPlayerTests(unittest.TestCase):
             self.assertEqual(mock_player.set_xwindow.call_args_list[-1][0][0], 0)
 
     def test_shutdown_with_shared_instance_does_not_release_instance(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         shared = MagicMock()
         shared.media_player_new.return_value = MagicMock()
         player = VlcPreviewPlayer(host, shared_instance=shared)
         mock_player = player._player
         player.shutdown()
 
-        mock_player.pause.assert_called_once()
+        mock_player.audio_set_mute.assert_called_once_with(True)
         mock_player.stop.assert_called_once()
         mock_player.release.assert_called_once()
         shared.release.assert_not_called()
@@ -975,14 +1020,13 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         # Soft stop avoids native stop()/set_media(None) which hang/spawn D3D windows.
         player._player.stop.assert_not_called()
         player._player.set_media.assert_not_called()
-        player._player.pause.assert_called_once()
+        player._player.set_pause.assert_called_once_with(1)
         player._player.audio_set_mute.assert_called_once_with(True)
         old_media.release.assert_not_called()
         self.assertIs(player._current_media, old_media)
 
     def test_set_media_releases_previous_media(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         player._player = MagicMock()
         old_media = MagicMock()
@@ -996,11 +1040,18 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         self.assertIs(player._current_media, new_media)
 
     def test_rebind_output_window_sets_platform_handle(self):
-        host = MagicMock()
-        host.winId.return_value = 456
+        host = _make_host_widget()
+        if hasattr(host, "winId") and not callable(getattr(type(host), "winId", None)):
+            pass
+        # Real QWidget.winId() is fine; stub host already returns 123. Override when possible.
+        if _USE_PYSIDE_STUB:
+            host.winId.return_value = 456
         player = VlcPreviewPlayer(host)
         player._player = MagicMock()
         player._released = False
+        if not _USE_PYSIDE_STUB:
+            player.host_widget = MagicMock()
+            player.host_widget.winId.return_value = 456
 
         player.rebind_output_window()
 
@@ -1012,11 +1063,11 @@ class VlcPreviewPlayerTests(unittest.TestCase):
             player._player.set_xwindow.assert_called_once_with(456)
 
     def test_resume_restarts_media_when_playback_has_reached_end(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         player._player = MagicMock()
         player._instance = MagicMock()
+        player._session_active = True
         player._current_video_path = "D:/videos/clip.mp4"
         player._pending_seek_ms = 12000
         player.get_time = MagicMock(return_value=30000)
@@ -1036,11 +1087,11 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         self.assertIs(player._current_media, new_media)
 
     def test_resume_restarts_from_zero_when_playback_has_reached_end_without_seek(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         player._player = MagicMock()
         player._instance = MagicMock()
+        player._session_active = True
         player._current_video_path = "D:/videos/clip.mp4"
         player._pending_seek_ms = None
         player.get_time = MagicMock(return_value=30000)
@@ -1051,14 +1102,14 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         result = player.resume()
 
         self.assertTrue(result)
-        player._instance.media_new.assert_called_once_with("D:/videos/clip.mp4", ":start-time=0.000")
+        player._instance.media_new.assert_called_once_with("D:/videos/clip.mp4")
 
     def test_resume_prioritizes_pending_seek_position(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         player._player = MagicMock()
         player._instance = MagicMock()
+        player._session_active = True
         player._current_video_path = "D:/videos/clip.mp4"
         player._pending_seek_ms = 8000
         player.get_time = MagicMock(return_value=1000)
@@ -1069,10 +1120,18 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         result = player.resume()
 
         self.assertTrue(result)
-        player._instance.media_new.assert_called_once_with("D:/videos/clip.mp4", ":start-time=8.000")
+        # Mid-clip pending seek: apply set_time + play, do not recreate media.
+        player._instance.media_new.assert_not_called()
+        player._player.set_time.assert_called_once_with(8000)
+        player._player.play.assert_called_once()
 
 
 class PreviewDialogTests(unittest.TestCase):
+    def setUp(self):
+        self._init_patcher = patch.object(VlcPreviewPlayer, "_initialize", lambda self: None)
+        self._init_patcher.start()
+        self.addCleanup(self._init_patcher.stop)
+
     def test_expanded_chrome_slider_release_uses_known_duration(self):
         from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
 
@@ -1093,7 +1152,7 @@ class PreviewDialogTests(unittest.TestCase):
     @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
     def test_slider_release_uses_known_duration_when_vlc_length_is_unavailable(self, mock_vlc_cls, _mock_timer):
-        parent = MagicMock()
+        parent = _make_preview_dialog_parent()
         player = MagicMock()
         player.play.return_value = True
         player.get_length.return_value = -1
@@ -1112,7 +1171,7 @@ class PreviewDialogTests(unittest.TestCase):
     @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
     def test_sync_ui_holds_pending_seek_position_during_zero_time_flash(self, mock_vlc_cls, _mock_timer):
-        parent = MagicMock()
+        parent = _make_preview_dialog_parent()
         player = MagicMock()
         player.play.return_value = True
         player.get_length.return_value = 120000
@@ -1131,7 +1190,7 @@ class PreviewDialogTests(unittest.TestCase):
     @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
     def test_load_preview_reuses_player_without_full_teardown(self, mock_vlc_cls, _mock_timer):
-        parent = MagicMock()
+        parent = _make_preview_dialog_parent()
         player = MagicMock()
         player.play.return_value = True
         player.get_length.return_value = 120000
@@ -1153,8 +1212,7 @@ class PreviewDialogTests(unittest.TestCase):
         player.suspend.assert_called()
 
     def test_shutdown_fast_skips_blocking_stop_and_release(self):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         mock_player = MagicMock()
         mock_instance = MagicMock()
@@ -1168,15 +1226,13 @@ class PreviewDialogTests(unittest.TestCase):
         mock_player.release.assert_not_called()
         mock_instance.release.assert_not_called()
         mock_player.audio_set_mute.assert_called_once_with(True)
-        mock_player.pause.assert_called_once()
         mock_player.set_media.assert_called_with(None)
         self.assertTrue(player._released)
         self.assertIsNone(player._player)
 
     @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     def test_play_same_file_seeks_without_media_new(self, _mock_timer):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         mock_mp = MagicMock()
         mock_mp.play.return_value = 0
@@ -1200,8 +1256,7 @@ class PreviewDialogTests(unittest.TestCase):
 
     @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     def test_play_same_file_reloads_when_seek_is_before_start_time(self, _mock_timer):
-        host = MagicMock()
-        host.winId.return_value = 123
+        host = _make_host_widget()
         player = VlcPreviewPlayer(host)
         mock_mp = MagicMock()
         mock_mp.play.return_value = 0
