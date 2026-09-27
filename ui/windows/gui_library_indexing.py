@@ -2345,7 +2345,9 @@ class LibraryIndexingGuiMixin:
         self._show_index_issue_guidance(issue_list)
         if hasattr(self, "_sync_tray_stop_action"):
             self._sync_tray_stop_action()
-        if self._close_when_indexing_stops:
+        if hasattr(self, "_maybe_close_when_busy_work_stops"):
+            self._maybe_close_when_busy_work_stops()
+        elif self._close_when_indexing_stops:
             self._close_when_indexing_stops = False
             self.close()
 

@@ -195,6 +195,44 @@ def delete_video_tags(video_id: str, *, config=None) -> int:
     return deleted
 
 
+def rekey_video_tags(
+    old_video_id: str,
+    new_video_id: str,
+    *,
+    config=None,
+) -> int:
+    """Rename projected tag rows from old_video_id to new_video_id.
+
+    Returns number of rows updated. Skips when destination already has rows.
+    """
+    old_id = str(old_video_id or "").strip()
+    new_id = str(new_video_id or "").strip()
+    if not old_id or not new_id or old_id == new_id:
+        return 0
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            dest = conn.execute(
+                "SELECT 1 FROM tag_rows WHERE video_id = ? LIMIT 1",
+                (new_id,),
+            ).fetchone()
+            if dest is not None:
+                logger.warning(
+                    "Skip tag rekey %s -> %s: destination rows already exist",
+                    old_id,
+                    new_id,
+                )
+                return 0
+            cur = conn.execute(
+                "UPDATE tag_rows SET video_id = ? WHERE video_id = ?",
+                (new_id, old_id),
+            )
+            conn.commit()
+            updated = int(cur.rowcount or 0)
+    if updated:
+        _invalidate_suggest_cache()
+    return updated
+
+
 def clear_all_tag_rows(*, config=None) -> int:
     with _WRITE_LOCK:
         with _db(config=config) as conn:

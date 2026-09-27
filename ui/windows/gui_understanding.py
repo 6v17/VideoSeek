@@ -1927,9 +1927,53 @@ class UnderstandingGuiMixin:
             self.understanding_page.btn_stop.setEnabled(False)
 
     def shutdown_understanding_side_workers(self):
-        """Stop and join ASR/recap side workers on app quit (all of them, not just one)."""
-        from ui.threading_utils import shutdown_thread
+        """Stop and join ASR/recap side workers on app quit (shared wait budget)."""
+        import time
 
+        attrs = (
+            "_recap_rematch_weak_worker",
+            "_recap_rematch_beat_worker",
+            "_recap_clip_caption_worker",
+            "_recap_worker",
+            "_asr_worker",
+            "_speaker_cluster_worker",
+            "_asr_connection_test_worker",
+        )
+        running = []
+        for attr in attrs:
+            worker = getattr(self, attr, None)
+            if worker is None:
+                continue
+            if getattr(worker, "isRunning", lambda: False)():
+                if hasattr(worker, "stop"):
+                    try:
+                        worker.stop()
+                    except Exception:
+                        pass
+                try:
+                    worker.requestInterruption()
+                except Exception:
+                    pass
+                try:
+                    worker.quit()
+                except Exception:
+                    pass
+                running.append((attr, worker))
+            else:
+                setattr(self, attr, None)
+        # Cap total wait across workers (~3s), not 3s × N.
+        deadline = time.monotonic() + 3.0
+        for attr, worker in running:
+            remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+            if remaining_ms > 0:
+                try:
+                    worker.wait(remaining_ms)
+                except Exception:
+                    pass
+            setattr(self, attr, None)
+
+    def understanding_side_workers_busy(self) -> bool:
+        """True when any ASR/recap side QThread is still running."""
         for attr in (
             "_recap_rematch_weak_worker",
             "_recap_rematch_beat_worker",
@@ -1940,10 +1984,40 @@ class UnderstandingGuiMixin:
             "_asr_connection_test_worker",
         ):
             worker = getattr(self, attr, None)
-            if worker is None:
+            if worker is not None and getattr(worker, "isRunning", lambda: False)():
+                return True
+        return False
+
+    def request_stop_understanding_side_workers(self) -> bool:
+        """Ask side workers to stop without joining (used by close-choice stop_exit)."""
+        stopped_any = False
+        for attr in (
+            "_recap_rematch_weak_worker",
+            "_recap_rematch_beat_worker",
+            "_recap_clip_caption_worker",
+            "_recap_worker",
+            "_asr_worker",
+            "_speaker_cluster_worker",
+            "_asr_connection_test_worker",
+        ):
+            worker = getattr(self, attr, None)
+            if worker is None or not getattr(worker, "isRunning", lambda: False)():
                 continue
-            shutdown_thread(worker, stop_first=True, allow_terminate=False, wait_ms=3000)
-            setattr(self, attr, None)
+            stopped_any = True
+            if hasattr(worker, "stop"):
+                try:
+                    worker.stop()
+                except Exception:
+                    pass
+            try:
+                worker.requestInterruption()
+            except Exception:
+                pass
+            try:
+                worker.quit()
+            except Exception:
+                pass
+        return stopped_any
 
     def _update_understanding_progress(self, value, text):
         if hasattr(self, "_sync_tray_stop_action"):
@@ -2056,7 +2130,9 @@ class UnderstandingGuiMixin:
         self._refresh_understanding_ui()
         if hasattr(self, "_sync_tray_stop_action"):
             self._sync_tray_stop_action()
-        if getattr(self, "_close_when_indexing_stops", False):
+        if hasattr(self, "_maybe_close_when_busy_work_stops"):
+            self._maybe_close_when_busy_work_stops()
+        elif getattr(self, "_close_when_indexing_stops", False):
             self._close_when_indexing_stops = False
             self.close()
 

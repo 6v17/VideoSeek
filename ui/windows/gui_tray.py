@@ -133,6 +133,13 @@ class TrayGuiMixin:
             elif getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
                 self.understanding_controller.request_stop()
                 self.understanding_page.lbl_status.setText(self.texts.get("understanding_stop_requested", ""))
+            elif hasattr(self, "request_stop_understanding_side_workers"):
+                if self.request_stop_understanding_side_workers():
+                    page = getattr(self, "understanding_page", None)
+                    if page is not None and hasattr(page, "lbl_status"):
+                        page.lbl_status.setText(
+                            self.texts.get("understanding_stop_requested", "Stopping…")
+                        )
             event.ignore()
             return True
 
@@ -152,10 +159,36 @@ class TrayGuiMixin:
             elif getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
                 self.understanding_controller.request_stop()
                 self.understanding_page.lbl_status.setText(self.texts.get("understanding_stop_requested", ""))
+            elif hasattr(self, "request_stop_understanding_side_workers"):
+                if self.request_stop_understanding_side_workers():
+                    page = getattr(self, "understanding_page", None)
+                    if page is not None and hasattr(page, "lbl_status"):
+                        page.lbl_status.setText(
+                            self.texts.get("understanding_stop_requested", "Stopping…")
+                        )
             event.ignore()
             return True
         event.ignore()
         return True
+
+    def _maybe_close_when_busy_work_stops(self):
+        """Complete stop_exit close once indexing/understanding/side workers are idle."""
+        if not getattr(self, "_close_when_indexing_stops", False):
+            return
+        if getattr(self, "indexing_controller", None) and self.indexing_controller.is_running():
+            return
+        if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        if hasattr(self, "understanding_side_workers_busy") and self.understanding_side_workers_busy():
+            return
+        try:
+            if any(feature.is_busy(self) for feature in get_registry().features):
+                return
+        except Exception:
+            pass
+        self._close_when_indexing_stops = False
+        self._force_application_quit = True
+        self.close()
 
     def _try_minimize_to_tray_on_close(self, event):
         if self._force_application_quit:
@@ -163,6 +196,8 @@ class TrayGuiMixin:
         if getattr(self, "indexing_controller", None) and self.indexing_controller.is_running():
             return False
         if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return False
+        if hasattr(self, "understanding_side_workers_busy") and self.understanding_side_workers_busy():
             return False
         if self._close_window_action() != "tray":
             return False

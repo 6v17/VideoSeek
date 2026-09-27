@@ -663,6 +663,51 @@ def delete_dialogue_transcript(video_id: str, *, config=None) -> bool:
             return cur.rowcount > 0
 
 
+def rekey_dialogue_transcript_video_id(
+    old_video_id: str,
+    new_video_id: str,
+    *,
+    config=None,
+) -> bool:
+    """Move a transcript row (+segments) from old_video_id to new_video_id.
+
+    Returns True when a row was relocated. No-op (False) when source missing,
+    ids equal/blank, or the destination id already has a transcript.
+    """
+    old_id = str(old_video_id or "").strip()
+    new_id = str(new_video_id or "").strip()
+    if not old_id or not new_id or old_id == new_id:
+        return False
+    payload = load_dialogue_transcript(old_id, config=config)
+    if payload is None:
+        return False
+    if load_dialogue_transcript(new_id, config=config) is not None:
+        logger.warning(
+            "Skip dialogue rekey %s -> %s: destination transcript already exists",
+            old_id,
+            new_id,
+        )
+        return False
+    saved = save_dialogue_transcript(
+        new_id,
+        list(payload.get("segments") or []),
+        library_path=str(payload.get("library_path") or ""),
+        video_path=str(payload.get("video_path") or ""),
+        asr_source=str(payload.get("asr_source") or ""),
+        config=config,
+    )
+    if not saved.get("ok"):
+        logger.warning(
+            "Failed dialogue rekey %s -> %s: %s",
+            old_id,
+            new_id,
+            saved.get("error"),
+        )
+        return False
+    delete_dialogue_transcript(old_id, config=config)
+    return True
+
+
 def has_any_dialogue_transcript(*, config=None) -> bool:
     try:
         with _db(config=config) as conn:

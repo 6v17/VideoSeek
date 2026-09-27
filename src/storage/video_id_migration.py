@@ -340,6 +340,109 @@ def _rename_video_assets(vector_dir, index_dir, old_vid, new_vid):
         os.replace(src, dst)
 
 
+def _evidence_paths_for_video(video_id: str, *, config=None) -> list[str]:
+    """All on-disk evidence JSON paths (mode stores + legacy) for one video id."""
+    from src.services.understanding_paths import iter_evidence_candidate_paths
+    from src.services.understanding_resource_service import SPLIT_UNDERSTANDING_MODES
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    for mode in SPLIT_UNDERSTANDING_MODES:
+        for path in iter_evidence_candidate_paths(video_id, config=config, mode=mode):
+            key = os.path.normcase(os.path.normpath(path))
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(os.path.normpath(path))
+    return paths
+
+
+def _relocate_evidence_files(old_vid: str, new_vid: str, *, config=None) -> int:
+    """Rename evidence JSON files and rewrite embedded video.video_id."""
+    moved = 0
+    for src in _evidence_paths_for_video(old_vid, config=config):
+        if not os.path.isfile(src):
+            continue
+        dst = os.path.join(os.path.dirname(src), f"{new_vid}.json")
+        if os.path.normcase(os.path.normpath(src)) == os.path.normcase(os.path.normpath(dst)):
+            continue
+        if os.path.exists(dst):
+            logger.warning(
+                "Skip evidence relocate %s -> %s: target already exists",
+                src,
+                dst,
+            )
+            continue
+        try:
+            with open(src, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Unreadable evidence during id migration %s: %s", src, exc)
+            continue
+        if isinstance(payload, dict):
+            video = payload.get("video")
+            if isinstance(video, dict):
+                stored = str(video.get("video_id", "") or "").strip()
+                if not stored or stored == old_vid:
+                    video["video_id"] = new_vid
+            tmp_path = f"{dst}.tmp"
+            try:
+                folder = os.path.dirname(dst)
+                if folder:
+                    os.makedirs(folder, exist_ok=True)
+                with open(tmp_path, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, dst)
+                os.remove(src)
+                moved += 1
+            except OSError as exc:
+                logger.warning("Failed evidence relocate %s -> %s: %s", src, dst, exc)
+                if os.path.isfile(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                continue
+        else:
+            try:
+                os.replace(src, dst)
+                moved += 1
+            except OSError as exc:
+                logger.warning("Failed evidence rename %s -> %s: %s", src, dst, exc)
+        # Drop leftover .tmp beside the old file if present.
+        old_tmp = f"{src}.tmp"
+        if os.path.isfile(old_tmp):
+            try:
+                os.remove(old_tmp)
+            except OSError:
+                pass
+    return moved
+
+
+def _relocate_understanding_side_assets(old_vid: str, new_vid: str, *, config=None) -> dict:
+    """Keep evidence JSON + dialogue/tags aligned when vector video_id changes."""
+    stats = {"evidence_files": 0, "dialogue_rekeyed": False, "tag_rows": 0}
+    try:
+        stats["evidence_files"] = _relocate_evidence_files(old_vid, new_vid, config=config)
+    except Exception:
+        logger.exception("Evidence relocate failed for %s -> %s", old_vid, new_vid)
+    try:
+        from src.storage.dialogue_transcript_store import rekey_dialogue_transcript_video_id
+
+        stats["dialogue_rekeyed"] = bool(
+            rekey_dialogue_transcript_video_id(old_vid, new_vid, config=config)
+        )
+    except Exception:
+        logger.exception("Dialogue rekey failed for %s -> %s", old_vid, new_vid)
+    try:
+        from src.storage.evidence_tags_store import rekey_video_tags
+
+        stats["tag_rows"] = int(rekey_video_tags(old_vid, new_vid, config=config) or 0)
+    except Exception:
+        logger.exception("Tag rekey failed for %s -> %s", old_vid, new_vid)
+    return stats
+
+
 def _legacy_vector_file(vector_dir, video_id):
     if not video_id:
         return ""
@@ -389,11 +492,12 @@ def _gc_orphan_assets(vector_dir, index_dir, valid_ids):
     return removed
 
 
-def migrate_model_storage_root(storage_root, *, progress_callback=None, progress_base=0, progress_span=100):
+def migrate_model_storage_root(storage_root, *, progress_callback=None, progress_base=0, progress_span=100, config=None):
     meta_file = storage_root["meta_file"]
     vector_dir = storage_root["vector_dir"]
     index_dir = storage_root["index_dir"]
     label = storage_root.get("label", meta_file)
+    runtime_config = dict(config or load_config())
 
     if not os.path.isfile(meta_file):
         return {"label": label, "migrated": 0, "skipped": 0, "failed": 0, "orphans_removed": 0, "skipped_root": True}
@@ -479,6 +583,8 @@ def migrate_model_storage_root(storage_root, *, progress_callback=None, progress
             logger.warning("Failed to rename assets %s -> %s: %s", old_vid, new_vid, exc)
             failed += 1
             continue
+
+        _relocate_understanding_side_assets(old_vid, new_vid, config=runtime_config)
 
         file_entry = (meta.get("libraries") or {}).get(root_path, {}).get("files", {}).get(rel_path)
         if isinstance(file_entry, dict):
@@ -567,6 +673,7 @@ def migrate_legacy_video_ids(config=None, progress_callback=None):
             progress_callback=progress_callback,
             progress_base=base,
             progress_span=span,
+            config=runtime_config,
         )
         per_root.append(stats)
         total_migrated += int(stats.get("migrated", 0) or 0)

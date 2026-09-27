@@ -78,16 +78,118 @@ class VideoIdMigrationTests(unittest.TestCase):
             roots = list(iter_model_asset_storage_roots(config))
             self.assertEqual(len(roots), 1)
 
-            stats = migrate_model_storage_root(roots[0])
+            stats = migrate_model_storage_root(roots[0], config=config)
             self.assertEqual(stats["migrated"], 1)
             self.assertTrue(os.path.isfile(os.path.join(vector_dir, f"{new_vid}_vectors.npy")))
             self.assertFalse(os.path.isfile(os.path.join(vector_dir, f"{legacy_vid}_vectors.npy")))
 
-            with open(meta_file, "r", encoding="utf-8") as handle:
-                migrated_meta = json.load(handle)
+            from src.storage.asset_store import load_metadata
+
+            migrated_meta = load_metadata(meta_file)
             entry = migrated_meta["libraries"][library_root]["files"]["clip.mp4"]
             self.assertEqual(entry["vid"], new_vid)
             self.assertNotEqual(migrated_meta.get("global_index_state"), "stale")
+
+    def test_migrate_relocates_evidence_and_dialogue(self):
+        from src.services.understanding_paths import get_evidence_path
+        from src.storage.dialogue_transcript_store import (
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+        )
+        from src.storage.evidence_tags_store import rekey_video_tags, replace_video_tags_from_bundle
+        from src.storage.video_id_migration import _relocate_understanding_side_assets
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            config = {"data_root": tmp}
+            old_vid = "legacyvid0123456789abcdef"
+            new_vid = "newvid0123456789abcdef0123"
+
+            evidence_path = get_evidence_path(old_vid, config=config, mode="tags")
+            os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+            payload = {
+                "schema_version": 1,
+                "video": {
+                    "video_id": old_vid,
+                    "video_path": os.path.join(tmp, "clip.mp4"),
+                    "video_rel_path": "clip.mp4",
+                    "library_path": tmp,
+                    "duration_sec": 1.0,
+                    "source_exists": True,
+                },
+                "provenance": {
+                    "understanding_profile_id": "vision_baseline_v1",
+                    "components": {},
+                    "chunk_source": {
+                        "search_profile_id": "x",
+                        "search_provider": "x",
+                        "search_variant": "x",
+                    },
+                    "keyframe_strategy": "midpoint",
+                    "generated_at": "2026-09-27T00:00:00Z",
+                    "generation_status": "completed",
+                    "chunk_total": 1,
+                    "chunks_completed": 1,
+                },
+                "chunks": [
+                    {
+                        "chunk_index": 0,
+                        "start_sec": 0.0,
+                        "end_sec": 1.0,
+                        "tags": ["person"],
+                        "sample": {"timestamp_sec": 0.5, "strategy": "midpoint"},
+                        "evidence": {
+                            "vision": {
+                                "image_caption": {
+                                    "source": "vision/image_caption/qwen3-vl-remote",
+                                    "text": "a person",
+                                }
+                            },
+                            "audio": {},
+                        },
+                    }
+                ],
+            }
+            with open(evidence_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+
+            with patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ), patch(
+                "src.storage.evidence_tags_store.get_dialogue_store_dir",
+                return_value=os.path.join(data_dir, "dialogue"),
+            ):
+                save_dialogue_transcript(
+                    old_vid,
+                    [{"start": 0.0, "end": 1.0, "text": "hello", "language": "en"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "clip.mp4"),
+                    asr_source="whisper",
+                    config=config,
+                )
+                replace_video_tags_from_bundle(old_vid, payload, config=config)
+
+                stats = _relocate_understanding_side_assets(old_vid, new_vid, config=config)
+                self.assertEqual(stats["evidence_files"], 1)
+                self.assertTrue(stats["dialogue_rekeyed"])
+                self.assertGreater(stats["tag_rows"], 0)
+
+                new_evidence = get_evidence_path(new_vid, config=config, mode="tags")
+                self.assertTrue(os.path.isfile(new_evidence))
+                self.assertFalse(os.path.isfile(evidence_path))
+                with open(new_evidence, "r", encoding="utf-8") as handle:
+                    relocated = json.load(handle)
+                self.assertEqual(relocated["video"]["video_id"], new_vid)
+
+                self.assertIsNone(load_dialogue_transcript(old_vid, config=config))
+                moved = load_dialogue_transcript(new_vid, config=config)
+                self.assertIsNotNone(moved)
+                self.assertEqual(moved["segments"][0]["text"], "hello")
+
+                # Destination already taken → rekey is a no-op
+                self.assertEqual(rekey_video_tags("ghost", new_vid, config=config), 0)
 
     def test_migration_marks_state_completed(self):
         with tempfile.TemporaryDirectory() as tmp:

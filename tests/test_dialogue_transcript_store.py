@@ -238,6 +238,33 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 self.assertEqual(payload["segments"][0]["text"], "new only")
                 self.assertEqual(payload["segments"][0].get("speaker") or "", "")
 
+    def test_rekey_dialogue_transcript_video_id(self):
+        from src.storage.dialogue_transcript_store import (
+            load_dialogue_transcript,
+            rekey_dialogue_transcript_video_id,
+            save_dialogue_transcript,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "old_vid",
+                    [{"start": 0.0, "end": 1.0, "text": "kept", "language": "en"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "a.mp4"),
+                    asr_source="whisper",
+                )
+                self.assertTrue(rekey_dialogue_transcript_video_id("old_vid", "new_vid"))
+                self.assertIsNone(load_dialogue_transcript("old_vid"))
+                moved = load_dialogue_transcript("new_vid")
+                self.assertEqual(moved["segments"][0]["text"], "kept")
+                self.assertFalse(rekey_dialogue_transcript_video_id("missing", "new_vid"))
+                self.assertFalse(rekey_dialogue_transcript_video_id("new_vid", "new_vid"))
+
     def test_speaker_roundtrip_update_and_inherit_on_overlap(self):
         from src.storage.dialogue_transcript_store import (
             inherit_segment_speakers,

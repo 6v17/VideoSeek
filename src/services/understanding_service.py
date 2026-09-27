@@ -275,6 +275,15 @@ def _run_pending_chunks(
 
     def _handle_chunk_done(chunk_index: int, result: dict[str, Any]) -> None:
         nonlocal output_path
+        # Empty / failed chunks must not enter `completed` or the checkpoint —
+        # otherwise UI reports success, resume skips them, and retry stays dead.
+        if not chunk_payload_has_evidence(result):
+            logger.warning(
+                "Refusing to checkpoint empty evidence chunk %s for %s",
+                chunk_index,
+                video_id,
+            )
+            return
         checkpoint_path = _process_completed_chunk(
             video_id=video_id,
             chunk_index=chunk_index,
@@ -305,17 +314,35 @@ def _run_pending_chunks(
         for chunk_index in pending_indices:
             if should_stop_callback and should_stop_callback():
                 break
-            result = _run_single_chunk(
-                chunk_index=chunk_index,
-                chunk=chunks[chunk_index],
-                video_path=video_path,
-                profile_manifest=profile_manifest,
-                config=config,
-                model_dir=model_dir,
-                should_stop_callback=should_stop_callback,
-                sample_strategy=_sample_strategy(chunk_index),
-            )
-            _handle_chunk_done(chunk_index, dict(result))
+            for attempt in range(1, 4):
+                if should_stop_callback and should_stop_callback():
+                    break
+                result = dict(
+                    _run_single_chunk(
+                        chunk_index=chunk_index,
+                        chunk=chunks[chunk_index],
+                        video_path=video_path,
+                        profile_manifest=profile_manifest,
+                        config=config,
+                        model_dir=model_dir,
+                        should_stop_callback=should_stop_callback,
+                        sample_strategy=_sample_strategy(chunk_index),
+                    )
+                )
+                if chunk_payload_has_evidence(result):
+                    _handle_chunk_done(chunk_index, result)
+                    break
+                if attempt < 3 and not (should_stop_callback and should_stop_callback()):
+                    logger.warning(
+                        "Understanding chunk %s returned empty evidence (attempt %s/2)",
+                        chunk_index,
+                        attempt,
+                    )
+                    continue
+                logger.warning(
+                    "Understanding chunk %s empty after retries",
+                    chunk_index,
+                )
 
     if max_concurrency <= 1:
         _run_sequential()
@@ -369,6 +396,24 @@ def _run_pending_chunks(
             future = executor.submit(_worker, chunk_index)
             in_flight[future] = (chunk_index, time.monotonic())
 
+    def _retry_or_drop(result_index: int, *, reason: str) -> None:
+        attempts = retry_counts.get(result_index, 0) + 1
+        retry_counts[result_index] = attempts
+        if attempts <= 2 and not _should_stop():
+            pending_queue.appendleft(result_index)
+            logger.warning(
+                "Understanding chunk %s %s (attempt %s/2)",
+                result_index,
+                reason,
+                attempts,
+            )
+        else:
+            logger.warning(
+                "Understanding chunk %s %s after retries",
+                result_index,
+                reason,
+            )
+
     executor = ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="understanding-chunk")
     try:
         _schedule_more(executor)
@@ -387,22 +432,7 @@ def _run_pending_chunks(
 
                 if error is not None:
                     controller.note_failure()
-                    attempts = retry_counts.get(result_index, 0) + 1
-                    retry_counts[result_index] = attempts
-                    if attempts <= 2 and not _should_stop():
-                        pending_queue.appendleft(result_index)
-                        logger.warning(
-                            "Understanding chunk %s failed (attempt %s/2): %s",
-                            result_index,
-                            attempts,
-                            error,
-                        )
-                    else:
-                        logger.warning(
-                            "Understanding chunk %s failed after retries: %s",
-                            result_index,
-                            error,
-                        )
+                    _retry_or_drop(result_index, reason=f"failed: {error}")
                     continue
 
                 if result is None:
@@ -410,9 +440,10 @@ def _run_pending_chunks(
 
                 if chunk_payload_has_evidence(result):
                     controller.note_success(elapsed)
+                    _handle_chunk_done(result_index, result)
                 else:
                     controller.note_empty_result()
-                _handle_chunk_done(result_index, result)
+                    _retry_or_drop(result_index, reason="returned empty evidence")
 
             _schedule_more(executor)
     finally:

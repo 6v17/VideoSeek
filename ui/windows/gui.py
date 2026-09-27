@@ -2522,6 +2522,10 @@ class MainWindow(
                     getattr(self, "understanding_controller", None)
                     and self.understanding_controller.is_running()
                 )
+                or (
+                    hasattr(self, "understanding_side_workers_busy")
+                    and self.understanding_side_workers_busy()
+                )
                 or any(feature.is_busy(self) for feature in get_registry().features)
             )
             and not self._force_application_quit

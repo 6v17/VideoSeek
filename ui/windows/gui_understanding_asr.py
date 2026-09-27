@@ -451,6 +451,8 @@ class UnderstandingAsrGuiMixin:
                 active_worker.deleteLater()
             except Exception:
                 pass
+            if hasattr(self, "_maybe_close_when_busy_work_stops"):
+                self._maybe_close_when_busy_work_stops()
 
         worker.progress_signal.connect(self._update_understanding_progress)
         worker.finished_signal.connect(self._finish_asr_extract)
@@ -646,6 +648,8 @@ class UnderstandingAsrGuiMixin:
                 active_worker.deleteLater()
             except Exception:
                 pass
+            if hasattr(self, "_maybe_close_when_busy_work_stops"):
+                self._maybe_close_when_busy_work_stops()
 
         worker.progress_signal.connect(self._update_understanding_progress)
         worker.finished_signal.connect(self._finish_speaker_cluster)

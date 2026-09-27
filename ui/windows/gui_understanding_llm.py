@@ -499,6 +499,8 @@ class UnderstandingLlmGuiMixin:
                 active_worker.deleteLater()
             except Exception:
                 pass
+            if hasattr(self, "_maybe_close_when_busy_work_stops"):
+                self._maybe_close_when_busy_work_stops()
 
         def _on_motion_chunk(index, total, payload):
             self._handle_recap_motion_chunk(index, total, payload)

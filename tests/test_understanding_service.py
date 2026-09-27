@@ -725,5 +725,159 @@ class CaptionConcurrencyControllerTests(unittest.TestCase):
         self.assertEqual(controller.active_limit(), 2)
 
 
+class EmptyChunkRetryTests(unittest.TestCase):
+    def test_empty_chunk_is_retried_and_not_checkpointed_until_evidence(self):
+        from src.services.understanding_service import _run_pending_chunks
+
+        video_context = {
+            "video_id": "vid_empty",
+            "video_path": "D:/Videos/demo.mp4",
+            "video_rel_path": "demo.mp4",
+            "library_path": "D:/Videos",
+            "duration_sec": 4.0,
+            "source_exists": True,
+        }
+        chunks = [{"start": 0.0, "end": 2.0}, {"start": 2.0, "end": 4.0}]
+        empty = {
+            "chunk_index": 0,
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "sample": {"timestamp_sec": 1.0, "strategy": "midpoint"},
+            "tags": [],
+            "evidence": {"vision": {}, "audio": {}},
+        }
+        good = {
+            "chunk_index": 0,
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "sample": {"timestamp_sec": 1.0, "strategy": "midpoint"},
+            "tags": ["person"],
+            "evidence": {
+                "vision": {
+                    "image_caption": {
+                        "source": "vision/image_caption/qwen3-vl-remote",
+                        "text": "a person",
+                    }
+                },
+                "audio": {},
+            },
+        }
+        calls = {"n": 0}
+
+        def _fake_run_chunk(**kwargs):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return dict(empty)
+            return dict(good)
+
+        fake_pipeline = MagicMock()
+        fake_pipeline.component_map.return_value = {
+            "image_caption": "vision/image_caption/qwen3-vl-remote",
+        }
+        fake_pipeline.keyframe_strategy = "midpoint"
+        completed: dict = {}
+        config = {
+            "understanding": {"remote_vlm": {"concurrency": 1, "understanding_mode": "tags"}},
+        }
+
+        with (
+            patch(
+                "src.services.understanding_service.get_remote_vlm_concurrency",
+                return_value=1,
+            ),
+            patch(
+                "src.services.understanding_service.get_remote_vlm_settings",
+                return_value={"timeout_sec": 30, "concurrency": 1},
+            ),
+            patch(
+                "src.services.understanding_service._run_single_chunk",
+                side_effect=_fake_run_chunk,
+            ),
+            patch(
+                "src.services.understanding_service._checkpoint_evidence_bundle",
+                return_value="/tmp/evidence.json",
+            ) as checkpoint_mock,
+        ):
+            _run_pending_chunks(
+                video_id="vid_empty",
+                video_context=video_context,
+                chunks=chunks,
+                profile_manifest=PROFILE_MANIFEST,
+                profile_id="vision_baseline_v1",
+                checkpoint_pipeline=fake_pipeline,
+                config=config,
+                model_dir=None,
+                completed=completed,
+                total=1,
+                generated_at="2026-09-27T00:00:00Z",
+                only_indices={0},
+            )
+
+        self.assertEqual(calls["n"], 3)
+        self.assertIn(0, completed)
+        self.assertTrue(chunk_payload_has_evidence(completed[0]))
+        self.assertEqual(checkpoint_mock.call_count, 1)
+
+    def test_empty_chunk_exhausted_retries_stays_out_of_completed(self):
+        from src.services.understanding_service import _run_pending_chunks
+
+        video_context = {
+            "video_id": "vid_empty2",
+            "video_path": "D:/Videos/demo.mp4",
+            "video_rel_path": "demo.mp4",
+            "library_path": "D:/Videos",
+            "duration_sec": 2.0,
+            "source_exists": True,
+        }
+        chunks = [{"start": 0.0, "end": 2.0}]
+        empty = {
+            "chunk_index": 0,
+            "start_sec": 0.0,
+            "end_sec": 2.0,
+            "sample": {"timestamp_sec": 1.0, "strategy": "midpoint"},
+            "tags": [],
+            "evidence": {"vision": {}, "audio": {}},
+        }
+        fake_pipeline = MagicMock()
+        fake_pipeline.component_map.return_value = {}
+        fake_pipeline.keyframe_strategy = "midpoint"
+        completed: dict = {}
+
+        with (
+            patch(
+                "src.services.understanding_service.get_remote_vlm_concurrency",
+                return_value=1,
+            ),
+            patch(
+                "src.services.understanding_service.get_remote_vlm_settings",
+                return_value={"timeout_sec": 30},
+            ),
+            patch(
+                "src.services.understanding_service._run_single_chunk",
+                return_value=empty,
+            ),
+            patch(
+                "src.services.understanding_service._checkpoint_evidence_bundle",
+                return_value="",
+            ) as checkpoint_mock,
+        ):
+            _run_pending_chunks(
+                video_id="vid_empty2",
+                video_context=video_context,
+                chunks=chunks,
+                profile_manifest=PROFILE_MANIFEST,
+                profile_id="vision_baseline_v1",
+                checkpoint_pipeline=fake_pipeline,
+                config={"understanding": {"remote_vlm": {"concurrency": 1}}},
+                model_dir=None,
+                completed=completed,
+                total=1,
+                generated_at="2026-09-27T00:00:00Z",
+            )
+
+        self.assertEqual(completed, {})
+        checkpoint_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
