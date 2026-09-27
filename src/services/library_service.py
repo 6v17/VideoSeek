@@ -471,12 +471,17 @@ def _lance_indexed_video_ids(*, config=None):
         if not lance_search_is_ready(base_dir):
             return None
         return get_lance_indexed_video_ids(base_dir)
-    except Exception:
+    except Exception as exc:
+        get_logger("library_service").warning("Lance indexed-id lookup failed: %s", exc)
         return None
 
 
 def _lance_video_has_vectors(video_id: str, *, config=None, profile_base_dir: str = "") -> bool:
-    """Per-video Lance probe used when the bulk indexed-id set may be incomplete."""
+    """Per-video Lance probe used when the bulk indexed-id set may be incomplete.
+
+    On probe failure return ``True`` so callers do not demote ready assets to
+    ``missing_asset`` when Lance is temporarily unreadable.
+    """
     video_id = str(video_id or "").strip()
     if not video_id:
         return False
@@ -485,8 +490,13 @@ def _lance_video_has_vectors(video_id: str, *, config=None, profile_base_dir: st
 
         base_dir = str(profile_base_dir or "").strip() or get_local_model_asset_dirs(config=config)["base_dir"]
         return bool(lance_video_has_vectors(base_dir, video_id))
-    except Exception:
-        return False
+    except Exception as exc:
+        get_logger("library_service").warning(
+            "Lance per-video probe failed for %s (keeping ready): %s",
+            video_id,
+            exc,
+        )
+        return True
 
 
 def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:

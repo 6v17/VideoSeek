@@ -7,6 +7,7 @@ from src.domain.search_hit import SearchHit
 from src.services.search_scope import (
     SearchablePathIndex,
     apply_search_scope,
+    count_indexed_ready_videos,
     filter_hits_by_library_paths,
     filter_hits_by_video_paths,
     filter_hits_with_existing_sources,
@@ -21,6 +22,14 @@ from src.services.search_scope import (
 
 
 class SearchScopeTests(unittest.TestCase):
+    def test_count_indexed_ready_videos_does_not_swallow_errors(self):
+        with patch(
+            "src.services.library_service.list_local_vector_details",
+            side_effect=RuntimeError("lance down"),
+        ):
+            with self.assertRaises(RuntimeError):
+                count_indexed_ready_videos(config={})
+
     def test_resolve_fetch_top_k_expands_when_scoped(self):
         self.assertEqual(resolve_fetch_top_k(20, False), 20)
         self.assertEqual(resolve_fetch_top_k(20, True), 100)

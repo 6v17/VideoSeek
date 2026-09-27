@@ -23,13 +23,13 @@ from src.services.search_telemetry_store import (
     SearchTelemetryState,
     _ensure_state_locked,
     _lock,
-    _log_summary_locked,
     _maybe_add_profile_counter,
     _now,
     _percentile,
     _persist_locked,
     is_locate_bias_auto_tune_enabled,
     is_telemetry_enabled,
+    log_telemetry_summary,
     logger,
 )
 
@@ -76,7 +76,7 @@ def record_crop_locate_anchor(
     _maybe_add_profile_counter("telemetry_crop_locate_total")
     _maybe_add_profile_counter("telemetry_crop_locate_anchor_kept" if kept else "telemetry_crop_locate_anchor_moved")
     if total % SUMMARY_LOG_INTERVAL == 0:
-        _log_summary_locked()
+        log_telemetry_summary()
 
 
 def _locate_score_bucket(score: float | None) -> str:

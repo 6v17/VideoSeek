@@ -15,6 +15,8 @@ from src.infra.ffmpeg_paths import get_ffmpeg_path, has_ffmpeg
 from src.infra.paths import ensure_folder_exists
 
 DEFAULT_SAMPLE_RATE = 16000
+# Long features (speaker cluster / ASR) can take minutes; never hang forever.
+DEFAULT_FFMPEG_TIMEOUT_SEC = 3600.0
 ProgressCallback = Callable[[float, str], None]
 
 
@@ -27,12 +29,22 @@ def _hidden_startupinfo() -> Any:
     return startupinfo
 
 
-def _run_ffmpeg(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        startupinfo=_hidden_startupinfo(),
-    )
+def _run_ffmpeg(
+    cmd: list[str],
+    *,
+    timeout_sec: float | None = DEFAULT_FFMPEG_TIMEOUT_SEC,
+) -> subprocess.CompletedProcess[bytes]:
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            startupinfo=_hidden_startupinfo(),
+            timeout=None if timeout_sec is None else max(1.0, float(timeout_sec)),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"FFmpeg timed out after {float(timeout_sec or 0.0):.0f}s"
+        ) from exc
 
 
 def extract_audio_mono_f32(
@@ -40,8 +52,9 @@ def extract_audio_mono_f32(
     *,
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     progress_callback: ProgressCallback | None = None,
+    timeout_sec: float | None = DEFAULT_FFMPEG_TIMEOUT_SEC,
 ) -> np.ndarray:
-    """Decode media audio to float32 mono via FFmpeg stdout pipe (no temp WAV)."""
+    """Decode media audio to float32 mono via FFmpeg (temp PCM file, not stdout pipe)."""
     source = os.path.normpath(os.path.abspath(str(media_path or "").strip()))
     if not source or not os.path.isfile(source):
         raise FileNotFoundError(f"Media file not found: {media_path!r}")
@@ -55,34 +68,42 @@ def extract_audio_mono_f32(
     if progress_callback:
         progress_callback(0.0, "extract_audio")
 
-    ffmpeg = get_ffmpeg_path()
-    cmd = [
-        ffmpeg,
-        "-nostdin",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        source,
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        str(sr),
-        "-f",
-        "s16le",
-        "pipe:1",
-    ]
-    result = _run_ffmpeg(cmd)
-    if result.returncode != 0:
-        detail = (result.stderr or b"").decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"FFmpeg audio extract failed: {detail or result.returncode}")
-    raw = result.stdout or b""
-    if len(raw) < 2:
-        raise RuntimeError("FFmpeg audio extract returned empty PCM")
+    handle = tempfile.NamedTemporaryFile(prefix="videoseek_pcm_", suffix=".s16le", delete=False)
+    pcm_path = handle.name
+    handle.close()
+    try:
+        ffmpeg = get_ffmpeg_path()
+        cmd = [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            source,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(sr),
+            "-f",
+            "s16le",
+            pcm_path,
+        ]
+        result = _run_ffmpeg(cmd, timeout_sec=timeout_sec)
+        if result.returncode != 0:
+            detail = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"FFmpeg audio extract failed: {detail or result.returncode}")
+        if not os.path.isfile(pcm_path) or os.path.getsize(pcm_path) < 2:
+            raise RuntimeError("FFmpeg audio extract returned empty PCM")
+        samples = np.fromfile(pcm_path, dtype=np.int16).astype(np.float32) * np.float32(1.0 / 32768.0)
+    finally:
+        try:
+            os.remove(pcm_path)
+        except OSError:
+            pass
 
-    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) * np.float32(1.0 / 32768.0)
     if progress_callback:
         progress_callback(1.0, "extract_audio")
     return np.ascontiguousarray(samples, dtype=np.float32)
@@ -140,7 +161,7 @@ def extract_audio_wav(
         "pcm_s16le",
         dest,
     ]
-    result = _run_ffmpeg(cmd)
+    result = _run_ffmpeg(cmd, timeout_sec=DEFAULT_FFMPEG_TIMEOUT_SEC)
     if result.returncode != 0 or not os.path.isfile(dest) or os.path.getsize(dest) <= 0:
         if os.path.isfile(dest):
             try:
@@ -190,7 +211,8 @@ def encode_asr_upload_bytes(
             "-b:a",
             "48k",
             mp3_path,
-        ]
+        ],
+        timeout_sec=min(600.0, DEFAULT_FFMPEG_TIMEOUT_SEC),
     )
     if result.returncode == 0 and os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
         try:

@@ -35,6 +35,9 @@ TIER_ORDER = (
 _lock = threading.Lock()
 _state: "SearchTelemetryState | None" = None
 _pending_playback: dict[str, Any] | None = None
+_dirty = False
+_persist_timer: threading.Timer | None = None
+PERSIST_DEBOUNCE_SEC = 1.0
 
 
 @dataclass
@@ -176,6 +179,7 @@ def get_telemetry_summary() -> dict[str, Any]:
 
 def reload_telemetry_state() -> dict[str, Any]:
     global _state
+    flush_telemetry_persist()
     with _lock:
         _state = _load_state()
         return _state.to_dict()
@@ -185,7 +189,19 @@ def log_telemetry_summary() -> None:
     if not is_telemetry_enabled():
         return
     with _lock:
-        _log_summary_locked()
+        summary = _ensure_state_locked().to_dict()
+    _emit_summary_log(summary)
+
+
+def flush_telemetry_persist() -> None:
+    """Write any pending telemetry to disk immediately (tests / shutdown)."""
+    global _persist_timer
+    with _lock:
+        timer = _persist_timer
+        _persist_timer = None
+    if timer is not None:
+        timer.cancel()
+    _write_dirty_state()
 
 
 def _ensure_state_locked() -> SearchTelemetryState:
@@ -209,10 +225,7 @@ def _load_state() -> SearchTelemetryState:
     return SearchTelemetryState(updated_at=_now())
 
 
-def _persist_locked(state: SearchTelemetryState) -> None:
-    path = get_telemetry_file_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = f"{path}.tmp"
+def _serialize_state(state: SearchTelemetryState) -> dict[str, Any]:
     payload = state.to_dict()
     playback = dict(payload.get("playback_bias") or {})
     playback["abs_delta_samples"] = list(state.playback_abs_delta_samples)
@@ -221,14 +234,55 @@ def _persist_locked(state: SearchTelemetryState) -> None:
     locate_clip["error_samples"] = list(state.locate_clip_error_samples)
     locate_clip["signal_samples"] = list(state.locate_clip_signal_samples)
     payload["locate_clip_window"] = locate_clip
+    return payload
+
+
+def _persist_locked(state: SearchTelemetryState) -> None:
+    """Mark state dirty and debounce disk writes (caller must hold ``_lock``)."""
+    global _dirty, _persist_timer
+    del state  # state is already in ``_state``; keep signature for call sites
+    _dirty = True
+    if _persist_timer is not None:
+        return
+    timer = threading.Timer(PERSIST_DEBOUNCE_SEC, _flush_persist_async)
+    timer.daemon = True
+    _persist_timer = timer
+    timer.start()
+
+
+def _flush_persist_async() -> None:
+    global _persist_timer
+    with _lock:
+        _persist_timer = None
+    _write_dirty_state()
+
+
+def _write_dirty_state() -> None:
+    global _dirty
+    with _lock:
+        if not _dirty:
+            return
+        state = _ensure_state_locked()
+        payload = _serialize_state(state)
+        _dirty = False
+    path = get_telemetry_file_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f"{path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        # Compact JSON: locate samples can be thousands of rows; indent=2 was multi-MB.
+        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp_path, path)
 
 
 def _log_summary_locked() -> None:
-    state = _ensure_state_locked()
-    summary = state.to_dict()
+    """Emit summary; caller must hold ``_lock``."""
+    summary = _ensure_state_locked().to_dict()
+    # Release path for logging is via ``log_telemetry_summary``; keep helper for
+    # callers that already hold the lock and only need the payload snapshot.
+    _emit_summary_log(summary)
+
+
+def _emit_summary_log(summary: dict[str, Any]) -> None:
     crop = summary["crop_locate"]
     playback = summary["playback_bias"]
     logger.info(

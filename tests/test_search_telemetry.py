@@ -11,13 +11,18 @@ def reset_telemetry_state(monkeypatch, tmp_path):
     telemetry_file = tmp_path / "search_telemetry.json"
     monkeypatch.setattr(telemetry_store, "get_telemetry_file_path", lambda: str(telemetry_file))
     monkeypatch.setattr(telemetry_store, "is_telemetry_enabled", lambda config=None: True)
+    monkeypatch.setattr(telemetry_store, "PERSIST_DEBOUNCE_SEC", 0.05)
+    telemetry_store.flush_telemetry_persist()
     with telemetry_store._lock:
         telemetry_store._state = None
         telemetry_store._pending_playback = None
+        telemetry_store._dirty = False
     yield
+    telemetry_store.flush_telemetry_persist()
     with telemetry_store._lock:
         telemetry_store._state = None
         telemetry_store._pending_playback = None
+        telemetry_store._dirty = False
 
 
 def test_record_crop_locate_anchor_updates_summary():
@@ -150,6 +155,7 @@ def test_persistence_round_trip(tmp_path):
         anchor_kept=True,
         clip_score=0.8,
     )
+    telemetry_store.flush_telemetry_persist()
 
     with telemetry_store._lock:
         telemetry_store._state = None
@@ -161,6 +167,9 @@ def test_persistence_round_trip(tmp_path):
     payload = json.loads((tmp_path / "search_telemetry.json").read_text(encoding="utf-8"))
     assert payload["version"] == 5
     assert payload["crop_locate"]["total"] == 1
+    # Compact JSON (no indent) keeps large locate sample dumps small.
+    raw = (tmp_path / "search_telemetry.json").read_text(encoding="utf-8")
+    assert "\n  " not in raw
 
 
 def test_format_telemetry_summary_contains_key_sections():

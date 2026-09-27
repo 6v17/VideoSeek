@@ -183,9 +183,10 @@ def cluster_embeddings(
         return []
     if count == 1:
         return [0]
-    sims = np.clip(embs @ embs.T, -1.0, 1.0).astype(np.float64, copy=False)
+    # float32 halves the N×N peak vs float64; cosine linkage does not need float64.
+    sims = np.clip(embs @ embs.T, -1.0, 1.0).astype(np.float32, copy=False)
     np.fill_diagonal(sims, -np.inf)
-    sizes = np.ones(count, dtype=np.float64)
+    sizes = np.ones(count, dtype=np.float32)
     labels = np.arange(count, dtype=np.int32)
     cutoff = float(threshold)
     for _ in range(count - 1):

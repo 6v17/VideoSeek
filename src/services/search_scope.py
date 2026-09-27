@@ -89,12 +89,18 @@ def list_ready_video_paths_for_libraries(library_paths: Optional[Sequence[str]],
 
 
 def count_indexed_ready_videos(config=None) -> int:
+    from src.app.logging_utils import get_logger
     from src.services.library_service import list_local_vector_details
 
     try:
         detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
-    except Exception:
-        return 0
+    except Exception as exc:
+        # Do not pretend the library is empty — callers treat 0 as "no indexed videos".
+        get_logger("search_scope").warning(
+            "count_indexed_ready_videos failed reading local vector details: %s",
+            exc,
+        )
+        raise
     count = 0
     for ent in detail.get("entries", []):
         if not ent.get("source_exists"):

@@ -27,4 +27,5 @@ jobs:
         run: python -m ruff check src ui tests main.py
 
       - name: Run tests
+        timeout-minutes: 30
         run: python -m pytest tests/ -q --tb=line

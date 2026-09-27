@@ -108,6 +108,34 @@ class ReadyAssetReconcileTests(unittest.TestCase):
             self.assertEqual(reconcile_ready_assets_with_lance(meta, config={}), 0)
         self.assertEqual(meta["libraries"]["D:/videos"]["files"]["a.mp4"]["asset_state"], "ready")
 
+    def test_lance_probe_failure_does_not_demote_ready(self):
+        from src.services.library_service import _lance_video_has_vectors, reconcile_ready_assets_with_lance
+
+        meta = {
+            "libraries": {
+                "D:/videos": {
+                    "files": {"a.mp4": {"vid": "vid_a", "asset_state": "ready"}},
+                }
+            }
+        }
+        with (
+            patch(
+                "src.services.library_service._lance_indexed_video_ids",
+                return_value=frozenset(),
+            ),
+            patch(
+                "src.services.library_service.get_local_model_asset_dirs",
+                return_value={"base_dir": "D:/profile"},
+            ),
+            patch(
+                "src.storage.lance_search_index.lance_video_has_vectors",
+                side_effect=RuntimeError("table locked"),
+            ),
+        ):
+            self.assertTrue(_lance_video_has_vectors("vid_a", profile_base_dir="D:/profile"))
+            self.assertEqual(reconcile_ready_assets_with_lance(meta, config={}), 0)
+        self.assertEqual(meta["libraries"]["D:/videos"]["files"]["a.mp4"]["asset_state"], "ready")
+
     def test_list_library_video_entries_demotes_stale_ready(self):
         lib_root = os.path.abspath(os.path.join(tempfile.gettempdir(), "videoseek_list_ready_lib"))
         os.makedirs(lib_root, exist_ok=True)
