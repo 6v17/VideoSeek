@@ -17,6 +17,34 @@ class ThumbCacheTests(unittest.TestCase):
         self.assertEqual(cache.get(key_b), "pixmap-b")
         self.assertEqual(cache.get(key_c), "pixmap-c")
 
+    def test_search_controller_converts_qimage_on_ui_thread(self):
+        from PySide6.QtCore import QObject
+        from PySide6.QtGui import QImage, QPixmap
+        from PySide6.QtWidgets import QApplication
+        from unittest.mock import MagicMock
+
+        from ui.controllers.search_controller import SearchController
+
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        parent = QObject()
+        parent.search_page = MagicMock()
+        parent.search_page.result_view = MagicMock()
+        controller = SearchController(parent)
+        controller._is_shutdown = False
+        image = QImage(8, 8, QImage.Format_RGB888)
+        image.fill(0)
+
+        controller._on_thumb_ready(0, image)
+
+        args = parent.search_page.result_view.set_thumbnail.call_args
+        self.assertEqual(args.args[0], 0)
+        self.assertIsInstance(args.args[1], QPixmap)
+        self.assertFalse(args.args[1].isNull())
+
+        controller._on_thumb_ready(1, None)
+        self.assertIsNone(parent.search_page.result_view.set_thumbnail.call_args.args[1])
+
 
 class TableVisibilityTests(unittest.TestCase):
     def test_empty_table_returns_empty_range(self):

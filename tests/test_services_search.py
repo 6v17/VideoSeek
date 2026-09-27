@@ -136,13 +136,16 @@ class SearchServiceTests(unittest.TestCase):
             "index_dim": 512,
         }
 
-        search_service._check_asset_profile_compatibility({}, asset_info, asset_label="frame")
+        self.assertIsNone(
+            search_service._check_asset_profile_compatibility({}, asset_info, asset_label="frame")
+        )
 
     def test_check_asset_profile_compatibility_ignores_missing_embedding_spec(self):
         asset_info = {"embedding_spec": None, "index_dim": 512}
 
-        search_service._check_asset_profile_compatibility({}, asset_info, asset_label="frame")
-
+        self.assertIsNone(
+            search_service._check_asset_profile_compatibility({}, asset_info, asset_label="frame")
+        )
     def test_apply_frame_neighbor_rerank_disabled_by_default(self):
         class DummyIndex:
             def reconstruct(self, idx):

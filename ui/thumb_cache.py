@@ -1,4 +1,4 @@
-"""In-memory cache for search-result thumbnail pixmaps."""
+"""In-memory cache for search-result thumbnail images (QImage, not QPixmap)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,12 @@ from threading import Lock
 
 
 class ThumbPixmapCache:
+    """LRU cache of worker-thread-safe thumbnail images.
+
+    Stores ``QImage`` (or opaque stand-ins in tests). Callers on the GUI thread
+    convert to ``QPixmap`` before painting.
+    """
+
     def __init__(self, max_entries: int = 256):
         self._max_entries = max(1, int(max_entries))
         self._entries: OrderedDict[tuple, object] = OrderedDict()
@@ -23,16 +29,16 @@ class ThumbPixmapCache:
 
     def get(self, key):
         with self._lock:
-            pixmap = self._entries.get(key)
-            if pixmap is not None:
+            image = self._entries.get(key)
+            if image is not None:
                 self._entries.move_to_end(key)
-            return pixmap
+            return image
 
-    def put(self, key, pixmap) -> None:
-        if pixmap is None:
+    def put(self, key, image) -> None:
+        if image is None:
             return
         with self._lock:
-            self._entries[key] = pixmap
+            self._entries[key] = image
             self._entries.move_to_end(key)
             while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)

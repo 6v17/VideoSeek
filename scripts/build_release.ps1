@@ -331,12 +331,12 @@ if ($LancePyd) {
     $LanceFound = $true
 }
 if (-not $LanceFound) {
-    Write-Warning "Could not find lancedb binaries (_lancedb.pyd). Packaged search/index may fail until you add --include-package=lancedb manually."
+    throw "Could not find lancedb binaries (_lancedb.pyd) under $BundleDir. Packaged search/index would be broken."
 }
 
 $PyarrowDll = Get-ChildItem -LiteralPath $BundleDir -Recurse -Filter "arrow*.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $PyarrowDll) {
-    Write-Warning "Could not find pyarrow DLLs under $BundleDir. Lance search may fail at runtime."
+    throw "Could not find pyarrow DLLs under $BundleDir. Lance search would fail at runtime."
 }
 
 Write-Step "Build complete"

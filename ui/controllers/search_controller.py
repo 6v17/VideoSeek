@@ -256,9 +256,17 @@ class SearchController(QObject):
             pass
         shutdown_thread(thread, stop_first=True, allow_terminate=True, wait_ms=1500)
 
-    def _on_thumb_ready(self, row, pixmap):
+    def _on_thumb_ready(self, row, image):
         if self._is_shutdown:
             return
+        from PySide6.QtGui import QImage, QPixmap
+
+        pixmap = None
+        if isinstance(image, QImage) and not image.isNull():
+            pixmap = QPixmap.fromImage(image)
+        elif image is not None and not isinstance(image, QImage):
+            # Legacy cache / mistaken emit of QPixmap — accept but do not create off-thread.
+            pixmap = image
         self._result_view().set_thumbnail(row, pixmap)
 
     def _on_search_progress(self, progress_key: str):

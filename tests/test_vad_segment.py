@@ -79,17 +79,14 @@ class AudioExtractTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             extract_audio_wav("Z:/missing/no-such-file.mp4")
 
-    @unittest.skipUnless(
-        os.path.isfile(str(Path(__file__).resolve().parents[1] / "test.wav")),
-        "repo test.wav missing",
-    )
     def test_extract_wav_passthrough_shape(self):
         from src.infra.ffmpeg_paths import has_ffmpeg
 
         if not has_ffmpeg():
             self.skipTest("ffmpeg unavailable")
-        source = str(Path(__file__).resolve().parents[1] / "test.wav")
         with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "source.wav")
+            _write_silent_wav(source, seconds=0.25)
             out = os.path.join(tmp, "out.wav")
             written = extract_audio_wav(source, out, sample_rate=16000)
             self.assertTrue(os.path.isfile(written))
@@ -99,36 +96,40 @@ class AudioExtractTests(unittest.TestCase):
                 self.assertEqual(handle.getframerate(), 16000)
                 self.assertEqual(handle.getsampwidth(), 2)
 
-    @unittest.skipUnless(
-        os.path.isfile(str(Path(__file__).resolve().parents[1] / "test.wav")),
-        "repo test.wav missing",
-    )
     def test_extract_mono_f32_pipe(self):
         from src.core.asr.audio_extract import extract_audio_mono_f32
         from src.infra.ffmpeg_paths import has_ffmpeg
 
         if not has_ffmpeg():
             self.skipTest("ffmpeg unavailable")
-        source = str(Path(__file__).resolve().parents[1] / "test.wav")
-        samples = extract_audio_mono_f32(source, sample_rate=16000)
-        self.assertEqual(samples.dtype, np.float32)
-        self.assertGreater(samples.size, 0)
-        self.assertLessEqual(float(np.max(np.abs(samples))), 1.0 + 1e-3)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "source.wav")
+            _write_silent_wav(source, seconds=0.25)
+            samples = extract_audio_mono_f32(source, sample_rate=16000)
+            self.assertEqual(samples.dtype, np.float32)
+            self.assertGreater(samples.size, 0)
+            self.assertLessEqual(float(np.max(np.abs(samples))), 1.0 + 1e-3)
 
 
 @unittest.skipUnless(_resolve_vad_model(), "silero_vad.onnx not available")
 class SileroVadIntegrationTests(unittest.TestCase):
-    def test_segment_speech_on_test_wav(self):
-        root = Path(__file__).resolve().parents[1]
-        wav = root / "test.wav"
-        if not wav.is_file():
-            self.skipTest("test.wav missing")
-        segments = segment_speech(str(wav), model_path=_resolve_vad_model())
-        self.assertIsInstance(segments, list)
-        for item in segments:
-            self.assertIsInstance(item, SpeechSegment)
-            self.assertLess(item.start_sec, item.end_sec)
-            self.assertGreaterEqual(item.start_sec, 0.0)
+    def test_segment_speech_on_synthetic_wav(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = os.path.join(tmp, "speechish.wav")
+            # Soft tone so VAD may or may not fire; shape of return value is what we assert.
+            frames = (0.05 * np.sin(2 * np.pi * 220 * np.arange(16000) / 16000)).astype(np.float32)
+            pcm = np.clip(frames * 32767.0, -32768, 32767).astype(np.int16)
+            with wave.open(wav, "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16000)
+                handle.writeframes(pcm.tobytes())
+            segments = segment_speech(wav, model_path=_resolve_vad_model())
+            self.assertIsInstance(segments, list)
+            for item in segments:
+                self.assertIsInstance(item, SpeechSegment)
+                self.assertLess(item.start_sec, item.end_sec)
+                self.assertGreaterEqual(item.start_sec, 0.0)
 
     def test_silent_wav_yields_no_segments(self):
         with tempfile.TemporaryDirectory() as tmp:

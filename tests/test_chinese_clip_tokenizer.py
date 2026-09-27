@@ -29,7 +29,7 @@ class ChineseClipTokenizerTests(unittest.TestCase):
     def test_build_tokenizer_lowercases_english(self):
         from src.core.chinese_clip_provider import ChineseCLIPOnnxEngine
 
-        pack = Path(r"D:\PycharmProjects\VideoSeek\models\chinese-clip\vit-large-patch14")
+        pack = Path(__file__).resolve().parents[1] / "models" / "chinese-clip" / "vit-large-patch14"
         if not (pack / "vocab.txt").is_file():
             self.skipTest("local Chinese CLIP pack not present")
         tok = ChineseCLIPOnnxEngine._build_tokenizer(str(pack))

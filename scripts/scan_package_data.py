@@ -25,7 +25,6 @@ PACKAGES = [
     "certifi",
     "yaml",
     "ftfy",
-    "scenedetect",
     "numpy",
 ]
 

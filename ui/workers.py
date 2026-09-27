@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage
 
 from src.app.config import load_config
 from src.app.i18n import get_texts
@@ -1055,15 +1055,16 @@ class ThumbLoader(QThread):
             apply_opencv_log_level()
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             height, width, _ = rgb_frame.shape
+            # QImage is safe off the GUI thread; QPixmap is not — convert on the UI side.
             image = QImage(rgb_frame.data, width, height, width * 3, QImage.Format_RGB888).copy()
-            pixmap = QPixmap.fromImage(image).scaled(
+            scaled = image.scaled(
                 thumb_width,
                 thumb_height,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             )
-            cache.put(cache_key, pixmap)
-            self.thumb_ready.emit(table_row, pixmap)
+            cache.put(cache_key, scaled)
+            self.thumb_ready.emit(table_row, scaled)
 
 
 class VersionCheckWorker(FetchWorkerBase):
