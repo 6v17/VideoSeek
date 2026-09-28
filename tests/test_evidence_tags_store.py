@@ -108,7 +108,7 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 )
                 self.assertEqual(len(and_miss), 0)
 
-                # Prose / slash noise must not enter the projection.
+                # Prose / slash schema-slot noise must not enter the projection.
                 n3 = store.replace_video_tags_from_bundle(
                     "vid1",
                     _sample_bundle(
@@ -120,9 +120,9 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                         tags1=[],
                     ),
                 )
-                self.assertEqual(n3, 3)
+                self.assertEqual(n3, 0)
                 projected = store.suggest_tags("", limit=20)
-                self.assertEqual(set(projected), {"人物", "动作", "场景"})
+                self.assertEqual(projected, [])
 
                 # Checkpoint-style replace with extra chunk tags.
                 n2 = store.replace_video_tags_from_bundle(

@@ -1,7 +1,7 @@
 from PySide6.QtCore import QObject, Signal
 
 from ui.threading_utils import shutdown_thread
-from ui.workers import UnderstandingSummaryWorker, UnderstandingVideoWorker, UnderstandingWorker
+from ui.workers import UnderstandingVideoWorker, UnderstandingWorker
 
 
 class UnderstandingController(QObject):
@@ -56,10 +56,6 @@ class UnderstandingController(QObject):
         self.worker.finished_signal.connect(self._finish)
         self.worker.start()
         return True
-
-    def start_video_summary(self, video_id):
-        # Kept for compatibility; summary mode now runs via start_video(mode="summary").
-        return self.start_video(video_id, mode="summary")
 
     def shutdown(self):
         shutdown_thread(self.worker, stop_first=True, allow_terminate=True, wait_ms=3000)

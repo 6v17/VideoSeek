@@ -483,9 +483,6 @@ class UnderstandingServiceTests(unittest.TestCase):
                 patch("src.services.understanding_service.load_evidence_bundle", return_value=existing_bundle),
                 patch("src.services.understanding_service.get_evidence_path", return_value=evidence_path),
                 patch(
-                    "src.services.understanding_service.generate_video_summary_from_chunks",
-                ) as summary_mock,
-                patch(
                     "src.services.understanding_service.get_active_embedding_spec",
                     return_value={"model_id": "clip_onnx_default", "provider": "clip_onnx"},
                 ),
@@ -505,112 +502,12 @@ class UnderstandingServiceTests(unittest.TestCase):
             self.assertEqual(result.get("chunk_count"), 2)
             self.assertEqual(result.get("resumed_from"), 1)
             fake_pipeline.run_chunk.assert_called_once()
-            summary_mock.assert_not_called()
             self.assertTrue(written_paths)
             loaded = json.loads(Path(written_paths[-1]).read_text(encoding="utf-8"))
             self.assertEqual(loaded["provenance"]["generation_status"], "completed")
             self.assertEqual(len(loaded["chunks"]), 2)
             self.assertTrue(chunk_payload_has_evidence(loaded["chunks"][0]))
             self.assertNotIn("summary", loaded)
-
-    def test_generate_summary_mode_writes_summary(self):
-        from src.services.understanding_service import generate_evidence_for_video
-
-        video_context = {
-            "video_id": "abc123",
-            "video_path": "D:/Videos/AnimeS1/ep01.mp4",
-            "video_rel_path": "ep01.mp4",
-            "library_path": "D:/Videos/AnimeS1",
-            "duration_sec": 2.0,
-            "source_exists": True,
-        }
-        chunks = [{"start": 0.0, "end": 2.0}]
-        generated_chunk = {
-            "chunk_index": 0,
-            "start_sec": 0.0,
-            "end_sec": 2.0,
-            "sample": {"timestamp_sec": 1.0, "strategy": "midpoint"},
-            "tags": [],
-            "evidence": {
-                "vision": {
-                    "image_caption": {
-                        "source": "vision/image_caption/qwen3-vl-remote",
-                        "text": "a quiet desk",
-                    },
-                },
-                "audio": {},
-            },
-        }
-        fake_pipeline = MagicMock()
-        fake_pipeline.run_chunk.return_value = generated_chunk
-        fake_pipeline.component_map.return_value = {
-            "image_caption": "vision/image_caption/qwen3-vl-remote",
-        }
-        fake_pipeline.keyframe_strategy = "midpoint"
-        fake_pipeline.close = MagicMock()
-        fake_pipeline.output_mode = "summary"
-
-        config = {
-            "models": {
-                "active_profile": "clip_onnx_default",
-                "profiles": [
-                    {
-                        "id": "clip_onnx_default",
-                        "provider": "clip_onnx",
-                        "runtime": {"model_variant": "vit-base-patch32"},
-                    }
-                ],
-            },
-        }
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            evidence_path = os.path.join(temp_dir, "data", "evidence", "videos", "abc123.json")
-            config["data_root"] = temp_dir
-            written_paths: list[str] = []
-
-            def _capture_write(path, payload):
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-                written_paths.append(str(path))
-
-            with (
-                patch(
-                    "src.services.understanding_service.get_understanding_resource_status",
-                    return_value={"understanding_ready": True, "missing_components": []},
-                ),
-                patch("src.services.understanding_service.resolve_video_context", return_value=video_context),
-                patch("src.services.indexing_service.load_video_chunks_by_id", return_value=chunks),
-                patch(
-                    "src.services.understanding_service.get_active_understanding_profile",
-                    return_value={"id": "vision_baseline_v1", "manifest": PROFILE_MANIFEST},
-                ),
-                patch("src.services.understanding_service.UnderstandingPipeline", return_value=fake_pipeline),
-                patch("src.services.understanding_service.load_evidence_bundle", return_value=None),
-                patch("src.services.understanding_service.get_evidence_path", return_value=evidence_path),
-                patch(
-                    "src.services.understanding_service.generate_video_summary_from_chunks",
-                    return_value={"text": "Quiet workspace.", "source": "remote_vlm"},
-                ) as summary_mock,
-                patch(
-                    "src.services.understanding_service.get_active_embedding_spec",
-                    return_value={"model_id": "clip_onnx_default", "provider": "clip_onnx"},
-                ),
-                patch(
-                    "src.services.understanding_service.get_active_model_profile",
-                    return_value={
-                        "id": "clip_onnx_default",
-                        "provider": "clip_onnx",
-                        "runtime": {"model_variant": "vit-base-patch32"},
-                    },
-                ),
-                patch("src.services.understanding_service._atomic_write_json", side_effect=_capture_write),
-            ):
-                result = generate_evidence_for_video("abc123", config=config, mode="summary")
-
-            summary_mock.assert_called_once()
-            self.assertEqual(result.get("understanding_mode"), "summary")
-            loaded = json.loads(Path(written_paths[-1]).read_text(encoding="utf-8"))
-            self.assertEqual(loaded["summary"]["text"], "Quiet workspace.")
 
     def test_evidence_exists_requires_completed_status(self):
         from src.services.understanding_service import evidence_exists_for_video

@@ -374,7 +374,7 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
             }
         )
         self.assertEqual(settings["caption_language"], "en")
-        self.assertTrue(settings["prompt"].startswith("Extract concise English tags"))
+        self.assertTrue(settings["prompt"].startswith("Look at the frame"))
 
     def test_get_remote_vlm_settings_infers_legacy_english_prompt(self):
         config = {
@@ -390,31 +390,44 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         settings = understanding_resource_service.get_remote_vlm_settings(config)
         self.assertEqual(settings["caption_language"], "en")
 
-    def test_video_summary_prompt_follows_language(self):
-        zh_prompt = understanding_resource_service.get_video_summary_prompt_for_language("zh")
-        en_prompt = understanding_resource_service.get_video_summary_prompt_for_language("en")
-        self.assertIn("中文", zh_prompt)
-        self.assertIn("画面描述", zh_prompt)
-        self.assertTrue(en_prompt.startswith("Below are chronological segment descriptions"))
-
-    def test_mode_switches_chunk_prompt(self):
+    def test_legacy_summary_mode_uses_tag_prompt(self):
         tag_settings = understanding_resource_service.finalize_remote_vlm_settings(
             {"understanding_mode": "tags", "caption_language": "zh"}
         )
         summary_settings = understanding_resource_service.finalize_remote_vlm_settings(
             {"understanding_mode": "summary", "caption_language": "zh"}
         )
-        self.assertIn("标签", tag_settings["prompt"])
-        self.assertIn("描述", summary_settings["prompt"])
-        self.assertNotEqual(tag_settings["prompt"], summary_settings["prompt"])
+        self.assertEqual(
+            understanding_resource_service.normalize_understanding_mode("summary"),
+            understanding_resource_service.UNDERSTANDING_MODE_SUMMARY,
+        )
+        self.assertNotIn(
+            understanding_resource_service.UNDERSTANDING_MODE_SUMMARY,
+            understanding_resource_service.SUPPORTED_UNDERSTANDING_MODES,
+        )
+        self.assertIn(
+            understanding_resource_service.UNDERSTANDING_MODE_SUMMARY,
+            understanding_resource_service.SPLIT_UNDERSTANDING_MODES,
+        )
+        # Legacy summary mode still normalizes, but chunk prompt falls back to tags.
+        self.assertEqual(summary_settings["understanding_mode"], "summary")
+        self.assertEqual(tag_settings["prompt"], summary_settings["prompt"])
+        self.assertIn("标签", summary_settings["prompt"])
+
+    def test_mode_switches_chunk_prompt(self):
+        tag_settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {"understanding_mode": "tags", "caption_language": "zh"}
+        )
         motion_settings = understanding_resource_service.finalize_remote_vlm_settings(
             {"understanding_mode": "motion", "caption_language": "zh"}
         )
+        self.assertIn("标签", tag_settings["prompt"])
         self.assertIn("拼接图", motion_settings["prompt"])
         self.assertIn("visible", motion_settings["prompt"])
         self.assertIn("change", motion_settings["prompt"])
         self.assertIn("inferred_weight", motion_settings["prompt"])
-        self.assertIn('"tags":["人物","动作","场面"]', motion_settings["prompt"])
+        self.assertIn('"tags":["老人","奔跑","雨夜","红伞"]', motion_settings["prompt"])
+        self.assertIn("检查清单", motion_settings["prompt"])
         self.assertNotEqual(motion_settings["prompt"], tag_settings["prompt"])
 
     def test_finalize_uses_custom_prompts_when_enabled(self):
@@ -431,10 +444,8 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         )
         self.assertTrue(settings["use_custom_prompts"])
         self.assertEqual(settings["prompt"], "Custom caption only.")
-        self.assertEqual(
-            understanding_resource_service.resolve_video_summary_prompt(settings),
-            "Custom summary only.",
-        )
+        self.assertNotIn("custom_summary_prompt", settings)
+        self.assertNotIn("custom_description_prompt", settings)
 
     def test_custom_prompt_empty_falls_back_to_language_default(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
@@ -448,11 +459,8 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                 "model": "qwen3-vl-8b-instruct",
             }
         )
-        self.assertTrue(settings["prompt"].startswith("Extract concise English tags"))
-        self.assertEqual(
-            understanding_resource_service.resolve_video_summary_prompt(settings),
-            "Only summary customized.",
-        )
+        self.assertTrue(settings["prompt"].startswith("Look at the frame"))
+        self.assertNotIn("custom_summary_prompt", settings)
 
     def test_finalize_remote_vlm_settings_preserves_api_key(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(

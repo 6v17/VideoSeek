@@ -1107,7 +1107,6 @@ class MainWindow(
             "_dialogue_table_stretch",
             "_recap_review_stretch",
             "_chunk_caption_stretch",
-            "_video_summary_stretch",
             "_vlm_prompt_stretch",
             "_recap_prompt_stretch",
         ):
@@ -1204,22 +1203,8 @@ class MainWindow(
             tabs.setTabText(
                 1,
                 t.get(
-                    "understanding_vlm_prompt_tab_description",
-                    t.get("understanding_custom_description_prompt_label", "Segment description"),
-                ),
-            )
-            tabs.setTabText(
-                2,
-                t.get(
                     "understanding_vlm_prompt_tab_motion",
                     t.get("understanding_custom_motion_prompt_label", "Segment change"),
-                ),
-            )
-            tabs.setTabText(
-                3,
-                t.get(
-                    "understanding_vlm_prompt_tab_summary",
-                    t["understanding_custom_summary_prompt_label"],
                 ),
             )
         self.understanding_page.btn_open_services.setText(
@@ -1229,7 +1214,6 @@ class MainWindow(
         self.understanding_page.video_label.setText(t["understanding_video_label"])
         self.understanding_page.timeline_label.setText(t["understanding_timeline_label"])
         self.understanding_page.timeline_hint.setText(t["understanding_timeline_hint"])
-        self.understanding_page.video_summary_title.setText(t["understanding_video_summary_title"])
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
         self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "Recap"))

@@ -191,12 +191,6 @@ class UnderstandingGuiMixin:
                 self.texts.get("library_evidence_detail", "Change history"),
             )
         )
-        if hasattr(page, "video_summary_card"):
-            page.video_summary_card.hide()
-        if hasattr(page, "video_summary_text"):
-            self._set_understanding_readonly_text(page.video_summary_text, "")
-        if hasattr(page, "video_summary_meta_label"):
-            page.video_summary_meta_label.setText("")
         if hasattr(page, "export_card"):
             page.export_card.setVisible(True)
         if hasattr(page, "generate_hint"):
@@ -718,9 +712,7 @@ class UnderstandingGuiMixin:
                 understanding_page.btn_reset_custom_prompts.setEnabled(enabled)
             for name in (
                 "input_custom_caption_prompt",
-                "input_custom_description_prompt",
                 "input_custom_motion_prompt",
-                "input_custom_summary_prompt",
             ):
                 editor = getattr(understanding_page, name, None)
                 if editor is not None:
@@ -742,10 +734,8 @@ class UnderstandingGuiMixin:
 
     def _vlm_prompt_getter_pairs(self):
         from src.services.understanding_resource_service import (
-            get_description_prompt_for_language,
             get_motion_prompt_for_language,
             get_tag_prompt_for_language,
-            get_video_summary_prompt_for_language,
         )
 
         page = getattr(self, "understanding_page", None)
@@ -753,9 +743,7 @@ class UnderstandingGuiMixin:
             return ()
         return (
             (getattr(page, "input_custom_caption_prompt", None), get_tag_prompt_for_language),
-            (getattr(page, "input_custom_description_prompt", None), get_description_prompt_for_language),
             (getattr(page, "input_custom_motion_prompt", None), get_motion_prompt_for_language),
-            (getattr(page, "input_custom_summary_prompt", None), get_video_summary_prompt_for_language),
         )
 
     def _vlm_prompt_language(self) -> str:
@@ -771,24 +759,18 @@ class UnderstandingGuiMixin:
         if page is None or not hasattr(page, "input_custom_caption_prompt"):
             return
         tag = str(page.input_custom_caption_prompt.toPlainText() or "").strip()
-        description = str(page.input_custom_description_prompt.toPlainText() or "").strip()
         motion = str(page.input_custom_motion_prompt.toPlainText() or "").strip()
-        summary = str(page.input_custom_summary_prompt.toPlainText() or "").strip()
         remote_vlm["use_custom_prompts"] = True
         remote_vlm["custom_tag_prompt"] = tag
         remote_vlm["custom_caption_prompt"] = tag
-        remote_vlm["custom_description_prompt"] = description
         remote_vlm["custom_motion_prompt"] = motion
-        remote_vlm["custom_summary_prompt"] = summary
 
     def _load_vlm_prompt_editors(self, remote_vlm: dict) -> None:
         language = self._vlm_prompt_language()
         use_custom = bool(remote_vlm.get("use_custom_prompts"))
         saved = (
             str(remote_vlm.get("custom_tag_prompt") or remote_vlm.get("custom_caption_prompt", "") or "").strip(),
-            str(remote_vlm.get("custom_description_prompt", "") or "").strip(),
             str(remote_vlm.get("custom_motion_prompt", "") or "").strip(),
-            str(remote_vlm.get("custom_summary_prompt", "") or "").strip(),
         )
         for (editor, getter), text in zip(self._vlm_prompt_getter_pairs(), saved):
             if editor is None:
@@ -813,9 +795,13 @@ class UnderstandingGuiMixin:
         tabs = getattr(page, "vlm_prompt_tabs", None) if page is not None else None
         if tabs is None:
             return
-        for index in range(tabs.count()):
-            tabs.setTabVisible(index, index == 2)
-        tabs.setCurrentIndex(2)
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        # Tabs: 0 = tag, 1 = motion
+        index = 1 if self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION else 0
+        for i in range(tabs.count()):
+            tabs.setTabVisible(i, True)
+        tabs.setCurrentIndex(min(index, max(tabs.count() - 1, 0)))
 
     def _on_reset_custom_prompts_clicked(self):
         page = getattr(self, "understanding_page", None)
@@ -981,84 +967,6 @@ class UnderstandingGuiMixin:
     def _set_understanding_readonly_text(self, widget, text: str):
         widget.setPlainText(str(text or ""))
 
-    def _extract_video_summary_text(self, evidence: dict | None) -> str:
-        if not isinstance(evidence, dict):
-            return ""
-        summary = dict(evidence.get("summary") or {})
-        return str(summary.get("text", "") or "").strip()
-
-    def _refresh_understanding_video_meta(self, evidence: dict | None = None):
-        if not hasattr(self, "understanding_page"):
-            return
-        page = self.understanding_page
-        if evidence is None:
-            video_id = self._selected_understanding_video_id()
-            evidence = (
-                load_evidence_bundle(
-                    video_id,
-                    config=load_config(),
-                    mode=self._current_understanding_mode(),
-                )
-                if video_id
-                else None
-            )
-        if not isinstance(evidence, dict):
-            page.video_summary_meta_label.setText("")
-            return
-        chunks = list(evidence.get("chunks") or [])
-        generated_at = str((evidence.get("provenance") or {}).get("generated_at") or "").strip()
-        parts = []
-        if chunks:
-            parts.append(
-                self.texts.get("understanding_video_meta_chunks", "{count} segments").format(count=len(chunks))
-            )
-        if generated_at:
-            parts.append(
-                self.texts.get("understanding_video_meta_generated_at", "Generated: {time}").format(time=generated_at)
-            )
-        page.video_summary_meta_label.setText(" · ".join(parts))
-
-    def _refresh_understanding_video_summary(self, evidence: dict | None = None):
-        if not hasattr(self, "understanding_page"):
-            return
-        page = self.understanding_page
-        if evidence is None:
-            video_id = self._selected_understanding_video_id()
-            evidence = (
-                load_evidence_bundle(
-                    video_id,
-                    config=load_config(),
-                    mode=self._current_understanding_mode(),
-                )
-                if video_id
-                else None
-            )
-        summary_text = self._extract_video_summary_text(evidence)
-        if summary_text:
-            self._set_understanding_readonly_text(page.video_summary_text, summary_text)
-            self._refresh_understanding_video_meta(evidence)
-            return
-        running = getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()
-        mode = str(getattr(self.understanding_controller, "current_mode", "") or "") if running else ""
-        if running and mode == "summary":
-            self._set_understanding_readonly_text(
-                page.video_summary_text,
-                self.texts.get(
-                    "understanding_video_summary_generating",
-                    "Generating video summary…",
-                ),
-            )
-            self._refresh_understanding_video_meta(evidence)
-            return
-        self._set_understanding_readonly_text(
-            page.video_summary_text,
-            self.texts.get(
-                "understanding_video_summary_empty",
-                "Click “Generate summary” after tags are ready.",
-            ),
-        )
-        self._refresh_understanding_video_meta(evidence)
-
     def _chunk_payload_has_evidence(self, payload) -> bool:
         if not isinstance(payload, dict):
             return False
@@ -1088,8 +996,6 @@ class UnderstandingGuiMixin:
                 self.texts.get("understanding_video_select_hint", "Select an indexed video."),
             )
             self._understanding_video_context = {}
-            self._refresh_understanding_video_summary(None)
-            self._refresh_understanding_video_meta(None)
             self._refresh_understanding_dialogue_step()
             self._sync_recap_export_button()
             if hasattr(self, "_refresh_recap_review_panel"):
@@ -1134,7 +1040,6 @@ class UnderstandingGuiMixin:
         if duration_sec <= 0:
             duration_sec = max((float(segment.end_sec) for segment in segments), default=0.0)
         page.chunk_timeline.set_segments(segments, duration_sec=duration_sec)
-        self._refresh_understanding_video_summary(evidence)
         if segments:
             page.chunk_timeline.set_selected_index(0)
             self._show_understanding_chunk_detail_impl(0)
@@ -1144,7 +1049,6 @@ class UnderstandingGuiMixin:
                 page.chunk_caption_text,
                 self.texts.get("understanding_video_no_chunks", "No semantic chunks for this video."),
             )
-            self._refresh_understanding_video_summary(evidence)
 
         self._refresh_understanding_dialogue_step()
         self._sync_recap_export_button()
@@ -1339,7 +1243,6 @@ class UnderstandingGuiMixin:
         page.chunk_timeline.set_generating_index(
             first_pending if first_pending is not None else (0 if total else -1)
         )
-        self._refresh_understanding_video_summary()
 
     def _selected_understanding_target_lib(self):
         if not hasattr(self, "understanding_page"):
@@ -1454,9 +1357,6 @@ class UnderstandingGuiMixin:
         page.btn_generate_batch.setEnabled(ready and not understanding_running and not indexing_running)
         if hasattr(page, "btn_project_tags"):
             page.btn_project_tags.setEnabled(not understanding_running and not indexing_running)
-        if hasattr(page, "btn_generate_summary"):
-            page.btn_generate_summary.setEnabled(False)
-            page.btn_generate_summary.hide()
         page.btn_evidence_details.setEnabled(not understanding_running)
         page.btn_export_video_json.setEnabled(
             not understanding_running and self._current_video_has_exportable_evidence()
@@ -1607,8 +1507,6 @@ class UnderstandingGuiMixin:
             page.btn_generate_batch.setEnabled(False)
         if hasattr(page, "btn_project_tags"):
             page.btn_project_tags.setEnabled(False)
-        if hasattr(page, "btn_generate_summary"):
-            page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
         page.btn_export_video_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -1789,8 +1687,6 @@ class UnderstandingGuiMixin:
         page.btn_generate_batch.setEnabled(False)
         if hasattr(page, "btn_project_tags"):
             page.btn_project_tags.setEnabled(False)
-        if hasattr(page, "btn_generate_summary"):
-            page.btn_generate_summary.setEnabled(False)
         page.btn_evidence_details.setEnabled(False)
         page.btn_export_video_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -1848,10 +1744,6 @@ class UnderstandingGuiMixin:
         page.progress_bar.setVisible(True)
         if page.progress_bar.maximum() <= 0:
             page.progress_bar.setMaximum(100)
-
-
-    def start_generate_understanding_summary(self, video_id=None):
-        self.start_generate_understanding_evidence(video_id=video_id)
 
     def stop_understanding_generation(self):
         weak_worker = getattr(self, "_recap_rematch_weak_worker", None)
@@ -2046,9 +1938,6 @@ class UnderstandingGuiMixin:
             page.btn_generate_batch.setEnabled(True)
         if hasattr(page, "btn_project_tags"):
             page.btn_project_tags.setEnabled(True)
-        if hasattr(page, "btn_generate_summary"):
-            page.btn_generate_summary.setEnabled(False)
-            page.btn_generate_summary.hide()
         page.btn_evidence_details.setEnabled(True)
         page.btn_export_video_json.setEnabled(self._current_video_has_exportable_evidence())
         self._refresh_understanding_dialogue_step()
@@ -2061,7 +1950,6 @@ class UnderstandingGuiMixin:
         page.progress_bar.setVisible(False)
         page.chunk_timeline.set_generating_index(-1)
 
-        mode = str(result.get("mode", "") or "")
         is_batch = bool(result.get("batch")) or (
             "generated_count" in result and "chunk_count" not in result and not result.get("video_id")
         )
@@ -2091,16 +1979,6 @@ class UnderstandingGuiMixin:
                 ).format(done=generated_count, total=requested_count)
             page.lbl_status.setText(status_text)
             self._load_understanding_video_timeline()
-        elif result.get("video_id") and mode == "summary":
-            if stopped:
-                page.lbl_status.setText(self.texts.get("understanding_generation_stopped", "Stopped."))
-            elif success:
-                page.lbl_status.setText(
-                    self.texts.get("understanding_summary_generation_done", "Video summary done.")
-                )
-            else:
-                page.lbl_status.setText(self.texts.get("understanding_generation_failed", "Failed."))
-            self._load_understanding_video_timeline()
         elif result.get("video_id"):
             chunk_count = int(result.get("chunk_count", 0) or 0)
             chunk_total = int(result.get("chunk_total", chunk_count) or chunk_count)
@@ -2110,16 +1988,10 @@ class UnderstandingGuiMixin:
                     "Stopped. Saved {saved}/{total} segments.",
                 ).format(saved=chunk_count, total=chunk_total)
             elif success:
-                if mode == "summary":
-                    status_text = self.texts.get(
-                        "understanding_summary_generation_done",
-                        "Video summary done.",
-                    )
-                else:
-                    status_text = self.texts.get(
-                        "understanding_video_generation_done",
-                        "Finished: {count} segments.",
-                    ).format(count=chunk_count)
+                status_text = self.texts.get(
+                    "understanding_video_generation_done",
+                    "Finished: {count} segments.",
+                ).format(count=chunk_count)
             else:
                 status_text = self.texts.get("understanding_generation_failed", "Failed.")
             page.lbl_status.setText(status_text)

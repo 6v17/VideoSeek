@@ -43,7 +43,6 @@ from src.services.understanding_resource_service import (
 from src.storage.asset_store import load_model_metadata
 from src.storage.config_store import get_active_embedding_spec, get_active_model_profile
 from src.storage.video_identity import canonicalize_library_path
-from src.utils import format_timecode_range
 
 logger = get_logger("understanding.service")
 
@@ -852,71 +851,6 @@ def _collapse_duplicate_ready_video_entries(entries: list[dict[str, Any]]) -> li
     return collapsed
 
 
-def _extract_chunk_caption_text(chunk_payload: Mapping[str, Any]) -> str:
-    if not isinstance(chunk_payload, dict):
-        return ""
-    tags = [str(item).strip() for item in list(chunk_payload.get("tags") or []) if str(item or "").strip()]
-    if tags:
-        from src.services.understanding_tags import format_tags_for_display
-
-        return format_tags_for_display(tags)
-    vision = dict(dict(chunk_payload.get("evidence") or {}).get("vision") or {})
-    return str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
-
-
-def _build_segment_descriptions_for_summary(chunk_payloads: list[Mapping[str, Any]]) -> str:
-    lines: list[str] = []
-    for index, chunk in enumerate(chunk_payloads):
-        caption = _extract_chunk_caption_text(chunk)
-        if not caption:
-            continue
-        start_sec = float(chunk.get("start_sec", 0.0))
-        end_sec = float(chunk.get("end_sec", start_sec))
-        time_range = format_timecode_range(start_sec, end_sec)
-        lines.append(f"{index + 1}. [{time_range}] {caption}")
-    return "\n".join(lines)
-
-
-def generate_video_summary_from_chunks(
-    chunk_payloads: list[Mapping[str, Any]],
-    *,
-    config=None,
-    should_stop_callback=None,
-) -> dict[str, str] | None:
-    segment_text = _build_segment_descriptions_for_summary(chunk_payloads)
-    if not segment_text.strip():
-        return None
-
-    from src.core.understanding.base import UnderstandingStoppedError
-    from src.core.understanding.components.remote_vl_caption import call_remote_vlm_text_completion
-    from src.services.understanding_resource_service import (
-        get_remote_vlm_settings,
-        resolve_video_summary_prompt,
-    )
-
-    cfg = dict(config or load_config())
-    remote_vlm = get_remote_vlm_settings(cfg)
-    instruction = resolve_video_summary_prompt(remote_vlm)
-    prompt = f"{instruction}\n\n{segment_text}"
-    try:
-        summary_text = call_remote_vlm_text_completion(
-            prompt=prompt,
-            config=cfg,
-            max_tokens=384,
-            should_stop_callback=should_stop_callback,
-        )
-    except UnderstandingStoppedError:
-        raise
-    except Exception as exc:
-        logger.warning("Video summary generation failed: %s", exc)
-        return None
-
-    summary_text = str(summary_text or "").strip()
-    if not summary_text:
-        return None
-    return {"text": summary_text, "source": "remote_vlm"}
-
-
 def build_evidence_bundle_payload(
     *,
     video_context: Mapping[str, Any],
@@ -946,14 +880,6 @@ def build_evidence_bundle_payload(
     if should_stop_callback and should_stop_callback():
         raise UnderstandingStoppedError("Evidence generation stopped by user")
 
-    summary_payload = None
-    if output_mode == UNDERSTANDING_MODE_SUMMARY:
-        summary_payload = generate_video_summary_from_chunks(
-            chunk_payloads,
-            config=cfg,
-            should_stop_callback=should_stop_callback,
-        )
-
     payload = _assemble_evidence_payload(
         video_context=video_context,
         profile_id=profile_id,
@@ -962,7 +888,6 @@ def build_evidence_bundle_payload(
         config=cfg,
         generation_status="completed",
         chunk_total=len(chunk_payloads),
-        summary_payload=summary_payload,
     )
     return payload
 
@@ -1113,13 +1038,6 @@ def _run_video_evidence_generation(
             }
 
         chunk_payloads = [completed[index] for index in range(total)]
-        summary_payload = None
-        if output_mode == UNDERSTANDING_MODE_SUMMARY:
-            summary_payload = generate_video_summary_from_chunks(
-                chunk_payloads,
-                config=cfg,
-                should_stop_callback=should_stop_callback,
-            )
         final_payload = _assemble_evidence_payload(
             video_context=video_context,
             profile_id=profile_id,
@@ -1128,7 +1046,6 @@ def _run_video_evidence_generation(
             config=cfg,
             generation_status="completed",
             chunk_total=total,
-            summary_payload=summary_payload,
             generated_at=generated_at,
         )
         output_path = write_evidence_bundle(
@@ -1309,65 +1226,6 @@ def generate_evidence_for_video(
         chunk_indices=chunk_indices,
         dense_chunk_indices=dense_chunk_indices,
     )
-
-
-def generate_summary_for_video(
-    video_id: str,
-    *,
-    config=None,
-    model_dir: str | None = None,
-    should_stop_callback=None,
-) -> dict[str, Any]:
-    """Generate whole-video summary into the summaries store (from summary-mode chunks)."""
-    cfg = _config_with_understanding_mode(config, UNDERSTANDING_MODE_SUMMARY)
-    status = get_understanding_resource_status(config=cfg, model_dir=model_dir)
-    if not status.get("understanding_ready"):
-        missing = ", ".join(status.get("missing_components") or [])
-        raise UnderstandingGenerationError(
-            f"Understanding resources are not ready (missing: {missing or 'unknown'})"
-        )
-
-    video_id = str(video_id or "").strip()
-    existing = load_evidence_bundle(video_id, config=cfg, mode=UNDERSTANDING_MODE_SUMMARY)
-    if not isinstance(existing, dict):
-        raise UnderstandingGenerationError("请先用「总结」模式生成段描述，再生成视频总结。")
-
-    chunk_payloads = [item for item in list(existing.get("chunks") or []) if isinstance(item, dict)]
-    if not chunk_payloads:
-        raise UnderstandingGenerationError("请先用「总结」模式生成段描述，再生成视频总结。")
-    if not any(_extract_chunk_caption_text(chunk) for chunk in chunk_payloads):
-        raise UnderstandingGenerationError("当前视频还没有可用段描述，请先用总结模式生成。")
-
-    if should_stop_callback and should_stop_callback():
-        raise UnderstandingStoppedError("Evidence generation stopped by user")
-
-    summary_payload = generate_video_summary_from_chunks(
-        chunk_payloads,
-        config=cfg,
-        should_stop_callback=should_stop_callback,
-    )
-    if not summary_payload or not str(summary_payload.get("text", "") or "").strip():
-        raise UnderstandingGenerationError("视频总结生成失败，未得到有效文本。")
-
-    payload = dict(existing)
-    payload["summary"] = dict(summary_payload)
-    provenance = dict(payload.get("provenance") or {})
-    provenance["updated_at"] = _utc_timestamp()
-    provenance["understanding_mode"] = UNDERSTANDING_MODE_SUMMARY
-    payload["provenance"] = provenance
-    output_path = write_evidence_bundle(
-        video_id, payload, config=cfg, mode=UNDERSTANDING_MODE_SUMMARY
-    )
-    return {
-        "video_id": video_id,
-        "evidence_path": output_path,
-        "chunk_count": len(chunk_payloads),
-        "chunk_total": len(chunk_payloads),
-        "summary": True,
-        "understanding_mode": UNDERSTANDING_MODE_SUMMARY,
-        "understanding_profile_id": str(provenance.get("understanding_profile_id", "") or ""),
-        "stopped": False,
-    }
 
 
 def generate_evidence_batch(

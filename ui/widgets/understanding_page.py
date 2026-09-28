@@ -174,7 +174,6 @@ class UnderstandingEvidencePage(QWidget):
         _add_step_header(self.export_card.content_layout, self.export_title, self.export_hint)
         self._build_export_step(self.export_card.content_layout)
         page_body.addWidget(self.export_card)
-        self.video_summary_card.hide()
         page_body.addStretch(1)
         self.order_workflow_cards(recap_first=True)
 
@@ -250,23 +249,17 @@ class UnderstandingEvidencePage(QWidget):
         self.vlm_prompt_tabs = QTabWidget()
         self.vlm_prompt_tabs.setObjectName("RecapPromptTabs")
         self.input_custom_caption_prompt = QPlainTextEdit()
-        self.input_custom_description_prompt = QPlainTextEdit()
         self.input_custom_motion_prompt = QPlainTextEdit()
-        self.input_custom_summary_prompt = QPlainTextEdit()
         for editor in (
             self.input_custom_caption_prompt,
-            self.input_custom_description_prompt,
             self.input_custom_motion_prompt,
-            self.input_custom_summary_prompt,
         ):
             editor.setObjectName("UnderstandingOutput")
             editor.setMinimumHeight(80)
             editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             editor.setTabChangesFocus(True)
         self.vlm_prompt_tabs.addTab(self.input_custom_caption_prompt, "")
-        self.vlm_prompt_tabs.addTab(self.input_custom_description_prompt, "")
         self.vlm_prompt_tabs.addTab(self.input_custom_motion_prompt, "")
-        self.vlm_prompt_tabs.addTab(self.input_custom_summary_prompt, "")
         self._vlm_prompt_stretch = add_vertically_stretchable(
             layout,
             self.vlm_prompt_tabs,
@@ -378,30 +371,6 @@ class UnderstandingEvidencePage(QWidget):
             max_height=900,
         )
         layout.addWidget(self.chunk_detail_card)
-
-        self.video_summary_card = _UnderstandingSection()
-        summary_layout = self.video_summary_card.content_layout
-        self.video_summary_title = QLabel()
-        self.video_summary_title.setObjectName("InlineFieldLabel")
-        summary_layout.addWidget(self.video_summary_title)
-        self.video_summary_text = QPlainTextEdit()
-        self.video_summary_text.setObjectName("UnderstandingOutput")
-        self.video_summary_text.setReadOnly(True)
-        self._video_summary_stretch = add_vertically_stretchable(
-            summary_layout,
-            self.video_summary_text,
-            default_height=140,
-            min_height=100,
-            max_height=900,
-        )
-        self.video_summary_meta_label = QLabel()
-        self.video_summary_meta_label.setObjectName("StatusHint")
-        self.video_summary_meta_label.setWordWrap(True)
-        self.video_summary_meta_label.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
-        )
-        summary_layout.addWidget(self.video_summary_meta_label)
-        layout.addWidget(self.video_summary_card)
 
     def _build_dialogue_step(self, layout: QVBoxLayout) -> None:
         actions, row = _command_bar()

@@ -58,18 +58,58 @@ class UnderstandingTagsTests(unittest.TestCase):
             "左侧画面中角色伸手触碰座椅。镜头聚焦手臂动作。\n"
             '{"tags":["人物","动作","座椅"]}'
         )
-        self.assertEqual(parse_vlm_tag_list(raw), ["人物", "动作", "座椅"])
+        self.assertEqual(parse_vlm_tag_list(raw), ["座椅"])
 
     def test_splits_slash_joined_tags(self):
         tags = parse_vlm_tag_list('{"tags":["人物/动作/场景/镜头"]}')
-        self.assertEqual(tags, ["人物", "动作", "场景", "镜头"])
+        # Category placeholders + camera meta are not footage features.
+        self.assertEqual(tags, [])
 
     def test_rejects_long_truncated_caption_as_tag(self):
         from src.services.understanding_tags import normalize_tag_text, projectable_tags
 
         junk = "佩戴长手套的女性角色正伸手触碰一张橙色皮质座椅"
         self.assertEqual(normalize_tag_text(junk), "")
-        self.assertEqual(projectable_tags([junk, "动作", "人物"]), ["动作", "人物"])
+        self.assertEqual(projectable_tags([junk, "动作", "人物", "座椅"]), ["座椅"])
+
+    def test_shot_class_always_dropped(self):
+        from src.services.understanding_tags import normalize_tag_text, projectable_tags
+
+        self.assertEqual(normalize_tag_text("近景"), "")
+        self.assertEqual(normalize_tag_text("特写"), "")
+        self.assertEqual(normalize_tag_text("close-up"), "")
+        self.assertEqual(
+            projectable_tags(["老人", "近景", "close-up", "跟拍", "奔跑"]),
+            ["老人", "奔跑"],
+        )
+
+    def test_no_example_driven_harvest_or_grounding(self):
+        from src.services.understanding_tags import (
+            evidence_text_from_chunk,
+            parse_motion_vlm_payload,
+            projectable_tags,
+        )
+
+        # Post-process only drops shot class / schema slots — does not invent tags
+        # from caption patterns or delete ungrounded content verbs.
+        self.assertEqual(
+            projectable_tags(
+                ["老人", "起身", "近景", "奔跑"],
+                evidence_text="老人在雨里奔跑",
+            ),
+            ["老人", "起身", "奔跑"],
+        )
+        self.assertEqual(
+            evidence_text_from_chunk({"tags": ["老人", "起身"], "text": "老人 · 起身"}),
+            "",
+        )
+        raw = (
+            "老人穿着雨衣在雨夜奔跑。\n"
+            '{"tags":["老人","起身","近景","奔跑"]}'
+        )
+        parsed = parse_motion_vlm_payload(raw)
+        self.assertEqual(parsed["tags"], ["老人", "起身", "奔跑"])
+        self.assertIn("老人", parsed["visible"])
 
     def test_parse_motion_structured_json(self):
         from src.services.understanding_tags import format_motion_cap_text, parse_motion_vlm_payload
@@ -78,7 +118,7 @@ class UnderstandingTagsTests(unittest.TestCase):
             {
                 "visible": "柜台前两人相对",
                 "change": "店长把支票推回去",
-                "tags": ["人物", "动作", "柜台"],
+                "tags": ["人物", "动作", "柜台", "支票"],
                 "inferred": "像拒收",
                 "inferred_weight": 0.4,
             },
@@ -87,7 +127,8 @@ class UnderstandingTagsTests(unittest.TestCase):
         parsed = parse_motion_vlm_payload(raw)
         self.assertEqual(parsed["visible"], "柜台前两人相对")
         self.assertEqual(parsed["change"], "店长把支票推回去")
-        self.assertEqual(parsed["tags"], ["人物", "动作", "柜台"])
+        # Schema-slot placeholders dropped; concrete tags kept.
+        self.assertEqual(parsed["tags"], ["柜台", "支票"])
         self.assertEqual(parsed["inferred"], "像拒收")
         self.assertAlmostEqual(parsed["inferred_weight"], 0.4)
         self.assertEqual(
@@ -98,12 +139,11 @@ class UnderstandingTagsTests(unittest.TestCase):
     def test_parse_motion_legacy_prose_plus_tags(self):
         from src.services.understanding_tags import parse_motion_vlm_payload
 
-        raw = '考官微笑特写。\n{"tags":["对话"]}'
+        raw = '考官微笑。\n{"tags":["对话","特写"]}'
         parsed = parse_motion_vlm_payload(raw)
         self.assertIn("考官", parsed["visible"])
         self.assertEqual(parsed["tags"], ["对话"])
         self.assertEqual(parsed["inferred_weight"], 0.0)
-
 
 if __name__ == "__main__":
     unittest.main()

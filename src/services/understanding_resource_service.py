@@ -61,9 +61,7 @@ DEFAULT_REMOTE_VLM_CONFIG = {
     "use_custom_prompts": False,
     "custom_caption_prompt": "",
     "custom_tag_prompt": "",
-    "custom_description_prompt": "",
     "custom_motion_prompt": "",
-    "custom_summary_prompt": "",
     "prompt": (
         "为这一视频帧提取简洁中文标签。只输出 JSON："
         '{"tags":["标签1","标签2"]}。'
@@ -116,13 +114,13 @@ CAPTION_LANGUAGE_EN = "en"
 SUPPORTED_CAPTION_LANGUAGES = {CAPTION_LANGUAGE_ZH, CAPTION_LANGUAGE_EN}
 
 UNDERSTANDING_MODE_TAGS = "tags"
-UNDERSTANDING_MODE_SUMMARY = "summary"
+UNDERSTANDING_MODE_SUMMARY = "summary"  # legacy on-disk store only
 UNDERSTANDING_MODE_MOTION = "motion"
 SUPPORTED_UNDERSTANDING_MODES = {
     UNDERSTANDING_MODE_TAGS,
-    UNDERSTANDING_MODE_SUMMARY,
     UNDERSTANDING_MODE_MOTION,
 }
+# Includes summary so path iteration still finds old summaries/ bundles.
 SPLIT_UNDERSTANDING_MODES = (
     UNDERSTANDING_MODE_TAGS,
     UNDERSTANDING_MODE_SUMMARY,
@@ -130,86 +128,78 @@ SPLIT_UNDERSTANDING_MODES = (
 )
 # Recap / VO / FCPXML uses a separate LLM job (see recap_service), not these vision modes.
 
-# Tag mode: chunk tags only.
+# Tag mode: flat searchable footage features (checklist only — not a fill-every-slot ontology).
 TAG_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: (
-        "为这一视频帧提取简洁中文标签。只输出 JSON："
-        '{"tags":["标签1","标签2"]}。'
-        "标签覆盖人物/角色、场景地点、可见物体、动作、氛围风格；"
-        "每条2-8字，不要句子，不要解释，不要 markdown。"
+        "看画面，提取可用来搜素材的中文标签。只输出 JSON："
+        '{"tags":["标签1","标签2","标签3"]}。'
+        "检查清单（有则写，无则跳过，不要为填满而编）："
+        "角色名/人物、具体动作、场景/环境、关键物体或服饰、可见情绪（如哭/笑）、天气/光线。"
+        "条数不设下限；画面丰富时可写到 16 条左右，每条 2–8 字。"
+        "不要写：景别（近景/特写等）、空泛互动、象征/阵营/氛围感受、句子、解释、markdown。"
     ),
     CAPTION_LANGUAGE_EN: (
-        "Extract concise English tags for this video frame. "
-        'Output JSON only: {"tags":["tag1","tag2"]}. '
-        "Cover people/characters, place/setting, visible objects, actions, mood/style. "
-        "Use short tags (1-3 words). No sentences, no explanation, no markdown."
+        "Look at the frame. Extract searchable footage tags. "
+        'Output JSON only: {"tags":["tag1","tag2","tag3"]}. '
+        "Checklist (include only what is visible; skip empty slots—do not invent): "
+        "character/person, concrete action, place/setting, key object or clothing, "
+        "visible emotion (e.g. crying/smiling), weather/light. "
+        "No minimum count; up to about 16 tags when the frame is rich (1–3 words each). "
+        "Do not write: shot size (close-up/wide), vague interaction, symbolism/"
+        "faction/mood-feelings, sentences, explanation, markdown."
     ),
 }
 # Keep old name as alias so existing imports/tests keep working.
 CAPTION_LANGUAGE_PROMPTS = TAG_LANGUAGE_PROMPTS
 
-# Summary mode: chunk descriptions (then whole-video summary).
-DESCRIPTION_LANGUAGE_PROMPTS = {
-    CAPTION_LANGUAGE_ZH: (
-        "用一两句简洁的中文描述这一视频帧的画面内容。"
-        "只写可见内容，不要列举分析过程，不要 markdown。"
-    ),
-    CAPTION_LANGUAGE_EN: (
-        "Describe this video frame in one or two concise sentences. "
-        "Only what is visible. No analysis steps, no markdown."
-    ),
-}
 # Motion mode: stitched earlier/later frames from the same chunk. Describe change only; optional tags.
 MOTION_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: (
         "这是一张视频时间片段拼接图。左侧帧早于右侧帧，图上有时间标注。\n"
-        "只根据画面写短字段，不要写长散文，不要编对白/动机/人物关系。\n"
+        "只根据画面写短字段。不要写长散文，不要写运镜/景别，不要编对白/动机。\n"
         "\n"
         "只输出一个 JSON 对象（可空字段留空字符串或省略）：\n"
         '{"visible":"谁/在哪/在干什么（只写看见的）",'
         '"change":"先…再…（两帧之间发生了什么）",'
-        '"tags":["人物","动作","场面"],'
+        '"tags":["老人","奔跑","雨夜","红伞"],'
         '"inferred":"弱推理叙事功能（可空）",'
         '"inferred_weight":0.0}\n'
         "\n"
         "规则：\n"
-        "1. visible：主体内容，只写可见事实，一句内。\n"
-        "2. change：内容变化；单帧可空。\n"
-        "3. tags：2–6 个短标签（2–6 字），优先人物/动作/场面/镜头；可搜可过滤。\n"
-        "4. inferred：弱推理（如像对质/像告别），看不清就空着；禁止写成硬事实。\n"
-        "5. inferred_weight：0～1；画面直白才高（少用），模糊则低或 0；空 inferred 时用 0。\n"
+        "1. visible：一句内写清谁、在哪、干什么（约20字内）。\n"
+        "2. change：一句内；单帧可空。\n"
+        "3. tags：短标签（2–6 字）。检查清单（有则写，无则跳过）："
+        "角色名/人物、具体动作、场景/环境、关键物体或服饰、可见情绪、天气/光线。"
+        "条数不设下限；画面丰富时可写到 16 条左右。"
+        "不要景别、空泛互动、象征/阵营；inferred 不得写入 tags。\n"
+        "4. inferred：弱推理（如像对质），看不清就空；不要放进 tags。\n"
+        "5. inferred_weight：0～1；空 inferred 时用 0。\n"
         "6. 不输出 Markdown，不输出故事总结。"
     ),
     CAPTION_LANGUAGE_EN: (
         "This is a stitched image of two frames from the same video span. "
         "Left is earlier than right; the image is time-labeled.\n"
-        "Write short fields only—no long prose, no invented dialogue/motives/relationships.\n"
+        "Write short fields only—no long prose, no camera/shot-size essays, "
+        "no invented dialogue/motives.\n"
         "\n"
         "Output one JSON object (empty fields may be \"\" or omitted):\n"
         '{"visible":"who/where/doing what (seen only)",'
         '"change":"first… then… (what changed between frames)",'
-        '"tags":["person","action","scene"],'
+        '"tags":["elder","running","rain","umbrella"],'
         '"inferred":"weak narrative role (optional)",'
         '"inferred_weight":0.0}\n'
         "\n"
         "Rules:\n"
-        "1. visible: subject content; visible facts only; one short line.\n"
-        "2. change: what changed; empty OK for a single frame.\n"
-        "3. tags: 2–6 short tags (1–3 words); prefer people/action/place/shot; searchable.\n"
-        "4. inferred: weak guess (e.g. confrontation/farewell); leave empty if unclear; never hard fact.\n"
-        "5. inferred_weight: 0–1; high only when the picture is obvious (rare); low/0 when fuzzy; 0 if inferred empty.\n"
+        "1. visible: who/where/doing what; one short line (~20 words max).\n"
+        "2. change: what changed; one short line; empty OK for a single frame.\n"
+        "3. tags: short tags (1–3 words). Checklist (skip empty slots): "
+        "character, concrete action, place/setting, object/clothing, visible emotion, "
+        "weather/light. No minimum; up to about 16 when the frame is rich. "
+        "No shot size, vague interaction, symbolism/faction; "
+        "never copy inferred into tags.\n"
+        "4. inferred: weak guess only; leave empty if unclear; do not put in tags.\n"
+        "5. inferred_weight: 0–1; 0 if inferred empty.\n"
         "6. No markdown. No story summary."
-    ),
-}
-VIDEO_SUMMARY_LANGUAGE_PROMPTS = {
-    CAPTION_LANGUAGE_ZH: (
-        "以下是一个视频按时间顺序各段的画面描述。请用一段简洁的中文总结整个视频的主要内容、"
-        "情节或主题，不要逐段复述，不要输出分析过程。"
-    ),
-    CAPTION_LANGUAGE_EN: (
-        "Below are chronological segment descriptions of a video. "
-        "Write one concise paragraph summarizing the overall content, story, or theme. "
-        "Do not repeat each segment line by line."
     ),
 }
 
@@ -226,14 +216,23 @@ def normalize_understanding_mode(value, *, default: str = UNDERSTANDING_MODE_TAG
     text = str(value or "").strip().lower()
     if text in SUPPORTED_UNDERSTANDING_MODES:
         return text
+    # Legacy path / on-disk summaries/ store — accept for loading old bundles.
+    if text == UNDERSTANDING_MODE_SUMMARY or text in {
+        "caption",
+        "captions",
+        "describe",
+        "description",
+        "descriptions",
+    }:
+        return UNDERSTANDING_MODE_SUMMARY
     # Accept a few aliases from older UI copy.
     if text in {"tag", "label", "labels"}:
         return UNDERSTANDING_MODE_TAGS
-    if text in {"caption", "captions", "describe", "description", "descriptions"}:
-        return UNDERSTANDING_MODE_SUMMARY
     if text in {"motion", "movement", "change", "changes"}:
         return UNDERSTANDING_MODE_MOTION
     fallback = str(default or UNDERSTANDING_MODE_TAGS).strip().lower()
+    if fallback == UNDERSTANDING_MODE_SUMMARY:
+        return UNDERSTANDING_MODE_SUMMARY
     return fallback if fallback in SUPPORTED_UNDERSTANDING_MODES else UNDERSTANDING_MODE_TAGS
 
 
@@ -242,17 +241,8 @@ def get_tag_prompt_for_language(language: str) -> str:
 
 
 def get_caption_prompt_for_language(language: str) -> str:
-    # Historical name: used as the chunk prompt for the active product path.
-    # Prefer get_tag_prompt_for_language / get_description_prompt_for_language.
+    # Historical name: chunk prompt for tags mode. Prefer get_tag_prompt_for_language.
     return get_tag_prompt_for_language(language)
-
-
-def get_description_prompt_for_language(language: str) -> str:
-    return DESCRIPTION_LANGUAGE_PROMPTS[normalize_caption_language(language)]
-
-
-def get_video_summary_prompt_for_language(language: str) -> str:
-    return VIDEO_SUMMARY_LANGUAGE_PROMPTS[normalize_caption_language(language)]
 
 
 def get_motion_prompt_for_language(language: str) -> str:
@@ -284,15 +274,6 @@ def resolve_tag_prompt(settings: Mapping[str, Any] | None) -> str:
     return get_tag_prompt_for_language(language)
 
 
-def resolve_description_prompt(settings: Mapping[str, Any] | None) -> str:
-    raw = dict(settings or {})
-    language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
-    custom = normalize_custom_prompt_text(raw.get("custom_description_prompt"))
-    if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
-        return custom
-    return get_description_prompt_for_language(language)
-
-
 def resolve_motion_prompt(settings: Mapping[str, Any] | None) -> str:
     raw = dict(settings or {})
     language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
@@ -306,20 +287,10 @@ def resolve_caption_prompt(settings: Mapping[str, Any] | None) -> str:
     """Chunk VLM prompt for the active understanding mode."""
     raw = dict(settings or {})
     mode = normalize_understanding_mode(raw.get("understanding_mode", UNDERSTANDING_MODE_TAGS))
-    if mode == UNDERSTANDING_MODE_SUMMARY:
-        return resolve_description_prompt(raw)
     if mode == UNDERSTANDING_MODE_MOTION:
         return resolve_motion_prompt(raw)
+    # tags, and legacy summary → tag prompt (summary generation UI removed)
     return resolve_tag_prompt(raw)
-
-
-def resolve_video_summary_prompt(settings: Mapping[str, Any] | None) -> str:
-    raw = dict(settings or {})
-    language = normalize_caption_language(raw.get("caption_language", CAPTION_LANGUAGE_ZH))
-    custom = normalize_custom_prompt_text(raw.get("custom_summary_prompt"))
-    if normalize_use_custom_prompts(raw.get("use_custom_prompts")) and custom:
-        return custom
-    return get_video_summary_prompt_for_language(language)
 
 
 def _normalize_vlm_base_url_for_compare(base_url: str) -> str:
@@ -475,15 +446,23 @@ def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> st
         return normalize_caption_language(explicit)
     prompt = str(raw_remote_vlm.get("prompt", "") or "").strip()
     if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] or prompt.startswith("Describe this video frame") or (
-        "Extract concise English tags" in prompt
+        "Extract concise English tags" in prompt or prompt.startswith("Look at the frame")
     ):
         return CAPTION_LANGUAGE_EN
     if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_ZH] or any(
-        token in prompt for token in ("中文", "视频帧", "标签")
+        token in prompt for token in ("中文", "视频帧", "标签", "搜素材")
     ):
         return CAPTION_LANGUAGE_ZH
-    return CAPTION_LANGUAGE_EN if prompt and ("Describe" in prompt or "Extract concise English tags" in prompt) else CAPTION_LANGUAGE_ZH
-
+    return (
+        CAPTION_LANGUAGE_EN
+        if prompt
+        and (
+            "Describe" in prompt
+            or "Extract concise English tags" in prompt
+            or "Look at the frame" in prompt
+        )
+        else CAPTION_LANGUAGE_ZH
+    )
 
 def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> dict[str, Any]:
     if not isinstance(raw_remote_vlm, dict):
@@ -504,15 +483,10 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
         raw_remote_vlm.get("use_custom_prompts", DEFAULT_REMOTE_VLM_CONFIG["use_custom_prompts"])
     )
     # custom_caption_prompt kept for backward compatibility (maps to tag prompt).
+    # custom_description_prompt / custom_summary_prompt from old configs are ignored.
     legacy_caption = normalize_custom_prompt_text(raw_remote_vlm.get("custom_caption_prompt", ""))
     remote_vlm["custom_tag_prompt"] = normalize_custom_prompt_text(
         raw_remote_vlm.get("custom_tag_prompt", "") or legacy_caption
-    )
-    remote_vlm["custom_description_prompt"] = normalize_custom_prompt_text(
-        raw_remote_vlm.get("custom_description_prompt", "")
-    )
-    remote_vlm["custom_summary_prompt"] = normalize_custom_prompt_text(
-        raw_remote_vlm.get("custom_summary_prompt", "")
     )
     remote_vlm["custom_motion_prompt"] = normalize_custom_prompt_text(
         raw_remote_vlm.get("custom_motion_prompt", "")

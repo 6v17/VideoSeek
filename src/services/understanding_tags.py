@@ -22,6 +22,67 @@ _JSON_DEBRIS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Camera / framing class (closed linguistic class — not an open bad-word list).
+_SHOT_SIZE_ZH_RE = re.compile(
+    r"^(?:大|中|近|远|全)?(?:大|中|近|远|全)?景$|^特写$|^跟拍$|^推拉$|^俯拍$|^仰拍$|^侧拍$|^摇镜$|^运镜$"
+)
+_SHOT_META_ZH = frozenset({"镜头", "画面", "内容", "场景感", "动作感"})
+_SHOT_EN_RE = re.compile(
+    r"^(?:close[\s-]?up|wide[\s-]?shot|medium[\s-]?shot|long[\s-]?shot|"
+    r"tracking[\s-]?shot|dolly|pan|tilt|shot|frame)$",
+    re.IGNORECASE,
+)
+# Schema-slot leakage from older ZH prompts (人物/动作/场景), not footage features.
+_CATEGORY_PLACEHOLDERS = frozenset({"人物", "动作", "场景", "场面", "角色"})
+
+
+def _is_shot_or_meta_tag(text: str) -> bool:
+    """True for camera jargon / empty meta labels — never useful as search tags."""
+    key = str(text or "").strip()
+    if not key:
+        return True
+    if key in _SHOT_META_ZH or key in _CATEGORY_PLACEHOLDERS:
+        return True
+    if key.casefold() in {s.casefold() for s in _CATEGORY_PLACEHOLDERS}:
+        return True
+    if _SHOT_SIZE_ZH_RE.match(key):
+        return True
+    if _SHOT_EN_RE.match(key):
+        return True
+    return False
+
+
+def evidence_text_from_chunk(chunk: Mapping[str, Any] | None) -> str:
+    """Collect visible/change/caption prose from a stored chunk (not tag-join display)."""
+    if not isinstance(chunk, Mapping):
+        return ""
+    tags = chunk.get("tags") if isinstance(chunk.get("tags"), (list, tuple)) else []
+    tag_display = format_tags_for_display(tags) if tags else ""
+
+    parts: list[str] = []
+    for key in ("visible", "change", "caption"):
+        value = str(chunk.get(key) or "").strip()
+        if value:
+            parts.append(value)
+
+    text = str(chunk.get("text") or "").strip()
+    if text and text != tag_display:
+        parts.append(text)
+
+    raw = str(chunk.get("raw_text") or "").strip()
+    for marker in ('{"tags"', "{'tags'"):
+        brace = raw.find(marker)
+        if brace > 0:
+            raw = raw[:brace].strip()
+            break
+        if brace == 0:
+            raw = ""
+            break
+    if raw and raw != tag_display and not raw.lstrip().startswith("{"):
+        parts.append(raw)
+
+    return " ".join(parts)
+
 
 def _looks_like_prose(text: str) -> bool:
     value = str(text or "").strip()
@@ -66,10 +127,16 @@ def normalize_tag_text(value: Any) -> str:
     if len(text) > _TAG_MAX_CHARS:
         # Reject — truncating captions created the "description as tag" bug.
         return ""
+    if _is_shot_or_meta_tag(text):
+        return ""
     return text
 
 
-def _dedupe_tags(tags: Iterable[str], *, limit: int = _TAG_MAX_COUNT) -> List[str]:
+def _dedupe_tags(
+    tags: Iterable[str],
+    *,
+    limit: int = _TAG_MAX_COUNT,
+) -> List[str]:
     out: List[str] = []
     seen: set[str] = set()
     for raw in tags:
@@ -87,9 +154,15 @@ def _dedupe_tags(tags: Iterable[str], *, limit: int = _TAG_MAX_COUNT) -> List[st
     return out
 
 
-def projectable_tags(tags: Iterable[Any], *, limit: int = _TAG_MAX_COUNT) -> List[str]:
-    """Normalize a chunk's tags for SQLite projection (filters prose / splits /)."""
-    return _dedupe_tags(tags, limit=limit)
+def projectable_tags(
+    tags: Iterable[Any],
+    *,
+    limit: int = _TAG_MAX_COUNT,
+    evidence_text: str = "",  # kept for call-site compat; unused
+) -> List[str]:
+    """Normalize tags for search: reject prose, shot-size class, schema-slot leakage."""
+    del evidence_text
+    return _dedupe_tags(tags, limit=max(1, int(limit)))
 
 
 def _tags_from_json_payload(payload: Any) -> List[str] | None:
@@ -261,10 +334,17 @@ def _motion_fields_from_mapping(payload: Mapping[str, Any] | None) -> dict[str, 
     return {
         "visible": visible[:120],
         "change": change[:120],
-        "tags": _dedupe_tags(tags, limit=8),
+        "tags": projectable_tags(tags, limit=_TAG_MAX_COUNT),
         "inferred": inferred[:80],
         "inferred_weight": float(weight or 0.0),
     }
+
+
+def _finalize_motion_tags(fields: dict[str, Any], *, extra_evidence: str = "") -> dict[str, Any]:
+    """Normalize motion tags after visible/change may have been filled from prose."""
+    del extra_evidence
+    fields["tags"] = projectable_tags(list(fields.get("tags") or []), limit=_TAG_MAX_COUNT)
+    return fields
 
 
 def parse_motion_vlm_payload(raw_text: str) -> dict[str, Any]:
@@ -311,6 +391,7 @@ def parse_motion_vlm_payload(raw_text: str) -> dict[str, Any]:
         fields = _motion_fields_from_mapping(parsed if isinstance(parsed, dict) else None)
         if fields is None:
             continue
+        prose = ""
         # Pure tags JSON (old motion): leave visible empty unless prose prefix exists.
         if not fields["visible"] and not fields["change"] and brace > 0:
             prose = text[:brace].strip()
@@ -319,20 +400,24 @@ def parse_motion_vlm_payload(raw_text: str) -> dict[str, Any]:
                 # Keep one short visible line; do not invent a change from leftover tags JSON.
                 line = prose.split("\n", 1)[0].strip()
                 fields["visible"] = line[:120]
-        return fields
+                prose = line[:120]
+        return _finalize_motion_tags(fields, extra_evidence=prose)
 
     # No JSON object: do not invent structure from long prose beyond a short visible line.
-    tags = parse_vlm_tag_list(text)
     if _looks_like_prose(text):
         line = text.split("\n", 1)[0].strip()
         json_at = line.find("{")
         if json_at > 0:
             line = line[:json_at].strip()
-        return {
-            "visible": line[:120],
-            "change": "",
-            "tags": tags,
-            "inferred": "",
-            "inferred_weight": 0.0,
-        }
-    return {**empty, "tags": tags}
+        tags = parse_vlm_tag_list(text)
+        return _finalize_motion_tags(
+            {
+                "visible": line[:120],
+                "change": "",
+                "tags": tags,
+                "inferred": "",
+                "inferred_weight": 0.0,
+            },
+            extra_evidence=line[:120],
+        )
+    return {**empty, "tags": parse_vlm_tag_list(text)}

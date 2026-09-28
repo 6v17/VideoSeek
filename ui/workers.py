@@ -843,62 +843,6 @@ class UnderstandingVideoWorker(QThread):
             self.finished_signal.emit(False, False, {})
 
 
-class UnderstandingSummaryWorker(QThread):
-    progress_signal = Signal(int, str)
-    finished_signal = Signal(bool, bool, object)
-    error_signal = Signal(str)
-
-    def __init__(self, video_id, model_dir=None):
-        super().__init__()
-        self.video_id = str(video_id or "").strip()
-        self.model_dir = model_dir
-        self._stop_requested = False
-
-    def stop(self):
-        self._stop_requested = True
-        self.requestInterruption()
-
-    def run(self):
-        try:
-            from src.app.config import load_config
-            from src.app.i18n import get_texts
-            from src.core.understanding.base import UnderstandingStoppedError
-            from src.services.understanding_service import generate_summary_for_video
-
-            config = load_config()
-            language = config.get("language", "zh")
-            texts = get_texts(language)
-            self.progress_signal.emit(
-                5,
-                texts.get("understanding_video_summary_generating", "Generating video summary…"),
-            )
-            result = dict(
-                generate_summary_for_video(
-                    self.video_id,
-                    config=config,
-                    model_dir=self.model_dir,
-                    should_stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
-                )
-                or {}
-            )
-            result.setdefault("video_id", self.video_id)
-            result["summary"] = True
-            stopped = bool(result.get("stopped")) or bool(getattr(self, "_stop_requested", False))
-            self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Summary done."))
-            self.finished_signal.emit(not stopped, stopped, result)
-        except Exception as exc:
-            from src.core.understanding.base import UnderstandingStoppedError
-
-            if isinstance(exc, UnderstandingStoppedError):
-                self.finished_signal.emit(
-                    False, True, {"video_id": self.video_id, "stopped": True, "summary": True}
-                )
-                return
-            logger.exception("Understanding summary worker failed")
-            self.error_signal.emit(str(exc))
-            self.finished_signal.emit(False, False, {"video_id": self.video_id, "summary": True})
-
-
 class UnderstandingWorker(QThread):
     progress_signal = Signal(int, str)
     video_started = Signal(str, int, int)  # video_id, current, total
