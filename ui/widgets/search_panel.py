@@ -20,6 +20,7 @@ from ui.widgets.layout import (
     compare_row_min_height,
     compute_search_panel_width,
     compute_search_query_tabs_height,
+    image_drop_min_height,
     search_panel_min_height,
 )
 from ui.widgets.scaffold import VSCard
@@ -110,7 +111,7 @@ class SearchPanel(VSCard):
         self.img_label.setObjectName("ImageDropZone")
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setWordWrap(True)
-        self.img_label.setMinimumHeight(COMPONENT_SIZES["image_drop_min_height"])
+        self.img_label.setMinimumHeight(image_drop_min_height())
         self.img_label.setMinimumWidth(0)
         self.img_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
@@ -251,7 +252,7 @@ class SearchPanel(VSCard):
         self.search_mode_options_stack.addWidget(self.search_mode_options_placeholder)
         self.search_mode_options_stack.addWidget(self.dialogue_search_mode_cluster)
 
-        tab_page_height = int(COMPONENT_SIZES["image_drop_min_height"]) + int(
+        tab_page_height = image_drop_min_height() + int(
             COMPONENT_SIZES.get("search_query_tab_page_margins_v", 12)
         )
 
@@ -406,6 +407,46 @@ class SearchPanel(VSCard):
         self._toggle_width = toggle_width
         self._mobile_qr_width = mobile_qr_width
         self._group_gap = group_gap
+        self._viewport_budget_height: int | None = None
+
+    def apply_viewport_budget(self, viewport_height: int | None) -> None:
+        """Shrink tab/drop floors for short logical windows; keep option rows intact."""
+        try:
+            vh = int(viewport_height) if viewport_height is not None else None
+        except (TypeError, ValueError):
+            vh = None
+        if vh is not None and vh < 240:
+            vh = None
+        if vh == getattr(self, "_viewport_budget_height", None):
+            return
+        self._viewport_budget_height = vh
+
+        drop = image_drop_min_height(viewport_height=vh)
+        margins = int(COMPONENT_SIZES.get("search_query_tab_page_margins_v", 12))
+        tab_page = drop + margins
+        self.img_label.setMinimumHeight(drop)
+        for tab in (
+            self.image_tab,
+            self.text_tab,
+            self.compose_tab,
+            self.dialogue_tab,
+            self.tags_tab,
+        ):
+            tab.setMinimumHeight(tab_page)
+
+        tabs_min = compute_search_query_tabs_height(viewport_height=vh)
+        # Shorter windows: less extra stretch above the drop zone.
+        slack = 48 if (vh is not None and vh < 720) else 96
+        self.search_query_tabs.setMinimumHeight(tabs_min)
+        self.search_query_tabs.setMaximumHeight(tabs_min + slack)
+
+        panel_min = search_panel_min_height(viewport_height=vh)
+        self.setMinimumHeight(panel_min)
+        # Prefer a shorter sizeHint when the viewport is cramped.
+        if vh is not None and vh < 780:
+            self._default_height = panel_min
+        else:
+            self._default_height = max(panel_min, compare_row_card_height())
 
     def relayout_inline_fields(self) -> None:
         """Size InlineFieldLabel rows to their text so EN/zh labels are not clipped."""

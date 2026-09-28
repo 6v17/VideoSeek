@@ -45,6 +45,8 @@ COMPONENT_SIZES = {
     "nav_button_height": 36,
     "sidebar_action_height": 32,
     "image_drop_min_height": 160,
+    # High-DPI / short logical windows: compress drop zone before crushing option rows.
+    "image_drop_min_height_floor": 100,
     "search_query_tab_chrome_height": 41,
     "search_query_tab_page_margins_v": 8,
     # Must fit #SearchModeSelect (1px border + padding + text); too short clips the bottom edge.
@@ -78,27 +80,47 @@ COMPONENT_SIZES = {
 }
 
 
-def compute_search_query_tabs_height(config=None) -> int:
+def _coerce_sizes(config=None) -> dict:
     sizes = dict(COMPONENT_SIZES)
     if isinstance(config, dict):
         sizes.update(config)
-    body = int(sizes["image_drop_min_height"]) + int(sizes.get("search_query_tab_page_margins_v", 12))
+    return sizes
+
+
+def image_drop_min_height(config=None, *, viewport_height: int | None = None) -> int:
+    """Drop-zone floor; shrinks on short logical windows (125%/150% DPI)."""
+    sizes = _coerce_sizes(config)
+    preferred = int(sizes["image_drop_min_height"])
+    floor = int(sizes.get("image_drop_min_height_floor", 100))
+    available = int(viewport_height) if viewport_height is not None else _available_height()
+    if available is None:
+        return preferred
+    if available >= 820:
+        return preferred
+    if available >= 720:
+        return max(floor, min(preferred, 130))
+    if available >= 620:
+        return max(floor, min(preferred, 110))
+    return floor
+
+
+def compute_search_query_tabs_height(config=None, *, viewport_height: int | None = None) -> int:
+    sizes = _coerce_sizes(config)
+    body = image_drop_min_height(sizes, viewport_height=viewport_height) + int(
+        sizes.get("search_query_tab_page_margins_v", 12)
+    )
     chrome = int(sizes.get("search_query_tab_chrome_height", 41))
     return body + chrome
 
 
 def compare_row_card_height(config=None) -> int:
     """Preferred height for search/preview cards (sizeHint / first-run defaults)."""
-    sizes = dict(COMPONENT_SIZES)
-    if isinstance(config, dict):
-        sizes.update(config)
+    sizes = _coerce_sizes(config)
     return int(sizes["search_compare_baseline_height"]) + 22
 
 
 def compute_search_panel_width(config=None) -> int:
-    sizes = dict(COMPONENT_SIZES)
-    if isinstance(config, dict):
-        sizes.update(config)
+    sizes = _coerce_sizes(config)
     label = int(sizes.get("search_field_label_width", 96))
     scope = int(sizes.get("search_scope_select_width", 104))
     qr = int(sizes.get("mobile_bridge_qr_width", 56))
@@ -132,48 +154,65 @@ def _available_height(margin=None) -> int | None:
     return int(available.height()) if available is not None else None
 
 
-def search_panel_min_height(config=None) -> int:
-    """Hard floor for the query card so option rows never crush into each other.
+def layout_viewport_height(window=None, *, margin=None) -> int | None:
+    """Prefer the live window height; fall back to screen available height.
 
-    Includes tab body, scope/mobile row, mode row, action row, card margins, and
-    enough gap that combo borders stay visible.
+    Screen-only budgets are too optimistic under 125%/150% DPI: the window is
+    often much shorter than ``availableGeometry`` in logical pixels.
     """
-    sizes = dict(COMPONENT_SIZES)
-    if isinstance(config, dict):
-        sizes.update(config)
-    tabs = compute_search_query_tabs_height(sizes)
+    try:
+        if window is not None:
+            height = int(window.height() or 0)
+            if height >= 240:
+                return height
+    except Exception:
+        pass
+    return _available_height(margin)
+
+
+def search_panel_chrome_height(config=None) -> int:
+    """Fixed query-card chrome outside the tab body (model/options/actions/gaps)."""
+    sizes = _coerce_sizes(config)
     card = int(sizes.get("search_panel_card_margin", 8)) * 2
     gap = max(6, int(sizes.get("search_panel_row_spacing", 4)))
-    # model + tabs + mobile + mode + actions → 4 gaps between 5 blocks
     model = 20
     options = int(sizes.get("search_image_options_row_height", 36))
     action = 36
     slack = 16  # combo bottom border + DPI rounding
-    return card + model + tabs + options + options + action + (gap * 4) + slack
+    # model + tabs + mobile + mode + actions → 4 gaps between 5 blocks (tabs counted elsewhere)
+    return card + model + options + options + action + (gap * 4) + slack
 
 
-def compare_row_idle_min_height(config=None) -> int:
-    """Top-row floor when the preview pane is collapsed (L-2: give height to results)."""
-    return search_panel_min_height(config)
+def search_panel_min_height(config=None, *, viewport_height: int | None = None) -> int:
+    """Hard floor for the query card so option rows never crush into each other.
+
+    Tab/drop body shrinks with ``viewport_height``; option rows stay fixed.
+    """
+    sizes = _coerce_sizes(config)
+    tabs = compute_search_query_tabs_height(sizes, viewport_height=viewport_height)
+    return search_panel_chrome_height(sizes) + tabs
 
 
-def compare_row_min_height(config=None) -> int:
+def compare_row_idle_min_height(config=None, *, viewport_height: int | None = None) -> int:
+    """Alias for the query-card floor (kept for older call sites / tests)."""
+    return search_panel_min_height(config, viewport_height=viewport_height)
+
+
+def compare_row_min_height(config=None, *, viewport_height: int | None = None) -> int:
     """Hard minimum for the compare row; always reserves space for the results table.
 
     Preferred card height is only a sizeHint / first-run default. Using it as the
     hard minimum on tall screens locked the top pane and starved the results table.
     """
-    sizes = dict(COMPONENT_SIZES)
-    if isinstance(config, dict):
-        sizes.update(config)
+    sizes = _coerce_sizes(config)
     preferred = compare_row_card_height(sizes)
-    # Never below the query card's true content floor (prevents stacked/overlapping controls).
-    floor = max(int(sizes.get("compare_row_min_height_floor", 240)), search_panel_min_height(sizes))
+    panel_floor = search_panel_min_height(sizes, viewport_height=viewport_height)
+    floor = max(int(sizes.get("compare_row_min_height_floor", 240)), panel_floor)
     soft_cap = max(int(sizes.get("compare_row_min_height_cap", 320)), floor)
     results_floor = int(sizes.get("result_table_min_height_floor", 180))
     # Page chrome under the workspace splitter (header / margins / handle).
     chrome = 120
-    available = _available_height()
+    available = int(viewport_height) if viewport_height is not None else _available_height()
     if available is None:
         return min(max(preferred, floor), soft_cap)
     # Results keep a floor first; top row takes whatever remains (capped).
@@ -186,15 +225,12 @@ def compare_row_min_height(config=None) -> int:
     return floor
 
 
-
-def result_table_min_height(config=None) -> int:
+def result_table_min_height(config=None, *, viewport_height: int | None = None) -> int:
     """Hard minimum for the search results table; shrinks on short screens."""
-    sizes = dict(COMPONENT_SIZES)
-    if isinstance(config, dict):
-        sizes.update(config)
+    sizes = _coerce_sizes(config)
     preferred = int(sizes["result_table_min_height"])
     floor = int(sizes.get("result_table_min_height_floor", 180))
-    available = _available_height()
+    available = int(viewport_height) if viewport_height is not None else _available_height()
     if available is None:
         return min(preferred, 240)
     if available >= 900:
@@ -206,14 +242,12 @@ def result_table_min_height(config=None) -> int:
     return min(preferred, floor)
 
 
-def preview_host_min_height(config=None) -> int:
+def preview_host_min_height(config=None, *, viewport_height: int | None = None) -> int:
     """Minimum preview surface height inside the compare row."""
-    sizes = dict(COMPONENT_SIZES)
-    if isinstance(config, dict):
-        sizes.update(config)
+    sizes = _coerce_sizes(config)
     preferred = int(sizes["preview_host_min_height"])
     floor = int(sizes.get("preview_host_min_height_floor", 180))
-    available = _available_height()
+    available = int(viewport_height) if viewport_height is not None else _available_height()
     if available is None:
         return min(preferred, 220)
     if available >= 900:

@@ -14,50 +14,67 @@ from ui.widgets.layout import (
     compare_row_min_height,
     compute_search_query_tabs_height,
     fit_splitter_pair,
+    image_drop_min_height,
     result_table_min_height,
     search_panel_min_height,
 )
 
 
 class LayoutResponsiveTests(unittest.TestCase):
+    def test_image_drop_shrinks_on_short_viewport(self):
+        preferred = layout_mod.COMPONENT_SIZES["image_drop_min_height"]
+        floor = layout_mod.COMPONENT_SIZES["image_drop_min_height_floor"]
+        self.assertEqual(image_drop_min_height(viewport_height=900), preferred)
+        self.assertLess(image_drop_min_height(viewport_height=700), preferred)
+        self.assertEqual(image_drop_min_height(viewport_height=500), floor)
+
+    def test_search_panel_min_shrinks_with_viewport(self):
+        tall = search_panel_min_height(viewport_height=900)
+        short = search_panel_min_height(viewport_height=640)
+        self.assertGreater(tall, short)
+        # Option-row chrome stays; only the tab/drop body compresses.
+        self.assertGreaterEqual(short, compute_search_query_tabs_height(viewport_height=640) + 120)
+
     def test_compare_row_min_shrinks_on_short_screen(self):
         preferred = compare_row_card_height()
-        content = search_panel_min_height()
+        content = search_panel_min_height(viewport_height=650)
         with patch.object(layout_mod, "_available_height", return_value=650):
-            # Short screens still keep the query-card content floor (no crushed rows).
+            # Short screens keep the adaptive query-card floor (no crushed rows).
             self.assertEqual(compare_row_min_height(), content)
         with patch.object(layout_mod, "_available_height", return_value=950):
+            content_tall = search_panel_min_height(viewport_height=950)
             soft_cap = max(
                 layout_mod.COMPONENT_SIZES["compare_row_min_height_cap"],
-                content,
+                content_tall,
             )
             expected = min(
-                max(preferred, content),
+                max(preferred, content_tall),
                 soft_cap,
                 950 - 120 - layout_mod.COMPONENT_SIZES["result_table_min_height_floor"],
             )
             self.assertEqual(compare_row_min_height(), expected)
 
     def test_compare_row_idle_min_is_below_preferred_card(self):
-        idle = compare_row_idle_min_height()
+        idle = compare_row_idle_min_height(viewport_height=900)
         preferred = compare_row_card_height()
-        self.assertEqual(idle, search_panel_min_height())
+        self.assertEqual(idle, search_panel_min_height(viewport_height=900))
         self.assertLess(idle, preferred)
         self.assertGreaterEqual(idle, 200)
-        # Idle top row must stay under the expanded preferred height so
-        # collapsing preview still frees vertical budget for results.
         self.assertLessEqual(idle, preferred - 40)
 
     def test_search_panel_min_fits_option_rows(self):
         # Scope/mobile + mode + search button must not crush into each other.
-        self.assertGreaterEqual(search_panel_min_height(), compute_search_query_tabs_height() + 120)
+        self.assertGreaterEqual(
+            search_panel_min_height(viewport_height=900),
+            compute_search_query_tabs_height(viewport_height=900) + 120,
+        )
 
     def test_compare_row_min_reserves_results_budget(self):
         with patch.object(layout_mod, "_available_height", return_value=744):
             top = compare_row_min_height()
             results_floor = layout_mod.COMPONENT_SIZES["result_table_min_height_floor"]
             self.assertLessEqual(top + 120 + results_floor, 744)
-            self.assertGreaterEqual(top, search_panel_min_height())
+            self.assertGreaterEqual(top, search_panel_min_height(viewport_height=744))
             self.assertLess(
                 layout_mod.COMPONENT_SIZES["image_drop_min_height"],
                 280,
