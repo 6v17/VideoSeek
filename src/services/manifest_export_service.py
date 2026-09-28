@@ -188,7 +188,10 @@ def execute_export_manifest(
         # Refuse writes under indexed library roots (same guard as timeline XML export).
         check_root = parent or target
         if not output_path_allowed(check_root):
-            raise ValueError("write_path must not be inside an indexed library root.")
+            raise ValueError(
+                "write_path must not be inside an indexed library root "
+                "(and must be under an allowed export root in team mode)."
+            )
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(target, "w", encoding="utf-8") as handle:

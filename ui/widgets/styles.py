@@ -489,16 +489,16 @@ QPushButton:disabled {
     background: __BUTTON_SOFT_HOVER__;
 }
 #SearchButton {
-    background: __SUCCESS__;
-    border-color: __SUCCESS__;
+    background: __ACCENT__;
+    border-color: __ACCENT__;
     color: __INVERSE_TEXT__;
     font-weight: 700;
 }
 #SearchButton:hover {
-    background: __SUCCESS_HOVER__;
+    background: __ACCENT_HOVER__;
 }
 #SearchButton:pressed {
-    background: __SUCCESS__;
+    background: __ACCENT__;
     border-color: __LINE_STRONG__;
 }
 #MobileBridgeToggle {
@@ -2922,6 +2922,15 @@ def build_style(colors):
     partial_icon = _qss_url(get_resource_path("resources/icons/check_partial.png"))
     style = style.replace("__CHECK_ICON__", check_icon)
     style = style.replace("__CHECK_PARTIAL_ICON__", partial_icon)
+    # Collapse 1px-adjacent sizes into a 5-step scale: 12 / 14 / 16 / 18 / 22.
+    for old, new in (
+        ("font-size: 11px", "font-size: 12px"),
+        ("font-size: 13px", "font-size: 14px"),
+        ("font-size: 15px", "font-size: 16px"),
+        ("font-size: 17px", "font-size: 18px"),
+        ("font-size: 20px", "font-size: 22px"),
+    ):
+        style = style.replace(old, new)
     return style
 
 

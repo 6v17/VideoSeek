@@ -199,6 +199,28 @@ class MobileBridgeServiceTests(unittest.TestCase):
         detail = str(getattr(exc, "detail", "") or exc)
         self.assertTrue(status == 413 or "limit" in detail.lower() or "exceed" in detail.lower())
 
+    def test_access_token_uses_compare_digest(self):
+        import hmac
+
+        from src.web.mobile_bridge import MobileBridgeService
+
+        with patch(
+            "src.web.mobile_bridge.get_data_storage_paths",
+            return_value={"mobile_upload_dir": "D:/tmp/uploads"},
+        ), patch("src.web.mobile_bridge.get_app_data_dir", return_value="D:/VideoSeek"), patch(
+            "src.web.mobile_bridge.os.path.isdir", return_value=False
+        ), patch(
+            "src.web.mobile_bridge.get_resource_path",
+            side_effect=lambda relative: f"D:/bundle/{relative}",
+        ):
+            service = MobileBridgeService(on_search_requested=lambda *_a: None)
+
+        with patch("src.web.mobile_bridge.hmac.compare_digest", wraps=hmac.compare_digest) as compare:
+            with self.assertRaises(Exception):
+                service._validate_access_token("wrong-token")
+            compare.assert_called()
+            service._validate_access_token(service.token)
+
 
 if __name__ == "__main__":
     unittest.main()

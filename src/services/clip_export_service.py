@@ -54,15 +54,85 @@ def resolve_clip_window(
     )
 
 
+def default_agent_export_root() -> str:
+    """Fallback export directory under app data (team / strict agent writes)."""
+    from src.app.logging_utils import get_app_data_dir
+
+    return os.path.normpath(os.path.join(get_app_data_dir(), "exports"))
+
+
+def export_path_guard_strict(config=None) -> bool:
+    """When True, Agent/team exports must land under ``list_export_allowed_roots``."""
+    forced = str(os.environ.get("VIDEOSEEK_AGENT_EXPORT_STRICT", "") or "").strip().lower()
+    if forced in {"1", "true", "yes", "on"}:
+        return True
+    if forced in {"0", "false", "no", "off"}:
+        return False
+    cfg = config or load_config()
+    try:
+        from src.services.team_mode_service import is_team_server_mode
+
+        if is_team_server_mode(cfg):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def list_export_allowed_roots(config=None) -> list[str]:
+    """Absolute normalized roots where Agent/team export writes are allowed."""
+    cfg = config or load_config()
+    roots: list[str] = []
+
+    def _add(raw: str) -> None:
+        text = str(raw or "").strip()
+        if not text:
+            return
+        roots.append(normalize_scope_path(os.path.abspath(os.path.expanduser(text))))
+
+    configured = cfg.get("agent_export_allowed_roots", [])
+    if isinstance(configured, str):
+        for part in configured.replace(";", os.pathsep).split(os.pathsep):
+            _add(part)
+    elif isinstance(configured, (list, tuple)):
+        for item in configured:
+            _add(str(item or ""))
+
+    env = str(os.environ.get("VIDEOSEEK_AGENT_EXPORT_ROOTS", "") or "").strip()
+    if env:
+        for part in env.replace(";", os.pathsep).split(os.pathsep):
+            _add(part)
+
+    if export_path_guard_strict(cfg) or roots:
+        _add(default_agent_export_root())
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for root in roots:
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        ordered.append(root)
+    return ordered
+
+
 def output_path_allowed(output_path: str, config=None) -> bool:
-    """Reject writes into indexed library roots (avoid overwriting source media)."""
+    """Reject library overwrites; in team/strict mode require an allowed export root."""
     from src.services.library_service import list_libraries
 
+    cfg = config or load_config()
     normalized_output = normalize_scope_path(output_path)
     for library_path in list_libraries().keys():
         if video_path_under_library_root(normalized_output, library_path):
             return False
-    return True
+
+    roots = list_export_allowed_roots(cfg)
+    if not roots and not export_path_guard_strict(cfg):
+        # Localhost Agent: historical contract — any path outside libraries.
+        return True
+    if not roots:
+        return False
+    return any(video_path_under_library_root(normalized_output, root) for root in roots)
 
 
 def _export_semaphore_for_mode(encode_mode: str) -> threading.Semaphore:

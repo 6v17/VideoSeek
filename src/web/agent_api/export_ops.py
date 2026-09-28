@@ -40,7 +40,10 @@ def _normalize_export_output_dir(output_dir: str) -> str:
     if not normalized:
         raise ValueError("export.output_dir is required.")
     if not output_path_allowed(normalized, config=load_config()):
-        raise ValueError("export.output_dir must not be inside an indexed library root.")
+        raise ValueError(
+            "export.output_dir must not be inside an indexed library root "
+            "(and must be under an allowed export root in team mode)."
+        )
     os.makedirs(normalized, exist_ok=True)
     return normalized
 

@@ -387,13 +387,16 @@ class SearchPanelStateMixin:
             cluster = getattr(page, "text_granularity_cluster", None)
             panel = getattr(page, "search_panel", None)
             if cluster is not None and panel is not None:
-                width = (
-                    getattr(panel, "_text_options_width_with_enhance", None)
-                    if show_enhance
-                    else getattr(panel, "_text_options_width_mode_only", None)
-                )
-                if width:
-                    cluster.setFixedWidth(int(width))
+                if hasattr(panel, "relayout_inline_fields"):
+                    panel.relayout_inline_fields()
+                else:
+                    width = (
+                        getattr(panel, "_text_options_width_with_enhance", None)
+                        if show_enhance
+                        else getattr(panel, "_text_options_width_mode_only", None)
+                    )
+                    if width:
+                        cluster.setMinimumWidth(int(width))
             if show_enhance:
                 self._populate_text_search_enhance_combo()
 
@@ -455,6 +458,10 @@ class SearchPanelStateMixin:
             tags_form.set_placeholder(
                 texts.get("search_tags_placeholder", "Filter tags, or pick from suggestions…")
             )
+
+        panel = getattr(page, "search_panel", None)
+        if panel is not None and hasattr(panel, "relayout_inline_fields"):
+            panel.relayout_inline_fields()
 
         self._refresh_search_model_display()
 

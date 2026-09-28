@@ -802,6 +802,9 @@ class MainWindow(
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
+        panel = getattr(self.search_page, "search_panel", None)
+        if panel is not None and hasattr(panel, "relayout_inline_fields"):
+            panel.relayout_inline_fields()
         self.search_page.preview_placeholder.setText(t["preview_placeholder"])
         self.result_table.apply_header_labels(t)
         self.search_page.result_view.set_empty_message(t["no_results"])

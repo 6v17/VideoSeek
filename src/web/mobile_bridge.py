@@ -1,3 +1,4 @@
+import hmac
 import os
 import secrets
 import socket
@@ -322,7 +323,9 @@ class MobileBridgeService:
             self._started.clear()
 
     def _validate_access_token(self, token: str) -> None:
-        if str(token or "").strip() != self.token:
+        provided = str(token or "").strip().encode("utf-8")
+        expected = str(self.token or "").encode("utf-8")
+        if not expected or not hmac.compare_digest(provided, expected):
             raise HTTPException(status_code=403, detail="Invalid access token.")
 
     async def _index(self, request: Request):
@@ -389,8 +392,7 @@ class MobileBridgeService:
         token: str = Form(""),
         file: UploadFile = File(...),
     ):
-        if str(token).strip() != self.token:
-            raise HTTPException(status_code=403, detail="Invalid upload token.")
+        self._validate_access_token(token)
         target_path = await self._save_upload_file(file)
         try:
             from src.core.image_io import encode_preview_jpeg

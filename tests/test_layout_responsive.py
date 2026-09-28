@@ -25,9 +25,24 @@ class LayoutResponsiveTests(unittest.TestCase):
                 min(preferred, layout_mod.COMPONENT_SIZES["compare_row_min_height_floor"]),
             )
         with patch.object(layout_mod, "_available_height", return_value=950):
-            self.assertEqual(
-                compare_row_min_height(),
-                min(preferred, layout_mod.COMPONENT_SIZES["compare_row_min_height_cap"]),
+            # Tall screens still reserve results floor; soft cap applies.
+            expected = min(
+                preferred,
+                layout_mod.COMPONENT_SIZES["compare_row_min_height_cap"],
+                950 - 120 - layout_mod.COMPONENT_SIZES["result_table_min_height_floor"],
+            )
+            self.assertEqual(compare_row_min_height(), expected)
+
+    def test_compare_row_min_reserves_results_budget(self):
+        with patch.object(layout_mod, "_available_height", return_value=744):
+            top = compare_row_min_height()
+            results_floor = layout_mod.COMPONENT_SIZES["result_table_min_height_floor"]
+            self.assertLessEqual(top + 120 + results_floor, 744)
+            self.assertLessEqual(top, layout_mod.COMPONENT_SIZES["compare_row_min_height_cap"])
+            self.assertLess(
+                layout_mod.COMPONENT_SIZES["image_drop_min_height"],
+                280,
+                "image drop should be smaller so query card fits with results",
             )
 
     def test_result_table_min_shrinks_on_short_screen(self):

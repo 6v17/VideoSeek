@@ -48,6 +48,8 @@ def _step_hint() -> QLabel:
     hint = QLabel()
     hint.setObjectName("CardHint")
     hint.setWordWrap(True)
+    # Cap measure so long EN copy does not span ultrawide windows (UI review P2-1).
+    hint.setMaximumWidth(860)
     return hint
 
 
@@ -55,6 +57,7 @@ def _status_hint() -> QLabel:
     hint = QLabel()
     hint.setObjectName("StatusHint")
     hint.setWordWrap(True)
+    hint.setMaximumWidth(860)
     return hint
 
 

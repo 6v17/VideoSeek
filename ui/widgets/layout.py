@@ -44,7 +44,7 @@ COMPONENT_SIZES = {
     "sidebar_width": 248,
     "nav_button_height": 36,
     "sidebar_action_height": 32,
-    "image_drop_min_height": 280,
+    "image_drop_min_height": 160,
     "search_query_tab_chrome_height": 41,
     "search_query_tab_page_margins_v": 8,
     # Must fit #SearchModeSelect (1px border + padding + text); too short clips the bottom edge.
@@ -56,9 +56,9 @@ COMPONENT_SIZES = {
     "link_query_preview_min_height": 210,
     "result_table_min_height": 420,
     "result_table_min_height_floor": 180,
-    "compare_row_min_height_floor": 260,
+    "compare_row_min_height_floor": 240,
     # Tall screens: do not lock the compare row to its preferred height, or results stay short.
-    "compare_row_min_height_cap": 380,
+    "compare_row_min_height_cap": 320,
     "preview_host_min_height_floor": 160,
     "video_scope_tree_min_height": 200,
     "progress_bar_height": 18,
@@ -67,7 +67,8 @@ COMPONENT_SIZES = {
     "search_option_combo_width": 96,
     "search_scope_select_width": 92,
     "mobile_bridge_qr_width": 56,
-    "search_field_label_width": 60,
+    # Soft floor for panel width math only; labels size to text (see SearchPanel.relayout_inline_fields).
+    "search_field_label_width": 96,
     "search_field_gap": 4,
     "search_controls_group_gap": 8,
     "search_panel_card_margin": 8,
@@ -98,7 +99,7 @@ def compute_search_panel_width(config=None) -> int:
     sizes = dict(COMPONENT_SIZES)
     if isinstance(config, dict):
         sizes.update(config)
-    label = int(sizes.get("search_field_label_width", 72))
+    label = int(sizes.get("search_field_label_width", 96))
     scope = int(sizes.get("search_scope_select_width", 104))
     qr = int(sizes.get("mobile_bridge_qr_width", 56))
     toggle = 52
@@ -132,7 +133,7 @@ def _available_height(margin=None) -> int | None:
 
 
 def compare_row_min_height(config=None) -> int:
-    """Hard minimum for the compare row; shrinks on short / high-DPI screens.
+    """Hard minimum for the compare row; always reserves space for the results table.
 
     Preferred card height is only a sizeHint / first-run default. Using it as the
     hard minimum on tall screens locked the top pane and starved the results table.
@@ -141,16 +142,22 @@ def compare_row_min_height(config=None) -> int:
     if isinstance(config, dict):
         sizes.update(config)
     preferred = compare_row_card_height(sizes)
-    floor = int(sizes.get("compare_row_min_height_floor", 280))
-    soft_cap = int(sizes.get("compare_row_min_height_cap", 380))
+    floor = int(sizes.get("compare_row_min_height_floor", 240))
+    soft_cap = int(sizes.get("compare_row_min_height_cap", 320))
+    results_floor = int(sizes.get("result_table_min_height_floor", 180))
+    # Page chrome under the workspace splitter (header / margins / handle).
+    chrome = 120
     available = _available_height()
     if available is None:
-        return min(preferred, soft_cap, 320)
+        return min(preferred, soft_cap, 280)
+    # Results keep a floor first; top row takes whatever remains (capped).
+    top_budget = max(floor, int(available) - chrome - results_floor)
+    capped = min(preferred, soft_cap, top_budget)
     if available >= 800:
-        return min(preferred, soft_cap)
+        return capped
     if available >= 700:
-        return min(preferred, 300)
-    return min(preferred, floor)
+        return min(capped, 280)
+    return min(capped, floor)
 
 
 def result_table_min_height(config=None) -> int:
