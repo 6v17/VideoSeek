@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QFrame,
@@ -55,6 +55,9 @@ class TagSearchForm(QWidget):
     activate_search = Signal()
     suggestion_activated = Signal(str)
 
+    # Keep suggest rows compact even when the list stretches to fill the tab.
+    _SUGGEST_ROW_PX = 22
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("TagSearchForm")
@@ -89,6 +92,7 @@ class TagSearchForm(QWidget):
         self.filter_edit.setFixedHeight(32)
         root.addWidget(self.filter_edit, 0)
 
+        suggest_min = self._SUGGEST_ROW_PX * 4 + 8
         self.suggest_list = QListWidget()
         self.suggest_list.setObjectName("TagSuggestList")
         self.suggest_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -96,13 +100,18 @@ class TagSearchForm(QWidget):
         self.suggest_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.suggest_list.setSpacing(0)
         self.suggest_list.setUniformItemSizes(True)
+        self.suggest_list.setMinimumHeight(suggest_min)
         self.suggest_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # List fills leftover tab height; hint stays pinned under it (no mid-card void).
         root.addWidget(self.suggest_list, 1)
 
         self.hint_label = QLabel()
         self.hint_label.setObjectName("StatusHint")
         self.hint_label.setWordWrap(True)
+        self.hint_label.setMaximumHeight(36)
         root.addWidget(self.hint_label, 0)
+
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.filter_edit.textChanged.connect(self.filter_changed.emit)
         self.filter_edit.navigate.connect(self._move_suggestion)
@@ -186,11 +195,14 @@ class TagSearchForm(QWidget):
             current = str(item.text() or "").strip().casefold()
         self.suggest_list.clear()
         exclude = set(self._selected_cf)
+        row_h = int(self._SUGGEST_ROW_PX)
         for raw in tags or []:
             tag = str(raw or "").strip()
             if not tag or tag.casefold() in exclude:
                 continue
-            self.suggest_list.addItem(QListWidgetItem(tag))
+            entry = QListWidgetItem(tag)
+            entry.setSizeHint(QSize(0, row_h))
+            self.suggest_list.addItem(entry)
         if self.suggest_list.count() <= 0:
             return
         restore = 0

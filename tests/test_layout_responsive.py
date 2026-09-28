@@ -10,35 +10,54 @@ from PySide6.QtCore import QSize
 from ui.widgets import layout as layout_mod
 from ui.widgets.layout import (
     compare_row_card_height,
+    compare_row_idle_min_height,
     compare_row_min_height,
+    compute_search_query_tabs_height,
     fit_splitter_pair,
     result_table_min_height,
+    search_panel_min_height,
 )
 
 
 class LayoutResponsiveTests(unittest.TestCase):
     def test_compare_row_min_shrinks_on_short_screen(self):
         preferred = compare_row_card_height()
+        content = search_panel_min_height()
         with patch.object(layout_mod, "_available_height", return_value=650):
-            self.assertEqual(
-                compare_row_min_height(),
-                min(preferred, layout_mod.COMPONENT_SIZES["compare_row_min_height_floor"]),
-            )
+            # Short screens still keep the query-card content floor (no crushed rows).
+            self.assertEqual(compare_row_min_height(), content)
         with patch.object(layout_mod, "_available_height", return_value=950):
-            # Tall screens still reserve results floor; soft cap applies.
-            expected = min(
-                preferred,
+            soft_cap = max(
                 layout_mod.COMPONENT_SIZES["compare_row_min_height_cap"],
+                content,
+            )
+            expected = min(
+                max(preferred, content),
+                soft_cap,
                 950 - 120 - layout_mod.COMPONENT_SIZES["result_table_min_height_floor"],
             )
             self.assertEqual(compare_row_min_height(), expected)
+
+    def test_compare_row_idle_min_is_below_preferred_card(self):
+        idle = compare_row_idle_min_height()
+        preferred = compare_row_card_height()
+        self.assertEqual(idle, search_panel_min_height())
+        self.assertLess(idle, preferred)
+        self.assertGreaterEqual(idle, 200)
+        # Idle top row must stay under the expanded preferred height so
+        # collapsing preview still frees vertical budget for results.
+        self.assertLessEqual(idle, preferred - 40)
+
+    def test_search_panel_min_fits_option_rows(self):
+        # Scope/mobile + mode + search button must not crush into each other.
+        self.assertGreaterEqual(search_panel_min_height(), compute_search_query_tabs_height() + 120)
 
     def test_compare_row_min_reserves_results_budget(self):
         with patch.object(layout_mod, "_available_height", return_value=744):
             top = compare_row_min_height()
             results_floor = layout_mod.COMPONENT_SIZES["result_table_min_height_floor"]
             self.assertLessEqual(top + 120 + results_floor, 744)
-            self.assertLessEqual(top, layout_mod.COMPONENT_SIZES["compare_row_min_height_cap"])
+            self.assertGreaterEqual(top, search_panel_min_height())
             self.assertLess(
                 layout_mod.COMPONENT_SIZES["image_drop_min_height"],
                 280,

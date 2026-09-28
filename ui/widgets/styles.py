@@ -1054,6 +1054,7 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
 #TagSuggestList::item {
     padding: 2px 8px;
     min-height: 18px;
+    max-height: 24px;
     border-bottom: 1px solid __LINE__;
 }
 #TagSuggestList::item:selected,

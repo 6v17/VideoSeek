@@ -36,6 +36,7 @@ from ui.widgets.layout import (
     compute_search_panel_width,
     fit_splitter_pair,
     result_table_min_height,
+    search_panel_min_height,
 )
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.result_table import ResultTable
@@ -613,9 +614,10 @@ class SearchPage(QWidget):
 
         self.results_slot_layout.addWidget(self.results_card)
 
-        top_min = compare_row_min_height()
+        top_min = max(compare_row_min_height(), search_panel_min_height())
         bottom_min = result_table_min_height()
         self.compare_splitter.setMinimumHeight(top_min)
+        self.search_panel.setMinimumHeight(top_min)
         self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
         self.workspace_splitter.setObjectName("SearchWorkspaceSplitter")
         self.workspace_splitter.setChildrenCollapsible(False)
@@ -725,7 +727,7 @@ class SearchPage(QWidget):
         splitter = getattr(self, "workspace_splitter", None)
         if splitter is None:
             return
-        top_min = compare_row_min_height()
+        top_min = max(compare_row_min_height(), search_panel_min_height())
         bottom_min = max(160, result_table_min_height())
         preferred_top = compare_row_card_height()
         preferred_bottom = max(bottom_min, 480)
@@ -753,6 +755,7 @@ class SearchPage(QWidget):
             default_b=preferred_bottom,
         )
         splitter.setSizes(sizes)
+
     def _persist_compare_splitter_sizes(self) -> None:
         splitter = getattr(self, "compare_splitter", None)
         if splitter is None or not splitter.isVisible():
@@ -806,12 +809,15 @@ class SearchPage(QWidget):
             saved = [int(v) for v in splitter.sizes()]
             self._workspace_sizes_before_float = saved
         preferred_top = compare_row_card_height()
-        top = max(compare_row_min_height(), int(saved[0]))
+        top = max(compare_row_min_height(), search_panel_min_height(), int(saved[0]))
         bottom = max(160, int(saved[1]))
         # Guard against a previously collapsed/broken snapshot.
         if top + 40 < preferred_top and bottom > preferred_top:
             total = top + bottom
-            top = min(preferred_top, max(compare_row_min_height(), total - max(160, bottom // 2)))
+            top = min(
+                preferred_top,
+                max(compare_row_min_height(), search_panel_min_height(), total - max(160, bottom // 2)),
+            )
             bottom = max(160, total - top)
             self._workspace_sizes_before_float = [top, bottom]
         if self._results_slot_min_before_float is None:
@@ -834,7 +840,7 @@ class SearchPage(QWidget):
         prior_min = self._results_slot_min_before_float
         self._results_slot_min_before_float = None
         if compare is not None:
-            compare.setMinimumHeight(compare_row_min_height())
+            compare.setMinimumHeight(max(compare_row_min_height(), search_panel_min_height()))
             compare.setMaximumHeight(16777215)
         if slot is not None:
             slot.setMaximumHeight(16777215)

@@ -72,7 +72,7 @@ COMPONENT_SIZES = {
     "search_field_gap": 4,
     "search_controls_group_gap": 8,
     "search_panel_card_margin": 8,
-    "search_panel_row_spacing": 4,
+    "search_panel_row_spacing": 8,
     "settings_path_input_width": 160,
     "understanding_form_label_width": 96,
 }
@@ -132,6 +132,31 @@ def _available_height(margin=None) -> int | None:
     return int(available.height()) if available is not None else None
 
 
+def search_panel_min_height(config=None) -> int:
+    """Hard floor for the query card so option rows never crush into each other.
+
+    Includes tab body, scope/mobile row, mode row, action row, card margins, and
+    enough gap that combo borders stay visible.
+    """
+    sizes = dict(COMPONENT_SIZES)
+    if isinstance(config, dict):
+        sizes.update(config)
+    tabs = compute_search_query_tabs_height(sizes)
+    card = int(sizes.get("search_panel_card_margin", 8)) * 2
+    gap = max(6, int(sizes.get("search_panel_row_spacing", 4)))
+    # model + tabs + mobile + mode + actions → 4 gaps between 5 blocks
+    model = 20
+    options = int(sizes.get("search_image_options_row_height", 36))
+    action = 36
+    slack = 16  # combo bottom border + DPI rounding
+    return card + model + tabs + options + options + action + (gap * 4) + slack
+
+
+def compare_row_idle_min_height(config=None) -> int:
+    """Top-row floor when the preview pane is collapsed (L-2: give height to results)."""
+    return search_panel_min_height(config)
+
+
 def compare_row_min_height(config=None) -> int:
     """Hard minimum for the compare row; always reserves space for the results table.
 
@@ -142,22 +167,24 @@ def compare_row_min_height(config=None) -> int:
     if isinstance(config, dict):
         sizes.update(config)
     preferred = compare_row_card_height(sizes)
-    floor = int(sizes.get("compare_row_min_height_floor", 240))
-    soft_cap = int(sizes.get("compare_row_min_height_cap", 320))
+    # Never below the query card's true content floor (prevents stacked/overlapping controls).
+    floor = max(int(sizes.get("compare_row_min_height_floor", 240)), search_panel_min_height(sizes))
+    soft_cap = max(int(sizes.get("compare_row_min_height_cap", 320)), floor)
     results_floor = int(sizes.get("result_table_min_height_floor", 180))
     # Page chrome under the workspace splitter (header / margins / handle).
     chrome = 120
     available = _available_height()
     if available is None:
-        return min(preferred, soft_cap, 280)
+        return min(max(preferred, floor), soft_cap)
     # Results keep a floor first; top row takes whatever remains (capped).
     top_budget = max(floor, int(available) - chrome - results_floor)
-    capped = min(preferred, soft_cap, top_budget)
+    capped = min(max(preferred, floor), soft_cap, top_budget)
     if available >= 800:
         return capped
     if available >= 700:
-        return min(capped, 280)
-    return min(capped, floor)
+        return min(capped, max(floor, 300))
+    return floor
+
 
 
 def result_table_min_height(config=None) -> int:

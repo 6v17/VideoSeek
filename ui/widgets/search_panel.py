@@ -20,6 +20,7 @@ from ui.widgets.layout import (
     compare_row_min_height,
     compute_search_panel_width,
     compute_search_query_tabs_height,
+    search_panel_min_height,
 )
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
@@ -76,7 +77,8 @@ class SearchPanel(VSCard):
 
     def __init__(self, parent=None):
         card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 12))
-        row_spacing = int(COMPONENT_SIZES.get("search_panel_row_spacing", 4))
+        # Keep ≥6 so scope/mobile/mode rows do not sit on each other's borders.
+        row_spacing = max(6, int(COMPONENT_SIZES.get("search_panel_row_spacing", 4)))
         super().__init__(parent, margins=(card_margin,) * 4, spacing=row_spacing)
         layout = self.content_layout
         layout.setSpacing(row_spacing)
@@ -375,7 +377,7 @@ class SearchPanel(VSCard):
         self.btn_clear.setObjectName("DangerGhostButton")
         action_row = QHBoxLayout()
         # Extra top gap so the mode combo bottom border is not covered by 开始搜索.
-        action_row.setContentsMargins(0, 4, 0, 0)
+        action_row.setContentsMargins(0, 8, 0, 0)
         action_row.setSpacing(8)
         action_row.addWidget(self.btn_search, 1)
         action_row.addWidget(self.btn_save_preset, 0)
@@ -392,9 +394,9 @@ class SearchPanel(VSCard):
         self.setMinimumWidth(default_width)
         # Allow dragging wider for tags suggestions; keep a sane ceiling.
         self.setMaximumWidth(max(default_width + 280, int(default_width * 1.85)))
-        # Preferred height for sizeHint; hard min shrinks on short / high-DPI screens.
+        # Preferred height for sizeHint; hard min must fit all fixed option rows.
         self._default_height = compare_row_card_height()
-        self.setMinimumHeight(compare_row_min_height())
+        self.setMinimumHeight(search_panel_min_height())
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._field_label_pad = 4
         self._field_gap = field_gap
