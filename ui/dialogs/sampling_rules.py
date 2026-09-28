@@ -57,6 +57,14 @@ class SamplingRulesDialog(VSDialogShell):
         self.table.setAlternatingRowColors(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(36)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+        )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)

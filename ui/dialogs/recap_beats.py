@@ -110,9 +110,15 @@ class RecapBeatsDialog(VSDialogShell):
         self.people_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.people_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.people_table.verticalHeader().setVisible(False)
+        self.people_table.verticalHeader().setDefaultSectionSize(36)
         self.people_table.setShowGrid(False)
         self.people_table.setAlternatingRowColors(False)
         self.people_table.setMaximumHeight(200)
+        self.people_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+        )
         self.people_table.setHorizontalHeaderLabels(
             list(
                 self.texts.get("understanding_recap_people_headers", ["Name", "Look"])
@@ -153,6 +159,11 @@ class RecapBeatsDialog(VSDialogShell):
         self.beats_table.setShowGrid(False)
         self.beats_table.setAlternatingRowColors(False)
         self.beats_table.verticalHeader().setDefaultSectionSize(36)
+        self.beats_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+        )
         self.beats_table.setHorizontalHeaderLabels(
             list(
                 self.texts.get(

@@ -1692,6 +1692,19 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     background: __TRACK__;
     color: __HEADLINE__;
 }
+/* Inline cell editors: global QLineEdit padding is too fat for table rows. */
+#ResultTable QLineEdit, #DataTable QLineEdit {
+    background: __FIELD__;
+    color: __HEADLINE__;
+    border: 1px solid __ACCENT__;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: 0;
+    min-height: 22px;
+    font-size: 13px;
+    selection-background-color: __ACCENT__;
+    selection-color: __INVERSE_TEXT__;
+}
 #ResultGrid {
     background: __FIELD__;
     border: 1px solid __LINE__;
@@ -2512,7 +2525,7 @@ QListWidget#DialogueLibraryList::item:selected {
 }
 #DialogRulesTable::item, #ResourceDialogTable::item {
     background: transparent;
-    padding: 8px 10px;
+    padding: 6px 10px;
     border: none;
     border-bottom: 1px solid __LINE__;
 }
@@ -2532,12 +2545,15 @@ QListWidget#DialogueLibraryList::item:selected {
     color: __HEADLINE__;
     border-bottom: 1px solid __LINE__;
 }
-#DialogRulesTable QLineEdit {
+#DialogRulesTable QLineEdit, #ResourceDialogTable QLineEdit {
     background: __FIELD__;
     color: __HEADLINE__;
     border: 1px solid __ACCENT__;
-    border-radius: 6px;
-    padding: 2px 6px;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: 0;
+    min-height: 22px;
+    font-size: 13px;
     selection-background-color: __ACCENT__;
     selection-color: __INVERSE_TEXT__;
 }
