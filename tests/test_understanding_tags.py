@@ -83,24 +83,34 @@ class UnderstandingTagsTests(unittest.TestCase):
             ["老人", "奔跑"],
         )
 
-    def test_no_example_driven_harvest_or_grounding(self):
+    def test_generic_fillers_dropped(self):
+        from src.services.understanding_tags import normalize_tag_text, projectable_tags
+
+        self.assertEqual(normalize_tag_text("男人"), "")
+        self.assertEqual(normalize_tag_text("起身"), "")
+        self.assertEqual(normalize_tag_text("室内"), "")
+        self.assertEqual(
+            projectable_tags(["男人", "起身", "手机", "室内", "光头强", "奔跑"]),
+            ["手机", "光头强", "奔跑"],
+        )
+
+    def test_no_caption_harvest_invents_tags(self):
         from src.services.understanding_tags import (
             evidence_text_from_chunk,
             parse_motion_vlm_payload,
             projectable_tags,
         )
 
-        # Post-process only drops shot class / schema slots — does not invent tags
-        # from caption patterns or delete ungrounded content verbs.
+        # No caption mining — only shot/generic filters.
         self.assertEqual(
             projectable_tags(
                 ["老人", "起身", "近景", "奔跑"],
                 evidence_text="老人在雨里奔跑",
             ),
-            ["老人", "起身", "奔跑"],
+            ["老人", "奔跑"],
         )
         self.assertEqual(
-            evidence_text_from_chunk({"tags": ["老人", "起身"], "text": "老人 · 起身"}),
+            evidence_text_from_chunk({"tags": ["老人", "奔跑"], "text": "老人 · 奔跑"}),
             "",
         )
         raw = (
@@ -108,7 +118,7 @@ class UnderstandingTagsTests(unittest.TestCase):
             '{"tags":["老人","起身","近景","奔跑"]}'
         )
         parsed = parse_motion_vlm_payload(raw)
-        self.assertEqual(parsed["tags"], ["老人", "起身", "奔跑"])
+        self.assertEqual(parsed["tags"], [])
         self.assertIn("老人", parsed["visible"])
 
     def test_parse_motion_structured_json(self):
@@ -127,8 +137,8 @@ class UnderstandingTagsTests(unittest.TestCase):
         parsed = parse_motion_vlm_payload(raw)
         self.assertEqual(parsed["visible"], "柜台前两人相对")
         self.assertEqual(parsed["change"], "店长把支票推回去")
-        # Schema-slot placeholders dropped; concrete tags kept.
-        self.assertEqual(parsed["tags"], ["柜台", "支票"])
+        # Motion mode drops searchable tags even if the model still emits them.
+        self.assertEqual(parsed["tags"], [])
         self.assertEqual(parsed["inferred"], "像拒收")
         self.assertAlmostEqual(parsed["inferred_weight"], 0.4)
         self.assertEqual(
@@ -142,7 +152,7 @@ class UnderstandingTagsTests(unittest.TestCase):
         raw = '考官微笑。\n{"tags":["对话","特写"]}'
         parsed = parse_motion_vlm_payload(raw)
         self.assertIn("考官", parsed["visible"])
-        self.assertEqual(parsed["tags"], ["对话"])
+        self.assertEqual(parsed["tags"], [])
         self.assertEqual(parsed["inferred_weight"], 0.0)
 
 if __name__ == "__main__":

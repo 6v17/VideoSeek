@@ -98,6 +98,7 @@ class UnderstandingGuiMixin:
         self._sync_vlm_provider_ui()
         self._remember_vlm_ui_selection(page)
         self._populate_understanding_caption_language_options(remote_vlm.get("caption_language", "zh"))
+        self._populate_understanding_mode_options(remote_vlm.get("understanding_mode", "tags"))
         page.input_caption_concurrency.setValue(
             max(1, min(4, int(remote_vlm.get("concurrency", 2) or 2)))
         )
@@ -110,52 +111,182 @@ class UnderstandingGuiMixin:
             self._refresh_understanding_settings_status()
 
     def _current_understanding_mode(self) -> str:
-        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_TAGS,
+            normalize_understanding_mode,
+        )
 
-        return UNDERSTANDING_MODE_MOTION
+        page = getattr(self, "understanding_page", None)
+        combo = getattr(page, "input_understanding_mode", None) if page is not None else None
+        if combo is not None:
+            data = combo.currentData(Qt.ItemDataRole.UserRole)
+            if data:
+                return normalize_understanding_mode(data)
+        return UNDERSTANDING_MODE_TAGS
+
+    def _populate_understanding_mode_options(self, active_mode=None) -> None:
+        page = getattr(self, "understanding_page", None)
+        if page is None or not hasattr(page, "input_understanding_mode"):
+            return
+        from src.services.understanding_resource_service import (
+            UNDERSTANDING_MODE_MOTION,
+            UNDERSTANDING_MODE_TAGS,
+            normalize_understanding_mode,
+        )
+
+        combo = page.input_understanding_mode
+        active = normalize_understanding_mode(active_mode or UNDERSTANDING_MODE_TAGS)
+        if active not in {UNDERSTANDING_MODE_TAGS, UNDERSTANDING_MODE_MOTION}:
+            active = UNDERSTANDING_MODE_TAGS
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(self.texts.get("understanding_mode_tags", "AI Tagging"), UNDERSTANDING_MODE_TAGS)
+        combo.addItem(self.texts.get("understanding_mode_motion", "AI Editing"), UNDERSTANDING_MODE_MOTION)
+        index = combo.findData(active)
+        combo.setCurrentIndex(0 if index < 0 else index)
+        combo.blockSignals(False)
+
+    def _on_understanding_mode_changed(self, *_args) -> None:
+        self._persist_understanding_job_options()
+        self._sync_understanding_mode_ui(reload_timeline=True)
 
     def _sync_understanding_mode_ui(self, *, reload_timeline: bool = False, reload_dialogue: bool = False):
         page = self._understanding_config_widgets()
         if page is None:
             return
-        page.btn_generate_evidence.setText(
-            self.texts.get("understanding_generate_motion_button", "Generate change notes")
-        )
-        page.btn_generate_batch.setText(
-            self.texts.get("understanding_generate_batch_motion", "Batch change notes")
-        )
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        is_motion = self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
+        if is_motion:
+            page.btn_generate_evidence.setText(
+                self.texts.get("understanding_generate_motion_button", "Generate change notes")
+            )
+            page.btn_generate_batch.setText(
+                self.texts.get("understanding_generate_batch_motion", "Batch change notes")
+            )
+            page.chunk_detail_title.setText(
+                self.texts.get("understanding_chunk_detail_title_motion", "Segment change")
+            )
+            if hasattr(page, "generate_title"):
+                page.generate_title.setText(
+                    self.texts.get(
+                        "understanding_step_generate_title_motion",
+                        "3. Optional full-video change notes",
+                    )
+                )
+            if hasattr(page, "generate_hint"):
+                page.generate_hint.setText(
+                    self.texts.get(
+                        "understanding_step_generate_hint_motion",
+                        "Generate full-video change notes before recap when you can.",
+                    )
+                )
+            if hasattr(page, "select_hint"):
+                page.select_hint.setText(
+                    self.texts.get("understanding_step_select_hint_motion", page.select_hint.text())
+                )
+            if hasattr(page, "header"):
+                page.header.subtitle.setText(
+                    self.texts.get("understanding_page_desc_motion", page.header.subtitle.text())
+                )
+            page.btn_evidence_details.setText(
+                self.texts.get(
+                    "library_evidence_detail_motion",
+                    self.texts.get("library_evidence_detail", "Change history"),
+                )
+            )
+            if hasattr(page, "order_workflow_cards"):
+                page.order_workflow_cards(recap_first=True)
+            if hasattr(page, "dialogue_title"):
+                page.dialogue_title.setText(
+                    self.texts.get("understanding_step_dialogue_title_motion", "2. Extract speech")
+                )
+            if hasattr(page, "export_title"):
+                page.export_title.setText(
+                    self.texts.get("understanding_step_export_title_motion", "4. Recap cuts")
+                )
+            if hasattr(page, "export_hint"):
+                page.export_hint.setText(
+                    self.texts.get("understanding_step_export_hint_motion", "")
+                )
+        else:
+            page.btn_generate_evidence.setText(
+                self.texts.get("understanding_generate_tags_button", "Generate tags")
+            )
+            page.btn_generate_batch.setText(
+                self.texts.get("understanding_generate_batch_tags", "Batch tags")
+            )
+            page.chunk_detail_title.setText(
+                self.texts.get("understanding_chunk_detail_title", "Segment tags")
+            )
+            if hasattr(page, "generate_title"):
+                page.generate_title.setText(
+                    self.texts.get(
+                        "understanding_step_generate_title_tags",
+                        self.texts.get("understanding_step_generate_title", "2. Generate tags"),
+                    )
+                )
+            if hasattr(page, "generate_hint"):
+                page.generate_hint.setText(
+                    self.texts.get(
+                        "understanding_step_generate_hint_tags",
+                        "Tag each segment of the current video.",
+                    )
+                )
+            if hasattr(page, "select_hint"):
+                page.select_hint.setText(
+                    self.texts.get("understanding_step_select_hint", page.select_hint.text())
+                )
+            if hasattr(page, "header"):
+                page.header.subtitle.setText(
+                    self.texts.get("understanding_page_desc", page.header.subtitle.text())
+                )
+            page.btn_evidence_details.setText(
+                self.texts.get("library_evidence_detail", "Evidence history")
+            )
+            if hasattr(page, "order_workflow_cards"):
+                page.order_workflow_cards(recap_first=False)
+            if hasattr(page, "dialogue_title"):
+                page.dialogue_title.setText(
+                    self.texts.get("understanding_step_dialogue_title", "Extract speech")
+                )
+            if hasattr(page, "export_title"):
+                page.export_title.setText(
+                    self.texts.get("understanding_step_export_title", "Recap")
+                )
+            if hasattr(page, "export_hint"):
+                page.export_hint.setText(
+                    self.texts.get("understanding_step_export_hint", "")
+                )
+
         page.btn_generate_batch.setToolTip(
             self.texts.get(
                 "understanding_generate_batch_tip",
-                "Queue videos in the current scope that are still missing results for this mode. Processes one video at a time.",
+                "Queue videos in the current scope that are still missing results for this mode.",
             )
         )
-        page.chunk_detail_title.setText(
-            self.texts.get("understanding_chunk_detail_title_motion", "Segment change")
-        )
-        if hasattr(page, "order_workflow_cards"):
-            # Layout order is fixed at page build; do not reshuffle on every label sync.
-            page.order_workflow_cards(recap_first=True)
-        if hasattr(page, "generate_title"):
-            page.generate_title.setText(
-                self.texts.get("understanding_step_generate_title_motion", "3. Optional full-video change notes")
-            )
-        if hasattr(page, "dialogue_title"):
-            page.dialogue_title.setText(
-                self.texts.get("understanding_step_dialogue_title_motion", "2. Extract speech")
-            )
-        if hasattr(page, "export_title"):
-            page.export_title.setText(
-                self.texts.get("understanding_step_export_title_motion", "4. Recap cuts")
-            )
+        # Tags mode: strip prose hints; Change mode keeps the step explanations.
+        show_prose = is_motion
+        if hasattr(page, "mode_hint"):
+            page.mode_hint.setVisible(show_prose)
+            if show_prose:
+                page.mode_hint.setText(
+                    self.texts.get(
+                        "understanding_mode_hint",
+                        "AI Tagging: searchable labels. AI Editing: speech + change notes + recap.",
+                    )
+                )
         if hasattr(page, "select_hint"):
-            page.select_hint.setText(
-                self.texts.get("understanding_step_select_hint_motion", page.select_hint.text())
-            )
-        if hasattr(page, "header"):
-            page.header.subtitle.setText(
-                self.texts.get("understanding_page_desc_motion", page.header.subtitle.text())
-            )
+            page.select_hint.setVisible(show_prose)
+        if hasattr(page, "generate_hint"):
+            page.generate_hint.setVisible(show_prose)
+        if hasattr(page, "vlm_prompt_hint"):
+            page.vlm_prompt_hint.setVisible(show_prose)
+        if hasattr(page, "header") and hasattr(page.header, "subtitle"):
+            page.header.subtitle.setVisible(show_prose)
+        if hasattr(page, "lbl_understanding_hint"):
+            page.lbl_understanding_hint.setVisible(show_prose)
         if page.btn_generate_evidence.objectName() != "PrimaryButton":
             page.btn_generate_evidence.setObjectName("PrimaryButton")
             style = page.btn_generate_evidence.style()
@@ -170,6 +301,7 @@ class UnderstandingGuiMixin:
                 style.polish(page.btn_generate_batch)
                 page.btn_generate_batch.update()
         if getattr(page, "btn_project_tags", None) is not None:
+            page.btn_project_tags.setVisible(not is_motion)
             page.btn_project_tags.setText(
                 self.texts.get("understanding_project_tags_button", "Sync to search")
             )
@@ -185,26 +317,12 @@ class UnderstandingGuiMixin:
                 style.unpolish(page.btn_project_tags)
                 style.polish(page.btn_project_tags)
                 page.btn_project_tags.update()
-        page.btn_evidence_details.setText(
-            self.texts.get(
-                "library_evidence_detail_motion",
-                self.texts.get("library_evidence_detail", "Change history"),
-            )
-        )
+
+        # Tags mode: tagging + sync only. Change mode: ASR + change notes + recap (no sync).
+        if hasattr(page, "dialogue_card"):
+            page.dialogue_card.setVisible(is_motion)
         if hasattr(page, "export_card"):
-            page.export_card.setVisible(True)
-        if hasattr(page, "generate_hint"):
-            page.generate_hint.setText(
-                self.texts.get(
-                    "understanding_step_generate_hint_motion",
-                    "Generate full-video change notes before recap when you can. If you skip, recap still fills beat-window notes.",
-                )
-            )
-        self._sync_vlm_prompt_tab_for_mode()
-        page.btn_export_video_json.setEnabled(
-            (not (getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()))
-            and self._current_video_has_exportable_evidence()
-        )
+            page.export_card.setVisible(is_motion)
         recap_buttons = (
             "btn_export_recap",
             "btn_recap_step_plan",
@@ -217,21 +335,22 @@ class UnderstandingGuiMixin:
         for name in recap_buttons:
             button = getattr(page, name, None)
             if button is not None:
-                button.setVisible(True)
+                button.setVisible(is_motion)
         for bar_name in ("recap_step_bar", "recap_main_bar"):
             bar = getattr(page, bar_name, None)
             if bar is not None:
-                bar.setVisible(True)
+                bar.setVisible(is_motion)
         if hasattr(page, "recap_start_hint"):
-            page.recap_start_hint.setVisible(True)
-        # Dialogue table is filled by timeline / ASR handlers — not on every label sync.
+            page.recap_start_hint.setVisible(is_motion)
+
+        self._sync_vlm_prompt_tab_for_mode()
+        page.btn_export_video_json.setEnabled(
+            (not (getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()))
+            and self._current_video_has_exportable_evidence()
+        )
         self._sync_recap_export_button()
         if hasattr(self, "_refresh_recap_review_panel"):
             self._refresh_recap_review_panel()
-        if hasattr(page, "export_hint"):
-            page.export_hint.setText(
-                self.texts.get("understanding_step_export_hint_motion", "")
-            )
         if reload_timeline:
             self._load_understanding_video_timeline()
         elif reload_dialogue:
@@ -754,18 +873,38 @@ class UnderstandingGuiMixin:
             return "zh"
         return normalize_caption_language(page.input_caption_language.currentData())
 
+    @staticmethod
+    def _prompt_overrides_builtin(text: str, getter) -> bool:
+        """True only when the editor holds a real override (not empty / not equal to builtins)."""
+        current = str(text or "").strip()
+        if not current:
+            return False
+        for lang in ("zh", "en"):
+            if current == str(getter(lang) or "").strip():
+                return False
+        return True
+
     def _apply_vlm_prompts_from_page(self, remote_vlm: dict) -> None:
+        """Persist overrides only. Matching code defaults → leave empty so code updates keep working."""
         page = getattr(self, "understanding_page", None)
         if page is None or not hasattr(page, "input_custom_caption_prompt"):
             return
-        tag = str(page.input_custom_caption_prompt.toPlainText() or "").strip()
-        motion = str(page.input_custom_motion_prompt.toPlainText() or "").strip()
-        remote_vlm["use_custom_prompts"] = True
+        pairs = self._vlm_prompt_getter_pairs()
+        if len(pairs) < 2:
+            return
+        tag_editor, tag_getter = pairs[0]
+        motion_editor, motion_getter = pairs[1]
+        tag_raw = str(tag_editor.toPlainText() or "").strip() if tag_editor is not None else ""
+        motion_raw = str(motion_editor.toPlainText() or "").strip() if motion_editor is not None else ""
+        tag = tag_raw if self._prompt_overrides_builtin(tag_raw, tag_getter) else ""
+        motion = motion_raw if self._prompt_overrides_builtin(motion_raw, motion_getter) else ""
         remote_vlm["custom_tag_prompt"] = tag
         remote_vlm["custom_caption_prompt"] = tag
         remote_vlm["custom_motion_prompt"] = motion
+        remote_vlm["use_custom_prompts"] = bool(tag or motion)
 
     def _load_vlm_prompt_editors(self, remote_vlm: dict) -> None:
+        """Show effective prompt: saved override if any, else current code default."""
         language = self._vlm_prompt_language()
         use_custom = bool(remote_vlm.get("use_custom_prompts"))
         saved = (
@@ -775,19 +914,19 @@ class UnderstandingGuiMixin:
         for (editor, getter), text in zip(self._vlm_prompt_getter_pairs(), saved):
             if editor is None:
                 continue
-            if use_custom and text:
+            if use_custom and self._prompt_overrides_builtin(text, getter):
                 editor.setPlainText(text)
             else:
                 editor.setPlainText(getter(language))
 
     def _refresh_vlm_prompt_editors_for_language(self) -> None:
         language = self._vlm_prompt_language()
-        builtin_langs = ("zh", "en")
         for editor, getter in self._vlm_prompt_getter_pairs():
             if editor is None:
                 continue
             current = str(editor.toPlainText() or "").strip()
-            if not current or any(current == str(getter(item) or "").strip() for item in builtin_langs):
+            # Switch language only when still on a builtin (or empty)—don't clobber real overrides.
+            if not self._prompt_overrides_builtin(current, getter):
                 editor.setPlainText(getter(language))
 
     def _sync_vlm_prompt_tab_for_mode(self) -> None:
@@ -797,11 +936,28 @@ class UnderstandingGuiMixin:
             return
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
 
-        # Tabs: 0 = tag, 1 = motion
+        # Tabs: 0 = tag, 1 = motion — only the active mode's prompt is shown.
         index = 1 if self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION else 0
+        index = min(index, max(tabs.count() - 1, 0))
         for i in range(tabs.count()):
-            tabs.setTabVisible(i, True)
-        tabs.setCurrentIndex(min(index, max(tabs.count() - 1, 0)))
+            tabs.setTabVisible(i, i == index)
+        tabs.setCurrentIndex(index)
+        if hasattr(page, "vlm_prompt_label"):
+            if index == 1:
+                page.vlm_prompt_label.setText(
+                    self.texts.get("understanding_custom_motion_prompt_label", "Change prompt")
+                )
+            else:
+                page.vlm_prompt_label.setText(
+                    self.texts.get("understanding_custom_caption_prompt_label", "Tag prompt")
+                )
+        if hasattr(page, "vlm_prompt_hint") and page.vlm_prompt_hint.isVisible():
+            page.vlm_prompt_hint.setText(
+                self.texts.get(
+                    "understanding_vlm_prompt_hint_simple",
+                    "Editable. Restore = built-in from code. Unchanged text is not saved as custom.",
+                )
+            )
 
     def _on_reset_custom_prompts_clicked(self):
         page = getattr(self, "understanding_page", None)
@@ -970,12 +1126,17 @@ class UnderstandingGuiMixin:
     def _chunk_payload_has_evidence(self, payload) -> bool:
         if not isinstance(payload, dict):
             return False
+        if str(payload.get("visible") or "").strip() or str(payload.get("change") or "").strip():
+            return True
         tags = [str(item).strip() for item in list(payload.get("tags") or []) if str(item or "").strip()]
         if tags:
             return True
         evidence = dict(payload.get("evidence") or {})
         vision = dict(evidence.get("vision") or {})
-        caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
+        caption_payload = dict(vision.get("image_caption") or {})
+        if str(caption_payload.get("visible") or "").strip() or str(caption_payload.get("change") or "").strip():
+            return True
+        caption = str(caption_payload.get("text", "") or "").strip()
         return bool(caption)
 
     def _load_understanding_video_timeline(self):
@@ -1177,15 +1338,27 @@ class UnderstandingGuiMixin:
         )
         vision = dict(dict(payload.get("evidence") or {}).get("vision") or {})
         caption = str(dict(vision.get("image_caption") or {}).get("text", "") or "").strip()
-        tags = [str(item).strip() for item in list(payload.get("tags") or []) if str(item or "").strip()]
-        if not tags:
-            nested = dict(vision.get("image_caption") or {}).get("tags") or []
-            tags = [str(item).strip() for item in list(nested) if str(item or "").strip()]
-        display = caption
-        if tags:
-            from src.services.understanding_tags import format_tags_for_display
+        # Prefer structured motion fields when present (change mode).
+        visible = str(payload.get("visible") or dict(vision.get("image_caption") or {}).get("visible") or "").strip()
+        change = str(payload.get("change") or dict(vision.get("image_caption") or {}).get("change") or "").strip()
+        if visible or change:
+            from src.services.understanding_tags import format_motion_cap_text
 
-            display = (display + "\n\n" if display else "") + format_tags_for_display(tags)
+            display = format_motion_cap_text(visible, change) or caption
+        else:
+            display = caption
+        # Tags belong to tags mode only — never append them on the change-mode detail card.
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+        if self._current_understanding_mode() != UNDERSTANDING_MODE_MOTION:
+            tags = [str(item).strip() for item in list(payload.get("tags") or []) if str(item or "").strip()]
+            if not tags:
+                nested = dict(vision.get("image_caption") or {}).get("tags") or []
+                tags = [str(item).strip() for item in list(nested) if str(item or "").strip()]
+            if tags:
+                from src.services.understanding_tags import format_tags_for_display
+
+                display = (display + "\n\n" if display else "") + format_tags_for_display(tags)
         dialogue = self._overlapping_dialogue_text(start_sec, end_sec)
         if dialogue:
             display = (
@@ -1208,12 +1381,8 @@ class UnderstandingGuiMixin:
         chunk_index = int(index)
         self._understanding_chunk_payloads[chunk_index] = dict(payload or {})
         page.chunk_timeline.set_segment_state(chunk_index, "ready")
-        page.chunk_timeline.set_generating_index(-1)
-        page.chunk_timeline.set_selected_index(chunk_index)
-        self._show_understanding_chunk_detail(chunk_index, payload)
-        if not getattr(self, "_recap_motion_timeline_shown", False):
-            self._ensure_understanding_timeline_on_screen()
-            self._recap_motion_timeline_shown = True
+        # Do not auto-select / rewrite the detail card per chunk — that reflows
+        # captions + sample frames and yanks the page scroll upward.
         _ = total
 
     def _handle_understanding_chunk_completed(self, index, total, payload):
@@ -1225,7 +1394,11 @@ class UnderstandingGuiMixin:
         page.chunk_timeline.set_segment_state(chunk_index, "ready")
         next_index = chunk_index + 1
         page.chunk_timeline.set_generating_index(next_index if next_index < int(total) else -1)
-        self._show_understanding_chunk_detail(chunk_index, payload)
+        # Timeline color only while generating. Opening every chunk's detail panel
+        # (text + dual thumbnails) makes the outer page scroll jump.
+        selected = int(page.chunk_timeline.selected_index())
+        if selected == chunk_index:
+            self._show_understanding_chunk_detail(chunk_index, payload)
 
     def _prepare_understanding_timeline_for_generation(self):
         page = self.understanding_page
@@ -1525,22 +1698,25 @@ class UnderstandingGuiMixin:
         self._set_understanding_config_enabled(False)
         page.btn_stop.setEnabled(True)
         page.btn_stop.setVisible(True)
-        page.progress_bar.setVisible(True)
-        page.lbl_status.setText(self.texts.get("understanding_generation_started", "Generating…"))
-        page.understanding_notice.hide()
-        self._prepare_understanding_timeline_for_generation()
-        resumed = sum(
-            1
-            for index in range(page.chunk_timeline.segment_count())
-            if self._chunk_payload_has_evidence(self._understanding_chunk_payloads.get(index))
-        )
-        if resumed > 0:
+        with self._freeze_understanding_page_scroll():
+            page.progress_bar.setVisible(True)
             page.lbl_status.setText(
-                self.texts.get(
-                    "understanding_generation_resuming",
-                    "Resuming: {saved} segments already saved.",
-                ).format(saved=resumed)
+                self.texts.get("understanding_generation_started", "Generating…")
             )
+            page.understanding_notice.hide()
+            self._prepare_understanding_timeline_for_generation()
+            resumed = sum(
+                1
+                for index in range(page.chunk_timeline.segment_count())
+                if self._chunk_payload_has_evidence(self._understanding_chunk_payloads.get(index))
+            )
+            if resumed > 0:
+                page.lbl_status.setText(
+                    self.texts.get(
+                        "understanding_generation_resuming",
+                        "Resuming: {saved} segments already saved.",
+                    ).format(saved=resumed)
+                )
 
         if self.understanding_controller.start_video(video_id, mode=self._current_understanding_mode()):
             if hasattr(self, "_sync_tray_stop_action"):
@@ -2075,8 +2251,12 @@ class UnderstandingGuiMixin:
         page = getattr(self, "understanding_page", None)
         if page is None or not hasattr(page, "dialogue_card"):
             return
+        from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
         with self._freeze_understanding_page_scroll():
-            page.dialogue_card.setVisible(True)
+            page.dialogue_card.setVisible(
+                self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
+            )
             video_id = self._selected_understanding_video_id()
             cues = []
             if video_id:
@@ -2360,6 +2540,8 @@ class UnderstandingGuiMixin:
         finally:
             if bar is not None:
                 bar.setValue(pos)
+                # Late reflow (text/pixmap) can still nudge scroll after this frame.
+                QTimer.singleShot(0, lambda b=bar, p=pos: b.setValue(p))
 
     def _select_understanding_chunk_at(self, timestamp_sec: float) -> None:
         chunks = list(getattr(self, "_understanding_index_chunks", []) or [])

@@ -224,10 +224,19 @@ class UnderstandingEvidencePage(QWidget):
         self.input_caption_language.setObjectName("SearchModeSelect")
         self.input_caption_language.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
+        self.mode_label = _field_label()
+        self.input_understanding_mode = NoWheelComboBox()
+        self.input_understanding_mode.setObjectName("SearchModeSelect")
+        self.input_understanding_mode.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
         grid.addWidget(_stack_field(self.scope_label, self.scope_combo), 0, 0)
         grid.addWidget(_stack_field(self.video_label, self.video_combo), 0, 1)
-        grid.addWidget(_stack_field(self.label_caption_language, self.input_caption_language), 1, 0)
+        grid.addWidget(_stack_field(self.mode_label, self.input_understanding_mode), 1, 0)
+        grid.addWidget(_stack_field(self.label_caption_language, self.input_caption_language), 1, 1)
         layout.addWidget(self.picker_strip)
+
+        self.mode_hint = _status_hint()
+        layout.addWidget(self.mode_hint)
 
         self.lbl_understanding_hint = _status_hint()
         layout.addWidget(self.lbl_understanding_hint)
@@ -363,6 +372,7 @@ class UnderstandingEvidencePage(QWidget):
         self.chunk_caption_text = QPlainTextEdit()
         self.chunk_caption_text.setObjectName("UnderstandingOutput")
         self.chunk_caption_text.setReadOnly(True)
+        self.chunk_caption_text.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._chunk_caption_stretch = add_vertically_stretchable(
             chunk_detail_layout,
             self.chunk_caption_text,

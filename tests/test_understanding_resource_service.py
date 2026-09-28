@@ -374,7 +374,8 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
             }
         )
         self.assertEqual(settings["caption_language"], "en")
-        self.assertTrue(settings["prompt"].startswith("Look at the frame"))
+        self.assertTrue(settings["prompt"].startswith("Task: short tags for text-search"))
+
 
     def test_get_remote_vlm_settings_infers_legacy_english_prompt(self):
         config = {
@@ -422,13 +423,20 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
             {"understanding_mode": "motion", "caption_language": "zh"}
         )
         self.assertIn("标签", tag_settings["prompt"])
-        self.assertIn("拼接图", motion_settings["prompt"])
+        self.assertIn("抽帧", motion_settings["prompt"])
         self.assertIn("visible", motion_settings["prompt"])
         self.assertIn("change", motion_settings["prompt"])
         self.assertIn("inferred_weight", motion_settings["prompt"])
-        self.assertIn('"tags":["老人","奔跑","雨夜","红伞"]', motion_settings["prompt"])
-        self.assertIn("检查清单", motion_settings["prompt"])
+        self.assertIn("主体", motion_settings["prompt"])
+        self.assertIn("正反打", motion_settings["prompt"])
+        self.assertIn("表情", motion_settings["prompt"])
+        self.assertNotIn("tags", motion_settings["prompt"].lower())
+        self.assertNotIn("标签", motion_settings["prompt"])
         self.assertNotEqual(motion_settings["prompt"], tag_settings["prompt"])
+        self.assertIn("文搜找片", tag_settings["prompt"])
+        self.assertIn("人物外貌/服饰", tag_settings["prompt"])
+        self.assertIn("有则写、无则跳过", tag_settings["prompt"])
+        self.assertIn("景别", tag_settings["prompt"])
 
     def test_finalize_uses_custom_prompts_when_enabled(self):
         settings = understanding_resource_service.finalize_remote_vlm_settings(
@@ -459,7 +467,8 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                 "model": "qwen3-vl-8b-instruct",
             }
         )
-        self.assertTrue(settings["prompt"].startswith("Look at the frame"))
+        self.assertTrue(settings["prompt"].startswith("Task: short tags for text-search"))
+
         self.assertNotIn("custom_summary_prompt", settings)
 
     def test_finalize_remote_vlm_settings_preserves_api_key(self):

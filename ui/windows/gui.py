@@ -520,6 +520,10 @@ class MainWindow(
         self.understanding_page.input_caption_language.currentIndexChanged.connect(
             self._on_understanding_caption_language_changed
         )
+        if hasattr(self.understanding_page, "input_understanding_mode"):
+            self.understanding_page.input_understanding_mode.currentIndexChanged.connect(
+                self._on_understanding_mode_changed
+            )
         form.input_vlm_provider_mode.currentIndexChanged.connect(self._on_vlm_provider_mode_changed)
         form.input_vlm_provider_preset.currentIndexChanged.connect(self._on_vlm_provider_preset_changed)
         llm_form = self.understanding_services_dialog.llm_form
@@ -1174,6 +1178,13 @@ class MainWindow(
         current_language = self.understanding_page.input_caption_language.currentData()
         self._populate_understanding_caption_language_options(current_language or "zh")
         self.understanding_page.input_caption_language.setToolTip(t["understanding_caption_language_hint"])
+        if hasattr(self.understanding_page, "mode_label"):
+            self.understanding_page.mode_label.setText(t.get("understanding_mode_label", "Mode"))
+        if hasattr(self.understanding_page, "mode_hint"):
+            self.understanding_page.mode_hint.setText(t.get("understanding_mode_hint", ""))
+        if hasattr(self.understanding_page, "input_understanding_mode"):
+            current_mode = self.understanding_page.input_understanding_mode.currentData()
+            self._populate_understanding_mode_options(current_mode or "tags")
         cfg.label_caption_concurrency.setText(t["understanding_caption_concurrency_label"])
         cfg.input_caption_concurrency.setToolTip(t["understanding_caption_concurrency_hint"])
         if hasattr(self.understanding_page, "vlm_prompt_label"):

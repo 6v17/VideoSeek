@@ -125,16 +125,17 @@ _VO_QUOTE_RE = re.compile(r"[「『]([^」』]{1,120})[」』]")
 _VO_WHITESPACE_RE = re.compile(r"\s+")
 
 RECAP_NAME_POLICY = """【人物】
-1. asr[].speaker 非空 = 谁在说，口播主语必须跟它走；禁止改成别人。
-2. 对白里自报/当面叫名才可绑人，且整集只绑同一个人。
-3. people 只是称呼词典；本段 asr 未证实的人名禁止写进口播。
-4. 无人名且 speaker 空时用画面特征称呼；不要瞎起人名；不要把多人并成同一个「他」。
+1. asr[].speaker 非空 = 谁在说，口播主语优先跟它走。
+2. 对白里自报/当面叫名才可绑真名，且整集只绑同一个人。
+3. people 是称呼词典：可用男主/女主/黄毛/蓝毛等稳定临时称呼区分角色。
+4. 有已证实人名或用户命名时优先用那个，不要用外号顶替已有真名；无人名时临时称呼完全可用。
+5. 不要把多人并成同一个「他」。
 """
 
 RECAP_FACT_POLICY = """【主谓宾】
 谁做了、对谁做、得到的是谁的东西必须分清；禁止两人结果并成「他们……」。
 同一事实整集口径一致，禁止前后自相矛盾。
-主语只跟 asr.speaker / 对白称呼走，禁止用男主/女主或从 people 乱抓名字顶替。
+主语优先跟 asr.speaker / 对白称呼 / people 稳定称呼走；可用男主/女主或发色外号，但禁止用外号顶替本段已证实人名，禁止从 people 乱抓名字张冠李戴。
 """
 
 # Plan stages: facts only — no VO narration rules (those live in RECAP_VO_WRITE_PACK).
@@ -201,7 +202,7 @@ RECAP_PLAN_ACT_SYSTEM = """你是影视解说的分幕剧情策划：只规划�
 【无对白也要管】silent_spans：有 cap 写视觉推进；无 cap 也要 needed_visual 占位，禁止跳过。
 本幕：进入 → 展开 → 落点（非末幕可接到下一幕）。多段小剧场各自要有展开与落点。
 一次写完：must_land / spine / silent_spans 须盖住。承接 already，勿重复推翻。
-event：谁做了什么、局面怎么变；禁止「XX说/觉得」；禁止男主/女主。
+event：谁做了什么、局面怎么变；禁止「XX说/觉得」。可用男主/女主等稳定临时称呼。
 t 落在本幕窗内并贴 spine/silent_spans；带 evidence_required 与 needed_visual。不要 OP/ED/预告。
 """ + RECAP_PLAN_EVIDENCE_PACK + """
 importance 0.05–1.0 只调口播配额，不决定删段。只输出 JSON。
@@ -271,7 +272,7 @@ JSON schema:
 RECAP_SYSTEM = """你是影视解说的选镜节点：按已写好的解说稿（beat.vo）找画面，不改剧情，不写新旁白。
 
 输入：beats（含 vo + evidence_required）、chunks、对白时间轴（asr.speaker 非空不可改）。
-画面须能证明旁白；优先 cap 对得上的 chunk；对不上标弱证据。禁止男主/女主。
+画面须能证明旁白；优先 cap 对得上的 chunk；对不上标弱证据。称呼可用男主/女主等临时外号（有真名优先真名）。
 
 【镜头】
 1. 每 beat 至少一刀；shots≥2 时至少两刀主线（进入 + 变化/落点）；禁止同 beat 两刀剪几乎同一段 src。
@@ -3254,10 +3255,10 @@ def recap_plan_user_prompt(pack: Mapping[str, Any]) -> str:
     target = recap_target_sec(duration)
     seeded = list(pack.get("people") or [])
     name_line = (
-        "people 已有稳定称呼（含用户命名与声线聚类）。event/口播主语必须跟 asr.speaker / people.label 走；"
-        "声线N 可先当临时称呼，禁止另造发色外号顶替已有 label。\n"
+        "people 已有稳定称呼（含用户命名与声线聚类）。event/口播主语优先跟 asr.speaker / people.label 走；"
+        "声线N 可先当临时称呼；可用男主/女主/发色外号，但禁止用外号顶替已有真名/用户命名。\n"
         if seeded
-        else "先列 people（稳定称呼），无人名再用画面特征。禁止男主/女主。\n"
+        else "先列 people（稳定称呼，可用男主/女主/黄毛/蓝毛等）；无人名再用画面特征。\n"
     )
     return (
         f"原片时长 {duration:.0f} 秒。请规划有证据支撑的故事线大纲 beats（有 asr/cap 就写，条数不设上限），不要写 clips。\n"
@@ -3332,7 +3333,8 @@ def recap_user_prompt(
         "时间最早的 beat 是开场，必须剪进去。不要选 OP/片头曲、ED/片尾曲、演职员表、下一集预告。skip=op_ed 的 chunk 不要用。只输出这些 beats 的 clips。\n"
         "chunks 是视觉证据：i=chunk_index，t=[start,end]，cap=看得见的变化。"
         "有 cap 必须优先；无 cap 时只按 asr 时间与 chunk.t 选镜，禁止瞎猜画面内容。\n"
-        "reason 必须用 people 里的稳定称呼（优先用户命名的 speaker label），不要把两个人写成同一个他。禁止男主/女主，禁止用发色外号替换已有名字。每个 clip 必须带 beat_id 和 reason。\n"
+        "reason 用 people 里的稳定称呼（优先用户命名的 speaker label）；可用男主/女主/发色外号，有真名时不要用外号顶替。"
+        "不要把两个人写成同一个他。每个 clip 必须带 beat_id 和 reason。\n"
         "asr[].speaker 非空=谁在说，当事实。\n\n"
         + json.dumps(
             {
@@ -4681,7 +4683,7 @@ def normalize_story_people(raw: Mapping[str, Any] | list[Any] | None) -> list[di
     if not isinstance(items, list):
         return []
     bad_label = re.compile(
-        r"^(男主|女主|主角|npc|语气助词.*|说话人\d*|声线\d*)$|"
+        r"^(npc|语气助词.*|说话人\d*|声线\d*)$|"
         r"^(ed|op|bgm)$|.*(片头曲|片尾曲|主题曲)|^ed音乐$|^op音乐$|^bgm音乐$",
         re.IGNORECASE,
     )
@@ -5216,7 +5218,7 @@ def recap_gap_user_prompt(
         "无 asr 禁止编台词/转述；有 caps 只写可见动作。\n"
         "谁说话只看 asr[].speaker；people 未在本段 asr 证实的人名禁止使用。\n"
         "match_status=weak_match：短句场面或 skip，禁止编结果。\n"
-        "禁止把两个人写成同一个他，禁止男主/女主。\n\n"
+        "禁止把两个人写成同一个他。可用男主/女主等临时称呼，有真名优先真名。\n\n"
         + json.dumps(
             {
                 "people": list(people or []),

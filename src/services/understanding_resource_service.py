@@ -128,78 +128,102 @@ SPLIT_UNDERSTANDING_MODES = (
 )
 # Recap / VO / FCPXML uses a separate LLM job (see recap_service), not these vision modes.
 
-# Tag mode: flat searchable footage features (checklist only — not a fill-every-slot ontology).
+# Tag mode: searchable footage tags.
+# Lean on DeepSeek-style *dimensions as a short checklist* (what editors search),
+# not a fill-every-slot ontology (no shot size / faction / symbolism / mood essays).
 TAG_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: (
-        "看画面，提取可用来搜素材的中文标签。只输出 JSON："
-        '{"tags":["标签1","标签2","标签3"]}。'
-        "检查清单（有则写，无则跳过，不要为填满而编）："
-        "角色名/人物、具体动作、场景/环境、关键物体或服饰、可见情绪（如哭/笑）、天气/光线。"
-        "条数不设下限；画面丰富时可写到 16 条左右，每条 2–8 字。"
-        "不要写：景别（近景/特写等）、空泛互动、象征/阵营/氛围感受、句子、解释、markdown。"
+        "任务：给「文搜找片」打短标签。只输出 JSON："
+        '{"tags":["标签1","标签2","标签3"]}。\n'
+        "按下面清单扫一眼画面，有则写、无则跳过（不要为填格子编词）：\n"
+        "1) 人物外貌/服饰（发型发色、五官、胡须眼镜、衣服颜色款式、年龄体型感）\n"
+        "2) 具体动作/事件（跑、抱、哭、爆炸…；禁止空泛的起身/互动/出现）\n"
+        "3) 场景/环境（厨房、街道夜景、办公室…；禁止只写室内/室外）\n"
+        "4) 主体道具（仅画面明确主体；人手顺带拿的手机/杯子不要）\n"
+        "5) 可见情绪（哭、笑、怒…；不要写氛围/象征）\n"
+        "6) 天气/光线（若明显：雨、雪、逆光、霓虹…）\n"
+        "有人时禁止只写男人/女人：外貌或服饰至少 2 个；怼脸/特写同理。\n"
+        "禁止：景别（近景/特写/跟拍）、阵营、象征、构图黑话、句子、markdown。\n"
+        "宁少勿凑；画面丰富时可到约 16 条，每条 2–8 字。"
     ),
     CAPTION_LANGUAGE_EN: (
-        "Look at the frame. Extract searchable footage tags. "
-        'Output JSON only: {"tags":["tag1","tag2","tag3"]}. '
-        "Checklist (include only what is visible; skip empty slots—do not invent): "
-        "character/person, concrete action, place/setting, key object or clothing, "
-        "visible emotion (e.g. crying/smiling), weather/light. "
-        "No minimum count; up to about 16 tags when the frame is rich (1–3 words each). "
-        "Do not write: shot size (close-up/wide), vague interaction, symbolism/"
-        "faction/mood-feelings, sentences, explanation, markdown."
+        "Task: short tags for text-search footage retrieval. "
+        'Output JSON only: {"tags":["tag1","tag2","tag3"]}.\n'
+        "Scan this short checklist—write only what is clearly visible; skip empty slots "
+        "(do not invent filler):\n"
+        "1) Person look/clothes (hair, face, beard/glasses, clothing color/style, age/build)\n"
+        "2) Concrete action/event (run, hug, cry, explode…; ban vague stand-up/interact/appear)\n"
+        "3) Place/setting (kitchen, night street, office…; ban indoor/outdoor alone)\n"
+        "4) Subject prop (only if clearly the subject; ignore phone/cup held casually)\n"
+        "5) Visible emotion (cry, smile, anger…; no mood/symbolism)\n"
+        "6) Weather/light if obvious (rain, snow, backlight, neon…)\n"
+        "If a person is visible: never bare man/woman—at least 2 look/clothes tags; "
+        "same for face close-ups.\n"
+        "Forbidden: shot size (close-up/medium/follow), faction, symbolism, composition jargon, "
+        "sentences, markdown.\n"
+        "Fewer beats filler; up to about 16 short tags (1–3 words) when rich."
     ),
 }
 # Keep old name as alias so existing imports/tests keep working.
 CAPTION_LANGUAGE_PROMPTS = TAG_LANGUAGE_PROMPTS
 
-# Motion mode: stitched earlier/later frames from the same chunk. Describe change only; optional tags.
+# Motion mode: change notes for recap beat matching.
+# 「主体」= what the eye lands on first (compositional focus), NOT pixel area, NOT story protagonist.
 MOTION_LANGUAGE_PROMPTS = {
     CAPTION_LANGUAGE_ZH: (
-        "这是一张视频时间片段拼接图。左侧帧早于右侧帧，图上有时间标注。\n"
-        "只根据画面写短字段。不要写长散文，不要写运镜/景别，不要编对白/动机。\n"
+        "根据抽帧图写画面变化。常见左右两帧（左早右晚），也可能四宫格（早→晚）或单帧；"
+        "按图上/附加文字的时间顺序写，不要当成同时分屏。\n"
         "\n"
-        "只输出一个 JSON 对象（可空字段留空字符串或省略）：\n"
-        '{"visible":"谁/在哪/在干什么（只写看见的）",'
-        '"change":"先…再…（两帧之间发生了什么）",'
-        '"tags":["老人","奔跑","雨夜","红伞"],'
+        "只输出一个 JSON（可空则 \"\" 或省略）：\n"
+        '{"visible":"主体是什么、在干什么（只写看见的）",'
+        '"change":"主体先…再…（有意义的变化）",'
         '"inferred":"弱推理叙事功能（可空）",'
         '"inferred_weight":0.0}\n'
         "\n"
+        "核心——先找「主体」再写：\n"
+        "主体=你一眼先看到、画面在讲的那一块（人物脸/特写、前景关键物、醒目景物等）。\n"
+        "不是像素面积最大：背景墙/天空再大，中间站着的人仍可能是主体。\n"
+        "也不是故事里的主角设定：路人、角落小人不抢眼就不要写成主体。\n"
+        "\n"
         "规则：\n"
-        "1. visible：一句内写清谁、在哪、干什么（约20字内）。\n"
-        "2. change：一句内；单帧可空。\n"
-        "3. tags：短标签（2–6 字）。检查清单（有则写，无则跳过）："
-        "角色名/人物、具体动作、场景/环境、关键物体或服饰、可见情绪、天气/光线。"
-        "条数不设下限；画面丰富时可写到 16 条左右。"
-        "不要景别、空泛互动、象征/阵营；inferred 不得写入 tags。\n"
-        "4. inferred：弱推理（如像对质），看不清就空；不要放进 tags。\n"
-        "5. inferred_weight：0～1；空 inferred 时用 0。\n"
-        "6. 不输出 Markdown，不输出故事总结。"
+        "1. visible：围绕主体写清是什么、在哪、在干什么；一句到两句，约 15–40 字。"
+        "主体有明显表情（哭/怒/笑/愣）必须写进 visible。\n"
+        "2. change：只写主体上有意义的变化（表情、动作、姿态、相对位置）；"
+        "一句到两句，约 15–40 字。背景路人、无关杂物不要写进 change。\n"
+        "3. 正反打/对话切镜：同一对话换机位时，写「两人对话，机位从A切到B」之类，"
+        "禁止写成「他背对镜头再面对她／她背对再面对他」这种假转身。\n"
+        "4. 几乎无变化或单帧：change 可空。\n"
+        "5. inferred：弱叙事猜测，看不清就空；inferred_weight 0～1，空则 0。\n"
+        "6. 不要 markdown，不要故事总结，不要输出示例以外的字段。"
     ),
     CAPTION_LANGUAGE_EN: (
-        "This is a stitched image of two frames from the same video span. "
-        "Left is earlier than right; the image is time-labeled.\n"
-        "Write short fields only—no long prose, no camera/shot-size essays, "
-        "no invented dialogue/motives.\n"
+        "Describe picture change from frame sample(s). Usually left/right "
+        "(left earlier, right later); sometimes a 2x2 time grid or a single frame. "
+        "Follow the time order in the image/notes; not a simultaneous split screen.\n"
         "\n"
         "Output one JSON object (empty fields may be \"\" or omitted):\n"
-        '{"visible":"who/where/doing what (seen only)",'
-        '"change":"first… then… (what changed between frames)",'
-        '"tags":["elder","running","rain","umbrella"],'
+        '{"visible":"what the subject is / doing (seen only)",'
+        '"change":"subject first… then… (meaningful change)",'
         '"inferred":"weak narrative role (optional)",'
         '"inferred_weight":0.0}\n'
         "\n"
+        "Core—find the SUBJECT first:\n"
+        "Subject = what your eye lands on / what the shot is about "
+        "(a face/close-up, a foreground object, a striking place, etc.).\n"
+        "NOT largest pixel area: a huge wall/sky can still leave the centered person as subject.\n"
+        "NOT story protagonist by name: ignore background extras that do not draw the eye.\n"
+        "\n"
         "Rules:\n"
-        "1. visible: who/where/doing what; one short line (~20 words max).\n"
-        "2. change: what changed; one short line; empty OK for a single frame.\n"
-        "3. tags: short tags (1–3 words). Checklist (skip empty slots): "
-        "character, concrete action, place/setting, object/clothing, visible emotion, "
-        "weather/light. No minimum; up to about 16 when the frame is rich. "
-        "No shot size, vague interaction, symbolism/faction; "
-        "never copy inferred into tags.\n"
-        "4. inferred: weak guess only; leave empty if unclear; do not put in tags.\n"
-        "5. inferred_weight: 0–1; 0 if inferred empty.\n"
-        "6. No markdown. No story summary."
+        "1. visible: what the subject is, where, doing what; 1–2 short lines (~15–40 words). "
+        "Clear facial expression on the subject (cry/anger/smile/stun) MUST be in visible.\n"
+        "2. change: only meaningful subject change (expression, action, pose, relative place); "
+        "1–2 short lines. Do not fill change with background extras or clutter.\n"
+        "3. Shot-reverse-shot dialogue: say the conversation coverage cut "
+        "(e.g. dialogue, camera from A to B)—do NOT invent body turns like "
+        "\"he turns his back then she turns hers\".\n"
+        "4. Little/no change or single frame: change may be empty.\n"
+        "5. inferred: weak guess only; empty if unclear; weight 0–1, 0 if empty.\n"
+        "6. No markdown, no story summary, no extra fields."
     ),
 }
 
@@ -446,11 +470,13 @@ def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> st
         return normalize_caption_language(explicit)
     prompt = str(raw_remote_vlm.get("prompt", "") or "").strip()
     if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_EN] or prompt.startswith("Describe this video frame") or (
-        "Extract concise English tags" in prompt or prompt.startswith("Look at the frame")
+        "Extract concise English tags" in prompt
+        or prompt.startswith("Look at the frame")
+        or prompt.startswith("You are tagging footage")
     ):
         return CAPTION_LANGUAGE_EN
     if prompt == CAPTION_LANGUAGE_PROMPTS[CAPTION_LANGUAGE_ZH] or any(
-        token in prompt for token in ("中文", "视频帧", "标签", "搜素材")
+        token in prompt for token in ("中文", "视频帧", "标签", "搜素材", "按标签找")
     ):
         return CAPTION_LANGUAGE_ZH
     return (
@@ -460,6 +486,7 @@ def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> st
             "Describe" in prompt
             or "Extract concise English tags" in prompt
             or "Look at the frame" in prompt
+            or "You are tagging footage" in prompt
         )
         else CAPTION_LANGUAGE_ZH
     )

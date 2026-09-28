@@ -34,16 +34,58 @@ _SHOT_EN_RE = re.compile(
 )
 # Schema-slot leakage from older ZH prompts (人物/动作/场景), not footage features.
 _CATEGORY_PLACEHOLDERS = frozenset({"人物", "动作", "场景", "场面", "角色"})
+# Non-discriminative fillers models use to pad checklist slots on every shot.
+_GENERIC_FILLERS = frozenset(
+    {
+        "男人",
+        "女人",
+        "男生",
+        "女生",
+        "男子",
+        "女子",
+        "男",
+        "女",
+        "室内",
+        "室外",
+        "起身",
+        "站立",
+        "站着",
+        "坐下",
+        "看着",
+        "看向",
+        "手持",
+        "拿着",
+        "背景",
+        "前景",
+        "人",
+        "man",
+        "woman",
+        "men",
+        "women",
+        "boy",
+        "girl",
+        "indoor",
+        "outdoor",
+        "inside",
+        "outside",
+        "standing",
+        "sitting",
+        "looking",
+        "holding",
+        "person",
+        "people",
+    }
+)
 
 
 def _is_shot_or_meta_tag(text: str) -> bool:
-    """True for camera jargon / empty meta labels — never useful as search tags."""
+    """True for camera jargon / empty meta / non-discriminative fillers."""
     key = str(text or "").strip()
     if not key:
         return True
-    if key in _SHOT_META_ZH or key in _CATEGORY_PLACEHOLDERS:
+    if key in _SHOT_META_ZH or key in _CATEGORY_PLACEHOLDERS or key in _GENERIC_FILLERS:
         return True
-    if key.casefold() in {s.casefold() for s in _CATEGORY_PLACEHOLDERS}:
+    if key.casefold() in {s.casefold() for s in _GENERIC_FILLERS}:
         return True
     if _SHOT_SIZE_ZH_RE.match(key):
         return True
@@ -341,17 +383,17 @@ def _motion_fields_from_mapping(payload: Mapping[str, Any] | None) -> dict[str, 
 
 
 def _finalize_motion_tags(fields: dict[str, Any], *, extra_evidence: str = "") -> dict[str, Any]:
-    """Normalize motion tags after visible/change may have been filled from prose."""
+    """Motion evidence is visible/change/inferred only — never keep searchable tags."""
     del extra_evidence
-    fields["tags"] = projectable_tags(list(fields.get("tags") or []), limit=_TAG_MAX_COUNT)
+    fields["tags"] = []
     return fields
 
 
 def parse_motion_vlm_payload(raw_text: str) -> dict[str, Any]:
-    """Parse motion VLM output into visible/change/tags/inferred(+weight).
+    """Parse motion VLM output into visible/change/inferred(+weight).
 
-    Legacy prose + trailing ``{"tags":[...]}`` still works: prose becomes visible
-    (or visible+change if two sentences), tags from JSON.
+    Any ``tags`` the model still emits are dropped (tags belong to tags mode).
+    Legacy prose + trailing JSON still maps prose into ``visible``.
     """
     text = str(raw_text or "").strip()
     empty = {
@@ -409,15 +451,14 @@ def parse_motion_vlm_payload(raw_text: str) -> dict[str, Any]:
         json_at = line.find("{")
         if json_at > 0:
             line = line[:json_at].strip()
-        tags = parse_vlm_tag_list(text)
         return _finalize_motion_tags(
             {
                 "visible": line[:120],
                 "change": "",
-                "tags": tags,
+                "tags": [],
                 "inferred": "",
                 "inferred_weight": 0.0,
             },
             extra_evidence=line[:120],
         )
-    return {**empty, "tags": parse_vlm_tag_list(text)}
+    return empty
