@@ -87,19 +87,27 @@ def _coerce_sizes(config=None) -> dict:
     return sizes
 
 
+# One height ladder. Drop zone uses the short rungs; panes use the tall rungs.
+# Do not copy these numbers into call sites — change the tuple.
+_HEIGHT_RUNGS_SHORT = (820, 720, 620)
+_HEIGHT_RUNGS_TALL = (900, 800, 700)
+_PAGE_CHROME_PX = 120
+
+
 def image_drop_min_height(config=None, *, viewport_height: int | None = None) -> int:
     """Drop-zone floor; shrinks on short logical windows (125%/150% DPI)."""
     sizes = _coerce_sizes(config)
     preferred = int(sizes["image_drop_min_height"])
     floor = int(sizes.get("image_drop_min_height_floor", 100))
     available = int(viewport_height) if viewport_height is not None else _available_height()
+    tall, mid, short = _HEIGHT_RUNGS_SHORT
     if available is None:
         return preferred
-    if available >= 820:
+    if available >= tall:
         return preferred
-    if available >= 720:
+    if available >= mid:
         return max(floor, min(preferred, 130))
-    if available >= 620:
+    if available >= short:
         return max(floor, min(preferred, 110))
     return floor
 
@@ -211,16 +219,17 @@ def compare_row_min_height(config=None, *, viewport_height: int | None = None) -
     soft_cap = max(int(sizes.get("compare_row_min_height_cap", 320)), floor)
     results_floor = int(sizes.get("result_table_min_height_floor", 180))
     # Page chrome under the workspace splitter (header / margins / handle).
-    chrome = 120
+    chrome = _PAGE_CHROME_PX
     available = int(viewport_height) if viewport_height is not None else _available_height()
     if available is None:
         return min(max(preferred, floor), soft_cap)
     # Results keep a floor first; top row takes whatever remains (capped).
     top_budget = max(floor, int(available) - chrome - results_floor)
     capped = min(max(preferred, floor), soft_cap, top_budget)
-    if available >= 800:
+    _tall, mid, short = _HEIGHT_RUNGS_TALL
+    if available >= mid:
         return capped
-    if available >= 700:
+    if available >= short:
         return min(capped, max(floor, 300))
     return floor
 
@@ -231,13 +240,14 @@ def result_table_min_height(config=None, *, viewport_height: int | None = None) 
     preferred = int(sizes["result_table_min_height"])
     floor = int(sizes.get("result_table_min_height_floor", 180))
     available = int(viewport_height) if viewport_height is not None else _available_height()
+    tall, mid, short = _HEIGHT_RUNGS_TALL
     if available is None:
         return min(preferred, 240)
-    if available >= 900:
+    if available >= tall:
         return preferred
-    if available >= 800:
+    if available >= mid:
         return min(preferred, 280)
-    if available >= 700:
+    if available >= short:
         return min(preferred, 220)
     return min(preferred, floor)
 
@@ -248,13 +258,14 @@ def preview_host_min_height(config=None, *, viewport_height: int | None = None) 
     preferred = int(sizes["preview_host_min_height"])
     floor = int(sizes.get("preview_host_min_height_floor", 180))
     available = int(viewport_height) if viewport_height is not None else _available_height()
+    tall, mid, short = _HEIGHT_RUNGS_TALL
     if available is None:
         return min(preferred, 220)
-    if available >= 900:
+    if available >= tall:
         return preferred
-    if available >= 800:
+    if available >= mid:
         return min(preferred, 240)
-    if available >= 700:
+    if available >= short:
         return min(preferred, 200)
     return min(preferred, floor)
 

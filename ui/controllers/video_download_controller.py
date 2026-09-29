@@ -97,7 +97,9 @@ class VideoDownloadController(QObject):
         page = self.page()
         try:
             resolve_download_output_dir(mode="default_dir")
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/controllers/video_download_controller.py:100')
             return
 
         jobs = []

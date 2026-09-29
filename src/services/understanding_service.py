@@ -1073,7 +1073,9 @@ def _read_evidence_json_file(path: str) -> dict[str, Any] | None:
     try:
         with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/understanding_service.py:1076')
         return None
     if not isinstance(payload, dict):
         return None

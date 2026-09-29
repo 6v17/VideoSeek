@@ -60,7 +60,9 @@ def is_subtitle_registry_seeded(*, config=None) -> bool:
             return bool(row and str(row[0] or "").strip() == "1")
         finally:
             conn.close()
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/subtitle_library_store.py:63')
         return False
 
 

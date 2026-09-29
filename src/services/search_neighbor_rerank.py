@@ -84,7 +84,9 @@ def _reconstruct_index_vector(search_index, candidate_id: int, cache: dict[int, 
         return cached
     try:
         vector = np.asarray(search_index.reconstruct(key), dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/search_neighbor_rerank.py:87')
         return None
     cache[key] = vector
     return vector

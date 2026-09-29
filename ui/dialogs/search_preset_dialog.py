@@ -146,6 +146,8 @@ class SearchPresetFormDialog(VSDialogShell):
                     payload["fusion"] = fusion
                 self._result_preset = create_preset(**payload)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/dialogs/search_preset_dialog.py:148')
             AppMessageDialog(
                 self.texts.get("error_title", "Error"),
                 str(exc),

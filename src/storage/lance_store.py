@@ -84,7 +84,9 @@ def is_lance_ann_enabled(config=None) -> bool:
         runtime = dict(config) if config is not None else load_config()
         default = bool(DEFAULT_CONFIG.get("lance_ann_enabled", False))
         return bool(runtime.get("lance_ann_enabled", default))
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/lance_store.py:87')
         return False
 
 
@@ -658,7 +660,9 @@ def _table_version(db, table_name: str) -> int | None:
         return None
     try:
         return int(db.open_table(table_name).version)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/lance_store.py:661')
         return None
 
 

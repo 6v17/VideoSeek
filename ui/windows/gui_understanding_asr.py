@@ -769,6 +769,8 @@ class UnderstandingAsrGuiMixin:
                 config=load_config(),
             )
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_asr.py:771')
             self.show_error_dialog(
                 self.texts.get("understanding_speaker_rename_failed", "Could not rename speakers"),
                 exc,
@@ -829,6 +831,8 @@ class UnderstandingAsrGuiMixin:
         try:
             updated = clear_dialogue_speakers(video_id, config=load_config())
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_asr.py:831')
             self.show_error_dialog(
                 self.texts.get("understanding_speaker_reset_failed", "Could not reset speakers"),
                 exc,
@@ -890,6 +894,8 @@ class UnderstandingAsrGuiMixin:
         try:
             result = export_dialogue_json_to_path(video_id, path, config=load_config())
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_asr.py:892')
             self.show_error_dialog(self.texts.get("details_export_failed", "Export failed."), exc)
             return
         if not result.get("ok"):

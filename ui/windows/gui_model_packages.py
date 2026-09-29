@@ -25,6 +25,8 @@ class ModelPackagesGuiMixin:
         try:
             result = run_rediscover_model_profiles()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_model_packages.py:27')
             self.show_error_dialog(
                 self.texts.get("model_rediscover_failed", "重新探测模型失败"),
                 exc,
@@ -98,6 +100,8 @@ class ModelPackagesGuiMixin:
             else:
                 selected_files = []
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_model_packages.py:100')
             self.show_error_dialog(self.texts.get("parse_model_package_failed", "Failed to parse model package."), exc)
             return
         ffmpeg_files = [
@@ -334,6 +338,8 @@ class ModelPackagesGuiMixin:
             reset_engine()
             result = remove_model_profile(selected_profile_id)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_model_packages.py:336')
             self.show_error_dialog(
                 self.texts.get("remove_model_profile_failed", "Failed to remove model profile."),
                 exc,

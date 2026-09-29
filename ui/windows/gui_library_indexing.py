@@ -483,6 +483,8 @@ class LibraryIndexingGuiMixin:
                 self._refresh_understanding_scope_options()
         except Exception as exc:
             # Never keep the previous local tree visible under client mode.
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_library_indexing.py:484')
             if tree is not None and is_team_client_mode():
                 try:
                     tree.refresh_from_entries([], library_paths=[])
@@ -1219,6 +1221,8 @@ class LibraryIndexingGuiMixin:
         try:
             missing_ids = collect_reindexable_missing_video_ids()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_library_indexing.py:1221')
             self.show_error_dialog(title, exc)
             return
 
@@ -1298,6 +1302,8 @@ class LibraryIndexingGuiMixin:
         try:
             result = clear_subtitle_transcripts([row["video_id"] for row in existing])
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_library_indexing.py:1300')
             self.show_error_dialog(
                 self.texts.get("clear_dialogue_index_failed", "Failed to clear subtitles"),
                 str(exc).strip() or repr(exc),
@@ -1839,6 +1845,8 @@ class LibraryIndexingGuiMixin:
         try:
             ensure_shared_transcripts()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_library_indexing.py:1841')
             self.show_error_dialog(
                 self.texts.get("build_dialogue_index_failed", "Dialogue index failed"),
                 str(exc).strip() or repr(exc),
@@ -2017,6 +2025,8 @@ class LibraryIndexingGuiMixin:
                 list_missing_library_files(meta, config, include_offline_roots=True)
             )
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_library_indexing.py:2019')
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
 
@@ -2467,7 +2477,9 @@ class LibraryIndexingGuiMixin:
             meta = load_model_metadata(config=config)
             for _entry in list_missing_library_files(meta, config, include_offline_roots=True):
                 return True
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/windows/gui_library_indexing.py:2470')
             return False
         return False
 
@@ -2767,6 +2779,8 @@ class LibraryIndexingGuiMixin:
 
             result = cleanup_safe_legacy_vector_sidecars()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_library_indexing.py:2769')
             self.show_error_dialog(self.texts["library_vectors_load_failed"], exc)
             return
 

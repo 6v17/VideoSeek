@@ -126,3 +126,14 @@ def get_logger(name):
     if not base_logger.handlers:
         setup_logging()
     return base_logger.getChild(name)
+
+
+def note_swallowed(exc: BaseException, where: str = "") -> None:
+    """Record a caught failure that still returns an empty sentinel.
+
+    Callers keep their fallback value; the log is what makes the failure visible.
+    """
+    try:
+        get_logger("swallowed").warning("%s: %s", where or "except", exc)
+    except Exception:
+        pass

@@ -46,6 +46,8 @@ class SettingsGuiMixin:
         try:
             config = load_config()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_settings.py:48')
             self._settings_loading = False
             self.show_error_dialog(self.texts["settings_load_failed"], exc)
             return
@@ -1593,6 +1595,8 @@ class SettingsGuiMixin:
         try:
             active_dir = get_effective_model_dir(config=config)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_settings.py:1595')
             self.show_error_dialog(self.texts["cleanup_old_model_dir_failed"], exc)
             return
         try:
@@ -1697,6 +1701,8 @@ class SettingsGuiMixin:
             config = load_config()
             source = get_effective_model_dir(config=config)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_settings.py:1699')
             self.show_error_dialog(t["model_root_move_failed"], exc)
             return
         if not source or not os.path.isdir(source):
@@ -1716,6 +1722,8 @@ class SettingsGuiMixin:
         try:
             result = self._run_storage_root_migration("model", dest)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_settings.py:1718')
             self.show_error_dialog(t["model_root_move_failed"], exc)
             return
         if not result.get("migrated") and result.get("reason") == "same_path":

@@ -9,6 +9,8 @@ Short rules for keeping VideoSeek maintainable. Architecture overview: [`archite
 3. **Indexing/search reads are Lance-only** — `_load_vectors_from_disk` / search assets do not load `*_vectors.npy`. Users import npy → Lance from **Settings → Paths** (not auto on launch); after `lance_migration.completed`, startup gates trust that flag and skip vector-dir listdir (sidecar npy may remain). Library details mark npy-only videos as `broken_asset`, not `ready`.
 4. **Do not import private (`_foo`) symbols across packages** — if another module needs it, make a public helper or move it.
 5. **Prefer new modules under ~400 lines** — when touching a god file, extract the piece you need instead of growing it.
+6. **Broad `except` must not hide a failure** — `except Exception` / bare `except` that still returns `[]` / `0` / `None` / `""` must call `note_swallowed` (or log / raise). Narrow parse catches may keep a quiet fallback. `tests/test_silent_failure_ratchet.py` fails if a new silent one appears.
+7. **Recap prompts live in `src/services/recap_prompts.py`** — `recap_service` re-exports them. Next splits of that file should follow plan / voiceover / match / export, not a rewrite.
 
 ## `src.utils` migration
 

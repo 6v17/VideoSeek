@@ -59,7 +59,9 @@ def _read_migration_state(config):
     try:
         with open(state_file, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/migration_runner.py:62')
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -105,7 +107,9 @@ def _already_migrated(config, meta):
     _ensure_expected_asset_dirs(config)
     try:
         model_dirs = get_local_model_asset_dirs(config=config)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/migration_runner.py:108')
         return False
     if not (os.path.isdir(model_dirs["vector_dir"]) and os.path.isdir(model_dirs["index_dir"])):
         return False
@@ -113,7 +117,9 @@ def _already_migrated(config, meta):
         return False
     try:
         global_paths = get_global_model_asset_paths(config=config)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/migration_runner.py:116')
         return False
     if not os.path.isdir(global_paths["global_dir"]):
         return False

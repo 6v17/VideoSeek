@@ -740,6 +740,8 @@ class MainWindow(
         try:
             config = load_config()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui.py:742')
             self.show_error_dialog(t["settings_load_failed"], exc)
             return
 
@@ -1381,7 +1383,9 @@ class MainWindow(
             return False
         try:
             config = load_config()
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/windows/gui.py:1384')
             return False
         return not bool(config.get("free_notice_seen", False))
 
@@ -1391,7 +1395,9 @@ class MainWindow(
             config = load_config()
             config["free_notice_seen"] = True
             save_config(config)
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/windows/gui.py:1394')
             return
 
     def _should_auto_show_update_notice(self) -> bool:
@@ -1410,7 +1416,9 @@ class MainWindow(
             return False
         try:
             config = load_config()
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/windows/gui.py:1413')
             return False
         dismissed = str(config.get("update_notice_dismissed_version") or "").strip()
         return dismissed != latest
@@ -1424,7 +1432,9 @@ class MainWindow(
             config = load_config()
             config["update_notice_dismissed_version"] = latest
             save_config(config)
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/windows/gui.py:1427')
             return
 
     def _maybe_auto_show_startup_notices(self) -> None:
@@ -1855,6 +1865,8 @@ class MainWindow(
                 fusion=effective_fusion,
             )
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui.py:1857')
             self.show_error_dialog(self.texts["search_failed"], exc)
             return False
 
@@ -2032,6 +2044,8 @@ class MainWindow(
                 payload["fusion"] = fusion
             create_preset(**payload)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui.py:2034')
             self.show_error_dialog(self.texts.get("search_presets_save_failed", ""), exc)
             return
         self.refresh_search_presets_ui()
@@ -2090,6 +2104,8 @@ class MainWindow(
         try:
             url = self.mobile_bridge_controller.toggle()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui.py:2092')
             self.show_error_dialog(self.texts["mobile_bridge_start_failed"], exc)
             return
 

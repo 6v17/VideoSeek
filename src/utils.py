@@ -160,7 +160,9 @@ def is_windows_admin() -> bool:
         import ctypes
 
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/utils.py:163')
         return False
 
 

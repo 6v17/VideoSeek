@@ -117,6 +117,8 @@ class ExportClipWorker(QThread):
             )
             stdout, stderr = self._process.communicate()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/playback/preview_dialog.py:119')
             self._process = None
             self.finished_export.emit(exc, self.save_path)
             return

@@ -535,7 +535,9 @@ def _get_windows_module_filename():
         if length <= 0:
             return ""
         return buffer.value[:length]
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/core/clip_embedding.py:538')
         return ""
 
 

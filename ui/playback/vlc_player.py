@@ -115,6 +115,8 @@ def create_vlc_preview_instance():
     try:
         return vlc_module.Instance(_vlc_embed_instance_args())
     except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(exc, 'ui/playback/vlc_player.py:117')
         _log_vlc_warning("create preview instance", exc)
         return None
 
@@ -133,6 +135,8 @@ def warmup_vlc_runtime():
         player = instance.media_player_new()
         return player is not None
     except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(exc, 'ui/playback/vlc_player.py:135')
         _log_vlc_warning("warmup runtime", exc)
         return False
     finally:
@@ -225,6 +229,8 @@ class VlcPreviewPlayer:
         try:
             result = self._player.play()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/playback/vlc_player.py:227')
             self._stop_at_ms = -1
             self._locked_stop_at_ms = -1
             _log_vlc_warning("start playback", exc)
@@ -285,6 +291,8 @@ class VlcPreviewPlayer:
             self._set_media(media)
             self.rebind_output_window()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/playback/vlc_player.py:287')
             _log_vlc_warning("prepare media playback", exc)
             return False
         self._apply_clip_window(stop_sec)
@@ -574,6 +582,8 @@ class VlcPreviewPlayer:
             self.host_widget.setAttribute(Qt.WA_NativeWindow, True)
             window_id = int(self.host_widget.winId())
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/playback/vlc_player.py:576')
             _log_vlc_debug("read host window id", exc)
             return
         try:
@@ -691,6 +701,8 @@ class VlcPreviewPlayer:
             self.rebind_output_window()
             result = self._player.play()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/playback/vlc_player.py:693')
             _log_vlc_warning("prepare media playback", exc)
             return False
         if result == -1:

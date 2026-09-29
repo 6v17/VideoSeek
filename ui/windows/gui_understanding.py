@@ -75,6 +75,8 @@ class UnderstandingGuiMixin:
         try:
             config = load_config()
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding.py:77')
             self.show_error_dialog(self.texts.get("understanding_config_load_failed", "Failed to load settings."), exc)
             return
         from src.services.understanding_resource_service import get_remote_vlm_settings
@@ -1285,7 +1287,9 @@ class UnderstandingGuiMixin:
                 if len(lines) >= 12:
                     break
             return "\n".join(lines)
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/windows/gui_understanding.py:1288')
             return ""
 
     def _show_understanding_chunk_detail(self, index: int, payload=None):
@@ -1645,6 +1649,8 @@ class UnderstandingGuiMixin:
         try:
             status = get_understanding_resource_status(config=load_config())
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding.py:1647')
             self.show_error_dialog(self.texts.get("understanding_generation_failed", "Failed to generate evidence."), exc)
             return
         if not status.get("understanding_ready"):
@@ -1741,6 +1747,8 @@ class UnderstandingGuiMixin:
 
             result = rebuild_all_from_json(config=load_config())
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding.py:1743')
             page.btn_project_tags.setEnabled(True)
             self.show_error_dialog(
                 self.texts.get("understanding_project_tags_failed", "Failed to sync tags to search."),
@@ -1806,6 +1814,8 @@ class UnderstandingGuiMixin:
         try:
             status = get_understanding_resource_status(config=load_config())
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding.py:1808')
             self.show_error_dialog(self.texts.get("understanding_generation_failed", "Failed to generate evidence."), exc)
             return
         if not status.get("understanding_ready"):
@@ -2743,6 +2753,8 @@ class UnderstandingGuiMixin:
             with open(path, "w", encoding="utf-8") as handle:
                 json.dump(evidence, handle, ensure_ascii=False, indent=2)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding.py:2745')
             self.show_error_dialog(self.texts.get("details_export_failed", "Export failed."), exc)
             return
         message = self.texts.get("details_export_done", "Exported: {path}").format(path=path)
@@ -3007,12 +3019,16 @@ class UnderstandingGuiMixin:
             dialog.status_hint.setText(evidence_dir)
             return
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding.py:3009')
             try:
                 evidence_dir = os.path.normpath(get_evidence_root(config=load_config()))
                 os.makedirs(evidence_dir, exist_ok=True)
                 open_folder_in_explorer(evidence_dir)
                 dialog.status_hint.setText(evidence_dir)
                 return
-            except Exception:
+            except Exception as _swallowed:
+                from src.app.logging_utils import note_swallowed
+                note_swallowed(_swallowed, 'ui/windows/gui_understanding.py:3016')
                 dialog.status_hint.setText(str(exc))
                 return

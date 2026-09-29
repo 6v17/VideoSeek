@@ -32,8 +32,10 @@ def needs_search_index_schema_upgrade(config=None):
     try:
         meta = load_model_metadata(config=cfg)
         return needs_search_index_upgrade(meta, config=cfg)
-    except Exception:
+    except Exception as _swallowed:
         # No CLIP profile / empty asset dir after removing all models — treat as no upgrade needed.
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/library_service.py:35')
         return False
 
 

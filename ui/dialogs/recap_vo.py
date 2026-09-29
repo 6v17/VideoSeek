@@ -130,7 +130,9 @@ class RecapAddShotDialog(VSDialogShell):
         try:
             start = parse_recap_clock(self.start_edit.text())
             end = parse_recap_clock(self.end_edit.text())
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/dialogs/recap_vo.py:133')
             return
         if end <= start + 0.04:
             return

@@ -63,7 +63,9 @@ def _windows_module_dir() -> str:
         if length <= 0:
             return ""
         return os.path.dirname(buffer.value[:length])
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/infra/paths.py:66')
         return ""
 
 

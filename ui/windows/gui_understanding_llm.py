@@ -651,6 +651,8 @@ class UnderstandingLlmGuiMixin:
                 target_sec=target,
             )
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:653')
             self.show_error_dialog(
                 self.texts.get("understanding_export_recap_failed", "Recap export failed"),
                 exc,
@@ -1107,6 +1109,8 @@ class UnderstandingLlmGuiMixin:
                 video_id=self._selected_understanding_video_id(),
             )
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:1109')
             self.show_error_dialog(
                 self.texts.get("understanding_recap_review_edit_failed", "Could not save VO"),
                 exc,
@@ -1156,6 +1160,8 @@ class UnderstandingLlmGuiMixin:
                 video_id=self._selected_understanding_video_id(),
             )
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:1158')
             self.show_error_dialog(
                 self.texts.get(
                     "understanding_recap_review_reorder_failed",
@@ -1208,6 +1214,8 @@ class UnderstandingLlmGuiMixin:
                     video_id=self._selected_understanding_video_id(),
                 )
             except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+                note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:1210')
                 self.show_error_dialog(
                     self.texts.get(
                         "understanding_recap_review_delete_failed",
@@ -1247,6 +1255,8 @@ class UnderstandingLlmGuiMixin:
                     video_id=self._selected_understanding_video_id(),
                 )
             except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+                note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:1249')
                 self.show_error_dialog(
                     self.texts.get(
                         "understanding_recap_review_delete_failed",
@@ -1421,6 +1431,8 @@ class UnderstandingLlmGuiMixin:
         try:
             add_recap_unit_shot(video_path, indices, **kwargs)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:1423')
             self.show_error_dialog(
                 self.texts.get(
                     "understanding_recap_review_add_shot_failed",
@@ -2080,6 +2092,8 @@ class UnderstandingLlmGuiMixin:
             self.show_error_dialog(title, exc.detail or exc.summary)
             return
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:2082')
             self.show_error_dialog(title, str(exc))
             return
         message = self.texts.get(
@@ -2123,6 +2137,8 @@ class UnderstandingLlmGuiMixin:
         try:
             written = export_saved_recap_fcpxml(payload, dest, video_path=video_path)
         except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, 'ui/windows/gui_understanding_llm.py:2125')
             self.show_error_dialog(
                 self.texts.get("understanding_recap_fcpxml", "Export FCPXML"),
                 str(exc),

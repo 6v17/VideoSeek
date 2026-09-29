@@ -274,7 +274,9 @@ def _windows_pid_is_nginx(pid: int) -> bool:
             return image.endswith("\\nginx.exe") or os.path.basename(image) == "nginx.exe"
         finally:
             kernel32.CloseHandle(handle)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/team_nginx_service.py:277')
         return False
 
 

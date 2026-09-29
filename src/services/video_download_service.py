@@ -216,7 +216,9 @@ def _refresh_browser_cookie_cache(
         with open(cache_path, "w", encoding="utf-8") as handle:
             handle.write(to_netscape(cookies))
         return True
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/video_download_service.py:219')
         return False
 
 
@@ -294,7 +296,9 @@ def _fetch_douyin_ttwid() -> str:
                     continue
                 value = str(header).split(";", 1)[0].split("=", 1)[1]
                 return urllib.parse.unquote(value)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/video_download_service.py:297')
         return ""
     return ""
 
@@ -486,7 +490,9 @@ def _is_browser_process_running(browser: str) -> bool:
             timeout=5,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/video_download_service.py:489')
         return False
     output = (result.stdout or "").lower()
     return exe.lower() in output and "no tasks are running" not in output
@@ -860,7 +866,9 @@ def _path_has_audio_stream(path: str) -> bool | None:
             timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/video_download_service.py:863')
         return None
     if result.returncode != 0:
         return False

@@ -15,7 +15,9 @@ def _temporal_match():
         from videoseek_plugin_clone.core import temporal_match as tm
 
         return tm
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/services/nle_timeline_export.py:18')
         return None
 
 

@@ -187,7 +187,9 @@ def _jianying_draft_available() -> bool:
         from src.services.jianying_draft_service import is_jianying_draft_support_available
 
         return bool(is_jianying_draft_support_available())
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/web/agent_api/health.py:190')
         return False
 
 

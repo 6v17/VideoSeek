@@ -79,7 +79,9 @@ def resolve_inference_ep(config=None) -> str:
 def get_available_onnx_provider_names() -> list[str]:
     try:
         providers = ort.get_available_providers()
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/core/onnx_session.py:82')
         return []
     return [str(provider) for provider in providers]
 

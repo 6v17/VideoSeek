@@ -48,7 +48,9 @@ def _read_migration_state(config):
     try:
         with open(state_file, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except Exception:
+    except Exception as _swallowed:
+        from src.app.logging_utils import note_swallowed
+        note_swallowed(_swallowed, 'src/storage/video_id_migration.py:51')
         return {}
     return payload if isinstance(payload, dict) else {}
 

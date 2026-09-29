@@ -260,7 +260,9 @@ class ResourceTableDialog(VSDialogShell):
             return False
         try:
             return bool(self.issue_row_predicate(row_data))
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/dialogs/resource_table.py:263')
             return False
 
     def _matches_filter(self, row_data):
@@ -412,7 +414,9 @@ class ResourceTableDialog(VSDialogShell):
                     ensure_ascii=False,
                     indent=2,
                 )
-        except Exception:
+        except Exception as _swallowed:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(_swallowed, 'ui/dialogs/resource_table.py:415')
             self.status_hint.setText(self.texts["details_export_failed"])
             return
         self.status_hint.setText(self.texts["details_export_done"].format(path=path))
