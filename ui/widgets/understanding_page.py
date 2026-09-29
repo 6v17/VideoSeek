@@ -176,6 +176,26 @@ class UnderstandingEvidencePage(QWidget):
         page_body.addWidget(self.export_card)
         page_body.addStretch(1)
         self.order_workflow_cards(recap_first=True)
+        self._hide_section_manuals()
+
+    def _hide_section_manuals(self) -> None:
+        """Keep titles and status; drop the per-section instruction paragraphs."""
+        for hint in (
+            self.select_hint,
+            self.generate_hint,
+            self.dialogue_hint,
+            self.export_hint,
+            self.mode_hint,
+            self.lbl_understanding_hint,
+            self.vlm_prompt_hint,
+            self.timeline_hint,
+            self.recap_prompt_hint,
+            self.recap_start_hint,
+            self.recap_review_hint,
+        ):
+            hint.hide()
+        if hasattr(self.header, "subtitle"):
+            self.header.subtitle.hide()
 
     def order_workflow_cards(self, *, recap_first: bool) -> None:
         layout = self.scaffold.content_layout

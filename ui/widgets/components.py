@@ -683,6 +683,9 @@ class SearchPage(QWidget):
         panel = getattr(self, "search_panel", None)
         if panel is not None and hasattr(panel, "apply_viewport_budget"):
             panel.apply_viewport_budget(vh)
+        preview = getattr(self, "preview_panel", None)
+        if preview is not None and hasattr(preview, "apply_viewport_budget"):
+            preview.apply_viewport_budget(vh)
         top_min = self._compare_top_min(vh)
         compare = getattr(self, "compare_splitter", None)
         if compare is not None:

@@ -268,27 +268,25 @@ class UnderstandingGuiMixin:
                 "Queue videos in the current scope that are still missing results for this mode.",
             )
         )
-        # Tags mode: strip prose hints; Change mode keeps the step explanations.
-        show_prose = is_motion
-        if hasattr(page, "mode_hint"):
-            page.mode_hint.setVisible(show_prose)
-            if show_prose:
-                page.mode_hint.setText(
-                    self.texts.get(
-                        "understanding_mode_hint",
-                        "AI Tagging: searchable labels. AI Editing: speech + change notes + recap.",
-                    )
-                )
-        if hasattr(page, "select_hint"):
-            page.select_hint.setVisible(show_prose)
-        if hasattr(page, "generate_hint"):
-            page.generate_hint.setVisible(show_prose)
-        if hasattr(page, "vlm_prompt_hint"):
-            page.vlm_prompt_hint.setVisible(show_prose)
+        # Section manuals stay off. Status lines (counts, progress) stay.
+        for hint_name in (
+            "mode_hint",
+            "select_hint",
+            "generate_hint",
+            "dialogue_hint",
+            "export_hint",
+            "vlm_prompt_hint",
+            "lbl_understanding_hint",
+            "recap_prompt_hint",
+            "recap_start_hint",
+            "recap_review_hint",
+            "timeline_hint",
+        ):
+            hint = getattr(page, hint_name, None)
+            if hint is not None:
+                hint.setVisible(False)
         if hasattr(page, "header") and hasattr(page.header, "subtitle"):
-            page.header.subtitle.setVisible(show_prose)
-        if hasattr(page, "lbl_understanding_hint"):
-            page.lbl_understanding_hint.setVisible(show_prose)
+            page.header.subtitle.setVisible(False)
         if page.btn_generate_evidence.objectName() != "PrimaryButton":
             page.btn_generate_evidence.setObjectName("PrimaryButton")
             style = page.btn_generate_evidence.style()
@@ -342,9 +340,6 @@ class UnderstandingGuiMixin:
             bar = getattr(page, bar_name, None)
             if bar is not None:
                 bar.setVisible(is_motion)
-        if hasattr(page, "recap_start_hint"):
-            page.recap_start_hint.setVisible(is_motion)
-
         self._sync_vlm_prompt_tab_for_mode()
         page.btn_export_video_json.setEnabled(
             (not (getattr(self, "understanding_controller", None) and self.understanding_controller.is_running()))

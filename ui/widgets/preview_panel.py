@@ -8,6 +8,7 @@ from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
 from ui.widgets.layout import (
     compare_row_card_height,
     compare_row_min_height,
+    layout_viewport_height,
     preview_host_min_height,
 )
 from ui.widgets.scaffold import VSCard
@@ -60,7 +61,7 @@ class PreviewPanel(VSCard):
 
         self.preview_host = PreviewHostFrame()
         self.preview_host.setObjectName("VideoContainer")
-        self.preview_host.setMinimumHeight(preview_host_min_height())
+        self.preview_host.setMinimumHeight(preview_host_min_height(viewport_height=self._layout_viewport()))
         self.preview_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.preview_host_layout = QVBoxLayout(self.preview_host)
         self.preview_host_layout.setContentsMargins(4, 4, 4, 4)
@@ -92,17 +93,37 @@ class PreviewPanel(VSCard):
         else:
             self._apply_normal_geometry()
 
-    def _apply_normal_geometry(self):
+    def _layout_viewport(self) -> int | None:
+        return layout_viewport_height(self.window())
+
+    def apply_viewport_budget(self, viewport_height: int | None) -> None:
+        """Match search-page mins to the live window, not the screen."""
+        try:
+            vh = int(viewport_height) if viewport_height is not None else None
+        except (TypeError, ValueError):
+            vh = None
+        if vh is not None and vh < 240:
+            vh = None
+        if self._maximized:
+            self._apply_maximized_geometry(vh)
+        else:
+            self._apply_normal_geometry(vh)
+
+    def _apply_normal_geometry(self, viewport_height: int | None = None):
+        vh = self._layout_viewport() if viewport_height is None else viewport_height
         self._panel_height = compare_row_card_height()
-        self.preview_host.setMinimumHeight(preview_host_min_height())
-        # Min shrinks on short screens; sizeHint still prefers _panel_height via parent splitter.
-        self.setMinimumHeight(compare_row_min_height())
+        self.preview_host.setMinimumHeight(preview_host_min_height(viewport_height=vh))
+        # Min shrinks on short windows; sizeHint still prefers _panel_height via parent splitter.
+        self.setMinimumHeight(compare_row_min_height(viewport_height=vh))
         self.setMaximumHeight(16777215)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def _apply_maximized_geometry(self):
-        host_min = max(280, preview_host_min_height())
+    def _apply_maximized_geometry(self, viewport_height: int | None = None):
+        vh = self._layout_viewport() if viewport_height is None else viewport_height
+        host_min = max(280, preview_host_min_height(viewport_height=vh))
         self.preview_host.setMinimumHeight(host_min)
-        self.setMinimumHeight(min(self.MAXIMIZED_MIN_HEIGHT, max(compare_row_min_height(), host_min + 120)))
+        self.setMinimumHeight(
+            min(self.MAXIMIZED_MIN_HEIGHT, max(compare_row_min_height(viewport_height=vh), host_min + 120))
+        )
         self.setMaximumHeight(16777215)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
