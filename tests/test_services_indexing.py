@@ -7,6 +7,14 @@ from unittest.mock import patch
 import numpy as np
 
 import tests.services_test_support  # noqa: F401 - cv2/faiss stubs
+
+# Keep Lance/profile writes out of the repo working tree.
+_TEST_PROFILE = os.path.join(tempfile.gettempdir(), "videoseek_pytest_profile")
+_TEST_INDEX = os.path.join(tempfile.gettempdir(), "videoseek_pytest_index")
+_TEST_VECTOR = os.path.join(tempfile.gettempdir(), "videoseek_pytest_vector")
+_TEST_ASSET_DIRS_BASE = {"base_dir": _TEST_PROFILE}
+_TEST_ASSET_DIRS = {"base_dir": _TEST_PROFILE, "index_dir": _TEST_INDEX, "vector_dir": _TEST_VECTOR}
+
 from src.services import indexing_service, library_service
 from src.workflows import update_video
 from src import utils
@@ -23,7 +31,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(out, {"file_size": 2048, "content_fp": "abc123"})
         mock_fp.assert_not_called()
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.storage.lance_search_index.get_lance_video_library_path")
     def test_try_reuse_uses_batch_library_path_map(self, mock_get_path, _mock_mtime, _mock_dirs):
@@ -39,7 +47,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(reused, {"canonical_vid": "vid_a"})
         mock_get_path.assert_not_called()
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.storage.lance_search_index.get_lance_video_library_path")
     def test_try_reuse_rejects_cross_library_from_batch_map(self, mock_get_path, _mock_mtime, _mock_dirs):
@@ -55,7 +63,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIsNone(reused)
         mock_get_path.assert_not_called()
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.os.path.getsize", return_value=9999)
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     def test_try_reuse_rejects_same_mtime_when_file_size_changed(self, _mock_mtime, _mock_size, _mock_dirs):
@@ -285,7 +293,7 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.services.library_service.clear_library_search_index")
     @patch(
         "src.services.library_service.get_local_model_asset_dirs",
-        return_value={"vector_dir": "source/vector", "index_dir": "source/index", "base_dir": "profile"},
+        return_value={"vector_dir": _TEST_VECTOR, "index_dir": _TEST_INDEX, "base_dir": _TEST_PROFILE},
     )
     @patch("src.services.library_service.save_model_metadata")
     @patch(
@@ -676,7 +684,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.storage.lance_store.end_lance_index_batch")
     @patch("src.storage.lance_store.begin_lance_index_batch")
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -716,7 +724,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.storage.lance_store.end_lance_index_batch")
     @patch("src.storage.lance_store.begin_lance_index_batch")
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
     @patch("src.services.indexing_service._collect_library_scan_plan")
@@ -833,7 +841,7 @@ class IndexingServiceTests(unittest.TestCase):
             ],
         )
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service.get_video_duration_seconds", return_value=60.0)
     @patch("src.core.clip_embedding.generate_vectors_and_index_for_video", return_value=([], [], None, []))
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
@@ -868,7 +876,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(lib_files["clip.mp4"]["vid"], "vid_a")
         self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "no_frames")
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service.get_video_duration_seconds", return_value=0.6)
     @patch("src.core.clip_embedding.generate_vectors_and_index_for_video", return_value=([], [], None, []))
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
@@ -942,7 +950,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service._ensure_video_chunks", return_value=([], False, {}))
     @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=True)
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
@@ -983,7 +991,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service._ensure_video_chunks", return_value=([], False, {}))
     @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=False)
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
@@ -1025,7 +1033,7 @@ class IndexingServiceTests(unittest.TestCase):
     @patch("src.services.indexing_service._safe_delete_unreferenced_video_data")
     @patch("src.services.indexing_service._ensure_video_chunks", return_value=([{"start": 0}], True, {"algo": 1}))
     @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=True)
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service._resolve_reusable_cached_vectors")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
     @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
@@ -1096,7 +1104,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.build_chunk_config", return_value={})
     @patch("src.services.indexing_service._sync_video_vectors_to_lance", return_value=False)
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch(
         "src.core.clip_embedding.generate_vectors_and_index_for_video",
         return_value=(np.array([[1.0, 0.0]], dtype=np.float32), np.array([0.0], dtype=np.float32), None, []),
@@ -1138,7 +1146,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "lance_sync_failed")
         mock_sync_lance.assert_called_once()
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch(
         "src.core.clip_embedding.generate_vectors_and_index_for_video",
         return_value=(np.array([[1.0]], dtype=np.float32), [0.0, 1.0], None, []),
@@ -1173,7 +1181,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(lib_files["clip.mp4"]["asset_state"], "sync_failed")
         self.assertEqual(lib_files["clip.mp4"]["sync_failure_reason"], "vector_timestamp_mismatch")
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch(
         "src.core.clip_embedding.generate_vectors_and_index_for_video",
         side_effect=RuntimeError("DirectML device lost: GPU out of memory"),
@@ -1215,7 +1223,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(issues[0]["reason"], "gpu_out_of_memory")
         self.assertIn("GPU out of memory", issues[0]["detail"])
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch(
         "src.core.clip_embedding.generate_vectors_and_index_for_video",
         side_effect=RuntimeError(
@@ -1353,7 +1361,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertNotIn("sync_failure_detail", lib_files["clip.mp4"])
 
     @patch.dict("src.services.indexing_service.os.environ", {"VIDEOSEEK_DEBUG_FORCE_GPU_OOM": "1"}, clear=False)
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -1388,7 +1396,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIn("debug injection", issues[0]["detail"].lower())
 
     @patch.dict("src.services.indexing_service.os.environ", {"VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM": "1"}, clear=False)
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -1671,7 +1679,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.storage.lance_store.end_lance_index_batch")
     @patch("src.storage.lance_store.begin_lance_index_batch")
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1732,7 +1740,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.storage.lance_store.end_lance_index_batch")
     @patch("src.storage.lance_store.begin_lance_index_batch")
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.relink_relocated_library_sources", return_value=0)
@@ -1768,7 +1776,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.storage.lance_store.end_lance_index_batch")
     @patch("src.storage.lance_store.begin_lance_index_batch")
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video", return_value=(None, None, True, False))
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1801,7 +1809,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.storage.lance_store.end_lance_index_batch")
     @patch("src.storage.lance_store.begin_lance_index_batch")
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS_BASE)
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1831,7 +1839,7 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(failed_videos, ["D:\\videos\\clip.mp4"])
         self.assertFalse(search_assets_changed)
 
-    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service.os.remove")
     @patch("src.services.indexing_service.os.path.exists")
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])

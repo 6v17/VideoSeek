@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 import os
 from unittest.mock import patch
@@ -5,6 +6,8 @@ from unittest.mock import patch
 import tests.services_test_support  # noqa: F401 - cv2/faiss stubs
 from tests.services_test_support import _model_dirs_from_test_config
 from src.services import library_service
+
+_TEST_PROFILE = os.path.join(tempfile.gettempdir(), "videoseek_pytest_profile")
 
 
 class LibraryDetailServiceTests(unittest.TestCase):
@@ -237,7 +240,7 @@ class LibraryDetailServiceTests(unittest.TestCase):
     @patch("src.storage.lance_store.garbage_collect_orphan_lance_videos", return_value=[])
     @patch("src.services.library_service.garbage_collect_orphan_library_indexes")
     @patch("src.services.library_service.clear_library_search_index")
-    @patch("src.services.library_service.get_local_model_asset_dirs", return_value={"vector_dir": "source/vector", "index_dir": "source/index", "base_dir": "profile"})
+    @patch("src.services.library_service.get_local_model_asset_dirs", return_value={"vector_dir": "source/vector", "index_dir": "source/index", "base_dir": _TEST_PROFILE})
     @patch("src.services.library_service.save_model_metadata")
     @patch(
         "src.services.library_service.load_model_metadata",
@@ -280,7 +283,7 @@ class LibraryDetailServiceTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(deleted, ["vid_a"])
         _mock_gc_orphans.assert_called_once()
-        mock_compact.assert_called_once_with("profile")
+        mock_compact.assert_called_once_with(_TEST_PROFILE)
 
     @patch("src.storage.lance_store.compact_lance_storage")
     @patch("src.storage.lance_store.garbage_collect_orphan_lance_videos")
@@ -288,7 +291,7 @@ class LibraryDetailServiceTests(unittest.TestCase):
     @patch("src.services.library_service.clear_library_search_index")
     @patch(
         "src.services.library_service.get_local_model_asset_dirs",
-        return_value={"base_dir": "profile"},
+        return_value={"base_dir": _TEST_PROFILE},
     )
     @patch("src.services.library_service.save_model_metadata")
     @patch(
@@ -364,7 +367,7 @@ class LibraryDetailServiceTests(unittest.TestCase):
 
         self.assertEqual(_files_for("videos"), {})
         self.assertIn("b.mp4", _files_for("shared"))
-        mock_compact.assert_called_once_with("profile")
+        mock_compact.assert_called_once_with(_TEST_PROFILE)
 
     @patch("src.storage.lance_search_index.get_lance_indexed_video_ids", return_value=set())
     @patch("src.services.library_service.get_local_model_asset_dirs", side_effect=_model_dirs_from_test_config)

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import tempfile
 import types
 
 # Hard isolation: Lance/storage mutation must never touch real AppData VideoSeek.
@@ -32,8 +33,10 @@ except ImportError:
 
 def _model_dirs_from_test_config(config=None):
     cfg = dict(config or {})
+    # Defaults stay under system temp so helpers never create repo-relative dirs.
+    root = os.path.join(tempfile.gettempdir(), "videoseek_pytest_assets")
     return {
-        "base_dir": cfg.get("base_dir", "source/profile"),
-        "vector_dir": cfg.get("vector_dir", "source/vector"),
-        "index_dir": cfg.get("index_dir", "source/index"),
+        "base_dir": cfg.get("base_dir", os.path.join(root, "profile")),
+        "vector_dir": cfg.get("vector_dir", os.path.join(root, "vector")),
+        "index_dir": cfg.get("index_dir", os.path.join(root, "index")),
     }

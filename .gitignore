@@ -38,8 +38,8 @@ build/
 main.build/
 main.dist/
 
-# Local Lance / profile scratch (do not add new artifacts)
-profile/lance/
+# Local runtime profile / Lance scratch (tests must not write here either)
+profile/
 **/__manifest__/
 
 # Logs / temp
