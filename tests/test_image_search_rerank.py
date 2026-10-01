@@ -42,7 +42,7 @@ class FrameHashTests(unittest.TestCase):
 
 
 class ImageSearchRerankTests(unittest.TestCase):
-    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_pixel_rerank_prefers_matching_frame(self, mock_thumb):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)
         query[30:50, 30:50] = (20, 180, 240)
@@ -71,7 +71,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         )
         self.assertEqual(reranked[0].start_sec, 2.0)
 
-    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_pixel_rerank_snaps_to_nearby_time(self, mock_thumb):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)
         query[30:50, 30:50] = (20, 180, 240)
@@ -98,7 +98,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         self.assertAlmostEqual(float(reranked[0].start_sec), 54.4, places=2)
 
     @unittest.mock.patch("src.services.image_search_rerank.compute_dhash", return_value=123456)
-    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_pixel_rerank_does_not_promote_unreranked_tail(self, mock_thumb, _mock_dhash):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)
         bad_frame = np.zeros((80, 80, 3), dtype=np.uint8)
@@ -122,7 +122,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         self.assertEqual(len(reranked), 2)
         self.assertTrue(all(hit.video_path != "tail.mp4" for hit in reranked))
 
-    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_pixel_rerank_reuses_thumbnail_cache_for_overlapping_probes(self, mock_thumb):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)
         query[30:50, 30:50] = (20, 180, 240)
@@ -147,7 +147,7 @@ class ImageSearchRerankTests(unittest.TestCase):
         self.assertLess(mock_thumb.call_count, 40)
 
     @unittest.mock.patch("src.services.image_search_rerank.compute_dhash")
-    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_pixel_rerank_reuses_probe_dhash_cache(self, mock_thumb, mock_dhash):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)
         query[30:50, 30:50] = (20, 180, 240)
@@ -204,7 +204,7 @@ class DynamicProbeTests(unittest.TestCase):
         window, _step = _hit_probe_plan(hit, {"image_pixel_rerank_probe_mode": "index"}, lookup=lookup)
         self.assertGreaterEqual(window, 6.0)
 
-    @unittest.mock.patch("src.services.image_search_rerank.get_single_thumbnail")
+    @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_index_mode_uses_lookup_step(self, mock_thumb):
         from src.services.search_scope import normalize_scope_path
 

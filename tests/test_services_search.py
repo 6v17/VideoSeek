@@ -21,24 +21,32 @@ class SearchServiceTests(unittest.TestCase):
         mock_text_embedding.assert_called_once_with("cat on sofa")
 
     @patch("src.services.search_service.load_search_assets")
-    @patch("src.services.search_service.build_query_vector")
+    @patch(
+        "src.services.search_service._coalesce_query_vector",
+        return_value=np.array([[1.0, 0.0]], dtype=np.float32),
+    )
     @patch("src.services.search_service._search_frame_results_with_ids")
     @patch("src.services.search_service.load_config")
     def test_run_search_returns_empty_when_index_missing(
         self,
         mock_load_config,
         mock_search_results_with_ids,
-        mock_build_query_vector,
+        _mock_coalesce_query_vector,
         mock_load_assets,
     ):
-        mock_load_config.return_value = {"cross_index_file": "index.faiss", "cross_vector_file": "vectors.npy"}
+        mock_load_config.return_value = {
+            "cross_index_file": "index.faiss",
+            "cross_vector_file": "vectors.npy",
+            "search_mode": "frame",
+            "text_search_enhance_enabled": False,
+        }
         mock_load_assets.return_value = (None, None, None)
 
-        result = search_service.run_search("query", is_text=True)
+        result = search_service.run_search("query", is_text=True, search_mode="frame")
 
         self.assertEqual(result, [])
-        mock_build_query_vector.assert_called_once()
         mock_search_results_with_ids.assert_not_called()
+        mock_load_assets.assert_called()
 
     @patch(
         "src.services.search_scope.filter_hits_with_existing_sources",
@@ -96,19 +104,22 @@ class SearchServiceTests(unittest.TestCase):
         "src.services.search_scope.filter_hits_with_existing_sources",
         side_effect=lambda hits, **_kwargs: list(hits or []),
     )
-    @patch("src.services.search_service.build_query_vector", return_value=np.array([[1.0, 0.0]], dtype=np.float32))
+    @patch(
+        "src.services.search_service._coalesce_query_vector",
+        return_value=np.array([[1.0, 0.0]], dtype=np.float32),
+    )
     @patch("src.services.search_service._run_frame_search_per_videos")
     @patch("src.services.search_service.load_config")
     def test_run_search_uses_per_video_route_for_precise_scoped_image(
         self,
         mock_load_config,
         mock_per_video_search,
-        _mock_build_query_vector,
+        _mock_coalesce_query_vector,
         _mock_filter_existing,
     ):
         from src.domain.search_hit import SearchHit
 
-        mock_load_config.return_value = {}
+        mock_load_config.return_value = {"text_search_enhance_enabled": False}
         expected = [SearchHit(12.0, 12.0, 0.91, "D:/clip.mp4")]
         mock_per_video_search.return_value = expected
 

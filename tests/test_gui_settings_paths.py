@@ -136,6 +136,7 @@ class GuiSettingsPathTests(unittest.TestCase):
                 "setting_runtime_detail_missing_dlls": "Missing system components: {items}",
             }
         )
+        dummy._resolve_runtime_issue_key = lambda status: self.Target._resolve_runtime_issue_key(dummy, status)
         dummy._get_runtime_issue_text = lambda issue: self.Target._get_runtime_issue_text(dummy, issue)
         dummy._build_runtime_issue_summary = lambda status: self.Target._build_runtime_issue_summary(dummy, status)
         dummy._build_runtime_diagnostics_detail = lambda status: "Missing system components: DirectML.dll"
@@ -311,10 +312,15 @@ class GuiSettingsPathTests(unittest.TestCase):
                 btn_stop_index=MagicMock(),
                 btn_add_lib=MagicMock(),
                 btn_remove_lib=MagicMock(),
+                btn_refresh_visual_library=MagicMock(),
+                btn_fix_missing_vectors=MagicMock(),
                 btn_build_dialogue_index=MagicMock(),
                 btn_reembed_dialogue=MagicMock(),
+                btn_clear_dialogue=MagicMock(),
                 btn_export_dialogue=MagicMock(),
                 input_subtitle_sample_interval=MagicMock(),
+                input_subtitle_sample_strategy=MagicMock(),
+                input_subtitle_ocr_batch=MagicMock(),
                 btn_cleanup_missing=MagicMock(),
                 progress_bar=MagicMock(),
             ),
@@ -323,14 +329,17 @@ class GuiSettingsPathTests(unittest.TestCase):
             switch_page=MagicMock(),
             indexing_controller=types.SimpleNamespace(
                 is_running=MagicMock(return_value=False),
+                is_busy=MagicMock(return_value=False),
                 start=MagicMock(return_value=True),
             ),
             _dialogue_index_running=MagicMock(return_value=False),
             _remove_library_worker_running=MagicMock(return_value=False),
             _apply_index_issue_button_state=MagicMock(),
+            _apply_cleanup_missing_button_state=MagicMock(),
             refresh_library_table=MagicMock(),
             show_error_dialog=MagicMock(),
             _refresh_search_session_hint=MagicMock(),
+            _runtime_warmup_ready=True,
             _last_index_issues=["old issue"],
             _last_index_issue_target="old",
         )

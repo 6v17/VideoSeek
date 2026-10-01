@@ -3336,7 +3336,8 @@ class RecapPackTests(unittest.TestCase):
                 ]
             }
         )
-        self.assertEqual([item["label"] for item in people], ["露切", "系统升级提示音", "系统"])
+        # 男主/女主 are allowed temporary role labels; drop music-only noise.
+        self.assertEqual([item["label"] for item in people], ["露切", "系统升级提示音", "男主", "系统"])
 
     def test_merge_story_beats_drops_gap_restatements(self):
         existing = [

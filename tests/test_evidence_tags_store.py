@@ -31,7 +31,7 @@ def _sample_bundle(*, tags0=None, tags1=None, video_id="vid1") -> dict:
                 "end_sec": 5.0,
                 "sample": {"timestamp_sec": 2.5, "strategy": "midpoint"},
                 "evidence": {"vision": {}, "audio": {}},
-                "tags": list(tags0 if tags0 is not None else ["person", "table"]),
+                "tags": list(tags0 if tags0 is not None else ["orange_chair", "table"]),
             },
             {
                 "chunk_index": 1,
@@ -39,7 +39,7 @@ def _sample_bundle(*, tags0=None, tags1=None, video_id="vid1") -> dict:
                 "end_sec": 10.0,
                 "sample": {"timestamp_sec": 7.5, "strategy": "midpoint"},
                 "evidence": {"vision": {}, "audio": {}},
-                "tags": list(tags1 if tags1 is not None else ["car"]),
+                "tags": list(tags1 if tags1 is not None else ["red_car"]),
             },
         ],
     }
@@ -64,15 +64,15 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 self.assertEqual(stats["tag_indexed_videos"], 1)
                 self.assertEqual(stats["tag_rows"], 3)
 
-                hits = store.search_tags("person", match_mode="exact", top_k=5)
+                hits = store.search_tags("orange_chair", match_mode="exact", top_k=5)
                 self.assertEqual(len(hits), 1)
                 self.assertEqual(hits[0]["chunk_index"], 0)
-                self.assertIn("person", hits[0]["matched_tags"])
+                self.assertIn("orange_chair", hits[0]["matched_tags"])
                 # Display uses the full chunk tag set, not only the hit tags.
-                self.assertEqual(hits[0]["chunk_tags"], ["person", "table"])
+                self.assertEqual(hits[0]["chunk_tags"], ["orange_chair", "table"])
 
-                suggestions = store.suggest_tags("per", limit=10)
-                self.assertIn("person", suggestions)
+                suggestions = store.suggest_tags("orang", limit=10)
+                self.assertIn("orange_chair", suggestions)
 
                 popular = store.suggest_tags("", limit=10)
                 self.assertTrue(len(popular) >= 1)
@@ -85,15 +85,15 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 cooccur = store.suggest_tags(
                     "",
                     limit=10,
-                    required_tags=["person"],
-                    exclude_tags=["person"],
+                    required_tags=["orange_chair"],
+                    exclude_tags=["orange_chair"],
                 )
                 self.assertIn("table", cooccur)
-                self.assertNotIn("person", cooccur)
+                self.assertNotIn("orange_chair", cooccur)
 
                 and_hits = store.search_tags(
                     "",
-                    required_tags=["person", "table"],
+                    required_tags=["orange_chair", "table"],
                     match_mode="exact",
                     top_k=5,
                 )
@@ -102,7 +102,7 @@ class EvidenceTagsStoreTests(unittest.TestCase):
 
                 and_miss = store.search_tags(
                     "",
-                    required_tags=["person", "road"],
+                    required_tags=["orange_chair", "road"],
                     match_mode="exact",
                     top_k=5,
                 )
@@ -127,7 +127,7 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 # Checkpoint-style replace with extra chunk tags.
                 n2 = store.replace_video_tags_from_bundle(
                     "vid1",
-                    _sample_bundle(tags0=["person", "chair"], tags1=["car", "road"]),
+                    _sample_bundle(tags0=["orange_chair", "wooden_chair"], tags1=["red_car", "road"]),
                 )
                 self.assertEqual(n2, 4)
                 stats2 = store.get_tag_index_stats()
@@ -202,7 +202,7 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 self.assertEqual(result["videos_projected"], 1)
                 self.assertEqual(result.get("scanned_by_store", {}).get("motion"), 1)
                 self.assertEqual(result["tag_rows"], 3)
-                hits = store.search_tags("person", match_mode="exact")
+                hits = store.search_tags("orange_chair", match_mode="exact")
                 self.assertEqual(len(hits), 1)
                 self.assertEqual(hits[0]["video_id"], "vid_motion")
 
@@ -222,7 +222,7 @@ class RunTagSearchTests(unittest.TestCase):
                 store._SCHEMA_READY.clear()
                 store.replace_video_tags_from_bundle("vid1", _sample_bundle())
                 hits, message, matched_by = run_tag_search(
-                    "person",
+                    "orange_chair",
                     top_k=5,
                     match_mode="exact",
                     config={"data_root": tmp},
@@ -231,7 +231,7 @@ class RunTagSearchTests(unittest.TestCase):
                 self.assertEqual(matched_by, "keyword")
                 self.assertEqual(len(hits), 1)
                 self.assertEqual(hits[0].match_kind, "tags")
-                self.assertIn("person", hits[0].matched_text)
+                self.assertIn("orange_chair", hits[0].matched_text)
                 self.assertIn("table", hits[0].matched_text)
                 self.assertEqual(hits[0].start_sec, 0.0)
                 self.assertEqual(hits[0].end_sec, 5.0)
@@ -251,7 +251,7 @@ class RunTagSearchTests(unittest.TestCase):
                 store._SCHEMA_READY.clear()
                 store.replace_video_tags_from_bundle("vid1", _sample_bundle())
                 hits, message, matched_by = run_tag_search(
-                    "person · table",
+                    "orange_chair · table",
                     top_k=5,
                     match_mode="exact",
                     config={"data_root": tmp},
@@ -261,7 +261,7 @@ class RunTagSearchTests(unittest.TestCase):
                 self.assertEqual(len(hits), 1)
                 hits2, message2, _ = run_tag_search(
                     "",
-                    required_tags=["person", "table"],
+                    required_tags=["orange_chair", "table"],
                     top_k=5,
                     match_mode="exact",
                     config={"data_root": tmp},

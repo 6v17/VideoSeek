@@ -47,7 +47,7 @@ class UnderstandingPipelineTests(unittest.TestCase):
         fake_caption = MagicMock()
         fake_caption.infer.return_value = {"text": "a person standing"}
 
-        pipeline = UnderstandingPipeline(PROFILE_MANIFEST)
+        pipeline = UnderstandingPipeline(PROFILE_MANIFEST, output_mode="tags")
         with (
             patch("src.core.understanding.pipeline.get_single_thumbnail", return_value=frame) as mock_thumb,
             patch("src.core.understanding.pipeline.is_component_installed", return_value=True),

@@ -489,6 +489,8 @@ class RuntimeResourceControllerTests(unittest.TestCase):
         controller = RuntimeResourceController(parent)
         dialog = MagicMock()
         controller._ensure_dialog = MagicMock(return_value=dialog)
+        # Avoid QApplication.processEvents() under a long pytest session (native crash on Windows).
+        controller._exec_runtime_resource_dialog = MagicMock(side_effect=lambda d: d.exec())
         mock_get_status.return_value = {
             "resources_ready": False,
             "display_files": ["clip_visual.onnx", "ffmpeg.exe"],
@@ -507,6 +509,7 @@ class RuntimeResourceControllerTests(unittest.TestCase):
             download_enabled=True,
         )
         dialog.exec.assert_called_once()
+        controller._exec_runtime_resource_dialog.assert_called_once_with(dialog)
 
     @patch("ui.controllers.runtime_resource_controller.get_texts")
     @patch("ui.controllers.runtime_resource_controller.get_runtime_resource_status")

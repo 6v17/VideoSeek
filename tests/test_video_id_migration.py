@@ -137,7 +137,7 @@ class VideoIdMigrationTests(unittest.TestCase):
                         "chunk_index": 0,
                         "start_sec": 0.0,
                         "end_sec": 1.0,
-                        "tags": ["person"],
+                        "tags": ["orange_chair"],
                         "sample": {"timestamp_sec": 0.5, "strategy": "midpoint"},
                         "evidence": {
                             "vision": {

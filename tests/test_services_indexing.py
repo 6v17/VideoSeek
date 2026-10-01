@@ -835,7 +835,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
     @patch("src.services.indexing_service.get_video_duration_seconds", return_value=60.0)
-    @patch("src.services.indexing_service.generate_vectors_and_index_for_video", return_value=([], [], None, []))
+    @patch("src.core.clip_embedding.generate_vectors_and_index_for_video", return_value=([], [], None, []))
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -870,7 +870,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
     @patch("src.services.indexing_service.get_video_duration_seconds", return_value=0.6)
-    @patch("src.services.indexing_service.generate_vectors_and_index_for_video", return_value=([], [], None, []))
+    @patch("src.core.clip_embedding.generate_vectors_and_index_for_video", return_value=([], [], None, []))
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
     @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
     @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
@@ -1140,7 +1140,7 @@ class IndexingServiceTests(unittest.TestCase):
 
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile", "index_dir": "index", "vector_dir": "vector"})
     @patch(
-        "src.services.indexing_service.generate_vectors_and_index_for_video",
+        "src.core.clip_embedding.generate_vectors_and_index_for_video",
         return_value=(np.array([[1.0]], dtype=np.float32), [0.0, 1.0], None, []),
     )
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
@@ -1669,6 +1669,9 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(lib_b_files["clip.mp4"]["vid"], "vid_old_mtime")
         self.assertNotIn("clip.mp4", meta["libraries"]["D:\\lib_a"]["files"])
 
+    @patch("src.storage.lance_store.end_lance_index_batch")
+    @patch("src.storage.lance_store.begin_lance_index_batch")
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1687,6 +1690,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_cleanup_invalid,
         mock_process_single_video,
         _mock_load_chunks,
+        _mock_model_dirs,
+        _mock_begin_batch,
+        _mock_end_batch,
     ):
         root_path = "D:\\videos"
         meta = {
@@ -1724,6 +1730,9 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertIn("new/clip.mp4", lib_files)
         self.assertEqual(persist_calls, ["saved"])
 
+    @patch("src.storage.lance_store.end_lance_index_batch")
+    @patch("src.storage.lance_store.begin_lance_index_batch")
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.relink_relocated_library_sources", return_value=0)
@@ -1740,6 +1749,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_relink,
         mock_process_single_video,
         _mock_load_chunks,
+        _mock_model_dirs,
+        _mock_begin_batch,
+        _mock_end_batch,
     ):
         meta = {"libraries": {"D:\\videos": {"files": {}}}}
         persist_calls = []
@@ -1754,6 +1766,9 @@ class IndexingServiceTests(unittest.TestCase):
 
         self.assertEqual(persist_calls, ["saved"])
 
+    @patch("src.storage.lance_store.end_lance_index_batch")
+    @patch("src.storage.lance_store.begin_lance_index_batch")
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video", return_value=(None, None, True, False))
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1766,6 +1781,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_cleanup_invalid,
         _mock_process_single_video,
         _mock_load_chunks,
+        _mock_model_dirs,
+        _mock_begin_batch,
+        _mock_end_batch,
     ):
         meta = {"libraries": {"D:\\videos": {"files": {}}}}
         persist_calls = []
@@ -1781,6 +1799,9 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertFalse(result[1])
         self.assertEqual(persist_calls, ["saved"])
 
+    @patch("src.storage.lance_store.end_lance_index_batch")
+    @patch("src.storage.lance_store.begin_lance_index_batch")
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value={"base_dir": "profile"})
     @patch("src.services.indexing_service.load_video_chunks_by_id", return_value=[])
     @patch("src.services.indexing_service.process_single_video")
     @patch("src.services.indexing_service.cleanup_invalid_library_files", return_value=iter(()))
@@ -1793,6 +1814,9 @@ class IndexingServiceTests(unittest.TestCase):
         _mock_cleanup_invalid,
         mock_process_single_video,
         _mock_load_chunks,
+        _mock_model_dirs,
+        _mock_begin_batch,
+        _mock_end_batch,
     ):
         mock_process_single_video.return_value = (None, None, True, False)
         meta = {"libraries": {"D:\\videos": {"files": {}}}}
