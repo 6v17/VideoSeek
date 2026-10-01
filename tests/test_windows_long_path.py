@@ -28,7 +28,8 @@ class WindowsLongPathTests(unittest.TestCase):
             # Exercise the ctypes branch; result should still point at the same dir.
             long_path = resolve_windows_long_path(tmp)
             self.assertTrue(os.path.isdir(long_path))
-            self.assertEqual(os.path.normcase(os.path.abspath(long_path)), os.path.normcase(os.path.abspath(tmp)))
+            # TEMP on some Windows hosts is an 8.3 alias (RUNNER~1); abspath does not expand it.
+            self.assertTrue(os.path.samefile(long_path, tmp))
 
     def test_fallback_when_get_long_path_raises(self):
         with tempfile.TemporaryDirectory() as tmp:

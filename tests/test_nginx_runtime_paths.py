@@ -45,12 +45,12 @@ class NginxRuntimePathTests(unittest.TestCase):
                         runtime = team_paths.sync_nginx_runtime_from_bundle()
                         exe = team_paths.get_nginx_exe()
             expected = appdata / "nginx"
-            self.assertEqual(os.path.normcase(runtime), os.path.normcase(str(expected)))
+            self.assertTrue(os.path.samefile(runtime, expected))
             self.assertTrue((expected / "conf" / "nginx.conf").is_file())
             self.assertTrue((expected / "conf" / "mime.types").is_file())
             self.assertTrue((expected / "logs").is_dir())
             self.assertTrue((expected / "temp").is_dir())
-            self.assertEqual(os.path.normcase(exe), os.path.normcase(str(bundle / "nginx.exe")))
+            self.assertTrue(os.path.samefile(exe, bundle / "nginx.exe"))
 
 
 if __name__ == "__main__":
