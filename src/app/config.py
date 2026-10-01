@@ -168,6 +168,7 @@ DEFAULT_CONFIG = {
     "export_copy_extra_sec": 4,
     "export_copy_margin_sec": 2.0,
     "jianying_drafts_dir": "",
+    "export_last_dir": "",
     "agent_api_enabled": False,
     "agent_export_allowed_roots": [],
     "agent_api_search_timeout_fast_sec": 90,
@@ -620,6 +621,7 @@ def _sanitize_general_settings(config):
         DEFAULT_CONFIG["free_notice_seen"],
     )
     sanitized["team_server_url"] = str(sanitized.get("team_server_url", "") or "").strip()
+    sanitized["export_last_dir"] = str(sanitized.get("export_last_dir", "") or "").strip()
     sanitized["search_video_discovery_enabled"] = _coerce_bool(
         sanitized.get(
             "search_video_discovery_enabled",

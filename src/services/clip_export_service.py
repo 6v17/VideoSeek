@@ -21,6 +21,43 @@ from src.utils import (
 
 logger = get_logger("clip_export_service")
 
+
+def last_export_dir(config=None) -> str:
+    """Last folder used by desktop clip export, if it still exists."""
+    cfg = config if isinstance(config, dict) else load_config()
+    path = str(cfg.get("export_last_dir") or "").strip()
+    if path and os.path.isdir(path):
+        return os.path.normpath(path)
+    return ""
+
+
+def remember_export_path(path: str) -> None:
+    """Persist the folder of a chosen export file or directory."""
+    raw = str(path or "").strip()
+    if not raw:
+        return
+    folder = raw if os.path.isdir(raw) else os.path.dirname(raw)
+    if not folder or not os.path.isdir(folder):
+        return
+    normalized = os.path.normpath(folder)
+    from src.app.config import save_config
+
+    cfg = load_config()
+    if os.path.normpath(str(cfg.get("export_last_dir") or "")) == normalized:
+        return
+    cfg["export_last_dir"] = normalized
+    save_config(cfg)
+
+
+def export_save_dialog_start(filename: str, config=None) -> str:
+    """Suggested save path: last export folder plus the file name."""
+    name = os.path.basename(str(filename or "").strip()) or "clip.mp4"
+    folder = last_export_dir(config)
+    if folder:
+        return os.path.join(folder, name)
+    return name
+
+
 EXPORT_CLIP_TIMEOUT_SEC = 120.0
 BATCH_EXPORT_TIMEOUT_MIN_SEC = 120.0
 BATCH_EXPORT_TIMEOUT_MAX_SEC = 900.0

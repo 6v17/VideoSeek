@@ -482,14 +482,17 @@ class ExpandedPreviewChrome(QWidget):
             return
         base_name = os.path.splitext(video_display_name(self.video_path))[0] or "clip"
         suggested_name = f"{base_name}_segment_{int(start_sec):06d}.mp4"
+        from src.services.clip_export_service import export_save_dialog_start, remember_export_path
+
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             self.texts.get("export_clip_title", "Export Preview Clip"),
-            suggested_name,
+            export_save_dialog_start(suggested_name),
             self.texts.get("export_clip_filter", "Video Files (*.mp4 *.mkv *.mov)"),
         )
         if not save_path:
             return
+        remember_export_path(save_path)
 
         queued_text = self.texts.get("preview_dialog_export_queued", "Export added to queue.")
         self._segment_line_override = queued_text

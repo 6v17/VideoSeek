@@ -7,7 +7,7 @@ import os
 from PySide6.QtWidgets import QFileDialog
 
 from src.domain.search_hit import SearchHit
-from src.services.clip_export_service import MAX_BATCH_EXPORT_CLIPS
+from src.services.clip_export_service import MAX_BATCH_EXPORT_CLIPS, last_export_dir, remember_export_path
 from src.services.jianying_draft_service import (
     JianyingDraftError,
     export_shot_list_to_jianying_draft,
@@ -271,9 +271,11 @@ class ShotListGuiMixin:
         output_dir = QFileDialog.getExistingDirectory(
             self,
             self.texts.get("shot_list_batch_export_title", "Choose output folder"),
+            last_export_dir(),
         )
         if not output_dir:
             return
+        remember_export_path(output_dir)
 
         self._start_shot_list_batch_export(items, output_dir, encode_mode)
 

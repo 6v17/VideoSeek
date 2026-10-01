@@ -541,14 +541,17 @@ class PreviewGuiMixin:
             return
         base_name = os.path.splitext(os.path.basename(path))[0]
         suggested_name = f"{base_name}_clip_{int(float(sec)):06d}.mp4"
+        from src.services.clip_export_service import export_save_dialog_start, remember_export_path
+
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             self.texts.get("export_clip_title", "\u5bfc\u51fa\u9884\u89c8\u7247\u6bb5"),
-            suggested_name,
+            export_save_dialog_start(suggested_name),
             self.texts.get("export_clip_filter", "\u89c6\u9891\u6587\u4ef6 (*.mp4 *.mkv *.mov)"),
         )
         if not save_path:
             return
+        remember_export_path(save_path)
         self._queue_preview_export(
             path,
             float(sec),
