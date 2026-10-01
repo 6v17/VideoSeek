@@ -5,8 +5,12 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
-if "faiss" not in sys.modules:
-    sys.modules["faiss"] = MagicMock()
+try:
+    import faiss as _real_faiss
+
+    sys.modules["faiss"] = _real_faiss
+except ImportError:
+    sys.modules["faiss"] = types.SimpleNamespace()
 
 import src.services  # noqa: F401
 import src.storage  # noqa: F401
@@ -14,9 +18,16 @@ import src.storage  # noqa: F401
 if "src.services.library_service" not in sys.modules:
     _fake_library_service = types.ModuleType("src.services.library_service")
     _fake_library_service.list_libraries = MagicMock(return_value={})
+    # None = Lance unavailable → trust meta asset_state (see list_agent_videos).
+    _fake_library_service._lance_indexed_video_ids = MagicMock(return_value=None)
     sys.modules["src.services.library_service"] = _fake_library_service
 # Make ``src.services.library_service`` attribute-importable for unittest.mock.patch.
 src.services.library_service = sys.modules["src.services.library_service"]
+# Keep lazy imports used by agent_library_service from failing on the stub.
+if not hasattr(src.services.library_service, "_lance_indexed_video_ids"):
+    src.services.library_service._lance_indexed_video_ids = MagicMock(return_value=None)
+if not hasattr(src.services.library_service, "list_libraries"):
+    src.services.library_service.list_libraries = MagicMock(return_value={})
 
 from types import SimpleNamespace
 
