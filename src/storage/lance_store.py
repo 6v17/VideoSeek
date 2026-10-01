@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_metadata
