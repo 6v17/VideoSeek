@@ -205,6 +205,7 @@ class PreviewDialog(QDialog):
         self._caption_text = ""
         self._play_token = 0
         self._duration_cache = {}
+        self._window_geometry_before_fullscreen = None
         # Prefer shared_instance + dedicated MediaPlayer (no HWND thrash with main preview).
         # shared_player is legacy: one player hop between hosts (kept for compat).
         self._shared_instance = shared_instance
@@ -383,8 +384,7 @@ class PreviewDialog(QDialog):
         if player is not None and player.is_available():
             player.suspend()
         if self.isFullScreen():
-            self.showNormal()
-            self._schedule_rebind()
+            self._exit_fullscreen()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
         self.video_path = str(video_path)
         self.start_sec = float(start_sec)
@@ -696,14 +696,39 @@ class PreviewDialog(QDialog):
         self._pending_ui_seek_ms = pending
         return display_ms
 
+    def _capture_window_geometry(self):
+        if self.isFullScreen():
+            return
+        geo = self.geometry()
+        if geo.isValid() and not geo.isEmpty():
+            self._window_geometry_before_fullscreen = geo
+
+    def _apply_restored_geometry(self, geo):
+        if self._closing or geo is None:
+            return
+        if self.isFullScreen():
+            self.showNormal()
+        self.setGeometry(geo)
+
+    def _exit_fullscreen(self):
+        """Leave fullscreen and put the window back to the size it had before."""
+        geo = self._window_geometry_before_fullscreen
+        self.showNormal()
+        if geo is None:
+            self._schedule_rebind()
+            return
+        self.setGeometry(geo)
+        QTimer.singleShot(0, lambda g=geo: self._apply_restored_geometry(g))
+        self._schedule_rebind()
+
     def _toggle_fullscreen(self):
         if self._closing:
             return
         if self.isFullScreen():
-            self.showNormal()
+            self._exit_fullscreen()
             self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
-            self._schedule_rebind()
             return
+        self._capture_window_geometry()
         self.showFullScreen()
         self.fullscreen_button.setText(self.texts.get("preview_dialog_exit_fullscreen", "Exit Fullscreen"))
         self._schedule_rebind()

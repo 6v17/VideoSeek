@@ -510,6 +510,7 @@ class SearchPage(QWidget):
         self._compare_row = None
         self._page_body = page_body
         self._preview_layout_maximized = False
+        self._workspace_sizes_before_preview_max = None
 
         # Slot stays in the page layout; results_card can reparent into a float window.
         self.results_slot = QWidget()
@@ -703,21 +704,49 @@ class SearchPage(QWidget):
     def set_preview_maximized(self, maximized: bool) -> None:
         """Hide search/results so the shared preview fills the page."""
         maximized = bool(maximized)
-        self._preview_layout_maximized = maximized
-        self.search_panel.setVisible(not maximized)
-        if not self.is_results_floating():
-            self.results_slot.setVisible(not maximized)
-        self.preview_panel.set_maximized(maximized)
+        timer = getattr(self, "_workspace_splitter_save_timer", None)
+        if timer is not None:
+            timer.stop()
         workspace = getattr(self, "workspace_splitter", None)
-        if workspace is not None and maximized:
-            # Give the compare row the full workspace while results are hidden.
-            total = max(1, sum(int(v) for v in workspace.sizes()) or 1)
-            workspace.setSizes([total, 0])
-        elif workspace is not None and not maximized:
+        if maximized:
+            if workspace is not None and not self.is_results_floating():
+                sizes = [int(v) for v in workspace.sizes()]
+                if len(sizes) >= 2 and sizes[0] > 0 and sizes[1] > 0:
+                    self._workspace_sizes_before_preview_max = sizes
+            self._preview_layout_maximized = True
+            self.search_panel.setVisible(False)
+            if not self.is_results_floating():
+                self.results_slot.setVisible(False)
+            self.preview_panel.set_maximized(True)
+            if workspace is not None:
+                # Give the compare row the full workspace while results are hidden.
+                total = max(1, sum(int(v) for v in workspace.sizes()) or 1)
+                workspace.setSizes([total, 0])
+            return
+
+        self.search_panel.setVisible(True)
+        if not self.is_results_floating():
+            self.results_slot.setVisible(True)
+        self.preview_panel.set_maximized(False)
+        saved = getattr(self, "_workspace_sizes_before_preview_max", None)
+        self._workspace_sizes_before_preview_max = None
+        if (
+            workspace is not None
+            and not self.is_results_floating()
+            and saved
+            and len(saved) >= 2
+            and saved[0] > 0
+            and saved[1] > 0
+        ):
+            restored = list(saved)
+            workspace.setSizes(restored)
+            QTimer.singleShot(0, lambda s=restored, splitter=workspace: splitter.setSizes(s))
+        elif workspace is not None:
             if self.is_results_floating():
                 self._lock_workspace_for_results_float()
             else:
                 self._restore_workspace_splitter_sizes()
+        self._preview_layout_maximized = False
 
     def _on_compare_splitter_moved(self, *_args) -> None:
         timer = getattr(self, "_compare_splitter_save_timer", None)

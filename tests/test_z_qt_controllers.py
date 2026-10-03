@@ -1214,6 +1214,62 @@ class PreviewDialogTests(unittest.TestCase):
         self.assertEqual(mock_vlc_cls.call_count, 1)
         player.suspend.assert_called()
 
+    @patch("ui.playback.preview_dialog.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
+    @patch("ui.playback.preview_dialog.VlcPreviewPlayer")
+    def test_exit_fullscreen_restores_the_window_height(self, mock_vlc_cls, _mock_timer):
+        parent = _make_preview_dialog_parent()
+        player = MagicMock()
+        player.play.return_value = True
+        player.get_length.return_value = 120000
+        player.get_time.return_value = 0
+        player.is_playing.return_value = False
+        player.is_available.return_value = True
+        mock_vlc_cls.return_value = player
+
+        dialog = PreviewDialog(parent, "D:/videos/clip.mp4", 10.0, 16.0, {"preview_dialog_pause": "Pause"})
+
+        class _Rect:
+            def __init__(self, width, height):
+                self._width = width
+                self._height = height
+
+            def isValid(self):
+                return self._width > 0 and self._height > 0
+
+            def isEmpty(self):
+                return self._width <= 0 or self._height <= 0
+
+            def width(self):
+                return self._width
+
+            def height(self):
+                return self._height
+
+        normal = _Rect(1000, 660)
+        fullscreen = _Rect(1920, 1080)
+        dialog._geometry = normal
+        dialog.geometry = lambda: dialog._geometry
+        state = {"full": False}
+        applied = []
+
+        def _set_geometry(geo):
+            applied.append(geo)
+            dialog._geometry = geo
+
+        dialog.setGeometry = _set_geometry
+        dialog.isFullScreen = lambda: state["full"]
+        dialog.showFullScreen = lambda: state.update(full=True) or setattr(dialog, "_geometry", fullscreen)
+        dialog.showNormal = lambda: state.update(full=False)
+
+        dialog._toggle_fullscreen()
+        self.assertTrue(dialog.isFullScreen())
+        self.assertEqual(dialog._geometry.height(), 1080)
+
+        dialog._toggle_fullscreen()
+        self.assertFalse(dialog.isFullScreen())
+        self.assertEqual(applied[-1].height(), 660)
+        self.assertEqual(applied[-1].width(), 1000)
+
     def test_shutdown_fast_skips_blocking_stop_and_release(self):
         host = _make_host_widget()
         player = VlcPreviewPlayer(host)
