@@ -992,9 +992,18 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     color: __HEADLINE__;
     border: 1px solid __LINE__;
     border-radius: 6px;
-    /* Keep padding modest; fixed widget height must leave room for both border edges. */
     padding: 2px 8px;
     min-height: 22px;
+}
+#SearchModeSelect::drop-down {
+    width: 0px;
+    border: none;
+    background: transparent;
+}
+#SearchModeSelect::down-arrow {
+    image: none;
+    width: 0px;
+    height: 0px;
 }
 #SearchModeSelect QAbstractItemView {
     background: __PANEL__;

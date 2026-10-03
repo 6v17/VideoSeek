@@ -294,10 +294,15 @@ class PreviewDialog(QDialog):
         self.export_button = QPushButton(self.texts.get("preview_dialog_export", "Export Segment"))
         self.export_button.setObjectName("PrimaryButton")
         self.export_button.setEnabled(False)
+        self.frame_export_button = QPushButton(self.texts.get("preview_frame_export", "存帧"))
+        self.frame_export_button.setObjectName("GhostButton")
+        self.frame_export_button.setEnabled(False)
+        self._frame_export_thread = None
         segment_row.addWidget(self.set_start_button)
         segment_row.addWidget(self.set_end_button)
         segment_row.addStretch(1)
         segment_row.addWidget(self.clear_segment_button)
+        segment_row.addWidget(self.frame_export_button)
         segment_row.addWidget(self.export_button)
         layout.addLayout(segment_row)
 
@@ -314,6 +319,7 @@ class PreviewDialog(QDialog):
         self.set_end_button.clicked.connect(self._mark_end)
         self.clear_segment_button.clicked.connect(self._clear_segment)
         self.export_button.clicked.connect(self._export_segment)
+        self.frame_export_button.clicked.connect(self._export_current_frame)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
@@ -397,6 +403,7 @@ class PreviewDialog(QDialog):
         self.set_end_button.setEnabled(True)
         self.clear_segment_button.setEnabled(True)
         self.fullscreen_button.setEnabled(True)
+        self.frame_export_button.setEnabled(bool(self.video_path))
         self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         self._update_segment_ui()
         try:
@@ -452,6 +459,7 @@ class PreviewDialog(QDialog):
         self.clear_segment_button.setEnabled(False)
         self.fullscreen_button.setEnabled(False)
         self.export_button.setEnabled(False)
+        self.frame_export_button.setEnabled(False)
 
     def _finalize_close(self):
         self._pending_close = False
@@ -560,6 +568,7 @@ class PreviewDialog(QDialog):
             self.set_end_button.setEnabled(False)
             self.clear_segment_button.setEnabled(False)
             self.export_button.setEnabled(False)
+            self.frame_export_button.setEnabled(False)
             return
 
         self._playback_ready = True
@@ -836,6 +845,57 @@ class PreviewDialog(QDialog):
         )
         self._set_export_busy(False)
 
+    def _export_current_frame(self):
+        if self._closing:
+            return
+        path = str(self.video_path or "").strip()
+        if not path:
+            return
+        thread = self._frame_export_thread
+        if thread is not None and thread.isRunning():
+            return
+        from ui.playback.frame_export import (
+            FrameExportThread,
+            begin_displayed_frame_capture,
+            prompt_frame_save_path,
+        )
+
+        time_sec = self._freeze_playhead_seconds()
+        save_path = prompt_frame_save_path(
+            self,
+            video_path=path,
+            time_sec=time_sec,
+            texts=self.texts,
+        )
+        if not save_path or self._closing:
+            return
+        self.frame_export_button.setEnabled(False)
+        self._segment_line_override = self.texts.get("preview_frame_exporting", "存帧…")
+        self._refresh_segment_queue_hint()
+        self._apply_detail_label()
+        snapshot_path = begin_displayed_frame_capture(self.player, save_path)
+        worker = FrameExportThread(path, time_sec, save_path, self, snapshot_path=snapshot_path)
+        worker.succeeded.connect(self._on_frame_export_done)
+        worker.failed.connect(self._on_frame_export_failed)
+        self._frame_export_thread = worker
+        worker.start()
+
+    def _on_frame_export_done(self, _save_path: str):
+        if self._closing:
+            return
+        self._segment_line_override = self.texts.get("preview_frame_export_done", "已存帧")
+        self._refresh_segment_queue_hint()
+        self._apply_detail_label()
+        self.frame_export_button.setEnabled(bool(self.video_path))
+
+    def _on_frame_export_failed(self):
+        if self._closing:
+            return
+        self._segment_line_override = self.texts.get("preview_frame_export_failed", "存帧失败")
+        self._refresh_segment_queue_hint()
+        self._apply_detail_label()
+        self.frame_export_button.setEnabled(bool(self.video_path))
+
     def _update_segment_ui(self):
         if self.segment_start_sec is not None and self.segment_end_sec is not None:
             if float(self.segment_end_sec) < float(self.segment_start_sec):
@@ -843,6 +903,8 @@ class PreviewDialog(QDialog):
         segment = self._normalized_segment()
         self.export_button.setEnabled(segment is not None)
         self.export_button.setToolTip("")
+        frame_busy = self._frame_export_thread is not None and self._frame_export_thread.isRunning()
+        self.frame_export_button.setEnabled(bool(self.video_path) and not self._closing and not frame_busy)
         self._refresh_segment_bounds_labels()
         self._apply_detail_label()
         self._refresh_segment_queue_hint()
@@ -867,6 +929,17 @@ class PreviewDialog(QDialog):
         if player is None:
             return 0.0
         return max(0.0, player.get_time() / 1000.0)
+
+    def _freeze_playhead_seconds(self) -> float:
+        """Pause on the frame the user is looking at, then return that time."""
+        player = self.player
+        if player is not None and player.is_available() and player.is_playing():
+            player.pause()
+            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+        current_ms = 0
+        if player is not None:
+            current_ms = max(0, int(player.get_time()))
+        return self._resolve_display_time_ms(current_ms) / 1000.0
 
     def _handle_export_finished(self, result, save_path):
         state, status_text = self._resolve_export_status(result, save_path)

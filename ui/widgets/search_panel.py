@@ -326,6 +326,23 @@ class SearchPanel(VSCard):
         _configure_field_group(self.search_scope_cluster, width=group1_width)
         self.search_scope_cluster.setFixedHeight(options_row_height)
 
+        self.skip_edges_label = QLabel()
+        self.skip_edges_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.skip_edges_label)
+        self.btn_skip_edges = SearchScopeSelect()
+        self.btn_skip_edges.setFixedWidth(scope_select_width)
+        self.btn_skip_edges.setFixedHeight(options_combo_height)
+        self.btn_skip_edges.setSizePolicy(combo_policy)
+        self.skip_edges_cluster = QWidget()
+        skip_edges_row = QHBoxLayout(self.skip_edges_cluster)
+        skip_edges_row.setContentsMargins(0, 2, 0, 2)
+        skip_edges_row.setSpacing(field_gap)
+        skip_edges_row.addWidget(self.skip_edges_label, 0)
+        skip_edges_row.addWidget(self.btn_skip_edges, 0)
+        skip_edges_row.addStretch(1)
+        _configure_field_group(self.skip_edges_cluster, width=group1_width)
+        self.skip_edges_cluster.setFixedHeight(options_row_height)
+
         self.options_block = self.search_scope_cluster
         self.options_title = self.search_scope_label
 
@@ -370,6 +387,18 @@ class SearchPanel(VSCard):
             QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         )
 
+        self.options_row = QWidget()
+        self.options_row.setObjectName("SearchOptionsRow")
+        options_row_layout = QHBoxLayout(self.options_row)
+        options_row_layout.setContentsMargins(0, 0, 0, 0)
+        options_row_layout.setSpacing(group_gap)
+        options_row_layout.addWidget(self.skip_edges_cluster, 0)
+        options_row_layout.addWidget(self.search_mode_options_stack, 0)
+        self.options_row.setFixedHeight(options_row_height)
+        self.options_row.setSizePolicy(
+            QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        )
+
         self.btn_search = QPushButton()
         self.btn_search.setObjectName("SearchButton")
         self.btn_save_preset = QPushButton()
@@ -387,10 +416,11 @@ class SearchPanel(VSCard):
         layout.addWidget(self.lbl_active_model, 0)
         layout.addWidget(self.search_query_tabs, 0)
         layout.addWidget(self.mobile_row, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(self.search_mode_options_stack, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.options_row, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addLayout(action_row, 0)
 
         default_width = compute_search_panel_width()
+        self._width_ceiling = default_width
         self._default_width = default_width
         self.setMinimumWidth(default_width)
         # Allow dragging wider for tags suggestions; keep a sane ceiling.
@@ -449,11 +479,12 @@ class SearchPanel(VSCard):
             self._default_height = max(panel_min, compare_row_card_height())
 
     def relayout_inline_fields(self) -> None:
-        """Size InlineFieldLabel rows to their text so EN/zh labels are not clipped."""
+        """Hug each label to its text and size dropdowns to their copy."""
         labels = [
             getattr(self, name, None)
             for name in (
                 "search_scope_label",
+                "skip_edges_label",
                 "mobile_toggle_label",
                 "search_mode_label",
                 "text_search_enhance_label",
@@ -461,55 +492,101 @@ class SearchPanel(VSCard):
                 "dialogue_search_mode_label",
             )
         ]
-        labeled = [label for label in labels if isinstance(label, QLabel) and str(label.text() or "").strip()]
+        labeled = [label for label in labels if isinstance(label, QLabel)]
         if not labeled:
             return
         pad = int(getattr(self, "_field_label_pad", 4))
-        needed = 0
+        label_widths = {}
         for label in labeled:
-            needed = max(needed, int(label.fontMetrics().horizontalAdvance(label.text())) + pad)
-        for label in labeled:
-            label.setMinimumWidth(needed)
+            text = str(label.text() or "").strip()
+            if not text:
+                label.setMinimumWidth(0)
+                label.setMaximumWidth(16777215)
+                label_widths[label] = 0
+                continue
+            width = int(label.fontMetrics().horizontalAdvance(text)) + pad + 6
+            label.setMinimumWidth(width)
+            label.setMaximumWidth(width)
+            label_widths[label] = width
 
         field_gap = int(getattr(self, "_field_gap", 4))
         group_gap = int(getattr(self, "_group_gap", 8))
-        scope_w = int(getattr(self, "_scope_select_width", 92))
-        mode_w = int(getattr(self, "_mode_combo_width", 108))
-        enhance_w = int(getattr(self, "_enhance_combo_width", 64))
+        scope_w = self._fit_combo_width(self.search_scope_select, floor=56, cap=120)
+        skip_w = self._fit_combo_width(getattr(self, "btn_skip_edges", None), floor=56, cap=120)
+        mode_w = self._fit_combo_width(self.search_mode, floor=56, cap=120)
+        image_mode_w = self._fit_combo_width(self.image_search_mode, floor=56, cap=120)
+        dialogue_mode_w = self._fit_combo_width(self.dialogue_search_mode, floor=56, cap=120)
+        enhance_w = self._fit_combo_width(self.text_search_enhance, floor=48, cap=84)
         toggle_w = int(getattr(self, "_toggle_width", 52))
         qr_w = int(getattr(self, "_mobile_qr_width", 56))
 
+        def _cluster_width(label, control_width) -> int:
+            return int(label_widths.get(label, 0)) + field_gap + int(control_width)
+
         if hasattr(self, "search_scope_cluster"):
-            self.search_scope_cluster.setMinimumWidth(needed + field_gap + scope_w)
+            self.search_scope_cluster.setMinimumWidth(
+                _cluster_width(self.search_scope_label, scope_w)
+            )
+        if hasattr(self, "skip_edges_cluster"):
+            self.skip_edges_cluster.setMinimumWidth(
+                _cluster_width(self.skip_edges_label, skip_w)
+            )
         if hasattr(self, "mobile_group"):
-            self.mobile_group.setMinimumWidth(needed + field_gap + toggle_w + field_gap + qr_w)
+            self.mobile_group.setMinimumWidth(
+                _cluster_width(self.mobile_toggle_label, toggle_w + field_gap + qr_w)
+            )
         if hasattr(self, "image_search_mode_cluster"):
-            self.image_search_mode_cluster.setMinimumWidth(needed + field_gap + mode_w)
+            self.image_search_mode_cluster.setMinimumWidth(
+                _cluster_width(self.image_search_mode_label, image_mode_w)
+            )
         if hasattr(self, "dialogue_search_mode_cluster"):
-            self.dialogue_search_mode_cluster.setMinimumWidth(needed + field_gap + mode_w)
+            self.dialogue_search_mode_cluster.setMinimumWidth(
+                _cluster_width(self.dialogue_search_mode_label, dialogue_mode_w)
+            )
         if hasattr(self, "text_granularity_cluster"):
-            with_enhance = needed + field_gap + mode_w + group_gap + needed + field_gap + enhance_w
-            mode_only = needed + field_gap + mode_w
+            mode_only = _cluster_width(self.search_mode_label, mode_w)
+            enhance = getattr(self, "text_search_enhance", None)
+            enhance_label = getattr(self, "text_search_enhance_label", None)
+            show_enhance = (
+                enhance is not None
+                and enhance.isVisible()
+                and enhance_label is not None
+                and enhance_label.isVisible()
+            )
+            with_enhance = mode_only + group_gap + _cluster_width(enhance_label, enhance_w)
             self._text_options_width_with_enhance = with_enhance
             self._text_options_width_mode_only = mode_only
-            enhance = getattr(self, "text_search_enhance", None)
-            width = with_enhance if enhance is not None and enhance.isVisible() else mode_only
-            self.text_granularity_cluster.setMinimumWidth(int(width))
+            self.text_granularity_cluster.setMinimumWidth(with_enhance if show_enhance else mode_only)
 
-        row_floor = (
-            needed
-            + field_gap
-            + scope_w
+        row1 = (
+            _cluster_width(self.search_scope_label, scope_w)
             + group_gap
-            + needed
-            + field_gap
-            + toggle_w
-            + field_gap
-            + qr_w
-            + int(COMPONENT_SIZES.get("search_panel_card_margin", 8)) * 2
+            + _cluster_width(self.mobile_toggle_label, toggle_w + field_gap + qr_w)
         )
-        self._default_width = max(int(self._default_width), row_floor)
+        skip_label = getattr(self, "skip_edges_label", None)
+        row2 = _cluster_width(skip_label, skip_w) + group_gap + int(
+            getattr(self, "_text_options_width_with_enhance", 0) or 0
+        )
+        card_margin = int(COMPONENT_SIZES.get("search_panel_card_margin", 8)) * 2
+        fitted = max(row1, row2) + card_margin
+        ceiling = int(getattr(self, "_width_ceiling", fitted) or fitted)
+        # A little wider than the tight fit, and never narrower than the original panel.
+        self._default_width = max(fitted + 36, ceiling)
         self.setMinimumWidth(int(self._default_width))
+
+    def _fit_combo_width(self, combo, *, floor: int, cap: int) -> int:
+        if combo is None:
+            return int(floor)
+        longest = 0
+        fm = combo.fontMetrics()
+        for index in range(combo.count()):
+            longest = max(longest, int(fm.horizontalAdvance(combo.itemText(index))))
+        if longest <= 0:
+            longest = int(fm.horizontalAdvance(combo.currentText() or ""))
+        # Horizontal padding only. These combos have no drop-down arrow.
+        width = max(int(floor), min(int(cap), longest + 20))
+        combo.setFixedWidth(width)
+        return width
 
     def sizeHint(self):
         from PySide6.QtCore import QSize

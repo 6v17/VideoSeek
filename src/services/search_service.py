@@ -220,14 +220,21 @@ def _run_frame_search_per_videos(
             precise_image=False,
         )
     with profile_phase("scope_filter"):
-        # Keep expanded pool until after video-discovery aggregation.
-        scope_keep_k = fetch_k if use_video_discovery else top_k
+        # Keep expanded pool until after video-discovery / intro-outro filtering.
+        from src.services.search_edge_filter import resolve_result_pool_k
+
+        scope_keep_k = resolve_result_pool_k(
+            fetch_k,
+            top_k,
+            config,
+            force_expand=use_video_discovery,
+        )
         scoped_hits = apply_search_scope(
             matched_results,
             video_paths=scope_paths,
             top_k=scope_keep_k,
         )
-    merge_keep_k = fetch_k if use_video_discovery else top_k
+    merge_keep_k = scope_keep_k if use_video_discovery else top_k
     results = _finalize_frame_hits(
         query_data,
         is_text,
@@ -763,14 +770,21 @@ def _run_search_impl(
                         )
                 merged_hits.extend(matched_results)
             with profile_phase("scope_filter"):
-                # Keep expanded pool until after video-discovery aggregation.
-                merge_keep_k = library_fetch_k if use_video_discovery else top_k
+                # Keep expanded pool until after video-discovery / intro-outro filtering.
+                from src.services.search_edge_filter import resolve_result_pool_k
+
+                merge_keep_k = resolve_result_pool_k(
+                    library_fetch_k,
+                    top_k,
+                    config,
+                    force_expand=use_video_discovery,
+                )
                 scoped_hits = _merge_search_hits(merged_hits, merge_keep_k)
             results = _finalize_frame_hits(
                 query_data,
                 is_text,
                 scoped_hits,
-                merge_keep_k,
+                top_k if not use_video_discovery else merge_keep_k,
                 config,
                 precise_image=precise_image,
                 pixel_query_data=pixel_query_data,
@@ -839,9 +853,16 @@ def _run_search_impl(
                     top_k=fetch_k,
                 )
             else:
-                # Keep the expanded recall pool until after video-discovery aggregation;
-                # truncating to top_k here collapses many videos into one dominant clip.
-                scope_keep_k = fetch_k if use_video_discovery else top_k
+                # Keep the expanded recall pool until after video-discovery /
+                # intro-outro filtering; truncating to top_k here collapses the pool.
+                from src.services.search_edge_filter import resolve_result_pool_k
+
+                scope_keep_k = resolve_result_pool_k(
+                    fetch_k,
+                    top_k,
+                    config,
+                    force_expand=use_video_discovery,
+                )
                 scoped_hits = apply_search_scope(
                     matched_results,
                     video_paths=scope_video_paths,
@@ -860,8 +881,18 @@ def _run_search_impl(
                     pixel_query_data=pixel_query_data,
                 )
         else:
-            merge_keep_k = fetch_k if use_video_discovery else top_k
-            results = _merge_search_hits(scoped_hits, merge_keep_k)
+            from src.services.search_edge_filter import resolve_result_pool_k
+
+            merge_keep_k = resolve_result_pool_k(
+                fetch_k,
+                top_k,
+                config,
+                force_expand=use_video_discovery,
+            )
+            results = _merge_search_hits(
+                scoped_hits,
+                merge_keep_k if use_video_discovery else top_k,
+            )
         if precise_image and scoped and scope_video_paths:
             from src.services.search_scope import filter_hits_by_video_paths
 
@@ -993,7 +1024,7 @@ def run_chunk_search(
 
         from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
 
-        fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped)
+        fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped, config=config)
         with profile_phase("load_assets"):
             search_index, ranges, video_paths = load_chunk_search_assets(config)
         if search_index is None:

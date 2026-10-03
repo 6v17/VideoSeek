@@ -6,24 +6,32 @@ from typing import List, Sequence
 
 from src.domain.search_hit import SearchHit
 from src.services.image_search_rerank import merge_index_step_lookup, reset_index_step_lookup
+from src.services.search_edge_filter import (
+    filter_search_edge_hits,
+    merge_video_end_lookup,
+    reset_video_end_lookup,
+)
 from src.services.search_scope import apply_search_scope, normalize_scope_path
 from src.storage.config_store import is_precise_image_search
 
 
 def _reset_search_index_steps() -> None:
     reset_index_step_lookup()
+    reset_video_end_lookup()
 
 
 def _merge_search_index_steps(video_paths, timestamps) -> None:
     if video_paths is None or timestamps is None:
         return
     merge_index_step_lookup(video_paths, timestamps)
+    merge_video_end_lookup(video_paths, timestamps)
 
 
 def _merge_search_hits(hits: List[SearchHit], top_k: int) -> List[SearchHit]:
     if top_k <= 0:
         return []
     ordered = sorted(hits or [], key=lambda item: float(item.score), reverse=True)
+    ordered = filter_search_edge_hits(ordered)
     return ordered[: int(top_k)]
 
 
@@ -61,6 +69,20 @@ def _dedupe_nearby_hits(hits: List[SearchHit], bucket_sec: float = 1.0) -> List[
         key = (str(hit.video_path), int(float(hit.start_sec) / bucket))
         if key not in best or float(hit.score) > float(best[key].score):
             best[key] = hit
+    return sorted(best.values(), key=lambda item: float(item.score), reverse=True)
+
+
+def _dedupe_identical_frame_hits(hits: List[SearchHit]) -> List[SearchHit]:
+    """Drop exact same-path/same-time copies (e.g. neighbor rerank snapped several seeds)."""
+    if not hits:
+        return []
+    best: dict[tuple[str, int], SearchHit] = {}
+    for hit in hits:
+        key = (str(hit.video_path), int(round(float(hit.start_sec) * 1000.0)))
+        if key not in best or float(hit.score) > float(best[key].score):
+            best[key] = hit
+    if len(best) == len(hits):
+        return list(hits)
     return sorted(best.values(), key=lambda item: float(item.score), reverse=True)
 
 

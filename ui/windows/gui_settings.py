@@ -224,6 +224,8 @@ class SettingsGuiMixin:
             self._refresh_legacy_migration_settings_ui()
         if hasattr(self, "_refresh_search_precision_controls"):
             self._refresh_search_precision_controls()
+        if hasattr(self, "_refresh_skip_edges_summary"):
+            self._refresh_skip_edges_summary()
         if hasattr(self, "load_understanding_settings"):
             self.load_understanding_settings()
 

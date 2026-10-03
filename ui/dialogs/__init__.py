@@ -9,6 +9,7 @@ from .donate import DonateDialog
 from .notice import NoticeDialog
 from .resource_table import ResourceTableDialog
 from .sampling_rules import SamplingRulesDialog
+from .skip_edges import SkipEdgesDialog
 from .shell import VSDialogShell
 from .understanding_services import UnderstandingServicesDialog
 
@@ -22,6 +23,7 @@ __all__ = [
     "NoticeDialog",
     "ResourceTableDialog",
     "SamplingRulesDialog",
+    "SkipEdgesDialog",
     "SortableTableWidgetItem",
     "UnderstandingServicesDialog",
     "VSDialogShell",

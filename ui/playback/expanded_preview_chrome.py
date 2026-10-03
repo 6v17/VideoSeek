@@ -129,11 +129,16 @@ class ExpandedPreviewChrome(QWidget):
         self.export_button = QPushButton()
         self.export_button.setObjectName("PrimaryButton")
         self.export_button.setEnabled(False)
+        self.frame_export_button = QPushButton()
+        self.frame_export_button.setObjectName("GhostButton")
+        self.frame_export_button.setEnabled(False)
+        self._frame_export_thread = None
         segment_row.addWidget(self.set_start_button)
         segment_row.addWidget(self.set_end_button)
         segment_row.addStretch(1)
         segment_row.addWidget(self.clear_segment_button)
         segment_row.addWidget(self.add_to_shot_list_button)
+        segment_row.addWidget(self.frame_export_button)
         segment_row.addWidget(self.export_button)
         root.addLayout(segment_row)
 
@@ -149,6 +154,7 @@ class ExpandedPreviewChrome(QWidget):
         self.clear_segment_button.clicked.connect(self._clear_segment)
         self.add_to_shot_list_button.clicked.connect(self._add_to_shot_list)
         self.export_button.clicked.connect(self._export_segment)
+        self.frame_export_button.clicked.connect(self._export_current_frame)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
@@ -205,6 +211,7 @@ class ExpandedPreviewChrome(QWidget):
             self.texts.get("shot_list_add_tip", "加入素材篮，稍后统一查看或导出")
         )
         self.export_button.setText(self.texts.get("preview_dialog_export", "Export Segment"))
+        self.frame_export_button.setText(self.texts.get("preview_frame_export", "存帧"))
 
     def bind_player(self, player):
         self.player = player
@@ -399,6 +406,7 @@ class ExpandedPreviewChrome(QWidget):
         self.maximize_button.setEnabled(False)
         self.add_to_shot_list_button.setEnabled(False)
         self.export_button.setEnabled(False)
+        self.frame_export_button.setEnabled(False)
         self._refresh_segment_bounds_labels()
         self._refresh_segment_queue_hint()
 
@@ -500,6 +508,48 @@ class ExpandedPreviewChrome(QWidget):
         self.export_status_changed.emit("queued", queued_text)
         self.export_requested.emit(self.video_path, start_sec, end_sec, save_path, encode_mode)
 
+    def _export_current_frame(self):
+        path = str(self.video_path or "").strip()
+        if not path:
+            return
+        thread = self._frame_export_thread
+        if thread is not None and thread.isRunning():
+            return
+        from ui.playback.frame_export import (
+            FrameExportThread,
+            begin_displayed_frame_capture,
+            prompt_frame_save_path,
+        )
+
+        time_sec = self._freeze_playhead_seconds()
+        save_path = prompt_frame_save_path(
+            self,
+            video_path=path,
+            time_sec=time_sec,
+            texts=self.texts,
+        )
+        if not save_path:
+            return
+        self.frame_export_button.setEnabled(False)
+        self._segment_line_override = self.texts.get("preview_frame_exporting", "存帧…")
+        self._refresh_segment_queue_hint()
+        snapshot_path = begin_displayed_frame_capture(self.player, save_path)
+        worker = FrameExportThread(path, time_sec, save_path, self, snapshot_path=snapshot_path)
+        worker.succeeded.connect(self._on_frame_export_done)
+        worker.failed.connect(self._on_frame_export_failed)
+        self._frame_export_thread = worker
+        worker.start()
+
+    def _on_frame_export_done(self, _save_path: str):
+        self._segment_line_override = self.texts.get("preview_frame_export_done", "已存帧")
+        self._refresh_segment_queue_hint()
+        self.frame_export_button.setEnabled(bool(self.video_path))
+
+    def _on_frame_export_failed(self):
+        self._segment_line_override = self.texts.get("preview_frame_export_failed", "存帧失败")
+        self._refresh_segment_queue_hint()
+        self.frame_export_button.setEnabled(bool(self.video_path))
+
     def _update_segment_ui(self):
         if self.segment_start_sec is not None and self.segment_end_sec is not None:
             if float(self.segment_end_sec) < float(self.segment_start_sec):
@@ -507,6 +557,8 @@ class ExpandedPreviewChrome(QWidget):
         segment = self._normalized_segment()
         self.export_button.setEnabled(segment is not None)
         self.add_to_shot_list_button.setEnabled(bool(self.video_path))
+        busy = self._frame_export_thread is not None and self._frame_export_thread.isRunning()
+        self.frame_export_button.setEnabled(bool(self.video_path) and not busy)
         self._refresh_segment_bounds_labels()
         self._refresh_segment_queue_hint()
 
@@ -526,6 +578,17 @@ class ExpandedPreviewChrome(QWidget):
         if player is None:
             return 0.0
         return max(0.0, player.get_time() / 1000.0)
+
+    def _freeze_playhead_seconds(self) -> float:
+        """Pause on the frame the user is looking at, then return that time."""
+        player = self.player
+        if player is not None and player.is_available() and player.is_playing():
+            player.pause()
+            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+        current_ms = 0
+        if player is not None:
+            current_ms = max(0, int(player.get_time()))
+        return self._resolve_display_time_ms(current_ms) / 1000.0
 
 
 def _format_segment_display_sec(value):

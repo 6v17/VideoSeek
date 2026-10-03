@@ -5,6 +5,11 @@ from src.app.app_meta import get_app_meta
 from src.app.logging_utils import get_logger
 from src.infra.paths import get_app_data_dir, get_default_model_dir, get_resource_path
 from src.media.sampling_fps import normalize_sampling_fps_mode, normalize_sampling_fps_rules_text
+from src.services.search_skip_ranges import (
+    migrate_legacy_skip_edges_to_ranges,
+    normalize_search_skip_ranges_text,
+    parse_search_skip_ranges,
+)
 
 logger = get_logger("config")
 _LAST_MIGRATION_NOTICE = None
@@ -97,6 +102,10 @@ DEFAULT_CONFIG = {
     "sampling_fps_rules": "0-10m=2; 10m-=1",
     "search_top_k": 100,
     "text_search_enhance_enabled": False,
+    "search_skip_edges_enabled": False,
+    "search_skip_ranges": "",
+    "search_skip_intro_sec": 0,
+    "search_skip_outro_sec": 0,
     "frame_neighbor_rerank_enabled": True,
     "frame_neighbor_rerank_top_n": 10,
     "frame_neighbor_rerank_window": 2,
@@ -194,6 +203,8 @@ DEFAULT_CONFIG = {
 CONFIG_BOUNDS = {
     "fps": (0.01, 24.0),
     "search_top_k": (1, 300),
+    "search_skip_intro_sec": (0, 600),
+    "search_skip_outro_sec": (0, 600),
     "frame_neighbor_rerank_top_n": (1, 100),
     "frame_neighbor_rerank_window": (1, 12),
     "image_pixel_rerank_top_n": (1, 100),
@@ -232,6 +243,8 @@ CONFIG_BOUNDS = {
 
 CONFIG_INT_KEYS = {
     "search_top_k",
+    "search_skip_intro_sec",
+    "search_skip_outro_sec",
     "frame_neighbor_rerank_top_n",
     "frame_neighbor_rerank_window",
     "image_pixel_rerank_top_n",
@@ -588,6 +601,23 @@ def _sanitize_general_settings(config):
         ),
         DEFAULT_CONFIG["text_search_enhance_enabled"],
     )
+    sanitized["search_skip_edges_enabled"] = _coerce_bool(
+        sanitized.get(
+            "search_skip_edges_enabled",
+            DEFAULT_CONFIG["search_skip_edges_enabled"],
+        ),
+        DEFAULT_CONFIG["search_skip_edges_enabled"],
+    )
+    ranges_text = normalize_search_skip_ranges_text(
+        sanitized.get("search_skip_ranges", DEFAULT_CONFIG["search_skip_ranges"])
+    )
+    if not ranges_text and sanitized["search_skip_edges_enabled"]:
+        ranges_text = migrate_legacy_skip_edges_to_ranges(
+            sanitized.get("search_skip_intro_sec", 0),
+            sanitized.get("search_skip_outro_sec", 0),
+        )
+    sanitized["search_skip_ranges"] = ranges_text
+    sanitized["search_skip_edges_enabled"] = bool(parse_search_skip_ranges(ranges_text))
     sanitized["experimental_hw_decode"] = _coerce_bool(
         sanitized.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"]),
         DEFAULT_CONFIG["experimental_hw_decode"],

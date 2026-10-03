@@ -255,8 +255,55 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(reranked[0].end_sec, 2.0)
         self.assertGreater(reranked[0].score, results[0].score)
 
+    def test_apply_frame_neighbor_rerank_collapses_snapped_duplicates(self):
+        class DummyIndex:
+            def __init__(self):
+                self._vectors = {
+                    0: np.array([0.2, 0.1], dtype=np.float32),
+                    1: np.array([0.3, 0.1], dtype=np.float32),
+                    2: np.array([1.0, 0.0], dtype=np.float32),
+                }
 
+            def reconstruct(self, idx):
+                return self._vectors[idx]
 
+        results = [
+            SearchHit(0.0, 0.0, 0.4, "a.mp4"),
+            SearchHit(1.0, 1.0, 0.5, "a.mp4"),
+            SearchHit(2.0, 2.0, 0.9, "a.mp4"),
+        ]
+        frame_ids = [0, 1, 2]
+        query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
+        timestamps = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+        paths = np.array(["a.mp4", "a.mp4", "a.mp4"], dtype=object)
+        config = {
+            "frame_neighbor_rerank_enabled": True,
+            "frame_neighbor_rerank_top_n": 5,
+            "frame_neighbor_rerank_window_sec": 2.0,
+        }
 
-if __name__ == "__main__":
-    unittest.main()
+        reranked = search_service._apply_frame_neighbor_rerank(
+            results,
+            frame_ids,
+            query_vector,
+            DummyIndex(),
+            timestamps,
+            paths,
+            config=config,
+        )
+        self.assertEqual(len(reranked), 1)
+        self.assertEqual(reranked[0].start_sec, 2.0)
+        self.assertGreaterEqual(float(reranked[0].score), 0.9)
+
+    def test_dedupe_identical_frame_hits_keeps_nearby_distinct_times(self):
+        from src.services.search_hit_utils import _dedupe_identical_frame_hits
+
+        hits = [
+            SearchHit(10.0, 10.0, 0.9, "a.mp4"),
+            SearchHit(10.5, 10.5, 0.8, "a.mp4"),
+            SearchHit(10.0, 10.0, 0.7, "a.mp4"),
+        ]
+        cleaned = _dedupe_identical_frame_hits(hits)
+        self.assertEqual(len(cleaned), 2)
+        self.assertEqual({round(float(h.start_sec), 1) for h in cleaned}, {10.0, 10.5})
+        self.assertEqual(float(cleaned[0].score), 0.9)

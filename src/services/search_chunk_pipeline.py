@@ -78,9 +78,9 @@ def _collect_frame_candidates_for_chunk_search(
         if is_text:
             from src.services.search_fetch_policy import resolve_source_filtered_fetch_top_k
 
-            fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped)
+            fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped, config=config)
         else:
-            fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped)
+            fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped, config=config)
     neighbor_seed_n = _resolve_neighbor_seed_top_n(config, fetch_k, top_k, precise_image=precise_image)
     candidates: List[SearchHit] = []
 
@@ -315,7 +315,9 @@ def _finalize_frame_hits(
     seed_times=None,
 ) -> List[SearchHit]:
     if is_text or not precise_image:
-        return _merge_search_hits(hits, top_k)
+        from src.services.search_hit_utils import _dedupe_identical_frame_hits
+
+        return _merge_search_hits(_dedupe_identical_frame_hits(hits), top_k)
     return _refine_precise_seed_hits(
         query_data,
         hits,
@@ -346,7 +348,7 @@ def _run_chunk_search_via_frames(
     if precise_image:
         frame_fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
     else:
-        frame_fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped)
+        frame_fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped, config=config)
     logger.info(
         "Chunk image search via frames (precise=%s, frame_fetch_k=%s)",
         precise_image,

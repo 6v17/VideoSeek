@@ -15,15 +15,20 @@ _PRECISE_PIXEL_LOCALIZE_TOP_N = 3
 _IN_VIDEO_PIXEL_LOCALIZE_CAP = 15
 
 
-def resolve_source_filtered_fetch_top_k(top_k: int, scoped: bool) -> int:
+def resolve_source_filtered_fetch_top_k(top_k: int, scoped: bool, config=None) -> int:
     """Expand recall before dropping hits whose source file no longer exists."""
+    from src.services.search_edge_filter import expand_fetch_for_edge_filter
+
     normalized = max(1, int(top_k))
     base = resolve_fetch_top_k(normalized, scoped)
     expanded = max(base * 5, normalized + 50)
-    return max(normalized, min(_SOURCE_FILTER_FETCH_CAP, expanded))
+    fetch_k = max(normalized, min(_SOURCE_FILTER_FETCH_CAP, expanded))
+    return expand_fetch_for_edge_filter(fetch_k, normalized, config)
 
 
 def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
+    from src.services.search_edge_filter import expand_fetch_for_edge_filter
+
     base = resolve_fetch_top_k(top_k, True)
     try:
         multiplier = int(config.get("image_search_fetch_multiplier", DEFAULT_CONFIG["image_search_fetch_multiplier"]))
@@ -31,7 +36,8 @@ def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
         multiplier = int(DEFAULT_CONFIG["image_search_fetch_multiplier"])
     multiplier = max(1, min(multiplier, 8))
     expanded = max(base * multiplier, base + 15)
-    return max(int(top_k), min(_GLOBAL_STAGE1_FETCH_CAP, expanded))
+    fetch_k = max(int(top_k), min(_GLOBAL_STAGE1_FETCH_CAP, expanded))
+    return expand_fetch_for_edge_filter(fetch_k, top_k, config)
 
 
 def _precise_pixel_localize_top_n(config, hits: List[SearchHit] | None = None) -> int:
@@ -57,8 +63,10 @@ def _resolve_frame_fetch_top_k(
     config,
     precise_image: bool = False,
 ) -> int:
+    from src.services.search_edge_filter import expand_fetch_for_edge_filter
+
     if is_text or not precise_image:
-        return resolve_source_filtered_fetch_top_k(top_k, scoped)
+        return resolve_source_filtered_fetch_top_k(top_k, scoped, config=config)
     fetch_k = resolve_fetch_top_k(top_k, scoped or True)
     try:
         multiplier = int(config.get("image_search_fetch_multiplier", DEFAULT_CONFIG["image_search_fetch_multiplier"]))
@@ -66,12 +74,16 @@ def _resolve_frame_fetch_top_k(
         multiplier = int(DEFAULT_CONFIG["image_search_fetch_multiplier"])
     multiplier = max(1, min(multiplier, 8))
     expanded = max(fetch_k * multiplier, fetch_k + 15)
-    return max(int(top_k), min(_PRECISE_FETCH_CAP, expanded))
+    fetch_k = max(int(top_k), min(_PRECISE_FETCH_CAP, expanded))
+    return expand_fetch_for_edge_filter(fetch_k, top_k, config)
 
 
-def _resolve_chunk_precise_frame_fetch_k(top_k: int, scoped: bool) -> int:
+def _resolve_chunk_precise_frame_fetch_k(top_k: int, scoped: bool, config=None) -> int:
+    from src.services.search_edge_filter import expand_fetch_for_edge_filter
+
     normalized = max(1, int(top_k))
     expanded = max(normalized * 6, normalized + 30)
     if scoped:
         expanded = max(expanded, normalized * 3 + 15)
-    return max(normalized, min(200, expanded))
+    fetch_k = max(normalized, min(200, expanded))
+    return expand_fetch_for_edge_filter(fetch_k, normalized, config)

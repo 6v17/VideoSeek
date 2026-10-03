@@ -470,6 +470,9 @@ class SearchPage(QWidget):
         self.search_scope_cluster = self.search_panel.search_scope_cluster
         self.search_scope_label = self.search_panel.search_scope_label
         self.search_scope_select = self.search_panel.search_scope_select
+        self.skip_edges_cluster = self.search_panel.skip_edges_cluster
+        self.skip_edges_label = self.search_panel.skip_edges_label
+        self.btn_skip_edges = self.search_panel.btn_skip_edges
         self.options_block = self.search_panel.options_block
         self.options_title = self.search_panel.options_title
         self.mobile_row = self.search_panel.mobile_row

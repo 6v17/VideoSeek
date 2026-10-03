@@ -448,6 +448,20 @@ class VlcPreviewPlayer:
             return
         self._set_paused(True)
 
+    def capture_displayed_frame(self, output_path: str) -> bool:
+        """Write the picture currently on screen. The file appears shortly after this returns."""
+        if self._player is None or self._released:
+            return False
+        dest = os.path.abspath(str(output_path or "").strip())
+        if not dest:
+            return False
+        try:
+            result = self._player.video_take_snapshot(0, dest, 0, 0)
+        except Exception as exc:
+            _log_vlc_debug("snapshot", exc)
+            return False
+        return result in (0, None)
+
     def _set_paused(self, paused: bool) -> None:
         """Force pause/resume. Prefer this over ``pause()``, which toggles in libvlc."""
         if self._player is None or self._released:

@@ -321,6 +321,8 @@ class SearchPanelStateMixin:
 
         if refresh_scope:
             self._refresh_search_scope_ui()
+        if hasattr(self, "_refresh_skip_edges_summary"):
+            self._refresh_skip_edges_summary()
 
         page = self.search_page
         texts = getattr(self, "texts", {}) or {}

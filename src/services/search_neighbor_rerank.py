@@ -11,7 +11,7 @@ from src.domain.search_hit import SearchHit
 from src.storage.config_store import get_frame_neighbor_rerank_enabled, get_frame_neighbor_rerank_top_n
 from src.storage.lance_search_index import LanceTableSearchIndex
 
-from src.services.search_hit_utils import _clamp_time_near_seed
+from src.services.search_hit_utils import _clamp_time_near_seed, _dedupe_identical_frame_hits
 
 _PRECISE_SEED_MAX_SHIFT_SEC = 5.0
 _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
@@ -240,7 +240,7 @@ def _apply_frame_neighbor_rerank_lance(
                 best_score = score
                 best_timestamp = candidate_ts
         reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(hit.video_path))
-    return reranked
+    return _dedupe_identical_frame_hits(reranked)
 
 
 def _expand_neighbor_rerank_candidates_lance(
@@ -440,7 +440,7 @@ def _apply_frame_neighbor_rerank(
                 best_timestamp = float(timestamps[candidate_id])
 
         reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(base_path))
-    return reranked
+    return _dedupe_identical_frame_hits(reranked)
 
 
 def _expand_neighbor_rerank_candidates(

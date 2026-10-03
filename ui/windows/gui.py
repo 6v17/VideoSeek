@@ -50,7 +50,7 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
-from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, UnderstandingServicesDialog
+from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog, UnderstandingServicesDialog
 from ui.dialogs.html_links import open_html_link
 from ui.widgets.sidebar_icons import (
     bilibili_toolbar_icon,
@@ -342,6 +342,7 @@ class MainWindow(
         self.search_page.btn_clear.clicked.connect(self.clear_all_content)
         self.search_page._results_view_group.idClicked.connect(self._on_results_view_mode_clicked)
         self.search_page.search_scope_select.editor_requested.connect(self.open_search_scope_editor)
+        self.search_page.btn_skip_edges.editor_requested.connect(self.open_skip_edges_dialog)
         self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
         self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
@@ -808,6 +809,9 @@ class MainWindow(
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
+        self.search_page.skip_edges_label.setText(t.get("search_skip_edges_label", "跳过时段"))
+        if hasattr(self, "_refresh_skip_edges_summary"):
+            self._refresh_skip_edges_summary()
         panel = getattr(self.search_page, "search_panel", None)
         if panel is not None and hasattr(panel, "relayout_inline_fields"):
             panel.relayout_inline_fields()
@@ -2185,6 +2189,57 @@ class MainWindow(
             config["image_search_mode"] = image_mode
             config["search_video_discovery_enabled"] = image_mode == "video_discovery"
             save_config(config)
+        except Exception as exc:
+            self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def _refresh_skip_edges_summary(self) -> None:
+        from src.services.search_edge_filter import get_search_skip_ranges_text
+
+        texts = getattr(self, "texts", {}) or {}
+        empty = texts.get("setting_skip_edges_empty", "未设置")
+        try:
+            ranges_text = get_search_skip_ranges_text()
+        except Exception:
+            ranges_text = ""
+        parts = [part.strip() for part in str(ranges_text or "").split(";") if part.strip()]
+        if not parts:
+            summary = texts.get("search_skip_edges_off", empty)
+        elif len(parts) == 1:
+            summary = parts[0]
+        else:
+            summary = texts.get("search_skip_edges_count", "{count}").format(count=len(parts))
+        tip = ranges_text or texts.get("skip_edges_hint", "")
+        btn = getattr(self.search_page, "btn_skip_edges", None)
+        if btn is not None and hasattr(btn, "set_display_text"):
+            btn.set_display_text(summary, tooltip=str(tip or summary))
+        panel = getattr(self.search_page, "search_panel", None)
+        if panel is not None and hasattr(panel, "relayout_inline_fields"):
+            panel.relayout_inline_fields()
+
+    def open_skip_edges_dialog(self) -> None:
+        from src.services.search_edge_filter import get_search_skip_ranges_text
+
+        try:
+            ranges_text = get_search_skip_ranges_text()
+        except Exception:
+            ranges_text = ""
+        dialog = SkipEdgesDialog(
+            parent=self,
+            is_dark=self.is_dark_mode,
+            language=self.language,
+            ranges_text=ranges_text,
+        )
+        if not dialog.exec():
+            return
+        try:
+            config = load_config()
+            next_ranges = dialog.ranges_text()
+            config["search_skip_ranges"] = next_ranges
+            config["search_skip_edges_enabled"] = bool(next_ranges)
+            config["search_skip_intro_sec"] = 0
+            config["search_skip_outro_sec"] = 0
+            save_config(config)
+            self._refresh_skip_edges_summary()
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
 
