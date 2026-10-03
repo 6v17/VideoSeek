@@ -8,8 +8,11 @@ import time
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFileDialog
 
+from src.app.logging_utils import get_logger
 from src.app.path_display import video_display_name
 from src.services.clip_export_service import export_save_dialog_start, remember_export_path
+
+logger = get_logger("frame_export")
 
 
 class FrameExportThread(QThread):
@@ -69,7 +72,8 @@ def begin_displayed_frame_capture(player, output_path: str) -> str:
     try:
         if not player.capture_displayed_frame(snapshot_path):
             return ""
-    except Exception:
+    except Exception as exc:
+        logger.debug("Displayed frame capture failed: %s", exc)
         return ""
     return snapshot_path
 

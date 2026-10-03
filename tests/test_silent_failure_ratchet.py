@@ -2,7 +2,9 @@
 
 Narrow catches (ValueError while parsing, OSError while deleting a temp file)
 may still return a fallback. ``except Exception`` / bare ``except`` that returns
-``[]`` / ``0`` / ``None`` / ``""`` must call ``note_swallowed`` or log or raise.
+``None`` / ``[]`` / ``0`` / ``""`` must call ``note_swallowed``, log, emit a
+failure signal, or raise. A bare ``return`` only leaves the handler; it is not
+an empty sentinel.
 """
 
 from __future__ import annotations
@@ -16,8 +18,9 @@ SILENT_EXCEPT_BASELINE = 0
 
 
 def _is_empty_sentinel(node: ast.AST | None) -> bool:
+    # ``return`` with no value just exits. ``return None`` is still a sentinel.
     if node is None:
-        return True
+        return False
     if isinstance(node, ast.Constant) and node.value in (None, 0, False, ""):
         return True
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)) and not node.elts:
@@ -41,6 +44,24 @@ def _is_broad(handler: ast.ExceptHandler) -> bool:
     return False
 
 
+def _is_log_helper(name: str) -> bool:
+    lowered = str(name or "")
+    return lowered.startswith("_log") or lowered.startswith("log_")
+
+
+def _emits_failure(func: ast.Attribute) -> bool:
+    if func.attr != "emit":
+        return False
+    owner = func.value
+    signal_name = ""
+    if isinstance(owner, ast.Attribute):
+        signal_name = owner.attr
+    elif isinstance(owner, ast.Name):
+        signal_name = owner.id
+    lowered = signal_name.lower()
+    return "fail" in lowered or "error" in lowered
+
+
 def _is_visible(handler: ast.ExceptHandler) -> bool:
     if any(isinstance(stmt, ast.Raise) for stmt in handler.body):
         return True
@@ -48,19 +69,24 @@ def _is_visible(handler: ast.ExceptHandler) -> bool:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Name) and func.id == "note_swallowed":
+        if isinstance(func, ast.Name) and (func.id == "note_swallowed" or _is_log_helper(func.id)):
             return True
-        if isinstance(func, ast.Attribute) and func.attr in {
-            "debug",
-            "info",
-            "warning",
-            "error",
-            "exception",
-            "critical",
-            "log",
-            "warn",
-            "show_error_dialog",
-        }:
+        if isinstance(func, ast.Attribute) and (
+            _is_log_helper(func.attr)
+            or _emits_failure(func)
+            or func.attr
+            in {
+                "debug",
+                "info",
+                "warning",
+                "error",
+                "exception",
+                "critical",
+                "log",
+                "warn",
+                "show_error_dialog",
+            }
+        ):
             return True
     return False
 
