@@ -6,10 +6,12 @@ from src.core.subtitle_ocr.frame_sample import (
     sample_times_in_segment,
 )
 from src.core.subtitle_ocr.merge_cues import merge_ocr_observations
+from src.core.asr.vad_segment import SpeechSegment
 from src.services.subtitle_index_service import (
     SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
     SUBTITLE_SAMPLE_STRATEGY_VAD,
     normalize_subtitle_sample_strategy,
+    probe_times_for_activity,
     resolve_subtitle_frame_budget,
     resolve_subtitle_sample_strategy,
 )
@@ -36,6 +38,22 @@ class SubtitleOcrHelpersTests(unittest.TestCase):
             resolve_subtitle_sample_strategy(config={"subtitle_sample_strategy": "timeline"}),
             SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
         )
+
+    def test_activity_probe_samples_speech_and_skips_the_quiet_gap(self):
+        times, _cap, count = probe_times_for_activity(
+            [
+                SpeechSegment(start_sec=0.4, end_sec=3.0),
+                SpeechSegment(start_sec=12.0, end_sec=15.0),
+            ],
+            duration=30.0,
+            sample_interval_sec=1.0,
+            max_frames_per_segment=0,
+            max_total_frames=0,
+        )
+        self.assertEqual(count, 2)
+        self.assertTrue(any(0.4 <= stamp <= 3.0 for stamp in times))
+        self.assertTrue(any(12.0 <= stamp <= 15.0 for stamp in times))
+        self.assertFalse(any(5.0 < stamp < 10.0 for stamp in times))
 
     def test_sample_times_respects_max_frames(self):
         times = sample_times_in_segment(0.0, 20.0, interval_sec=0.5, max_frames=4)

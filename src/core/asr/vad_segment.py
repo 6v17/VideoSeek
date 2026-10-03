@@ -21,6 +21,17 @@ STATE_SHAPE = (2, 1, 128)
 # Skip ORT when window energy is clearly silence (still advances context).
 DEFAULT_SILENCE_RMS = 5e-4
 DEFAULT_PROGRESS_EVERY = 64
+# Subtitle probe: catch quiet dialogue Silero scores under the ASR default (0.5).
+SUBTITLE_VAD_THRESHOLD = 0.35
+SUBTITLE_VAD_MIN_SPEECH_MS = 100
+QUIET_SPEECH_TARGET_PEAK = 0.45
+QUIET_SPEECH_MAX_GAIN = 12.0
+# Supplement Silero: keep stretches louder than the noise floor.
+ENERGY_ACTIVITY_FLOOR_RMS = 0.004
+ENERGY_ACTIVITY_WINDOW_SEC = 0.05
+ENERGY_ACTIVITY_MIN_SEC = 0.20
+ENERGY_ACTIVITY_GAP_SEC = 0.35
+ENERGY_ACTIVITY_PAD_SEC = 0.12
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -367,6 +378,130 @@ def _split_oversized_segments(
     return result
 
 
+def merge_speech_segments(
+    segments: Sequence[SpeechSegment],
+    *,
+    gap_sec: float = 0.0,
+) -> list[SpeechSegment]:
+    """Join overlapping or nearby segments. ``gap_sec`` bridges short holes."""
+    ordered = sorted(
+        (
+            SpeechSegment(start_sec=float(item.start_sec), end_sec=float(item.end_sec))
+            for item in segments
+            if float(item.end_sec) > float(item.start_sec)
+        ),
+        key=lambda item: (item.start_sec, item.end_sec),
+    )
+    if not ordered:
+        return []
+    gap = max(0.0, float(gap_sec))
+    merged: list[SpeechSegment] = [ordered[0]]
+    for item in ordered[1:]:
+        last = merged[-1]
+        if item.start_sec <= last.end_sec + gap:
+            merged[-1] = SpeechSegment(
+                start_sec=last.start_sec,
+                end_sec=max(last.end_sec, item.end_sec),
+            )
+        else:
+            merged.append(item)
+    return merged
+
+
+def energy_activity_segments(
+    waveform: np.ndarray,
+    *,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
+    floor_rms: float = ENERGY_ACTIVITY_FLOOR_RMS,
+    window_sec: float = ENERGY_ACTIVITY_WINDOW_SEC,
+    min_active_sec: float = ENERGY_ACTIVITY_MIN_SEC,
+    gap_sec: float = ENERGY_ACTIVITY_GAP_SEC,
+    pad_sec: float = ENERGY_ACTIVITY_PAD_SEC,
+) -> list[SpeechSegment]:
+    """Mark stretches whose level sits above the track's own noise floor.
+
+    Used beside Silero so quiet-but-real speech the model scores as silence
+    still gets a segment. Near-digital silence stays out.
+    """
+    audio = np.asarray(waveform, dtype=np.float32).reshape(-1)
+    if audio.size == 0:
+        return []
+    rate = max(1, int(sample_rate))
+    win = max(1, int(round(rate * float(window_sec))))
+    usable = int(audio.shape[0] // win) * win
+    if usable <= 0:
+        return []
+    windows = audio[:usable].reshape(-1, win)
+    rms = np.sqrt(np.mean(windows * windows, axis=1))
+    noise_floor = float(np.percentile(rms, 20))
+    if not np.isfinite(noise_floor) or noise_floor < 0.0:
+        noise_floor = 0.0
+    threshold = min(0.05, max(float(floor_rms), noise_floor * 3.5))
+    active = rms >= threshold
+    min_windows = max(1, int(round(float(min_active_sec) / float(window_sec))))
+    duration = float(audio.shape[0]) / float(rate)
+    pad = max(0.0, float(pad_sec))
+    raw: list[SpeechSegment] = []
+    index = 0
+    count = int(active.shape[0])
+    while index < count:
+        if not bool(active[index]):
+            index += 1
+            continue
+        end_index = index + 1
+        while end_index < count and bool(active[end_index]):
+            end_index += 1
+        if end_index - index >= min_windows:
+            start_sec = max(0.0, index * win / float(rate) - pad)
+            end_sec = min(duration, end_index * win / float(rate) + pad)
+            if end_sec > start_sec:
+                raw.append(SpeechSegment(start_sec=start_sec, end_sec=end_sec))
+        index = end_index
+    return merge_speech_segments(raw, gap_sec=gap_sec)
+
+
+def boost_quiet_regions(
+    waveform: np.ndarray,
+    *,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
+    target_peak: float = QUIET_SPEECH_TARGET_PEAK,
+    max_gain: float = QUIET_SPEECH_MAX_GAIN,
+    block_sec: float = 0.5,
+) -> np.ndarray:
+    """Lift quiet stretches toward ``target_peak`` without touching already-loud audio.
+
+    Gain is chosen per block, then smoothed across samples. Near-digital silence
+    stays at unity gain so the noise floor is not turned into false speech.
+    """
+    audio = np.asarray(waveform, dtype=np.float32).reshape(-1)
+    if audio.size == 0:
+        return np.ascontiguousarray(audio, dtype=np.float32)
+    block = max(1, int(round(float(sample_rate) * float(block_sec))))
+    n_blocks = int(np.ceil(audio.shape[0] / float(block)))
+    gains = np.ones(n_blocks, dtype=np.float32)
+    target = float(target_peak)
+    cap = max(1.0, float(max_gain))
+    for index in range(n_blocks):
+        chunk = audio[index * block : (index + 1) * block]
+        if chunk.size == 0:
+            continue
+        peak = float(np.max(np.abs(chunk)))
+        if not np.isfinite(peak) or peak < 1e-4 or peak >= target:
+            continue
+        gains[index] = np.float32(min(cap, target / peak))
+    if n_blocks == 1:
+        envelope = np.full(audio.shape[0], gains[0], dtype=np.float32)
+    else:
+        centers = (np.arange(n_blocks, dtype=np.float32) + 0.5) * np.float32(block)
+        envelope = np.interp(
+            np.arange(audio.shape[0], dtype=np.float32),
+            centers,
+            gains,
+        ).astype(np.float32, copy=False)
+    boosted = np.clip(audio * envelope, -1.0, 1.0)
+    return np.ascontiguousarray(boosted, dtype=np.float32)
+
+
 def segment_speech(
     audio: str | np.ndarray,
     *,
@@ -380,6 +515,7 @@ def segment_speech(
     min_silence_duration_ms: int = 100,
     speech_pad_ms: int = 30,
     silence_rms: float = DEFAULT_SILENCE_RMS,
+    normalize_quiet: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> list[SpeechSegment]:
     """Return speech segments in seconds for a WAV path or mono float32 waveform."""
@@ -387,6 +523,8 @@ def segment_speech(
         waveform = load_wav_mono(audio, target_sr=sample_rate)
     else:
         waveform = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if normalize_quiet:
+        waveform = boost_quiet_regions(waveform, sample_rate=sample_rate)
 
     engine = model or get_silero_vad_engine(model_path, model_dir=model_dir)
     if progress_callback:

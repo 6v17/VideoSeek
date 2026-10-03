@@ -11,6 +11,9 @@ from src.core.asr.vad_segment import (
     SpeechSegment,
     _split_oversized_segments,
     _timestamps_from_probs,
+    boost_quiet_regions,
+    energy_activity_segments,
+    merge_speech_segments,
     resolve_silero_vad_model_path,
     segment_speech,
 )
@@ -56,6 +59,54 @@ class VadTimestampLogicTests(unittest.TestCase):
         self.assertEqual(len(split), 3)
         self.assertAlmostEqual(split[0].duration_sec, 30.0)
         self.assertAlmostEqual(split[-1].end_sec, 75.0)
+
+
+class EnergyActivityTests(unittest.TestCase):
+    def test_loud_burst_is_kept_and_silence_is_not(self):
+        rate = 16000
+        silence = np.zeros(rate, dtype=np.float32)
+        voice = np.full(rate, 0.08, dtype=np.float32)
+        audio = np.concatenate([silence, voice, silence])
+        segments = energy_activity_segments(audio, sample_rate=rate)
+        self.assertEqual(len(segments), 1)
+        self.assertLess(segments[0].start_sec, 1.3)
+        self.assertGreater(segments[0].end_sec, 1.7)
+        self.assertLess(segments[0].end_sec, 2.4)
+
+    def test_hiss_does_not_open_a_segment(self):
+        audio = np.full(16000 * 2, 1e-5, dtype=np.float32)
+        self.assertEqual(energy_activity_segments(audio, sample_rate=16000), [])
+
+    def test_merge_joins_vad_and_energy(self):
+        merged = merge_speech_segments(
+            [
+                SpeechSegment(start_sec=1.0, end_sec=2.0),
+                SpeechSegment(start_sec=2.1, end_sec=3.0),
+                SpeechSegment(start_sec=8.0, end_sec=9.0),
+            ],
+            gap_sec=0.2,
+        )
+        self.assertEqual(len(merged), 2)
+        self.assertAlmostEqual(merged[0].start_sec, 1.0)
+        self.assertAlmostEqual(merged[0].end_sec, 3.0)
+
+
+class QuietRegionBoostTests(unittest.TestCase):
+    def test_quiet_block_is_lifted_and_loud_block_stays(self):
+        rate = 16000
+        quiet = np.full(rate, 0.02, dtype=np.float32)
+        loud = np.full(rate, 0.8, dtype=np.float32)
+        audio = np.concatenate([quiet, loud])
+        boosted = boost_quiet_regions(audio, sample_rate=rate, block_sec=1.0)
+        quiet_peak = float(np.max(np.abs(boosted[rate // 4 : rate // 2])))
+        loud_peak = float(np.max(np.abs(boosted[rate + rate // 2 :])))
+        self.assertGreater(quiet_peak, 0.15)
+        self.assertAlmostEqual(loud_peak, 0.8, places=2)
+
+    def test_digital_silence_is_not_amplified(self):
+        audio = np.full(16000, 1e-8, dtype=np.float32)
+        boosted = boost_quiet_regions(audio, sample_rate=16000, block_sec=1.0)
+        self.assertLess(float(np.max(np.abs(boosted))), 1e-6)
 
 
 class VadPathResolveTests(unittest.TestCase):

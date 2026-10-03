@@ -1,8 +1,8 @@
 """Build shared subtitle library via timeline/VAD probe + frame OCR (RapidOCR ONNX).
 
 Pipeline strategies:
-- ``timeline``: sample across the full video (better for BGM-heavy PVs)
-- ``vad``: Silero VAD speech segments only (faster for dialogue-heavy media)
+- ``timeline``: sample across the full video, top title band and bottom dialogue band
+- ``vad``: Silero speech segments plus energy-above-noise stretches, bottom band only
 
 Both paths share: decode + blank/unchanged subtitle-band gates → RapidOCR on
 changed plates → shared transcript JSON.
@@ -12,13 +12,21 @@ from __future__ import annotations
 
 import math
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
 
 from src.app.logging_utils import get_logger
-from src.core.asr.vad_segment import segment_media_speech
+from src.core.asr.audio_extract import extract_audio_mono_f32
+from src.core.asr.vad_segment import (
+    SUBTITLE_VAD_MIN_SPEECH_MS,
+    SUBTITLE_VAD_THRESHOLD,
+    SpeechSegment,
+    energy_activity_segments,
+    merge_speech_segments,
+    segment_speech,
+)
 from src.core.subtitle_ocr.frame_sample import (
     sample_times_across_timeline,
     sample_times_in_segment,
@@ -91,15 +99,6 @@ def resolve_subtitle_sample_strategy(*, config=None, explicit: str | None = None
         )
     except Exception:
         return DEFAULT_SUBTITLE_SAMPLE_STRATEGY
-
-
-def _speech_duration_sec(segments: Sequence[Any]) -> float:
-    total = 0.0
-    for seg in segments or []:
-        start = float(getattr(seg, "start_sec", 0.0) or (seg.get("start_sec") if isinstance(seg, dict) else 0.0) or 0.0)
-        end = float(getattr(seg, "end_sec", start) or (seg.get("end_sec") if isinstance(seg, dict) else start) or start)
-        total += max(0.0, end - start)
-    return total
 
 
 def resolve_subtitle_frame_budget(
@@ -204,6 +203,53 @@ def _build_probe_times_timeline(
     return times, frame_cap
 
 
+def probe_times_for_activity(
+    segments: list[SpeechSegment],
+    *,
+    duration: float,
+    sample_interval_sec: float,
+    max_frames_per_segment: int,
+    max_total_frames: int,
+) -> tuple[list[float], int, int]:
+    """Sample OCR times inside VAD/energy segments. Empty activity scans nothing here."""
+    if not segments:
+        return [], 0, 0
+    times: list[float] = []
+    for seg in segments:
+        times.extend(
+            sample_times_in_segment(
+                float(seg.start_sec),
+                float(seg.end_sec),
+                interval_sec=sample_interval_sec,
+                max_frames=max_frames_per_segment,
+            )
+        )
+    deduped: list[float] = []
+    min_spacing = max(0.05, min(0.35, float(sample_interval_sec) * 0.4))
+    for stamp in sorted(times):
+        if not deduped or abs(stamp - deduped[-1]) >= min_spacing:
+            deduped.append(stamp)
+    active_sec = sum(max(0.0, float(seg.end_sec) - float(seg.start_sec)) for seg in segments)
+    frame_cap = resolve_subtitle_frame_budget(
+        active_sec,
+        sample_interval_sec=sample_interval_sec,
+        segment_count=len(segments),
+        max_total_frames=max_total_frames,
+    )
+    if len(deduped) > frame_cap:
+        idxs = np.linspace(0, len(deduped) - 1, num=frame_cap, dtype=int)
+        deduped = [deduped[int(i)] for i in idxs]
+    logger.info(
+        "Subtitle OCR probe plan (vad+energy): active=%.1fs duration=%.1fs interval=%.2fs times=%d segments=%d",
+        active_sec,
+        duration,
+        sample_interval_sec,
+        len(deduped),
+        len(segments),
+    )
+    return deduped, frame_cap, len(segments)
+
+
 def _build_probe_times_vad(
     *,
     media_path: str,
@@ -214,68 +260,41 @@ def _build_probe_times_vad(
     progress_callback: ProgressCallback | None,
     stop_callback: StopCallback | None,
 ) -> tuple[list[float], int, int]:
+    """Silero speech, plus stretches louder than the track noise floor."""
+    if progress_callback:
+        progress_callback(0.04, "subtitle_extract_audio")
+    if _stopped(stop_callback):
+        raise InterruptedError("stopped")
+
     def _vad_progress(ratio: float, stage: str) -> None:
         if not progress_callback:
             return
         stage_name = "subtitle_extract_audio" if "extract" in str(stage) else "subtitle_vad"
         progress_callback(0.04 + 0.14 * max(0.0, min(1.0, float(ratio))), stage_name)
 
-    if progress_callback:
-        progress_callback(0.04, "subtitle_extract_audio")
+    waveform = extract_audio_mono_f32(media_path, progress_callback=_vad_progress)
     if _stopped(stop_callback):
         raise InterruptedError("stopped")
-
-    segments = list(segment_media_speech(media_path, progress_callback=_vad_progress) or [])
-    if not segments:
-        logger.info("Subtitle OCR VAD found no speech segments for %s", media_path)
-        return [], 0, 0
-
-    times: list[float] = []
-    for seg in segments:
-        start = float(getattr(seg, "start_sec", 0.0) or 0.0)
-        end = float(getattr(seg, "end_sec", start) or start)
-        times.extend(
-            sample_times_in_segment(
-                start,
-                end,
-                interval_sec=sample_interval_sec,
-                max_frames=max_frames_per_segment,
-            )
+    try:
+        speech = segment_speech(
+            waveform,
+            threshold=SUBTITLE_VAD_THRESHOLD,
+            min_speech_duration_ms=SUBTITLE_VAD_MIN_SPEECH_MS,
+            normalize_quiet=True,
+            progress_callback=_vad_progress,
         )
-    deduped: list[float] = []
-    min_spacing = max(0.05, min(0.35, float(sample_interval_sec) * 0.4))
-    for t in sorted(times):
-        if not deduped or abs(t - deduped[-1]) >= min_spacing:
-            deduped.append(t)
-    times = deduped
-
-    speech_sec = _speech_duration_sec(segments)
-    frame_cap = resolve_subtitle_frame_budget(
-        speech_sec,
+    except FileNotFoundError:
+        logger.warning("Silero VAD model missing; subtitle probe keeps energy segments only")
+        speech = []
+    energy = energy_activity_segments(waveform)
+    segments = merge_speech_segments([*speech, *energy], gap_sec=0.2)
+    return probe_times_for_activity(
+        segments,
+        duration=duration,
         sample_interval_sec=sample_interval_sec,
-        segment_count=len(segments),
+        max_frames_per_segment=max_frames_per_segment,
         max_total_frames=max_total_frames,
     )
-    if len(times) > frame_cap:
-        logger.info(
-            "Subtitle OCR frame budget trim (vad): speech=%.1fs interval=%.2fs times=%d -> cap=%d",
-            speech_sec,
-            sample_interval_sec,
-            len(times),
-            frame_cap,
-        )
-        idxs = np.linspace(0, len(times) - 1, num=frame_cap, dtype=int)
-        times = [times[int(i)] for i in idxs]
-    else:
-        logger.info(
-            "Subtitle OCR probe plan (vad): speech=%.1fs duration=%.1fs interval=%.2fs times=%d cap=%d",
-            speech_sec,
-            duration,
-            sample_interval_sec,
-            len(times),
-            frame_cap,
-        )
-    return times, frame_cap, len(segments)
 
 
 def index_video_subtitles(
@@ -299,8 +318,8 @@ def index_video_subtitles(
     ``sample_strategy``:
     - ``timeline``: probe the full video (default; better for BGM/PV);
       OCR both a top title band (~0–20%) and bottom dialogue band (~60–100%)
-    - ``vad``: only sample inside Silero speech segments (faster for dialogue);
-      bottom band only
+    - ``vad``: Silero speech segments plus energy-above-noise stretches;
+      bottom band only. Silence stays unsampled.
 
     Blank / unchanged subtitle bands are skipped so OCR cost tracks subtitle
     changes. ``max_total_frames>0`` only caps probe count.
