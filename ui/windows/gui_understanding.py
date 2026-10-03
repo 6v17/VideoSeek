@@ -2309,6 +2309,7 @@ class UnderstandingGuiMixin:
         table.setRowCount(0)
         table.setRowCount(len(rows))
         edit_label = self.texts.get("understanding_dialogue_edit", "Edit")
+        delete_label = self.texts.get("understanding_dialogue_delete", "Delete")
         for index, cue in enumerate(rows):
             start = float(cue.get("start") or 0.0)
             end = float(cue.get("end") or start)
@@ -2330,19 +2331,29 @@ class UnderstandingGuiMixin:
             table.setItem(index, 0, time_item)
             table.setItem(index, 1, speaker_item)
             table.setItem(index, 2, text_item)
-            button = QPushButton(edit_label)
-            button.setProperty("class", "TableBtn")
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setFixedHeight(28)
-            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            button.setAutoDefault(False)
-            button.setDefault(False)
-            button.clicked.connect(lambda _checked=False, r=index: self._edit_understanding_dialogue_cue(r))
+            edit_button = QPushButton(edit_label)
+            edit_button.setProperty("class", "TableBtn")
+            edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            edit_button.setFixedHeight(28)
+            edit_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            edit_button.setAutoDefault(False)
+            edit_button.setDefault(False)
+            edit_button.clicked.connect(lambda _checked=False, r=index: self._edit_understanding_dialogue_cue(r))
+            delete_button = QPushButton(delete_label)
+            delete_button.setProperty("class", "TableDeleteBtn")
+            delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_button.setFixedHeight(28)
+            delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            delete_button.setAutoDefault(False)
+            delete_button.setDefault(False)
+            delete_button.clicked.connect(lambda _checked=False, r=index: self._delete_understanding_dialogue_cue(r))
             host = QWidget()
             row_layout = QHBoxLayout(host)
             row_layout.setContentsMargins(4, 0, 4, 0)
+            row_layout.setSpacing(4)
             row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            row_layout.addWidget(button)
+            row_layout.addWidget(edit_button)
+            row_layout.addWidget(delete_button)
             table.setCellWidget(index, 3, host)
         table.blockSignals(False)
 
@@ -2409,6 +2420,44 @@ class UnderstandingGuiMixin:
                         break
                 except (TypeError, ValueError):
                     continue
+        if hasattr(self, "_sync_asr_extract_button"):
+            self._sync_asr_extract_button()
+
+    def _delete_understanding_dialogue_cue(self, row: int) -> None:
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        video_id = self._selected_understanding_video_id()
+        if table is None or not video_id:
+            return
+        item = table.item(int(row), 0)
+        if item is None:
+            return
+        try:
+            seg_index = int(item.data(Qt.ItemDataRole.UserRole + 1))
+        except (TypeError, ValueError):
+            return
+        text_item = table.item(int(row), 2)
+        line = str(text_item.text() if text_item is not None else "").strip()
+        preview = line if len(line) <= 48 else line[:48] + "…"
+        if not self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            self.texts.get(
+                "understanding_dialogue_delete_confirm",
+                "Delete this line?\n{text}",
+            ).format(text=preview or "—"),
+            kind="warning",
+        ):
+            return
+        from src.storage.dialogue_transcript_store import delete_dialogue_segment
+
+        if not delete_dialogue_segment(video_id, seg_index, config=load_config()):
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_dialogue_delete_failed", "Could not delete this line."),
+                kind="warning",
+            )
+            return
+        self._refresh_understanding_dialogue_step()
         if hasattr(self, "_sync_asr_extract_button"):
             self._sync_asr_extract_button()
 

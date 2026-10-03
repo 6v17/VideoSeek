@@ -386,6 +386,36 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
                 self.assertEqual(row["speaker"], "柜台职员")
                 self.assertFalse(update_dialogue_segment("v", 0, text="   "))
 
+    def test_delete_dialogue_segment_keeps_other_indexes(self):
+        from src.storage.dialogue_transcript_store import (
+            delete_dialogue_segment,
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                save_dialogue_transcript(
+                    "v",
+                    [
+                        {"start": 1.0, "end": 2.0, "text": "第一句", "asr_source": "asr"},
+                        {"start": 3.0, "end": 4.0, "text": "第二句", "asr_source": "asr"},
+                    ],
+                    library_path=tmp,
+                    asr_source="asr",
+                )
+                self.assertTrue(delete_dialogue_segment("v", 0))
+                self.assertFalse(delete_dialogue_segment("v", 0))
+                payload = load_dialogue_transcript("v")
+                self.assertEqual(payload["segment_count"], 1)
+                self.assertEqual(len(payload["segments"]), 1)
+                self.assertEqual(payload["segments"][0]["text"], "第二句")
+                self.assertEqual(payload["segments"][0]["seg_index"], 1)
+
     def test_update_dialogue_transcript_location_after_rename(self):
         from src.storage.dialogue_transcript_store import (
             load_dialogue_transcript,

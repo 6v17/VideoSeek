@@ -424,6 +424,45 @@ def update_dialogue_segment(
             return True
 
 
+def delete_dialogue_segment(
+    video_id: str,
+    seg_index: int,
+    *,
+    config=None,
+) -> bool:
+    """Remove one saved cue. Other cues keep their seg_index."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return False
+    try:
+        index = int(seg_index)
+    except (TypeError, ValueError):
+        return False
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            cur = conn.execute(
+                "DELETE FROM segments WHERE video_id = ? AND seg_index = ?",
+                (video_id, index),
+            )
+            if cur.rowcount <= 0:
+                conn.rollback()
+                return False
+            remaining = conn.execute(
+                "SELECT COUNT(*) AS n FROM segments WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            conn.execute(
+                """
+                UPDATE transcripts
+                SET segment_count = ?, updated_at = ?
+                WHERE video_id = ?
+                """,
+                (int(remaining["n"] or 0), time.time(), video_id),
+            )
+            conn.commit()
+            return True
+
+
 def update_dialogue_segment_speakers(
     video_id: str,
     assignments: dict[int, str],

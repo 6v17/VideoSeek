@@ -70,7 +70,7 @@ UNDERSTANDING_DIALOGUE_TABLE_SPEC = TableSpec(
         TableColumnSpec("range", width=118),
         TableColumnSpec("speaker", width=108),
         TableColumnSpec("text", resize="stretch"),
-        TableColumnSpec("actions", width=72),
+        TableColumnSpec("actions", width=132),
     ),
 )
 
