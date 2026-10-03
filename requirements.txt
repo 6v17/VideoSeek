@@ -11,13 +11,13 @@ PySide6==6.10.2
 faiss-cpu==1.13.2
 lancedb==0.34.0
 numpy==2.2.6
-pillow==12.1.1
+pillow==12.3.0
 pillow-heif==1.3.0
 # SigLIP ONNX profiles load tokenizer.json via Hugging Face tokenizers (default clip_onnx does not need this)
 tokenizers==0.22.2
 ftfy
 regex
-yt-dlp
+yt-dlp==2026.08.19
 rookiepy
 python-vlc
 
