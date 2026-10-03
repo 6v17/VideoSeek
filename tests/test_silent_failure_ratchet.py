@@ -1,10 +1,16 @@
-"""Ratchet: broad except handlers must not return an empty sentinel in silence.
+"""Ratchet: broad except handlers must not return a literal empty value in silence.
 
 Narrow catches (ValueError while parsing, OSError while deleting a temp file)
 may still return a fallback. ``except Exception`` / bare ``except`` that returns
-``None`` / ``[]`` / ``0`` / ``""`` must call ``note_swallowed``, log, emit a
-failure signal, or raise. A bare ``return`` only leaves the handler; it is not
-an empty sentinel.
+a literal ``None`` / ``False`` / ``0`` / ``""`` / ``[]`` / ``()`` / ``{}`` must
+call ``note_swallowed``, log, emit a failure signal (name contains fail/error),
+or raise. Project helpers named ``_log*`` / ``log_*`` count as logging.
+
+A bare ``return`` only leaves the handler and is not an empty value.
+
+This scan only sees those literals. Built expressions such as ``return [], []``
+or ``return list(results or [])`` are not flagged and need a human look when
+reviewing a broad except on a hot path.
 """
 
 from __future__ import annotations
