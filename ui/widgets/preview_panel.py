@@ -71,13 +71,13 @@ class PreviewPanel(VSCard):
         self.preview_placeholder.setWordWrap(True)
         self.preview_host_layout.addWidget(self.preview_placeholder)
 
-        self.expanded_chrome = ExpandedPreviewChrome()
+        self.expanded_chrome = ExpandedPreviewChrome(self)
         self.expanded_chrome.collapse_button.hide()
-        self.expanded_chrome.show_chrome()
 
         layout.addLayout(preview_header)
         layout.addWidget(self.preview_host, 1)
         layout.addWidget(self.expanded_chrome, 0)
+        self.expanded_chrome.show_chrome()
         self._apply_normal_geometry()
 
     def is_maximized(self) -> bool:
