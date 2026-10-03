@@ -39,6 +39,9 @@ from ui.widgets.list_find_bar import (
 )
 
 _LIST_VIEW_HEIGHT = 280
+_COUNT_COL_MIN = 36
+_STATUS_COL_MIN = 88
+_ACTION_COL_MIN = 56
 _STATUS_READY = QColor("#2ec27e")
 _STATUS_PENDING = QColor("#f4c95d")
 # Fixable missing vectors — stronger amber so it reads as “needs sync”.
@@ -47,6 +50,37 @@ _STATUS_FIX = QColor("#d89b0d")
 
 class _ClickLabel(QLabel):
     clicked = Signal()
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(parent)
+        self._full_text = ""
+        # Long library names must shrink so the status/action columns stay on screen.
+        self.setMinimumWidth(48)
+        self.setText(text)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        return QSize(48, max(hint.height(), 18))
+
+    def setText(self, text: str) -> None:
+        self._full_text = str(text or "")
+        self._apply_elide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_elide()
+
+    def _apply_elide(self) -> None:
+        full = self._full_text
+        width = self.width()
+        if width <= 4:
+            QLabel.setText(self, full)
+            return
+        elided = self.fontMetrics().elidedText(
+            full, Qt.TextElideMode.ElideMiddle, max(1, width - 4)
+        )
+        if self.text() != elided:
+            QLabel.setText(self, elided)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -257,6 +291,7 @@ class _LibBlock:
         "collapse",
         "count_label",
         "status_label",
+        "open_button",
         "entries",
         "populated",
         "expanded",
@@ -274,6 +309,7 @@ class _LibBlock:
         self.collapse: QToolButton | None = None
         self.count_label: QLabel | None = None
         self.status_label: QLabel | None = None
+        self.open_button: QPushButton | None = None
         self.entries: list[dict] = []
         self.populated = False
         self.expanded = False
@@ -301,6 +337,9 @@ class LibraryGroupedVideoTree(QWidget):
         self._header_count = ""
         self._header_status = ""
         self._header_action = ""
+        self._count_col_w = _COUNT_COL_MIN
+        self._status_col_w = _STATUS_COL_MIN
+        self._action_col_w = _ACTION_COL_MIN
         self._find_hits: list[ListFindHit] = []
         self._find_index = -1
 
@@ -354,6 +393,7 @@ class LibraryGroupedVideoTree(QWidget):
         header_row.addWidget(self._header_status_label, 0)
         header_row.addWidget(self._header_action_label, 0)
         self._column_header.setVisible(False)
+        self._sync_column_widths()
 
         self._scroll = QScrollArea()
         self._scroll.setObjectName("LibraryGroupedScroll")
@@ -405,6 +445,9 @@ class LibraryGroupedVideoTree(QWidget):
         del remove_text  # legacy keyword kept for call-site compatibility
         if open_text:
             self._open_text = open_text
+            for block in self._blocks:
+                if block.open_button is not None:
+                    block.open_button.setText(open_text)
         if status_template:
             self._status_template = status_template
             for block in self._blocks:
@@ -452,6 +495,57 @@ class LibraryGroupedVideoTree(QWidget):
         if empty_text:
             self._empty_text = empty_text
             self._empty_label.setText(empty_text)
+        self._sync_column_widths()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_column_widths()
+
+    def _sync_column_widths(self) -> None:
+        """English 'Action' / '999/999 extracted' is wider than the Chinese headers."""
+        template = self._status_template or "{ready}/{total}"
+        try:
+            status_sample = template.format(ready=999, total=999)
+        except Exception:
+            status_sample = "999/999"
+        self._count_col_w = max(
+            _COUNT_COL_MIN,
+            self._header_count_label.fontMetrics().horizontalAdvance(self._header_count or "Count") + 16,
+        )
+        status_fm = self._header_status_label.fontMetrics()
+        self._status_col_w = max(
+            _STATUS_COL_MIN,
+            status_fm.horizontalAdvance(self._header_status or "Status") + 12,
+            status_fm.horizontalAdvance(status_sample) + 12,
+        )
+        action_fm = self._header_action_label.fontMetrics()
+        self._action_col_w = max(
+            _ACTION_COL_MIN,
+            action_fm.horizontalAdvance(self._header_action or "Action") + 16,
+            action_fm.horizontalAdvance(self._open_text or "Open") + 28,
+        )
+        self._header_count_label.setFixedWidth(self._count_col_w)
+        self._header_status_label.setFixedWidth(self._status_col_w)
+        self._header_action_label.setFixedWidth(self._action_col_w)
+        for block in self._blocks:
+            self._apply_block_column_widths(block)
+
+    def _apply_block_column_widths(self, block: _LibBlock) -> None:
+        if block.count_label is not None:
+            block.count_label.setFixedWidth(self._count_col_w)
+        if block.status_label is not None:
+            block.status_label.setFixedWidth(self._status_col_w)
+            self._refresh_block_status_label(block)
+        if block.open_button is not None:
+            block.open_button.setFixedWidth(self._action_col_w)
+
+    def _set_status_label_text(self, label: QLabel, text: str) -> None:
+        full = str(text or "")
+        label.setToolTip(full)
+        width = max(1, int(self._status_col_w) - 8)
+        label.setText(
+            label.fontMetrics().elidedText(full, Qt.TextElideMode.ElideRight, width)
+        )
 
     def collect_expanded_library_paths(self) -> list[str]:
         return [os.path.normpath(b.lib_path) for b in self._blocks if b.expanded]
@@ -516,7 +610,7 @@ class LibraryGroupedVideoTree(QWidget):
             return
         lib_path = str(block.lib_path or "").strip()
         if lib_path and not os.path.isdir(lib_path):
-            label.setText(self._offline_status_text or "Path missing")
+            self._set_status_label_text(label, self._offline_status_text or "Path missing")
             label.setProperty("libSync", "offline")
             style = label.style()
             if style is not None:
@@ -528,9 +622,9 @@ class LibraryGroupedVideoTree(QWidget):
         needs_fix = any(self._entry_needs_fix(ent) for ent in block.entries)
         template = self._status_template or "{ready}/{total}"
         try:
-            label.setText(template.format(ready=ready, total=total))
+            self._set_status_label_text(label, template.format(ready=ready, total=total))
         except Exception:
-            label.setText(f"{ready}/{total}")
+            self._set_status_label_text(label, f"{ready}/{total}")
         label.setProperty("libSync", "needs_fix" if needs_fix else "")
         style = label.style()
         if style is not None:
@@ -801,6 +895,7 @@ class LibraryGroupedVideoTree(QWidget):
         btn_open.setObjectName("LibraryLibAction")
         btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_open.clicked.connect(lambda _=False, p=lib_path: self.open_library_requested.emit(p))
+        block.open_button = btn_open
 
         status_label = QLabel()
         status_label.setObjectName("LibraryLibSyncStatus")
@@ -853,6 +948,7 @@ class LibraryGroupedVideoTree(QWidget):
         top.addWidget(count_label, 0)
         top.addWidget(status_label, 0)
         top.addWidget(btn_open, 0)
+        self._apply_block_column_widths(block)
         outer.addWidget(header)
         outer.addWidget(body)
         body.setVisible(block.expanded)

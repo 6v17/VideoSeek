@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.layout import (
     COMPONENT_SIZES,
     compare_row_card_height,
@@ -1090,6 +1091,7 @@ class LibraryPage(QWidget):
             divider.setFrameShape(QFrame.VLine)
             divider.setFrameShadow(QFrame.Plain)
             divider.setObjectName("ToolbarDivider")
+            divider.setFixedSize(1, 22)
             return divider
 
         # Chrome: mode switch + add/remove as one left-packed group, hint underneath
@@ -1124,12 +1126,12 @@ class LibraryPage(QWidget):
         self.btn_tab_visual.setCheckable(True)
         self.btn_tab_visual.setChecked(True)
         self.btn_tab_visual.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab_visual.setMinimumWidth(88)
+        self.btn_tab_visual.setMinimumWidth(108)
         self.btn_tab_dialogue = QPushButton()
         self.btn_tab_dialogue.setObjectName("LibraryModeBtn")
         self.btn_tab_dialogue.setCheckable(True)
         self.btn_tab_dialogue.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_tab_dialogue.setMinimumWidth(88)
+        self.btn_tab_dialogue.setMinimumWidth(108)
         mode_row.addWidget(self.btn_tab_visual)
         mode_row.addWidget(self.btn_tab_dialogue)
         self._library_mode_group = QButtonGroup(self)
@@ -1197,8 +1199,9 @@ class LibraryPage(QWidget):
         self.table_title.setObjectName("CardTitle")
         table_layout.addWidget(self.table_title)
 
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
+        toolbar_host = QWidget()
+        toolbar_host.setObjectName("LibraryToolbarFlow")
+        toolbar = FlowLayout(toolbar_host, spacing=8)
         self.btn_sync_db = QPushButton()
         self.btn_sync_db.setObjectName("PrimaryButton")
         self.btn_refresh_visual_library = QPushButton()
@@ -1234,9 +1237,7 @@ class LibraryPage(QWidget):
 
         toolbar.addWidget(self.btn_sync_db)
         toolbar.addWidget(self.btn_refresh_visual_library)
-        toolbar.addSpacing(4)
         toolbar.addWidget(_toolbar_divider())
-        toolbar.addSpacing(4)
         toolbar.addWidget(self.btn_index_issues)
         toolbar.addWidget(self.btn_fix_missing_vectors)
         toolbar.addWidget(self.btn_cleanup_missing)
@@ -1244,10 +1245,9 @@ class LibraryPage(QWidget):
         toolbar.addWidget(self.btn_vector_details)
         toolbar.addWidget(self.btn_debug_gpu_oom)
         toolbar.addWidget(self.btn_debug_system_oom)
-        toolbar.addStretch()
-        toolbar.addWidget(self.visual_video_tree.find_bar, 0)
+        toolbar.addWidget(self.visual_video_tree.find_bar)
         toolbar.addWidget(self.btn_stop_index)
-        table_layout.addLayout(toolbar)
+        table_layout.addWidget(toolbar_host)
         table_layout.addWidget(self.visual_video_tree, 1)
         self.visual_video_tree.find_bar.install_shortcuts(self.table_card)
         visual_layout.addWidget(self.table_card, 1)
@@ -1266,8 +1266,9 @@ class LibraryPage(QWidget):
         self.dialogue_table_title.setObjectName("CardTitle")
         dialogue_table_layout.addWidget(self.dialogue_table_title)
 
-        dialogue_toolbar = QHBoxLayout()
-        dialogue_toolbar.setSpacing(8)
+        dialogue_toolbar_host = QWidget()
+        dialogue_toolbar_host.setObjectName("LibraryToolbarFlow")
+        dialogue_toolbar = FlowLayout(dialogue_toolbar_host, spacing=8)
         self.btn_build_dialogue_index = QPushButton()
         self.btn_build_dialogue_index.setObjectName("PrimaryButton")
         self.btn_reembed_dialogue = QPushButton()
@@ -1316,18 +1317,14 @@ class LibraryPage(QWidget):
         dialogue_toolbar.addWidget(self.btn_clear_dialogue)
         dialogue_toolbar.addWidget(self.btn_export_dialogue)
         dialogue_toolbar.addWidget(self.btn_refresh_dialogue_library)
-        dialogue_toolbar.addSpacing(8)
         dialogue_toolbar.addWidget(self.lbl_subtitle_sample_strategy)
         dialogue_toolbar.addWidget(self.input_subtitle_sample_strategy)
-        dialogue_toolbar.addSpacing(8)
         dialogue_toolbar.addWidget(self.lbl_subtitle_sample_interval)
         dialogue_toolbar.addWidget(self.input_subtitle_sample_interval)
-        dialogue_toolbar.addSpacing(8)
         dialogue_toolbar.addWidget(self.lbl_subtitle_ocr_batch)
         dialogue_toolbar.addWidget(self.input_subtitle_ocr_batch)
-        dialogue_toolbar.addStretch()
         dialogue_toolbar.addWidget(self.btn_stop_dialogue_index)
-        dialogue_table_layout.addLayout(dialogue_toolbar)
+        dialogue_table_layout.addWidget(dialogue_toolbar_host)
 
         find_row = QHBoxLayout()
         find_row.setContentsMargins(0, 0, 0, 0)
