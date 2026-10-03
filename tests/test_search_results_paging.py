@@ -23,5 +23,29 @@ class SearchResultsPagingTests(unittest.TestCase):
         self.assertEqual(slice_search_results_page(items, 99), [])
 
 
+class SearchResultsPagerLabelTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtWidgets import QApplication
+
+        if QApplication.instance() is None:
+            cls._app = QApplication([])
+
+    def test_english_previous_label_is_not_clipped(self):
+        from ui.widgets.search_results_pager import SearchResultsPager
+
+        pager = SearchResultsPager()
+        pager.set_texts(
+            {
+                "search_results_prev_page": "Previous",
+                "search_results_next_page": "Next",
+                "search_results_page_info": "{page}/{pages} · {total}",
+            }
+        )
+        needed = pager.btn_prev.fontMetrics().horizontalAdvance("Previous") + 16
+        self.assertGreaterEqual(pager.btn_prev.width(), needed)
+        self.assertEqual(pager.btn_prev.width(), pager.btn_next.width())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,9 +27,12 @@ _CARD_MIN_WIDTH = 312
 _CARD_SPACING = 12
 _GRID_BOTTOM_PAD = 20
 _BTN_H = 30
+# Floors only; English labels (Preview / Locate / Export) are sized from font metrics.
 _BTN_W = 54
 _BTN_DEEP_W = 72
 _BTN_ADD_W = 46
+# TableBtn QSS padding 5px 8px + 1px border + a little slack so the first glyph is not clipped.
+_BTN_PAD_X = 24
 
 
 class ResultGridCard(QFrame):
@@ -201,7 +204,8 @@ class ResultGridCard(QFrame):
         def _action(text: str, tip: str, slot, *, width: int = _BTN_W, btn_class: str = "TableBtn") -> QPushButton:
             btn = QPushButton(text)
             btn.setProperty("class", btn_class)
-            btn.setFixedSize(width, _BTN_H)
+            fitted = max(width, btn.fontMetrics().horizontalAdvance(text) + _BTN_PAD_X)
+            btn.setFixedSize(fitted, _BTN_H)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             # Avoid Space re-firing the last clicked action (preview play/pause owns Space).
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -257,9 +261,18 @@ class ResultGridCard(QFrame):
                 )
             )
         layout.addWidget(row)
+        self._sync_card_width(row)
 
         self._on_preview = on_preview
         self.updateGeometry()
+
+    def _sync_card_width(self, row: QWidget) -> None:
+        buttons = row.findChildren(QPushButton)
+        if not buttons:
+            self.setFixedWidth(_CARD_MIN_WIDTH)
+            return
+        row_w = sum(int(btn.width()) for btn in buttons) + 4 * max(0, len(buttons) - 1)
+        self.setFixedWidth(max(_CARD_MIN_WIDTH, row_w + 16))
 
 
 class ResultGrid(QScrollArea):
@@ -288,6 +301,15 @@ class ResultGrid(QScrollArea):
         self._cards: list[ResultGridCard] = []
         self._cols = 1
         self._side_pad = -1
+
+    def _card_slot_width(self) -> int:
+        if not self._cards:
+            return _CARD_MIN_WIDTH
+        widths = [
+            max(_CARD_MIN_WIDTH, int(card.width()), int(card.minimumWidth()))
+            for card in self._cards
+        ]
+        return max(widths)
 
     def count(self) -> int:
         return len(self._cards)
@@ -357,9 +379,10 @@ class ResultGrid(QScrollArea):
     def _reflow(self, *, force: bool = False) -> None:
         width = max(1, self.viewport().width())
         # Keep a little breathing room; leftover space is split as side padding so the block is centered.
+        card_w = self._card_slot_width()
         usable = max(1, width - 16)
-        cols = max(1, (usable + _CARD_SPACING) // (_CARD_MIN_WIDTH + _CARD_SPACING))
-        used = cols * _CARD_MIN_WIDTH + max(0, cols - 1) * _CARD_SPACING
+        cols = max(1, (usable + _CARD_SPACING) // (card_w + _CARD_SPACING))
+        used = cols * card_w + max(0, cols - 1) * _CARD_SPACING
         side = max(8, (width - used) // 2)
         if (
             not force

@@ -8,6 +8,9 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWi
 from src.app.search_results_paging import SEARCH_RESULTS_PAGE_SIZE, search_results_page_count
 
 _PAGER_ROW_HEIGHT = 24
+# QSS `#SearchResultsPagerButton` uses padding 0 8px + 1px border.
+_PAGER_BTN_PAD_X = 24
+_PAGER_BTN_MIN_WIDTH = 48
 
 
 class SearchResultsPager(QWidget):
@@ -32,7 +35,7 @@ class SearchResultsPager(QWidget):
 
         self.btn_prev = QPushButton()
         self.btn_prev.setObjectName("SearchResultsPagerButton")
-        self.btn_prev.setFixedSize(64, _PAGER_ROW_HEIGHT)
+        self.btn_prev.setFixedHeight(_PAGER_ROW_HEIGHT)
         self.btn_prev.setSizePolicy(button_policy)
         self.btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -44,7 +47,7 @@ class SearchResultsPager(QWidget):
 
         self.btn_next = QPushButton()
         self.btn_next.setObjectName("SearchResultsPagerButton")
-        self.btn_next.setFixedSize(64, _PAGER_ROW_HEIGHT)
+        self.btn_next.setFixedHeight(_PAGER_ROW_HEIGHT)
         self.btn_next.setSizePolicy(button_policy)
         self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -61,7 +64,22 @@ class SearchResultsPager(QWidget):
         self._texts = dict(texts or {})
         self.btn_prev.setText(self._texts.get("search_results_prev_page", "Previous"))
         self.btn_next.setText(self._texts.get("search_results_next_page", "Next"))
+        self._fit_pager_buttons()
         self._sync_controls()
+
+    def _fit_pager_buttons(self) -> None:
+        """English 'Previous' is wider than 上一页; keep both buttons the same width."""
+
+        def _width_for(button: QPushButton) -> int:
+            label = str(button.text() or "")
+            return max(
+                _PAGER_BTN_MIN_WIDTH,
+                button.fontMetrics().horizontalAdvance(label) + _PAGER_BTN_PAD_X,
+            )
+
+        width = max(_width_for(self.btn_prev), _width_for(self.btn_next))
+        self.btn_prev.setFixedSize(width, _PAGER_ROW_HEIGHT)
+        self.btn_next.setFixedSize(width, _PAGER_ROW_HEIGHT)
 
     def configure(
         self,

@@ -145,6 +145,41 @@ class ResultViewModeTests(unittest.TestCase):
         self.assertGreaterEqual(grid._host.minimumHeight(), card_h * 3 + _GRID_BOTTOM_PAD)
         self.assertGreaterEqual(grid._cards[0].actions_host.minimumHeight(), _BTN_H)
 
+    def test_english_preview_label_is_not_clipped(self):
+        from PySide6.QtWidgets import QPushButton
+
+        from ui.widgets.result_grid import ResultGridCard
+
+        card = ResultGridCard()
+        texts = {
+            "preview": "Preview",
+            "preview_tip": "",
+            "locate": "Locate",
+            "locate_tip": "",
+            "export_clip": "Export",
+            "export_clip_tip": "",
+            "shot_list_add": "Add",
+            "shot_list_add_tip": "",
+            "thumb_loading": "...",
+        }
+
+        def _noop(*_a, **_k):
+            return None
+
+        card.bind(
+            rank=1,
+            hit=SearchHit(1.0, 2.0, 0.9, r"D:\videos\a.mp4", match_kind="frame"),
+            texts=texts,
+            on_preview=_noop,
+            on_locate=_noop,
+            on_export=_noop,
+            on_add_to_shot_list=_noop,
+        )
+        action_row = card.actions_host.layout().itemAt(0).widget()
+        preview = next(btn for btn in action_row.findChildren(QPushButton) if btn.text() == "Preview")
+        needed = preview.fontMetrics().horizontalAdvance("Preview") + 16
+        self.assertGreaterEqual(preview.width(), needed)
+
 
 if __name__ == "__main__":
     unittest.main()
