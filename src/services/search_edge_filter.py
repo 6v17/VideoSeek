@@ -32,9 +32,21 @@ def get_video_end_lookup() -> dict[str, float]:
     return dict(lookup) if isinstance(lookup, dict) else {}
 
 
+def _coerce_rows(value):
+    """Turn paths/timestamps into a list without boolean-testing numpy arrays."""
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        return [value]
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
 def merge_video_end_lookup(video_paths: Iterable, timestamps: Iterable) -> None:
-    paths = list(video_paths or [])
-    times = list(timestamps or [])
+    paths = _coerce_rows(video_paths)
+    times = _coerce_rows(timestamps)
     if not paths or not times or len(paths) != len(times):
         return
     current = get_video_end_lookup()

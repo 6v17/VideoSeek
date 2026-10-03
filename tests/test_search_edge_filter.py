@@ -98,6 +98,17 @@ class SearchEdgeFilterTests(unittest.TestCase):
             )
         )
 
+    def test_merge_video_end_lookup_accepts_numpy_timestamps(self):
+        import numpy as np
+
+        from src.services.search_edge_filter import get_video_end_lookup
+
+        merge_video_end_lookup(
+            np.array(["a.mp4", "a.mp4"]),
+            np.array([1.0, 12.5]),
+        )
+        self.assertEqual(max(get_video_end_lookup().values()), 12.5)
+
     def test_merge_backfills_after_edge_filter(self):
         merge_video_end_lookup(["a.mp4"] * 5, [0.0, 50.0, 200.0, 400.0, 1300.0])
         cfg = {
