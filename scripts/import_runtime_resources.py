@@ -11,8 +11,8 @@ Default layout (when config.json has not moved these paths):
   %LOCALAPPDATA%\\VideoSeek\\models\\<provider>\\<variant>\\
   %LOCALAPPDATA%\\VideoSeek\\bin\\ffmpeg.exe
 
-  import_runtime_resources.bat --status
-  import_runtime_resources.bat D:\\downloads\\openai-clip.zip D:\\downloads\\ffmpeg.exe
+  python import_runtime_resources.py --status
+  python import_runtime_resources.py D:\\downloads\\openai-clip.zip D:\\downloads\\ffmpeg.exe
 """
 from __future__ import annotations
 

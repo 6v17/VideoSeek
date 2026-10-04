@@ -81,13 +81,10 @@ Missing runtime assets (import in-app for both installer and source):
 | Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse**; or download model zips and `ffmpeg.exe` from [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models), then import |
 | VLC (Windows source only) | Download `vlc_lib.zip` from [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) and extract at project root |
 
-Fallback: if the model zip and `ffmpeg.exe` are already on disk, an agent can close VideoSeek, download these two files into one folder, and run this. No git checkout is required; it writes the installed app's `%LOCALAPPDATA%\VideoSeek`:
-
-- https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.bat
-- https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py
+Fallback: if the model zip and `ffmpeg.exe` are already on disk, an agent can close VideoSeek, download [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py), and run this. No git checkout is required; it writes the installed app's `%LOCALAPPDATA%\VideoSeek`:
 
 ```bat
-import_runtime_resources.bat openai-clip.zip ffmpeg.exe
+python import_runtime_resources.py openai-clip.zip ffmpeg.exe
 ```
 
 See **`docs/quickstart.md`** for troubleshooting and tests.
