@@ -169,7 +169,25 @@ class StandaloneRuntimeImportTests(unittest.TestCase):
             app_data = os.path.join(temp_dir, "VideoSeek")
             os.makedirs(app_data)
             with open(os.path.join(app_data, "config.json"), "w", encoding="utf-8") as handle:
-                json.dump({"schema_version": 2, "library_paths": ["D:/videos"]}, handle)
+                json.dump(
+                    {
+                        "schema_version": 2,
+                        "library_paths": ["D:/videos"],
+                        "models": {
+                            "active_profile": "clip_onnx_default",
+                            "profiles": [
+                                {
+                                    "id": "clip_onnx_default",
+                                    "provider": "clip_onnx",
+                                    "enabled": True,
+                                    "runtime": {"model_dir": os.path.join(app_data, "models"), "model_variant": "vit-base-patch32"},
+                                    "files": {"visual_model": "clip_visual.onnx", "text_model": "clip_text.onnx"},
+                                }
+                            ],
+                        },
+                    },
+                    handle,
+                )
 
             search_dir = Path(temp_dir) / "openai-clip" / "vit-large-patch14"
             search_dir.mkdir(parents=True)
@@ -181,6 +199,7 @@ class StandaloneRuntimeImportTests(unittest.TestCase):
                         "provider": "clip_onnx",
                         "variant": "vit-large-patch14",
                         "display_name": "OpenAI CLIP",
+                        "files": {"visual_model": "clip_visual.onnx"},
                     }
                 ),
                 encoding="utf-8",
@@ -219,6 +238,9 @@ class StandaloneRuntimeImportTests(unittest.TestCase):
             config = json.loads(Path(payload["config_file"]).read_text(encoding="utf-8"))
             self.assertEqual(config["library_paths"], ["D:/videos"])
             self.assertEqual(config["models"]["active_profile"], "clip_onnx_vit_large_patch14")
+            ghost = next(item for item in config["models"]["profiles"] if item["id"] == "clip_onnx_default")
+            self.assertFalse(ghost["enabled"])
+            self.assertTrue(payload["packages"]["active_profile_switched"])
             self.assertTrue(os.path.isfile(config["ffmpeg_path"]))
             self.assertTrue(
                 (

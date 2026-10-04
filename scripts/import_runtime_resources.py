@@ -196,6 +196,7 @@ def _install_search_tree(extracted_root: str, model_root: str, config: dict) -> 
             existing[str(profile.get("id")).strip()] = index
     imported = 0
     updated = 0
+    touched: list[str] = []
     for manifest_file in manifests:
         with open(manifest_file, "r", encoding="utf-8") as handle:
             manifest = json.load(handle)
@@ -247,9 +248,74 @@ def _install_search_tree(extracted_root: str, model_root: str, config: dict) -> 
             profiles.append(new_profile)
             existing[profile_id] = len(profiles) - 1
             imported += 1
-        if not str(models.get("active_profile") or "").strip():
-            models["active_profile"] = profile_id
-    return {"imported": imported, "updated": updated}
+        touched.append(profile_id)
+    return {"imported": imported, "updated": updated, "touched": touched}
+
+
+def _profile_ready(profile: dict, model_root: str) -> bool:
+    runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
+    root = str(runtime.get("model_dir") or model_root or "").strip()
+    provider = str(profile.get("provider") or "").strip()
+    variant = str(runtime.get("model_variant") or profile.get("model_variant") or "").strip()
+    if not root or not provider or not variant:
+        return False
+    resource_dir = os.path.join(os.path.abspath(root), _provider_dir(provider), variant)
+    if not os.path.isdir(resource_dir):
+        return False
+    files_map = profile.get("files") if isinstance(profile.get("files"), dict) else {}
+    names = [str(value or "").strip() for value in files_map.values() if str(value or "").strip()]
+    if not names:
+        return os.path.isfile(os.path.join(resource_dir, "model_manifest.json"))
+    return all(os.path.isfile(os.path.join(resource_dir, name)) for name in names)
+
+
+def _finalize_active_profile(config: dict, model_root: str, touched_ids: list[str]) -> dict:
+    models = config.get("models")
+    if not isinstance(models, dict):
+        return {"active_profile": "", "active_profile_switched": False, "warnings": []}
+    profiles = models.get("profiles")
+    if not isinstance(profiles, list):
+        profiles = []
+    warnings = []
+    disabled = []
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        if _profile_ready(profile, model_root):
+            continue
+        if profile.get("enabled", True):
+            profile["enabled"] = False
+            disabled.append(str(profile.get("id") or ""))
+    if disabled:
+        warnings.append("disabled profiles with missing files: " + ", ".join(item for item in disabled if item))
+    previous = str(models.get("active_profile") or "").strip()
+    active = next((item for item in profiles if isinstance(item, dict) and str(item.get("id") or "") == previous), None)
+    switched = False
+    if active is None or not _profile_ready(active, model_root):
+        replacement = ""
+        for profile_id in reversed(touched_ids):
+            candidate = next((item for item in profiles if isinstance(item, dict) and str(item.get("id") or "") == profile_id), None)
+            if candidate and _profile_ready(candidate, model_root):
+                replacement = profile_id
+                break
+        if not replacement:
+            for profile in reversed(profiles):
+                if isinstance(profile, dict) and _profile_ready(profile, model_root):
+                    replacement = str(profile.get("id") or "")
+                    break
+        if replacement and replacement != previous:
+            models["active_profile"] = replacement
+            switched = True
+            warnings.append(
+                f"active_profile switched from {previous or '(empty)'} to {replacement} because the previous profile files are missing"
+            )
+        elif previous:
+            warnings.append(f"active_profile unchanged ({previous}); its model files are missing")
+    return {
+        "active_profile": str(models.get("active_profile") or ""),
+        "active_profile_switched": switched,
+        "warnings": warnings,
+    }
 
 
 def _install_understanding_tree(extracted_root: str, model_root: str) -> str:
@@ -338,17 +404,22 @@ def import_runtime_resources_standalone(paths: list[str], *, app_data_dir: str |
 
     imported = 0
     updated = 0
+    touched_ids: list[str] = []
     understanding_imported = []
     errors = []
     checksum_verified_count = 0
+    checksum_skipped = []
     for zip_path in zip_files:
         if not os.path.isfile(zip_path) or not zipfile.is_zipfile(zip_path):
             errors.append(f"{os.path.basename(zip_path)}: not a zip")
             continue
         try:
             sha_file = _matching_sha(zip_path, sha_files)
-            if _verify_sha256(zip_path, sha_file):
-                checksum_verified_count += 1
+            if sha_file:
+                if _verify_sha256(zip_path, sha_file):
+                    checksum_verified_count += 1
+            else:
+                checksum_skipped.append(os.path.basename(zip_path))
             os.makedirs(model_root, exist_ok=True)
             with tempfile.TemporaryDirectory(prefix="videoseek-import-", dir=model_root) as temp_dir:
                 extracted = os.path.join(temp_dir, "extracted")
@@ -362,10 +433,17 @@ def import_runtime_resources_standalone(paths: list[str], *, app_data_dir: str |
                     result = _install_search_tree(extracted, model_root, config)
                     imported += int(result["imported"])
                     updated += int(result["updated"])
+                    touched_ids.extend(result.get("touched") or [])
                 else:
                     errors.append(f"{os.path.basename(zip_path)}: unrecognized package")
         except Exception as exc:
             errors.append(f"{os.path.basename(zip_path)}: {exc}")
+
+    profile_state = _finalize_active_profile(config, model_root, touched_ids) if zip_files else {
+        "active_profile": str((config.get("models") or {}).get("active_profile") or ""),
+        "active_profile_switched": False,
+        "warnings": [],
+    }
 
     if ffmpeg_files or zip_files:
         with open(config_path, "w", encoding="utf-8") as handle:
@@ -382,6 +460,10 @@ def import_runtime_resources_standalone(paths: list[str], *, app_data_dir: str |
             "understanding_imported": understanding_imported,
             "errors": errors,
             "checksum_verified_count": checksum_verified_count,
+            "checksum_skipped": checksum_skipped,
+            "active_profile": profile_state["active_profile"],
+            "active_profile_switched": profile_state["active_profile_switched"],
+            "warnings": profile_state["warnings"],
         },
         "mode": "installed-app",
     }
