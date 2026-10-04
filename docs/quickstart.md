@@ -21,7 +21,7 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 | **VLC（Windows 源码）** | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到与 `main.py` 同级的 `vlc_lib/` |
 | **安装包用户** | 一般已全部内置 |
 
-备选：模型 zip 和 `ffmpeg.exe` 已经在本机、不想点导入弹窗时，agent 可关掉 VideoSeek，把 [import_runtime_resources.bat](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.bat) 和 [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py) 下载到同一目录后执行（写入 `%LOCALAPPDATA%\VideoSeek` 的 `config.json`；模型进 `models\`，FFmpeg 进配置里的 `ffmpeg_path`，默认为 `bin\ffmpeg.exe`）：
+备选：模型 zip 和 `ffmpeg.exe` 已经在本机、不想点导入弹窗时，agent 可关掉 VideoSeek，把 [import_runtime_resources.bat](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.bat) 和 [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py) 下载到同一目录后执行。不需要克隆仓库，写入本机已安装的 `%LOCALAPPDATA%\VideoSeek`（`config.json`、`models\`、`ffmpeg_path`，默认 `bin\ffmpeg.exe`）：
 
 ```bat
 import_runtime_resources.bat openai-clip.zip ffmpeg.exe

@@ -152,5 +152,89 @@ class RuntimeResourceServiceTests(unittest.TestCase):
             self.assertTrue((Path(model_root) / "chinese-clip" / "vit-base-patch16" / "model_manifest.json").is_file())
 
 
+def _load_import_script():
+    import importlib.util
+
+    path = os.path.join(os.path.dirname(__file__), "..", "scripts", "import_runtime_resources.py")
+    spec = importlib.util.spec_from_file_location("import_runtime_resources_under_test", os.path.abspath(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class StandaloneRuntimeImportTests(unittest.TestCase):
+    def test_standalone_import_writes_installed_app_data(self):
+        script = _load_import_script()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_data = os.path.join(temp_dir, "VideoSeek")
+            os.makedirs(app_data)
+            with open(os.path.join(app_data, "config.json"), "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 2, "library_paths": ["D:/videos"]}, handle)
+
+            search_dir = Path(temp_dir) / "openai-clip" / "vit-large-patch14"
+            search_dir.mkdir(parents=True)
+            (search_dir / "clip_visual.onnx").write_bytes(b"v")
+            (search_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "clip_onnx_vit_large_patch14",
+                        "provider": "clip_onnx",
+                        "variant": "vit-large-patch14",
+                        "display_name": "OpenAI CLIP",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            search_zip = Path(temp_dir) / "openai-clip.zip"
+            with zipfile.ZipFile(search_zip, "w") as archive:
+                for file_path in search_dir.rglob("*"):
+                    if file_path.is_file():
+                        archive.write(file_path, file_path.relative_to(search_dir.parent).as_posix())
+
+            ocr_dir = Path(temp_dir) / "ocr"
+            ocr_dir.mkdir()
+            (ocr_dir / "ch_PP-OCRv4_det_infer.onnx").write_bytes(b"d")
+            (ocr_dir / "understanding_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "vision/ocr/rapidocr-zh",
+                        "install_relpath": "components/vision/ocr/rapidocr-zh",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ocr_zip = Path(temp_dir) / "rapidocr-zh-understanding.zip"
+            with zipfile.ZipFile(ocr_zip, "w") as archive:
+                for file_path in ocr_dir.iterdir():
+                    archive.write(file_path, file_path.name)
+
+            ffmpeg = Path(temp_dir) / "ffmpeg.exe"
+            ffmpeg.write_bytes(b"ffmpeg")
+
+            payload = script.import_runtime_resources_standalone(
+                [str(search_zip), str(ocr_zip), str(ffmpeg)],
+                app_data_dir=app_data,
+            )
+
+            config = json.loads(Path(payload["config_file"]).read_text(encoding="utf-8"))
+            self.assertEqual(config["library_paths"], ["D:/videos"])
+            self.assertEqual(config["models"]["active_profile"], "clip_onnx_vit_large_patch14")
+            self.assertTrue(os.path.isfile(config["ffmpeg_path"]))
+            self.assertTrue(
+                (
+                    Path(app_data)
+                    / "models"
+                    / "understanding"
+                    / "components"
+                    / "vision"
+                    / "ocr"
+                    / "rapidocr-zh"
+                    / "understanding_manifest.json"
+                ).is_file()
+            )
+            self.assertEqual(payload["packages"]["errors"], [])
+            self.assertEqual(payload["packages"]["understanding_imported"], ["vision/ocr/rapidocr-zh"])
+
+
 if __name__ == "__main__":
     unittest.main()
