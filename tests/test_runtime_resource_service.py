@@ -1,7 +1,11 @@
+import json
 import os
 import sys
+import tempfile
 import types
 import unittest
+import zipfile
+from pathlib import Path
 from unittest.mock import patch
 
 sys.modules.setdefault("cv2", types.SimpleNamespace())
@@ -76,6 +80,76 @@ class RuntimeResourceServiceTests(unittest.TestCase):
                 os.path.normpath("D:/VideoSeek/bin"),
             ],
         )
+
+    @patch("src.app.config.save_config")
+    def test_install_ffmpeg_executable_copies_to_configured_target(self, mock_save_config):
+        from src.infra.ffmpeg_paths import install_ffmpeg_executable
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = os.path.join(temp_dir, "ffmpeg.exe")
+            target = os.path.join(temp_dir, "bin", "ffmpeg.exe")
+            with open(source, "wb") as handle:
+                handle.write(b"ffmpeg-bytes")
+            config = {"ffmpeg_path": target, "model_dir": temp_dir}
+
+            installed = install_ffmpeg_executable(source, config=config)
+
+            self.assertEqual(os.path.normpath(installed), os.path.normpath(target))
+            self.assertEqual(config["ffmpeg_path"], os.path.normpath(target))
+            self.assertEqual(Path(target).read_bytes(), b"ffmpeg-bytes")
+            mock_save_config.assert_called_once_with(config)
+
+    def test_import_runtime_resources_rejects_unknown_files(self):
+        with self.assertRaises(RuntimeError):
+            runtime_resource_service.import_runtime_resources(["D:/downloads/notes.txt"])
+
+    def test_import_selected_runtime_packages_installs_search_zip(self):
+        with tempfile.TemporaryDirectory() as model_root:
+            required_files = [
+                "chinese_clip_image.onnx",
+                "chinese_clip_text.onnx",
+                "vocab.txt",
+                "preprocessor_config.json",
+                "config.json",
+            ]
+            package_dir = Path(model_root) / "staging" / "chinese-clip" / "vit-base-patch16"
+            package_dir.mkdir(parents=True)
+            for file_name in required_files:
+                (package_dir / file_name).write_bytes(b"x")
+            (package_dir / "model_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "id": "chinese_clip_vit_base_patch16",
+                        "provider": "chinese_clip_onnx",
+                        "variant": "vit-base-patch16",
+                        "display_name": "Chinese CLIP",
+                        "required_files": required_files,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            zip_path = Path(model_root) / "chinese_clip.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                for file_path in package_dir.rglob("*"):
+                    if file_path.is_file():
+                        archive.write(file_path, file_path.relative_to(package_dir.parent).as_posix())
+
+            config = {
+                "models": {
+                    "active_profile": "",
+                    "profiles": [],
+                }
+            }
+            with (
+                patch("src.services.model_package_service.load_config", return_value=config),
+                patch("src.services.model_package_service.save_config"),
+                patch("src.services.model_package_service.get_config_schema_version", return_value=2),
+            ):
+                result = runtime_resource_service.import_selected_runtime_packages(model_root, [str(zip_path)])
+
+            self.assertEqual(result["imported"], 1)
+            self.assertEqual(result["errors"], [])
+            self.assertTrue((Path(model_root) / "chinese-clip" / "vit-base-patch16" / "model_manifest.json").is_file())
 
 
 if __name__ == "__main__":

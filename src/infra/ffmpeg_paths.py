@@ -66,6 +66,30 @@ def resolve_ffmpeg_path_info():
     return "", "missing"
 
 
+def install_ffmpeg_executable(ffmpeg_file, config=None):
+    """Copy ``ffmpeg.exe`` to the configured target and persist ``ffmpeg_path``.
+
+    Same write as the in-app runtime import: existing ``ffmpeg_path`` when set,
+    otherwise ``<app data>/bin/ffmpeg.exe``.
+    """
+    from src.app.config import load_config, save_config
+
+    source_path = os.path.normpath(os.path.abspath(os.fspath(ffmpeg_file)))
+    if os.path.basename(source_path).strip().lower() != "ffmpeg.exe":
+        raise RuntimeError("Selected executable is not ffmpeg.exe")
+    if not os.path.isfile(source_path):
+        raise RuntimeError(f"FFmpeg file not found: {source_path}")
+    current = config if config is not None else load_config()
+    target_path = os.path.normpath(get_configured_ffmpeg_target_path(config=current))
+    target_dir = os.path.dirname(target_path)
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
+    shutil.copy2(source_path, target_path)
+    current["ffmpeg_path"] = target_path
+    save_config(current)
+    return target_path
+
+
 def sync_ffmpeg_path_to_config():
     from src.app.config import load_config, save_config
 

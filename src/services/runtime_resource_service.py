@@ -111,6 +111,164 @@ def get_runtime_resource_open_paths(status=None):
     return deduped
 
 
+def import_selected_runtime_packages(model_root, selected_files, progress_callback=None):
+    """Import zip packages the same way the in-app runtime import worker does."""
+    from src.services.model_package_service import import_model_package_zip
+    from src.services.understanding_import_service import (
+        classify_package_zip,
+        import_understanding_component_zip,
+    )
+    from src.services.understanding_resource_service import (
+        SEARCH_MODEL_MANIFEST_FILENAME,
+        UNDERSTANDING_MANIFEST_FILENAME,
+    )
+
+    def _progress(percent, message):
+        if progress_callback is not None:
+            progress_callback(int(percent), str(message or ""))
+
+    files = [str(path or "").strip() for path in (selected_files or []) if str(path or "").strip()]
+    zip_files = [path for path in files if path.lower().endswith(".zip")]
+    sha256_files = [path for path in files if path.lower().endswith(".sha256")]
+    if not zip_files:
+        raise RuntimeError("No model zip to import.")
+
+    from src.app.plugins import get_registry
+
+    plugin_kinds = get_registry().package_kinds
+    aggregate = {
+        "imported": 0,
+        "updated": 0,
+        "understanding_imported": [],
+        "understanding_updated": [],
+        "errors": [],
+        "checksum_verified_count": 0,
+    }
+    for spec in plugin_kinds.values():
+        aggregate.setdefault(spec.aggregate_imported_key, [])
+        aggregate.setdefault(spec.aggregate_updated_key, [])
+
+    root = os.path.normpath(os.path.abspath(os.fspath(model_root)))
+    total = max(1, len(zip_files))
+    for index, zip_path in enumerate(zip_files, start=1):
+        _progress(int(((index - 1) / total) * 90), f"Importing {os.path.basename(zip_path)}")
+        matching_sha = ""
+        expected_name = f"{os.path.basename(zip_path)}.sha256".lower()
+        for candidate in sha256_files:
+            if os.path.basename(candidate).lower() == expected_name:
+                matching_sha = candidate
+                break
+        package_kind = classify_package_zip(zip_path)
+        package_result = None
+        if package_kind == "understanding":
+            package_result = import_understanding_component_zip(
+                root,
+                zip_path,
+                sha256_file=matching_sha or None,
+            )
+            component_id = str(package_result.get("component_id", "") or "").strip()
+            if package_result.get("updated"):
+                aggregate["updated"] += 1
+                aggregate["understanding_updated"].append(component_id)
+            else:
+                aggregate["imported"] += 1
+                aggregate["understanding_imported"].append(component_id)
+        elif package_kind == "search":
+            package_result = import_model_package_zip(
+                root,
+                zip_path,
+                sha256_file=matching_sha or None,
+            )
+            aggregate["imported"] += int(package_result.get("imported", 0))
+            aggregate["updated"] += int(package_result.get("updated", 0))
+            aggregate["errors"].extend(package_result.get("errors", []))
+        elif package_kind in plugin_kinds:
+            spec = plugin_kinds[package_kind]
+            package_result = spec.import_fn(
+                root,
+                zip_path,
+                sha256_file=matching_sha or None,
+            )
+            component_id = str(package_result.get("component_id", "") or "").strip()
+            if package_result.get("updated"):
+                aggregate["updated"] += 1
+                aggregate[spec.aggregate_updated_key].append(component_id)
+            else:
+                aggregate["imported"] += 1
+                aggregate[spec.aggregate_imported_key].append(component_id)
+        else:
+            kind_hints = ", ".join(
+                [UNDERSTANDING_MANIFEST_FILENAME, SEARCH_MODEL_MANIFEST_FILENAME]
+                + [f"plugin:{kind}" for kind in plugin_kinds]
+            )
+            aggregate["errors"].append(
+                f"{os.path.basename(zip_path)}: unrecognized package (expected {kind_hints})"
+            )
+            continue
+        if package_result is not None and package_result.get("checksum_verified"):
+            aggregate["checksum_verified_count"] += 1
+        _progress(int((index / total) * 95), f"Imported {index}/{total}")
+    _progress(100, "Model package import finished")
+    return aggregate
+
+
+def import_runtime_resources(paths, config=None):
+    """Install local model zips and/or ``ffmpeg.exe`` into the app data layout.
+
+    Uses the configured ``model_dir`` and ``ffmpeg_path`` when the user has
+    changed them. Does not download files.
+    """
+    from src.app.config import CONFIG_FILE, load_config
+    from src.infra.ffmpeg_paths import install_ffmpeg_executable
+
+    files = [os.path.normpath(os.path.abspath(os.fspath(path))) for path in paths if str(path or "").strip()]
+    if not files:
+        raise RuntimeError("Pass at least one model zip or ffmpeg.exe.")
+
+    ffmpeg_files = []
+    package_files = []
+    rejected = []
+    for path in files:
+        name = os.path.basename(path).lower()
+        if name == "ffmpeg.exe":
+            ffmpeg_files.append(path)
+        elif name.endswith(".zip") or name.endswith(".sha256"):
+            package_files.append(path)
+        else:
+            rejected.append(path)
+    if rejected:
+        names = ", ".join(os.path.basename(path) for path in rejected)
+        raise RuntimeError(f"Unsupported runtime file(s): {names}. Expected a model .zip, optional .sha256, or ffmpeg.exe.")
+    if not any(path.lower().endswith(".zip") for path in package_files) and any(
+        path.lower().endswith(".sha256") for path in package_files
+    ):
+        raise RuntimeError("A .sha256 file needs the matching .zip beside it.")
+    if len(ffmpeg_files) > 1:
+        raise RuntimeError("Pass one ffmpeg.exe.")
+
+    current = config if config is not None else load_config()
+    model_root = _resolve_runtime_model_root_dir(current)
+    if not model_root:
+        raise RuntimeError("model_dir is empty in config.json.")
+
+    ffmpeg_result = None
+    if ffmpeg_files:
+        target_path = install_ffmpeg_executable(ffmpeg_files[0], config=current)
+        ffmpeg_result = {"source": ffmpeg_files[0], "target_path": target_path}
+
+    packages = None
+    if any(path.lower().endswith(".zip") for path in package_files):
+        packages = import_selected_runtime_packages(model_root, package_files)
+
+    return {
+        "config_file": CONFIG_FILE,
+        "model_root": model_root,
+        "ffmpeg": ffmpeg_result,
+        "packages": packages,
+        "status": get_runtime_resource_status(),
+    }
+
+
 def ensure_runtime_resource_dirs(status=None):
     status = status or get_runtime_resource_status()
     os.makedirs(status["root_dir"], exist_ok=True)

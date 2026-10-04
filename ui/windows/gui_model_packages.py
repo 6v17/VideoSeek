@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import os
-import shutil
 
 from PySide6.QtWidgets import QFileDialog
 
-from src.app.config import load_config, save_config
+from src.app.config import load_config
+from src.infra.ffmpeg_paths import install_ffmpeg_executable
 from src.services.model_package_service import (
     rediscover_model_profiles as run_rediscover_model_profiles,
     remove_model_profile,
 )
 from src.storage.config_store import get_active_model_profile, get_effective_model_dir, resolve_provider_dir
-from src.utils import get_configured_ffmpeg_target_path
 from ui.workers import ModelPackageImportWorker
 
 
@@ -137,18 +136,7 @@ class ModelPackagesGuiMixin:
         self._start_model_package_import(model_root, model_files, scan_only)
 
     def _import_ffmpeg_executable(self, ffmpeg_file, config):
-        source_path = os.path.normpath(os.path.abspath(os.fspath(ffmpeg_file)))
-        if os.path.basename(source_path).strip().lower() != "ffmpeg.exe":
-            raise RuntimeError("Selected executable is not ffmpeg.exe")
-        if not os.path.exists(source_path):
-            raise RuntimeError(f"FFmpeg file not found: {source_path}")
-        target_path = os.path.normpath(get_configured_ffmpeg_target_path(config=config))
-        target_dir = os.path.dirname(target_path)
-        if target_dir:
-            os.makedirs(target_dir, exist_ok=True)
-        shutil.copy2(source_path, target_path)
-        config["ffmpeg_path"] = target_path
-        save_config(config)
+        install_ffmpeg_executable(ffmpeg_file, config=config)
 
     def _resolve_model_package_root(self, config):
         config_root = str(config.get("model_dir", "") or "").strip()

@@ -1791,97 +1791,17 @@ class ModelPackageImportWorker(QThread):
 
     def run(self):
         try:
-            from src.services.model_package_service import import_model_package_zip, import_model_packages
-            from src.services.understanding_import_service import (
-                classify_package_zip,
-                import_understanding_component_zip,
-            )
-            from src.services.understanding_resource_service import (
-                SEARCH_MODEL_MANIFEST_FILENAME,
-                UNDERSTANDING_MANIFEST_FILENAME,
-            )
+            from src.services.model_package_service import import_model_packages
+            from src.services.runtime_resource_service import import_selected_runtime_packages
 
             zip_files = [path for path in self.selected_files if path.lower().endswith(".zip")]
-            sha256_files = [path for path in self.selected_files if path.lower().endswith(".sha256")]
             if zip_files and not self.scan_only:
-                from src.app.plugins import get_registry
-
-                plugin_kinds = get_registry().package_kinds
-                aggregate = {
-                    "imported": 0,
-                    "updated": 0,
-                    "understanding_imported": [],
-                    "understanding_updated": [],
-                    "errors": [],
-                    "checksum_verified_count": 0,
-                }
-                for spec in plugin_kinds.values():
-                    aggregate.setdefault(spec.aggregate_imported_key, [])
-                    aggregate.setdefault(spec.aggregate_updated_key, [])
-                total = max(1, len(zip_files))
-                for index, zip_path in enumerate(zip_files, start=1):
-                    progress_before = int(((index - 1) / total) * 90)
-                    self.progress_signal.emit(progress_before, f"Importing {os.path.basename(zip_path)}")
-                    matching_sha = ""
-                    expected_name = f"{os.path.basename(zip_path)}.sha256".lower()
-                    for candidate in sha256_files:
-                        if os.path.basename(candidate).lower() == expected_name:
-                            matching_sha = candidate
-                            break
-                    package_kind = classify_package_zip(zip_path)
-                    package_result = None
-                    if package_kind == "understanding":
-                        package_result = import_understanding_component_zip(
-                            self.model_root,
-                            zip_path,
-                            sha256_file=matching_sha or None,
-                        )
-                        component_id = str(package_result.get("component_id", "") or "").strip()
-                        if package_result.get("updated"):
-                            aggregate["updated"] += 1
-                            aggregate["understanding_updated"].append(component_id)
-                        else:
-                            aggregate["imported"] += 1
-                            aggregate["understanding_imported"].append(component_id)
-                    elif package_kind == "search":
-                        package_result = import_model_package_zip(
-                            self.model_root,
-                            zip_path,
-                            sha256_file=matching_sha,
-                        )
-                        aggregate["imported"] += int(package_result.get("imported", 0))
-                        aggregate["updated"] += int(package_result.get("updated", 0))
-                        aggregate["errors"].extend(package_result.get("errors", []))
-                    elif package_kind in plugin_kinds:
-                        spec = plugin_kinds[package_kind]
-                        package_result = spec.import_fn(
-                            self.model_root,
-                            zip_path,
-                            sha256_file=matching_sha or None,
-                        )
-                        component_id = str(package_result.get("component_id", "") or "").strip()
-                        if package_result.get("updated"):
-                            aggregate["updated"] += 1
-                            aggregate[spec.aggregate_updated_key].append(component_id)
-                        else:
-                            aggregate["imported"] += 1
-                            aggregate[spec.aggregate_imported_key].append(component_id)
-                    else:
-                        kind_hints = ", ".join(
-                            [UNDERSTANDING_MANIFEST_FILENAME, SEARCH_MODEL_MANIFEST_FILENAME]
-                            + [f"plugin:{kind}" for kind in plugin_kinds]
-                        )
-                        aggregate["errors"].append(
-                            f"{os.path.basename(zip_path)}: unrecognized package "
-                            f"(expected {kind_hints})"
-                        )
-                        continue
-                    if package_result is not None and package_result.get("checksum_verified"):
-                        aggregate["checksum_verified_count"] += 1
-                    progress_after = int((index / total) * 95)
-                    self.progress_signal.emit(progress_after, f"Imported {index}/{total}")
-                self.progress_signal.emit(100, "Model package import finished")
-                self.finished_signal.emit(aggregate)
+                result = import_selected_runtime_packages(
+                    self.model_root,
+                    self.selected_files,
+                    progress_callback=self.progress_signal.emit,
+                )
+                self.finished_signal.emit(result)
                 return
 
             self.progress_signal.emit(20, "Scanning model directory")

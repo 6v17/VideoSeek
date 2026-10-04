@@ -81,6 +81,12 @@ Missing runtime assets (import in-app for both installer and source):
 | Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse**; or download model zips and `ffmpeg.exe` from [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models), then import |
 | VLC (Windows source only) | Download `vlc_lib.zip` from [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) and extract at project root |
 
+If the files are already on disk, close VideoSeek and import them with the repo script (model zip and `ffmpeg.exe`):
+
+```bat
+scripts\import_runtime_resources.bat path\to\openai-clip.zip path\to\ffmpeg.exe
+```
+
 See **`docs/quickstart.md`** for troubleshooting and tests.
 
 ## Docs
