@@ -1,6 +1,5 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0.."
 if "%~1"=="" goto usage
 
 set "PYTHON="
@@ -26,6 +25,6 @@ exit /b %ERRORLEVEL%
 
 :usage
 echo Close VideoSeek first. Pass files that are already on disk.
-echo   scripts\import_runtime_resources.bat --status
-echo   scripts\import_runtime_resources.bat model.zip ffmpeg.exe
+echo   import_runtime_resources.bat --status
+echo   import_runtime_resources.bat model.zip ffmpeg.exe
 exit /b 2

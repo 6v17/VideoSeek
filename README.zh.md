@@ -81,10 +81,13 @@ python main.py
 | 模型、FFmpeg | 按应用内提示下载，或 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **导入并解析**；也可从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载各模型 zip 与 `ffmpeg.exe` 后导入 |
 | VLC（仅 Windows 源码） | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到项目根目录 |
 
-文件已经下到本机时，可先关掉 VideoSeek，再用仓库里的脚本写入同一份用户配置（模型 zip 与 `ffmpeg.exe`）：
+文件已经下到本机时，先关掉 VideoSeek。把下面两个文件下载到同一目录，进入该目录后执行（写入 `%LOCALAPPDATA%\VideoSeek`）：
+
+- https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.bat
+- https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py
 
 ```bat
-scripts\import_runtime_resources.bat path\to\openai-clip.zip path\to\ffmpeg.exe
+import_runtime_resources.bat openai-clip.zip ffmpeg.exe
 ```
 
 排障、手动摆模型、测试命令见 **`docs/quickstart.md`**。

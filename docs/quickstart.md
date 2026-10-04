@@ -21,11 +21,11 @@ Windows 上 `requirements.txt` 已含 DirectML 等；Linux / macOS 需自行把 
 | **VLC（Windows 源码）** | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到与 `main.py` 同级的 `vlc_lib/` |
 | **安装包用户** | 一般已全部内置 |
 
-文件已经在本机、不想点导入弹窗时，先关掉 VideoSeek，再在仓库里跑 `scripts\import_runtime_resources.bat`（写入 `%LOCALAPPDATA%\VideoSeek` 的 `config.json`；模型进 `models\`，FFmpeg 进配置里的 `ffmpeg_path`，默认为 `bin\ffmpeg.exe`）：
+文件已经在本机、不想点导入弹窗时，先关掉 VideoSeek。把 [import_runtime_resources.bat](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.bat) 和 [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py) 下载到同一目录，进入该目录后执行（写入 `%LOCALAPPDATA%\VideoSeek` 的 `config.json`；模型进 `models\`，FFmpeg 进配置里的 `ffmpeg_path`，默认为 `bin\ffmpeg.exe`）：
 
 ```bat
-scripts\import_runtime_resources.bat path\to\openai-clip.zip path\to\ffmpeg.exe
-scripts\import_runtime_resources.bat --status
+import_runtime_resources.bat openai-clip.zip ffmpeg.exe
+import_runtime_resources.bat --status
 ```
 
 缺 VLC 时搜索/建库仍可用，预览可能不能播。
