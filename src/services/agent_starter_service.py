@@ -334,6 +334,7 @@ def build_agent_starter_text(
         "tag_indexed_videos": health.get("tag_indexed_videos"),
         "tag_match_modes": health.get("tag_match_modes") or ["exact", "fuzzy"],
         "text_search_enhance_enabled": bool(health.get("text_search_enhance_enabled")),
+        "search_skip_ranges": str(health.get("search_skip_ranges") or ""),
         "search_presets": preset_summaries,
     }
     if preset_total > len(preset_summaries):

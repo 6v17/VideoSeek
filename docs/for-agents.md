@@ -116,6 +116,8 @@
 `match_mode`（`search_kind=dialogue` 或 `tags`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
 `text_enhance`（仅**画面文搜** `query_type=text`）：**由 Agent 按需开关**——`true`/`false` 覆盖本机/服务机面板默认；省略则跟 `/health.text_search_enhance_enabled`。frame 与 chunk 均可。响应看 `meta.text_enhance`（意图）与 `meta.text_enhance_applied`（是否真的跑了增强）。图搜、`query_vector` 预计算、dialogue/tags **不走**增强。
 
+**跳过时段不是请求字段。** 画面搜索（`search_kind=visual`，含 frame/chunk）使用服务机桌面「跳过时段」。这条规则对所有 Agent 和用户机生效，请求体不能单独覆盖。当前规则见 `/health` 的 `search_skip_ranges`（空字符串表示不过滤），画面搜索响应另有 `meta.search_skip_ranges` 与 `meta.search_skip_edges_applied`。台词（`dialogue`）和标签（`tags`）搜索不走这道过滤。
+
 **文搜增强在做什么（预期管理）：**
 
 1. 从查询拆短语，并做有限同义扩展（规则表，不是大模型改写整句）。  
@@ -351,6 +353,8 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
     "search_precision_mode": "fast",
     "text_enhance": null,
     "text_enhance_applied": false,
+    "search_skip_ranges": "0-90",
+    "search_skip_edges_applied": true,
     "index_ready": true,
     "global_index_state": "fresh",
     "scope_applied": true,

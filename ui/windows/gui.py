@@ -2193,30 +2193,45 @@ class MainWindow(
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
 
     def _refresh_skip_edges_summary(self) -> None:
-        from src.services.search_edge_filter import get_search_skip_ranges_text
+        from src.services.search_edge_filter import (
+            get_search_skip_ranges_text,
+            resolve_skip_edges_chrome,
+        )
+        from src.services.team_mode_service import get_team_mode
 
         texts = getattr(self, "texts", {}) or {}
-        empty = texts.get("setting_skip_edges_empty", "未设置")
         try:
             ranges_text = get_search_skip_ranges_text()
         except Exception:
             ranges_text = ""
-        parts = [part.strip() for part in str(ranges_text or "").split(";") if part.strip()]
-        if not parts:
-            summary = texts.get("search_skip_edges_off", empty)
-        elif len(parts) == 1:
-            summary = parts[0]
-        else:
-            summary = texts.get("search_skip_edges_count", "{count}").format(count=len(parts))
-        tip = ranges_text or texts.get("skip_edges_hint", "")
+        team_mode = get_team_mode()
+        chrome = resolve_skip_edges_chrome(
+            team_mode=team_mode,
+            ranges_text=ranges_text,
+            texts=texts,
+        )
         btn = getattr(self.search_page, "btn_skip_edges", None)
-        if btn is not None and hasattr(btn, "set_display_text"):
-            btn.set_display_text(summary, tooltip=str(tip or summary))
+        if btn is not None:
+            btn.setEnabled(bool(chrome["enabled"]))
+            btn.setCursor(
+                Qt.CursorShape.PointingHandCursor
+                if chrome["enabled"]
+                else Qt.CursorShape.ArrowCursor
+            )
+            if hasattr(btn, "set_display_text"):
+                btn.set_display_text(str(chrome["summary"]), tooltip=str(chrome["tooltip"]))
+        label = getattr(self.search_page, "skip_edges_label", None)
+        if label is not None:
+            label.setToolTip(str(chrome["tooltip"]) if team_mode in {"client", "server"} else "")
         panel = getattr(self.search_page, "search_panel", None)
         if panel is not None and hasattr(panel, "relayout_inline_fields"):
             panel.relayout_inline_fields()
 
     def open_skip_edges_dialog(self) -> None:
+        from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            return
         from src.services.search_edge_filter import get_search_skip_ranges_text
 
         try:

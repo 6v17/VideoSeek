@@ -232,9 +232,11 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
     tag_stats = get_tag_index_stats(config=config)
     tag_ready = bool(tag_stats.get("tag_index_ready"))
     from src.services.clip_export_service import export_path_guard_strict, list_export_allowed_roots
+    from src.services.search_edge_filter import get_search_skip_ranges_text
 
     export_strict = bool(export_path_guard_strict(config))
     export_roots = list_export_allowed_roots(config)
+    skip_ranges = get_search_skip_ranges_text(config)
     return {
         "api_version": API_VERSION,
         "ok": True,
@@ -287,6 +289,7 @@ def build_health_payload(mode: Optional[str] = None) -> Dict[str, Any]:
         "tag_rows": int(tag_stats.get("tag_rows") or 0),
         "tag_match_modes": ["exact", "fuzzy"],
         "text_search_enhance_enabled": bool(get_text_search_enhance_enabled(config)),
+        "search_skip_ranges": skip_ranges,
         "team": _build_team_health(config),
         "export_path_guard_strict": export_strict,
         "export_allowed_roots": export_roots,

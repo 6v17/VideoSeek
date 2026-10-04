@@ -757,6 +757,12 @@ def get_agent_search_telemetry(*, locale: str = "zh", config=None) -> Dict[str, 
     }
 
 
+def _skip_edges_meta(config) -> Dict[str, Any]:
+    from src.services.search_edge_filter import skip_edges_api_meta
+
+    return skip_edges_api_meta(config)
+
+
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     config = load_config()
     search_kind = _normalize_search_kind(body.search_kind)
@@ -847,6 +853,7 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
             "global_index_state": snapshot["global_index_state"],
             "search_index_schema_version": snapshot.get("search_index_schema_version"),
             **scope_meta,
+            **_skip_edges_meta(config),
         },
     }
     if preview_anchor_sec is not None:

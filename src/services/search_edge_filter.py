@@ -87,6 +87,49 @@ def get_search_skip_edges_enabled(config=None) -> bool:
     return bool(parse_search_skip_ranges(get_search_skip_ranges_text(config)))
 
 
+def skip_edges_api_meta(config=None) -> dict[str, str | bool]:
+    """Server-owned skip rule. Callers cannot override it per request."""
+    text = get_search_skip_ranges_text(config)
+    return {
+        "search_skip_ranges": text,
+        "search_skip_edges_applied": bool(parse_search_skip_ranges(text)),
+    }
+
+
+def resolve_skip_edges_chrome(
+    *,
+    team_mode: str,
+    ranges_text: str,
+    texts: Mapping[str, str] | None = None,
+) -> dict[str, str | bool]:
+    """Search-bar skip control: employees see a locked server rule; the server edits it."""
+    copy = texts or {}
+    mode = str(team_mode or "off").strip().lower()
+    if mode == "client":
+        summary = str(copy.get("search_skip_edges_team_client") or "服务机")
+        tip = str(copy.get("search_skip_edges_team_client_hint") or summary)
+        return {"enabled": False, "summary": summary, "tooltip": tip}
+
+    parts = [part.strip() for part in str(ranges_text or "").split(";") if part.strip()]
+    if not parts:
+        summary = str(
+            copy.get("search_skip_edges_off")
+            or copy.get("setting_skip_edges_empty")
+            or ""
+        )
+    elif len(parts) == 1:
+        summary = parts[0]
+    else:
+        template = str(copy.get("search_skip_edges_count") or "{count}")
+        summary = template.format(count=len(parts))
+    tip = str(ranges_text or "").strip() or str(copy.get("skip_edges_hint") or summary)
+    if mode == "server":
+        note = str(copy.get("search_skip_edges_team_server_hint") or "").strip()
+        if note:
+            tip = f"{tip}\n{note}" if tip else note
+    return {"enabled": True, "summary": summary, "tooltip": tip}
+
+
 def expand_fetch_for_edge_filter(fetch_k: int, top_k: int, config=None) -> int:
     """Grow the candidate pool so edge filtering can backfill to top_k."""
     base = max(1, int(fetch_k))

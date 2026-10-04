@@ -189,7 +189,8 @@ class AgentStarterServiceTests(unittest.TestCase):
             self.assertIn("do not scan the disk", payload["starter_text"])
             self.assertEqual(payload["meta"]["search_preset_count"], 0)
             self.assertEqual(payload["meta"]["search_preset_snapshot_count"], 0)
-            self.assertLessEqual(payload["meta"]["line_count"], 95)
+            self.assertIn("search_skip_ranges", payload["starter_text"])
+            self.assertLessEqual(payload["meta"]["line_count"], 96)
 
 
 class ForAgentsDocTests(unittest.TestCase):

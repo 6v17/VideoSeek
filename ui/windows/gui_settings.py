@@ -1111,6 +1111,8 @@ class SettingsGuiMixin:
         # refreshed (startup) should pass refresh_library=False.
         if refresh_library and hasattr(self, "refresh_library_table"):
             self.refresh_library_table()
+        if hasattr(self, "_refresh_skip_edges_summary"):
+            self._refresh_skip_edges_summary()
 
     def _refresh_team_mode_status(self, status=None):
         if not hasattr(self, "settings_page"):

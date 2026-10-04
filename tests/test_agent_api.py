@@ -439,6 +439,7 @@ class AgentApiHealthTests(unittest.TestCase):
         self.assertEqual(payload["library_indexes_ready"], 2)
         self.assertEqual(payload["dialogue_match_modes"], ["exact", "fuzzy"])
         self.assertIn("text_search_enhance_enabled", payload)
+        self.assertIn("search_skip_ranges", payload)
         self.assertTrue(payload["capabilities"]["frame_extract"])
         self.assertTrue(payload["capabilities"]["batch_frame_extract"])
         self.assertTrue(payload["capabilities"]["timeline_export"])
@@ -539,6 +540,8 @@ class AgentApiPresetTests(unittest.TestCase):
         payload = execute_agent_search(body)
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["meta"]["scope_applied"])
+        self.assertIn("search_skip_ranges", payload["meta"])
+        self.assertIsInstance(payload["meta"]["search_skip_edges_applied"], bool)
         kwargs = mock_run_search.call_args.kwargs
         self.assertEqual(kwargs.get("scope_library_paths"), ["D:/saved_lib"])
         self.assertIsNone(kwargs.get("scope_video_paths"))

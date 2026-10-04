@@ -11,6 +11,8 @@ from src.services.search_edge_filter import (
     hit_in_skipped_edge,
     merge_video_end_lookup,
     reset_video_end_lookup,
+    resolve_skip_edges_chrome,
+    skip_edges_api_meta,
 )
 from src.services.search_skip_ranges import parse_search_skip_ranges
 
@@ -177,6 +179,52 @@ class SearchEdgeFilterTests(unittest.TestCase):
             resolve_result_pool_k(240, 100, {"search_skip_edges_enabled": False}, force_expand=True),
             240,
         )
+
+    def test_team_client_skip_control_is_locked_to_server_rule(self):
+        texts = {
+            "search_skip_edges_team_client": "服务机",
+            "search_skip_edges_team_client_hint": "由服务机统一设置",
+            "search_skip_edges_team_server_hint": "对所有用户生效",
+            "search_skip_edges_off": "不过滤",
+            "search_skip_edges_count": "{count}段",
+            "skip_edges_hint": "填写时段",
+        }
+        client = resolve_skip_edges_chrome(
+            team_mode="client",
+            ranges_text="0-90",
+            texts=texts,
+        )
+        self.assertFalse(client["enabled"])
+        self.assertEqual(client["summary"], "服务机")
+        self.assertIn("服务机", client["tooltip"])
+
+        local = resolve_skip_edges_chrome(
+            team_mode="off",
+            ranges_text="0-90; end-60",
+            texts=texts,
+        )
+        self.assertTrue(local["enabled"])
+        self.assertEqual(local["summary"], "2段")
+        self.assertNotIn("对所有用户生效", local["tooltip"])
+
+        server = resolve_skip_edges_chrome(
+            team_mode="server",
+            ranges_text="0-90",
+            texts=texts,
+        )
+        self.assertTrue(server["enabled"])
+        self.assertEqual(server["summary"], "0-90")
+        self.assertIn("对所有用户生效", server["tooltip"])
+
+    def test_api_meta_reports_server_rule_without_request_override(self):
+        off = skip_edges_api_meta({"search_skip_ranges": "", "search_skip_edges_enabled": False})
+        self.assertEqual(off["search_skip_ranges"], "")
+        self.assertFalse(off["search_skip_edges_applied"])
+        on = skip_edges_api_meta(
+            {"search_skip_ranges": "0-90", "search_skip_edges_enabled": True}
+        )
+        self.assertEqual(on["search_skip_ranges"], "0-90")
+        self.assertTrue(on["search_skip_edges_applied"])
 
 
 if __name__ == "__main__":
