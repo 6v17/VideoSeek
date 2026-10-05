@@ -1,9 +1,10 @@
 """Recap job runner: motion evidence + dialogue cues → LLM cut list + SRT.
 
 Stage modules: ``recap_vo_budget``, ``recap_match``, ``recap_captions``,
-``recap_cuts``, ``recap_cut_fit``, ``recap_cut_pad``, ``recap_constants``,
+``recap_cuts``, ``recap_cut_fit``, ``recap_cut_pad``, ``recap_cut_build``,
+``recap_io``, ``recap_focus``, ``recap_rematch``, ``recap_constants``,
 ``recap_prompts``. This file re-exports those surfaces and owns remaining plan /
-LLM / export orchestration. Jianying / FCPXML are separate exports.
+LLM / rematch / export orchestration. Jianying / FCPXML are separate exports.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from typing import Any, Callable, Mapping, Sequence
 from src.app.config import load_config
 from src.core.understanding.base import UnderstandingStoppedError
 from src.media.fcpxml import (
-    atomic_write_text,
     layout_clips_on_timeline,
     write_cuts_json,
     write_fcpxml,
@@ -232,6 +232,44 @@ from src.services.recap_cut_pad import (  # facade: TTS pad / insert clamp
     pad_cuts_for_tts as pad_cuts_for_tts,
 )
 
+from src.services.recap_cut_build import (  # facade: normalize / refine / duration
+    _chunk_is_skipped as _chunk_is_skipped,
+    apply_recap_duration as apply_recap_duration,
+    normalize_cut_list as normalize_cut_list,
+    refine_recap_cuts as refine_recap_cuts,
+    stash_match_vo_as_draft as stash_match_vo_as_draft,
+)
+
+from src.services.recap_io import (  # facade: sidecar load / write
+    _load_recap_sidecar as _load_recap_sidecar,
+    _read_recap_sidecar as _read_recap_sidecar,
+    _recap_clip_records as _recap_clip_records,
+    _recap_sidecar_path as _recap_sidecar_path,
+    load_recap_beats as load_recap_beats,
+    load_recap_cuts as load_recap_cuts,
+    recap_beats_path_for_video as recap_beats_path_for_video,
+    recap_cuts_path_for_video as recap_cuts_path_for_video,
+    write_recap_beats_file as write_recap_beats_file,
+    write_recap_cuts_file as write_recap_cuts_file,
+)
+
+from src.services.recap_focus import (  # facade: soft focus prior
+    infer_recap_focus as infer_recap_focus,
+    merge_recap_focus as merge_recap_focus,
+    normalize_recap_focus as normalize_recap_focus,
+    recap_focus_evidence_limits as recap_focus_evidence_limits,
+    recap_focus_plan_hint as recap_focus_plan_hint,
+    recap_focus_vo_hint as recap_focus_vo_hint,
+    story_silent_spans as story_silent_spans,
+)
+
+from src.services.recap_rematch import (  # facade: rematch splice / filter
+    _filter_rematch_cuts_to_beat as _filter_rematch_cuts_to_beat,
+    _locked_vo_context as _locked_vo_context,
+    _neighbor_beats_for_rematch as _neighbor_beats_for_rematch,
+    _splice_recap_beat_cuts as _splice_recap_beat_cuts,
+)
+
 from src.services.understanding_resource_service import (
     CAPTION_LANGUAGE_ZH,
     UNDERSTANDING_MODE_MOTION,
@@ -250,18 +288,6 @@ _DIALOGUE_OUTCOME_RE = re.compile(
 )
 _VO_LAND_HINT_RE = re.compile(
     r"(拒|答应|同意|决定|收下|推回|收束|落点|结束|算了|离去|离开|揭穿|识破|赢|输|放过|解决|成交)"
-)
-_FOCUS_FLEX_RE = re.compile(
-    r"(瞧不起|废物|弱者|蝼蚁|不可能|居然|震惊|跪下|臣服|天才|碾压|秒杀|打脸|装逼|"
-    r"小看|不堪一击|笑话|蝼蚁|不自量力|放马过来|受死)",
-)
-_FOCUS_ORDEAL_RE = re.compile(
-    r"(活下去|好痛|好冷|救救|绝望|撑不住|一个人|遗弃|饿|崩溃|好累|好怕|血|"
-    r"为什么.*我|孤单|死掉|撑不下去|好难受)",
-)
-_FOCUS_BOND_RE = re.compile(
-    r"(喜欢你|保护你|跟我走|相信我|谢谢你|别死|救你|牵手|靠近|心动|"
-    r"我会保护|交给我|一起走|不要离开)",
 )
 # Hiragana / katakana — source JP dialogue leaking into Chinese VO.
 _JP_KANA_RE = re.compile(r"[\u3040-\u30ff]")
@@ -2013,170 +2039,6 @@ def split_story_into_plan_acts(
     return out
 
 
-def story_silent_spans(
-    pack: Mapping[str, Any],
-    *,
-    min_sec: float = 12.0,
-    limit: int = 48,
-) -> list[dict[str, Any]]:
-    """Picture-time windows with little/no ASR — still belong on the story clock."""
-    duration = float(pack.get("duration_sec") or 0.0)
-    story_start, story_end = recap_story_window(duration)
-    if story_end - story_start < 1.0:
-        return []
-    spoken: list[tuple[float, float]] = []
-    for row in pack.get("ocr") or []:
-        if not isinstance(row, Mapping) or not str(row.get("text") or "").strip():
-            continue
-        try:
-            start = float(row.get("start") or 0.0)
-            end = float(row.get("end") or start)
-        except (TypeError, ValueError):
-            continue
-        if end < story_start or start > story_end:
-            continue
-        spoken.append((max(story_start, start), min(story_end, end)))
-    spoken.sort()
-    merged: list[tuple[float, float]] = []
-    for lo, hi in spoken:
-        if not merged or lo > merged[-1][1] + 1.0:
-            merged.append((lo, hi))
-        else:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
-    gaps: list[tuple[float, float]] = []
-    cursor = story_start
-    for lo, hi in merged:
-        if lo - cursor >= float(min_sec):
-            gaps.append((cursor, lo))
-        cursor = max(cursor, hi)
-    if story_end - cursor >= float(min_sec):
-        gaps.append((cursor, story_end))
-    chunks = [row for row in (pack.get("chunks") or []) if isinstance(row, Mapping)]
-    out: list[dict[str, Any]] = []
-    for lo, hi in gaps:
-        caps: list[dict[str, Any]] = []
-        for chunk in chunks:
-            span = _time_span(chunk.get("t"))
-            if not span:
-                continue
-            if span[1] < lo - 1.0 or span[0] > hi + 1.0:
-                continue
-            cap = str(chunk.get("cap") or "").strip()
-            if not cap:
-                continue
-            caps.append(
-                {
-                    "i": chunk.get("i"),
-                    "t": [round(span[0], 2), round(span[1], 2)],
-                    "cap": cap[:80],
-                }
-            )
-            if len(caps) >= 4:
-                break
-        out.append(
-            {
-                "t": [round(lo, 2), round(hi, 2)],
-                "kind": "no_asr",
-                "caps": caps,
-                "has_cap": bool(caps),
-            }
-        )
-        if len(out) >= max(1, int(limit or 48)):
-            break
-    return out
-
-
-def normalize_recap_focus(raw: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Clamp soft focus to known modes; low confidence → generic (no forced trope)."""
-    item = dict(raw or {})
-    mode = str(item.get("mode") or RECAP_FOCUS_GENERIC).strip().lower()
-    if mode not in RECAP_FOCUS_MODES:
-        mode = RECAP_FOCUS_GENERIC
-    try:
-        confidence = float(item.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, confidence))
-    if confidence < RECAP_FOCUS_SOFT_MIN:
-        mode = RECAP_FOCUS_GENERIC
-    return {
-        "mode": mode,
-        "confidence": round(confidence, 3),
-        "note": str(item.get("note") or "").strip()[:120],
-        "active": mode != RECAP_FOCUS_GENERIC and confidence >= RECAP_FOCUS_SOFT_MIN,
-    }
-
-
-def infer_recap_focus(pack: Mapping[str, Any]) -> dict[str, Any]:
-    """Heuristic soft prior from ASR patterns + speaker mix + silent picture share."""
-    texts: list[str] = []
-    speakers: set[str] = set()
-    for row in pack.get("ocr") or []:
-        if not isinstance(row, Mapping):
-            continue
-        body = str(row.get("text") or "").strip()
-        if body:
-            texts.append(body)
-        speaker = str(row.get("speaker") or "").strip()
-        if speaker:
-            speakers.add(speaker)
-    blob = "\n".join(texts)
-    flex_hits = len(_FOCUS_FLEX_RE.findall(blob))
-    ordeal_hits = len(_FOCUS_ORDEAL_RE.findall(blob))
-    bond_hits = len(_FOCUS_BOND_RE.findall(blob))
-    duration = float(pack.get("duration_sec") or 0.0)
-    story_start, story_end = recap_story_window(duration) if duration > 1.0 else (0.0, duration)
-    story_dur = max(1.0, story_end - story_start)
-    silent = story_silent_spans(pack)
-    silent_dur = sum(
-        max(0.0, (span[1] - span[0]))
-        for span in (_time_span(row.get("t")) for row in silent)
-        if span
-    )
-    silent_ratio = silent_dur / story_dur
-    speaker_n = len(speakers)
-
-    scores = {
-        RECAP_FOCUS_FLEX: float(flex_hits) + (0.8 if speaker_n >= 3 else 0.0),
-        RECAP_FOCUS_ORDEAL: float(ordeal_hits) + (1.2 if silent_ratio >= 0.22 and speaker_n <= 2 else 0.0),
-        RECAP_FOCUS_BOND: float(bond_hits) + (0.6 if 2 <= speaker_n <= 3 else 0.0),
-    }
-    best_mode, best_score = max(scores.items(), key=lambda item: item[1])
-    second = sorted(scores.values(), reverse=True)[1] if len(scores) > 1 else 0.0
-    if best_score < 2.0 or best_score < second + 1.0:
-        return normalize_recap_focus(
-            {"mode": RECAP_FOCUS_GENERIC, "confidence": 0.25, "note": "heuristic_unclear"}
-        )
-    confidence = min(0.92, 0.45 + 0.12 * best_score + 0.08 * max(0.0, best_score - second))
-    note = {
-        RECAP_FOCUS_FLEX: "heuristic_flex_npc_side",
-        RECAP_FOCUS_ORDEAL: "heuristic_ordeal_picture",
-        RECAP_FOCUS_BOND: "heuristic_bond_secondary",
-    }.get(best_mode, "")
-    return normalize_recap_focus({"mode": best_mode, "confidence": confidence, "note": note})
-
-
-def merge_recap_focus(
-    heuristic: Mapping[str, Any] | None,
-    llm_focus: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    """Blend LLM soft_focus with heuristic; never force when both are weak."""
-    base = normalize_recap_focus(heuristic)
-    other = normalize_recap_focus(llm_focus) if llm_focus else normalize_recap_focus(None)
-    if not other.get("active") and not base.get("active"):
-        return normalize_recap_focus(
-            {"mode": RECAP_FOCUS_GENERIC, "confidence": max(float(base.get("confidence") or 0.0), float(other.get("confidence") or 0.0)), "note": "soft_inactive"}
-        )
-    if other.get("active") and (
-        not base.get("active") or float(other.get("confidence") or 0.0) >= float(base.get("confidence") or 0.0)
-    ):
-        note = str(other.get("note") or "") or "llm_soft_focus"
-        return normalize_recap_focus(
-            {"mode": other.get("mode"), "confidence": other.get("confidence"), "note": note}
-        )
-    return base
-
-
 def parse_soft_focus_payload(text: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(_extract_json(text))
@@ -2191,68 +2053,6 @@ def parse_soft_focus_payload(text: str) -> dict[str, Any] | None:
     if mode in RECAP_FOCUS_MODES:
         return {"mode": mode, "confidence": payload.get("confidence"), "note": payload.get("note")}
     return None
-
-
-def recap_focus_plan_hint(focus: Mapping[str, Any] | None) -> str:
-    info = normalize_recap_focus(focus)
-    if not info.get("active"):
-        return "【软先验】未识别套路：通用进入→展开→收束；禁止硬套标签。\n"
-    mode = str(info.get("mode") or "")
-    if mode == RECAP_FOCUS_FLEX:
-        return (
-            "【软先验·flex】材料支撑时偏：轻视→打脸→收束；多写 NPC 反应，asr 偏重。"
-            "不像就退回通用。\n"
-        )
-    if mode == RECAP_FOCUS_ORDEAL:
-        return (
-            "【软先验·ordeal】材料支撑时偏：抬 silent/caps 画面权；独白与压迫场面同权。"
-            "不像就退回通用。\n"
-        )
-    if mode == RECAP_FOCUS_BOND:
-        return (
-            "【软先验·bond】材料支撑时偏：盯副1态度转折；对白推关系、画面吃反应。"
-            "不像就退回通用。\n"
-        )
-    return ""
-
-
-def recap_focus_vo_hint(focus: Mapping[str, Any] | None) -> str:
-    info = normalize_recap_focus(focus)
-    if not info.get("active"):
-        return ""
-    mode = str(info.get("mode") or "")
-    if mode == RECAP_FOCUS_FLEX:
-        return "软写法：写清谁轻视、谁被打脸、场上结果；NPC 反应可写。\n"
-    if mode == RECAP_FOCUS_ORDEAL:
-        return "软写法：绝境画面与崩溃都要落到旁白；无 asr 可用 caps。\n"
-    if mode == RECAP_FOCUS_BOND:
-        return "软写法：副1态度怎么变、主1做了什么让局面转。\n"
-    return ""
-
-
-def recap_focus_evidence_limits(
-    focus: Mapping[str, Any] | None,
-    *,
-    asr_limit: int = 20,
-    cap_limit: int = 10,
-) -> tuple[int, int]:
-    """Soft-bias how many asr vs caps rows the LLM sees for a span (never hard-drop either)."""
-    info = normalize_recap_focus(focus)
-    base_asr = max(1, int(asr_limit or 20))
-    base_cap = max(1, int(cap_limit or 10))
-    if not info.get("active"):
-        return base_asr, base_cap
-    mode = str(info.get("mode") or "")
-    if mode == RECAP_FOCUS_FLEX:
-        # Dialogue / NPC reactions drive flex; keep caps for reaction close-ups.
-        return min(36, int(round(base_asr * 1.35))), max(base_cap, int(round(base_cap * 0.9)))
-    if mode == RECAP_FOCUS_ORDEAL:
-        # Silent / picture pressure shares weight with ASR.
-        return max(base_asr, int(round(base_asr * 0.95))), min(24, int(round(base_cap * 1.5)))
-    if mode == RECAP_FOCUS_BOND:
-        # Attitude turns live in dialogue; reaction faces in caps.
-        return min(32, int(round(base_asr * 1.15))), min(16, int(round(base_cap * 1.2)))
-    return base_asr, base_cap
 
 
 def build_plan_structure_brief(
@@ -5435,196 +5235,6 @@ def fill_recap_vo_gaps(
     return work
 
 
-def _chunk_is_skipped(pack: Mapping[str, Any], chunk_index: int | None) -> bool:
-    if chunk_index is None:
-        return False
-    for item in pack.get("chunks") or []:
-        if int(item.get("i", -1)) == int(chunk_index):
-            return bool(str(item.get("skip") or "").strip())
-    return False
-
-
-def normalize_cut_list(raw: Mapping[str, Any], pack: Mapping[str, Any]) -> list[dict[str, Any]]:
-    duration = float(pack.get("duration_sec") or 0.0)
-    _op_start, story_end = recap_story_window(duration)
-    clips_in = raw.get("clips") if isinstance(raw, Mapping) else None
-    if not isinstance(clips_in, list) or not clips_in:
-        raise RuntimeError("LLM 没有返回 clips。")
-    out: list[dict[str, Any]] = []
-    for index, item in enumerate(clips_in, 1):
-        if not isinstance(item, Mapping):
-            continue
-        vo = str(item.get("vo") or "").strip()
-        try:
-            src_in = float(item.get("src_in"))
-        except (TypeError, ValueError):
-            continue
-        src_out = item.get("src_out")
-        duration_in = item.get("duration")
-        try:
-            if src_out is None and duration_in is not None:
-                src_out = src_in + float(duration_in)
-            else:
-                src_out = float(src_out)
-        except (TypeError, ValueError):
-            continue
-        chunk_index = item.get("chunk_index")
-        try:
-            chunk_index_i = int(chunk_index)
-        except (TypeError, ValueError):
-            chunk_index_i = None
-        window = _chunk_window(pack, chunk_index_i) if chunk_index_i is not None else None
-        if window:
-            src_in = max(window[0], src_in)
-            src_out = min(window[1], src_out)
-            # Allow a little spill into the next chunk for merged beats.
-            src_out = max(src_out, src_in + 0.4)
-        if duration > 0:
-            src_in = min(max(0.0, src_in), duration)
-            src_out = min(max(src_in + 0.4, src_out), duration)
-        span = src_out - src_in
-        vo_need = vo_needed_sec(vo) if vo else 0.0
-        max_keep = max(MAX_CLIP_SEC, min(MAX_TTS_CLIP_SEC, vo_need)) if vo else MAX_CLIP_SEC
-        insert = _looks_like_insert_cut(item)
-        floor = MIN_CLIP_SEC if vo else min(MIN_CLIP_SEC, max(2.4, span))
-        if insert:
-            floor = min(floor, max(2.0, span if span >= 2.0 else 2.0))
-        if span > max_keep + 0.15:
-            # Keep the establishing head (enter/setup); do not chop into a later stub.
-            src_out = round(src_in + max_keep, 2)
-        elif span < floor and duration:
-            extra = floor - span
-            src_out = min(duration, src_out + extra)
-            if window:
-                src_out = min(window[1], src_out)
-            if src_out - src_in < floor:
-                src_in = max(0.0 if not window else window[0], src_out - floor)
-        if src_out - src_in < 0.8:
-            continue
-        if _chunk_is_skipped(pack, chunk_index_i):
-            continue
-        if duration >= 360 and src_in >= story_end:
-            continue
-        name = str(item.get("name") or "").strip() or f"{index:02d}"
-        reason = str(item.get("reason") or "").strip()[:80]
-        beat_raw = item.get("beat_id", item.get("beat"))
-        try:
-            beat_id = int(beat_raw)
-        except (TypeError, ValueError):
-            beat_id = None
-        role = _clip_role(item)
-        if not role and insert:
-            role = "insert"
-        row = {
-            "name": name[:40],
-            "beat_id": beat_id,
-            "chunk_index": chunk_index_i,
-            "src_in": round(src_in, 3),
-            "src_out": round(src_out, 3),
-            "duration": round(src_out - src_in, 3),
-            "vo": vo,
-            "reason": reason,
-        }
-        if role:
-            row["role"] = role
-        out.append(row)
-    if not out:
-        raise RuntimeError("LLM 剪辑表没有可用镜头。")
-    return out
-
-
-def stash_match_vo_as_draft(cuts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Keep accidental match VO as caption seed; official narration is written later."""
-    out: list[dict[str, Any]] = []
-    for clip in cuts or []:
-        item = dict(clip)
-        seed = str(item.get("vo_draft") or item.get("vo") or "").strip()
-        item["vo_draft"] = seed
-        item["vo"] = ""
-        out.append(item)
-    return out
-
-
-def refine_recap_cuts(
-    cuts: Sequence[Mapping[str, Any]],
-    pack: Mapping[str, Any],
-    beats: list[Mapping[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
-    """Keep cuts and grow picture if needed. Do not edit the script."""
-    out = coalesce_recap_cuts(list(cuts or []))
-    out = clamp_cuts_to_beat_window(out, pack, beats)
-    out = snap_cuts_to_capped_chunks(out, pack, beats)
-    out = clamp_insert_cuts_to_beat(out, pack, beats)
-    out = pad_cuts_for_tts(out, pack, beats)
-    out = coalesce_recap_cuts(out)
-    return drop_reused_source_cuts(out)
-
-
-def apply_recap_duration(
-    cuts: list[Mapping[str, Any]],
-    pack: Mapping[str, Any],
-    beats: list[Mapping[str, Any]] | None = None,
-    *,
-    target_sec: float = TARGET_RECAP_SEC,
-    min_sec: float = MIN_RECAP_SEC,
-) -> list[dict[str, Any]]:
-    """Fit picture to VO speak time (grow) then trim budget overshoots. Never pad empty beats."""
-    _ = (target_sec, min_sec)
-    out = [dict(clip) for clip in cuts]
-    if not out:
-        return out
-    by_id = {}
-    for beat in beats or []:
-        try:
-            by_id[int(beat.get("id"))] = dict(beat)
-        except (TypeError, ValueError):
-            continue
-    groups: dict[Any, list[dict[str, Any]]] = {}
-    for clip in out:
-        groups.setdefault(clip.get("beat_id"), []).append(clip)
-    for beat_id, group in groups.items():
-        beat = None
-        if beat_id is not None:
-            try:
-                beat = by_id.get(int(beat_id))
-            except (TypeError, ValueError):
-                beat = None
-        budget = float((beat or {}).get("budget_sec") or 0.0)
-        if budget <= 0:
-            continue
-        vo_text = str((beat or {}).get("vo") or "").strip()
-        if not vo_text:
-            for clip in group:
-                vo_text = str(clip.get("vo") or clip.get("vo_draft") or "").strip()
-                if vo_text:
-                    break
-        need = vo_needed_sec(vo_text) if vo_text else 0.0
-        have = sum(_clip_len(clip) for clip in group)
-        beat_span = _time_span((beat or {}).get("t")) if beat else None
-        # Grow toward speak time (capped by budget), not toward empty quota.
-        want = min(budget, need) if need > 0.05 else 0.0
-        if want > have + 0.25:
-            room = want - have
-            masters = [clip for clip in group if not _looks_like_insert_cut(clip)]
-            targets = masters or list(group)
-            for clip in targets:
-                if room <= 0.05:
-                    break
-                grown = _expand_clip(
-                    clip,
-                    pack,
-                    room,
-                    beat_span,
-                    forward_only=False,
-                    max_len=MAX_TTS_CLIP_SEC,
-                )
-                room -= grown
-            have = sum(_clip_len(clip) for clip in group)
-        if have > budget + 0.25:
-            _trim_group_to_budget(out, group, budget)
-    return out
-
-
 def parse_cut_list(text: str, pack: Mapping[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     try:
         payload = _loads_cut_list_json(text)
@@ -5701,84 +5311,6 @@ def normalize_recap_start_from(value: str | None) -> str:
     if key in {RECAP_START_PLAN_ONLY, "plan-only", "planonly"}:
         return RECAP_START_PLAN_ONLY
     return RECAP_START_PLAN
-
-
-def recap_beats_path_for_video(video_path: str) -> Path:
-    return _recap_sidecar_path(video_path, "_recap_beats.json")
-
-
-def recap_cuts_path_for_video(video_path: str) -> Path:
-    return _recap_sidecar_path(video_path, "_recap_cuts.json")
-
-
-def _recap_sidecar_path(video_path: str, suffix: str) -> Path:
-    video = Path(os.path.abspath(os.path.expanduser(str(video_path or "").strip())))
-    return video.parent / f"{video.stem}{suffix}"
-
-
-def _read_recap_sidecar(path: Path, required_key: str) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return None
-    if not isinstance(payload, dict) or not isinstance(payload.get(required_key), list):
-        return None
-    if not payload.get(required_key):
-        return None
-    return payload
-
-
-def _load_recap_sidecar(
-    video_path: str,
-    *,
-    suffix: str,
-    required_key: str,
-    video_id: str = "",
-) -> dict[str, Any] | None:
-    primary = _recap_sidecar_path(video_path, suffix)
-    payload = _read_recap_sidecar(primary, required_key)
-    if payload is not None:
-        return payload
-    vid = str(video_id or "").strip()
-    parent = Path(os.path.abspath(os.path.expanduser(str(video_path or "").strip()))).parent
-    if not vid or not parent.is_dir():
-        return None
-    found: list[tuple[float, dict[str, Any]]] = []
-    for path in parent.glob(f"*{suffix}"):
-        if path == primary:
-            continue
-        item = _read_recap_sidecar(path, required_key)
-        if item is None or str(item.get("video_id") or "").strip() != vid:
-            continue
-        try:
-            mtime = float(path.stat().st_mtime)
-        except OSError:
-            mtime = 0.0
-        found.append((mtime, item))
-    if not found:
-        return None
-    found.sort(key=lambda row: row[0], reverse=True)
-    return found[0][1]
-
-
-def load_recap_beats(video_path: str, *, video_id: str = "") -> dict[str, Any] | None:
-    return _load_recap_sidecar(
-        video_path,
-        suffix="_recap_beats.json",
-        required_key="beats",
-        video_id=video_id,
-    )
-
-
-def load_recap_cuts(video_path: str, *, video_id: str = "") -> dict[str, Any] | None:
-    return _load_recap_sidecar(
-        video_path,
-        suffix="_recap_cuts.json",
-        required_key="clips",
-        video_id=video_id,
-    )
 
 
 def save_recap_clip_vo(
@@ -5917,91 +5449,6 @@ def rewrite_recap_clip_caption(
     return saved
 
 
-def _splice_recap_beat_cuts(
-    existing: Sequence[Mapping[str, Any]],
-    new_cuts: Sequence[Mapping[str, Any]],
-    beat_id: int,
-) -> list[dict[str, Any]]:
-    """Replace every clip for ``beat_id`` with ``new_cuts``, keeping other beats intact.
-
-    Removes *all* clips of the target beat (even if non-contiguous), then inserts the
-    new block at the first removed position so neighbors stay in narrative order.
-    """
-    target = int(beat_id)
-    kept: list[dict[str, Any]] = []
-    insert_at: int | None = None
-    for clip in existing or []:
-        row = dict(clip)
-        if _clip_beat_id(row) == target:
-            if insert_at is None:
-                insert_at = len(kept)
-            continue
-        kept.append(row)
-    mid: list[dict[str, Any]] = []
-    for clip in new_cuts or []:
-        row = dict(clip)
-        row["beat_id"] = target
-        mid.append(row)
-    if not mid:
-        return kept
-    if insert_at is None:
-        # No prior clips for this beat — place by ascending beat id among neighbors.
-        insert_at = len(kept)
-        for index, clip in enumerate(kept):
-            bid = _clip_beat_id(clip)
-            if bid is not None and bid > target:
-                insert_at = index
-                break
-    return kept[:insert_at] + mid + kept[insert_at:]
-
-
-def _neighbor_beats_for_rematch(
-    allocated: Sequence[Mapping[str, Any]],
-    beat_id: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any] | None]:
-    ordered = [dict(item) for item in allocated or []]
-    target_index = None
-    for index, item in enumerate(ordered):
-        try:
-            if int(item.get("id")) == int(beat_id):
-                target_index = index
-                break
-        except (TypeError, ValueError):
-            continue
-    if target_index is None:
-        raise RuntimeError(f"规划里没有拍 #{beat_id}。")
-    prev_beat = ordered[target_index - 1] if target_index > 0 else None
-    next_beat = ordered[target_index + 1] if target_index + 1 < len(ordered) else None
-    return prev_beat, ordered[target_index], next_beat
-
-
-def _locked_vo_context(
-    clips: Sequence[Mapping[str, Any]],
-    beat_id: int,
-) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    """Return (prev VO lines, next VO lines, old cuts for this beat)."""
-    target = int(beat_id)
-    prev: list[str] = []
-    nxt: list[str] = []
-    old: list[dict[str, Any]] = []
-    phase = "before"
-    for clip in clips or []:
-        row = dict(clip)
-        bid = _clip_beat_id(row)
-        vo = str(row.get("vo") or "").strip()
-        if bid == target:
-            phase = "after"
-            old.append(row)
-            continue
-        if phase == "before":
-            if vo:
-                prev.append(vo)
-        else:
-            if vo:
-                nxt.append(vo)
-    return prev[-3:], nxt[:3], old
-
-
 def rematch_recap_user_prompt(
     pack: Mapping[str, Any],
     *,
@@ -6042,51 +5489,6 @@ def rematch_recap_user_prompt(
         }
     }
     return base + "\n\n" + json.dumps(extra, ensure_ascii=False)
-
-
-def _filter_rematch_cuts_to_beat(
-    cuts: Sequence[Mapping[str, Any]],
-    beat: Mapping[str, Any],
-    *,
-    pack: Mapping[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    """Keep only target-beat clips that still touch the beat time window."""
-    target = int(beat.get("id"))
-    span = _time_span(beat.get("t"))
-    out: list[dict[str, Any]] = []
-    for clip in cuts or []:
-        row = dict(clip)
-        bid = _clip_beat_id(row)
-        if bid not in (None, 0, target):
-            continue
-        row["beat_id"] = target
-        try:
-            src_in = float(row.get("src_in") or 0.0)
-            src_out = float(row.get("src_out") or 0.0)
-        except (TypeError, ValueError):
-            continue
-        if src_out <= src_in + 0.4:
-            continue
-        pad = float(BEAT_SRC_PAD_SEC)
-        if span and _overlap_sec((src_in, src_out), (span[0] - pad, span[1] + pad)) <= 0.05:
-            # Far outside beat window — try snap, else drop.
-            placed = None
-            if pack is not None:
-                placed = _snap_src_into_beat_window(
-                    pack,
-                    span,
-                    want_sec=max(MIN_FLASH_CLIP_SEC, min(src_out - src_in, MAX_CLIP_SEC)),
-                    pad_sec=pad,
-                )
-            if placed is None:
-                continue
-            row["src_in"], row["src_out"] = placed
-            row["duration"] = round(placed[1] - placed[0], 3)
-            src_in, src_out = placed
-        if pack is not None and _source_hits_op_ed(pack, src_in, src_out):
-            continue
-        out.append(row)
-    return out
 
 
 def caption_recap_clip_indices(
@@ -6421,32 +5823,6 @@ def rematch_weak_recap_beats(
     }
 
 
-def write_recap_beats_file(
-    dest: str | Path,
-    *,
-    title: str,
-    video_id: str,
-    allocated: list[Mapping[str, Any]],
-    people: list[Mapping[str, Any]] | None = None,
-    stage: str = RECAP_START_PLAN,
-) -> Path:
-    return atomic_write_text(
-        dest,
-        json.dumps(
-            {
-                "title": title,
-                "video_id": video_id,
-                "stage": stage,
-                "target_sec": round(sum(float(item.get("budget_sec") or 0.0) for item in allocated), 1),
-                "people": list(people or []),
-                "beats": list(allocated),
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-    )
-
-
 def save_recap_plan_edits(
     video_path: str,
     *,
@@ -6472,84 +5848,6 @@ def save_recap_plan_edits(
         video_id=str(video_id or "").strip(),
         allocated=allocated,
         people=normalize_story_people({"people": list(people or [])}),
-    )
-
-
-def _recap_clip_records(clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for clip in clips:
-        row = {
-            "name": clip.get("name"),
-            "beat_id": clip.get("beat_id"),
-            "chunk_index": clip.get("chunk_index"),
-            "src_in": round(float(clip.get("src_in") or 0.0), 3),
-            "src_out": round(float(clip.get("src_out") or 0.0), 3),
-            "duration": round(
-                float(clip.get("duration") or (float(clip.get("src_out") or 0.0) - float(clip.get("src_in") or 0.0))),
-                3,
-            ),
-            "tl_in": round(float(clip.get("tl_in") or 0.0), 3),
-            "tl_out": round(float(clip.get("tl_out") or 0.0), 3),
-            "vo": clip.get("vo") or "",
-            "vo_draft": str(clip.get("vo_draft") or clip.get("vo") or ""),
-            "vo_tl_in": clip.get("vo_tl_in"),
-            "vo_tl_out": clip.get("vo_tl_out"),
-            "reason": str(clip.get("reason") or ""),
-            "role": str(clip.get("role") or "").strip(),
-        }
-        match_status = str(clip.get("match_status") or "").strip()
-        if match_status:
-            row["match_status"] = match_status
-        if clip.get("match_score") is not None:
-            try:
-                row["match_score"] = round(float(clip.get("match_score")), 3)
-            except (TypeError, ValueError):
-                pass
-        if clip.get("match_threshold") is not None:
-            try:
-                row["match_threshold"] = round(float(clip.get("match_threshold")), 3)
-            except (TypeError, ValueError):
-                pass
-        support = clip.get("evidence_support")
-        if isinstance(support, Mapping):
-            row["evidence_support"] = dict(support)
-        for key in ("visual_score", "asr_score", "vlm_score", "character_score"):
-            if clip.get(key) is None:
-                continue
-            try:
-                row[key] = round(float(clip.get(key)), 3)
-            except (TypeError, ValueError):
-                pass
-        rows.append(row)
-    return rows
-
-
-def write_recap_cuts_file(
-    dest: str | Path,
-    *,
-    title: str,
-    video_path: str,
-    video_id: str,
-    info: Mapping[str, Any],
-    laid_out: Sequence[Mapping[str, Any]],
-    beats_path: str | Path,
-    stage: str,
-) -> Path:
-    clips = list(laid_out or [])
-    return write_cuts_json(
-        {
-            "title": title,
-            "video": video_path,
-            "video_id": video_id,
-            "stage": stage,
-            "fps": info.get("fps"),
-            "duration_sec": clips[-1]["tl_out"] if clips else 0,
-            "tts_speed": TTS_SPEED,
-            "clip_count": len(clips),
-            "beats_path": str(beats_path),
-            "clips": _recap_clip_records(clips),
-        },
-        dest,
     )
 
 
