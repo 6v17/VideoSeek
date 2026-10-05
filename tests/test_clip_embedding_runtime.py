@@ -420,22 +420,18 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
             "min_chunk_duration": 0.0,
         },
     )
-    @patch("src.core.clip_embedding.get_active_embedding_spec", return_value={})
     @patch("src.core.clip_embedding.load_config", return_value=_clip_schema_v2_config(prefer_gpu=False))
     @patch("src.core.clip_embedding._estimate_index_frame_total", return_value=5)
     @patch("src.core.clip_embedding.free_memory")
-    @patch("src.core.clip_embedding.ensure_folder_exists")
     @patch("src.core.clip_embedding.stream_frames_with_ffmpeg")
     @patch("src.core.clip_embedding.get_engine")
     def test_generate_vectors_reader_thread_batches_match_stream(
         self,
         mock_get_engine,
         mock_stream,
-        mock_ensure,
         mock_free,
         mock_estimate,
         mock_load_cfg,
-        mock_spec,
         mock_chunk_cfg,
     ):
         batch_lengths = []
