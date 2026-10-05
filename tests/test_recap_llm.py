@@ -3906,6 +3906,7 @@ class RecapPackTests(unittest.TestCase):
 
             with (
                 patch("src.services.recap_service.get_remote_llm_settings", return_value={"model": "x"}),
+                patch("src.services.recap_service.resolve_recap_caption_language", return_value="zh"),
                 patch("src.services.recap_service.build_recap_pack", return_value=pack),
                 patch("src.services.recap_service.call_remote_llm", side_effect=fake_llm),
                 patch(

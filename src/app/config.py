@@ -699,7 +699,22 @@ def _migrate_legacy_storage_if_needed(config):
     return _apply_legacy_storage_path_defaults(migrated)
 
 
+def _config_file_override():
+    """Optional config path for tests. Empty means the normal user config file."""
+    raw = os.environ.get("VIDEOSEEK_CONFIG_PATH", "").strip()
+    if not raw:
+        return ""
+    return os.path.normpath(os.path.expanduser(raw))
+
+
+def _active_config_file():
+    return _config_file_override() or CONFIG_FILE
+
+
 def _resolve_config_path():
+    override = _config_file_override()
+    if override:
+        return override
     if os.path.exists(CONFIG_FILE):
         return CONFIG_FILE
     legacy_data_dir = os.path.join(LEGACY_INSTALL_DIR, STORAGE_DIR_NAME)
@@ -762,14 +777,14 @@ def load_config():
             should_persist_new_defaults
             or chunk_migrated
             or had_persisted_team_role
-            or os.path.normpath(config_path) != os.path.normpath(CONFIG_FILE)
+            or os.path.normpath(config_path) != os.path.normpath(_active_config_file())
         ):
             save_config(config)
         return config
 
-    logger.info("Config file %s not found, using default values", CONFIG_FILE)
+    logger.info("Config file %s not found, using default values", config_path)
     config = DEFAULT_CONFIG.copy()
-    config["data_root"] = os.path.dirname(CONFIG_FILE)
+    config["data_root"] = os.path.dirname(_active_config_file())
     config = _apply_data_root_storage_paths(config)
     config = _migrate_legacy_storage_if_needed(config)
     save_config(config)
@@ -782,22 +797,24 @@ def save_config(config):
     has_explicit_storage_paths = any(key in raw_config for key in PATH_KEYS)
     config = _sanitize_understanding_settings(_sanitize_sampling_settings(_apply_default_values(raw_config)))
     config, _chunk_migrated = _sanitize_chunk_settings(config)
+    config_base_dir = os.path.dirname(_active_config_file())
     if has_explicit_data_root:
-        config = _normalize_data_root(config, os.path.dirname(CONFIG_FILE))
+        config = _normalize_data_root(config, config_base_dir)
         config = _apply_data_root_storage_paths(config)
     elif has_explicit_storage_paths:
         config["data_root"] = ""
-        config = _normalize_storage_paths(config, os.path.dirname(CONFIG_FILE))
+        config = _normalize_storage_paths(config, config_base_dir)
         inferred_data_root = _infer_data_root_from_storage_paths(config)
         if inferred_data_root:
             config["data_root"] = inferred_data_root
             config = _apply_data_root_storage_paths(config)
     else:
-        config["data_root"] = os.path.dirname(CONFIG_FILE)
+        config["data_root"] = config_base_dir
         config = _apply_data_root_storage_paths(config)
     config = _sanitize_general_settings(config)
-    _ensure_parent_dir(CONFIG_FILE)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as handle:
+    target = _active_config_file()
+    _ensure_parent_dir(target)
+    with open(target, "w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=4, ensure_ascii=False)
 
 

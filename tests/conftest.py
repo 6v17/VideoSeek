@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
+import tempfile
 import types
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, NonCallableMagicMock
+
+# Point config I/O at a temp file before any test imports load_config().
+# VIDEOSEEK_CONFIG_PATH already set by the caller is left alone.
+if not os.environ.get("VIDEOSEEK_CONFIG_PATH", "").strip():
+    _pytest_config_dir = Path(tempfile.mkdtemp(prefix="videoseek-pytest-config-"))
+    os.environ["VIDEOSEEK_CONFIG_PATH"] = str(_pytest_config_dir / "config.json")
 
 # Real packages must not remain replaced by lightweight import stubs.
 _PROTECTED_MODULES = frozenset({"numpy", "cv2", "onnxruntime", "faiss", "PySide6"})

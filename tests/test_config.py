@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,33 @@ from src.app import config as config_module
 
 
 class ConfigMigrationTests(unittest.TestCase):
+    def setUp(self):
+        # These tests redirect CONFIG_FILE themselves. The suite-wide
+        # VIDEOSEEK_CONFIG_PATH would hide that patch.
+        self._saved_config_path = os.environ.pop("VIDEOSEEK_CONFIG_PATH", None)
+
+    def tearDown(self):
+        if self._saved_config_path is None:
+            os.environ.pop("VIDEOSEEK_CONFIG_PATH", None)
+        else:
+            os.environ["VIDEOSEEK_CONFIG_PATH"] = self._saved_config_path
+
+    def test_load_config_env_path_does_not_touch_user_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            override = Path(temp_dir) / "isolated" / "config.json"
+            user_config = Path(temp_dir) / "user" / "config.json"
+            user_config.parent.mkdir()
+            user_config.write_text('{"caption_language_marker":"keep"}', encoding="utf-8")
+            before = user_config.read_text(encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"VIDEOSEEK_CONFIG_PATH": str(override)}),
+                patch.object(config_module, "CONFIG_FILE", str(user_config)),
+            ):
+                loaded = config_module.load_config()
+            self.assertEqual(loaded["understanding"]["remote_vlm"]["caption_language"], "zh")
+            self.assertTrue(override.is_file())
+            self.assertEqual(user_config.read_text(encoding="utf-8"), before)
+
     def test_load_config_rewrites_legacy_install_paths_without_copying_data_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
