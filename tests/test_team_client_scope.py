@@ -101,8 +101,12 @@ class TeamClientScopeTests(unittest.TestCase):
                     search_precision_mode="precise",
                     scope_video_paths=["http://192.168.1.2:18080/videos/lib1/a.mp4"],
                     preview_anchor_sec=64.5,
+                    locate_anchor_score=0.82,
+                    locate_score_margin=0.11,
                 )
         self.assertEqual(captured["payload"].get("preview_anchor_sec"), 64.5)
+        self.assertEqual(captured["payload"].get("locate_anchor_score"), 0.82)
+        self.assertEqual(captured["payload"].get("locate_score_margin"), 0.11)
         scope = captured["payload"].get("scope") or {}
         self.assertEqual(
             scope.get("video_paths"),

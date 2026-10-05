@@ -806,6 +806,10 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
         }
         if preview_anchor_sec is not None:
             search_kwargs["preview_anchor_sec"] = preview_anchor_sec
+            if body.locate_anchor_score is not None:
+                search_kwargs["locate_anchor_score"] = float(body.locate_anchor_score)
+            if body.locate_score_margin is not None:
+                search_kwargs["locate_score_margin"] = float(body.locate_score_margin)
         # Always use run_search so frame and chunk text queries share enhance.
         hits = run_search(
             resolved["query_data"],
@@ -1050,6 +1054,8 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         pad_before_sec=batch.pad_before_sec,
         pad_after_sec=batch.pad_after_sec,
         preview_anchor_sec=item.preview_anchor_sec,
+        locate_anchor_score=item.locate_anchor_score,
+        locate_score_margin=item.locate_score_margin,
         team_play_urls=bool(getattr(item, "team_play_urls", False)),
     )
 

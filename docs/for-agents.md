@@ -110,7 +110,7 @@
 | `image_folder` | 与 `queries` 二选一；扫描 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每张图一条 query；`client_request_id` = 文件名 |
 
 `search_precision_mode`（图搜）：`fast` \| `precise`；未传时见 `/health` 的 `agent_api_default_image_precision`；纯文搜忽略。  
-`preview_anchor_sec`：图搜且 `scope.video_paths` 恰好 1 条时可用；服务端将 `search_precision_mode` 设为 `precise`。  
+`preview_anchor_sec`：图搜且 `scope.video_paths` 恰好 1 条时可用；服务端将 `search_precision_mode` 设为 `precise`。片内定位请同时传上一轮粗搜的 `locate_anchor_score` 和 `locate_score_margin`，否则定位窗按低置信度展开，并跳过像素精修。  
 `search_kind=dialogue`：仅 `query_type=text`；先看 `/health` 的 `dialogue_index_ready` / `capabilities.dialogue_search`（需在桌面字幕库完成提取）。  
 `search_kind=tags`：仅 `query_type=text`；先看 `/health` 的 `tag_index_ready` / `capabilities.tag_search`（需在理解页生成标签，并点「同步到搜索」写入投影；Agent **不代跑** VLM）。命中时间为 chunk 段区间；`matched_text` 为该 chunk 完整标签集（多标签用 ` · ` 拼接）。多个标签可用 `query` 写成 `tagA · tagB`（AND：同一 chunk 须同时命中）。  
 `match_mode`（`search_kind=dialogue` 或 `tags`）：`exact` \| `fuzzy`（及 `auto`）；团队用户机也可把同一值放在 `search_mode` 里透传。`fuzzy` 优先完整子字段命中，再按散落命中率排序。  
@@ -314,6 +314,8 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `expand_frame_hits` | 否 | `true` | frame 模式下点命中扩成段 |
 | `pad_before_sec` / `pad_after_sec` | 否 | **3.0** | 扩段 padding（秒） |
 | `preview_anchor_sec` | 否 | — | 图搜 + `scope.video_paths` 恰好 1 条；服务端强制 `precise` |
+| `locate_anchor_score` | 否 | — | 片内定位时的粗搜命中分；与 `preview_anchor_sec` 一起传 |
+| `locate_score_margin` | 否 | — | 粗搜 top1 与 top2 的分差；与 `preview_anchor_sec` 一起传 |
 
 **成功响应：**
 

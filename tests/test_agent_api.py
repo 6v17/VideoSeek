@@ -740,6 +740,8 @@ class AgentApiPresetTests(unittest.TestCase):
             query="D:/crop.png",
             query_type="image_path",
             preview_anchor_sec=64.0,
+            locate_anchor_score=0.82,
+            locate_score_margin=0.11,
             scope=AgentSearchScope(video_paths=["D:/clip.mp4"]),
             top_k=1,
         )
@@ -747,6 +749,8 @@ class AgentApiPresetTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         kwargs = mock_run_search.call_args.kwargs
         self.assertEqual(kwargs.get("preview_anchor_sec"), 64.0)
+        self.assertEqual(kwargs.get("locate_anchor_score"), 0.82)
+        self.assertEqual(kwargs.get("locate_score_margin"), 0.11)
         self.assertEqual(kwargs.get("search_precision_mode"), "precise")
         self.assertTrue(payload["meta"].get("crop_locate"))
 

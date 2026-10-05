@@ -535,6 +535,8 @@ def run_team_client_search(
     scope_library_paths: Optional[Sequence[str]] = None,
     video_discovery_enabled: Optional[bool] = None,
     preview_anchor_sec: Optional[float] = None,
+    locate_anchor_score: Optional[float] = None,
+    locate_score_margin: Optional[float] = None,
     query_vector=None,
     match_mode: Optional[str] = None,
     text_enhance: Optional[bool] = None,
@@ -581,6 +583,17 @@ def run_team_client_search(
             payload["preview_anchor_sec"] = max(0.0, float(preview_anchor_sec))
         except (TypeError, ValueError):
             pass
+    if kind not in {"dialogue", "tags"}:
+        for key, value in (
+            ("locate_anchor_score", locate_anchor_score),
+            ("locate_score_margin", locate_score_margin),
+        ):
+            if value is None:
+                continue
+            try:
+                payload[key] = float(value)
+            except (TypeError, ValueError):
+                pass
 
     video_paths = [str(p).strip() for p in (scope_video_paths or []) if str(p or "").strip()]
     library_paths = [str(p).strip() for p in (scope_library_paths or []) if str(p or "").strip()]

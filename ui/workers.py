@@ -261,6 +261,8 @@ class SearchWorker(QThread):
                     scope_library_paths=config.scope_library_paths or None,
                     video_discovery_enabled=config.video_discovery_enabled,
                     preview_anchor_sec=config.preview_anchor_sec,
+                    locate_anchor_score=config.locate_anchor_score,
+                    locate_score_margin=config.locate_score_margin,
                     query_vector=query_vector,
                     match_mode=config.search_mode if kind in {"dialogue", "tags"} else None,
                     text_enhance=text_enhance,

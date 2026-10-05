@@ -44,6 +44,10 @@ class AgentSearchRequest(BaseModel):
     pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
     pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
     preview_anchor_sec: Optional[float] = None
+    # Coarse-hit score and top1-top2 gap for in-video locate. Desktop keeps these
+    # locally; the team client must send them or the server locate window stays wide.
+    locate_anchor_score: Optional[float] = None
+    locate_score_margin: Optional[float] = None
     team_play_urls: bool = False
 
 
