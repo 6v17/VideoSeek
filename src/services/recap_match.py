@@ -22,6 +22,22 @@ from src.services.recap_vo_budget import _looks_like_insert_cut
 
 _JP_KANA_RE = re.compile(r"[\u3040-\u30ff]")
 
+_OP_ED_RE = re.compile(
+    r"(片头曲|片尾曲|片頭曲|オープニング|エンディング|opening\s*theme|ending\s*theme|"
+    r"作词|作曲|编曲|作詞|作曲|編曲|主题曲|主題曲|主题歌|主題歌|"
+    r"演职员表|演職員表|制作委员会|製作委員会|下集预告|下一集预告|下集預告|"
+    r"to\s*be\s*continued|\bending\s*credits\b)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_op_ed_text(*parts: Any) -> bool:
+    body = " ".join(str(part or "") for part in parts).strip()
+    if not body:
+        return False
+    return bool(_OP_ED_RE.search(body))
+
+
 def recap_story_window(duration_sec: float) -> tuple[float, float]:
     """Keep cold open from 0. Only exclude typical ED at the tail."""
     duration = max(0.0, float(duration_sec or 0.0))
