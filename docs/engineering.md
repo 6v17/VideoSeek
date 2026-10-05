@@ -10,7 +10,20 @@ Short rules for keeping VideoSeek maintainable. Architecture overview: [`archite
 4. **Do not import private (`_foo`) symbols across packages** — if another module needs it, make a public helper or move it.
 5. **Prefer new modules under ~400 lines** — when touching a god file, extract the piece you need instead of growing it.
 6. **Broad `except` must not hide a failure** — `except Exception` / bare `except` that still returns `[]` / `0` / `None` / `""` must call `note_swallowed` (or log / raise). Narrow parse catches may keep a quiet fallback. `tests/test_silent_failure_ratchet.py` fails if a new silent one appears.
-7. **Recap knobs / prompts stay out of the runner** — budgets and stage keys in `src/services/recap_constants.py`, prompt text in `recap_prompts.py`; `recap_service` re-exports both. Next splits should follow plan / voiceover / match / export, not a rewrite.
+7. **Recap knobs / prompts / VO budget stay out of the runner** — stage knobs in `recap_constants.py`, prompts in `recap_prompts.py`, VO timing math in `recap_vo_budget.py`; `recap_service` re-exports them. Next splits should follow plan / voiceover / match / export, not a rewrite.
+
+## AI-assisted edit stops
+
+AI will keep patching a file until someone stops it. Treat these as hard stops (human or agent), not soft style tips:
+
+| Trigger | Stop and do this instead |
+|---------|--------------------------|
+| Single file grows past **500 lines** while you are editing it | Split (or extract the piece you touched). Do not keep appending. |
+| A module gains more than **10 top-level magic knobs** | Move them to a constants / config module (see rule 7 for recap). |
+| A third `fit_X_to_Y` / `stretch_X_for_Y` / similar patch helper appears in the same pipeline | Redesign the stage boundary; do not add another parameter or sibling helper. |
+| You split a module | Define the **public** surface in the same change (`name = _name` aliases or a small facade). Cross-package `from … import _foo` is a failed split (rule 4). |
+
+Legacy god files already over these lines are exempt until touched; once you touch them, leave them closer to the table than you found them.
 
 ## `src.utils` migration
 

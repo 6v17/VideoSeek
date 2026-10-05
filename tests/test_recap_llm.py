@@ -4135,5 +4135,102 @@ class FcpxmlTests(unittest.TestCase):
         self.assertAlmostEqual(cues[1]["tl_in"], 8.0)
 
 
+class RecapBudgetMathTests(unittest.TestCase):
+    """Guardrails for VO / picture budget math before further recap_service splits."""
+
+    def test_trim_group_noop_when_under_budget(self):
+        from src.services.recap_service import trim_group_to_budget
+
+        enter = {"src_in": 0.0, "src_out": 6.0, "vo": "开场进入。", "beat_id": 1}
+        land = {"src_in": 6.0, "src_out": 12.0, "vo": "局面落定。", "beat_id": 1}
+        out = [enter, land]
+        group = [enter, land]
+        trim_group_to_budget(out, group, budget=20.0)
+        self.assertEqual(len(out), 2)
+        self.assertAlmostEqual(float(enter["src_out"]) - float(enter["src_in"]), 6.0)
+        self.assertAlmostEqual(float(land["src_out"]) - float(land["src_in"]), 6.0)
+
+    def test_trim_group_shrinks_insert_before_masters(self):
+        from src.services.recap_service import trim_group_to_budget
+
+        enter = {"src_in": 0.0, "src_out": 8.0, "vo": "进入冲突。", "beat_id": 1}
+        insert = {
+            "src_in": 8.0,
+            "src_out": 16.0,
+            "vo": "",
+            "beat_id": 1,
+            "role": "insert",
+        }
+        land = {"src_in": 16.0, "src_out": 24.0, "vo": "当场落定。", "beat_id": 1}
+        out = [enter, insert, land]
+        group = [enter, insert, land]
+        # Total 24s → budget 14s needs ~10s cut; insert alone can give 6s down to 2s floor.
+        trim_group_to_budget(out, group, budget=14.0)
+        self.assertEqual(len(out), 3)
+        insert_len = float(insert["src_out"]) - float(insert["src_in"])
+        enter_len = float(enter["src_out"]) - float(enter["src_in"])
+        land_len = float(land["src_out"]) - float(land["src_in"])
+        self.assertLessEqual(insert_len, 2.05)
+        self.assertGreaterEqual(enter_len, 4.0)
+        self.assertGreaterEqual(land_len, 4.0)
+        self.assertLessEqual(enter_len + insert_len + land_len, 14.35)
+
+    def test_trim_group_keeps_enter_and_land_masters(self):
+        from src.services.recap_service import trim_group_to_budget
+
+        enter = {"src_in": 0.0, "src_out": 10.0, "vo": "进入。", "beat_id": 1}
+        middle = {"src_in": 10.0, "src_out": 20.0, "vo": "", "beat_id": 1}
+        land = {"src_in": 20.0, "src_out": 30.0, "vo": "落点。", "beat_id": 1}
+        out = [enter, middle, land]
+        group = [enter, middle, land]
+        # Aggressive budget forces empty-middle delete after shrink.
+        trim_group_to_budget(out, group, budget=8.0)
+        self.assertIn(enter, out)
+        self.assertIn(land, out)
+        self.assertNotIn(middle, out)
+        self.assertEqual(group[0], enter)
+        self.assertEqual(group[-1], land)
+
+    def test_stretch_stops_at_media_end(self):
+        clips = [
+            {
+                "src_in": 10.0,
+                "src_out": 12.0,
+                "vo": "一二三四五" * 20,
+            }
+        ]
+        stretched = stretch_recap_clips_for_vo(clips, media_duration=15.0)
+        self.assertLessEqual(float(stretched[0]["src_out"]), 15.0 + 1e-6)
+        self.assertGreater(float(stretched[0]["src_out"]), 12.0)
+
+    def test_fit_skips_llm_when_draft_already_covers(self):
+        # Two short voiced shots → coverage high enough to skip polish rewrite.
+        clips = [
+            {
+                "tl_in": 0.0,
+                "tl_out": 8.0,
+                "src_in": 0.0,
+                "src_out": 8.0,
+                "vo": "店长当场拒收支票。",
+                "vo_draft": "店长当场拒收支票。",
+                "beat_id": 1,
+            },
+            {
+                "tl_in": 8.0,
+                "tl_out": 16.0,
+                "src_in": 8.0,
+                "src_out": 16.0,
+                "vo": "女人转身报警评理。",
+                "vo_draft": "女人转身报警评理。",
+                "beat_id": 2,
+            },
+        ]
+        with patch("src.services.recap_service.call_remote_llm") as mock_llm:
+            out = fit_recap_captions_to_tts(clips)
+        mock_llm.assert_not_called()
+        self.assertEqual(out[0]["vo"], "店长当场拒收支票。")
+        self.assertEqual(out[1]["vo"], "女人转身报警评理。")
+
+
 if __name__ == "__main__":
     unittest.main()
