@@ -153,7 +153,7 @@ class SearchPanelStateMixin:
             return "fast"
         return "precise" if self._image_search_mode_from_ui() == "precise" else "fast"
 
-    def _resolve_video_discovery_enabled(self, *, is_text: bool, has_image: bool) -> bool:
+    def resolve_video_discovery_enabled(self, *, is_text: bool, has_image: bool) -> bool:
         if is_text or not has_image:
             return False
         return self._image_search_mode_from_ui() == "video_discovery"

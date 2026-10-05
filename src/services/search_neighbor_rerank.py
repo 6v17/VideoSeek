@@ -11,7 +11,7 @@ from src.domain.search_hit import SearchHit
 from src.storage.config_store import get_frame_neighbor_rerank_enabled, get_frame_neighbor_rerank_top_n
 from src.storage.lance_search_index import LanceTableSearchIndex
 
-from src.services.search_hit_utils import _clamp_time_near_seed, _dedupe_identical_frame_hits
+from src.services.search_hit_utils import clamp_time_near_seed, dedupe_identical_frame_hits
 
 _PRECISE_SEED_MAX_SHIFT_SEC = 5.0
 _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
@@ -195,7 +195,7 @@ def _apply_bounded_neighbor_refine_lance(
                 best_neighbor_score = float(score)
                 best_timestamp = candidate_ts
         if best_neighbor_score > base_score:
-            adjusted_time = _clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
+            adjusted_time = clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
             blended_score = ((1.0 - blend) * base_score) + (blend * best_neighbor_score)
             reranked[rank] = SearchHit(adjusted_time, adjusted_time, blended_score, str(hit.video_path))
     return reranked
@@ -240,7 +240,7 @@ def _apply_frame_neighbor_rerank_lance(
                 best_score = score
                 best_timestamp = candidate_ts
         reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(hit.video_path))
-    return _dedupe_identical_frame_hits(reranked)
+    return dedupe_identical_frame_hits(reranked)
 
 
 def _expand_neighbor_rerank_candidates_lance(
@@ -361,7 +361,7 @@ def _apply_bounded_neighbor_refine(
                 best_neighbor_score = float(score)
                 best_timestamp = candidate_ts
         if best_neighbor_score > base_score:
-            adjusted_time = _clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
+            adjusted_time = clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
             blended_score = ((1.0 - blend) * base_score) + (blend * best_neighbor_score)
             reranked[rank] = SearchHit(adjusted_time, adjusted_time, blended_score, str(hit.video_path))
     return reranked
@@ -440,7 +440,7 @@ def _apply_frame_neighbor_rerank(
                 best_timestamp = float(timestamps[candidate_id])
 
         reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(base_path))
-    return _dedupe_identical_frame_hits(reranked)
+    return dedupe_identical_frame_hits(reranked)
 
 
 def _expand_neighbor_rerank_candidates(
@@ -541,3 +541,13 @@ def _resolve_neighbor_seed_top_n(
         configured = int(DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
     target = max(configured, int(top_k) * 2, 12)
     return max(1, min(int(fetch_k), target, 32))
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+neighbor_rerank_enabled = _neighbor_rerank_enabled
+neighbor_candidate_score = _neighbor_candidate_score
+collect_neighbor_frame_ids = _collect_neighbor_frame_ids
+apply_bounded_neighbor_refine = _apply_bounded_neighbor_refine
+apply_frame_neighbor_rerank = _apply_frame_neighbor_rerank
+expand_neighbor_rerank_candidates = _expand_neighbor_rerank_candidates
+resolve_neighbor_seed_top_n = _resolve_neighbor_seed_top_n

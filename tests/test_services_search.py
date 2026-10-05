@@ -6,6 +6,7 @@ import numpy as np
 import tests.services_test_support  # noqa: F401 - cv2/faiss stubs
 from src.domain.search_hit import SearchHit
 from src.services import search_service
+from src.services import search_neighbor_rerank
 
 
 class SearchServiceTests(unittest.TestCase):
@@ -22,10 +23,10 @@ class SearchServiceTests(unittest.TestCase):
 
     @patch("src.services.search_service.load_search_assets")
     @patch(
-        "src.services.search_service._coalesce_query_vector",
+        "src.services.search_service.coalesce_query_vector",
         return_value=np.array([[1.0, 0.0]], dtype=np.float32),
     )
-    @patch("src.services.search_service._search_frame_results_with_ids")
+    @patch("src.services.search_service.search_frame_results_with_ids")
     @patch("src.services.search_service.load_config")
     def test_run_search_returns_empty_when_index_missing(
         self,
@@ -53,7 +54,7 @@ class SearchServiceTests(unittest.TestCase):
         side_effect=lambda hits, **_kwargs: list(hits or []),
     )
     @patch(
-        "src.services.search_service._coalesce_query_vector",
+        "src.services.search_service.coalesce_query_vector",
         return_value=np.array([[1.0, 0.0]], dtype=np.float32),
     )
     @patch("src.services.search_service._run_frame_search_per_videos")
@@ -105,7 +106,7 @@ class SearchServiceTests(unittest.TestCase):
         side_effect=lambda hits, **_kwargs: list(hits or []),
     )
     @patch(
-        "src.services.search_service._coalesce_query_vector",
+        "src.services.search_service.coalesce_query_vector",
         return_value=np.array([[1.0, 0.0]], dtype=np.float32),
     )
     @patch("src.services.search_service._run_frame_search_per_videos")
@@ -148,14 +149,14 @@ class SearchServiceTests(unittest.TestCase):
         }
 
         self.assertIsNone(
-            search_service._check_asset_profile_compatibility({}, asset_info, asset_label="frame")
+            search_service.check_asset_profile_compatibility({}, asset_info, asset_label="frame")
         )
 
     def test_check_asset_profile_compatibility_ignores_missing_embedding_spec(self):
         asset_info = {"embedding_spec": None, "index_dim": 512}
 
         self.assertIsNone(
-            search_service._check_asset_profile_compatibility({}, asset_info, asset_label="frame")
+            search_service.check_asset_profile_compatibility({}, asset_info, asset_label="frame")
         )
     def test_apply_frame_neighbor_rerank_disabled_by_default(self):
         class DummyIndex:
@@ -168,7 +169,7 @@ class SearchServiceTests(unittest.TestCase):
         timestamps = np.array([0.0, 1.0, 2.0], dtype=np.float32)
         paths = np.array(["a.mp4", "a.mp4", "a.mp4"], dtype=object)
 
-        reranked = search_service._apply_frame_neighbor_rerank(
+        reranked = search_service.apply_frame_neighbor_rerank(
             results,
             frame_ids,
             query_vector,
@@ -181,16 +182,16 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(reranked, results)
 
     def test_neighbor_rerank_auto_enabled_for_image_search(self):
-        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=True))
-        self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
+        self.assertFalse(search_service.neighbor_rerank_enabled({}, is_text=False, precise_image=True))
+        self.assertTrue(search_service.neighbor_rerank_enabled({}, is_text=False, precise_image=False))
 
     def test_neighbor_rerank_respects_text_default(self):
-        self.assertFalse(search_service._neighbor_rerank_enabled({}, is_text=True))
+        self.assertFalse(search_service.neighbor_rerank_enabled({}, is_text=True))
 
     def test_neighbor_rerank_enabled_for_fast_image_search_by_default(self):
-        self.assertTrue(search_service._neighbor_rerank_enabled({}, is_text=False, precise_image=False))
+        self.assertTrue(search_service.neighbor_rerank_enabled({}, is_text=False, precise_image=False))
         self.assertFalse(
-            search_service._neighbor_rerank_enabled(
+            search_service.neighbor_rerank_enabled(
                 {"frame_neighbor_rerank_enabled": False},
                 is_text=False,
                 precise_image=False,
@@ -201,7 +202,7 @@ class SearchServiceTests(unittest.TestCase):
     def test_finalize_frame_hits_prefers_pixel_query_data(self, mock_pixel):
         mock_pixel.return_value = []
         hits = [SearchHit(1.0, 1.0, 0.9, "a.mp4")]
-        search_service._finalize_frame_hits(
+        search_service.finalize_frame_hits(
             "text query",
             False,
             hits,
@@ -216,7 +217,7 @@ class SearchServiceTests(unittest.TestCase):
     def test_collect_neighbor_frame_ids_uses_time_window(self):
         timestamps = np.array([10.0, 11.0, 12.0, 13.0, 20.0], dtype=np.float32)
         paths = np.array(["a.mp4"] * 4 + ["b.mp4"], dtype=object)
-        ids = search_service._collect_neighbor_frame_ids(2, timestamps, paths, window_sec=1.5)
+        ids = search_neighbor_rerank.collect_neighbor_frame_ids(2, timestamps, paths, window_sec=1.5)
         self.assertEqual(ids, [2, 1, 3])
 
     def test_apply_frame_neighbor_rerank_snaps_to_better_neighbor(self):
@@ -242,7 +243,7 @@ class SearchServiceTests(unittest.TestCase):
             "frame_neighbor_rerank_window": 2,
         }
 
-        reranked = search_service._apply_frame_neighbor_rerank(
+        reranked = search_service.apply_frame_neighbor_rerank(
             results,
             frame_ids,
             query_vector,
@@ -282,7 +283,7 @@ class SearchServiceTests(unittest.TestCase):
             "frame_neighbor_rerank_window_sec": 2.0,
         }
 
-        reranked = search_service._apply_frame_neighbor_rerank(
+        reranked = search_service.apply_frame_neighbor_rerank(
             results,
             frame_ids,
             query_vector,
@@ -296,14 +297,14 @@ class SearchServiceTests(unittest.TestCase):
         self.assertGreaterEqual(float(reranked[0].score), 0.9)
 
     def test_dedupe_identical_frame_hits_keeps_nearby_distinct_times(self):
-        from src.services.search_hit_utils import _dedupe_identical_frame_hits
+        from src.services.search_hit_utils import dedupe_identical_frame_hits
 
         hits = [
             SearchHit(10.0, 10.0, 0.9, "a.mp4"),
             SearchHit(10.5, 10.5, 0.8, "a.mp4"),
             SearchHit(10.0, 10.0, 0.7, "a.mp4"),
         ]
-        cleaned = _dedupe_identical_frame_hits(hits)
+        cleaned = dedupe_identical_frame_hits(hits)
         self.assertEqual(len(cleaned), 2)
         self.assertEqual({round(float(h.start_sec), 1) for h in cleaned}, {10.0, 10.5})
         self.assertEqual(float(cleaned[0].score), 0.9)

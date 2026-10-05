@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import types
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.app.config import DEFAULT_CONFIG
 from src.app.i18n import TEXTS

@@ -11,7 +11,7 @@ from typing import Iterable, List, Optional
 from src.domain.search_hit import SearchHit, RowLike, coerce_search_hit
 
 
-def _now_iso() -> str:
+def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -41,7 +41,7 @@ class ShotListItem:
             score=float(hit.score) if hit.score is not None else None,
             match_kind=str(getattr(hit, "match_kind", "frame") or "frame"),
             source_query=str(source_query or "").strip(),
-            added_at=_now_iso(),
+            added_at=now_iso(),
         )
 
 

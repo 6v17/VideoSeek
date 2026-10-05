@@ -151,7 +151,8 @@ def normalize_segments_for_export(
     dedupe_overlaps: bool = True,
 ) -> list[dict[str, Any]]:
     """Pad tiny hits; pack within each track (multi-track) or single-track pack."""
-    tm = _tm(); close_small_query_gaps, pack_segments_by_coverage = tm.close_small_query_gaps, tm.pack_segments_by_coverage
+    tm = _tm()
+    close_small_query_gaps, pack_segments_by_coverage = tm.close_small_query_gaps, tm.pack_segments_by_coverage
 
     # Short/point hits stay in the timeline — pad to a drag-friendly minimum.
     min_dur = max(float(min_duration_sec or 0.0), 1.0 / max(float(timeline_fps or 24.0), 1e-6))

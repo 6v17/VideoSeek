@@ -6,7 +6,7 @@ import os
 
 from PySide6.QtWidgets import QFileDialog
 
-from src.app.config import load_config, save_config
+from src.app.config import load_config
 from src.services.llm_settings import (
     REMOTE_LLM_MODE_CLOUD,
     REMOTE_LLM_MODE_LOCAL,
@@ -1871,7 +1871,6 @@ class UnderstandingLlmGuiMixin:
 
     def _on_recap_review_item_clicked(self, item, column: int) -> None:
         _ = column
-        from PySide6.QtCore import Qt
 
         page = getattr(self, "understanding_page", None)
         if page is None or item is None:

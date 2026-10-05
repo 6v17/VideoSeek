@@ -84,7 +84,6 @@ def manifest_items_from_sources(
     for block in sources:
         if not block.get("ok", True) and block.get("error"):
             continue
-        block_mode = str(block.get("mode") or mode or "chunk")
         query = str(block.get("query") or "")
         client_request_id = block.get("client_request_id")
         hits = sorted(block.get("hits") or [], key=lambda row: row.get("rank", 999))

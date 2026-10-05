@@ -19,9 +19,46 @@ from src.media.fcpxml import (
     write_srt,
 )
 from src.services.llm_settings import call_remote_llm, get_remote_llm_settings
-from src.services.recap_prompts import *  # facade: prompt policy lives in recap_prompts
+from src.services.recap_prompts import (  # facade: prompt policy lives in recap_prompts
+    RECAP_CAPTION_SYSTEM as RECAP_CAPTION_SYSTEM,
+    RECAP_CAPTION_SYSTEM_EN as RECAP_CAPTION_SYSTEM_EN,
+    RECAP_EVIDENCE_POLICY as RECAP_EVIDENCE_POLICY,
+    RECAP_EVIDENCE_POLICY_EN as RECAP_EVIDENCE_POLICY_EN,
+    RECAP_EVIDENCE_POLICY_PLAN_EN as RECAP_EVIDENCE_POLICY_PLAN_EN,
+    RECAP_EVIDENCE_REQUIRED_TAGS,
+    RECAP_FACT_POLICY as RECAP_FACT_POLICY,
+    RECAP_GAP_SYSTEM,
+    RECAP_GAP_SYSTEM_EN,
+    RECAP_NAME_POLICY as RECAP_NAME_POLICY,
+    RECAP_PLAN_ACT_SYSTEM as RECAP_PLAN_ACT_SYSTEM,
+    RECAP_PLAN_GAP_SYSTEM as RECAP_PLAN_GAP_SYSTEM,
+    RECAP_PLAN_HEAD_SYSTEM as RECAP_PLAN_HEAD_SYSTEM,
+    RECAP_PLAN_STRUCTURE_SYSTEM as RECAP_PLAN_STRUCTURE_SYSTEM,
+    RECAP_PLAN_SYSTEM as RECAP_PLAN_SYSTEM,
+    RECAP_PLAN_SYSTEM_EN as RECAP_PLAN_SYSTEM_EN,
+    RECAP_PLAN_TAIL_SYSTEM as RECAP_PLAN_TAIL_SYSTEM,
+    RECAP_SYSTEM as RECAP_SYSTEM,
+    RECAP_SYSTEM_EN as RECAP_SYSTEM_EN,
+    RECAP_VO_CONTINUITY_POLICY as RECAP_VO_CONTINUITY_POLICY,
+    RECAP_VO_CONTINUITY_POLICY_EN as RECAP_VO_CONTINUITY_POLICY_EN,
+    RECAP_VO_DRAFT_SYSTEM as RECAP_VO_DRAFT_SYSTEM,
+    RECAP_VO_DRAFT_SYSTEM_EN as RECAP_VO_DRAFT_SYSTEM_EN,
+    RECAP_VO_POLISH_SYSTEM as RECAP_VO_POLISH_SYSTEM,
+    RECAP_VO_POLISH_SYSTEM_EN as RECAP_VO_POLISH_SYSTEM_EN,
+    RECAP_VO_STYLE_POLICY as RECAP_VO_STYLE_POLICY,
+    default_recap_caption_prompt,
+    default_recap_gap_prompt,
+    default_recap_match_prompt,
+    default_recap_plan_act_prompt,
+    default_recap_plan_gap_prompt as default_recap_plan_gap_prompt,
+    default_recap_plan_head_prompt as default_recap_plan_head_prompt,
+    default_recap_plan_prompt,
+    default_recap_plan_structure_prompt,
+    default_recap_plan_tail_prompt as default_recap_plan_tail_prompt,
+    default_recap_polish_prompt,
+    default_recap_vo_draft_prompt,
+)
 from src.services.understanding_resource_service import (
-    CAPTION_LANGUAGE_EN,
     CAPTION_LANGUAGE_ZH,
     UNDERSTANDING_MODE_MOTION,
     normalize_caption_language,
@@ -2842,7 +2879,7 @@ def recap_user_prompt(
     target = recap_target_sec(duration)
     used = list(used_src or [])
     used_line = (
-        f"【已用画面】下面 used_src 已占用，禁止再剪重叠超过约三成的同一段原片（连续复用更禁止）。\n"
+        "【已用画面】下面 used_src 已占用，禁止再剪重叠超过约三成的同一段原片（连续复用更禁止）。\n"
         if used
         else "【已用画面】本段若多刀，每刀 src 不得互相大面积重叠；更禁止连着几刀同一画面。\n"
     )

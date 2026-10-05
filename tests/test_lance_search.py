@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import sys
 import tempfile
@@ -7,9 +8,9 @@ import numpy as np
 
 sys.modules.setdefault("cv2", object())
 
-from src.core.faiss_index import create_clip_index, load_clip_index, save_vectors
-from src.services.search_assets import invalidate_search_asset_caches, load_chunk_search_assets, load_search_assets
-from src.services.search_frame_query import _search_frame_results_with_ids
+from src.core.faiss_index import create_clip_index, save_vectors
+from src.services.search_assets import invalidate_search_asset_caches, load_search_assets
+from src.services.search_frame_query import search_frame_results_with_ids
 from src.storage.asset_store import save_metadata
 from src.storage.lance_search_index import (
     InMemoryFlatSearchIndex,
@@ -27,9 +28,7 @@ from src.storage.lance_store import (
 
 class LanceSearchTests(unittest.TestCase):
     def test_in_memory_flat_search_matches_faiss(self):
-        try:
-            import faiss
-        except ImportError:
+        if importlib.util.find_spec("faiss") is None:
             self.skipTest("faiss not installed")
 
         vectors = np.random.randn(32, 16).astype(np.float32)
@@ -45,9 +44,7 @@ class LanceSearchTests(unittest.TestCase):
             np.testing.assert_array_equal(faiss_ids, lance_ids)
 
     def test_load_search_assets_prefers_lance_when_ready(self):
-        try:
-            import lancedb
-        except ImportError:
+        if importlib.util.find_spec("lancedb") is None:
             self.skipTest("lancedb not installed")
 
         vectors = np.random.randn(6, 8).astype(np.float32)
@@ -101,7 +98,7 @@ class LanceSearchTests(unittest.TestCase):
             self.assertIsNone(loaded_paths)
 
             query = np.asarray(vectors[2], dtype=np.float32).reshape(1, -1)
-            hits, _ids = _search_frame_results_with_ids(
+            hits, _ids = search_frame_results_with_ids(
                 query,
                 search_index,
                 loaded_ts,
@@ -112,9 +109,7 @@ class LanceSearchTests(unittest.TestCase):
             self.assertEqual(hits[0].video_path, os.path.join(tmp, "clip.mp4"))
 
     def test_upsert_profile_video_vectors_updates_lance(self):
-        try:
-            import lancedb
-        except ImportError:
+        if importlib.util.find_spec("lancedb") is None:
             self.skipTest("lancedb not installed")
 
         vectors = np.random.randn(3, 8).astype(np.float32)
@@ -190,9 +185,7 @@ class LanceSearchTests(unittest.TestCase):
             self.assertEqual(mem_ids.shape, lance_ids.shape)
 
     def test_get_lance_video_row_counts_returns_per_video_totals(self):
-        try:
-            import lancedb
-        except ImportError:
+        if importlib.util.find_spec("lancedb") is None:
             self.skipTest("lancedb not installed")
 
         vectors = np.random.randn(4, 8).astype(np.float32)

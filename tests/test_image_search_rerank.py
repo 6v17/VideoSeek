@@ -233,7 +233,7 @@ class DynamicProbeTests(unittest.TestCase):
 
 class NeighborScoreCacheTests(unittest.TestCase):
     def test_neighbor_candidate_score_reuses_cached_dot(self):
-        from src.services import search_service
+        from src.services.search_neighbor_rerank import neighbor_candidate_score
 
         reconstruct_calls = {"count": 0}
 
@@ -251,9 +251,9 @@ class NeighborScoreCacheTests(unittest.TestCase):
         vector_cache = {}
         score_cache = {}
 
-        first = search_service._neighbor_candidate_score(query, index, 1, vector_cache, score_cache)
-        second = search_service._neighbor_candidate_score(query, index, 1, vector_cache, score_cache)
-        third = search_service._neighbor_candidate_score(query, index, 2, vector_cache, score_cache)
+        first = neighbor_candidate_score(query, index, 1, vector_cache, score_cache)
+        second = neighbor_candidate_score(query, index, 1, vector_cache, score_cache)
+        third = neighbor_candidate_score(query, index, 2, vector_cache, score_cache)
 
         self.assertAlmostEqual(first, 1.0)
         self.assertAlmostEqual(second, 1.0)
@@ -261,7 +261,7 @@ class NeighborScoreCacheTests(unittest.TestCase):
         self.assertEqual(reconstruct_calls["count"], 2)
 
     def test_neighbor_candidate_score_uses_preloaded_vectors(self):
-        from src.services import search_service
+        from src.services.search_neighbor_rerank import neighbor_candidate_score
 
         vectors = np.array(
             [
@@ -276,7 +276,7 @@ class NeighborScoreCacheTests(unittest.TestCase):
             def reconstruct(self, idx):
                 raise AssertionError(f"unexpected reconstruct for {idx}")
 
-        score = search_service._neighbor_candidate_score(
+        score = neighbor_candidate_score(
             query,
             FailIndex(),
             0,

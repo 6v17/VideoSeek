@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QEventLoop, Qt
+from PySide6.QtCore import QEventLoop
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from src.app.config import (
@@ -400,7 +400,6 @@ class SettingsGuiMixin:
             return
         from src.services.team_mode_service import get_team_mode, set_session_team_mode
         from ui.dialogs.team_mode_dialog import prompt_team_client_url
-        from ui.workers import TeamConnectWorker, TeamServerLifecycleWorker
 
         self._team_mode_ui_applying = True
         try:
@@ -821,9 +820,6 @@ class SettingsGuiMixin:
             )
             previous_embedding_batch_size = int(
                 config.get("embedding_batch_size", DEFAULT_CONFIG["embedding_batch_size"])
-            )
-            previous_indexing_video_workers = int(
-                config.get("indexing_video_workers", DEFAULT_CONFIG["indexing_video_workers"])
             )
             previous_min_chunk_size = int(config.get("min_chunk_size", DEFAULT_CONFIG["min_chunk_size"]))
             previous_min_chunk_duration = float(

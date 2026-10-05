@@ -267,7 +267,6 @@ class VideoIdMigrationTests(unittest.TestCase):
                 handle.write(b"x" * 2048)
 
             legacy_vid = get_legacy_video_hash(video_path)
-            new_vid = get_video_hash(video_path)
             save_vector_payload(
                 np.zeros((2, 512), dtype=np.float32),
                 [0.0, 1.0],

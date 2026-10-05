@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 from ui.widgets.layout import (
     COMPONENT_SIZES,
     compare_row_card_height,
-    compare_row_min_height,
     compute_search_panel_width,
     compute_search_query_tabs_height,
     image_drop_min_height,

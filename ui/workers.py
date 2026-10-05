@@ -8,7 +8,7 @@ from PySide6.QtGui import QImage
 from src.app.config import load_config
 from src.app.i18n import get_texts
 from src.app.logging_utils import get_logger
-from src.domain.search_hit import SearchHit, coerce_search_hit
+from src.domain.search_hit import coerce_search_hit
 
 logger = get_logger("workers")
 
@@ -90,7 +90,8 @@ class StorageRootMigrateWorker(QThread):
         from src.services.storage_service import migrate_app_data_root, migrate_model_root
 
         try:
-            callback = lambda value, text: self.progress_signal.emit(int(value), str(text))
+            def callback(value, text):
+                self.progress_signal.emit(int(value), str(text))
             if self.kind == "model":
                 result = migrate_model_root(self.target_root, progress_callback=callback)
             else:

@@ -343,7 +343,9 @@ def cluster_video_speakers(
     embed = embed_fn
     if embed is None:
         engine = get_campplus_engine()
-        embed = lambda wav, _engine=engine: _engine.embed_waveform(wav, sample_rate=sr)
+
+        def embed(wav, _engine=engine):
+            return _engine.embed_waveform(wav, sample_rate=sr)
 
     window_vectors: list[np.ndarray] = []
     window_energy: list[float] = []

@@ -10,8 +10,6 @@ from src.core.extract_frames import (
     _build_cpu_extract_command,
     _build_d3d11va_extract_command,
     extract_frames_with_ffmpeg,
-    ffmpeg_supports_d3d11va,
-    is_experimental_hw_decode_enabled,
     stream_frames_with_ffmpeg,
 )
 from src.utils import get_video_duration_seconds, get_video_stream_info, has_readable_video_stream

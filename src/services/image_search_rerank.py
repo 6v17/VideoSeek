@@ -331,7 +331,7 @@ def _hit_probe_plan(hit: SearchHit, config, lookup: Mapping[str, float] | None =
     return window, step
 
 
-def _clamp_time_near_seed(time_sec: float, seed_sec: float, max_shift_sec: float) -> float:
+def clamp_time_near_seed(time_sec: float, seed_sec: float, max_shift_sec: float) -> float:
     seed = max(0.0, float(seed_sec))
     delta = max(0.0, float(max_shift_sec))
     value = max(0.0, float(time_sec))
@@ -363,7 +363,7 @@ def _best_pixel_match(
     hash_cache = probe_hash_cache if probe_hash_cache is not None else {}
     for probe_time in _temporal_probe_times(center_sec, probe_window, step_sec):
         if max_shift is not None and max_shift > 0:
-            probe_time = _clamp_time_near_seed(probe_time, seed, max_shift)
+            probe_time = clamp_time_near_seed(probe_time, seed, max_shift)
         probe_hash = _get_probe_dhash_cached(
             video_path,
             probe_time,
@@ -378,7 +378,7 @@ def _best_pixel_match(
             best_sim = pixel_sim
             best_time = float(probe_time)
     if max_shift is not None and max_shift > 0:
-        best_time = _clamp_time_near_seed(best_time, seed, max_shift)
+        best_time = clamp_time_near_seed(best_time, seed, max_shift)
     return best_time, best_sim
 
 
@@ -409,7 +409,7 @@ def refine_hit_time_with_pixel(
         return hit
 
     lookup = index_step_lookup if index_step_lookup is not None else get_index_step_lookup()
-    center = _clamp_time_near_seed(_hit_probe_center(hit), seed, max_time_shift_sec)
+    center = clamp_time_near_seed(_hit_probe_center(hit), seed, max_time_shift_sec)
     window, step = _hit_probe_plan(hit, config, lookup=lookup)
     window = min(float(window), float(max_time_shift_sec))
     decode_session = VideoThumbnailSession()
@@ -431,7 +431,7 @@ def refine_hit_time_with_pixel(
     if pixel_sim < min_similarity:
         return SearchHit(seed, seed, clip_score, str(hit.video_path))
     combined = (_CLIP_SCORE_WEIGHT * clip_score) + (_PIXEL_SCORE_WEIGHT * pixel_sim)
-    refined_time = _clamp_time_near_seed(best_time, seed, max_time_shift_sec)
+    refined_time = clamp_time_near_seed(best_time, seed, max_time_shift_sec)
     return SearchHit(refined_time, refined_time, combined, str(hit.video_path))
 
 
@@ -482,7 +482,7 @@ def apply_image_pixel_rerank(
             seed_time = float(seed_values[rank]) if rank < len(seed_values) else float(span_start)
             center = _hit_probe_center(hit)
             if max_time_shift_sec is not None and max_time_shift_sec > 0:
-                center = _clamp_time_near_seed(center, seed_time, max_time_shift_sec)
+                center = clamp_time_near_seed(center, seed_time, max_time_shift_sec)
             window, step = _hit_probe_plan(hit, config, lookup=lookup)
             if max_time_shift_sec is not None and max_time_shift_sec > 0:
                 window = min(float(window), float(max_time_shift_sec))
@@ -509,7 +509,7 @@ def apply_image_pixel_rerank(
                 reranked.append((rank, SearchHit(span_start, span_end, combined, hit.video_path)))
             else:
                 if max_time_shift_sec is not None and max_time_shift_sec > 0:
-                    best_time = _clamp_time_near_seed(best_time, seed_time, max_time_shift_sec)
+                    best_time = clamp_time_near_seed(best_time, seed_time, max_time_shift_sec)
                 reranked.append((rank, SearchHit(best_time, best_time, combined, hit.video_path)))
     finally:
         decode_session.close()
@@ -522,3 +522,7 @@ def apply_image_pixel_rerank(
     if top_k is not None and top_k > 0:
         return merged[: int(top_k)]
     return merged
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+image_pixel_rerank_top_n = _image_pixel_rerank_top_n

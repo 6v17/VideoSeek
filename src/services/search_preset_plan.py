@@ -7,7 +7,7 @@ from typing import Any
 from src.app.config import load_config
 from src.services.search_preset_model import get_preset
 from src.services.search_preset_query import (
-    _resolve_compose_ref_paths,
+    resolve_compose_ref_paths,
     encode_mixed_query_vector,
     resolve_preset_query_vector,
 )
@@ -34,7 +34,7 @@ def build_compose_search_plan(
 ) -> dict[str, Any]:
     cfg = config or load_config()
     query = str(query or "").strip()
-    ref_paths = _resolve_compose_ref_paths(source_image_paths)
+    ref_paths = resolve_compose_ref_paths(source_image_paths)
     if not query and not ref_paths:
         raise ValueError("Compose query must include text and/or reference images")
     query_vector = encode_mixed_query_vector(

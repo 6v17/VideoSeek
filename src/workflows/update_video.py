@@ -186,7 +186,7 @@ def _update_videos_flow_body(
             include_existing_assets=include_existing_assets,
             video_ids=video_ids,
         )
-    except IndexUpdateInterrupted as exc:
+    except IndexUpdateInterrupted:
         scan_s = time.perf_counter() - t_scan
         logger.info(
             "Index update interrupted: cleanup=%.2fs scan_libraries=%.2fs total=%.2fs",

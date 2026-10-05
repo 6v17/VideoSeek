@@ -98,7 +98,7 @@ def _build_user_capability_bullets(
         else:
             n = health.get("video_count")
             bullets.append(
-                f"Find shots by visual meaning in synced videos"
+                "Find shots by visual meaning in synced videos"
                 + (f" (~{n} entries)." if n is not None else " (text or reference images).")
             )
         search_bits = []

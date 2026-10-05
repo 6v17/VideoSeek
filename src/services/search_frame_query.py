@@ -9,7 +9,7 @@ import numpy as np
 from src.domain.search_hit import SearchHit
 from src.storage.lance_search_index import LanceTableSearchIndex
 
-from src.services.search_neighbor_rerank import _neighbor_candidate_score
+from src.services.search_neighbor_rerank import neighbor_candidate_score
 
 _ANCHOR_BRUTEFORCE_MAX_FRAMES = 48
 _ANCHOR_BRUTEFORCE_PREFILTER_MULTIPLIER = 2
@@ -172,7 +172,7 @@ def _search_frame_results_in_time_window(
     score_cache: dict[int, float] = {}
     scored: List[tuple[float, int]] = []
     for idx in candidate_ids:
-        score = _neighbor_candidate_score(
+        score = neighbor_candidate_score(
             query,
             index,
             int(idx),
@@ -198,3 +198,9 @@ def _search_frame_results_in_time_window(
         )
         matched_ids.append(int(idx))
     return matched_results, matched_ids
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+search_frame_results_with_ids = _search_frame_results_with_ids
+search_chunk_results = _search_chunk_results
+search_frame_results_in_time_window = _search_frame_results_in_time_window

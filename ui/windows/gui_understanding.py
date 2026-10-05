@@ -28,7 +28,6 @@ from src.services.understanding_resource_service import (
 )
 from src.services.understanding_service import (
     clear_all_evidence,
-    delete_evidence_for_videos,
     list_local_evidence_details,
     list_ready_video_entries,
     load_evidence_bundle,
@@ -114,7 +113,6 @@ class UnderstandingGuiMixin:
 
     def _current_understanding_mode(self) -> str:
         from src.services.understanding_resource_service import (
-            UNDERSTANDING_MODE_MOTION,
             UNDERSTANDING_MODE_TAGS,
             normalize_understanding_mode,
         )

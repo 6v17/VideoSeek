@@ -115,6 +115,7 @@ __all__ = [
     "_format_timecode",
     "_hits_to_payload",
     "_index_snapshot",
+    "_normalize_mode",
     "_per_library_indexes_ready",
     "_resolve_agent_search_inputs",
     "_resolve_batch_timeout_sec",

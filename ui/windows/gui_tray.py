@@ -1,7 +1,7 @@
 """System tray: minimize on close and background indexing."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QDialog, QStyle, QSystemTrayIcon
 
 from src.app.config import DEFAULT_CONFIG, load_config

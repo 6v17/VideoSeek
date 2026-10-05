@@ -534,7 +534,9 @@ class ChunkSearchTests(unittest.TestCase):
             SearchHit(6.0, 6.0, 0.8, video_path),
         ]
         with patch("src.services.search_chunk_pipeline._load_global_chunk_ranges_by_path", return_value=range_index):
-            aggregated = search_service._aggregate_frame_hits_to_chunks(frame_hits, 5, {})
+            from src.services.search_chunk_pipeline import aggregate_frame_hits_to_chunks
+
+            aggregated = aggregate_frame_hits_to_chunks(frame_hits, 5, {})
         self.assertEqual(len(aggregated), 2)
         self.assertAlmostEqual(float(aggregated[0].score), 0.9)
         self.assertAlmostEqual(float(aggregated[0].start_sec), 0.0)
@@ -546,7 +548,7 @@ class ChunkSearchTests(unittest.TestCase):
     @patch("src.services.search_chunk_pipeline._collect_frame_candidates_for_chunk_search")
     def test_chunk_image_search_falls_back_to_frame_hits(self, mock_collect, _mock_aggregate):
         mock_collect.return_value = [SearchHit(12.0, 12.0, 0.91, "D:/lib/a.mp4")]
-        results = search_service._run_chunk_search_via_frames(
+        results = search_service.run_chunk_search_via_frames(
             "D:/query.jpg",
             is_text=False,
             top_k=5,
@@ -566,7 +568,9 @@ class ChunkSearchTests(unittest.TestCase):
             for i in range(120)
         ]
         hits = [seed_hit, neighbor_hit, *fillers]
-        prepared = search_service._prepare_frame_candidates_for_chunk_aggregate(hits)
+        from src.services.search_chunk_pipeline import prepare_frame_candidates_for_chunk_aggregate
+
+        prepared = prepare_frame_candidates_for_chunk_aggregate(hits)
         prepared_by_video = {
             (str(hit.video_path), float(hit.start_sec))
             for hit in prepared
@@ -574,9 +578,9 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertIn((video_path, 1.0), prepared_by_video)
         self.assertIn((video_path, 2.0), prepared_by_video)
 
-    @patch("src.services.search_chunk_pipeline._check_asset_profile_compatibility")
+    @patch("src.services.search_chunk_pipeline.check_asset_profile_compatibility")
     @patch("src.services.search_chunk_pipeline.load_search_assets")
-    @patch("src.services.search_chunk_pipeline._search_frame_results_with_ids")
+    @patch("src.services.search_chunk_pipeline.search_frame_results_with_ids")
     def test_collect_frame_candidates_expands_neighbors_for_chunk_aggregate(
         self,
         mock_search,
@@ -607,7 +611,9 @@ class ChunkSearchTests(unittest.TestCase):
             "fps": 1.0,
         }
         query_vector = np.array([[1.0, 0.0]], dtype=np.float32)
-        hits = search_service._collect_frame_candidates_for_chunk_search(
+        from src.services.search_chunk_pipeline import collect_frame_candidates_for_chunk_search
+
+        hits = collect_frame_candidates_for_chunk_search(
             "D:/query.jpg",
             is_text=False,
             top_k=5,
@@ -644,7 +650,9 @@ class ChunkSearchTests(unittest.TestCase):
             "frame_neighbor_rerank_window": 2,
             "fps": 1.0,
         }
-        expanded = search_service._expand_neighbor_rerank_candidates(
+        from src.services.search_neighbor_rerank import expand_neighbor_rerank_candidates
+
+        expanded = expand_neighbor_rerank_candidates(
             results,
             frame_ids,
             query_vector,

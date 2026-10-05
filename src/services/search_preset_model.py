@@ -8,8 +8,8 @@ from src.services.search_preset_constants import (
     PRESET_TYPE_MIXED,
 )
 from src.services.search_preset_storage import (
-    _now_iso,
-    _suppressed_builtin_ids,
+    now_iso,
+    suppressed_builtin_ids,
     load_presets_document,
     save_presets_document,
 )
@@ -113,9 +113,9 @@ def ensure_builtin_search_presets(config=None) -> int:
         for item in presets
         if isinstance(item, dict)
     }
-    suppressed = _suppressed_builtin_ids(document)
+    suppressed = suppressed_builtin_ids(document)
     added = 0
-    now = _now_iso()
+    now = now_iso()
     for spec in BUILTIN_SEARCH_PRESETS:
         preset_id = str(spec.get("id", "") or "").strip()
         if not preset_id or preset_id in existing_ids or preset_id in suppressed:

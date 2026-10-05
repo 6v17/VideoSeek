@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from src.core.timestamp_health import assess_index_timestamp_health, probe_stream_timing
+from src.core.timestamp_health import assess_index_timestamp_health
 
 
 class TimestampHealthTests(unittest.TestCase):

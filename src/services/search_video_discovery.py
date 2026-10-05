@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import List, Sequence
 
 from src.domain.search_hit import SearchHit
-from src.services.search_assets import _load_per_video_frame_assets
-from src.services.search_hit_utils import _merge_search_hits, _merge_search_index_steps, _resolve_scoped_video_targets
-from src.services.search_neighbor_rerank import _apply_frame_neighbor_rerank
+from src.services.search_assets import load_per_video_frame_assets
+from src.services.search_hit_utils import merge_search_hits, merge_search_index_steps, resolve_scoped_video_targets
+from src.services.search_neighbor_rerank import apply_frame_neighbor_rerank
 from src.services.search_scope import normalize_scope_path
 
-from src.services.search_frame_query import _search_frame_results_with_ids
+from src.services.search_frame_query import search_frame_results_with_ids
 
 _GLOBAL_VIDEO_RECALL_LIMIT = 20
 _GLOBAL_PER_VIDEO_SEED_CAP = 5
@@ -127,7 +127,7 @@ def _locate_frames_in_recalled_videos(
     if ensure_video_paths:
         required = [
             abs_path
-            for abs_path, _video_id in _resolve_scoped_video_targets(ensure_video_paths, config)
+            for abs_path, _video_id in resolve_scoped_video_targets(ensure_video_paths, config)
         ]
         merged: List[str] = []
         seen: set[str] = set()
@@ -149,11 +149,11 @@ def _locate_frames_in_recalled_videos(
     frame_hits: List[SearchHit] = []
     per_k = int(_GLOBAL_STAGE2_PER_VIDEO_K)
     processed_videos: set[str] = set()
-    for abs_path, video_id in _resolve_scoped_video_targets(candidate_videos, config):
+    for abs_path, video_id in resolve_scoped_video_targets(candidate_videos, config):
         path_key = normalize_scope_path(abs_path)
         processed_videos.add(path_key)
         stage1_video_hits = stage1_by_video.get(path_key, [])
-        search_index, timestamps, video_paths, _vector_matrix = _load_per_video_frame_assets(
+        search_index, timestamps, video_paths, _vector_matrix = load_per_video_frame_assets(
             video_id,
             abs_path,
             config,
@@ -161,15 +161,15 @@ def _locate_frames_in_recalled_videos(
         if search_index is None:
             frame_hits.extend(stage1_video_hits)
             continue
-        _merge_search_index_steps(video_paths, timestamps)
-        matched_results, matched_ids = _search_frame_results_with_ids(
+        merge_search_index_steps(video_paths, timestamps)
+        matched_results, matched_ids = search_frame_results_with_ids(
             query_vector,
             search_index,
             timestamps,
             video_paths,
             top_k=per_k,
         )
-        matched_results = _apply_frame_neighbor_rerank(
+        matched_results = apply_frame_neighbor_rerank(
             matched_results,
             matched_ids,
             query_vector,
@@ -180,7 +180,7 @@ def _locate_frames_in_recalled_videos(
             is_text=is_text,
             precise_image=True,
         )
-        frame_hits.extend(_merge_search_hits(stage1_video_hits + matched_results, per_k))
+        frame_hits.extend(merge_search_hits(stage1_video_hits + matched_results, per_k))
     if not frame_hits:
         return list(stage1_hits)
     stage1_preserved = [
@@ -190,4 +190,14 @@ def _locate_frames_in_recalled_videos(
     ]
     combined = frame_hits + stage1_preserved
     merge_limit = max(len(stage1_hits), per_k * len(candidate_videos))
-    return _merge_search_hits(combined, merge_limit)
+    return merge_search_hits(combined, merge_limit)
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+cap_hits_per_video = _cap_hits_per_video
+use_video_discovery_results = _use_video_discovery_results
+resolve_video_discovery_enabled = _resolve_video_discovery_enabled
+aggregate_hits_to_video_discovery = _aggregate_hits_to_video_discovery
+apply_video_discovery_presentation = _apply_video_discovery_presentation
+top_video_paths_from_hits = _top_video_paths_from_hits
+locate_frames_in_recalled_videos = _locate_frames_in_recalled_videos

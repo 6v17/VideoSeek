@@ -1,4 +1,3 @@
-import pytest
 
 from src.services.model_profile_display import (
     format_active_model_display_name,

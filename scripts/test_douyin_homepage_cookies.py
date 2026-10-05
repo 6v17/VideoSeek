@@ -1,4 +1,3 @@
-import json
 import urllib.request
 
 url = "https://www.douyin.com/"

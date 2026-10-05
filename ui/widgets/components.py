@@ -1,29 +1,19 @@
-from typing import Optional
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
-    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSpinBox,
     QSplitter,
     QStackedWidget,
-    QTabWidget,  # retained for other pages
-    QTextEdit,
-    QTableWidget,
-    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -41,13 +31,11 @@ from ui.widgets.layout import (
     search_panel_min_height,
 )
 from ui.widgets.preview_panel import PreviewPanel
-from ui.widgets.result_table import ResultTable
 from ui.widgets.search_results_pager import SearchResultsPager
 from ui.widgets.result_view import ResultView
 from ui.widgets.results_float_window import ResultsFloatWindow, force_widget_foreground
 from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
-    PageHeader,
     PageScaffold,
     VSCard,
     VSProgressStatusRow,

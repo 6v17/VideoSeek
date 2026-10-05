@@ -50,7 +50,7 @@ class TableVisibilityTests(unittest.TestCase):
     def test_empty_table_returns_empty_range(self):
         from PySide6.QtWidgets import QApplication, QTableWidget
 
-        app = QApplication.instance() or QApplication([])
+        _app = QApplication.instance() or QApplication([])
         table = QTableWidget()
         self.assertEqual(list(visible_table_row_range(table)), [])
 

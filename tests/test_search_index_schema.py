@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 from src.services.search_index_schema import (
-    LIBRARY_SEARCH_INDEX_STATUS_NEEDS_UPGRADE,
     LIBRARY_SEARCH_INDEX_STATUS_NOT_APPLICABLE,
     LIBRARY_SEARCH_INDEX_STATUS_READY,
     LIBRARY_SEARCH_INDEX_STATUS_STALE,

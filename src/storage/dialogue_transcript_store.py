@@ -1161,7 +1161,7 @@ def iter_matching_transcript_segment_rows(
             return
         candidate_cap = _fuzzy_candidate_cap(max_hits)
 
-        or_parts = [f"instr(s.text_cf, ?) > 0" for _ in probes]
+        or_parts = ["instr(s.text_cf, ?) > 0" for _ in probes]
         where_params: list[Any] = list(probes)
         where_sql = "(" + " OR ".join(or_parts) + ")"
         if want_lib:

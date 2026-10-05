@@ -221,3 +221,8 @@ def locate_crop_confidence_warning_key(
     if float(hits[0].score) < threshold:
         return "locate_crop_low_confidence"
     return None
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+LOCATE_CROP_MIN_CLIP_SCORE = _LOCATE_CROP_MIN_CLIP_SCORE
+resolve_rerank_query = _resolve_rerank_query

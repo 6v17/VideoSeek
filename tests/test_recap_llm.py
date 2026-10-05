@@ -26,7 +26,6 @@ from src.services.recap_service import (
     activity_shift_gaps,
     dialogue_outcome_gaps,
     build_asr_vlm_spine,
-    expand_spine_plot_phases,
     ensure_beats_cover_spine,
     ensure_beats_land_dialogue_outcomes,
     finalize_recap_plan_beats,
@@ -41,7 +40,6 @@ from src.services.recap_service import (
     clear_redundant_insert_vo,
     scrub_intra_line_duplicate_vo,
     apply_vo_polish_cues,
-    parse_vo_polish_cues,
     polish_recap_vo,
     recap_vo_coverage_ratio,
     normalize_story_people,
@@ -69,7 +67,6 @@ from src.services.recap_service import (
     missing_match_beats,
     merge_story_beats,
     merge_story_people,
-    normalize_caption_cues,
     normalize_cut_list,
     normalize_evidence_required,
     normalize_story_beats,
@@ -84,8 +81,6 @@ from src.services.recap_service import (
     clamp_recap_vo_to_picture,
     clamp_insert_cuts_to_beat,
     clamp_cuts_to_beat_window,
-    ensure_main_cut_per_beat,
-    _looks_like_insert_cut,
     restore_recap_vo_text,
     scrub_restated_insert_vo,
     stretch_recap_clips_for_vo,
@@ -94,8 +89,6 @@ from src.services.recap_service import (
     parse_cut_list,
     parse_story_beats,
     parse_story_plan,
-    recap_caption_user_prompt,
-    recap_gap_user_prompt,
     recap_gap_clip_indices,
     parse_gap_fills,
     recap_cuts_duration,
@@ -118,7 +111,6 @@ from src.services.recap_service import (
     default_recap_match_prompt,
     default_recap_plan_prompt,
     default_recap_polish_prompt,
-    normalize_evidence_required,
     RECAP_CAPTION_SYSTEM,
     RECAP_CAPTION_SYSTEM_EN,
     RECAP_EVIDENCE_POLICY,
@@ -3116,38 +3108,6 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("走进", out[1]["vo"])
         # Weak match invented speech without asr → cleared
         self.assertEqual(out[2]["vo"], "")
-
-        # JP asr + Chinese narrative (no quotes) must survive — that is the actual commentary.
-        jp_pack = {
-            "ocr": [{"start": 10.0, "end": 16.0, "speaker": "店长", "text": "これは受け取れません"}],
-            "chunks": [{"i": 0, "t": [10.0, 20.0], "cap": "店长推回支票", "skip": ""}],
-        }
-        kept = scrub_unevidenced_vo(
-            [
-                {
-                    "src_in": 12.0,
-                    "src_out": 18.0,
-                    "vo": "店长当场拒收支票，两人僵在柜台前。",
-                    "beat_id": 1,
-                }
-            ],
-            pack=jp_pack,
-            beats=[{"id": 1, "event": "拒收支票", "t": [10.0, 25.0]}],
-        )
-        self.assertIn("拒收", kept[0]["vo"])
-
-    def test_split_clips_for_captions_keeps_same_beat_together(self):
-        from src.services.recap_service import split_clips_for_captions
-
-        clips = [
-            {"beat_id": 1, "name": "a"},
-            {"beat_id": 1, "name": "b"},
-            {"beat_id": 2, "name": "c"},
-            {"beat_id": 2, "name": "d"},
-            {"beat_id": 3, "name": "e"},
-        ]
-        waves = split_clips_for_captions(clips, per_wave=3)
-        self.assertEqual([[c["name"] for c in w] for w in waves], [["a", "b"], ["c", "d", "e"]])
 
         # JP asr + Chinese narrative (no quotes) must survive — that is the actual commentary.
         jp_pack = {

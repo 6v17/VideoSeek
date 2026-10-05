@@ -36,7 +36,7 @@ The former monolith `src/web/agent_api.py` is split into `src/web/agent_api/` (`
 
 ## Lint / CI
 
-- Ruff config lives in `pyproject.toml` (narrow rule set on purpose).
+- Ruff config lives in `pyproject.toml` (`F` + `E4`/`E7`/`E9`; `E402` ignored for lazy imports).
 - CI runs `ruff check` then `pytest`.
 - Expand Ruff rules gradually; do not dump a repo-wide style rewrite in one PR.
 - Former megafile `tests/test_services.py` is split into `tests/test_services_*.py` (+ `services_test_support.py`).

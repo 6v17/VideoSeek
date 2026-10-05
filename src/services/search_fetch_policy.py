@@ -41,7 +41,7 @@ def _resolve_stage1_global_fetch_k(top_k: int, config) -> int:
 
 
 def _precise_pixel_localize_top_n(config, hits: List[SearchHit] | None = None) -> int:
-    from src.services.image_search_rerank import _image_pixel_rerank_top_n
+    from src.services.image_search_rerank import image_pixel_rerank_top_n
 
     prepared_count = len(hits or [])
     unique_videos = {
@@ -50,9 +50,9 @@ def _precise_pixel_localize_top_n(config, hits: List[SearchHit] | None = None) -
         if str(getattr(hit, "video_path", "") or "").strip()
     }
     if len(unique_videos) == 1 and prepared_count > 0:
-        configured = _image_pixel_rerank_top_n(config, prepared_count)
+        configured = image_pixel_rerank_top_n(config, prepared_count)
         return max(1, min(configured, _IN_VIDEO_PIXEL_LOCALIZE_CAP, prepared_count))
-    configured = _image_pixel_rerank_top_n(config, _PRECISE_PIXEL_LOCALIZE_TOP_N)
+    configured = image_pixel_rerank_top_n(config, _PRECISE_PIXEL_LOCALIZE_TOP_N)
     return max(1, min(configured, _PRECISE_PIXEL_LOCALIZE_TOP_N, prepared_count or _PRECISE_PIXEL_LOCALIZE_TOP_N))
 
 
@@ -87,3 +87,10 @@ def _resolve_chunk_precise_frame_fetch_k(top_k: int, scoped: bool, config=None) 
         expanded = max(expanded, normalized * 3 + 15)
     fetch_k = max(normalized, min(200, expanded))
     return expand_fetch_for_edge_filter(fetch_k, normalized, config)
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+precise_pixel_localize_top_n = _precise_pixel_localize_top_n
+resolve_stage1_global_fetch_k = _resolve_stage1_global_fetch_k
+resolve_frame_fetch_top_k = _resolve_frame_fetch_top_k
+resolve_chunk_precise_frame_fetch_k = _resolve_chunk_precise_frame_fetch_k

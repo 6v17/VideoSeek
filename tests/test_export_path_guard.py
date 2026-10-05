@@ -8,7 +8,6 @@ import unittest
 from unittest.mock import patch
 
 from src.services.clip_export_service import (
-    default_agent_export_root,
     export_path_guard_strict,
     list_export_allowed_roots,
     output_path_allowed,

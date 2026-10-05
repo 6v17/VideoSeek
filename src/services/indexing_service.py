@@ -1,11 +1,9 @@
-import gc
 import hashlib
 import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
-import numpy as np
 
 from src.app.indexing_progress import IndexingProgressReporter
 from src.app.logging_utils import get_logger
@@ -13,10 +11,8 @@ from src.core.semantic_chunking import build_semantic_chunks, chunk_builder_kwar
 from src.core.extract_frames import FrameExtractionError
 from src.storage.config_store import (
     build_chunk_config,
-    get_active_embedding_spec,
     get_local_model_asset_dirs,
 )
-from src.infra.paths import ensure_folder_exists
 from src.media.formats import VIDEO_EXTS
 from src.storage.video_identity import (
     canonicalize_library_path,

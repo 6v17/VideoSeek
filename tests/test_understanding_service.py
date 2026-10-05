@@ -68,7 +68,6 @@ class UnderstandingPipelineTests(unittest.TestCase):
 
 
     def test_run_video_chunks_invokes_chunk_callback(self):
-        frame = np.zeros((64, 64, 3), dtype=np.uint8)
         pipeline = UnderstandingPipeline(PROFILE_MANIFEST)
         seen = []
 

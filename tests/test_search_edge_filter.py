@@ -126,7 +126,7 @@ class SearchEdgeFilterTests(unittest.TestCase):
         original = edge_mod.load_config
         edge_mod.load_config = lambda: cfg
         try:
-            merged = hit_utils._merge_search_hits(hits, 2)
+            merged = hit_utils.merge_search_hits(hits, 2)
         finally:
             edge_mod.load_config = original
         self.assertEqual([float(h.start_sec) for h in merged], [200.0, 400.0])

@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import tempfile
@@ -9,7 +8,6 @@ import numpy as np
 sys.modules.setdefault("cv2", object())
 
 from src.core.faiss_index import save_vectors
-from src.core.semantic_chunking import pack_chunks
 from src.storage.asset_store import save_metadata
 from src.storage.lance_store import (
     CHUNKS_TABLE_NAME,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from src.services.understanding_tags import format_tags_for_display, parse_vlm_tag_list
+from src.services.understanding_tags import parse_vlm_tag_list
 
 
 class UnderstandingTagsTests(unittest.TestCase):

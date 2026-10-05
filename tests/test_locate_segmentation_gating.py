@@ -1,4 +1,3 @@
-import pytest
 
 from src.services.locate_segmentation_gating import (
     EFFECT_SIZE_MIN_SEC,

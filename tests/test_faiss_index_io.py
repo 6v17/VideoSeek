@@ -16,7 +16,7 @@ class FaissIndexIoTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows FAISS ASCII staging root")
     def test_resolve_faiss_ascii_staging_root_is_ascii(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as _tmp:
             faiss_index_module._FAISS_STAGING_ROOT = None
             with patch.object(faiss_index_module.os, "makedirs") as makedirs_mock:
                 root = faiss_index_module._resolve_faiss_ascii_staging_root()

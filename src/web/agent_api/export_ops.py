@@ -15,11 +15,13 @@ from src.services.clip_export_service import (
 )
 from src.services.manifest_export_service import (
     dedupe_manifest_items,
-    execute_export_manifest,
-    format_timecode as _format_timecode,
+    execute_export_manifest as execute_export_manifest,
+    format_timecode as format_timecode,
     manifest_items_from_sources,
 )
 from src.utils import normalize_export_encode_mode
+
+_format_timecode = format_timecode
 
 from .schemas import (
     AgentBatchExportClipItem,

@@ -1,7 +1,7 @@
 from collections import deque
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QPixmap, QWheelEvent
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -1798,7 +1798,7 @@ class MainWindow(
                 search_precision_mode=search_precision_mode,
             ),
             search_precision_mode=search_precision_mode,
-            video_discovery_enabled=self._resolve_video_discovery_enabled(
+            video_discovery_enabled=self.resolve_video_discovery_enabled(
                 is_text=False,
                 has_image=True,
             ),

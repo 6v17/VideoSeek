@@ -14,7 +14,7 @@ from src.storage.config_store import get_active_embedding_spec
 from src.services.search_preset_constants import PRESET_TYPE_MIXED
 from src.services.search_preset_model import normalize_fusion, normalize_preset_record
 from src.services.search_preset_storage import (
-    _now_iso,
+    now_iso,
     get_preset_query_cache_root,
     query_cache_path,
     resolve_preset_ref_paths,
@@ -119,7 +119,7 @@ def _save_cached_query_vector(preset: dict, vector: np.ndarray, config=None) -> 
         "embedding_spec": get_active_embedding_spec(config=config or load_config()),
         "source_fingerprint": _preset_source_fingerprint(preset, config=config),
         "source_type": PRESET_TYPE_MIXED,
-        "cached_at": _now_iso(),
+        "cached_at": now_iso(),
     }
     atomic_save_numpy(cache_path, payload)
 
@@ -203,3 +203,7 @@ def resolve_preset_query_vector(preset: dict, config=None, *, force_refresh: boo
     vector = encode_preset_query_vector(normalized, config=config)
     _save_cached_query_vector(normalized, vector, config=config)
     return vector
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+resolve_compose_ref_paths = _resolve_compose_ref_paths

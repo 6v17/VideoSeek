@@ -26,7 +26,6 @@ from src.services.search_scope import (
 )
 from src.services.search_service import run_dialogue_search, run_search, run_tag_search
 from src.storage.config_store import (
-    get_search_mode,
     get_search_scope_mode,
     get_search_top_k,
     get_text_search_enhance_enabled,

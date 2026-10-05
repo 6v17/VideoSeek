@@ -1,4 +1,3 @@
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
 
 from ui.widgets.styles import theme_color_map

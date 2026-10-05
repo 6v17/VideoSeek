@@ -48,3 +48,7 @@ def filter_hits_by_min_score(hits, min_score) -> List[SearchHit]:
     except (TypeError, ValueError):
         return list(hits or [])
     return [hit for hit in (hits or []) if float(getattr(hit, "score", 0.0) or 0.0) >= threshold]
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+coalesce_query_vector = _coalesce_query_vector

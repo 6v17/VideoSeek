@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.components import ClickableLabel
 from ui.widgets.styles import repolish_widget
 
 
@@ -138,7 +137,7 @@ class SettingsFormMixin:
     def _bind_setting_detail(self, label, hint_label, extra_hint_labels):
         self._setting_detail_bindings.append((label, hint_label, extra_hint_labels))
         label.set_click_handler(
-            lambda l=label, h=hint_label, e=extra_hint_labels: self._activate_setting_detail(l, h, e)
+            lambda lbl=label, h=hint_label, e=extra_hint_labels: self._activate_setting_detail(lbl, h, e)
         )
 
     def _activate_setting_detail(self, label, hint_label, extra_hint_labels):

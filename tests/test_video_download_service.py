@@ -6,7 +6,6 @@ from unittest.mock import patch
 from src.services import video_download_errors as vde
 from src.services.legacy_network_cleanup_service import scan_legacy_network_assets
 from src.services.remote_link_precheck_service import precheck_remote_links
-from src.services import video_download_errors as vde
 from src.services.video_download_service import (
     _build_cookie_attempts,
     _domains_from_url,
@@ -15,7 +14,6 @@ from src.services.video_download_service import (
     _refresh_browser_cookie_cache,
     build_download_format,
     extract_video_heights,
-    format_qualities_label,
     get_browser_cookie_preflight_reason,
     get_download_default_dir,
     inspect_douyin_cookie_file,

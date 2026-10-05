@@ -25,7 +25,6 @@ from src.web.agent_api import (
     _clamp_top_k,
     _expand_image_folder,
     _filter_hits,
-    _hits_to_payload,
 )
 
 
@@ -558,7 +557,7 @@ class AgentApiPresetTests(unittest.TestCase):
         mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
         mock_run_search.return_value = [SearchHit(1.0, 1.0, 0.9, "D:/scoped.mp4")]
         body = AgentSearchRequest(query="goal", mode="frame")
-        payload = execute_agent_search(body)
+        execute_agent_search(body)
         kwargs = mock_run_search.call_args.kwargs
         self.assertEqual(kwargs.get("scope_video_paths"), ["D:/scoped.mp4"])
         self.assertIsNone(kwargs.get("scope_library_paths"))

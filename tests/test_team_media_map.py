@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-from unittest import mock
 
 from src.services.team_media_map import absolute_path_to_play_url, build_media_mounts
 from src.services.team_paths import normalize_http_base, normalize_team_mode

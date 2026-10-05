@@ -18,8 +18,8 @@ from src.services.search_preset_query import (
     resolve_preset_query_vector,
 )
 from src.services.search_preset_storage import (
-    _now_iso,
-    _suppressed_builtin_ids,
+    now_iso,
+    suppressed_builtin_ids,
     get_preset_refs_dir,
     load_presets_document,
     resolve_preset_ref_paths,
@@ -109,7 +109,7 @@ def create_preset(
     image_paths = [str(path or "").strip() for path in (source_image_paths or []) if str(path or "").strip()]
     _validate_mixed_content(query, image_paths)
     preset_id = uuid.uuid4().hex[:12]
-    now = _now_iso()
+    now = now_iso()
     ref_files = _copy_reference_images(image_paths, preset_id, config=config)
     preset = normalize_preset_record(
         {
@@ -199,7 +199,7 @@ def update_preset(
             current["ui"] = dict(ui)
         if not preset_has_content(current):
             raise ValueError("Preset requires query text and/or at least one reference image")
-        current["updated_at"] = _now_iso()
+        current["updated_at"] = now_iso()
         updated = normalize_preset_record(current)
         if not updated:
             raise RuntimeError("Failed to normalize updated preset")
@@ -231,7 +231,7 @@ def delete_preset(preset_id: str, config=None) -> bool:
     _remove_preset_assets(removed, config=config)
     document["presets"] = kept
     if preset_id in BUILTIN_SEARCH_PRESET_IDS:
-        suppressed = _suppressed_builtin_ids(document)
+        suppressed = suppressed_builtin_ids(document)
         suppressed.add(preset_id)
         document["suppressed_builtin_ids"] = sorted(suppressed)
     save_presets_document(document, config=config)

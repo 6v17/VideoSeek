@@ -9,29 +9,29 @@ from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
 from src.services.search_assets import (
-    _FRAME_ASSET_INFO,
-    _check_asset_profile_compatibility,
-    _library_indexes_ready,
-    _profile_base_dir,
+    FRAME_ASSET_INFO,
+    check_asset_profile_compatibility,
+    library_indexes_ready,
+    profile_base_dir,
     load_library_frame_search_assets,
     load_scoped_video_frame_search_assets,
     load_search_assets,
 )
 from src.services.search_fetch_policy import (
-    _resolve_chunk_precise_frame_fetch_k,
-    _resolve_frame_fetch_top_k,
-    _resolve_stage1_global_fetch_k,
+    resolve_chunk_precise_frame_fetch_k,
+    resolve_frame_fetch_top_k,
+    resolve_stage1_global_fetch_k,
 )
-from src.services.search_frame_query import _search_frame_results_with_ids
+from src.services.search_frame_query import search_frame_results_with_ids
 from src.services.search_hit_utils import (
-    _merge_search_index_steps,
-    _merge_search_hits,
-    _resolve_scoped_video_targets,
+    merge_search_index_steps,
+    merge_search_hits,
+    resolve_scoped_video_targets,
 )
-from src.services.search_locate_pipeline import _refine_precise_seed_hits
+from src.services.search_locate_pipeline import refine_precise_seed_hits
 from src.services.search_neighbor_rerank import (
-    _expand_neighbor_rerank_candidates,
-    _resolve_neighbor_seed_top_n,
+    expand_neighbor_rerank_candidates,
+    resolve_neighbor_seed_top_n,
 )
 from src.services.search_profiling import profile_phase
 from src.services.search_scope import apply_search_scope, is_search_scoped, normalize_scope_path
@@ -65,14 +65,14 @@ def _collect_frame_candidates_for_chunk_search(
     if top_k is None:
         top_k = get_search_top_k(config)
     scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
-    from src.services.search_service import _coalesce_query_vector
+    from src.services.search_query import coalesce_query_vector
 
-    query_vector = _coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
+    query_vector = coalesce_query_vector(query_data, is_text=is_text, query_vector=query_vector)
     if precise_image:
         fetch_k = (
-            _resolve_stage1_global_fetch_k(top_k, config)
+            resolve_stage1_global_fetch_k(top_k, config)
             if not scoped
-            else _resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
+            else resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
         )
     else:
         if is_text:
@@ -80,12 +80,12 @@ def _collect_frame_candidates_for_chunk_search(
 
             fetch_k = resolve_source_filtered_fetch_top_k(top_k, scoped, config=config)
         else:
-            fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped, config=config)
-    neighbor_seed_n = _resolve_neighbor_seed_top_n(config, fetch_k, top_k, precise_image=precise_image)
+            fetch_k = resolve_chunk_precise_frame_fetch_k(top_k, scoped, config=config)
+    neighbor_seed_n = resolve_neighbor_seed_top_n(config, fetch_k, top_k, precise_image=precise_image)
     candidates: List[SearchHit] = []
 
     if scoped and scope_video_paths:
-        targets = _resolve_scoped_video_targets(scope_video_paths, config)
+        targets = resolve_scoped_video_targets(scope_video_paths, config)
         if not targets:
             return []
         video_ids = [video_id for _path, video_id in targets]
@@ -93,15 +93,15 @@ def _collect_frame_candidates_for_chunk_search(
         search_index, timestamps, video_paths = load_scoped_video_frame_search_assets(video_ids, config)
         if search_index is None:
             return []
-        _merge_search_index_steps(video_paths, timestamps)
-        matched_results, matched_ids = _search_frame_results_with_ids(
+        merge_search_index_steps(video_paths, timestamps)
+        matched_results, matched_ids = search_frame_results_with_ids(
             query_vector,
             search_index,
             timestamps,
             video_paths,
             top_k=fetch_k,
         )
-        candidates = _expand_neighbor_rerank_candidates(
+        candidates = expand_neighbor_rerank_candidates(
             matched_results,
             matched_ids,
             query_vector,
@@ -122,7 +122,7 @@ def _collect_frame_candidates_for_chunk_search(
         scoped
         and scope_library_paths
         and not scope_video_paths
-        and _library_indexes_ready(config, scope_library_paths)
+        and library_indexes_ready(config, scope_library_paths)
     ):
         library_fetch_k = fetch_k
         library_seed_n = neighbor_seed_n
@@ -130,8 +130,8 @@ def _collect_frame_candidates_for_chunk_search(
             search_index, timestamps, video_paths = load_library_frame_search_assets(library_path, config)
             if search_index is None:
                 continue
-            _merge_search_index_steps(video_paths, timestamps)
-            matched_results, matched_ids = _search_frame_results_with_ids(
+            merge_search_index_steps(video_paths, timestamps)
+            matched_results, matched_ids = search_frame_results_with_ids(
                 query_vector,
                 search_index,
                 timestamps,
@@ -139,7 +139,7 @@ def _collect_frame_candidates_for_chunk_search(
                 top_k=library_fetch_k,
             )
             candidates.extend(
-                _expand_neighbor_rerank_candidates(
+                expand_neighbor_rerank_candidates(
                     matched_results,
                     matched_ids,
                     query_vector,
@@ -157,16 +157,16 @@ def _collect_frame_candidates_for_chunk_search(
         search_index, timestamps, video_paths = load_search_assets(config)
         if search_index is None:
             return []
-        _merge_search_index_steps(video_paths, timestamps)
-        _check_asset_profile_compatibility(config, _FRAME_ASSET_INFO, asset_label="frame")
-        matched_results, matched_ids = _search_frame_results_with_ids(
+        merge_search_index_steps(video_paths, timestamps)
+        check_asset_profile_compatibility(config, FRAME_ASSET_INFO, asset_label="frame")
+        matched_results, matched_ids = search_frame_results_with_ids(
             query_vector,
             search_index,
             timestamps,
             video_paths,
             top_k=global_fetch_k,
         )
-        candidates = _expand_neighbor_rerank_candidates(
+        candidates = expand_neighbor_rerank_candidates(
             matched_results,
             matched_ids,
             query_vector,
@@ -215,8 +215,8 @@ def _chunk_hit_from_range(frame_hit: SearchHit, chunk_start: float, chunk_end: f
 
 def _load_global_chunk_ranges_by_path(config) -> dict[str, list[tuple[float, float]]]:
     """Map normalized video_path -> chunk time ranges from Lance (no embedding dump)."""
-    profile_base_dir = _profile_base_dir(config)
-    raw = load_lance_chunk_time_ranges(profile_base_dir)
+    profile_dir = profile_base_dir(config)
+    raw = load_lance_chunk_time_ranges(profile_dir)
     if not raw:
         return {}
     by_path: dict[str, list[tuple[float, float]]] = {}
@@ -263,7 +263,7 @@ def _chunk_ranges_for_video(
     if not video_id:
         return []
     # Prefer chunk table only; avoid load_video_chunks_by_id frame materialize.
-    chunks = load_lance_video_chunks(_profile_base_dir(config), video_id)
+    chunks = load_lance_video_chunks(profile_base_dir(config), video_id)
     return [(float(chunk["start"]), float(chunk["end"])) for chunk in chunks]
 
 
@@ -315,10 +315,10 @@ def _finalize_frame_hits(
     seed_times=None,
 ) -> List[SearchHit]:
     if is_text or not precise_image:
-        from src.services.search_hit_utils import _dedupe_identical_frame_hits
+        from src.services.search_hit_utils import dedupe_identical_frame_hits
 
-        return _merge_search_hits(_dedupe_identical_frame_hits(hits), top_k)
-    return _refine_precise_seed_hits(
+        return merge_search_hits(dedupe_identical_frame_hits(hits), top_k)
+    return refine_precise_seed_hits(
         query_data,
         hits,
         top_k,
@@ -346,9 +346,9 @@ def _run_chunk_search_via_frames(
         top_k = get_search_top_k(config)
     scoped = is_search_scoped(video_paths=scope_video_paths, library_paths=scope_library_paths)
     if precise_image:
-        frame_fetch_k = _resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
+        frame_fetch_k = resolve_frame_fetch_top_k(top_k, scoped, is_text=False, config=config, precise_image=True)
     else:
-        frame_fetch_k = _resolve_chunk_precise_frame_fetch_k(top_k, scoped, config=config)
+        frame_fetch_k = resolve_chunk_precise_frame_fetch_k(top_k, scoped, config=config)
     logger.info(
         "Chunk image search via frames (precise=%s, frame_fetch_k=%s)",
         precise_image,
@@ -393,7 +393,7 @@ def _run_chunk_search_via_frames(
             "Chunk aggregate mapped 0 segments from %s frame hits; returning frame results",
             len(frame_hits),
         )
-        return _merge_search_hits(frame_hits, top_k)
+        return merge_search_hits(frame_hits, top_k)
     return []
 
 
@@ -421,3 +421,11 @@ def _run_chunk_search_via_precise_frames(
         precise_image=True,
         config=config,
     )
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+finalize_frame_hits = _finalize_frame_hits
+run_chunk_search_via_frames = _run_chunk_search_via_frames
+aggregate_frame_hits_to_chunks = _aggregate_frame_hits_to_chunks
+prepare_frame_candidates_for_chunk_aggregate = _prepare_frame_candidates_for_chunk_aggregate
+collect_frame_candidates_for_chunk_search = _collect_frame_candidates_for_chunk_search

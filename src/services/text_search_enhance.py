@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Callable, List, Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 

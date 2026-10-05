@@ -389,11 +389,11 @@ class SearchController(QObject):
             if image_path:
                 try:
                     from src.services.image_search_rerank import is_likely_cropped_query_image
-                    from src.services.search_service import _LOCATE_CROP_MIN_CLIP_SCORE
+                    from src.services.search_service import LOCATE_CROP_MIN_CLIP_SCORE
 
                     if is_likely_cropped_query_image(image_path):
                         clip_score_mode = True
-                        low_confidence_threshold = _LOCATE_CROP_MIN_CLIP_SCORE
+                        low_confidence_threshold = LOCATE_CROP_MIN_CLIP_SCORE
                 except Exception as exc:
                     logger.debug("Crop query clip-score UI hint skipped: %s", exc)
 

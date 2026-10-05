@@ -33,7 +33,6 @@ def _derive_subtitle_library_index_state(
     """Align index_state with whether dialogue search can return hits for this library."""
     ready = max(0, int(video_count_subtitle_ready or 0))
     total = max(0, int(video_count_total or 0))
-    searchable = ready > 0
     if ready <= 0:
         state = str(stored or "").strip().lower() or "pending"
         if state not in {"pending", "indexing", "error", "unknown", "missing"}:

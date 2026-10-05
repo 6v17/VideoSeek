@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from src.app.config import load_config
-from src.services.search_service import _resolve_frame_fetch_top_k, load_search_assets
+from src.services.search_service import resolve_frame_fetch_top_k, load_search_assets
 from src.storage.config_store import get_search_top_k
 
 
@@ -23,7 +23,7 @@ def main() -> None:
             print("sample_210_220", arr[window][:12])
     for scoped in (False, True):
         for precise in (False, True):
-            fk = _resolve_frame_fetch_top_k(top_k, scoped, False, cfg, precise_image=precise)
+            fk = resolve_frame_fetch_top_k(top_k, scoped, False, cfg, precise_image=precise)
             print(f"fetch_k scoped={scoped} precise={precise} -> {fk}")
 
 

@@ -467,7 +467,10 @@ class RuntimeGuiMixin:
     def ensure_runtime_warmup(self, on_ready) -> None:
         """Warm CLIP + VLC once (one status line), then run ``on_ready``."""
         if callable(on_ready) is False:
-            on_ready = lambda: None
+            def _noop():
+                return None
+
+            on_ready = _noop
         if getattr(self, "_runtime_warmup_ready", False):
             on_ready()
             return
@@ -658,7 +661,6 @@ class RuntimeGuiMixin:
         self.push_inference_status()
 
     def _apply_runtime_resource_status(self, status):
-        model_ready = bool(status.get("model_ready", self.ui_state.model_ready))
         resources_ready = bool(status.get("resources_ready", self.ui_state.resources_ready))
         # Keep Search enabled: subtitle keyword search does not need CLIP.
         # Visual tabs still gate inside start_search via check_runtime_resources.

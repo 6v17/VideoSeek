@@ -30,21 +30,18 @@ from src.core.onnx_session import (
 from src.core.onnx_vision_engine import (
     INFERENCE_LOCK as _INFERENCE_LOCK,
     OnnxVisionBatchMixin,
-    format_exception_detail as _format_exception_detail,
     truncate_log_text as _truncate_log_text,
 )
 from src.core.semantic_chunking import SemanticChunkStreamBuilder, chunk_builder_kwargs
 from src.core.tokenizer import tokenize
 from src.storage.config_store import build_chunk_config
 from src.storage.config_store import (
-    get_active_embedding_spec,
     get_active_model_profile,
     get_active_model_resource_dir,
     get_active_model_runtime,
     get_effective_prefer_gpu,
 )
 from src.utils import (
-    ensure_folder_exists,
     ensure_model_files,
     free_memory,
     get_video_duration_seconds,

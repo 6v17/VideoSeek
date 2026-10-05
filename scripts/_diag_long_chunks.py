@@ -26,7 +26,6 @@ def _analyze_segment(vectors, timestamps, start, end):
     start_idx = int(np.searchsorted(timestamps, start))
     end_idx = int(np.searchsorted(timestamps, end, side="right")) - 1
     seg_v = vectors[start_idx : end_idx + 1]
-    seg_t = timestamps[start_idx : end_idx + 1]
     if len(seg_v) < 2:
         return {}
     adj = [cosine_similarity(seg_v[i], seg_v[i + 1]) for i in range(len(seg_v) - 1)]

@@ -15,9 +15,7 @@ from src.services.search_scope import (
     resolve_effective_search_scope,
     resolve_explicit_scope_library_paths,
     resolve_fetch_top_k,
-    scope_request_is_explicit,
     video_path_under_library_root,
-    video_source_exists,
 )
 
 

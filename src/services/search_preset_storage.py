@@ -158,3 +158,8 @@ def save_presets_document(document: dict, config=None) -> None:
     payload["suppressed_builtin_ids"] = sorted(_suppressed_builtin_ids(payload))
     payload.pop("model_profile_id", None)
     _atomic_write_json(get_presets_file(config), payload)
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+now_iso = _now_iso
+suppressed_builtin_ids = _suppressed_builtin_ids

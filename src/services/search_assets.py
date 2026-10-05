@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 
 import numpy as np
 
@@ -188,3 +187,12 @@ def _load_per_video_frame_assets(video_id, abs_path, config, *, include_vectors:
         except Exception as exc:
             logger.debug("Per-video Lance vector matrix unavailable for %s: %s", video_id, exc)
     return search_index, ts, video_paths, vector_matrix
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+FRAME_ASSET_INFO = _FRAME_ASSET_INFO
+CHUNK_ASSET_INFO = _CHUNK_ASSET_INFO
+check_asset_profile_compatibility = _check_asset_profile_compatibility
+profile_base_dir = _profile_base_dir
+library_indexes_ready = _library_indexes_ready
+load_per_video_frame_assets = _load_per_video_frame_assets

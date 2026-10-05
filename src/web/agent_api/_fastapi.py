@@ -13,7 +13,10 @@ except ImportError as exc:
     JSONResponse = None
     PlainTextResponse = None
     BaseModel = object
-    Field = lambda *args, **kwargs: None
+
+    def Field(*args, **kwargs):
+        return None
+
     uvicorn = None
     _IMPORT_ERROR = exc
 else:

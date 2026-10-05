@@ -120,7 +120,7 @@ class TextSearchEnhanceTests(unittest.TestCase):
             return_value="frame",
         ), mock.patch.object(
             search_service,
-            "_use_precise_image_pipeline",
+            "use_precise_image_pipeline",
             return_value=False,
         ), mock.patch.object(
             search_service,
@@ -138,7 +138,7 @@ class TextSearchEnhanceTests(unittest.TestCase):
             "clear_search_progress_callback",
         ), mock.patch.object(
             search_service,
-            "_reset_search_index_steps",
+            "reset_search_index_steps",
         ):
             search_service.run_search("红衣女人", is_text=True, top_k=5)
         enhance.assert_not_called()

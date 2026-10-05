@@ -8,11 +8,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-import numpy as np
 
 from src.app.config import load_config
 from src.core.faiss_index import load_vectors
-from src.core.image_io import load_image_bgr
 from src.services.search_service import build_query_vector, run_search
 from src.storage.asset_store import load_model_metadata
 from src.storage.config_store import get_local_model_asset_dirs

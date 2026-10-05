@@ -2,7 +2,6 @@ import tempfile
 import unittest
 import os
 from pathlib import Path
-from unittest import mock
 from unittest.mock import patch
 
 import numpy as np

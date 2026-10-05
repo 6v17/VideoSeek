@@ -16,9 +16,6 @@ from src.services.search_telemetry_playback import (
 )
 from src.services.search_telemetry_store import (
     SearchTelemetryState,
-    _lock,
-    _pending_playback,
-    _state,
     get_locate_signal_samples,
     get_telemetry_file_path,
     get_telemetry_summary,

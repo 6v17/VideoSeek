@@ -8,24 +8,24 @@ from src.domain.search_hit import SearchHit
 from src.services.image_search_rerank import apply_image_pixel_rerank, is_likely_cropped_query_image
 from src.services.search_assets import load_search_assets
 from src.services.search_fetch_policy import (
-    _precise_pixel_localize_top_n,
-    _resolve_frame_fetch_top_k,
+    precise_pixel_localize_top_n,
+    resolve_frame_fetch_top_k,
 )
 from src.services.search_frame_query import (
-    _search_frame_results_in_time_window,
-    _search_frame_results_with_ids,
+    search_frame_results_in_time_window,
+    search_frame_results_with_ids,
 )
 from src.services.search_hit_utils import (
-    _clamp_time_near_seed,
-    _dedupe_nearby_hits,
-    _merge_search_hits,
+    clamp_time_near_seed,
+    dedupe_nearby_hits,
+    merge_search_hits,
 )
 from src.services.search_locate import (
-    _resolve_rerank_query,
+    resolve_rerank_query,
     apply_locate_crop_anchor_stability,
     should_allow_pixel_refine,
 )
-from src.services.search_neighbor_rerank import _apply_bounded_neighbor_refine
+from src.services.search_neighbor_rerank import apply_bounded_neighbor_refine
 from src.services.search_scope import normalize_scope_path
 
 _LOCATE_ANCHOR_WINDOW_SEC = 30.0
@@ -60,7 +60,7 @@ def _locate_anchor_window_hits_from_index(
     preloaded_vectors=None,
     skip_neighbor_refine: bool = False,
 ) -> List[SearchHit]:
-    matched_results, matched_ids = _search_frame_results_in_time_window(
+    matched_results, matched_ids = search_frame_results_in_time_window(
         query_vector,
         search_index,
         timestamps,
@@ -73,8 +73,8 @@ def _locate_anchor_window_hits_from_index(
     if not matched_results:
         return []
     if skip_neighbor_refine:
-        return _merge_search_hits(matched_results, locate_k)
-    refined = _apply_bounded_neighbor_refine(
+        return merge_search_hits(matched_results, locate_k)
+    refined = apply_bounded_neighbor_refine(
         matched_results,
         matched_ids,
         query_vector,
@@ -82,7 +82,7 @@ def _locate_anchor_window_hits_from_index(
         timestamps,
         video_paths,
     )
-    return _merge_search_hits(refined, locate_k)
+    return merge_search_hits(refined, locate_k)
 
 
 def _search_locate_anchor_window_hits(
@@ -122,8 +122,8 @@ def _search_locate_anchor_window_hits(
 
     global_index, global_ts, global_paths = load_search_assets(config)
     if global_index is not None and int(getattr(global_index, "ntotal", 0) or 0) > 0:
-        fetch_k = _resolve_frame_fetch_top_k(locate_k, True, False, config, precise_image=True)
-        global_hits, global_ids = _search_frame_results_with_ids(
+        fetch_k = resolve_frame_fetch_top_k(locate_k, True, False, config, precise_image=True)
+        global_hits, global_ids = search_frame_results_with_ids(
             query_vector,
             global_index,
             global_ts,
@@ -141,9 +141,9 @@ def _search_locate_anchor_window_hits(
             in_window_ids.append(int(frame_id))
         if in_window:
             if skip_neighbor_refine:
-                merged = _merge_search_hits(in_window, locate_k)
+                merged = merge_search_hits(in_window, locate_k)
             else:
-                refined = _apply_bounded_neighbor_refine(
+                refined = apply_bounded_neighbor_refine(
                     in_window,
                     in_window_ids,
                     query_vector,
@@ -151,7 +151,7 @@ def _search_locate_anchor_window_hits(
                     global_ts,
                     global_paths,
                 )
-                merged = _merge_search_hits(refined, locate_k)
+                merged = merge_search_hits(refined, locate_k)
             if merged:
                 return merged
 
@@ -203,11 +203,11 @@ def _refine_precise_seed_hits(
     """Localize frozen recall seeds: pixel (and optional bounded neighbor upstream) only."""
     if not hits:
         return []
-    prepared = _dedupe_nearby_hits(hits, bucket_sec=1.0)
-    frozen = _merge_search_hits(prepared, top_k)
+    prepared = dedupe_nearby_hits(hits, bucket_sec=1.0)
+    frozen = merge_search_hits(prepared, top_k)
     if not frozen:
         return []
-    rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
+    rerank_query = resolve_rerank_query(query_data, pixel_query_data)
     crop_query = is_likely_cropped_query_image(rerank_query)
     clip_seeds = [float(t) for t in (seed_times or [hit.start_sec for hit in frozen])]
     if len(clip_seeds) != len(frozen):
@@ -229,7 +229,7 @@ def _refine_precise_seed_hits(
         locate_limit = max(1, min(_LOCATE_PIXEL_LOCALIZE_TOP_N, len(frozen)))
         head = frozen[:locate_limit]
         clip_seeds = [
-            _clamp_time_near_seed(float(hit.start_sec), anchor, _LOCATE_PIXEL_MAX_SHIFT_SEC)
+            clamp_time_near_seed(float(hit.start_sec), anchor, _LOCATE_PIXEL_MAX_SHIFT_SEC)
             for hit in head
         ]
         pixel_head = apply_image_pixel_rerank(
@@ -249,7 +249,7 @@ def _refine_precise_seed_hits(
                 output.append(hit)
         return output[: max(1, int(top_k))]
 
-    localize_n = _precise_pixel_localize_top_n(config, frozen)
+    localize_n = precise_pixel_localize_top_n(config, frozen)
     head = frozen[:localize_n]
     pixel_head = apply_image_pixel_rerank(
         rerank_query,
@@ -267,3 +267,10 @@ def _refine_precise_seed_hits(
         else:
             output.append(hit)
     return output[: max(1, int(top_k))]
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+resolve_locate_result_top_k = _resolve_locate_result_top_k
+search_locate_anchor_window_hits = _search_locate_anchor_window_hits
+search_locate_crop_trusted_hits = _search_locate_crop_trusted_hits
+refine_precise_seed_hits = _refine_precise_seed_hits

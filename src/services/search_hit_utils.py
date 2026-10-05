@@ -136,3 +136,15 @@ def _scope_filter_hits_with_seeds(
         filtered_hits = filtered_hits[: int(top_k)]
         filtered_seeds = filtered_seeds[: int(top_k)]
     return filtered_hits, filtered_seeds
+
+
+# Public names for cross-module callers (engineering.md rule 4).
+reset_search_index_steps = _reset_search_index_steps
+merge_search_index_steps = _merge_search_index_steps
+merge_search_hits = _merge_search_hits
+resolve_scoped_video_targets = _resolve_scoped_video_targets
+use_precise_image_pipeline = _use_precise_image_pipeline
+dedupe_nearby_hits = _dedupe_nearby_hits
+dedupe_identical_frame_hits = _dedupe_identical_frame_hits
+clamp_time_near_seed = _clamp_time_near_seed
+scope_filter_hits_with_seeds = _scope_filter_hits_with_seeds

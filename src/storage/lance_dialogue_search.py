@@ -12,7 +12,6 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 
 from src.app.logging_utils import get_logger
 from src.core.faiss_index import _normalize_vectors
