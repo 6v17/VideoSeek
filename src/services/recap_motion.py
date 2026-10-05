@@ -1,12 +1,13 @@
-"""Motion-chunk compaction and VLM gap indices for recap planning.
+"""Motion-chunk compaction, VLM gap indices, and beat-window motion fill.
 
-``fill_recap_motion_for_beats`` stays in the runner (needs ``build_recap_pack``).
+``fill_recap_motion_for_beats`` refreshes the pack via the runner so tests can
+patch ``src.services.recap_service.build_recap_pack``.
 ``recap_service`` re-exports these names.
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from src.services.recap_constants import RECAP_CLIMAX_IMPORTANCE, RECAP_VISUAL_EVIDENCE_TAGS
 from src.services.recap_match import (
@@ -15,6 +16,13 @@ from src.services.recap_match import (
     looks_like_op_ed_text,
     recap_story_window,
 )
+from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
+
+
+def _rs():
+    from src.services import recap_service as runner
+
+    return runner
 
 
 def _caption_one_liner(text: str, limit: int = 72) -> str:
@@ -329,3 +337,70 @@ def recap_motion_dense_chunk_indices(
         ):
             dense.append(index)
     return dense
+
+
+def fill_recap_motion_for_beats(
+    video_id: str,
+    pack: Mapping[str, Any],
+    beats: Sequence[Mapping[str, Any]] | None,
+    *,
+    config=None,
+    should_stop_callback: Callable[[], bool] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+    chunk_completed_callback: Callable[..., None] | None = None,
+) -> tuple[dict[str, Any], list[str], int]:
+    """VLM every beat-window chunk that still lacks a motion caption.
+
+    Climax windows use a four-frame grid in one call. Dialogue coverage alone
+    never skips motion — empty caps make Match/VO picture-blind.
+    """
+    indices = recap_motion_gap_chunk_indices(pack, beats)
+    if not indices:
+        return dict(pack), [], 0
+    dense = recap_motion_dense_chunk_indices(pack, beats, indices)
+    from src.core.understanding.base import UnderstandingStoppedError
+    from src.services.understanding_service import generate_evidence_for_video
+
+    wanted = set()
+    for raw in indices:
+        try:
+            wanted.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    done = {"n": 0}
+
+    def _on_chunk(chunk_index, _total, _payload) -> None:
+        try:
+            index = int(chunk_index)
+        except (TypeError, ValueError):
+            return
+        if index not in wanted:
+            return
+        done["n"] += 1
+        if on_progress:
+            on_progress(done["n"], len(indices))
+        if chunk_completed_callback:
+            chunk_completed_callback(index, len(indices), _payload)
+
+    if on_progress:
+        on_progress(0, len(indices))
+    try:
+        generate_evidence_for_video(
+            video_id,
+            config=config,
+            mode=UNDERSTANDING_MODE_MOTION,
+            chunk_indices=indices,
+            dense_chunk_indices=dense,
+            should_stop_callback=should_stop_callback,
+            chunk_completed_callback=_on_chunk,
+        )
+    except UnderstandingStoppedError:
+        raise
+    except Exception:
+        return dict(pack), ["recap_warn_motion_gaps"], done["n"]
+    refreshed = _rs().build_recap_pack(video_id, config=config)
+    if pack.get("people"):
+        refreshed["people"] = list(pack.get("people") or [])
+    leftover = recap_motion_gap_chunk_indices(refreshed, beats)
+    filled = max(0, len(indices) - len(leftover))
+    return refreshed, [], filled
