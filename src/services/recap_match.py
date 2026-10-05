@@ -435,7 +435,7 @@ def score_recap_cut_match(
         coverage = 0.5
 
     insert = looks_like_insert_cut(clip)
-    bridge = _is_bridge_clip(clip) or _looks_like_scene_shift_text(reason, event, cap_blob)
+    bridge = is_bridge_clip(clip) or _looks_like_scene_shift_text(reason, event, cap_blob)
     # Reason is self-justifying Match prose — do not let it alone prove the shot.
     if has_vlm:
         visual_score = max(vlm_score, reason_score * 0.35)
@@ -584,10 +584,11 @@ def _looks_like_scene_shift_text(*parts: Any) -> bool:
         )
     )
 
-def _is_bridge_clip(clip: Mapping[str, Any]) -> bool:
+def is_bridge_clip(clip: Mapping[str, Any]) -> bool:
     name = str(clip.get("name") or "").strip()
     reason = str(clip.get("reason") or "").strip()
     return name == "过渡" or reason == "过渡"
 
 time_span = _time_span
 overlap_sec = _overlap_sec
+_is_bridge_clip = is_bridge_clip

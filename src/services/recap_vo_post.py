@@ -16,10 +16,10 @@ from src.services.recap_captions import (
     sanitize_generic_role_labels,
 )
 from src.services.recap_constants import CHARS_PER_SEC, MIN_STANDALONE_CLIP_SEC, MIN_VO_FILL
-from src.services.recap_llm_json import _loads_json_object
+from src.services.recap_llm_json import loads_json_object
 from src.services.recap_match import (
     _evidence_for_source_span,
-    _is_bridge_clip,
+    is_bridge_clip,
     _people_labels,
 )
 from src.services.recap_vo_budget import (
@@ -147,7 +147,7 @@ def parse_vo_polish_cues(
     clips: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Parse polish edits; empty text is kept so duplicate lines can be cleared."""
-    payload = _loads_json_object(text)
+    payload = loads_json_object(text)
     raw = payload.get("captions") if isinstance(payload, Mapping) else None
     if not isinstance(raw, list):
         raise RuntimeError("LLM 没有返回润色 captions。")
@@ -237,13 +237,13 @@ def recap_gap_clip_indices(
             covered.add(index)
     beat_has_main_vo: set[Any] = set()
     for clip in items:
-        if looks_like_insert_cut(clip) or _is_bridge_clip(clip):
+        if looks_like_insert_cut(clip) or is_bridge_clip(clip):
             continue
         if str(clip.get("vo") or "").strip():
             beat_has_main_vo.add(clip.get("beat_id"))
     gaps: list[int] = []
     for index, clip in enumerate(items):
-        if index in covered or _is_bridge_clip(clip):
+        if index in covered or is_bridge_clip(clip):
             continue
         if str(clip.get("vo") or "").strip():
             continue
@@ -268,7 +268,7 @@ def parse_gap_fills(
     *,
     allowed: set[int] | None = None,
 ) -> list[dict[str, Any]]:
-    payload = _loads_json_object(text)
+    payload = loads_json_object(text)
     raw = payload.get("fills") if isinstance(payload, Mapping) else None
     if not isinstance(raw, list):
         raise RuntimeError("LLM 没有返回 fills。")

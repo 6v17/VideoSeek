@@ -13,7 +13,7 @@ from src.services.recap_constants import (
     CAPTION_CLIPS_PER_WAVE,
     MIN_STANDALONE_CLIP_SEC,
 )
-from src.services.recap_match import _is_bridge_clip
+from src.services.recap_match import is_bridge_clip
 from src.services.recap_vo_budget import (
     _caption_clip_sec,
     _join_vo,
@@ -217,7 +217,7 @@ def normalize_caption_cues(
                 break
             if index > start_i and looks_like_insert_cut(items[index]):
                 break
-            if index > start_i and _is_bridge_clip(items[index]):
+            if index > start_i and is_bridge_clip(items[index]):
                 break
             stop = index
         end_i = stop
@@ -372,7 +372,7 @@ def split_underfilled_vo_clips(
     for clip in clips or []:
         row = dict(clip)
         text = str(row.get("vo") or "").strip()
-        if not text or looks_like_insert_cut(row) or _is_bridge_clip(row):
+        if not text or looks_like_insert_cut(row) or is_bridge_clip(row):
             out.append(row)
             continue
         picture = _caption_clip_sec(row)
@@ -464,7 +464,7 @@ def recap_vo_coverage_ratio(clips: Sequence[Mapping[str, Any]]) -> float:
     mains = [
         clip
         for clip in items
-        if not looks_like_insert_cut(clip) and not _is_bridge_clip(clip)
+        if not looks_like_insert_cut(clip) and not is_bridge_clip(clip)
     ]
     rows = mains or items
     by_beat: dict[Any, list[Mapping[str, Any]]] = {}

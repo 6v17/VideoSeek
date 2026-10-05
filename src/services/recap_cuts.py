@@ -15,7 +15,7 @@ from src.services.recap_constants import (
     SOURCE_OVERLAP_MERGE_SEC,
     SOURCE_REUSE_RATIO,
 )
-from src.services.recap_match import _is_bridge_clip, overlap_sec
+from src.services.recap_match import is_bridge_clip, overlap_sec
 from src.services.recap_vo_budget import (
     _clip_len,
     _join_vo,
@@ -70,7 +70,7 @@ def _is_flash_cut(clip: Mapping[str, Any]) -> bool:
     if looks_like_insert_cut(clip):
         return False
     return _clip_len(clip) < MIN_FLASH_CLIP_SEC or (
-        _is_bridge_clip(clip) and _clip_len(clip) <= MIN_FLASH_CLIP_SEC + 0.05
+        is_bridge_clip(clip) and _clip_len(clip) <= MIN_FLASH_CLIP_SEC + 0.05
     )
 
 def _merge_cut_pair(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
@@ -82,7 +82,7 @@ def _merge_cut_pair(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[s
     right_vo = _preferred_clip_vo(right)
     vo = _join_vo(left_vo, right_vo)
     head: Mapping[str, Any] = left
-    if _is_bridge_clip(left) and not _is_bridge_clip(right):
+    if is_bridge_clip(left) and not is_bridge_clip(right):
         head = right
     elif not left_vo and right_vo:
         head = right
@@ -98,7 +98,7 @@ def _merge_cut_pair(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[s
     )
     if draft:
         out["vo_draft"] = draft
-    if vo and _is_bridge_clip(out):
+    if vo and is_bridge_clip(out):
         other = right if head is left else left
         out["name"] = str(other.get("name") or out.get("name") or "")
         out["reason"] = str(other.get("reason") or "")

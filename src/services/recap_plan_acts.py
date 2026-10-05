@@ -9,17 +9,16 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
-from src.services.recap_constants import PLAN_ACT_TARGET_SEC, RECAP_FOCUS_MODES
+from src.services.recap_constants import DIALOGUE_OUTCOME_RE, PLAN_ACT_TARGET_SEC, RECAP_FOCUS_MODES
 from src.services.recap_focus import (
     infer_recap_focus,
     normalize_recap_focus,
     recap_focus_plan_hint,
     story_silent_spans,
 )
-from src.services.recap_llm_json import _extract_json
+from src.services.recap_llm_json import extract_json
 from src.services.recap_match import time_span, recap_story_window
 from src.services.recap_spine import (
-    _DIALOGUE_OUTCOME_RE,
     build_asr_vlm_spine,
     sample_timeline_items,
 )
@@ -95,7 +94,7 @@ def split_story_into_plan_acts(
 
 def parse_soft_focus_payload(text: str) -> dict[str, Any] | None:
     try:
-        payload = json.loads(_extract_json(text))
+        payload = json.loads(extract_json(text))
     except (json.JSONDecodeError, TypeError, ValueError, RuntimeError):
         return None
     if not isinstance(payload, Mapping):
@@ -173,7 +172,7 @@ def build_plan_structure_brief(
 
 def parse_plan_act_windows(text: str) -> list[tuple[float, float]]:
     try:
-        payload = json.loads(_extract_json(text))
+        payload = json.loads(extract_json(text))
     except (json.JSONDecodeError, TypeError, ValueError, RuntimeError):
         return []
     if not isinstance(payload, Mapping):
@@ -358,7 +357,7 @@ def _must_land_cues(pack: Mapping[str, Any], *, limit: int = 24) -> list[dict[st
         if not isinstance(row, Mapping):
             continue
         text = str(row.get("text") or "").strip()
-        if not text or not _DIALOGUE_OUTCOME_RE.search(text):
+        if not text or not DIALOGUE_OUTCOME_RE.search(text):
             continue
         try:
             start = float(row.get("start") or 0.0)

@@ -17,7 +17,7 @@ from src.services.recap_focus import (
     recap_focus_evidence_limits,
     recap_focus_vo_hint,
 )
-from src.services.recap_llm_json import _loads_json_object
+from src.services.recap_llm_json import loads_json_object
 from src.services.recap_match import (
     _beats_by_id,
     _evidence_for_source_span,
@@ -298,7 +298,7 @@ def _caption_clip_rows(
     return rows
 
 def parse_caption_cues(text: str, clips: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    payload = _loads_json_object(text)
+    payload = loads_json_object(text)
     raw = payload.get("captions") if isinstance(payload, Mapping) else None
     if not isinstance(raw, list) or not raw:
         raise RuntimeError("LLM 没有返回 captions。")

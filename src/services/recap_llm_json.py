@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any
 
-def _extract_json(text: str) -> str:
+def extract_json(text: str) -> str:
     body = str(text or "").strip()
     if body.startswith("```"):
         body = body.strip("`")
@@ -98,8 +98,8 @@ def _salvage_cut_list_payload(text: str) -> dict[str, Any]:
         raise json.JSONDecodeError("No clip objects", text, 0)
     return {"title": str(title or "解说剪辑").strip() or "解说剪辑", "clips": clips}
 
-def _loads_json_object(text: str) -> dict[str, Any]:
-    raw = _extract_json(text)
+def loads_json_object(text: str) -> dict[str, Any]:
+    raw = extract_json(text)
     for candidate in (raw, _repair_llm_json(raw)):
         try:
             payload = json.loads(candidate)
@@ -111,12 +111,14 @@ def _loads_json_object(text: str) -> dict[str, Any]:
 
 def _loads_cut_list_json(text: str) -> dict[str, Any]:
     try:
-        return _loads_json_object(text)
+        return loads_json_object(text)
     except json.JSONDecodeError:
         pass
     body = str(text or "").strip()
     start = body.find("{")
-    salvage_src = body[start:] if start >= 0 else _extract_json(text)
+    salvage_src = body[start:] if start >= 0 else extract_json(text)
     return _salvage_cut_list_payload(salvage_src)
 
 loads_cut_list_json = _loads_cut_list_json
+_extract_json = extract_json
+_loads_json_object = loads_json_object

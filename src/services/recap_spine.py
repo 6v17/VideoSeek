@@ -8,16 +8,8 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
-from src.services.recap_constants import PLAN_ACT_ASR_LIMIT
+from src.services.recap_constants import DIALOGUE_OUTCOME_RE, PLAN_ACT_ASR_LIMIT
 from src.services.recap_match import time_span
-
-_DIALOGUE_OUTCOME_RE = re.compile(
-    r"(不行|不可以|别再|不许|拒绝|拒收|拒了|收下|接住|答应|同意|成交|决定|胜负|赢了|输了|揭穿|识破|"
-    r"坦白|承认|否认|推回|还回去|交给你|就这样|算了|滚|走开|回去吧|走吧|没事了|放过|"
-    r"原谅|解决|搞定|到此为止|就到这|回头见|离开|真相|结果出来|全勾完|结束了|完了|完蛋|成立|不成立|"
-    r"refuse|reject|accept|deal|decide|won|lost|confess|deny)",
-    re.IGNORECASE,
-)
 
 
 def _normalize_ocr_text(text: str) -> str:
@@ -248,7 +240,7 @@ def expand_spine_plot_phases(spine: Sequence[Mapping[str, Any]]) -> list[dict[st
         caps = [row for row in (seg.get("caps") or []) if isinstance(row, Mapping)]
         speakers = list(seg.get("speakers") or [])
         dur = max(0.0, window[1] - window[0])
-        outcomes = [row for row in asr if _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))]
+        outcomes = [row for row in asr if DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))]
         needs_split = dur >= 28.0 or len(asr) >= 4 or (outcomes and dur >= 18.0)
         if not needs_split:
             row = dict(seg)
@@ -340,15 +332,15 @@ def _spine_event_label(seg: Mapping[str, Any]) -> str:
         if who:
             return f"{who}中间展开"
         return f"中间展开{body}" if body else "中间展开"
-    if phase == "land" or any(_DIALOGUE_OUTCOME_RE.search(text) for text in texts):
+    if phase == "land" or any(DIALOGUE_OUTCOME_RE.search(text) for text in texts):
         for text in reversed(texts):
-            if _DIALOGUE_OUTCOME_RE.search(text):
+            if DIALOGUE_OUTCOME_RE.search(text):
                 body = text[:28]
                 return f"{who}{body}收束局面" if who else f"对白收束至{body}"
         body = texts[-1][:22] if texts else ""
         return f"{who}收束至{body}" if who else (f"对白收束至{body}" if body else "对白收束")
     for text in reversed(texts):
-        if _DIALOGUE_OUTCOME_RE.search(text):
+        if DIALOGUE_OUTCOME_RE.search(text):
             body = text[:28]
             return f"{who}{body}收束局面" if who else f"对白收束至{body}"
     caps = [str(row.get("cap") or "").strip() for row in (seg.get("caps") or []) if str(row.get("cap") or "").strip()]

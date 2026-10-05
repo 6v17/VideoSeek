@@ -9,7 +9,13 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Mapping, Sequence
 
-from src.services.recap_constants import ENDING_COVER_RATIO, MAX_GAP_FILL_WINDOWS, MAX_STORY_BEATS
+from src.services.recap_constants import (
+    DIALOGUE_OUTCOME_RE,
+    ENDING_COVER_RATIO,
+    MAX_GAP_FILL_WINDOWS,
+    MAX_STORY_BEATS,
+    TEXTURE_BEAT_RE,
+)
 from src.services.recap_match import (
     overlap_sec,
     time_span,
@@ -17,11 +23,7 @@ from src.services.recap_match import (
     recap_story_window,
 )
 from src.services.recap_plan_cover import _beat_lands_dialogue_outcome
-from src.services.recap_spine import _DIALOGUE_OUTCOME_RE
 
-_TEXTURE_BEAT_RE = re.compile(
-    r"(设定|世界观|规则说明|能力说明|教室|空间|角色侧面|性格|态度|习惯|表情|换场|过渡|气氛|环境)"
-)
 _ACTIVITY_EVENT_KEY_RE = re.compile(r"[\s，,。！？!?…；;：:、\"'「」『』（）()【】\[\]《》<>·\-—_]+")
 
 
@@ -203,7 +205,7 @@ def dialogue_outcome_gaps(
     raw: list[tuple[float, float]] = []
     for cue in cues:
         text = str(cue.get("text") or "")
-        if not _DIALOGUE_OUTCOME_RE.search(text):
+        if not DIALOGUE_OUTCOME_RE.search(text):
             continue
         try:
             start = float(cue.get("start") or 0.0)
@@ -261,7 +263,7 @@ def trim_story_beats_to_limit(
         # Keep climax AND enter/exit/bridge texture — never drop story bookends as filler.
         if importance >= 0.85:
             hard.add(beat_id)
-        elif _TEXTURE_BEAT_RE.search(event) or any(
+        elif TEXTURE_BEAT_RE.search(event) or any(
             token in event
             for token in (
                 "进入",

@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 from src.services.recap_clock import recap_target_sec
 from src.services.recap_constants import MATCH_BEATS_PER_WAVE, MAX_PLAN_BEATS
 from src.services.recap_match import overlap_sec, recap_story_window, time_span
-from src.services.recap_plan_gaps import _TEXTURE_BEAT_RE
+from src.services.recap_constants import TEXTURE_BEAT_RE
 
 
 def split_beats_for_match(
@@ -128,7 +128,7 @@ def _coverage_pin_ids(beats: list[Mapping[str, Any]]) -> set[int]:
 def _is_texture_beat(beat: Mapping[str, Any]) -> bool:
     evidence = " ".join(str(tag) for tag in (beat.get("evidence_required") or []))
     body = f"{beat.get('event') or ''} {beat.get('needed_visual') or ''} {evidence}"
-    return bool(_TEXTURE_BEAT_RE.search(body))
+    return bool(TEXTURE_BEAT_RE.search(body))
 
 def _texture_pin_ids(beats: Sequence[Mapping[str, Any]], *, limit: int = 3) -> set[int]:
     """Keep a few setting / character / scene-change beats so allocate does not drop them all."""

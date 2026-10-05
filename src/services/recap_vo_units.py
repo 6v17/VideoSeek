@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from src.services.recap_constants import MATCH_STATUS_OK
-from src.services.recap_match import _beats_by_id, _is_bridge_clip, is_weak_match_clip
+from src.services.recap_match import _beats_by_id, is_bridge_clip, is_weak_match_clip
 from src.services.recap_vo_budget import (
     _clip_role,
     looks_like_insert_cut,
@@ -59,7 +59,7 @@ def group_recap_vo_units(
         for offset, clip_i in enumerate(indices):
             clip = items[clip_i]
             role = _clip_role(clip) or ("insert" if looks_like_insert_cut(clip) else "")
-            if _is_bridge_clip(clip):
+            if is_bridge_clip(clip):
                 role = "bridge"
             if role == "vo_hold":
                 # Narration placeholder with no picture shot — keep unit, hide from children.
@@ -259,7 +259,7 @@ def recap_clip_review_rows(
         flags: list[str] = []
         if looks_like_insert_cut(clip):
             flags.append("insert")
-        if _is_bridge_clip(clip):
+        if is_bridge_clip(clip):
             flags.append("bridge")
         if not text:
             if "bridge" not in flags:

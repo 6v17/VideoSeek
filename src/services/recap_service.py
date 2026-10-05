@@ -62,6 +62,7 @@ from src.services.recap_constants import (  # facade: knobs live in recap_consta
     BEAT_SRC_PAD_SEC as BEAT_SRC_PAD_SEC,
     CAPTION_CLIPS_PER_WAVE as CAPTION_CLIPS_PER_WAVE,
     CHARS_PER_SEC as CHARS_PER_SEC,
+    DIALOGUE_OUTCOME_RE as DIALOGUE_OUTCOME_RE,
     ENDING_COVER_RATIO as ENDING_COVER_RATIO,
     HARD_MIN_BEAT_SEC as HARD_MIN_BEAT_SEC,
     INSERT_MAX_GAP_FROM_MASTER_SEC as INSERT_MAX_GAP_FROM_MASTER_SEC,
@@ -111,6 +112,7 @@ from src.services.recap_constants import (  # facade: knobs live in recap_consta
     SOURCE_OVERLAP_MERGE_SEC as SOURCE_OVERLAP_MERGE_SEC,
     SOURCE_REUSE_RATIO as SOURCE_REUSE_RATIO,
     TARGET_RECAP_SEC as TARGET_RECAP_SEC,
+    TEXTURE_BEAT_RE as TEXTURE_BEAT_RE,
     TTS_SPEED as TTS_SPEED,
     VO_COVER_RATIO as VO_COVER_RATIO,
     VO_DRAFT_BEATS_PER_WAVE as VO_DRAFT_BEATS_PER_WAVE,
@@ -154,6 +156,7 @@ from src.services.recap_match import (  # facade: match QC + span/evidence helpe
     _clamp_match_threshold as _clamp_match_threshold,
     _evidence_for_source_span as _evidence_for_source_span,
     _has_japanese_kana as _has_japanese_kana,
+    is_bridge_clip as is_bridge_clip,
     _is_bridge_clip as _is_bridge_clip,
     _looks_like_scene_shift_text as _looks_like_scene_shift_text,
     overlap_sec as overlap_sec,
@@ -282,7 +285,6 @@ from src.services.recap_motion import (  # facade: motion chunks / VLM gaps / fi
 )
 
 from src.services.recap_spine import (  # facade: OCR cues / ASR-VLM spine
-    _DIALOGUE_OUTCOME_RE as _DIALOGUE_OUTCOME_RE,
     _normalize_ocr_text as _normalize_ocr_text,
     _spine_event_label as _spine_event_label,
     build_asr_vlm_spine as build_asr_vlm_spine,
@@ -294,8 +296,10 @@ from src.services.recap_spine import (  # facade: OCR cues / ASR-VLM spine
 
 from src.services.recap_llm_json import (  # facade: LLM JSON salvage
     _extract_balanced_object as _extract_balanced_object,
+    extract_json as extract_json,
     _extract_json as _extract_json,
     loads_cut_list_json as loads_cut_list_json,
+    loads_json_object as loads_json_object,
     _loads_json_object as _loads_json_object,
     _repair_llm_json as _repair_llm_json,
     _salvage_cut_list_payload as _salvage_cut_list_payload,
@@ -321,7 +325,6 @@ from src.services.recap_plan_acts import (  # facade: act windows / structure br
 
 from src.services.recap_plan_gaps import (  # facade: coverage / gaps / OP-ED
     _ACTIVITY_EVENT_KEY_RE as _ACTIVITY_EVENT_KEY_RE,
-    _TEXTURE_BEAT_RE as _TEXTURE_BEAT_RE,
     _event_overlap_ratio as _event_overlap_ratio,
     activity_shift_gaps as activity_shift_gaps,
     beat_evidence_score as beat_evidence_score,
@@ -495,10 +498,8 @@ from src.services.recap_plan_pipeline import (  # facade: act plan LLM + finaliz
     scrub_unevidenced_beats as scrub_unevidenced_beats,
 )
 
-
-
-
-
+_DIALOGUE_OUTCOME_RE = DIALOGUE_OUTCOME_RE
+_TEXTURE_BEAT_RE = TEXTURE_BEAT_RE
 
 
 def generate_recap_timeline(

@@ -8,9 +8,10 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
+from src.services.recap_constants import DIALOGUE_OUTCOME_RE
 from src.services.recap_focus import story_silent_spans
 from src.services.recap_match import time_span, recap_story_window
-from src.services.recap_spine import _DIALOGUE_OUTCOME_RE, _spine_event_label
+from src.services.recap_spine import _spine_event_label
 
 def _beat_lands_dialogue_outcome(
     spans: Sequence[tuple[float, float]],
@@ -43,7 +44,7 @@ def ensure_beats_land_dialogue_outcomes(
     story_start, story_end = recap_story_window(duration) if duration > 1.0 else (0.0, duration or 1e9)
     for cue in cues:
         text = str(cue.get("text") or "").strip()
-        if not text or not _DIALOGUE_OUTCOME_RE.search(text):
+        if not text or not DIALOGUE_OUTCOME_RE.search(text):
             continue
         try:
             start = float(cue.get("start") or 0.0)
@@ -176,7 +177,7 @@ def ensure_beats_cover_spine(
         outcome_rows = [
             row
             for row in (seg.get("asr") or [])
-            if isinstance(row, Mapping) and _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))
+            if isinstance(row, Mapping) and DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))
         ]
         # Entry-only overlap must NOT skip a cluster that still lacks a land near the outcome.
         if outcome_rows and phase in {"land", "full"}:

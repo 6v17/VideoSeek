@@ -11,20 +11,19 @@ import re
 from typing import Any, Mapping, Sequence
 
 from src.services.recap_captions import sanitize_generic_role_labels
-from src.services.recap_constants import MIN_BEAT_BUDGET_SEC
+from src.services.recap_constants import DIALOGUE_OUTCOME_RE, MIN_BEAT_BUDGET_SEC
 from src.services.recap_focus import (
     normalize_recap_focus,
     recap_focus_evidence_limits,
     recap_focus_vo_hint,
 )
-from src.services.recap_llm_json import _extract_json
+from src.services.recap_llm_json import extract_json
 from src.services.recap_match import (
     _beats_by_id,
     _evidence_for_source_span,
     time_span,
     normalize_evidence_required,
 )
-from src.services.recap_spine import _DIALOGUE_OUTCOME_RE
 from src.services.recap_vo_budget import (
     _clip_role,
     looks_like_insert_cut,
@@ -61,7 +60,7 @@ def beat_vo_drops_dialogue_land(
     asr = [row for row in (evidence.get("asr") or []) if isinstance(row, Mapping)]
     if not asr:
         return False
-    outcomes = [row for row in asr if _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))]
+    outcomes = [row for row in asr if DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))]
     speakers = [
         str(row.get("speaker") or "").strip()
         for row in asr
@@ -77,7 +76,7 @@ def beat_vo_drops_dialogue_land(
     if _VO_LAND_HINT_RE.search(vo):
         return False
     for row in outcomes:
-        matched = _DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))
+        matched = DIALOGUE_OUTCOME_RE.search(str(row.get("text") or ""))
         if matched and matched.group(0) in vo:
             return False
         snippet = re.sub(r"\s+", "", str(row.get("text") or ""))[:8]
@@ -152,7 +151,7 @@ def recap_vo_draft_user_prompt(
             outcome_bits = [
                 str(item.get("text") or "").strip()[:24]
                 for item in asr_rows
-                if _DIALOGUE_OUTCOME_RE.search(str(item.get("text") or ""))
+                if DIALOGUE_OUTCOME_RE.search(str(item.get("text") or ""))
             ]
             land_note = (
                 "；本窗对白已有落点（"
@@ -196,7 +195,7 @@ def recap_vo_draft_user_prompt(
 def parse_vo_drafts(text: str, beats: Sequence[Mapping[str, Any]] | None = None) -> dict[int, str]:
     """Map beat id → narration draft. Bad JSON yields empty map (non-fatal)."""
     try:
-        payload = json.loads(_extract_json(text))
+        payload = json.loads(extract_json(text))
     except (json.JSONDecodeError, TypeError, ValueError, RuntimeError):
         return {}
     if not isinstance(payload, Mapping):

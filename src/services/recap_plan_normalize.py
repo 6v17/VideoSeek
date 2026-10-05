@@ -15,11 +15,11 @@ from src.services.recap_constants import (
     MAX_BEAT_BUDGET_SEC,
     MIN_BEAT_BUDGET_SEC,
     TARGET_RECAP_SEC,
+    TEXTURE_BEAT_RE,
 )
-from src.services.recap_llm_json import _loads_json_object
+from src.services.recap_llm_json import loads_json_object
 from src.services.recap_match import time_span, normalize_evidence_required
 from src.services.recap_plan_gaps import (
-    _TEXTURE_BEAT_RE,
     beat_evidence_score,
     beat_evidence_sec,
     drop_op_ed_beats,
@@ -126,7 +126,7 @@ def merge_story_people(*groups: list[Mapping[str, Any]] | None) -> list[dict[str
 
 def parse_story_plan(text: str) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     try:
-        payload = _loads_json_object(text)
+        payload = loads_json_object(text)
     except json.JSONDecodeError as exc:
         raise RuntimeError("语言模型返回的剧情节拍不是合法 JSON。请再生成一次。") from exc
     if not isinstance(payload, dict):
@@ -186,7 +186,7 @@ def allocate_beat_budgets(
         event = str(out.get("event") or "")
         # Enter→land needs ≥2 masters; climax beats often need a third beat of reaction.
         min_shots = 2
-        if importance < 0.22 and not _TEXTURE_BEAT_RE.search(event):
+        if importance < 0.22 and not TEXTURE_BEAT_RE.search(event):
             min_shots = 1
         if importance >= 0.75:
             min_shots = 3

@@ -1,11 +1,14 @@
-"""Tunable knobs for the recap job (budgets, clip floors, stage keys).
+"""Tunable knobs and shared match patterns for the recap job.
 
 Values started as top-level literals in ``recap_service``; keep them here so the
-runner does not keep growing a magic-number header. ``recap_service`` re-exports
-these names for existing callers.
+runner does not keep growing a magic-number header. Patterns used by more than
+one stage live here too, instead of being private imports between stages.
+``recap_service`` re-exports these names for existing callers.
 """
 
 from __future__ import annotations
+
+import re
 
 BASE_CHARS_PER_SEC = 5.0
 TTS_SPEED = 1.25
@@ -71,3 +74,14 @@ RECAP_FOCUS_SOFT_MIN = 0.55
 
 RECAP_VISUAL_EVIDENCE_TAGS = frozenset({"动作", "反应", "物品", "变化", "场面"})
 RECAP_CLIMAX_IMPORTANCE = 0.85
+
+DIALOGUE_OUTCOME_RE = re.compile(
+    r"(不行|不可以|别再|不许|拒绝|拒收|拒了|收下|接住|答应|同意|成交|决定|胜负|赢了|输了|揭穿|识破|"
+    r"坦白|承认|否认|推回|还回去|交给你|就这样|算了|滚|走开|回去吧|走吧|没事了|放过|"
+    r"原谅|解决|搞定|到此为止|就到这|回头见|离开|真相|结果出来|全勾完|结束了|完了|完蛋|成立|不成立|"
+    r"refuse|reject|accept|deal|decide|won|lost|confess|deny)",
+    re.IGNORECASE,
+)
+TEXTURE_BEAT_RE = re.compile(
+    r"(设定|世界观|规则说明|能力说明|教室|空间|角色侧面|性格|态度|习惯|表情|换场|过渡|气氛|环境)"
+)
