@@ -12,8 +12,8 @@ from typing import Any, Mapping, Sequence
 
 from src.services.recap_constants import MATCH_PACK_PAD_SEC
 from src.services.recap_match import (
-    _overlap_sec,
-    _time_span,
+    overlap_sec,
+    time_span,
     keep_chunk_for_recap,
     recap_story_window,
 )
@@ -24,7 +24,7 @@ def _beats_brief(existing: list[Mapping[str, Any]]) -> tuple[float, float, list[
     last_end = 0.0
     brief: list[dict[str, Any]] = []
     for beat in existing:
-        span = _time_span(beat.get("t")) or (0.0, 0.0)
+        span = time_span(beat.get("t")) or (0.0, 0.0)
         if brief:
             first_start = min(first_start, span[0])
             last_end = max(last_end, span[1])
@@ -65,7 +65,7 @@ def recap_plan_tail_user_prompt(pack: Mapping[str, Any], existing: list[Mapping[
     last_end = 0.0
     brief = []
     for beat in existing:
-        span = _time_span(beat.get("t")) or (0.0, 0.0)
+        span = time_span(beat.get("t")) or (0.0, 0.0)
         last_end = max(last_end, span[1])
         brief.append(
             {
@@ -174,7 +174,7 @@ def _span_cover_ratio(span: tuple[float, float], covers: Sequence[tuple[float, f
     return covered / width
 
 def _beats_time_conflict(left: tuple[float, float], right: tuple[float, float]) -> bool:
-    overlap = _overlap_sec(left, right)
+    overlap = overlap_sec(left, right)
     if overlap <= 0.05:
         return False
     left_w = max(left[1] - left[0], 0.4)
@@ -199,10 +199,10 @@ def merge_story_beats(
     out = [dict(item) for item in head]
     used = {int(item.get("id") or 0) for item in out}
     next_id = max(used) + 1 if used else 1
-    existing_spans = [span for span in (_time_span(item.get("t")) for item in out) if span]
+    existing_spans = [span for span in (time_span(item.get("t")) for item in out) if span]
     for raw in tail:
         item = dict(raw)
-        span = _time_span(item.get("t"))
+        span = time_span(item.get("t"))
         event = str(item.get("event") or "")
         if span and allowed_windows is not None and not _beat_inside_windows(span, allowed_windows):
             continue
@@ -213,7 +213,7 @@ def merge_story_beats(
         if span:
             dup = False
             for prev in out:
-                prev_span = _time_span(prev.get("t"))
+                prev_span = time_span(prev.get("t"))
                 if prev_span and _beats_time_conflict(span, prev_span):
                     dup = True
                     break
@@ -231,7 +231,7 @@ def merge_story_beats(
         out.append(item)
         if span:
             existing_spans.append(span)
-    out.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    out.sort(key=lambda item: ((time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
     return out
 
 def filter_pack_to_spans(
@@ -252,8 +252,8 @@ def filter_pack_to_spans(
         return out
     chunks = []
     for item in pack.get("chunks") or []:
-        span = _time_span(item.get("t"))
-        if span and any(_overlap_sec(span, window) > 0 for window in padded):
+        span = time_span(item.get("t"))
+        if span and any(overlap_sec(span, window) > 0 for window in padded):
             chunks.append(item)
     ocr = []
     for row in pack.get("ocr") or []:
@@ -261,7 +261,7 @@ def filter_pack_to_spans(
             span = (float(row.get("start") or 0.0), float(row.get("end") or 0.0))
         except (TypeError, ValueError):
             continue
-        if any(_overlap_sec(span, window) > 0 for window in padded):
+        if any(overlap_sec(span, window) > 0 for window in padded):
             ocr.append(row)
     out = dict(pack)
     out["chunks"] = chunks
@@ -280,8 +280,8 @@ def filter_pack_to_span(
     window = (lo, hi)
     chunks = []
     for item in pack.get("chunks") or []:
-        span = _time_span(item.get("t"))
-        if span and _overlap_sec(span, window) > 0:
+        span = time_span(item.get("t"))
+        if span and overlap_sec(span, window) > 0:
             chunks.append(item)
     ocr = []
     for row in pack.get("ocr") or []:
@@ -289,7 +289,7 @@ def filter_pack_to_span(
             span = (float(row.get("start") or 0.0), float(row.get("end") or 0.0))
         except (TypeError, ValueError):
             continue
-        if _overlap_sec(span, window) > 0:
+        if overlap_sec(span, window) > 0:
             ocr.append(row)
     out = dict(pack)
     out["chunks"] = chunks
@@ -305,7 +305,7 @@ def pack_for_beats(
     starts: list[float] = []
     ends: list[float] = []
     for beat in beats:
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if not span:
             continue
         starts.append(span[0])

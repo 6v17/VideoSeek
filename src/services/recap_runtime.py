@@ -1,7 +1,7 @@
-"""Recap runtime helpers: cut-list parse, prompt resolve, clip/plan saves.
 
-LLM call wrappers stay in the runner.
-``recap_service`` re-exports these names.
+"""Recap runtime helpers: parse/resolve/save, media probe, FCPXML export.
+
+`recap_service` re-exports these names.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from src.app.config import load_config
-from src.media.fcpxml import write_cuts_json, write_srt
+from src.media.fcpxml import layout_clips_on_timeline, write_cuts_json, write_fcpxml, write_srt
 from src.services.recap_clock import recap_target_sec
 from src.services.recap_constants import (
     RECAP_START_CAPTIONS,
@@ -22,16 +22,16 @@ from src.services.recap_constants import (
 )
 from src.services.recap_cut_build import normalize_cut_list
 from src.services.recap_io import (
-    _recap_clip_records,
     load_recap_cuts,
     recap_beats_path_for_video,
+    recap_clip_records,
     recap_cuts_path_for_video,
     write_recap_beats_file,
 )
-from src.services.recap_llm_json import _loads_cut_list_json
+from src.services.recap_llm_json import loads_cut_list_json
 from src.services.recap_plan_normalize import allocate_beat_budgets, normalize_story_people
 from src.services.recap_prompts import default_recap_match_prompt
-from src.services.recap_vo_budget import _max_picture_for_vo
+from src.services.recap_vo_budget import _max_picture_for_vo, stretch_recap_clips_for_vo
 from src.services.understanding_resource_service import (
     CAPTION_LANGUAGE_ZH,
     normalize_caption_language,
@@ -39,7 +39,7 @@ from src.services.understanding_resource_service import (
 
 def parse_cut_list(text: str, pack: Mapping[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     try:
-        payload = _loads_cut_list_json(text)
+        payload = loads_cut_list_json(text)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             "语言模型返回的剪辑表不是合法 JSON（常见于漏逗号或镜头太多被截断）。请再生成一次。"
@@ -129,7 +129,7 @@ def save_recap_clip_vo(
     clips[index] = clip
     dest = recap_cuts_path_for_video(media)
     next_payload = dict(payload)
-    next_payload["clips"] = _recap_clip_records(clips)
+    next_payload["clips"] = recap_clip_records(clips)
     next_payload["clip_count"] = len(clips)
     if clips:
         next_payload["duration_sec"] = float(clips[-1].get("tl_out") or next_payload.get("duration_sec") or 0.0)
@@ -173,4 +173,36 @@ def save_recap_plan_edits(
         video_id=str(video_id or "").strip(),
         allocated=allocated,
         people=normalize_story_people({"people": list(people or [])}),
+    )
+
+probe_recap_media = _probe_media
+
+def export_saved_recap_fcpxml(
+    payload: Mapping[str, Any],
+    dest_path: str | Path,
+    *,
+    video_path: str = "",
+) -> Path:
+    video = str(video_path or payload.get("video") or "").strip()
+    video_id = str(payload.get("video_id") or "").strip()
+    if video_id:
+        from src.services.understanding_service import resolve_current_media_path
+
+        video = resolve_current_media_path(video_id, stored=video)
+    if not video or not os.path.isfile(video):
+        raise RuntimeError(f"找不到原片：{video or '(空路径)'}")
+    info = probe_recap_media(video)
+    clips = stretch_recap_clips_for_vo(
+        list(payload.get("clips") or []),
+        media_duration=float(info.get("duration") or 0.0),
+    )
+    if not clips:
+        raise RuntimeError("剪辑表没有镜头。")
+    laid = layout_clips_on_timeline(clips, fps=float(info.get("fps") or payload.get("fps") or 24.0))
+    return write_fcpxml(
+        laid,
+        video_path=video,
+        info=info,
+        dest_path=dest_path,
+        project_name=str(payload.get("title") or "解说剪辑"),
     )

@@ -17,7 +17,7 @@ from src.services.recap_focus import (
     story_silent_spans,
 )
 from src.services.recap_llm_json import _extract_json
-from src.services.recap_match import _time_span, recap_story_window
+from src.services.recap_match import time_span, recap_story_window
 from src.services.recap_spine import (
     _DIALOGUE_OUTCOME_RE,
     build_asr_vlm_spine,
@@ -145,7 +145,7 @@ def build_plan_structure_brief(
     for row in pack.get("chunks") or []:
         if not isinstance(row, Mapping):
             continue
-        span = _time_span(row.get("t"))
+        span = time_span(row.get("t"))
         if not span or span[1] < story_start or span[0] > story_end:
             continue
         if str(row.get("skip") or "").strip():
@@ -185,7 +185,7 @@ def parse_plan_act_windows(text: str) -> list[tuple[float, float]]:
     for item in raw:
         if not isinstance(item, Mapping):
             continue
-        span = _time_span(item.get("t") or item.get("window") or item.get("span"))
+        span = time_span(item.get("t") or item.get("window") or item.get("span"))
         if not span or span[1] - span[0] < 2.0:
             continue
         out.append((float(span[0]), float(span[1])))
@@ -276,7 +276,7 @@ def clamp_beats_to_act_window(
     out: list[dict[str, Any]] = []
     for beat in beats or []:
         row = dict(beat)
-        span = _time_span(row.get("t"))
+        span = time_span(row.get("t"))
         if not span:
             continue
         if span[1] < lo or span[0] > hi:
@@ -304,7 +304,7 @@ def recap_plan_act_user_prompt(
         spans = [
             span
             for span in (
-                _time_span(item.get("t"))
+                time_span(item.get("t"))
                 for item in (pack.get("chunks") or [])
             )
             if span
@@ -320,8 +320,8 @@ def recap_plan_act_user_prompt(
     silent = [
         row
         for row in story_silent_spans(pack)
-        if (_time_span(row.get("t")) or (0.0, 0.0))[1] >= lo
-        and (_time_span(row.get("t")) or (0.0, 0.0))[0] <= hi
+        if (time_span(row.get("t")) or (0.0, 0.0))[1] >= lo
+        and (time_span(row.get("t")) or (0.0, 0.0))[0] <= hi
     ]
     focus = normalize_recap_focus(pack.get("recap_focus") if isinstance(pack, Mapping) else None)
     focus_line = recap_focus_plan_hint(focus)

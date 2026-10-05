@@ -22,11 +22,11 @@ from src.services.recap_cut_pad import (
     pad_cuts_for_tts,
 )
 from src.services.recap_cuts import coalesce_recap_cuts, drop_reused_source_cuts
-from src.services.recap_match import _time_span, recap_story_window
+from src.services.recap_match import time_span, recap_story_window
 from src.services.recap_vo_budget import (
     _clip_len,
     _clip_role,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     _trim_group_to_budget,
     vo_needed_sec,
 )
@@ -80,7 +80,7 @@ def normalize_cut_list(raw: Mapping[str, Any], pack: Mapping[str, Any]) -> list[
         span = src_out - src_in
         vo_need = vo_needed_sec(vo) if vo else 0.0
         max_keep = max(MAX_CLIP_SEC, min(MAX_TTS_CLIP_SEC, vo_need)) if vo else MAX_CLIP_SEC
-        insert = _looks_like_insert_cut(item)
+        insert = looks_like_insert_cut(item)
         floor = MIN_CLIP_SEC if vo else min(MIN_CLIP_SEC, max(2.4, span))
         if insert:
             floor = min(floor, max(2.0, span if span >= 2.0 else 2.0))
@@ -192,12 +192,12 @@ def apply_recap_duration(
                     break
         need = vo_needed_sec(vo_text) if vo_text else 0.0
         have = sum(_clip_len(clip) for clip in group)
-        beat_span = _time_span((beat or {}).get("t")) if beat else None
+        beat_span = time_span((beat or {}).get("t")) if beat else None
         # Grow toward speak time (capped by budget), not toward empty quota.
         want = min(budget, need) if need > 0.05 else 0.0
         if want > have + 0.25:
             room = want - have
-            masters = [clip for clip in group if not _looks_like_insert_cut(clip)]
+            masters = [clip for clip in group if not looks_like_insert_cut(clip)]
             targets = masters or list(group)
             for clip in targets:
                 if room <= 0.05:

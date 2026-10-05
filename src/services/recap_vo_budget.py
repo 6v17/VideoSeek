@@ -433,3 +433,5 @@ def stretch_recap_clips_for_vo(
                 grow["duration"] = round(float(grow["src_out"]) - src_in, 3)
         index += 1
     return out
+
+looks_like_insert_cut = _looks_like_insert_cut

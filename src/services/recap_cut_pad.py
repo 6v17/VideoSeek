@@ -16,15 +16,15 @@ from src.services.recap_constants import (
 )
 from src.services.recap_match import (
     _beats_by_id,
-    _overlap_sec,
-    _time_span,
+    overlap_sec,
+    time_span,
     keep_chunk_for_recap,
     looks_like_op_ed_text,
     recap_story_window,
 )
 from src.services.recap_vo_budget import (
     _clip_len,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     _preferred_clip_vo,
     _vo_cover_span,
     vo_needed_sec,
@@ -45,8 +45,8 @@ def _source_hits_op_ed(pack: Mapping[str, Any], start: float, end: float) -> boo
             chunk.get("cap"), " ".join(str(tag) for tag in (chunk.get("tags") or []))
         ):
             continue
-        span = _time_span(chunk.get("t"))
-        if span and _overlap_sec((start, end), span) > 0.25:
+        span = time_span(chunk.get("t"))
+        if span and overlap_sec((start, end), span) > 0.25:
             return True
     return False
 
@@ -64,7 +64,7 @@ def _clamp_window_away_from_op_ed(
         )
         if not skip:
             continue
-        span = _time_span(chunk.get("t"))
+        span = time_span(chunk.get("t"))
         if not span:
             continue
         if span[1] <= src_in + 0.35:
@@ -85,9 +85,9 @@ def _neighbor_source_window(
     chunks = [
         item
         for item in (pack.get("chunks") or [])
-        if keep_chunk_for_recap(item, duration) and _time_span(item.get("t"))
+        if keep_chunk_for_recap(item, duration) and time_span(item.get("t"))
     ]
-    chunks.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("i") or 0)))
+    chunks.sort(key=lambda item: ((time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("i") or 0)))
     if not chunks:
         window = _chunk_window(pack, int(chunk_index or 0)) if chunk_index is not None else None
         return window
@@ -100,11 +100,11 @@ def _neighbor_source_window(
     if index is None:
         window = _chunk_window(pack, int(chunk_index or 0)) if chunk_index is not None else None
         return window
-    lo, hi = _time_span(chunks[index].get("t")) or (0.0, 0.0)
+    lo, hi = time_span(chunks[index].get("t")) or (0.0, 0.0)
     slack = 0.0 if strict else 10.0
     cursor = index - 1
     while cursor >= 0:
-        prev = _time_span(chunks[cursor].get("t"))
+        prev = time_span(chunks[cursor].get("t"))
         if not prev or lo - prev[1] > 0.85:
             break
         if beat_span and prev[0] < beat_span[0] - slack:
@@ -113,7 +113,7 @@ def _neighbor_source_window(
         cursor -= 1
     cursor = index + 1
     while cursor < len(chunks):
-        nxt = _time_span(chunks[cursor].get("t"))
+        nxt = time_span(chunks[cursor].get("t"))
         if not nxt or nxt[0] - hi > 0.85:
             break
         if beat_span and nxt[1] > beat_span[1] + slack:
@@ -242,7 +242,7 @@ def pad_cuts_for_tts(
                 beat = by_id.get(int(clip["beat_id"]))
         except (TypeError, ValueError):
             beat = None
-        beat_span = _time_span((beat or {}).get("t"))
+        beat_span = time_span((beat or {}).get("t"))
         extra = need - have
         _expand_clip(
             out[last],
@@ -289,8 +289,8 @@ def clamp_insert_cuts_to_beat(
 
     drop: set[int] = set()
     for beat_id, indices in groups.items():
-        masters = [items[i] for i in indices if not _looks_like_insert_cut(items[i])]
-        inserts = [i for i in indices if _looks_like_insert_cut(items[i])]
+        masters = [items[i] for i in indices if not looks_like_insert_cut(items[i])]
+        inserts = [i for i in indices if looks_like_insert_cut(items[i])]
         if not inserts:
             continue
         if not masters:
@@ -304,7 +304,7 @@ def clamp_insert_cuts_to_beat(
                 beat = by_id.get(int(beat_id))
             except (TypeError, ValueError):
                 beat = None
-        beat_span = _time_span((beat or {}).get("t"))
+        beat_span = time_span((beat or {}).get("t"))
         for index in inserts:
             clip = items[index]
             try:
@@ -319,7 +319,7 @@ def clamp_insert_cuts_to_beat(
             if beat_span:
                 pad = float(max_gap_sec)
                 expanded = (beat_span[0] - pad, beat_span[1] + pad)
-                outside_beat = _overlap_sec((src_in, src_out), expanded) <= 0.05
+                outside_beat = overlap_sec((src_in, src_out), expanded) <= 0.05
             if not far_after and not outside_beat:
                 continue
             placed = _place_insert_after_master(

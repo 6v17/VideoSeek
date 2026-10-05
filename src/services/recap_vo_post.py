@@ -24,7 +24,7 @@ from src.services.recap_match import (
 )
 from src.services.recap_vo_budget import (
     _caption_clip_sec,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     _max_picture_for_vo,
     _vo_covers,
     tts_char_budget,
@@ -237,7 +237,7 @@ def recap_gap_clip_indices(
             covered.add(index)
     beat_has_main_vo: set[Any] = set()
     for clip in items:
-        if _looks_like_insert_cut(clip) or _is_bridge_clip(clip):
+        if looks_like_insert_cut(clip) or _is_bridge_clip(clip):
             continue
         if str(clip.get("vo") or "").strip():
             beat_has_main_vo.add(clip.get("beat_id"))
@@ -296,7 +296,7 @@ def parse_gap_fills(
         if not body:
             continue
         picture = _caption_clip_sec(items[index])
-        if picture < MIN_STANDALONE_CLIP_SEC and not _looks_like_insert_cut(items[index]):
+        if picture < MIN_STANDALONE_CLIP_SEC and not looks_like_insert_cut(items[index]):
             continue
         if picture < 1.6:
             continue

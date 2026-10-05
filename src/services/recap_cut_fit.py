@@ -19,8 +19,8 @@ from src.services.recap_match import (
     _beats_by_id,
     _cap_match_score_for_anchor,
     _evidence_for_source_span,
-    _overlap_sec,
-    _time_span,
+    overlap_sec,
+    time_span,
     keep_chunk_for_recap,
     recap_story_window,
 )
@@ -49,7 +49,7 @@ def snap_cuts_to_capped_chunks(
             continue
         if not str(chunk.get("cap") or "").strip():
             continue
-        span = _time_span(chunk.get("t"))
+        span = time_span(chunk.get("t"))
         if not span or span[1] - span[0] < MIN_FLASH_CLIP_SEC:
             continue
         capped.append((span, dict(chunk)))
@@ -75,7 +75,7 @@ def snap_cuts_to_capped_chunks(
         except (TypeError, ValueError):
             beat_id = 0
         beat = by_id.get(beat_id) if beat_id else None
-        beat_span = _time_span((beat or {}).get("t")) if beat else None
+        beat_span = time_span((beat or {}).get("t")) if beat else None
         if not beat_span:
             out.append(row)
             continue
@@ -91,11 +91,11 @@ def snap_cuts_to_capped_chunks(
         want = max(MIN_FLASH_CLIP_SEC, min(src_out - src_in, MAX_CLIP_SEC))
         best: tuple[float, float, dict[str, Any], float] | None = None
         for span, chunk in capped:
-            overlap = _overlap_sec(span, beat_span)
+            overlap = overlap_sec(span, beat_span)
             if overlap <= 0.5:
                 continue
             # Don't snap every beat onto the same already-used capped window.
-            if any(_overlap_sec(span, used) / max(0.2, span[1] - span[0]) >= 0.55 for used in used_chunk_spans):
+            if any(overlap_sec(span, used) / max(0.2, span[1] - span[0]) >= 0.55 for used in used_chunk_spans):
                 continue
             cap = str(chunk.get("cap") or "")
             # Local ASR on the candidate chunk helps when event is dialogue-shaped.
@@ -105,7 +105,7 @@ def snap_cuts_to_capped_chunks(
             cand_asr = " ".join(str(item.get("text") or "") for item in cand_ev.get("asr") or [])
             score = _cap_match_score_for_anchor(anchor, cap, asr_blob=cand_asr)
             # Slight preference for staying near the LLM pick when scores are close.
-            score += 0.04 * min(1.0, _overlap_sec(span, (src_in, src_out)) / max(0.2, want))
+            score += 0.04 * min(1.0, overlap_sec(span, (src_in, src_out)) / max(0.2, want))
             if best is None or score > best[3]:
                 best = (span[0], span[1], chunk, score)
 
@@ -186,10 +186,10 @@ def _snap_src_into_beat_window(
     for item in pack.get("chunks") or []:
         if not keep_chunk_for_recap(item, duration):
             continue
-        window = _time_span(item.get("t"))
+        window = time_span(item.get("t"))
         if not window:
             continue
-        overlap = _overlap_sec(window, beat_span)
+        overlap = overlap_sec(window, beat_span)
         if overlap <= 0.4:
             continue
         cand_lo = max(window[0], lo)
@@ -229,7 +229,7 @@ def clamp_cuts_to_beat_window(
         except (TypeError, ValueError):
             beat_id = 0
         beat = by_id.get(beat_id) if beat_id else None
-        span = _time_span((beat or {}).get("t")) if beat else None
+        span = time_span((beat or {}).get("t")) if beat else None
         if not span:
             out.append(row)
             continue
@@ -243,7 +243,7 @@ def clamp_cuts_to_beat_window(
             out.append(row)
             continue
         expanded = (span[0] - pad, span[1] + pad)
-        overlap = _overlap_sec((src_in, src_out), expanded)
+        overlap = overlap_sec((src_in, src_out), expanded)
         clip_len = src_out - src_in
         if overlap >= min(clip_len * 0.85, clip_len - 0.05) and overlap > 0.4:
             # Mostly inside — trim any spill past the pad.

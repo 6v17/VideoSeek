@@ -21,13 +21,13 @@ from src.services.recap_llm_json import _extract_json
 from src.services.recap_match import (
     _beats_by_id,
     _evidence_for_source_span,
-    _time_span,
+    time_span,
     normalize_evidence_required,
 )
 from src.services.recap_spine import _DIALOGUE_OUTCOME_RE
 from src.services.recap_vo_budget import (
     _clip_role,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     tts_char_budget,
 )
 
@@ -47,7 +47,7 @@ def beat_vo_drops_dialogue_land(
     pack: Mapping[str, Any] | None,
 ) -> bool:
     """True when this beat's ASR has a spoken outcome but VO never lands it / names speakers."""
-    span = _time_span(beat.get("t"))
+    span = time_span(beat.get("t"))
     if not span:
         return False
     evidence = _evidence_for_source_span(
@@ -103,7 +103,7 @@ def recap_vo_draft_user_prompt(
             continue
         if beat_id <= 0:
             continue
-        span = _time_span(beat.get("t")) or (0.0, 0.0)
+        span = time_span(beat.get("t")) or (0.0, 0.0)
         budget = float(beat.get("budget_sec") or MIN_BEAT_BUDGET_SEC)
         evidence = _evidence_for_source_span(
             pack,
@@ -245,7 +245,7 @@ def stamp_beat_vo_onto_cuts(
         body = str((by_id.get(beat_id) or {}).get("vo") or "").strip()
         if not body:
             continue
-        role = _clip_role(clip) or ("insert" if _looks_like_insert_cut(clip) else "")
+        role = _clip_role(clip) or ("insert" if looks_like_insert_cut(clip) else "")
         if role in {"insert", "bridge", "vo_hold"}:
             clip["vo"] = ""
             clip["vo_draft"] = ""

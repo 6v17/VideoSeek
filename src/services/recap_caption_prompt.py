@@ -22,13 +22,13 @@ from src.services.recap_match import (
     _beats_by_id,
     _evidence_for_source_span,
     _looks_like_scene_shift_text,
-    _time_span,
+    time_span,
     is_weak_match_clip,
     normalize_evidence_required,
 )
 from src.services.recap_vo_budget import (
     _clip_role,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     tts_char_budget,
 )
 
@@ -107,7 +107,7 @@ def recap_gap_user_prompt(
 
 def _caption_visual_role(clip: Mapping[str, Any]) -> str:
     """Discrete shot role for captions. Never pass raw VLM / reason text."""
-    if _looks_like_insert_cut(clip):
+    if looks_like_insert_cut(clip):
         return "insert"
     if _clip_role(clip) == "bridge":
         return "bridge"
@@ -162,7 +162,7 @@ def _caption_clip_rows(
         src_in = float(clip.get("src_in") or 0.0)
         src_out = float(clip.get("src_out") or src_in)
         # Prefer the whole beat window so JP dialogue near the cut still reaches the writer.
-        beat_span = _time_span(beat.get("t"))
+        beat_span = time_span(beat.get("t"))
         if beat_span and role not in {"insert"}:
             ev_in = min(src_in, beat_span[0])
             ev_out = max(src_out, beat_span[1])

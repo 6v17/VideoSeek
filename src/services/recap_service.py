@@ -1,17 +1,7 @@
 """Recap job runner: motion evidence + dialogue cues → LLM cut list + SRT.
 
-Stage modules: ``recap_vo_budget``, ``recap_match``, ``recap_captions``,
-``recap_cuts``, ``recap_cut_fit``, ``recap_cut_pad``, ``recap_cut_build``,
-``recap_io``, ``recap_focus``, ``recap_rematch``, ``recap_motion``,
-``recap_spine``, ``recap_llm_json``, ``recap_plan_cover``, ``recap_plan_acts``,
-``recap_plan_gaps``, ``recap_plan_merge``, ``recap_match_waves``,
-``recap_vo_scrub``, ``recap_plan_normalize``, ``recap_vo_units``,
-``recap_vo_edit``, ``recap_dialogue``, ``recap_vo_draft``, ``recap_clock``,
-``recap_caption_prompt``, ``recap_vo_post``, ``recap_plan_finalize``,
-``recap_match_prompt``, ``recap_runtime``, ``recap_export``, ``recap_pack``,
-``recap_vo_pipeline``, ``recap_rematch_job``, ``recap_constants``,
-``recap_prompts``. This file re-exports those surfaces and owns plan-act /
-motion-fill / weak-rematch / timeline orchestration.
+Stage modules live beside this file (``recap_*``). This module re-exports their
+public surfaces and owns ``generate_recap_timeline`` orchestration.
 """
 
 from __future__ import annotations
@@ -131,7 +121,7 @@ from src.services.recap_vo_budget import (  # facade: VO budget math lives in re
     _clip_role as _clip_role,
     _counted_chars as _counted_chars,
     _join_vo as _join_vo,
-    _looks_like_insert_cut as _looks_like_insert_cut,
+    looks_like_insert_cut as looks_like_insert_cut,
     _max_picture_for_vo as _max_picture_for_vo,
     _normalize_vo_key as _normalize_vo_key,
     _preferred_clip_vo as _preferred_clip_vo,
@@ -166,10 +156,10 @@ from src.services.recap_match import (  # facade: match QC + span/evidence helpe
     _has_japanese_kana as _has_japanese_kana,
     _is_bridge_clip as _is_bridge_clip,
     _looks_like_scene_shift_text as _looks_like_scene_shift_text,
-    _overlap_sec as _overlap_sec,
+    overlap_sec as overlap_sec,
     _people_labels as _people_labels,
     _text_similarity as _text_similarity,
-    _time_span as _time_span,
+    time_span as time_span,
     annotate_recap_match_quality as annotate_recap_match_quality,
     clear_vo_on_weak_matches as clear_vo_on_weak_matches,
     is_weak_match_clip as is_weak_match_clip,
@@ -246,7 +236,7 @@ from src.services.recap_cut_build import (  # facade: normalize / refine / durat
 from src.services.recap_io import (  # facade: sidecar load / write
     _load_recap_sidecar as _load_recap_sidecar,
     _read_recap_sidecar as _read_recap_sidecar,
-    _recap_clip_records as _recap_clip_records,
+    recap_clip_records as recap_clip_records,
     _recap_sidecar_path as _recap_sidecar_path,
     load_recap_beats as load_recap_beats,
     load_recap_cuts as load_recap_cuts,
@@ -266,11 +256,13 @@ from src.services.recap_focus import (  # facade: soft focus prior
     story_silent_spans as story_silent_spans,
 )
 
-from src.services.recap_rematch import (  # facade: rematch splice / filter
-    _filter_rematch_cuts_to_beat as _filter_rematch_cuts_to_beat,
-    _locked_vo_context as _locked_vo_context,
-    _neighbor_beats_for_rematch as _neighbor_beats_for_rematch,
-    _splice_recap_beat_cuts as _splice_recap_beat_cuts,
+from src.services.recap_rematch import (  # facade: rematch splice + jobs
+    filter_rematch_cuts_to_beat as filter_rematch_cuts_to_beat,
+    locked_vo_context as locked_vo_context,
+    neighbor_beats_for_rematch as neighbor_beats_for_rematch,
+    rematch_recap_beat as rematch_recap_beat,
+    rematch_weak_recap_beats as rematch_weak_recap_beats,
+    splice_recap_beat_cuts as splice_recap_beat_cuts,
 )
 
 from src.services.recap_motion import (  # facade: motion chunks / VLM gaps / fill
@@ -303,7 +295,7 @@ from src.services.recap_spine import (  # facade: OCR cues / ASR-VLM spine
 from src.services.recap_llm_json import (  # facade: LLM JSON salvage
     _extract_balanced_object as _extract_balanced_object,
     _extract_json as _extract_json,
-    _loads_cut_list_json as _loads_cut_list_json,
+    loads_cut_list_json as loads_cut_list_json,
     _loads_json_object as _loads_json_object,
     _repair_llm_json as _repair_llm_json,
     _salvage_cut_list_payload as _salvage_cut_list_payload,
@@ -362,12 +354,15 @@ from src.services.recap_plan_merge import (  # facade: merge beats / filter pack
     recap_plan_tail_user_prompt as recap_plan_tail_user_prompt,
 )
 
-from src.services.recap_match_waves import (  # facade: match waves / pins
+from src.services.recap_match_waves import (  # facade: match waves / pins / prompts
     _coverage_pin_ids as _coverage_pin_ids,
     _ensure_pinned_rows as _ensure_pinned_rows,
     _is_texture_beat as _is_texture_beat,
     _texture_pin_ids as _texture_pin_ids,
     missing_match_beats as missing_match_beats,
+    recap_plan_user_prompt as recap_plan_user_prompt,
+    recap_user_prompt as recap_user_prompt,
+    rematch_recap_user_prompt as rematch_recap_user_prompt,
     split_beats_for_match as split_beats_for_match,
 )
 
@@ -411,13 +406,6 @@ from src.services.recap_vo_edit import (  # facade: unit hand-edits
     save_recap_vo_unit as save_recap_vo_unit,
 )
 
-from src.services.recap_dialogue import (  # facade: ASR cues / speakers
-    ensure_recap_dialogue_cues as ensure_recap_dialogue_cues,
-    list_speech_dialogue_cues as list_speech_dialogue_cues,
-    people_from_dialogue_speakers as people_from_dialogue_speakers,
-    recap_dialogue_status as recap_dialogue_status,
-    recap_speaker_stats as recap_speaker_stats,
-)
 
 from src.services.recap_vo_draft import (  # facade: VO draft prompt / stamp
     _VO_LAND_HINT_RE as _VO_LAND_HINT_RE,
@@ -465,19 +453,11 @@ from src.services.recap_vo_post import (  # facade: polish/gap helpers + no-ops
     scrub_unattested_people_names as scrub_unattested_people_names,
 )
 
-from src.services.recap_plan_finalize import (  # facade: deterministic plan finalize
-    finalize_recap_plan_beats as finalize_recap_plan_beats,
-    scrub_unevidenced_beats as scrub_unevidenced_beats,
-)
 
-from src.services.recap_match_prompt import (  # facade: plan/match user prompts
-    recap_plan_user_prompt as recap_plan_user_prompt,
-    recap_user_prompt as recap_user_prompt,
-    rematch_recap_user_prompt as rematch_recap_user_prompt,
-)
 
-from src.services.recap_runtime import (  # facade: parse/resolve/save helpers
-    _probe_media as _probe_media,
+from src.services.recap_runtime import (  # facade: parse/resolve/save + export
+    export_saved_recap_fcpxml as export_saved_recap_fcpxml,
+    probe_recap_media as probe_recap_media,
     normalize_recap_start_from as normalize_recap_start_from,
     parse_cut_list as parse_cut_list,
     resolve_recap_caption_language as resolve_recap_caption_language,
@@ -487,12 +467,14 @@ from src.services.recap_runtime import (  # facade: parse/resolve/save helpers
     save_recap_plan_edits as save_recap_plan_edits,
 )
 
-from src.services.recap_export import (  # facade: FCPXML export
-    export_saved_recap_fcpxml as export_saved_recap_fcpxml,
-)
 
-from src.services.recap_pack import (  # facade: evidence pack
+from src.services.recap_pack import (  # facade: evidence pack + dialogue
     build_recap_pack as build_recap_pack,
+    ensure_recap_dialogue_cues as ensure_recap_dialogue_cues,
+    list_speech_dialogue_cues as list_speech_dialogue_cues,
+    people_from_dialogue_speakers as people_from_dialogue_speakers,
+    recap_dialogue_status as recap_dialogue_status,
+    recap_speaker_stats as recap_speaker_stats,
 )
 
 from src.services.recap_vo_pipeline import (  # facade: VO LLM stages
@@ -504,15 +486,13 @@ from src.services.recap_vo_pipeline import (  # facade: VO LLM stages
     rewrite_recap_clip_caption as rewrite_recap_clip_caption,
 )
 
-from src.services.recap_rematch_job import (  # facade: rematch jobs
-    rematch_recap_beat as rematch_recap_beat,
-    rematch_weak_recap_beats as rematch_weak_recap_beats,
-)
 
-from src.services.recap_plan_pipeline import (  # facade: act plan LLM stages
+from src.services.recap_plan_pipeline import (  # facade: act plan LLM + finalize
     _try_story_plan_llm as _try_story_plan_llm,
+    finalize_recap_plan_beats as finalize_recap_plan_beats,
     plan_story_beats_by_acts as plan_story_beats_by_acts,
     resolve_plan_act_windows as resolve_plan_act_windows,
+    scrub_unevidenced_beats as scrub_unevidenced_beats,
 )
 
 
@@ -772,7 +752,7 @@ def generate_recap_timeline(
         if title == "解说剪辑" and plan_title and plan_title != "解说剪辑":
             title = plan_title
         _raise_if_stopped()
-        info = _probe_media(video_path)
+        info = probe_recap_media(video_path)
         laid_match = layout_clips_on_timeline(cuts, fps=float(info.get("fps") or 24.0))
         cuts_path = write_recap_cuts_file(
             cuts_path,
@@ -804,7 +784,7 @@ def generate_recap_timeline(
 
     _raise_if_stopped()
     if info is None:
-        info = _probe_media(video_path)
+        info = probe_recap_media(video_path)
     if stage == RECAP_START_CAPTIONS:
         cuts = annotate_recap_match_quality(cuts, allocated, pack, people, config=cfg)
     laid_out = layout_clips_on_timeline(cuts, fps=float(info.get("fps") or 24.0))

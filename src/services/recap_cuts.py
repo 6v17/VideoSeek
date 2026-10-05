@@ -15,11 +15,11 @@ from src.services.recap_constants import (
     SOURCE_OVERLAP_MERGE_SEC,
     SOURCE_REUSE_RATIO,
 )
-from src.services.recap_match import _is_bridge_clip, _overlap_sec
+from src.services.recap_match import _is_bridge_clip, overlap_sec
 from src.services.recap_vo_budget import (
     _clip_len,
     _join_vo,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     _preferred_clip_vo,
     _vo_covers,
 )
@@ -45,7 +45,7 @@ def _clip_src_span(clip: Mapping[str, Any]) -> tuple[float, float]:
     return src_in, src_out
 
 def _source_overlap_sec(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
-    return _overlap_sec(_clip_src_span(left), _clip_src_span(right))
+    return overlap_sec(_clip_src_span(left), _clip_src_span(right))
 
 def _source_gap_sec(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
     a_in, a_out = _clip_src_span(left)
@@ -67,7 +67,7 @@ def _source_adjacent_clips(
     return _source_gap_sec(left, right) <= max(0.0, float(gap_sec))
 
 def _is_flash_cut(clip: Mapping[str, Any]) -> bool:
-    if _looks_like_insert_cut(clip):
+    if looks_like_insert_cut(clip):
         return False
     return _clip_len(clip) < MIN_FLASH_CLIP_SEC or (
         _is_bridge_clip(clip) and _clip_len(clip) <= MIN_FLASH_CLIP_SEC + 0.05
@@ -127,7 +127,7 @@ def _cut_to_next_shot(prev: dict[str, Any], clip: Mapping[str, Any]) -> dict[str
     c_in, c_out = _clip_src_span(clip)
     if c_in >= p_out - 0.04:
         return dict(clip)
-    insert = _looks_like_insert_cut(clip)
+    insert = looks_like_insert_cut(clip)
     if insert:
         if c_in >= p_in + 0.8:
             prev["src_out"] = round(min(c_in, p_out), 3)
@@ -139,7 +139,7 @@ def _cut_to_next_shot(prev: dict[str, Any], clip: Mapping[str, Any]) -> dict[str
     same_beat = (
         _clip_beat_id(prev) is not None
         and _clip_beat_id(prev) == _clip_beat_id(clip)
-        and not _looks_like_insert_cut(prev)
+        and not looks_like_insert_cut(prev)
     )
     if c_in >= p_in + 0.35 and (c_in - p_in) >= 1.6:
         prev["src_out"] = round(c_in, 3)
@@ -176,7 +176,7 @@ def _should_merge_source_clips(left: Mapping[str, Any], right: Mapping[str, Any]
     adjacent = overlap >= SOURCE_OVERLAP_MERGE_SEC or _source_adjacent_clips(left, right)
     if not adjacent:
         return False
-    if _looks_like_insert_cut(left) or _looks_like_insert_cut(right):
+    if looks_like_insert_cut(left) or looks_like_insert_cut(right):
         return False
     if _is_flash_cut(left) or _is_flash_cut(right):
         return True
@@ -234,7 +234,7 @@ def drop_reused_source_cuts(
         key=lambda clip: (
             float(clip.get("src_in") or 0.0),
             int(clip.get("beat_id") or 0),
-            0 if not _looks_like_insert_cut(clip) else 1,
+            0 if not looks_like_insert_cut(clip) else 1,
         )
     )
     kept: list[dict[str, Any]] = []
@@ -281,7 +281,7 @@ def drop_reused_source_cuts(
             and beat_id == _clip_beat_id(prev)
         )
         # Same-beat master + short insert nesting is intentional reaction CU — keep both.
-        if same_beat and _looks_like_insert_cut(clip) != _looks_like_insert_cut(prev):
+        if same_beat and looks_like_insert_cut(clip) != looks_like_insert_cut(prev):
             short = min(_clip_len(prev), _clip_len(clip))
             long = max(_clip_len(prev), _clip_len(clip))
             if short <= long * 0.75:
@@ -353,8 +353,8 @@ def dedupe_overlapping_recap_cuts(
             need = float(overlap_ratio) if same_beat else float(cross_beat_overlap_ratio)
             if ratio < need:
                 continue
-            left_insert = _looks_like_insert_cut(left)
-            right_insert = _looks_like_insert_cut(right)
+            left_insert = looks_like_insert_cut(left)
+            right_insert = looks_like_insert_cut(right)
             # Keep a short insert over a long master when ranges mostly nest (same beat only).
             if same_beat and left_insert != right_insert:
                 if left_insert and left_len <= right_len * 0.75:

@@ -17,7 +17,7 @@ from src.services.recap_constants import (
     TARGET_RECAP_SEC,
 )
 from src.services.recap_llm_json import _loads_json_object
-from src.services.recap_match import _time_span, normalize_evidence_required
+from src.services.recap_match import time_span, normalize_evidence_required
 from src.services.recap_plan_gaps import (
     _TEXTURE_BEAT_RE,
     beat_evidence_score,
@@ -43,7 +43,7 @@ def normalize_story_beats(raw: Mapping[str, Any] | list[Any]) -> list[dict[str, 
         except (TypeError, ValueError):
             importance = 0.5
         importance = min(1.0, max(0.05, importance))
-        span = _time_span(item.get("t")) or (0.0, 0.0)
+        span = time_span(item.get("t")) or (0.0, 0.0)
         try:
             beat_id = int(item.get("id"))
         except (TypeError, ValueError):
@@ -156,7 +156,7 @@ def allocate_beat_budgets(
         evidence = beat_evidence_sec(beat, chunk_list)
         evid_score = beat_evidence_score(evidence)
         importance = float(beat.get("importance") or 0.5)
-        span = _time_span(beat.get("t")) or (0.0, 0.0)
+        span = time_span(beat.get("t")) or (0.0, 0.0)
         span_dur = max(0.0, span[1] - span[0])
         # High-importance beats: don't let thin/short source windows tank quota.
         if importance >= 0.8 and evid_score > 0.0:

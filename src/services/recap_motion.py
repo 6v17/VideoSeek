@@ -11,8 +11,8 @@ from typing import Any, Callable, Mapping, Sequence
 
 from src.services.recap_constants import RECAP_CLIMAX_IMPORTANCE, RECAP_VISUAL_EVIDENCE_TAGS
 from src.services.recap_match import (
-    _overlap_sec,
-    _time_span,
+    overlap_sec,
+    time_span,
     looks_like_op_ed_text,
     recap_story_window,
 )
@@ -191,7 +191,7 @@ def apply_recap_skip_marks(
         if str(item.get("skip") or "").strip():
             out.append(item)
             continue
-        span = _time_span(item.get("t"))
+        span = time_span(item.get("t"))
         if not span:
             out.append(item)
             continue
@@ -203,7 +203,7 @@ def apply_recap_skip_marks(
         blob = " ".join(
             str(cue.get("text") or "")
             for cue in cues
-            if _overlap_sec(
+            if overlap_sec(
                 (float(cue.get("start") or 0.0), float(cue.get("end") or cue.get("start") or 0.0)),
                 span,
             )
@@ -224,7 +224,7 @@ def _cue_span(cue: Mapping[str, Any]) -> tuple[float, float] | None:
         if end < start:
             start, end = end, start
         return start, end
-    return _time_span(cue.get("t"))
+    return time_span(cue.get("t"))
 
 def _beat_evidence_tags(beat: Mapping[str, Any]) -> set[str]:
     tags: set[str] = set()
@@ -252,7 +252,7 @@ def _asr_covers_span(
     for cue in cues or []:
         cue_span = _cue_span(cue)
         if cue_span:
-            covered += _overlap_sec(span, cue_span)
+            covered += overlap_sec(span, cue_span)
     need = min(8.0, max(2.0, duration * 0.25))
     return covered >= need
 
@@ -262,16 +262,16 @@ def _chunk_motion_beats(
     *,
     pad_sec: float,
 ) -> list[Mapping[str, Any]]:
-    span = _time_span(chunk.get("t"))
+    span = time_span(chunk.get("t"))
     if not span:
         return []
     matched: list[Mapping[str, Any]] = []
     for beat in beats or []:
-        beat_span = _time_span(beat.get("t"))
+        beat_span = time_span(beat.get("t"))
         if not beat_span:
             continue
         window = (beat_span[0] - pad_sec, beat_span[1] + pad_sec)
-        if _overlap_sec(span, window) > 0.4:
+        if overlap_sec(span, window) > 0.4:
             matched.append(beat)
     return matched
 
@@ -289,7 +289,7 @@ def recap_motion_gap_chunk_indices(
     pad = max(0.0, float(pad_sec or 0.0))
     windows = []
     for beat in beats or []:
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if not span:
             continue
         windows.append((span[0] - pad, span[1] + pad))
@@ -299,10 +299,10 @@ def recap_motion_gap_chunk_indices(
     for chunk in pack.get("chunks") or []:
         if str(chunk.get("skip") or "").strip() or str(chunk.get("cap") or "").strip():
             continue
-        span = _time_span(chunk.get("t"))
+        span = time_span(chunk.get("t"))
         if not span:
             continue
-        if not any(_overlap_sec(span, window) > 0.4 for window in windows):
+        if not any(overlap_sec(span, window) > 0.4 for window in windows):
             continue
         try:
             indices.append(int(chunk.get("i")))

@@ -118,3 +118,5 @@ def _loads_cut_list_json(text: str) -> dict[str, Any]:
     start = body.find("{")
     salvage_src = body[start:] if start >= 0 else _extract_json(text)
     return _salvage_cut_list_payload(salvage_src)
+
+loads_cut_list_json = _loads_cut_list_json

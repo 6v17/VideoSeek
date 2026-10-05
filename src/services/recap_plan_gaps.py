@@ -11,8 +11,8 @@ from typing import Any, Mapping, Sequence
 
 from src.services.recap_constants import ENDING_COVER_RATIO, MAX_GAP_FILL_WINDOWS, MAX_STORY_BEATS
 from src.services.recap_match import (
-    _overlap_sec,
-    _time_span,
+    overlap_sec,
+    time_span,
     looks_like_op_ed_text,
     recap_story_window,
 )
@@ -32,14 +32,14 @@ def opening_deadline_sec(duration_sec: float) -> float:
     return min(210.0, max(150.0, duration * 0.12))
 
 def beat_evidence_sec(beat: Mapping[str, Any], chunks: list[Mapping[str, Any]] | None = None) -> float:
-    span = _time_span(beat.get("t"))
+    span = time_span(beat.get("t"))
     if not span:
         return 0.0
     total = 0.0
     for item in chunks or []:
-        window = _time_span(item.get("t"))
+        window = time_span(item.get("t"))
         if window:
-            total += _overlap_sec(span, window)
+            total += overlap_sec(span, window)
     if total <= 0.0:
         total = min(max(0.0, span[1] - span[0]), 12.0)
     return round(total, 2)
@@ -55,7 +55,7 @@ def beats_cover_ending(beats: list[Mapping[str, Any]], duration_sec: float) -> b
     _op_start, story_end = recap_story_window(duration)
     last_story = 0.0
     for beat in beats:
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if not span:
             continue
         if span[0] >= story_end:
@@ -71,7 +71,7 @@ def beats_cover_opening(beats: list[Mapping[str, Any]], duration_sec: float) -> 
     for beat in beats:
         if looks_like_op_ed_text(beat.get("event"), beat.get("needed_visual")):
             continue
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if not span:
             continue
         first_start = span[0] if first_start is None else min(first_start, span[0])
@@ -100,7 +100,7 @@ def story_beat_gaps(
     for beat in beats:
         if looks_like_op_ed_text(beat.get("event"), beat.get("needed_visual")):
             continue
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if not span:
             continue
         lo = max(story_start, span[0])
@@ -167,7 +167,7 @@ def activity_shift_gaps(
     """Pin long holes between consecutive beats whose events barely overlap (domain-agnostic)."""
     ordered: list[tuple[float, float, str]] = []
     for beat in beats:
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if not span:
             continue
         ordered.append((span[0], span[1], str(beat.get("event") or "")))
@@ -195,7 +195,7 @@ def dialogue_outcome_gaps(
         return []
     covered: list[tuple[float, float]] = []
     for beat in beats or []:
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if span and span[1] - span[0] > 0.2:
             covered.append((float(span[0]), float(span[1])))
     duration = float(pack.get("duration_sec") or 0.0)
@@ -243,7 +243,7 @@ def trim_story_beats_to_limit(
         return items
     by_time = sorted(
         items,
-        key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)),
+        key=lambda item: ((time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)),
     )
     hard: set[int] = set()
     if by_time:
@@ -287,7 +287,7 @@ def trim_story_beats_to_limit(
         key=lambda item: (
             int(item.get("id") or 0) in hard,
             float(item.get("importance") or 0.5),
-            -((_time_span(item.get("t")) or (0.0, 0.0))[1] - (_time_span(item.get("t")) or (0.0, 0.0))[0]),
+            -((time_span(item.get("t")) or (0.0, 0.0))[1] - (time_span(item.get("t")) or (0.0, 0.0))[0]),
         ),
         reverse=True,
     )
@@ -307,7 +307,7 @@ def drop_op_ed_beats(
         needed = str(beat.get("needed_visual") or "")
         if looks_like_op_ed_text(event, needed):
             continue
-        span = _time_span(beat.get("t"))
+        span = time_span(beat.get("t"))
         if span and duration >= 360 and span[0] >= story_end:
             continue
         kept.append(dict(beat))

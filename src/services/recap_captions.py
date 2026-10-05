@@ -17,7 +17,7 @@ from src.services.recap_match import _is_bridge_clip
 from src.services.recap_vo_budget import (
     _caption_clip_sec,
     _join_vo,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     _max_picture_for_vo,
     _normalize_vo_key,
     _vo_covers,
@@ -98,7 +98,7 @@ def _fold_short_captions(
             return False
         if start < 0 or end >= len(clips) or start > end:
             return False
-        return all(_looks_like_insert_cut(clips[index]) for index in range(start, end + 1))
+        return all(looks_like_insert_cut(clips[index]) for index in range(start, end + 1))
 
     out: list[dict[str, Any]] = [items[0]]
     for cap in items[1:]:
@@ -162,7 +162,7 @@ def pack_captions_for_tts(
                     cursor += 1
                     continue
                 break
-            if _looks_like_insert_cut(items[cursor]):
+            if looks_like_insert_cut(items[cursor]):
                 break
             if not _vo_needs_more_picture(text, covered):
                 break
@@ -215,7 +215,7 @@ def normalize_caption_cues(
         for index in range(start_i, end_i + 1):
             if beat_id is not None and items[index].get("beat_id") != beat_id:
                 break
-            if index > start_i and _looks_like_insert_cut(items[index]):
+            if index > start_i and looks_like_insert_cut(items[index]):
                 break
             if index > start_i and _is_bridge_clip(items[index]):
                 break
@@ -372,7 +372,7 @@ def split_underfilled_vo_clips(
     for clip in clips or []:
         row = dict(clip)
         text = str(row.get("vo") or "").strip()
-        if not text or _looks_like_insert_cut(row) or _is_bridge_clip(row):
+        if not text or looks_like_insert_cut(row) or _is_bridge_clip(row):
             out.append(row)
             continue
         picture = _caption_clip_sec(row)
@@ -464,7 +464,7 @@ def recap_vo_coverage_ratio(clips: Sequence[Mapping[str, Any]]) -> float:
     mains = [
         clip
         for clip in items
-        if not _looks_like_insert_cut(clip) and not _is_bridge_clip(clip)
+        if not looks_like_insert_cut(clip) and not _is_bridge_clip(clip)
     ]
     rows = mains or items
     by_beat: dict[Any, list[Mapping[str, Any]]] = {}

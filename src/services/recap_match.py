@@ -18,7 +18,7 @@ from src.services.recap_constants import (
     MATCH_WEAK_SCORE_INSERT,
 )
 from src.services.recap_prompts import RECAP_EVIDENCE_REQUIRED_TAGS
-from src.services.recap_vo_budget import _looks_like_insert_cut
+from src.services.recap_vo_budget import looks_like_insert_cut
 
 _JP_KANA_RE = re.compile(r"[\u3040-\u30ff]")
 
@@ -424,7 +424,7 @@ def score_recap_cut_match(
                 met += 1
             elif tag == "场面" and (has_vlm or _looks_like_scene_shift_text(reason, cap_blob)):
                 met += 1
-            elif tag == "反应" and (has_vlm or _looks_like_insert_cut(clip)):
+            elif tag == "反应" and (has_vlm or looks_like_insert_cut(clip)):
                 met += 1
             elif tag == "物品" and (has_vlm or has_asr):
                 met += 1
@@ -434,7 +434,7 @@ def score_recap_cut_match(
     elif has_asr or has_vlm:
         coverage = 0.5
 
-    insert = _looks_like_insert_cut(clip)
+    insert = looks_like_insert_cut(clip)
     bridge = _is_bridge_clip(clip) or _looks_like_scene_shift_text(reason, event, cap_blob)
     # Reason is self-justifying Match prose — do not let it alone prove the shot.
     if has_vlm:
@@ -588,3 +588,6 @@ def _is_bridge_clip(clip: Mapping[str, Any]) -> bool:
     name = str(clip.get("name") or "").strip()
     reason = str(clip.get("reason") or "").strip()
     return name == "过渡" or reason == "过渡"
+
+time_span = _time_span
+overlap_sec = _overlap_sec

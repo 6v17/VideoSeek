@@ -11,7 +11,7 @@ from src.services.recap_constants import MATCH_STATUS_OK
 from src.services.recap_match import _beats_by_id, _is_bridge_clip, is_weak_match_clip
 from src.services.recap_vo_budget import (
     _clip_role,
-    _looks_like_insert_cut,
+    looks_like_insert_cut,
     _max_picture_for_vo,
     _vo_underfills_picture,
     vo_sec,
@@ -58,7 +58,7 @@ def group_recap_vo_units(
         tl_hi = float(items[end].get("tl_out") or tl_lo)
         for offset, clip_i in enumerate(indices):
             clip = items[clip_i]
-            role = _clip_role(clip) or ("insert" if _looks_like_insert_cut(clip) else "")
+            role = _clip_role(clip) or ("insert" if looks_like_insert_cut(clip) else "")
             if _is_bridge_clip(clip):
                 role = "bridge"
             if role == "vo_hold":
@@ -257,7 +257,7 @@ def recap_clip_review_rows(
         beat = by_id.get(beat_id) or {}
         event = str(clip.get("event") or beat.get("event") or "").strip()
         flags: list[str] = []
-        if _looks_like_insert_cut(clip):
+        if looks_like_insert_cut(clip):
             flags.append("insert")
         if _is_bridge_clip(clip):
             flags.append("bridge")

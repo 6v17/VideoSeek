@@ -16,7 +16,7 @@ from src.services.recap_constants import (
     RECAP_FOCUS_ORDEAL,
     RECAP_FOCUS_SOFT_MIN,
 )
-from src.services.recap_match import _time_span, recap_story_window
+from src.services.recap_match import time_span, recap_story_window
 
 _FOCUS_FLEX_RE = re.compile(
     r"(瞧不起|废物|弱者|蝼蚁|不可能|居然|震惊|跪下|臣服|天才|碾压|秒杀|打脸|装逼|"
@@ -74,7 +74,7 @@ def story_silent_spans(
     for lo, hi in gaps:
         caps: list[dict[str, Any]] = []
         for chunk in chunks:
-            span = _time_span(chunk.get("t"))
+            span = time_span(chunk.get("t"))
             if not span:
                 continue
             if span[1] < lo - 1.0 or span[0] > hi + 1.0:
@@ -146,7 +146,7 @@ def infer_recap_focus(pack: Mapping[str, Any]) -> dict[str, Any]:
     silent = story_silent_spans(pack)
     silent_dur = sum(
         max(0.0, (span[1] - span[0]))
-        for span in (_time_span(row.get("t")) for row in silent)
+        for span in (time_span(row.get("t")) for row in silent)
         if span
     )
     silent_ratio = silent_dur / story_dur

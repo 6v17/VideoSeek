@@ -9,7 +9,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from src.services.recap_focus import story_silent_spans
-from src.services.recap_match import _time_span, recap_story_window
+from src.services.recap_match import time_span, recap_story_window
 from src.services.recap_spine import _DIALOGUE_OUTCOME_RE, _spine_event_label
 
 def _beat_lands_dialogue_outcome(
@@ -36,7 +36,7 @@ def ensure_beats_land_dialogue_outcomes(
     cues = [row for row in (pack.get("ocr") or []) if isinstance(row, Mapping)]
     if not cues:
         return items
-    covered_spans = [span for span in (_time_span(beat.get("t")) for beat in items) if span]
+    covered_spans = [span for span in (time_span(beat.get("t")) for beat in items) if span]
     used_ids = {int(beat.get("id") or 0) for beat in items if int(beat.get("id") or 0) > 0}
     next_id = max(used_ids) + 1 if used_ids else 1
     duration = float(pack.get("duration_sec") or 0.0)
@@ -77,7 +77,7 @@ def ensure_beats_land_dialogue_outcomes(
         used_ids.add(next_id)
         covered_spans.append((lo, hi))
         next_id += 1
-    items.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    items.sort(key=lambda item: ((time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
     return items
 
 def ensure_beats_cover_silent_spans(
@@ -88,11 +88,11 @@ def ensure_beats_cover_silent_spans(
 ) -> list[dict[str, Any]]:
     """Force beats on no-ASR picture spans that still have caps — silent time is still story time."""
     items = [dict(beat) for beat in beats or []]
-    covered = [span for span in (_time_span(beat.get("t")) for beat in items) if span]
+    covered = [span for span in (time_span(beat.get("t")) for beat in items) if span]
     used_ids = {int(beat.get("id") or 0) for beat in items if int(beat.get("id") or 0) > 0}
     next_id = max(used_ids) + 1 if used_ids else 1
     for silent in story_silent_spans(pack):
-        window = _time_span(silent.get("t"))
+        window = time_span(silent.get("t"))
         if not window:
             continue
         caps = [row for row in (silent.get("caps") or []) if isinstance(row, Mapping)]
@@ -122,7 +122,7 @@ def ensure_beats_cover_silent_spans(
         used_ids.add(next_id)
         covered.append(window)
         next_id += 1
-    items.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    items.sort(key=lambda item: ((time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
     return items
 
 def ensure_beats_cover_spine(
@@ -135,7 +135,7 @@ def ensure_beats_cover_spine(
     items = [dict(beat) for beat in beats or []]
     if not spine:
         return items
-    covered_spans = [_time_span(beat.get("t")) for beat in items]
+    covered_spans = [time_span(beat.get("t")) for beat in items]
     covered_spans = [span for span in covered_spans if span]
     used_ids = {int(beat.get("id") or 0) for beat in items if int(beat.get("id") or 0) > 0}
     next_id = max(used_ids) + 1 if used_ids else 1
@@ -167,7 +167,7 @@ def ensure_beats_cover_spine(
         return False
 
     for seg in spine:
-        window = _time_span(seg.get("t"))
+        window = time_span(seg.get("t"))
         if not window:
             continue
         if not (seg.get("asr") or seg.get("caps")):
@@ -238,5 +238,5 @@ def ensure_beats_cover_spine(
         used_ids.add(next_id)
         covered_spans.append(window)
         next_id += 1
-    items.sort(key=lambda item: ((_time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
+    items.sort(key=lambda item: ((time_span(item.get("t")) or (0.0, 0.0))[0], int(item.get("id") or 0)))
     return items

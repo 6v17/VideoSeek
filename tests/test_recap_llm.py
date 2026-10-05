@@ -1465,9 +1465,9 @@ class RecapPackTests(unittest.TestCase):
         self.assertAlmostEqual(env_tuned["weak"], 0.6)
 
     def test_recap_clip_records_keeps_match_qc(self):
-        from src.services.recap_service import _recap_clip_records
+        from src.services.recap_service import recap_clip_records
 
-        rows = _recap_clip_records(
+        rows = recap_clip_records(
             [
                 {
                     "name": "01",
@@ -1902,9 +1902,9 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(len(evidence["caps"]), 1)
 
     def test_splice_recap_beat_cuts_keeps_neighbors(self):
-        from src.services.recap_service import _splice_recap_beat_cuts
+        from src.services.recap_service import splice_recap_beat_cuts
 
-        merged = _splice_recap_beat_cuts(
+        merged = splice_recap_beat_cuts(
             [
                 {"beat_id": 1, "vo": "a", "src_in": 1.0},
                 {"beat_id": 2, "vo": "b", "src_in": 2.0},
@@ -1918,9 +1918,9 @@ class RecapPackTests(unittest.TestCase):
         self.assertEqual(merged[1]["beat_id"], 2)
 
     def test_splice_recap_beat_cuts_noncontiguous(self):
-        from src.services.recap_service import _splice_recap_beat_cuts
+        from src.services.recap_service import splice_recap_beat_cuts
 
-        merged = _splice_recap_beat_cuts(
+        merged = splice_recap_beat_cuts(
             [
                 {"beat_id": 1, "vo": "a", "src_in": 1.0},
                 {"beat_id": 2, "vo": "b", "src_in": 2.0},
@@ -2059,7 +2059,7 @@ class RecapPackTests(unittest.TestCase):
                 "src.services.recap_service.call_remote_llm",
                 side_effect=[match_json, caption_json],
             ), patch(
-                "src.services.recap_service._probe_media",
+                "src.services.recap_service.probe_recap_media",
                 return_value={"fps": 24.0, "duration": 80.0, "width": 1920, "height": 1080},
             ), patch(
                 "src.services.understanding_service.resolve_current_media_path",
@@ -2388,7 +2388,7 @@ class RecapPackTests(unittest.TestCase):
 
 
     def test_story_silent_spans_and_structure_brief_include_no_asr_time(self):
-        from src.services.recap_service import _time_span
+        from src.services.recap_service import time_span
 
         pack = {
             "duration_sec": 600.0,
@@ -2406,7 +2406,7 @@ class RecapPackTests(unittest.TestCase):
         silent = story_silent_spans(pack, min_sec=12.0)
         self.assertTrue(
             any(
-                (span := _time_span(row.get("t"))) and span[0] <= 90.0 <= span[1]
+                (span := time_span(row.get("t"))) and span[0] <= 90.0 <= span[1]
                 for row in silent
             )
         )
@@ -3909,7 +3909,7 @@ class RecapPackTests(unittest.TestCase):
                 patch("src.services.recap_service.build_recap_pack", return_value=pack),
                 patch("src.services.recap_service.call_remote_llm", side_effect=fake_llm),
                 patch(
-                    "src.services.recap_service._probe_media",
+                    "src.services.recap_service.probe_recap_media",
                     return_value={"fps": 24.0, "width": 1920, "height": 1080, "duration": 1440.0},
                 ),
                 patch("src.services.recap_service.fit_recap_captions_to_tts", side_effect=fake_captions),
@@ -4106,7 +4106,7 @@ class FcpxmlTests(unittest.TestCase):
                 "clips": [{"name": "01", "src_in": 1.0, "src_out": 5.0, "vo": "你好"}],
             }
             with patch(
-                "src.services.recap_service._probe_media",
+                "src.services.recap_service.probe_recap_media",
                 return_value={"fps": 24.0, "width": 1920, "height": 1080, "duration": 20.0},
             ):
                 xml = export_saved_recap_fcpxml(payload, root / "out.fcpxml", video_path=str(video))

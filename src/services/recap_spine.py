@@ -9,7 +9,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from src.services.recap_constants import PLAN_ACT_ASR_LIMIT
-from src.services.recap_match import _time_span
+from src.services.recap_match import time_span
 
 _DIALOGUE_OUTCOME_RE = re.compile(
     r"(不行|不可以|别再|不许|拒绝|拒收|拒了|收下|接住|答应|同意|成交|决定|胜负|赢了|输了|揭穿|识破|"
@@ -207,7 +207,7 @@ def build_asr_vlm_spine(
             asr_rows.append(row)
         caps: list[dict[str, Any]] = []
         for chunk in chunks:
-            span = _time_span(chunk.get("t"))
+            span = time_span(chunk.get("t"))
             if not span:
                 continue
             if span[1] < lo - 2.0 or span[0] > hi + 2.0:
@@ -241,7 +241,7 @@ def expand_spine_plot_phases(spine: Sequence[Mapping[str, Any]]) -> list[dict[st
     for seg in spine or []:
         if not isinstance(seg, Mapping):
             continue
-        window = _time_span(seg.get("t"))
+        window = time_span(seg.get("t"))
         if not window:
             continue
         asr = [row for row in (seg.get("asr") or []) if isinstance(row, Mapping)]
@@ -268,8 +268,8 @@ def expand_spine_plot_phases(spine: Sequence[Mapping[str, Any]]) -> list[dict[st
             sub_caps = [
                 dict(item)
                 for item in caps
-                if (_time_span(item.get("t")) or (0.0, 0.0))[0] <= hi + 1.0
-                and (_time_span(item.get("t")) or (0.0, 0.0))[1] >= lo - 1.0
+                if (time_span(item.get("t")) or (0.0, 0.0))[0] <= hi + 1.0
+                and (time_span(item.get("t")) or (0.0, 0.0))[1] >= lo - 1.0
             ]
             if not sub_asr and not sub_caps:
                 return None

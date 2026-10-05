@@ -14,7 +14,7 @@ from src.services.recap_match import (
     _evidence_for_source_span,
     _has_japanese_kana,
     _text_similarity,
-    _time_span,
+    time_span,
     is_weak_match_clip,
 )
 from src.services.recap_vo_budget import _punctuate_vo_sentence
@@ -136,7 +136,7 @@ def _vo_evidence_window(
     except (TypeError, ValueError, IndexError):
         beat_id = 0
     beat = _beats_by_id(beats).get(beat_id) if beat_id else None
-    span = _time_span((beat or {}).get("t")) if beat else None
+    span = time_span((beat or {}).get("t")) if beat else None
     if span:
         lo = min(lo, span[0] - 2.0)
         hi = max(hi, span[1] + 2.0)

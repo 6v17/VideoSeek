@@ -184,3 +184,5 @@ def write_recap_cuts_file(
         },
         dest,
     )
+
+recap_clip_records = _recap_clip_records

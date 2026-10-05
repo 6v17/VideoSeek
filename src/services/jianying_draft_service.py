@@ -557,7 +557,7 @@ def export_recap_to_jianying_draft(
     if not media or not os.path.isfile(media):
         raise JianyingDraftError("找不到视频文件", detail=media or "(empty)")
 
-    from src.services.recap_service import stretch_recap_clips_for_vo, _probe_media as probe_recap_media
+    from src.services.recap_service import stretch_recap_clips_for_vo, probe_recap_media
 
     media_duration = 0.0
     try:
