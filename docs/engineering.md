@@ -10,7 +10,7 @@ Short rules for keeping VideoSeek maintainable. Architecture overview: [`archite
 4. **Do not import private (`_foo`) symbols across packages** — if another module needs it, make a public helper or move it.
 5. **Prefer new modules under ~400 lines** — when touching a god file, extract the piece you need instead of growing it.
 6. **Broad `except` must not hide a failure** — `except Exception` / bare `except` that still returns `[]` / `0` / `None` / `""` must call `note_swallowed` (or log / raise). Narrow parse catches may keep a quiet fallback. `tests/test_silent_failure_ratchet.py` fails if a new silent one appears.
-7. **Recap prompts live in `src/services/recap_prompts.py`** — `recap_service` re-exports them. Next splits of that file should follow plan / voiceover / match / export, not a rewrite.
+7. **Recap knobs / prompts stay out of the runner** — budgets and stage keys in `src/services/recap_constants.py`, prompt text in `recap_prompts.py`; `recap_service` re-exports both. Next splits should follow plan / voiceover / match / export, not a rewrite.
 
 ## `src.utils` migration
 
