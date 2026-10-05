@@ -10,7 +10,7 @@ Short rules for keeping VideoSeek maintainable. Architecture overview: [`archite
 4. **Do not import private (`_foo`) symbols across packages** — if another module needs it, make a public helper or move it.
 5. **Prefer new modules under ~400 lines** — when touching a god file, extract the piece you need instead of growing it.
 6. **Broad `except` must not hide a failure** — `except Exception` / bare `except` that still returns `[]` / `0` / `None` / `""` must call `note_swallowed` (or log / raise). Narrow parse catches may keep a quiet fallback. `tests/test_silent_failure_ratchet.py` fails if a new silent one appears.
-7. **Recap knobs / prompts / VO budget stay out of the runner** — stage knobs in `recap_constants.py`, prompts in `recap_prompts.py`, VO timing math in `recap_vo_budget.py`; `recap_service` re-exports them. Next splits should follow plan / voiceover / match / export, not a rewrite.
+7. **Recap knobs / prompts / VO budget / match QC stay out of the runner** — stage knobs in `recap_constants.py`, prompts in `recap_prompts.py`, VO timing math in `recap_vo_budget.py`, match QC and span/evidence helpers in `recap_match.py`; `recap_service` re-exports them. Next splits should follow plan / voiceover / match / export, not a rewrite.
 
 ## AI-assisted edit stops
 
