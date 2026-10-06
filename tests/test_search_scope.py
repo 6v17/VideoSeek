@@ -131,6 +131,49 @@ class SearchScopeTests(unittest.TestCase):
         finally:
             os.unlink(existing_path)
 
+    def test_chunk_and_discovery_keep_video_id_for_renamed_source(self):
+        from src.services.search_chunk_pipeline import aggregate_frame_hits_to_chunks
+        from src.services.search_scope import normalize_scope_path
+        from src.services.search_video_discovery import aggregate_hits_to_video_discovery
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            existing_path = handle.name
+        try:
+            path_index = SearchablePathIndex.from_meta(
+                {
+                    "libraries": {
+                        os.path.dirname(existing_path): {
+                            "files": {
+                                os.path.basename(existing_path): {
+                                    "vid": "v1",
+                                    "asset_state": "ready",
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+            stale = "D:/old/moved/clip.mp4"
+            frame_hit = SearchHit(6.0, 6.0, 0.92, stale, video_id="v1")
+            discovery = aggregate_hits_to_video_discovery([frame_hit], 1)
+            kept = filter_hits_with_existing_sources(discovery, path_index=path_index)
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(kept[0].video_id, "v1")
+            self.assertEqual(normalize_scope_path(kept[0].video_path), normalize_scope_path(existing_path))
+
+            range_index = {normalize_scope_path(stale): [(4.0, 10.0)]}
+            with patch(
+                "src.services.search_chunk_pipeline._load_global_chunk_ranges_by_path",
+                return_value=range_index,
+            ):
+                chunks = aggregate_frame_hits_to_chunks([frame_hit], 1, {})
+            kept_chunks = filter_hits_with_existing_sources(chunks, path_index=path_index)
+            self.assertEqual(len(kept_chunks), 1)
+            self.assertEqual(kept_chunks[0].video_id, "v1")
+            self.assertAlmostEqual(float(kept_chunks[0].start_sec), 4.0)
+        finally:
+            os.unlink(existing_path)
+
     def test_enrich_hits_with_source_paths_via_subtitle_index(self):
         from src.services.search_scope import enrich_hits_with_source_paths
 

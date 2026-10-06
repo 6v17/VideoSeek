@@ -167,14 +167,15 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
 
     def test_aggregate_hits_to_video_discovery_marks_video_kind(self):
         hits = [
-            SearchHit(10.0, 10.0, 0.7, "D:/a.mp4"),
-            SearchHit(20.0, 20.0, 0.95, "D:/b.mp4"),
-            SearchHit(30.0, 30.0, 0.8, "D:/a.mp4"),
+            SearchHit(10.0, 10.0, 0.7, "D:/a.mp4", video_id="a"),
+            SearchHit(20.0, 20.0, 0.95, "D:/b.mp4", video_id="b"),
+            SearchHit(30.0, 30.0, 0.8, "D:/a.mp4", video_id="a"),
         ]
         aggregated = aggregate_hits_to_video_discovery(hits, 2)
         self.assertEqual(len(aggregated), 2)
         self.assertEqual(aggregated[0].video_path, "D:/b.mp4")
         self.assertEqual(aggregated[0].match_kind, "video")
+        self.assertEqual(aggregated[0].video_id, "b")
         self.assertAlmostEqual(float(aggregated[0].start_sec), 20.0)
 
     def test_apply_video_discovery_presentation_caps_per_video(self):

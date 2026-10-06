@@ -529,9 +529,9 @@ class ChunkSearchTests(unittest.TestCase):
             ]
         }
         frame_hits = [
-            SearchHit(1.0, 1.0, 0.7, video_path),
-            SearchHit(2.0, 2.0, 0.9, video_path),
-            SearchHit(6.0, 6.0, 0.8, video_path),
+            SearchHit(1.0, 1.0, 0.7, video_path, video_id="vid-a"),
+            SearchHit(2.0, 2.0, 0.9, video_path, video_id="vid-a"),
+            SearchHit(6.0, 6.0, 0.8, video_path, video_id="vid-a"),
         ]
         with patch("src.services.search_chunk_pipeline._load_global_chunk_ranges_by_path", return_value=range_index):
             from src.services.search_chunk_pipeline import aggregate_frame_hits_to_chunks
@@ -539,6 +539,7 @@ class ChunkSearchTests(unittest.TestCase):
             aggregated = aggregate_frame_hits_to_chunks(frame_hits, 5, {})
         self.assertEqual(len(aggregated), 2)
         self.assertAlmostEqual(float(aggregated[0].score), 0.9)
+        self.assertEqual(aggregated[0].video_id, "vid-a")
         self.assertAlmostEqual(float(aggregated[0].start_sec), 0.0)
         self.assertAlmostEqual(float(aggregated[0].end_sec), 4.0)
         self.assertAlmostEqual(float(aggregated[1].score), 0.8)

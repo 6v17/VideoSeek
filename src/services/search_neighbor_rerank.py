@@ -18,6 +18,23 @@ _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
 _PRECISE_NEIGHBOR_BLEND = 0.1
 
 
+def _retimed_hit(hit: SearchHit, timestamp: float, score: float, *, video_path: str | None = None) -> SearchHit:
+    """Keep video_id when a neighbor frame replaces the seed.
+
+    Renamed sources are resolved by video_id after search. Dropping it here
+    makes the filter throw away the best frames of a moved file.
+    """
+    return SearchHit(
+        float(timestamp),
+        float(timestamp),
+        float(score),
+        str(hit.video_path if video_path is None else video_path),
+        match_kind=str(hit.match_kind or "frame"),
+        video_id=str(hit.video_id or ""),
+        matched_text=str(hit.matched_text or ""),
+    )
+
+
 def _neighbor_rerank_enabled(config, is_text: bool = False, precise_image: bool = False) -> bool:
     if is_text or precise_image:
         return False
@@ -197,7 +214,7 @@ def _apply_bounded_neighbor_refine_lance(
         if best_neighbor_score > base_score:
             adjusted_time = clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
             blended_score = ((1.0 - blend) * base_score) + (blend * best_neighbor_score)
-            reranked[rank] = SearchHit(adjusted_time, adjusted_time, blended_score, str(hit.video_path))
+            reranked[rank] = _retimed_hit(hit, adjusted_time, blended_score)
     return reranked
 
 
@@ -239,7 +256,7 @@ def _apply_frame_neighbor_rerank_lance(
             if score > best_score:
                 best_score = score
                 best_timestamp = candidate_ts
-        reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(hit.video_path))
+        reranked[rank] = _retimed_hit(hit, best_timestamp, best_score)
     return dedupe_identical_frame_hits(reranked)
 
 
@@ -281,7 +298,7 @@ def _expand_neighbor_rerank_candidates_lance(
         for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
             base_path = str(hit.video_path or "")
             key = (base_path, int(round(candidate_ts * 1000)))
-            candidate = SearchHit(candidate_ts, candidate_ts, score, base_path)
+            candidate = _retimed_hit(hit, candidate_ts, score, video_path=base_path)
             if key not in candidates or score > float(candidates[key].score):
                 candidates[key] = candidate
 
@@ -363,7 +380,7 @@ def _apply_bounded_neighbor_refine(
         if best_neighbor_score > base_score:
             adjusted_time = clamp_time_near_seed(best_timestamp, seed_time, max_shift_sec)
             blended_score = ((1.0 - blend) * base_score) + (blend * best_neighbor_score)
-            reranked[rank] = SearchHit(adjusted_time, adjusted_time, blended_score, str(hit.video_path))
+            reranked[rank] = _retimed_hit(hit, adjusted_time, blended_score)
     return reranked
 
 
@@ -439,7 +456,7 @@ def _apply_frame_neighbor_rerank(
                 best_score = score
                 best_timestamp = float(timestamps[candidate_id])
 
-        reranked[rank] = SearchHit(best_timestamp, best_timestamp, best_score, str(base_path))
+        reranked[rank] = _retimed_hit(hit, best_timestamp, best_score, video_path=str(base_path))
     return dedupe_identical_frame_hits(reranked)
 
 
@@ -513,7 +530,7 @@ def _expand_neighbor_rerank_candidates(
                 continue
             ts = float(timestamps[candidate_id])
             key = (base_path, int(round(ts * 1000)))
-            hit = SearchHit(ts, ts, score, base_path)
+            hit = _retimed_hit(results[rank], ts, score, video_path=base_path)
             if key not in candidates or score > float(candidates[key].score):
                 candidates[key] = hit
 

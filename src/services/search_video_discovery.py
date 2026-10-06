@@ -76,6 +76,7 @@ def _aggregate_hits_to_video_discovery(hits: List[SearchHit], top_k: int) -> Lis
                 float(hit.score),
                 str(hit.video_path),
                 match_kind="video",
+                video_id=str(hit.video_id or ""),
             )
         )
     return discovery
