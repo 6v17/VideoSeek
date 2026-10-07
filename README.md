@@ -2,7 +2,7 @@
 
 [中文说明](./README.zh.md) | **English**
 
-**Search your local video library by text or screenshot, preview hits, export clips.**  
+**Search a local video library by a sentence, tags, a screenshot, or a line of dialogue. Preview the hit, then export.**  
 Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media files are not uploaded.
 
 > Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.  
@@ -15,20 +15,21 @@ Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media f
 | Feature | Description |
 |---------|-------------|
 | **Local libraries** | Add folders, sync to extract frames and build embeddings |
-| **Text search** | Describe a scene; get time ranges in indexed videos |
-| **Image / screenshot search** | Find similar shots from a reference or cropped frame |
+| **Text search** | Describe a scene; get time ranges in indexed videos, per frame or aggregated into chunks |
+| **Image / screenshot search** | Find similar shots from a reference or cropped frame. One of: frame (default), best per video, deep search, chunk |
 | **Hard-subtitle search** | OCR on-screen subtitles, then keyword search by time; exact match, or fuzzy (**complete query spans first, then scatter hit-rate**, with highlighting) |
-| **Scope & presets** | All libraries, selected libraries/videos; saved search presets |
-| **frame / chunk modes** | Per-frame hits or semantic chunk aggregation |
-| **Preview & export** | Timeline preview; export mp4 segments |
+| **Scope & presets** | All libraries, selected libraries/videos; Compose search can save text plus reference images as a preset |
+| **Preview & export** | Timeline preview and mp4 clips. A shot basket can also export a Jianying draft, Premiere XML, or DaVinci FCPXML. The installer includes the Jianying export dependency |
 
 ### Optional
 
 | Feature | Description |
 |---------|-------------|
 | **Video understanding** | Desktop-only optional: per-chunk captions + whole-video summary; **recap cuts** (plan → match shots → captions); local **CAM++** speaker clustering (`resources/asr/campplus.*`) |
-| **Jianying drafts** | Export shot lists / recap cuts to Jianying; installer bundles the dependency |
-| **Localhost Agent API** | HTTP on `127.0.0.1`: semantic/subtitle search, list libraries/videos, export clips (see `docs/for-agents.md`; no understanding endpoints) |
+| **Tag search** | After understanding has tagged shots, filter by combinations such as “blue hair” or “red-and-white outfit” |
+| **Vision models** | openai-clip, chinese-clip, or siglip2, each in a base and a large pack; switching models means re-syncing that library |
+| **LAN sharing** | One machine indexes as the server; other machines search as clients. Media stays on the server |
+| **Localhost Agent API** | HTTP on `127.0.0.1`: semantic, subtitle, and tag search; list libraries/videos; export clips or a timeline (see `docs/for-agents.md`; no understanding endpoints) |
 | **Video download** | Resolve page links, download into a local folder, then sync like a normal library |
 | **Optional plugins** | Load extension pages before startup via `VIDEOSEEK_PLUGINS` or `profile/plugins.json` (nav / package kinds / i18n). The open-source tree ships no third-party plugin code. |
 
