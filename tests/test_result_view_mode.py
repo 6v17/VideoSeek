@@ -59,76 +59,75 @@ class ResultViewModeTests(unittest.TestCase):
         self.assertEqual(view.grid.count(), 0)
         self.assertEqual(view.table.rowCount(), 0)
 
-    def test_grid_video_discovery_includes_deep_locate_and_elides_title(self):
+    def test_grid_card_elides_title_and_opens_preview_on_double_click(self):
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
         from ui.widgets.result_grid import ResultGridCard
 
         card = ResultGridCard()
-        deep_calls = []
+        opened = []
         long_name = (
             "very_long_video_file_name_for_elide_check_"
             "abcdefghijklmnop_qrstuvwxyz_0123456789_extra_tail.mp4"
         )
         hit = SearchHit(12.0, 12.0, 0.88, rf"D:\videos\{long_name}", match_kind="video")
         texts = {
-            "preview": "预览",
-            "preview_tip": "",
-            "locate": "定位",
-            "locate_tip": "",
-            "deep_locate": "定位镜头",
-            "deep_locate_tip": "",
-            "export_clip": "导出",
-            "export_clip_tip": "",
-            "shot_list_add": "加入",
-            "shot_list_add_tip": "",
             "thumb_loading": "...",
             "time_preview_label": "Preview ~{time}",
         }
-
-        def _noop(*_a, **_k):
-            return None
-
         card.bind(
             rank=1,
             hit=hit,
             texts=texts,
-            on_preview=_noop,
-            on_locate=_noop,
-            on_export=_noop,
-            on_deep_locate=lambda *args: deep_calls.append(args),
-            on_add_to_shot_list=_noop,
+            on_preview=lambda *args: opened.append(args),
         )
-        card.setFixedWidth(312)
         card.title_label.setFixedWidth(160)
         card._refresh_title_elide()
 
-        action_row = card.actions_host.layout().itemAt(0).widget()
-        from PySide6.QtWidgets import QPushButton
-
-        labels = [btn.text() for btn in action_row.findChildren(QPushButton)]
-        self.assertEqual(labels, ["预览", "定位镜头", "定位", "导出", "加入"])
-        locate = next(btn for btn in action_row.findChildren(QPushButton) if btn.text() == "定位")
-        self.assertEqual(locate.property("class"), "TableLocateBtn")
         shown = card.title_label.text()
         self.assertNotEqual(shown, long_name)
         self.assertLess(len(shown), len(long_name))
         self.assertTrue("…" in shown or "..." in shown)
         self.assertTrue(card.title_label.toolTip().endswith(long_name))
+        self.assertFalse(hasattr(card, "actions_host"))
 
-    def test_grid_host_height_includes_last_action_row(self):
-        from ui.widgets.result_grid import ResultGrid, _BTN_H, _GRID_BOTTOM_PAD
+        local = QPointF(card.rect().center())
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            local,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        selected = []
+        card._on_select = lambda item: selected.append(item)
+        card.mousePressEvent(press)
+        self.assertEqual(selected, [card])
+        self.assertEqual(opened, [])
+
+        dbl = QMouseEvent(
+            QEvent.Type.MouseButtonDblClick,
+            local,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        card.mouseDoubleClickEvent(dbl)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(opened[0][0], hit.video_path)
+
+    def test_compact_grid_fits_five_columns_on_browse_width(self):
+        from ui.widgets.result_grid import ResultGrid, _CARD_SPACING, _CARD_WIDTH, _GRID_BOTTOM_PAD
+
+        usable = 1100 - 16
+        cols = max(1, (usable + _CARD_SPACING) // (_CARD_WIDTH + _CARD_SPACING))
+        self.assertGreaterEqual(cols, 5)
 
         grid = ResultGrid()
-        grid.resize(700, 240)
-        texts = {
-            "preview": "预览",
-            "preview_tip": "",
-            "locate": "定位",
-            "locate_tip": "",
-            "export_clip": "导出",
-            "export_clip_tip": "",
-            "thumb_loading": "...",
-            "result_mode_frame": "Frame",
-        }
+        texts = {"thumb_loading": "...", "result_mode_frame": "Frame"}
         hits = [
             SearchHit(1.0, 2.0, 0.9, rf"D:\videos\clip_{i}.mp4", match_kind="frame")
             for i in range(6)
@@ -139,46 +138,9 @@ class ResultViewModeTests(unittest.TestCase):
 
         grid.populate(hits, _noop, _noop, _noop, texts)
         grid._sync_host_height()
-        card_h = max(card.sizeHint().height() for card in grid._cards)
-        self.assertGreaterEqual(card_h, 120)
-        # 3 rows with 2 columns at ~700px width; host must clear last action row + pad.
-        self.assertGreaterEqual(grid._host.minimumHeight(), card_h * 3 + _GRID_BOTTOM_PAD)
-        self.assertGreaterEqual(grid._cards[0].actions_host.minimumHeight(), _BTN_H)
-
-    def test_english_preview_label_is_not_clipped(self):
-        from PySide6.QtWidgets import QPushButton
-
-        from ui.widgets.result_grid import ResultGridCard
-
-        card = ResultGridCard()
-        texts = {
-            "preview": "Preview",
-            "preview_tip": "",
-            "locate": "Locate",
-            "locate_tip": "",
-            "export_clip": "Export",
-            "export_clip_tip": "",
-            "shot_list_add": "Add",
-            "shot_list_add_tip": "",
-            "thumb_loading": "...",
-        }
-
-        def _noop(*_a, **_k):
-            return None
-
-        card.bind(
-            rank=1,
-            hit=SearchHit(1.0, 2.0, 0.9, r"D:\videos\a.mp4", match_kind="frame"),
-            texts=texts,
-            on_preview=_noop,
-            on_locate=_noop,
-            on_export=_noop,
-            on_add_to_shot_list=_noop,
-        )
-        action_row = card.actions_host.layout().itemAt(0).widget()
-        preview = next(btn for btn in action_row.findChildren(QPushButton) if btn.text() == "Preview")
-        needed = preview.fontMetrics().horizontalAdvance("Preview") + 16
-        self.assertGreaterEqual(preview.width(), needed)
+        self.assertEqual(grid._cards[0].width(), _CARD_WIDTH)
+        self.assertFalse(hasattr(grid._cards[0], "actions_host"))
+        self.assertGreater(grid._host.minimumHeight(), _GRID_BOTTOM_PAD)
 
 
 if __name__ == "__main__":

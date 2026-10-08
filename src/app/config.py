@@ -129,7 +129,7 @@ DEFAULT_CONFIG = {
     "export_encode_audio_bitrate": "192k",
     "thumb_width": 130,
     "thumb_height": 75,
-    "search_results_view_mode": "table",
+    "search_results_view_mode": "grid",
     "prefer_gpu": True,
     "inference_ep": "auto",
     "experimental_hw_decode": False,

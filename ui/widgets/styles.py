@@ -592,6 +592,12 @@ QPushButton:disabled {
     background: transparent;
     border: none;
 }
+#MobileBridgeQrButton[placement="settings"] {
+    min-width: 72px;
+    max-width: 88px;
+    min-height: 32px;
+    max-height: 32px;
+}
 #MobileBridgeQrButton:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __ACCENT__;
@@ -624,6 +630,39 @@ QPushButton:disabled {
 #GhostButton:pressed {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __ACCENT__;
+}
+#SearchFilterToggle {
+    background: __BUTTON_SOFT__;
+    border: 1px solid __LINE_STRONG__;
+    color: __HEADLINE__;
+    font-weight: 600;
+    padding: 4px 12px;
+}
+#SearchFilterToggle:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE_STRONG__;
+}
+#SearchFilterToggle[active="true"] {
+    color: __ACCENT__;
+    border-color: __ACCENT__;
+}
+#SearchFilterToggle:checked {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    color: __ACCENT__;
+    padding: 4px 12px;
+}
+#SearchFilterToggle:pressed {
+    background: __BUTTON_SOFT_HOVER__;
+    padding: 4px 12px;
+}
+#SearchFilterSummary {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    padding: 0 2px;
 }
 #PresetChipButton {
     background: __ACCENT_SOFT__;
@@ -979,7 +1018,7 @@ QTextEdit#SearchInput, QPlainTextEdit#SearchInput {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 4px 10px;
     color: __TEXT__;
     selection-background-color: __ACCENT__;
     selection-color: __INVERSE_TEXT__;
@@ -1021,16 +1060,25 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
 #TagSearchForm {
     background: transparent;
 }
-#TagSearchBar {
+#TagSearchField {
     background: __FIELD__;
-    color: __HEADLINE__;
     border: 1px solid __LINE__;
     border-radius: 6px;
-    padding: 4px 10px;
+}
+#TagSearchField[focused="true"] {
+    border: 1px solid __ACCENT__;
+}
+#TagSearchBar {
+    background: transparent;
+    color: __HEADLINE__;
+    border: none;
+    padding: 0 4px;
     selection-background-color: __ACCENT_SOFT__;
 }
-#TagSearchBar:focus {
-    border: 1px solid __ACCENT__;
+#ComposeImagePopup {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
 }
 #TagChipScroll {
     background: transparent;
@@ -1051,6 +1099,26 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
 #TagChipButton:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
+}
+#TagChipNavButton {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
+    color: __HEADLINE__;
+    padding: 0;
+    font-size: 16px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 32px;
+    max-height: 32px;
+}
+#TagChipNavButton:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    border-color: __LINE_STRONG__;
+}
+#TagChipNavButton:disabled {
+    color: __MUTED__;
+    border-color: transparent;
 }
 #TagSuggestList {
     background: __FIELD__;
@@ -1234,6 +1302,14 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     font-size: 12px;
     font-weight: 600;
     padding: 0 2px 0 0;
+}
+#SearchQueryTabs[barOnly="true"]::pane {
+    border: none;
+    background: transparent;
+    max-height: 0px;
+    margin: 0px;
+    padding: 0px;
+    top: 0px;
 }
 #SearchQueryTabs::pane, #RecapPromptTabs::pane {
     border: 1px solid __LINE__;
@@ -1600,6 +1676,92 @@ QTableView#LibraryGroupedLibTree::item:selected:!active {
     border-radius: 8px;
     padding: 12px;
 }
+#ImageQueryInput {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 6px;
+}
+#ImageQueryInput:hover {
+    border-color: __ACCENT__;
+}
+#ImageQueryInput[filled="true"] {
+    background: __FIELD__;
+    border: 1px solid __LINE_STRONG__;
+}
+#ImageQueryInput[filled="true"]:hover {
+    border-color: __ACCENT__;
+}
+#ImageQueryInputText {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0;
+}
+#ImageQueryInput[filled="true"] #ImageQueryInputText {
+    color: __TEXT__;
+    font-weight: 500;
+}
+#ImageQueryThumbPic {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+#ImageQueryClear {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: __MUTED__;
+    font-size: 16px;
+    font-weight: 500;
+    padding: 0;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+}
+#ImageQueryClear:hover {
+    background: __BUTTON_SOFT_HOVER__;
+    color: __DANGER__;
+    padding: 0;
+}
+#ImageQueryClear:pressed {
+    background: __BUTTON_SOFT_HOVER__;
+    color: __DANGER__;
+    padding: 0;
+}
+#ImageQueryPreview {
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+    border-radius: 8px;
+}
+#ImageQueryPreview QLabel {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+#ImageQueryPath {
+    color: __MUTED__;
+    font-size: 12px;
+    font-weight: 400;
+    padding: 0;
+}
+#SearchPreviewStripThumb {
+    background: __FIELD__;
+    border: 1px solid __LINE__;
+    border-radius: 4px;
+    padding: 0;
+}
+#SearchPreviewStripThumb[selected="true"] {
+    border: 2px solid __ACCENT__;
+}
+#SearchPreviewStripCaption {
+    color: __MUTED__;
+    font-size: 11px;
+    padding: 0;
+    background: transparent;
+}
 #PreviewPlaceholder {
     /* Fill the preview host; do not force a tall min (starves the results splitter). */
     min-height: 0px;
@@ -1644,13 +1806,16 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
 #PreviewTimeLabel {
     color: __HEADLINE__;
     font-family: Consolas, "Microsoft YaHei UI", monospace;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
-    padding: 5px 10px;
+    padding: 2px 8px;
     background: __TRACK__;
     border: 1px solid __LINE__;
-    border-radius: 8px;
+    border-radius: 6px;
     min-width: 102px;
+}
+#PreviewDialog QPushButton {
+    padding: 3px 10px;
 }
 #PreviewSegmentQueueHint {
     color: #38bdf8;
@@ -1730,6 +1895,15 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
 #ResultGridCard:hover {
     border-color: __ACCENT__;
     background: __BUTTON_SOFT__;
+}
+#ResultGridCard[selected="true"] {
+    border-color: __ACCENT__;
+    background: __ACCENT_SOFT__;
+}
+#ResultGridThumb {
+    background: __TRACK__;
+    border: none;
+    border-radius: 6px;
 }
 #ResultGridRank {
     background: __ACCENT_SOFT__;

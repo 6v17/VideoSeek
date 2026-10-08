@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QLabel, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
 
 from ui.views.table_views import populate_result_table
 from ui.widgets.result_grid import ResultGrid
@@ -32,6 +32,7 @@ class ResultView(QWidget):
         view_mode: str = VIEW_TABLE,
     ):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._busy = False
         self._empty_message = ""
         self._mode = VIEW_GRID if str(view_mode or "").strip().lower() == VIEW_GRID else VIEW_TABLE
@@ -41,6 +42,7 @@ class ResultView(QWidget):
         layout.setSpacing(0)
 
         self.stack = QStackedWidget()
+        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         if min_table_height is not None:
             self.stack.setMinimumHeight(min_table_height)
 
@@ -87,6 +89,13 @@ class ResultView(QWidget):
         self._sync_empty_overlay()
         if emit:
             self.view_mode_changed.emit(self._mode)
+
+    def set_viewport_min_height(self, height: int) -> None:
+        """One floor for the stack. Child table/grid mins must not stack on top of it."""
+        height = max(120, int(height))
+        self.stack.setMinimumHeight(height)
+        self.table.setMinimumHeight(0)
+        self.grid.setMinimumHeight(0)
 
     def _apply_mode_widget(self) -> None:
         self.content_stack.setCurrentWidget(self.grid if self._mode == VIEW_GRID else self.table)

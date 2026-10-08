@@ -268,6 +268,9 @@ class SearchController(QObject):
             # Legacy cache / mistaken emit of QPixmap — accept but do not create off-thread.
             pixmap = image
         self._result_view().set_thumbnail(row, pixmap)
+        updater = getattr(self.parent_window, "_update_search_preview_strip_thumb", None)
+        if updater is not None and pixmap is not None:
+            updater(row, pixmap)
 
     def _on_search_progress(self, progress_key: str):
         if self._is_shutdown or not self._is_current_worker():
@@ -357,6 +360,9 @@ class SearchController(QObject):
     def _display_results(self, results):
         if self._is_shutdown or not self._is_current_worker():
             return
+        leave_preview = getattr(self.parent_window, "_leave_search_preview_layer", None)
+        if leave_preview is not None and getattr(self.parent_window, "_search_preview_embedded", False):
+            leave_preview()
         is_locate_run = bool(getattr(self.worker, "preview_anchor_sec", None) is not None)
         if not is_locate_run:
             self._last_coarse_results = list(results or [])
@@ -444,6 +450,17 @@ class SearchController(QObject):
         self._sync_results_pager()
         self._update_results_status_text(results, context)
         self._start_page_thumbnails(page_results)
+        self._sync_embedded_preview_strip()
+
+    def _sync_embedded_preview_strip(self) -> None:
+        window = self.parent_window
+        if not getattr(window, "_search_preview_embedded", False):
+            return
+        filler = getattr(window, "_fill_search_preview_strip", None)
+        dialog = getattr(window, "_preview_dialog", None)
+        if filler is None or dialog is None:
+            return
+        filler(getattr(dialog, "video_path", ""), getattr(dialog, "start_sec", 0.0))
 
     def _update_results_status_text(self, results, context: dict) -> None:
         texts = self.parent_window.texts

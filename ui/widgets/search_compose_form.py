@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -112,15 +113,16 @@ class PresetImageChip(QWidget):
 class SearchComposeFormWidget(QWidget):
     """Search-time mixed query editor (no preset name / save actions)."""
 
-    def __init__(self, parent=None, *, texts: dict | None = None, fill_text: bool = False):
+    def __init__(self, parent=None, *, texts: dict | None = None, fill_text: bool = False, inline_bar: bool = False):
         super().__init__(parent)
         self.texts = dict(texts or {})
         self._fill_text = bool(fill_text)
+        self._inline_bar = bool(inline_bar)
         self._image_paths: list[str] = []
         self._image_chips: list[PresetImageChip] = []
         strip_height = int(COMPONENT_SIZES.get("compose_image_strip_height", 118))
 
-        root = QVBoxLayout(self)
+        root = QHBoxLayout(self) if self._inline_bar else QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(4)
 
@@ -128,13 +130,15 @@ class SearchComposeFormWidget(QWidget):
         self.input_description.setObjectName("SearchInput")
         self.input_description.setPlaceholderText("")
         self.input_description.setAcceptRichText(False)
-        if self._fill_text:
+        if self._inline_bar:
+            self.input_description.setFixedHeight(32)
+            self.input_description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        elif self._fill_text:
             self.input_description.setMinimumHeight(68)
             self.input_description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            root.addWidget(self.input_description, 1)
         else:
             self.input_description.setFixedHeight(80)
-            root.addWidget(self.input_description)
+        root.addWidget(self.input_description, 1)
 
         self.images_scroll = QScrollArea()
         self.images_scroll.setWidgetResizable(True)
@@ -148,20 +152,46 @@ class SearchComposeFormWidget(QWidget):
         self.images_layout.setSpacing(6 if self._fill_text else 10)
         self.images_layout.addStretch(1)
         self.images_scroll.setWidget(self.images_host)
-        root.addWidget(self.images_scroll)
 
-        image_actions = QHBoxLayout()
-        image_actions.setSpacing(8)
         self.btn_add_images = QPushButton()
         self.btn_remove_selected = QPushButton()
         self.btn_remove_selected.setObjectName("DangerGhostButton")
         self.btn_remove_selected.setEnabled(False)
         self.btn_add_images.clicked.connect(self._add_images)
         self.btn_remove_selected.clicked.connect(self._remove_selected_images)
-        image_actions.addWidget(self.btn_add_images)
-        image_actions.addWidget(self.btn_remove_selected)
-        image_actions.addStretch(1)
-        root.addLayout(image_actions)
+        self._image_popup = None
+        self.btn_open_images = None
+        if self._inline_bar:
+            self.btn_open_images = QPushButton()
+            self.btn_open_images.setObjectName("GhostButton")
+            self.btn_open_images.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_open_images.setFixedHeight(32)
+            self.btn_open_images.setMinimumWidth(72)
+            self.btn_open_images.clicked.connect(self._toggle_image_popup)
+            root.addWidget(self.btn_open_images, 0)
+            self._image_popup = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+            self._image_popup.setObjectName("ComposeImagePopup")
+            self._image_popup.hide()
+            popup_layout = QVBoxLayout(self._image_popup)
+            popup_layout.setContentsMargins(10, 10, 10, 10)
+            popup_layout.setSpacing(8)
+            popup_layout.addWidget(self.images_scroll)
+            image_actions = QHBoxLayout()
+            image_actions.setSpacing(8)
+            self.btn_add_images.setFixedHeight(32)
+            self.btn_remove_selected.setFixedHeight(32)
+            image_actions.addWidget(self.btn_add_images)
+            image_actions.addWidget(self.btn_remove_selected)
+            image_actions.addStretch(1)
+            popup_layout.addLayout(image_actions)
+        else:
+            root.addWidget(self.images_scroll)
+            image_actions = QHBoxLayout()
+            image_actions.setSpacing(8)
+            image_actions.addWidget(self.btn_add_images)
+            image_actions.addWidget(self.btn_remove_selected)
+            image_actions.addStretch(1)
+            root.addLayout(image_actions)
 
         self.fusion_block = QWidget()
         fusion_layout = QHBoxLayout(self.fusion_block)
@@ -183,10 +213,15 @@ class SearchComposeFormWidget(QWidget):
         fusion_layout.addWidget(self.slider_fusion, 1)
         fusion_layout.addWidget(self.lbl_fusion_image)
         fusion_layout.addWidget(self.lbl_fusion_value)
-        root.addWidget(self.fusion_block)
-
-        if self._fill_text:
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if self._inline_bar:
+            self.fusion_block.setMaximumHeight(36)
+            self._image_popup.layout().addWidget(self.fusion_block)
+            self.setFixedHeight(34)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        else:
+            root.addWidget(self.fusion_block)
+            if self._fill_text:
+                self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.input_description.textChanged.connect(self._refresh_fusion_controls)
         self.slider_fusion.valueChanged.connect(self._update_fusion_value_label)
@@ -194,12 +229,28 @@ class SearchComposeFormWidget(QWidget):
         self._rebuild_image_strip()
         self.set_texts(self.texts)
 
+    def apply_inline_height(self, height: int) -> None:
+        """Inline compose bar: description shows two lines; the image button stays centered."""
+        if not self._inline_bar:
+            return
+        height = max(32, int(height))
+        self.input_description.setFixedHeight(height)
+        self.input_description.document().setDocumentMargin(2)
+        self.input_description.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.input_description.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.input_description.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFixedHeight(height)
+        lay = self.layout()
+        if lay is not None:
+            lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
     def set_texts(self, texts: dict) -> None:
         self.texts = dict(texts or {})
         self.input_description.setPlaceholderText(
             self.texts.get("search_presets_field_description_hint", "")
         )
         self.btn_add_images.setText(self.texts.get("search_presets_add_images", "Add images"))
+        self._refresh_open_images_button()
         self.lbl_fusion_text.setText(self.texts.get("search_presets_fusion_text", "Text"))
         self.lbl_fusion_image.setText(self.texts.get("search_presets_fusion_image", "Image"))
         self._update_remove_selected_state()
@@ -310,6 +361,7 @@ class SearchComposeFormWidget(QWidget):
         self.images_layout.addStretch(1)
         has_images = bool(self._image_paths)
         self.images_scroll.setVisible(has_images)
+        self._refresh_open_images_button()
         self._update_remove_selected_state()
         self._refresh_fusion_controls()
 
@@ -337,7 +389,48 @@ class SearchComposeFormWidget(QWidget):
         self._image_paths = [path for path in self._image_paths if path not in selected]
         self._rebuild_image_strip()
 
+    def _refresh_open_images_button(self) -> None:
+        button = self.btn_open_images
+        if button is None:
+            return
+        count = len(self._image_paths)
+        if count:
+            button.setText(
+                self.texts.get("search_compose_images_count", "图片 {count}").format(count=count)
+            )
+        else:
+            button.setText(self.texts.get("search_compose_images", "图片"))
+
+    def _toggle_image_popup(self) -> None:
+        popup = self._image_popup
+        if popup is None:
+            return
+        if popup.isVisible():
+            popup.hide()
+            return
+        self._show_image_popup()
+
+    def _show_image_popup(self) -> None:
+        popup = self._image_popup
+        if popup is None or not self.isVisible():
+            return
+        popup.setMinimumWidth(max(420, int(self.input_description.width())))
+        popup.adjustSize()
+        origin = self.input_description.mapToGlobal(QPoint(0, self.input_description.height() + 4))
+        popup.move(origin)
+        popup.show()
+
+    def hideEvent(self, event) -> None:
+        popup = self._image_popup
+        if popup is not None and popup.isVisible():
+            popup.hide()
+        super().hideEvent(event)
+
     def _add_images(self):
+        reopen = bool(self._inline_bar)
+        popup = self._image_popup
+        if reopen and popup is not None and popup.isVisible():
+            popup.hide()
         paths, _selected = QFileDialog.getOpenFileNames(
             self,
             self.texts.get("search_presets_add_images", "Add images"),
@@ -346,3 +439,5 @@ class SearchComposeFormWidget(QWidget):
         )
         for path in paths:
             self.add_image(path)
+        if reopen and paths:
+            self._show_image_popup()

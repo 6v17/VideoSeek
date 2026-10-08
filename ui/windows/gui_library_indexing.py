@@ -365,20 +365,7 @@ class LibraryIndexingGuiMixin:
             pass
 
         if hint is not None:
-            if subtitle_mode:
-                hint.setText(
-                    self.texts.get(
-                        "library_subtitle_mode_hint",
-                        self.texts.get("library_shared_add_hint", ""),
-                    )
-                )
-            else:
-                hint.setText(
-                    self.texts.get(
-                        "library_visual_mode_hint",
-                        self.texts.get("library_shared_add_hint", ""),
-                    )
-                )
+            hint.hide()
 
     def _active_library_tree(self):
         page = self.library_page
@@ -559,8 +546,9 @@ class LibraryIndexingGuiMixin:
                     "用户机：显示服务机共享库与字幕库（只读）。索引请在服务机完成；可用范围搜索限定片源。",
                 )
             )
+            hint.show()
         else:
-            # Keep mode-aware add/remove copy (not the generic shared fallback).
+            hint.hide()
             self._refresh_library_action_hints()
         self._refresh_remove_selected_videos_button()
         self._refresh_cleanup_missing_button_state(probe=False)

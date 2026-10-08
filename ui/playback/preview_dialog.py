@@ -164,6 +164,7 @@ class ExportClipWorker(QThread):
 class PreviewDialog(QDialog):
     export_requested = Signal(str, float, float, str, str)
     export_status_changed = Signal(str, str)
+    add_to_shot_list_requested = Signal(str, float, float, str)
     # Emitted when the user dismisses the floating preview (close hides; event is ignored).
     dismissed = Signal()
 
@@ -213,12 +214,13 @@ class PreviewDialog(QDialog):
         self._owns_player = shared_player is None
         self._on_release_shared_player = on_release_shared_player
 
+        self.setObjectName("PreviewDialog")
         self.setWindowTitle(self.texts.get("preview_dialog_title", "Large Preview"))
         self.resize(1000, 660)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 4, 8, 6)
+        layout.setSpacing(4)
 
         self.video_host = _PreviewVideoHost()
         self.video_host.setMinimumHeight(480)
@@ -234,10 +236,11 @@ class PreviewDialog(QDialog):
         self.detail_label = QLabel("")
         self.detail_label.setObjectName("Hint")
         self.detail_label.setWordWrap(True)
+        self.detail_label.setVisible(False)
         layout.addWidget(self.detail_label)
 
         transport = QHBoxLayout()
-        transport.setSpacing(8)
+        transport.setSpacing(6)
         self.play_button = QPushButton(self.texts.get("preview_dialog_pause", "Pause"))
         self.fullscreen_button = QPushButton(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
         self.fullscreen_button.setObjectName("NeutralToolButton")
@@ -287,7 +290,7 @@ class PreviewDialog(QDialog):
         layout.addWidget(self.slider)
 
         segment_row = QHBoxLayout()
-        segment_row.setSpacing(8)
+        segment_row.setSpacing(6)
         self.set_start_button = QPushButton(self.texts.get("preview_dialog_set_start", "Set Start"))
         self.set_end_button = QPushButton(self.texts.get("preview_dialog_set_end", "Set End"))
         self.clear_segment_button = QPushButton(self.texts.get("preview_dialog_clear_segment", "Clear Segment"))
@@ -298,11 +301,15 @@ class PreviewDialog(QDialog):
         self.frame_export_button = QPushButton(self.texts.get("preview_frame_export", "存帧"))
         self.frame_export_button.setObjectName("GhostButton")
         self.frame_export_button.setEnabled(False)
+        self.add_to_shot_list_button = QPushButton()
+        self.add_to_shot_list_button.setObjectName("AccentGhostButton")
+        self.add_to_shot_list_button.setEnabled(False)
         self._frame_export_thread = None
         segment_row.addWidget(self.set_start_button)
         segment_row.addWidget(self.set_end_button)
         segment_row.addStretch(1)
         segment_row.addWidget(self.clear_segment_button)
+        segment_row.addWidget(self.add_to_shot_list_button)
         segment_row.addWidget(self.frame_export_button)
         segment_row.addWidget(self.export_button)
         layout.addLayout(segment_row)
@@ -321,6 +328,8 @@ class PreviewDialog(QDialog):
         self.clear_segment_button.clicked.connect(self._clear_segment)
         self.export_button.clicked.connect(self._export_segment)
         self.frame_export_button.clicked.connect(self._export_current_frame)
+        self.add_to_shot_list_button.clicked.connect(self._add_to_shot_list)
+        self._sync_add_to_shot_list_button(enabled=False)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
 
@@ -404,6 +413,7 @@ class PreviewDialog(QDialog):
         self.clear_segment_button.setEnabled(True)
         self.fullscreen_button.setEnabled(True)
         self.frame_export_button.setEnabled(bool(self.video_path))
+        self._sync_add_to_shot_list_button()
         self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         self._update_segment_ui()
         try:
@@ -460,6 +470,7 @@ class PreviewDialog(QDialog):
         self.fullscreen_button.setEnabled(False)
         self.export_button.setEnabled(False)
         self.frame_export_button.setEnabled(False)
+        self._sync_add_to_shot_list_button(enabled=False)
 
     def _finalize_close(self):
         self._pending_close = False
@@ -569,6 +580,7 @@ class PreviewDialog(QDialog):
             self.clear_segment_button.setEnabled(False)
             self.export_button.setEnabled(False)
             self.frame_export_button.setEnabled(False)
+            self._sync_add_to_shot_list_button(enabled=False)
             return
 
         self._playback_ready = True
@@ -733,22 +745,6 @@ class PreviewDialog(QDialog):
         self.fullscreen_button.setText(self.texts.get("preview_dialog_exit_fullscreen", "Exit Fullscreen"))
         self._schedule_rebind()
 
-    def _lock_status_line(self):
-        if not self._playback_ready or self._closing:
-            return ""
-        player = self.player
-        if player is None:
-            return ""
-        if player.has_locked_window():
-            return self.texts.get(
-                "preview_dialog_locked",
-                "Matched segment preview is locked and will pause automatically at the end point.",
-            )
-        return self.texts.get(
-            "preview_dialog_unlocked",
-            "Full video unlocked. You can scrub and continue playback freely.",
-        )
-
     def _set_caption_text(self, caption_text=None):
         text = str(caption_text or "").strip()
         self._caption_text = text
@@ -764,9 +760,8 @@ class PreviewDialog(QDialog):
             self.detail_label.setText(self._detail_error)
             self.detail_label.setVisible(True)
             return
-        lock = self._lock_status_line()
-        self.detail_label.setText(lock)
-        self.detail_label.setVisible(bool(lock))
+        self.detail_label.clear()
+        self.detail_label.setVisible(False)
 
     def _refresh_segment_queue_hint(self):
         text = (self._segment_line_override or "").strip()
@@ -930,6 +925,7 @@ class PreviewDialog(QDialog):
         self.export_button.setToolTip("")
         frame_busy = self._frame_export_thread is not None and self._frame_export_thread.isRunning()
         self.frame_export_button.setEnabled(bool(self.video_path) and not self._closing and not frame_busy)
+        self._sync_add_to_shot_list_button(enabled=bool(self.video_path) and not self._closing)
         self._refresh_segment_bounds_labels()
         self._apply_detail_label()
         self._refresh_segment_queue_hint()
@@ -1009,6 +1005,38 @@ class PreviewDialog(QDialog):
         self.play_button.setEnabled(not busy)
         self.fullscreen_button.setEnabled(not busy)
         self.slider.setEnabled(not busy)
+        self._sync_add_to_shot_list_button(enabled=(not busy) and bool(self.video_path) and not self._closing)
+
+    def _sync_add_to_shot_list_button(self, *, enabled: bool | None = None) -> None:
+        button = getattr(self, "add_to_shot_list_button", None)
+        if button is None:
+            return
+        button.setText(
+            self.texts.get(
+                "preview_dialog_add_to_shot_list",
+                self.texts.get("shot_list_add", "加入素材篮"),
+            )
+        )
+        button.setToolTip(self.texts.get("shot_list_add_tip", ""))
+        if enabled is None:
+            enabled = bool(self.video_path) and not self._closing
+        button.setEnabled(bool(enabled))
+
+    def _add_to_shot_list(self) -> None:
+        path = str(self.video_path or "").strip()
+        if not path:
+            return
+        segment = self._normalized_segment()
+        if segment is not None:
+            start_sec, end_sec = segment
+            match_kind = "clip"
+        else:
+            start_sec = float(self.start_sec or 0.0)
+            end_sec = float(self.end_sec if self.end_sec is not None else start_sec)
+            if end_sec < start_sec:
+                start_sec, end_sec = end_sec, start_sec
+            match_kind = "clip" if abs(end_sec - start_sec) > 0.05 else "frame"
+        self.add_to_shot_list_requested.emit(path, start_sec, end_sec, match_kind)
 
 
 def _format_segment_display_sec(value):

@@ -3,74 +3,79 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QSize, QTimer
+from shiboken6 import isValid
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from ui.widgets.styles import repolish_widget
 from src.app.path_display import video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_locate import format_clip_score_percent, resolve_clip_confidence_label
 from ui.views.table_views import _format_time_range
 from ui.widgets.thumb_cell import make_thumb_label
 
-# Wide enough for video-discovery actions: 预览 / 定位镜头 / 定位 / 导出 / 加入
-_CARD_MIN_WIDTH = 312
+# Thumbnail-first card. ~200px lets five columns fit the content area beside the sidebar.
+_CARD_WIDTH = 196
 _CARD_SPACING = 12
 _GRID_BOTTOM_PAD = 20
-_BTN_H = 30
-# Floors only; English labels (Preview / Locate / Export) are sized from font metrics.
-_BTN_W = 54
-_BTN_DEEP_W = 72
-_BTN_ADD_W = 46
-# TableBtn QSS padding 5px 8px + 1px border + a little slack so the first glyph is not clipped.
-_BTN_PAD_X = 24
+_THUMB_HEIGHT = 110
 
 
 class ResultGridCard(QFrame):
-    """One hit: thumb + title + meta + compact actions (same set/order as list)."""
+    """One hit: thumbnail, name, time, and score. Double-click opens preview."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ResultGridCard")
+        self.setProperty("selected", False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-        self.setFixedWidth(_CARD_MIN_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        self.setFixedWidth(_CARD_WIDTH)
 
         self._video_path = ""
         self._start_sec = 0.0
         self._end_sec = 0.0
         self._on_preview = None
+        self._on_select = None
         self._title_full = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(6)
 
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(6)
+        self.thumb_wrap = QFrame()
+        self.thumb_wrap.setObjectName("ResultGridThumb")
+        self.thumb_wrap.setFixedHeight(_THUMB_HEIGHT)
+        thumb_grid = QGridLayout(self.thumb_wrap)
+        thumb_grid.setContentsMargins(0, 0, 0, 0)
+        thumb_grid.setSpacing(0)
+
+        self.thumb_label = make_thumb_label(text="…")
+        self.thumb_label.setMinimumHeight(_THUMB_HEIGHT)
+        self.thumb_label.setMaximumHeight(_THUMB_HEIGHT)
+        self.thumb_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
         self.rank_label = QLabel()
         self.rank_label.setObjectName("ResultGridRank")
         self.rank_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.rank_label.setFixedSize(22, 22)
-        head.addWidget(self.rank_label, 0)
-        head.addStretch(1)
-        root.addLayout(head)
 
-        self.thumb_label = make_thumb_label(text="…")
-        self.thumb_label.setMinimumHeight(84)
-        self.thumb_label.setMaximumHeight(110)
-        self.thumb_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        root.addWidget(self.thumb_label)
+        thumb_grid.addWidget(self.thumb_label, 0, 0)
+        thumb_grid.addWidget(
+            self.rank_label,
+            0,
+            0,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+        )
+        root.addWidget(self.thumb_wrap)
 
         self.title_label = QLabel()
         self.title_label.setObjectName("ResultGridTitle")
@@ -88,13 +93,14 @@ class ResultGridCard(QFrame):
         self.meta_label.setFixedHeight(self.meta_label.fontMetrics().height() + 2)
         root.addWidget(self.meta_label)
 
-        self.actions_host = QWidget()
-        self.actions_host.setObjectName("ResultGridActions")
-        self.actions_host.setMinimumHeight(_BTN_H)
-        actions_layout = QVBoxLayout(self.actions_host)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(0)
-        root.addWidget(self.actions_host)
+        for widget in (
+            self.thumb_wrap,
+            self.thumb_label,
+            self.rank_label,
+            self.title_label,
+            self.meta_label,
+        ):
+            widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -112,14 +118,28 @@ class ResultGridCard(QFrame):
             return
         width = max(48, self.title_label.width() - 2)
         if self.title_label.width() <= 0:
-            width = max(48, _CARD_MIN_WIDTH - 20)
+            width = max(48, _CARD_WIDTH - 20)
         elided = self.title_label.fontMetrics().elidedText(
             full, Qt.TextElideMode.ElideMiddle, width
         )
         self.title_label.setText(elided)
 
+    def set_selected(self, selected: bool) -> None:
+        selected = bool(selected)
+        if bool(self.property("selected")) == selected:
+            return
+        self.setProperty("selected", selected)
+        repolish_widget(self)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._on_select is not None:
+            self._on_select(self)
+        super().mousePressEvent(event)
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._video_path and self._on_preview:
+            if self._on_select is not None:
+                self._on_select(self)
             self._on_preview(self._video_path, self._start_sec, self._end_sec)
         super().mouseDoubleClickEvent(event)
 
@@ -144,14 +164,15 @@ class ResultGridCard(QFrame):
         hit,
         texts: dict,
         on_preview,
-        on_locate,
-        on_export,
+        on_locate=None,
+        on_export=None,
         on_deep_locate=None,
         on_add_to_shot_list=None,
         clip_score_mode: bool = False,
         low_confidence: bool = False,
         loading_text: str = "…",
     ) -> None:
+        del on_locate, on_export, on_deep_locate, on_add_to_shot_list
         coerced = coerce_search_hit(hit)
         self._video_path = str(coerced.video_path or "")
         self._start_sec = float(coerced.start_sec)
@@ -183,96 +204,14 @@ class ResultGridCard(QFrame):
             score_text = f"{score_text} ⚠"
         meta = f"{time_text} · {score_text}"
         self.meta_label.setToolTip(meta)
-        meta_width = max(48, self.meta_label.width() - 2) if self.meta_label.width() > 0 else (_CARD_MIN_WIDTH - 20)
+        meta_width = max(48, self.meta_label.width() - 2) if self.meta_label.width() > 0 else (_CARD_WIDTH - 20)
         self.meta_label.setText(
             self.meta_label.fontMetrics().elidedText(meta, Qt.TextElideMode.ElideRight, meta_width)
         )
 
-        layout = self.actions_host.layout()
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-        row = QWidget()
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(4)
-        row_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-        def _action(text: str, tip: str, slot, *, width: int = _BTN_W, btn_class: str = "TableBtn") -> QPushButton:
-            btn = QPushButton(text)
-            btn.setProperty("class", btn_class)
-            fitted = max(width, btn.fontMetrics().horizontalAdvance(text) + _BTN_PAD_X)
-            btn.setFixedSize(fitted, _BTN_H)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            # Avoid Space re-firing the last clicked action (preview play/pause owns Space).
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn.setAutoDefault(False)
-            btn.setDefault(False)
-            if tip:
-                btn.setToolTip(tip)
-            btn.clicked.connect(slot)
-            return btn
-
-        # Same order / roles as list view ``_build_result_actions``.
-        row_layout.addWidget(
-            _action(
-                texts.get("preview", "Preview"),
-                texts.get("preview_tip", ""),
-                lambda _=False, p=self._video_path, s=self._start_sec, e=self._end_sec: on_preview(p, s, e),
-            )
-        )
-        if match_kind == "video" and on_deep_locate is not None:
-            row_layout.addWidget(
-                _action(
-                    texts.get("deep_locate", "Find shot"),
-                    texts.get("deep_locate_tip", ""),
-                    lambda _=False, p=self._video_path, a=self._start_sec, sc=score: on_deep_locate(p, a, sc),
-                    width=_BTN_DEEP_W,
-                )
-            )
-        row_layout.addWidget(
-            _action(
-                texts.get("locate", "Locate"),
-                texts.get("locate_tip", ""),
-                lambda _=False, p=self._video_path: on_locate(p),
-                btn_class="TableLocateBtn",
-            )
-        )
-        if on_export is not None:
-            row_layout.addWidget(
-                _action(
-                    texts.get("export_clip", "Export"),
-                    texts.get("export_clip_tip", ""),
-                    lambda _=False, p=self._video_path, s=self._start_sec, e=self._end_sec: on_export(p, s, e),
-                )
-            )
-        if on_add_to_shot_list is not None:
-            row_layout.addWidget(
-                _action(
-                    texts.get("shot_list_add", "Add"),
-                    texts.get("shot_list_add_tip", ""),
-                    lambda _=False, p=self._video_path, s=self._start_sec, e=self._end_sec, sc=score, k=match_kind: on_add_to_shot_list(
-                        p, s, e, sc, k
-                    ),
-                    width=_BTN_ADD_W,
-                )
-            )
-        layout.addWidget(row)
-        self._sync_card_width(row)
-
         self._on_preview = on_preview
+        self.set_selected(False)
         self.updateGeometry()
-
-    def _sync_card_width(self, row: QWidget) -> None:
-        buttons = row.findChildren(QPushButton)
-        if not buttons:
-            self.setFixedWidth(_CARD_MIN_WIDTH)
-            return
-        row_w = sum(int(btn.width()) for btn in buttons) + 4 * max(0, len(buttons) - 1)
-        self.setFixedWidth(max(_CARD_MIN_WIDTH, row_w + 16))
 
 
 class ResultGrid(QScrollArea):
@@ -299,17 +238,12 @@ class ResultGrid(QScrollArea):
         self.setWidget(self._host)
 
         self._cards: list[ResultGridCard] = []
+        self._selected: ResultGridCard | None = None
         self._cols = 1
         self._side_pad = -1
 
     def _card_slot_width(self) -> int:
-        if not self._cards:
-            return _CARD_MIN_WIDTH
-        widths = [
-            max(_CARD_MIN_WIDTH, int(card.width()), int(card.minimumWidth()))
-            for card in self._cards
-        ]
-        return max(widths)
+        return _CARD_WIDTH
 
     def count(self) -> int:
         return len(self._cards)
@@ -321,6 +255,7 @@ class ResultGrid(QScrollArea):
             if widget is not None:
                 widget.deleteLater()
         self._cards = []
+        self._selected = None
         self._host.setMinimumHeight(0)
 
     def set_thumbnail(self, row: int, pixmap) -> None:
@@ -367,10 +302,16 @@ class ResultGrid(QScrollArea):
                 low_confidence=low_confidence,
                 loading_text=loading,
             )
+            card._on_select = self._select_card
             self._cards.append(card)
+        self._selected = None
         self._reflow(force=True)
-        # Layout/QSS settle on the next tick; re-measure so the last action row is scrollable.
         QTimer.singleShot(0, self._sync_host_height)
+
+    def _select_card(self, card: ResultGridCard) -> None:
+        self._selected = card
+        for other in self._cards:
+            other.set_selected(other is card)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -407,7 +348,9 @@ class ResultGrid(QScrollArea):
         self._sync_host_height()
 
     def _sync_host_height(self) -> None:
-        """Force scrollable height so the last card's action row is not clipped."""
+        """Force scrollable height so the last card is not clipped."""
+        if not isValid(self) or not isValid(self._host):
+            return
         if not self._cards:
             self._host.setMinimumHeight(0)
             return
@@ -435,7 +378,6 @@ class ResultGrid(QScrollArea):
             + max(0, rows - 1) * spacing
         )
         layout_hint = int(self._grid.sizeHint().height())
-        # Keep a little extra so the final action buttons clear the viewport edge.
         total = max(measured, layout_hint) + 8
         if self._host.minimumHeight() != total:
             self._host.setMinimumHeight(total)

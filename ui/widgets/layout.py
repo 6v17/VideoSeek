@@ -4,7 +4,7 @@ from PySide6.QtGui import QGuiApplication
 
 WINDOW_SIZES = {
     "main": {
-        "preferred": QSize(1360, 850),
+        "preferred": QSize(1400, 850),
         # Soft floor; apply_window_size further clamps against available geometry.
         "minimum": QSize(1024, 600),
         "screen_margin": 72,

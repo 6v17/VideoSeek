@@ -1,8 +1,12 @@
 """Local search panel with image/text query tabs and shared scope + mobile upload."""
 
-from PySide6.QtCore import Qt, Signal
+import os
+
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -16,15 +20,253 @@ from PySide6.QtWidgets import (
 
 from ui.widgets.layout import (
     COMPONENT_SIZES,
-    compare_row_card_height,
     compute_search_panel_width,
-    compute_search_query_tabs_height,
-    image_drop_min_height,
-    search_panel_min_height,
 )
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
-from ui.widgets.tag_search_form import TagSearchForm
+from ui.widgets.styles import repolish_widget
+from ui.widgets.tag_search_form import TagSearchForm, _StripHint
+
+
+class _ElidedPathLabel(QLabel):
+    """Single-line path. The middle is elided; the tooltip keeps the full address."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ImageQueryPath")
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(32)
+        self.setMinimumWidth(0)
+        self._full = ""
+        self.hide()
+
+    def set_path(self, path: str) -> None:
+        self._full = str(path or "").strip()
+        self.setToolTip(self._full)
+        self.setVisible(bool(self._full))
+        self._elide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        if not self._full:
+            super().setText("")
+            return
+        width = max(0, self.width() - 4)
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, width))
+
+
+class ImageQueryThumb(QFrame):
+    """Compact image query. Click, drop, and paste stay on the existing handlers."""
+
+    image_clear_requested = Signal()
+    _HEIGHT = 48
+    _PREVIEW_MAX = 280
+    _EMPTY_CAPTION = "选择图片 / 拖入图片"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ImageQueryInput")
+        self.setProperty("filled", False)
+        self.setFixedHeight(self._HEIGHT)
+        self.setMinimumWidth(220)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._source: QPixmap | None = None
+        self._hint = ""
+        self._caption = self._EMPTY_CAPTION
+        self._file_path = ""
+        self._preview: QFrame | None = None
+        self._preview_label: QLabel | None = None
+        self._path_label: _ElidedPathLabel | None = None
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 4, 6, 4)
+        row.setSpacing(8)
+
+        self._thumb = QLabel()
+        self._thumb.setObjectName("ImageQueryThumbPic")
+        self._thumb.setFixedSize(40, 36)
+        self._thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._thumb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._thumb.hide()
+
+        self._text = QLabel(self._caption)
+        self._text.setObjectName("ImageQueryInputText")
+        self._text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        self._clear = QPushButton("×")
+        self._clear.setObjectName("ImageQueryClear")
+        self._clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._clear.setFixedSize(22, 22)
+        self._clear.setToolTip("移除图片")
+        self._clear.hide()
+        self._clear.clicked.connect(lambda _checked=False: self.image_clear_requested.emit())
+
+        row.addWidget(self._thumb, 0)
+        row.addWidget(self._text, 1)
+        row.addWidget(self._clear, 0)
+        self._show_caption()
+
+    def set_path(self, path: str) -> None:
+        self._file_path = str(path or "").strip()
+        if self._path_label is not None:
+            self._path_label.set_path("")
+        if self._source is not None and not self._source.isNull():
+            self._show_filled()
+
+    def set_caption(self, text: str) -> None:
+        self._caption = str(text or "").strip() or self._EMPTY_CAPTION
+        if self._source is None or self._source.isNull():
+            self._show_caption()
+
+    def set_clear_tip(self, text: str) -> None:
+        self._clear.setToolTip(str(text or "").strip() or "移除图片")
+
+    def apply_bar_height(self, height: int) -> None:
+        """Stay about one and a half times a normal field, not the full query row."""
+        del height
+        self._HEIGHT = 48
+        self.setFixedHeight(self._HEIGHT)
+        self._thumb.setFixedSize(40, 36)
+        if self._source is not None and not self._source.isNull():
+            self._show_filled()
+        else:
+            self._show_caption()
+
+    def setText(self, text: str) -> None:  # noqa: N802 — kept for the existing drop hint
+        self._hint = str(text or "")
+        self.setToolTip(self._hint)
+        if self._source is None or self._source.isNull():
+            self._text.setToolTip(self._hint)
+
+    def clear(self) -> None:  # noqa: N802 — Qt-style API used by the window
+        self._source = None
+        self._file_path = ""
+        self._hide_preview()
+        if self._path_label is not None:
+            self._path_label.set_path("")
+        self._show_caption()
+
+    def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802 — Qt-style API used by the window
+        self._source = QPixmap(pixmap) if pixmap is not None else QPixmap()
+        if self._source.isNull():
+            self._show_caption()
+            return
+        self._show_filled()
+
+    def pixmap(self) -> QPixmap:  # noqa: N802 — Qt-style API used by the window
+        if self._source is not None and not self._source.isNull():
+            return self._source
+        return QPixmap()
+
+    def _show_caption(self) -> None:
+        self._thumb.hide()
+        self._clear.hide()
+        self._text.setToolTip(self._hint)
+        self.setProperty("filled", False)
+        repolish_widget(self)
+        self._elide_text()
+
+    def _show_filled(self) -> None:
+        self._text.setToolTip(self._file_path or self._hint)
+        thumb = self._source.scaled(
+            40,
+            36,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._thumb.setPixmap(thumb)
+        self._thumb.show()
+        self._clear.show()
+        self.setProperty("filled", True)
+        repolish_widget(self)
+        self._elide_text()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._elide_text()
+
+    def _elide_text(self) -> None:
+        filled = self._source is not None and not self._source.isNull()
+        full = os.path.basename(self._file_path) if filled and self._file_path else self._caption
+        width = self._text.width()
+        if width < 24:
+            width = max(24, self.width() - (70 if filled else 28))
+        shown = self._text.fontMetrics().elidedText(
+            full,
+            Qt.TextElideMode.ElideMiddle if filled else Qt.TextElideMode.ElideRight,
+            width,
+        )
+        self._text.setText(shown)
+
+    def enterEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().enterEvent(event)
+        self._show_preview()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 — Qt API
+        self._hide_preview()
+        super().leaveEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 — Qt API
+        self._hide_preview()
+        super().hideEvent(event)
+
+    def _ensure_preview(self) -> QFrame:
+        host = self.window() or self
+        preview = self._preview
+        if preview is not None and preview.parentWidget() is host:
+            return preview
+        if preview is not None:
+            preview.hide()
+            preview.deleteLater()
+        preview = QFrame(
+            host,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+        preview.setObjectName("ImageQueryPreview")
+        preview.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        preview.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        layout = QVBoxLayout(preview)
+        layout.setContentsMargins(4, 4, 4, 4)
+        label = QLabel(preview)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+        preview.hide()
+        self._preview = preview
+        self._preview_label = label
+        return preview
+
+    def _show_preview(self) -> None:
+        if self._source is None or self._source.isNull() or not self.isVisible():
+            return
+        preview = self._ensure_preview()
+        label = self._preview_label
+        if label is None:
+            return
+        shown = self._source.scaled(
+            self._PREVIEW_MAX,
+            self._PREVIEW_MAX,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        label.setPixmap(shown)
+        preview.adjustSize()
+        origin = self.mapToGlobal(QPoint(0, self.height() + 6))
+        preview.move(origin)
+        preview.show()
+        preview.raise_()
+
+    def _hide_preview(self) -> None:
+        if self._preview is not None:
+            self._preview.hide()
 
 
 class SearchScopeSelect(QComboBox):
@@ -85,13 +327,10 @@ class SearchPanel(VSCard):
 
         combo_width = int(COMPONENT_SIZES.get("search_option_combo_width", 96))
         scope_select_width = int(COMPONENT_SIZES.get("search_scope_select_width", 120))
-        mobile_qr_width = int(COMPONENT_SIZES.get("mobile_bridge_qr_width", 56))
         field_label_width = int(COMPONENT_SIZES.get("search_field_label_width", 96))
         field_gap = int(COMPONENT_SIZES.get("search_field_gap", 4))
         group_gap = int(COMPONENT_SIZES.get("search_controls_group_gap", 12))
-        toggle_width = 52
         group1_width = field_label_width + field_gap + scope_select_width
-        group2_width = field_label_width + field_gap + toggle_width + field_gap + mobile_qr_width
         combo_policy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         def _configure_field_label(label: QLabel) -> None:
@@ -106,18 +345,21 @@ class SearchPanel(VSCard):
                 QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
             )
 
-        self.img_label = QLabel()
-        self.img_label.setObjectName("ImageDropZone")
-        self.img_label.setAlignment(Qt.AlignCenter)
-        self.img_label.setWordWrap(True)
-        self.img_label.setMinimumHeight(image_drop_min_height())
-        self.img_label.setMinimumWidth(0)
-        self.img_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.img_label = ImageQueryThumb()
+        self.lbl_image_path = _ElidedPathLabel()
+        self.img_label._path_label = self.lbl_image_path
+        image_slot = QWidget()
+        image_slot_row = QHBoxLayout(image_slot)
+        image_slot_row.setContentsMargins(0, 0, 0, 0)
+        image_slot_row.setSpacing(8)
+        image_slot_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        image_slot_row.addWidget(self.img_label, 1)
+        image_slot_row.addWidget(self.lbl_image_path, 1)
 
         self.text_search = QTextEdit()
         self.text_search.setObjectName("SearchInput")
-        self.text_search.setMinimumHeight(68)
-        self.text_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.text_search.setFixedHeight(32)
+        self.text_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.text_search.setAcceptRichText(False)
 
         self.lbl_active_model = QLabel()
@@ -126,19 +368,17 @@ class SearchPanel(VSCard):
         self.lbl_active_model.setWordWrap(False)
         self.lbl_active_model.setFixedHeight(20)
 
-        self.lbl_text_model_hint = QLabel()
+        self.lbl_text_model_hint = _StripHint(self, self.text_search)
         self.lbl_text_model_hint.setObjectName("StatusHint")
-        self.lbl_text_model_hint.setWordWrap(True)
 
         self.dialogue_search = QTextEdit()
         self.dialogue_search.setObjectName("SearchInput")
-        self.dialogue_search.setMinimumHeight(68)
-        self.dialogue_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.dialogue_search.setFixedHeight(32)
+        self.dialogue_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.dialogue_search.setAcceptRichText(False)
 
-        self.lbl_dialogue_hint = QLabel()
+        self.lbl_dialogue_hint = _StripHint(self, self.dialogue_search)
         self.lbl_dialogue_hint.setObjectName("StatusHint")
-        self.lbl_dialogue_hint.setWordWrap(True)
 
         self.tags_form = TagSearchForm()
         self.tags_search = self.tags_form.tags_search
@@ -251,62 +491,35 @@ class SearchPanel(VSCard):
         self.search_mode_options_stack.addWidget(self.search_mode_options_placeholder)
         self.search_mode_options_stack.addWidget(self.dialogue_search_mode_cluster)
 
-        tab_page_height = image_drop_min_height() + int(
-            COMPONENT_SIZES.get("search_query_tab_page_margins_v", 12)
-        )
+        self.compose_form = SearchComposeFormWidget(fill_text=True, inline_bar=True)
 
-        self.image_tab = QWidget()
-        self.image_tab.setMinimumHeight(tab_page_height)
-        image_tab_layout = QVBoxLayout(self.image_tab)
-        image_tab_layout.setContentsMargins(4, 4, 4, 4)
-        image_tab_layout.setSpacing(6)
-        image_tab_layout.addWidget(self.img_label, 1)
-
-        self.text_tab = QWidget()
-        self.text_tab.setMinimumHeight(tab_page_height)
-        text_tab_layout = QVBoxLayout(self.text_tab)
-        text_tab_layout.setContentsMargins(4, 4, 4, 4)
-        text_tab_layout.setSpacing(4)
-        text_tab_layout.addWidget(self.text_search, 1)
-        text_tab_layout.addWidget(self.lbl_text_model_hint, 0, Qt.AlignmentFlag.AlignTop)
-
-        self.compose_form = SearchComposeFormWidget(fill_text=True)
-        self.compose_tab = QWidget()
-        self.compose_tab.setMinimumHeight(tab_page_height)
-        compose_tab_layout = QVBoxLayout(self.compose_tab)
-        compose_tab_layout.setContentsMargins(4, 4, 4, 4)
-        compose_tab_layout.setSpacing(0)
-        compose_tab_layout.addWidget(self.compose_form, 1)
-
-        self.dialogue_tab = QWidget()
-        self.dialogue_tab.setMinimumHeight(tab_page_height)
-        dialogue_tab_layout = QVBoxLayout(self.dialogue_tab)
-        dialogue_tab_layout.setContentsMargins(4, 4, 4, 4)
-        dialogue_tab_layout.setSpacing(4)
-        dialogue_tab_layout.addWidget(self.dialogue_search, 1)
-        dialogue_tab_layout.addWidget(self.lbl_dialogue_hint, 0, Qt.AlignmentFlag.AlignTop)
-
-        self.tags_tab = QWidget()
-        self.tags_tab.setMinimumHeight(tab_page_height)
-        tags_tab_layout = QVBoxLayout(self.tags_tab)
-        tags_tab_layout.setContentsMargins(4, 4, 4, 4)
-        tags_tab_layout.setSpacing(0)
-        tags_tab_layout.addWidget(self.tags_form, 1)
+        self.query_stack = QStackedWidget()
+        self.query_stack.setObjectName("SearchQueryStack")
+        self.query_stack.setFixedHeight(34)
+        self.query_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        for editor in (
+            image_slot,
+            self.text_search,
+            self.compose_form,
+            self.dialogue_search,
+            self.tags_form,
+        ):
+            self.query_stack.addWidget(editor)
 
         self.search_query_tabs = QTabWidget()
         self.search_query_tabs.setObjectName("SearchQueryTabs")
-        tabs_min = compute_search_query_tabs_height()
-        self.search_query_tabs.setMinimumHeight(tabs_min)
-        # Soft ceiling so the query card can shrink without locking min==max.
-        self.search_query_tabs.setMaximumHeight(tabs_min + 96)
-        self.search_query_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.search_query_tabs.setProperty("barOnly", True)
+        self.search_query_tabs.setDocumentMode(True)
+        self.search_query_tabs.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.search_query_tabs.tabBar().setUsesScrollButtons(False)
         self.search_query_tabs.tabBar().setExpanding(False)
-        self.search_query_tabs.addTab(self.image_tab, "")
-        self.search_query_tabs.addTab(self.text_tab, "")
-        self.search_query_tabs.addTab(self.compose_tab, "")
-        self.search_query_tabs.addTab(self.dialogue_tab, "")
-        self.search_query_tabs.addTab(self.tags_tab, "")
+        self.search_query_tabs.tabBar().setFixedHeight(28)
+        for _name in ("image", "text", "compose", "dialogue", "tags"):
+            placeholder = QWidget()
+            placeholder.setMaximumHeight(0)
+            self.search_query_tabs.addTab(placeholder, "")
+        self.search_query_tabs.setFixedHeight(30)
+        self.search_query_tabs.currentChanged.connect(self.query_stack.setCurrentIndex)
 
         self.search_scope_label = QLabel()
         self.search_scope_label.setObjectName("InlineFieldLabel")
@@ -345,137 +558,185 @@ class SearchPanel(VSCard):
         self.options_block = self.search_scope_cluster
         self.options_title = self.search_scope_label
 
-        self.mobile_toggle_label = QLabel()
-        self.mobile_toggle_label.setObjectName("InlineFieldLabel")
-        _configure_field_label(self.mobile_toggle_label)
-        self.btn_mobile_toggle = QPushButton()
-        self.btn_mobile_toggle.setObjectName("MobileBridgeToggle")
-        self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
-        self.btn_mobile_toggle.setCheckable(True)
-        self.btn_mobile_toggle.setFixedWidth(toggle_width)
-        self.btn_mobile_toggle.setFixedHeight(options_combo_height)
-        self.btn_mobile_toggle.setSizePolicy(combo_policy)
-        self.btn_mobile_qr = QPushButton()
-        self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
-        self.btn_mobile_qr.setFixedWidth(mobile_qr_width)
-        self.btn_mobile_qr.setMinimumWidth(mobile_qr_width)
-        self.btn_mobile_qr.setMaximumWidth(mobile_qr_width)
-        self.btn_mobile_qr.setFixedHeight(options_combo_height)
-        self.btn_mobile_qr.setProperty("qrState", "hidden")
-        self.btn_mobile_qr.setEnabled(False)
-        self.btn_mobile_qr.setSizePolicy(combo_policy)
-        self.mobile_group = QWidget()
-        mobile_group_layout = QHBoxLayout(self.mobile_group)
-        mobile_group_layout.setContentsMargins(0, 2, 0, 2)
-        mobile_group_layout.setSpacing(field_gap)
-        mobile_group_layout.addWidget(self.mobile_toggle_label, 0)
-        mobile_group_layout.addWidget(self.btn_mobile_toggle, 0)
-        mobile_group_layout.addWidget(self.btn_mobile_qr, 0)
-        _configure_field_group(self.mobile_group, width=group2_width)
-        self.mobile_group.setFixedHeight(options_row_height)
-
         self.mobile_row = QWidget()
-        self.mobile_row.setObjectName("SearchMobileRow")
-        mobile_row_layout = QHBoxLayout(self.mobile_row)
-        mobile_row_layout.setContentsMargins(0, 0, 0, 0)
-        mobile_row_layout.setSpacing(group_gap)
-        mobile_row_layout.addWidget(self.search_scope_cluster, 0)
-        mobile_row_layout.addWidget(self.mobile_group, 0)
-        self.mobile_row.setFixedHeight(options_row_height)
-        self.mobile_row.setSizePolicy(
-            QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        )
+        self.mobile_row.hide()
 
+        self._filter_row_height = options_row_height
         self.options_row = QWidget()
         self.options_row.setObjectName("SearchOptionsRow")
         options_row_layout = QHBoxLayout(self.options_row)
         options_row_layout.setContentsMargins(0, 0, 0, 0)
         options_row_layout.setSpacing(group_gap)
+        options_row_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        options_row_layout.addWidget(self.search_scope_cluster, 0)
         options_row_layout.addWidget(self.skip_edges_cluster, 0)
         options_row_layout.addWidget(self.search_mode_options_stack, 0)
         self.options_row.setFixedHeight(options_row_height)
         self.options_row.setSizePolicy(
-            QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         )
 
         self.btn_search = QPushButton()
         self.btn_search.setObjectName("SearchButton")
+        self.btn_search.setFixedHeight(32)
         self.btn_save_preset = QPushButton()
         self.btn_save_preset.setObjectName("GhostButton")
+        self.btn_save_preset.setFixedHeight(32)
         self.btn_clear = QPushButton()
         self.btn_clear.setObjectName("DangerGhostButton")
-        action_row = QHBoxLayout()
-        # Extra top gap so the mode combo bottom border is not covered by 开始搜索.
-        action_row.setContentsMargins(0, 8, 0, 0)
-        action_row.setSpacing(8)
-        action_row.addWidget(self.btn_search, 1)
-        action_row.addWidget(self.btn_save_preset, 0)
-        action_row.addWidget(self.btn_clear)
+        self.btn_clear.setFixedHeight(32)
+        self.btn_filters = QPushButton("高级参数")
+        self.btn_filters.setObjectName("SearchFilterToggle")
+        self.btn_filters.setCheckable(True)
+        self.btn_filters.setChecked(False)
+        self.btn_filters.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_filters.setFixedHeight(32)
+        self.btn_filters.setToolTip("搜索范围、跳过时段和搜索模式")
+        self.lbl_filter_summary = QLabel()
+        self.lbl_filter_summary.setObjectName("SearchFilterSummary")
+        self.lbl_filter_summary.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_filter_summary.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.lbl_filter_summary.hide()
+        self._filter_summary = ""
+        options_row_layout.addWidget(self.btn_save_preset, 0)
+        options_row_layout.addStretch(1)
+        self.options_row.hide()
+        self.btn_filters.toggled.connect(self._on_filters_toggled)
 
-        layout.addWidget(self.lbl_active_model, 0)
-        layout.addWidget(self.search_query_tabs, 0)
-        layout.addWidget(self.mobile_row, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(self.options_row, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addLayout(action_row, 0)
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(8)
+        tab_row.addWidget(self.search_query_tabs, 0)
+        tab_row.addStretch(1)
+        tab_row.addWidget(self.lbl_active_model, 0)
+
+        query_row = QHBoxLayout()
+        query_row.setContentsMargins(0, 0, 0, 0)
+        query_row.setSpacing(8)
+        query_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._query_row = query_row
+        query_row.addWidget(self.query_stack, 1)
+        query_row.addWidget(self.btn_search, 0)
+        query_row.addWidget(self.btn_clear, 0)
+        query_row.addWidget(self.btn_filters, 0)
+        query_row.addWidget(self.lbl_filter_summary, 0)
+        query_row.addStretch(0)
+        self.search_query_tabs.currentChanged.connect(self._sync_query_anchor)
+
+        layout.addLayout(tab_row, 0)
+        layout.addLayout(query_row, 0)
+        layout.addWidget(self.options_row, 0)
 
         default_width = compute_search_panel_width()
         self._width_ceiling = default_width
         self._default_width = default_width
-        self.setMinimumWidth(default_width)
-        # Allow dragging wider for tags suggestions; keep a sane ceiling.
-        self.setMaximumWidth(max(default_width + 280, int(default_width * 1.85)))
-        # Preferred height for sizeHint; hard min must fit all fixed option rows.
-        self._default_height = compare_row_card_height()
-        self.setMinimumHeight(search_panel_min_height())
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(16777215)
+        # One short bar. The old card height belonged to the side preview, not the query.
+        self._default_height = 116
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._sync_card_height()
+        self._apply_query_box_height()
         self._field_label_pad = 4
         self._field_gap = field_gap
         self._scope_select_width = scope_select_width
         self._mode_combo_width = mode_combo_width
         self._enhance_combo_width = enhance_combo_width
-        self._toggle_width = toggle_width
-        self._mobile_qr_width = mobile_qr_width
         self._group_gap = group_gap
         self._viewport_budget_height: int | None = None
+        self._sync_query_anchor()
 
     def apply_viewport_budget(self, viewport_height: int | None) -> None:
-        """Shrink tab/drop floors for short logical windows; keep option rows intact."""
-        try:
-            vh = int(viewport_height) if viewport_height is not None else None
-        except (TypeError, ValueError):
-            vh = None
-        if vh is not None and vh < 240:
-            vh = None
-        if vh == getattr(self, "_viewport_budget_height", None):
+        """Keep the query bar at one fixed strip. Results own the leftover height."""
+        del viewport_height
+        self._sync_card_height()
+
+    def _on_filters_toggled(self, opened: bool) -> None:
+        self.options_row.setVisible(bool(opened))
+        self._sync_card_height()
+        self._apply_filter_summary_visibility()
+
+    def _sync_card_height(self) -> None:
+        """Collapsed bar stays 116. The filter row adds one line only while open."""
+        extra = 0
+        if self.btn_filters.isChecked():
+            extra = int(self._filter_row_height) + int(self.content_layout.spacing())
+        self.setFixedHeight(int(self._default_height or 116) + extra)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._sync_query_anchor()
+
+    def _query_field_width(self) -> int:
+        """Every query field takes about 55% of the bar so the actions sit against it."""
+        margins = self.content_layout.contentsMargins()
+        inner = max(0, self.width() - margins.left() - margins.right())
+        if inner < 480:
+            inner = 480
+        target = int(inner * 0.55)
+        floor = 280
+        ceiling = max(floor, inner - 320)
+        return max(floor, min(target, ceiling))
+
+    def _sync_query_anchor(self) -> None:
+        """Keep every query field the same width, with spare space after the buttons."""
+        lay = getattr(self, "_query_row", None)
+        if lay is None:
             return
-        self._viewport_budget_height = vh
+        stack_index = lay.indexOf(self.query_stack)
+        tail = lay.count() - 1
+        if stack_index < 0 or tail <= stack_index:
+            return
+        width = self._query_field_width()
+        self.query_stack.setMinimumWidth(width)
+        self.query_stack.setMaximumWidth(width)
+        lay.setStretch(stack_index, 0)
+        lay.setStretch(tail, 1)
 
-        drop = image_drop_min_height(viewport_height=vh)
-        margins = int(COMPONENT_SIZES.get("search_query_tab_page_margins_v", 12))
-        tab_page = drop + margins
-        self.img_label.setMinimumHeight(drop)
-        for tab in (
-            self.image_tab,
-            self.text_tab,
-            self.compose_tab,
-            self.dialogue_tab,
-            self.tags_tab,
-        ):
-            tab.setMinimumHeight(tab_page)
-
-        tabs_min = compute_search_query_tabs_height(viewport_height=vh)
-        # Shorter windows: less extra stretch above the drop zone.
-        slack = 48 if (vh is not None and vh < 720) else 96
-        self.search_query_tabs.setMinimumHeight(tabs_min)
-        self.search_query_tabs.setMaximumHeight(tabs_min + slack)
-
-        panel_min = search_panel_min_height(viewport_height=vh)
-        self.setMinimumHeight(panel_min)
-        # Prefer a shorter sizeHint when the viewport is cramped.
-        if vh is not None and vh < 780:
-            self._default_height = panel_min
+    def set_filter_summary(self, text: str) -> None:
+        """Quiet reminder of filters that are not at their default."""
+        full = " ".join(str(text or "").split())
+        self._filter_summary = full
+        self.lbl_filter_summary.setToolTip(full)
+        if full:
+            shown = self.lbl_filter_summary.fontMetrics().elidedText(
+                full,
+                Qt.TextElideMode.ElideRight,
+                260,
+            )
+            self.lbl_filter_summary.setText(shown)
         else:
-            self._default_height = max(panel_min, compare_row_card_height())
+            self.lbl_filter_summary.clear()
+        self.btn_filters.setProperty("active", bool(full))
+        repolish_widget(self.btn_filters)
+        self._apply_filter_summary_visibility()
+
+    def _apply_filter_summary_visibility(self) -> None:
+        self.lbl_filter_summary.setVisible(bool(self._filter_summary) and not self.btn_filters.isChecked())
+
+    def _apply_query_box_height(self) -> None:
+        """Give the query field two text lines without growing the card."""
+        card = int(self._default_height or 116)
+        margin_v = int(COMPONENT_SIZES.get("search_panel_card_margin", 8)) * 2
+        spacing = max(6, int(COMPONENT_SIZES.get("search_panel_row_spacing", 4)))
+        tabs = self.search_query_tabs.height() or 30
+        # Panel border sits outside the layout.
+        available = card - margin_v - spacing - int(tabs) - 2
+        line = max(16, self.fontMetrics().lineSpacing())
+        two_lines = line * 2 + 14
+        # Use the card's leftover height so the field is at least two lines tall.
+        height = available if available >= two_lines else max(36, available)
+        self.query_stack.setFixedHeight(height)
+        for editor in (self.text_search, self.dialogue_search):
+            editor.setFixedHeight(height)
+            editor.document().setDocumentMargin(2)
+            editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tags_form.apply_bar_height(height)
+        self.compose_form.apply_inline_height(height)
+        self.img_label.apply_bar_height(height)
+        self.lbl_image_path.setFixedHeight(min(32, height))
 
     def relayout_inline_fields(self) -> None:
         """Hug each label to its text and size dropdowns to their copy."""
@@ -484,7 +745,6 @@ class SearchPanel(VSCard):
             for name in (
                 "search_scope_label",
                 "skip_edges_label",
-                "mobile_toggle_label",
                 "search_mode_label",
                 "text_search_enhance_label",
                 "image_search_mode_label",
@@ -516,8 +776,6 @@ class SearchPanel(VSCard):
         image_mode_w = self._fit_combo_width(self.image_search_mode, floor=56, cap=120)
         dialogue_mode_w = self._fit_combo_width(self.dialogue_search_mode, floor=56, cap=120)
         enhance_w = self._fit_combo_width(self.text_search_enhance, floor=48, cap=84)
-        toggle_w = int(getattr(self, "_toggle_width", 52))
-        qr_w = int(getattr(self, "_mobile_qr_width", 56))
 
         def _cluster_width(label, control_width) -> int:
             return int(label_widths.get(label, 0)) + field_gap + int(control_width)
@@ -529,10 +787,6 @@ class SearchPanel(VSCard):
         if hasattr(self, "skip_edges_cluster"):
             self.skip_edges_cluster.setMinimumWidth(
                 _cluster_width(self.skip_edges_label, skip_w)
-            )
-        if hasattr(self, "mobile_group"):
-            self.mobile_group.setMinimumWidth(
-                _cluster_width(self.mobile_toggle_label, toggle_w + field_gap + qr_w)
             )
         if hasattr(self, "image_search_mode_cluster"):
             self.image_search_mode_cluster.setMinimumWidth(
@@ -557,11 +811,7 @@ class SearchPanel(VSCard):
             self._text_options_width_mode_only = mode_only
             self.text_granularity_cluster.setMinimumWidth(with_enhance if show_enhance else mode_only)
 
-        row1 = (
-            _cluster_width(self.search_scope_label, scope_w)
-            + group_gap
-            + _cluster_width(self.mobile_toggle_label, toggle_w + field_gap + qr_w)
-        )
+        row1 = _cluster_width(self.search_scope_label, scope_w)
         skip_label = getattr(self, "skip_edges_label", None)
         row2 = _cluster_width(skip_label, skip_w) + group_gap + int(
             getattr(self, "_text_options_width_with_enhance", 0) or 0
@@ -590,8 +840,8 @@ class SearchPanel(VSCard):
     def sizeHint(self):
         from PySide6.QtCore import QSize
 
-        # Initial preferred size; splitter can still shrink to minimumHeight / widen.
-        return QSize(int(self._default_width), int(self._default_height))
+        height = int(self.minimumHeight() or self._default_height)
+        return QSize(max(int(self._default_width), 1), height)
 
     def text_query(self) -> str:
         return self.text_search.toPlainText().strip()

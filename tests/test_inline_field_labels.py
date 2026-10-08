@@ -23,7 +23,6 @@ class InlineFieldLabelLayoutTests(unittest.TestCase):
             "search_scope_label": "Search scope",
             "image_search_mode_label": "Image mode",
             "search_mode_label": "Search mode",
-            "mobile_toggle_label": "Phone",
             "dialogue_search_mode_label": "Match mode",
             "text_search_enhance_label": "Enhance",
         }

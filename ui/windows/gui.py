@@ -322,6 +322,7 @@ class MainWindow(
         self.preview_surface_stack.setCurrentWidget(self.search_page.preview_placeholder)
 
         self.result_table = self.search_page.result_table
+        self.result_table.cellDoubleClicked.connect(self._open_result_table_preview)
 
         self.sidebar.btn_page_search.clicked.connect(lambda: self.switch_page("search"))
         self.sidebar.btn_page_link.clicked.connect(lambda: self.switch_page("link"))
@@ -343,9 +344,10 @@ class MainWindow(
         self.search_page._results_view_group.idClicked.connect(self._on_results_view_mode_clicked)
         self.search_page.search_scope_select.editor_requested.connect(self.open_search_scope_editor)
         self.search_page.btn_skip_edges.editor_requested.connect(self.open_skip_edges_dialog)
-        self.search_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
-        self.search_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
+        self.settings_page.btn_mobile_toggle.clicked.connect(self.toggle_mobile_bridge)
+        self.settings_page.btn_mobile_qr.clicked.connect(self.show_mobile_bridge_qr)
         self.search_page.btn_export_tasks.clicked.connect(self.show_preview_export_tasks)
+        self.search_page.btn_preview_export_tasks.clicked.connect(self.show_preview_export_tasks)
         self.search_page.search_mode.currentIndexChanged.connect(self._on_search_mode_changed)
         if hasattr(self.search_page, "text_search_enhance"):
             self.search_page.text_search_enhance.currentIndexChanged.connect(
@@ -371,6 +373,8 @@ class MainWindow(
             tags_edit.textChanged.connect(self._on_tags_query_changed)
         self.search_page.search_query_tabs.currentChanged.connect(self._on_search_query_tab_changed)
         self.search_page.img_label.mousePressEvent = lambda e: self.upload_file()
+        if hasattr(self.search_page.img_label, "image_clear_requested"):
+            self.search_page.img_label.image_clear_requested.connect(self.clear_image_query)
         self._init_search_scope_state()
         self.link_page.btn_probe.clicked.connect(self.start_video_download_probe)
         self.link_page.btn_download.clicked.connect(self.start_video_download)
@@ -786,7 +790,7 @@ class MainWindow(
         self.sidebar.runtime_hint.setToolTip("")
 
         self.search_page.header.title.setText(t["search_page_title"])
-        self.search_page.header.subtitle.setText(t["search_page_desc"])
+        self.search_page.header.subtitle.hide()
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
@@ -798,16 +802,25 @@ class MainWindow(
         self.search_page.btn_results_view_grid.setText(t.get("results_view_grid", "网格"))
         self.search_page.btn_results_view_table.setToolTip(t.get("results_view_table_tip", ""))
         self.search_page.btn_results_view_grid.setToolTip(t.get("results_view_grid_tip", ""))
+        self.search_page.btn_preview_back.setText(t.get("search_preview_back", "返回结果"))
+        self.search_page.preview_strip_label.setText(t.get("search_preview_strip", "同视频就近候选"))
+        self.search_page.preview_strip_label.setToolTip(t.get("search_preview_strip_tip", "双击播放"))
+        self.search_page.preview_detail_title.setText(t.get("search_preview_detail", "当前视频"))
         self.search_page.apply_results_float_texts(t)
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_shot_list_button()
         self._update_preview_action_button_styles()
         self.search_page.text_search.setPlaceholderText(t["search_placeholder"])
-        self.search_page.mobile_toggle_label.setText(t.get("mobile_bridge_toggle_label", t["mobile_bridge_start"]))
-        self.search_page.btn_mobile_qr.setText(t["mobile_bridge_qr"])
+        dialogue = getattr(self.search_page, "dialogue_search", None)
+        if dialogue is not None:
+            dialogue.setPlaceholderText(t.get("search_dialogue_placeholder", "输入字幕里出现过的词或短句..."))
         self._update_mobile_bridge_controls()
         self.search_page.btn_search.setText(t["search"])
         self.search_page.btn_clear.setText(t["clear"])
+        filters = getattr(self.search_page, "btn_filters", None)
+        if filters is not None:
+            filters.setText(t.get("search_filters_toggle", "高级参数"))
+            filters.setToolTip(t.get("search_filters_toggle_tip", ""))
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
         self.search_page.skip_edges_label.setText(t.get("search_skip_edges_label", "跳过时段"))
         if hasattr(self, "_refresh_skip_edges_summary"):
@@ -822,7 +835,7 @@ class MainWindow(
         self.search_controller._sync_results_pager()
 
         self.link_page.header.title.setText(t["link_page_title"])
-        self.link_page.header.subtitle.setText(t["link_page_desc"])
+        self.link_page.header.subtitle.hide()
         self.link_page.links_input.setPlaceholderText(t["download_links_placeholder"])
         self.link_page.btn_change_dir.setText(t["download_change_dir"])
         cfg = load_config()
@@ -839,7 +852,7 @@ class MainWindow(
         self.video_download_controller.refresh_default_dir_label()
 
         self.library_page.header.title.setText(t["library_page_title"])
-        self.library_page.header.subtitle.setText(t["library_page_desc"])
+        self.library_page.header.subtitle.hide()
         self.library_page.btn_tab_visual.setText(t.get("library_tab_visual", "Videos"))
         self.library_page.btn_tab_dialogue.setText(t.get("library_tab_dialogue", "Dialogue"))
         if getattr(self.library_page, "lbl_mode_caption", None) is not None:
@@ -860,12 +873,7 @@ class MainWindow(
             self.library_page.btn_add_lib.setText(t.get("add_folder", "Add Library"))
             self.library_page.btn_remove_lib.setText(t.get("remove_library", "Remove Library"))
             self.library_page.btn_remove_lib.setToolTip(t.get("remove_library_hint", ""))
-            self.library_page.lbl_shared_library_hint.setText(
-                t.get(
-                    "library_shared_add_hint",
-                    "Add/Remove applies to the current type: Videos are per CLIP model; Subtitles are global.",
-                )
-            )
+            self.library_page.lbl_shared_library_hint.hide()
         if hasattr(self, "_refresh_team_client_library_chrome"):
             self._refresh_team_client_library_chrome()
         self.library_page.btn_sync_db.setText(
@@ -1004,9 +1012,7 @@ class MainWindow(
                 "Test feature: APIs and storage may still change.",
             )
         )
-        self.understanding_page.header.subtitle.setText(
-            t.get("understanding_page_desc_motion", t["understanding_page_desc"])
-        )
+        self.understanding_page.header.subtitle.hide()
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
         if hasattr(self.understanding_page, "select_hint"):
             self.understanding_page.select_hint.setText(
@@ -1295,7 +1301,7 @@ class MainWindow(
                 self._refresh_understanding_settings_status()
 
         self.settings_page.header.title.setText(t["settings_page_title"])
-        self.settings_page.header.subtitle.setText(t["settings_page_desc"])
+        self.settings_page.header.subtitle.hide()
         self.settings_page.general_title.setText(t["settings_group_title"])
         self.settings_page.btn_save.setText(t["save_settings"])
         self.settings_page.btn_reset.setText(t["reset_settings"])
@@ -1308,6 +1314,10 @@ class MainWindow(
 
         if not self.current_img_path and not self.search_page.img_label.pixmap():
             self.search_page.img_label.setText(t["image_drop_hint"])
+        if hasattr(self.search_page.img_label, "set_caption"):
+            self.search_page.img_label.set_caption(t.get("image_upload_label", "选择图片 / 拖入图片"))
+        if hasattr(self.search_page.img_label, "set_clear_tip"):
+            self.search_page.img_label.set_clear_tip(t.get("image_query_clear", "移除图片"))
 
         self.search_page.lbl_status.setText(t["ready"])
         self.library_page.lbl_status.setText(t["ready"])
@@ -1497,7 +1507,7 @@ class MainWindow(
     def _apply_results_view_mode_from_config(self) -> None:
         from src.app.config import load_config
 
-        mode = str(load_config().get("search_results_view_mode") or "table").strip().lower()
+        mode = str(load_config().get("search_results_view_mode") or "grid").strip().lower()
         self._set_results_view_mode(mode, persist=False, rerender=False)
 
     def _set_results_view_mode(self, mode: str, *, persist: bool = True, rerender: bool = True) -> None:
@@ -2137,23 +2147,23 @@ class MainWindow(
 
     def _update_mobile_bridge_controls(self):
         is_running = hasattr(self, "mobile_bridge_controller") and self.mobile_bridge_controller.is_running()
-        self.search_page.btn_mobile_toggle.blockSignals(True)
-        self.search_page.btn_mobile_toggle.setChecked(is_running)
-        self.search_page.btn_mobile_toggle.blockSignals(False)
-        self.search_page.btn_mobile_toggle.setProperty("bridgeState", "on" if is_running else "off")
-        self.search_page.btn_mobile_toggle.style().unpolish(self.search_page.btn_mobile_toggle)
-        self.search_page.btn_mobile_toggle.style().polish(self.search_page.btn_mobile_toggle)
-        self.search_page.btn_mobile_toggle.update()
-        self.search_page.btn_mobile_toggle.setText(self._mobile_bridge_toggle_text(is_running))
-        self.search_page.btn_mobile_toggle.setToolTip(
+        toggle = self.settings_page.btn_mobile_toggle
+        qr = self.settings_page.btn_mobile_qr
+        toggle.blockSignals(True)
+        toggle.setChecked(is_running)
+        toggle.blockSignals(False)
+        toggle.setProperty("bridgeState", "on" if is_running else "off")
+        toggle.style().unpolish(toggle)
+        toggle.style().polish(toggle)
+        toggle.update()
+        toggle.setText(self._mobile_bridge_toggle_text(is_running))
+        toggle.setToolTip(
             self.texts["mobile_bridge_stop"] if is_running else self.texts["mobile_bridge_start"]
         )
-        self.search_page.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
-        self.search_page.btn_mobile_qr.setProperty("qrState", "visible" if is_running else "hidden")
-        self.search_page.btn_mobile_qr.setEnabled(is_running)
-        self.search_page.btn_mobile_qr.style().unpolish(self.search_page.btn_mobile_qr)
-        self.search_page.btn_mobile_qr.style().polish(self.search_page.btn_mobile_qr)
-        self.search_page.btn_mobile_qr.update()
+        qr.setEnabled(is_running)
+        qr.style().unpolish(qr)
+        qr.style().polish(qr)
+        qr.update()
 
     def _mobile_bridge_toggle_text(self, is_running, texts=None):
         t = texts or self.texts
@@ -2226,6 +2236,8 @@ class MainWindow(
         panel = getattr(self.search_page, "search_panel", None)
         if panel is not None and hasattr(panel, "relayout_inline_fields"):
             panel.relayout_inline_fields()
+        if hasattr(self, "_refresh_search_filter_summary"):
+            self._refresh_search_filter_summary()
 
     def open_skip_edges_dialog(self) -> None:
         from src.services.team_mode_service import is_team_client_mode
@@ -2257,6 +2269,16 @@ class MainWindow(
             self._refresh_skip_edges_summary()
         except Exception as exc:
             self.show_error_dialog(self.texts["settings_save_failed"], exc)
+
+    def clear_image_query(self):
+        """Remove only the image query. Text, tags, and results stay."""
+        self.current_img_path = None
+        self.search_page.img_label.clear()
+        self.search_page.img_label.setText(self.texts["image_drop_hint"])
+        try:
+            self._refresh_search_panel_state()
+        except Exception:
+            pass
 
     def clear_all_content(self):
         self.current_img_path = None
@@ -2630,6 +2652,7 @@ class MainWindow(
             self.search_page.lbl_status.setText(self.texts["image_load_failed"])
             return
         self.search_page.img_label.setPixmap(pixmap)
+        self.search_page.img_label.set_path(path)
         if clear_text:
             self.search_page.search_panel.clear_text_query()
         self.search_page.lbl_status.setText(self.texts["image_loaded"])

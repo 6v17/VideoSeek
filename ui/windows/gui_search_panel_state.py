@@ -179,12 +179,12 @@ class SearchPanelStateMixin:
             return
         page = self.search_page
         texts = getattr(self, "texts", {}) or {}
-        current_mode = page.search_mode.currentData()
+        current_mode = str(page.search_mode.currentData() or "").strip().lower()
         page.search_mode.blockSignals(True)
         page.search_mode.clear()
         page.search_mode.addItem(texts.get("setting_search_mode_frame", "Frame"), "frame")
         page.search_mode.addItem(texts.get("setting_search_mode_chunk", "Chunk"), "chunk")
-        target = "chunk" if current_mode == "chunk" else "frame"
+        target = current_mode if current_mode in {"frame", "chunk"} else "chunk"
         target_index = page.search_mode.findData(target)
         if target_index >= 0:
             page.search_mode.setCurrentIndex(target_index)
@@ -460,12 +460,66 @@ class SearchPanelStateMixin:
             tags_form.set_placeholder(
                 texts.get("search_tags_placeholder", "Filter tags, or pick from suggestions…")
             )
+            tags_form.set_nav_tooltips(
+                texts.get("search_tags_scroll_prev", "Previous tag"),
+                texts.get("search_tags_scroll_next", "Next tag"),
+            )
 
         panel = getattr(page, "search_panel", None)
         if panel is not None and hasattr(panel, "relayout_inline_fields"):
             panel.relayout_inline_fields()
 
         self._refresh_search_model_display()
+        self._refresh_search_filter_summary()
+
+    def _refresh_search_filter_summary(self) -> None:
+        page = getattr(self, "search_page", None)
+        panel = getattr(page, "search_panel", None) if page is not None else None
+        if panel is None or not hasattr(panel, "set_filter_summary"):
+            return
+        texts = getattr(self, "texts", {}) or {}
+        parts: list[str] = []
+        try:
+            scope_is_default = self._search_scope_is_global()
+        except Exception:
+            scope_is_default = True
+        if not scope_is_default:
+            scope = str(page.search_scope_select.toolTip() or "").splitlines()
+            scope_text = scope[0].strip() if scope else ""
+            if not scope_text:
+                scope_text = page.search_scope_select.currentText().strip()
+            if scope_text:
+                parts.append(scope_text)
+        skip = page.btn_skip_edges.currentText().strip()
+        skip_defaults = {
+            str(texts.get("search_skip_edges_off") or "").strip(),
+            str(texts.get("setting_skip_edges_empty") or "").strip(),
+        }
+        if skip and skip not in skip_defaults:
+            parts.append(skip)
+        active = self._search_active_tab()
+        if active in {self.SEARCH_TAB_TEXT, self.SEARCH_TAB_COMPOSE}:
+            if self._text_search_mode_from_ui() != "chunk":
+                mode = page.search_mode.currentText().strip()
+                if mode:
+                    parts.append(mode)
+            enhance = getattr(page, "text_search_enhance", None)
+            if enhance is not None and bool(enhance.currentData()):
+                label = str(texts.get("search_text_enhance_label") or "").strip()
+                if label:
+                    parts.append(label)
+        elif active == self.SEARCH_TAB_IMAGE:
+            if self._image_search_mode_from_ui() != "frame":
+                mode = page.image_search_mode.currentText().strip()
+                if mode:
+                    parts.append(mode)
+        elif active in {self.SEARCH_TAB_DIALOGUE, self.SEARCH_TAB_TAGS}:
+            if self._dialogue_match_mode_from_ui() != "exact":
+                combo = getattr(page, "dialogue_search_mode", None)
+                mode = combo.currentText().strip() if combo is not None else ""
+                if mode:
+                    parts.append(mode)
+        panel.set_filter_summary(" · ".join(parts))
 
     def _dialogue_search_hint_text(self, texts) -> str:
         mode = self._dialogue_match_mode_from_ui()
@@ -636,13 +690,13 @@ class SearchPanelStateMixin:
         return timer
 
     def _on_tags_query_changed(self, *_args) -> None:
-        self._refresh_search_panel_state(refresh_scope=False)
+        # Typing only refreshes the suggestion list. Rebuilding the whole
+        # search bar on each character closed the popup and did extra work.
         if self._search_active_tab() != self.SEARCH_TAB_TAGS:
             return
         self._ensure_tag_suggest_timer().start()
 
     def _on_tag_selection_changed(self) -> None:
-        self._refresh_search_panel_state(refresh_scope=False)
         if self._search_active_tab() != self.SEARCH_TAB_TAGS:
             return
         # Chips only change the query; search runs via 搜索 / Enter.

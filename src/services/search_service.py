@@ -238,6 +238,35 @@ def _run_frame_search_per_videos(
     )
 
 
+def _hits_with_video_id(hits: List[SearchHit], video_id: str) -> List[SearchHit]:
+    """Keep locate hits resolvable after a source file is renamed.
+
+    Per-video window search builds hits from the path stored in the index and
+    does not copy ``video_id``. Discovery hits still resolve through that id;
+    locate hits with only the stale path are dropped as missing files.
+    """
+    vid = str(video_id or "").strip()
+    if not vid:
+        return list(hits or [])
+    stamped: List[SearchHit] = []
+    for hit in hits or []:
+        if str(hit.video_id or "").strip():
+            stamped.append(hit)
+            continue
+        stamped.append(
+            SearchHit(
+                hit.start_sec,
+                hit.end_sec,
+                hit.score,
+                hit.video_path,
+                match_kind=hit.match_kind,
+                video_id=vid,
+                matched_text=hit.matched_text,
+            )
+        )
+    return stamped
+
+
 def _run_frame_locate_per_videos(
     query_vector,
     targets,
@@ -334,15 +363,18 @@ def _run_frame_locate_per_videos(
         ):
             emit_search_progress("locate_progress_pixel")
         merged_hits.extend(
-            refine_precise_seed_hits(
-                query_data,
-                matched_results,
-                locate_top_k,
-                config,
-                pixel_query_data=pixel_query_data,
-                locate_anchor_sec=anchor_sec,
-                locate_anchor_score=locate_anchor_score,
-                locate_score_margin=locate_score_margin,
+            _hits_with_video_id(
+                refine_precise_seed_hits(
+                    query_data,
+                    matched_results,
+                    locate_top_k,
+                    config,
+                    pixel_query_data=pixel_query_data,
+                    locate_anchor_sec=anchor_sec,
+                    locate_anchor_score=locate_anchor_score,
+                    locate_score_margin=locate_score_margin,
+                ),
+                video_id,
             )
         )
     crop_final = is_likely_cropped_query_image(rerank_query)

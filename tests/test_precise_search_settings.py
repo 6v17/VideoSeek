@@ -480,6 +480,36 @@ class PreciseSearchSettingsWiringTests(unittest.TestCase):
         self.assertEqual(resolve_locate_result_top_k(20, crop_query=True), 1)
         self.assertEqual(resolve_locate_result_top_k(1), 1)
 
+    @mock.patch("src.services.search_service.is_likely_cropped_query_image", return_value=True)
+    @mock.patch("src.services.search_service.search_locate_crop_trusted_hits")
+    @mock.patch("src.services.search_service.load_per_video_frame_assets")
+    def test_locate_keeps_video_id_when_index_path_is_stale(
+        self,
+        mock_load,
+        mock_crop_hits,
+        _mock_crop,
+    ):
+        from src.services.search_service import _run_frame_locate_per_videos
+
+        mock_load.return_value = (object(), [168.0], [r"D:\old\renamed.mp4"], None)
+        mock_crop_hits.return_value = [
+            SearchHit(168.0, 168.0, 0.5, r"D:\old\renamed.mp4")
+        ]
+
+        hits = _run_frame_locate_per_videos(
+            object(),
+            [(r"D:\library\current.mp4", "vid-renamed")],
+            3,
+            {},
+            preview_anchor_sec=168.0,
+            locate_anchor_score=0.5,
+            locate_score_margin=0.0,
+        )
+
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].video_id, "vid-renamed")
+        self.assertAlmostEqual(float(hits[0].start_sec), 168.0)
+
     @mock.patch("src.services.search_locate_pipeline.search_frame_results_in_time_window")
     @mock.patch("src.services.search_assets.load_search_assets", return_value=(None, None, None))
     def test_search_locate_crop_trusted_uses_narrow_window(self, _mock_load, mock_window):

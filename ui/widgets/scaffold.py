@@ -106,7 +106,7 @@ class PageHeader(QFrame):
         super().__init__(parent)
         self.setObjectName("PageHeader")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(12)
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
@@ -132,6 +132,7 @@ class PageHeader(QFrame):
         self.subtitle = QLabel()
         self.subtitle.setObjectName("PageSubtitle")
         self.subtitle.setWordWrap(True)
+        self.subtitle.hide()
         title_col.addWidget(self.subtitle)
 
         # Inline tip: right of the title card, vertically centered with it.

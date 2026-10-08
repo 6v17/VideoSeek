@@ -321,6 +321,8 @@ class SearchScopeGuiMixin:
                 summary = texts.get("search_scope_all", "")
                 display = texts.get("search_scope_all_short", summary)
         self.search_page.search_scope_select.set_display_text(display, tooltip=summary)
+        if hasattr(self, "_refresh_search_filter_summary"):
+            self._refresh_search_filter_summary()
 
     def open_search_scope_editor(self) -> None:
         self._refresh_search_scope_entries(force=True)

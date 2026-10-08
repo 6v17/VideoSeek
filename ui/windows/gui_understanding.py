@@ -187,9 +187,7 @@ class UnderstandingGuiMixin:
                     self.texts.get("understanding_step_select_hint_motion", page.select_hint.text())
                 )
             if hasattr(page, "header"):
-                page.header.subtitle.setText(
-                    self.texts.get("understanding_page_desc_motion", page.header.subtitle.text())
-                )
+                page.header.subtitle.hide()
             page.btn_evidence_details.setText(
                 self.texts.get(
                     "library_evidence_detail_motion",
@@ -239,9 +237,7 @@ class UnderstandingGuiMixin:
                     self.texts.get("understanding_step_select_hint", page.select_hint.text())
                 )
             if hasattr(page, "header"):
-                page.header.subtitle.setText(
-                    self.texts.get("understanding_page_desc", page.header.subtitle.text())
-                )
+                page.header.subtitle.hide()
             page.btn_evidence_details.setText(
                 self.texts.get("library_evidence_detail", "Evidence history")
             )

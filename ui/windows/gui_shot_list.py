@@ -28,6 +28,7 @@ class ShotListGuiMixin:
         self.shot_list = ShotListStore()
         self._shot_list_export_worker = None
         self.search_page.btn_shot_list.clicked.connect(self.show_shot_list_dialog)
+        self.search_page.btn_preview_shot_list.clicked.connect(self.show_shot_list_dialog)
         self._update_shot_list_button()
 
     def _current_search_query_hint(self) -> str:
@@ -373,3 +374,4 @@ class ShotListGuiMixin:
         label = self.texts.get("shot_list", "Shot list")
         button.setText(f"{label} ({count})" if count else label)
         self._set_button_object_name(button, "PrimaryButton" if count else "GhostButton")
+        self._sync_preview_layer_actions()
