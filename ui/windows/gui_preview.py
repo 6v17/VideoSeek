@@ -255,6 +255,57 @@ class PreviewGuiMixin:
             embedded=True,
         )
 
+    def _pause_embedded_preview(self) -> None:
+        """Leave the in-page player mounted. Only stop the picture from playing."""
+        dialog = getattr(self, "_preview_dialog", None)
+        if dialog is None or getattr(dialog, "_closing", False):
+            return
+        player = getattr(dialog, "player", None)
+        if player is None or not hasattr(player, "is_playing"):
+            return
+        try:
+            if player.is_playing():
+                player.pause()
+                button = getattr(dialog, "play_button", None)
+                if button is not None:
+                    button.setText(self.texts.get("preview_dialog_play", "Play"))
+        except Exception as exc:
+            logger.debug("Pause embedded preview on page leave skipped: %s", exc)
+
+    def _restore_embedded_preview_surface(self) -> None:
+        """Show the same in-page player again after another page hid its parent."""
+        if not getattr(self, "_search_preview_embedded", False):
+            return
+        dialog = getattr(self, "_preview_dialog", None)
+        if dialog is None:
+            return
+        if getattr(dialog, "_closing", False):
+            dialog._closing = False
+            dialog._close_requested = False
+            for name in (
+                "play_button",
+                "slider",
+                "set_start_button",
+                "set_end_button",
+                "clear_segment_button",
+                "fullscreen_button",
+                "export_button",
+                "frame_export_button",
+            ):
+                widget = getattr(dialog, name, None)
+                if widget is not None:
+                    widget.setEnabled(True)
+            if hasattr(dialog, "_sync_add_to_shot_list_button"):
+                dialog._sync_add_to_shot_list_button()
+            timer = getattr(dialog, "update_timer", None)
+            if timer is not None:
+                timer.start()
+        self._present_embedded_preview(dialog)
+        self._rebind_preview_output(dialog)
+        player = getattr(dialog, "player", None)
+        if player is not None and hasattr(player, "rebind_output_window"):
+            QTimer.singleShot(80, player.rebind_output_window)
+
     def _leave_search_preview_layer(self) -> None:
         self._search_preview_embedded = False
         page = getattr(self, "search_page", None)

@@ -681,21 +681,28 @@ class MainWindow(
         self.pages.setCurrentIndex(next_idx)
         self.sidebar.set_current_page(page_name)
         search_idx = mapping.get("search")
+        embedded_preview = bool(getattr(self, "_search_preview_embedded", False))
         if search_idx is not None and prev_idx == search_idx and next_idx != search_idx:
             if hasattr(self, "_collapse_preview_maximize"):
                 self._collapse_preview_maximize()
             self.preview_controller.stop_preview()
             if hasattr(self, "_reset_preview_chrome"):
                 self._reset_preview_chrome()
-        # Floating preview (e.g. Understanding chunk double-click) should not linger
-        # after leaving the page that opened it.
-        if prev_idx != next_idx:
+            if embedded_preview and hasattr(self, "_pause_embedded_preview"):
+                self._pause_embedded_preview()
+        # A floating preview should not linger on another page. The in-page
+        # search player stays mounted and is only paused.
+        if prev_idx != next_idx and not embedded_preview:
             dlg = getattr(self, "_preview_dialog", None)
             if dlg is not None:
                 try:
                     dlg.dismiss_for_page_switch()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui.py:switch_page")
+        if page_name == "search" and embedded_preview and hasattr(self, "_restore_embedded_preview_surface"):
+            QTimer.singleShot(0, self._restore_embedded_preview_surface)
         if page_name == "settings":
             self._refresh_agent_api_status()
             self.refresh_search_telemetry_panel()
