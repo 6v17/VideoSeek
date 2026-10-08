@@ -592,7 +592,8 @@ class PreviewGuiMixin:
             return ""
         try:
             length_ms = int(player.get_length() or 0)
-        except Exception:
+        except Exception as exc:
+            logger.debug("preview duration unavailable: %s", exc)
             return ""
         if length_ms <= 0:
             return ""
