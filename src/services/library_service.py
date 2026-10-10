@@ -162,14 +162,18 @@ def list_libraries(*, maintain: bool = False):
             for old_path in removed_paths:
                 try:
                     clear_library_search_index(old_path, config=config)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "src/services/library_service.py:clear_removed_library_index")
             meta["libraries"] = normalized
             save_model_metadata(meta, config=config)
         try:
             garbage_collect_orphan_library_indexes(meta, config=config)
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/library_service.py:garbage_collect_orphan_library_indexes")
     return normalized
 
 
@@ -354,8 +358,10 @@ def register_library_videos(*, config=None, library_path: str | None = None) -> 
             from src.services.understanding_service import invalidate_ready_video_entries_cache
 
             invalidate_ready_video_entries_cache()
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/library_service.py:invalidate_ready_video_entries_cache")
     return {"registered": registered, "updated": updated, "changed": changed}
 
 
@@ -391,7 +397,10 @@ def list_library_video_entries(*, config=None, register: bool = True) -> list[di
     if lance_video_ids is not None:
         try:
             profile_base_dir = get_local_model_asset_dirs(config=cfg)["base_dir"]
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/library_service.py:profile_base_dir")
             profile_base_dir = ""
     entries: list[dict] = []
     demoted = 0

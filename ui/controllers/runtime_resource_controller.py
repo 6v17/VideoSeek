@@ -51,8 +51,10 @@ class RuntimeResourceController(QObject):
                         parent._populate_model_profile_options(load_config())
                     if hasattr(parent, "refresh_runtime_resource_ui"):
                         parent.refresh_runtime_resource_ui(sync_dialog=False)
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/runtime_resource_controller.py:rediscover_model_profiles")
         else:
             # Already-imported packs may still carry stale Large=512 metadata.
             try:
@@ -69,8 +71,10 @@ class RuntimeResourceController(QObject):
                         parent._refresh_search_model_display()
                     if hasattr(parent, "refresh_runtime_resource_ui"):
                         parent.refresh_runtime_resource_ui(sync_dialog=False)
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/runtime_resource_controller.py:heal_stale_model_embedding_dimensions")
         self.status_changed.emit(status)
         if status["resources_ready"]:
             return True

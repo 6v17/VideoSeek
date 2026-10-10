@@ -1200,10 +1200,20 @@ class PreviewGuiMixin:
             task["worker"] = worker
             task["status"] = "running"
             self._preview_export_active[task["id"]] = task
-            worker.finished_export.connect(
-                lambda result, path, task_id=task["id"]: self._handle_preview_export_result(task_id, result, path)
+            from ui.threading_utils import connect_on_receiver
+
+            connect_on_receiver(
+                worker,
+                "finished_export(PyObject,QString)",
+                self,
+                lambda result, path, task_id=task["id"]: self._handle_preview_export_result(task_id, result, path),
             )
-            worker.finished.connect(lambda task_id=task["id"]: self._handle_preview_export_finished(task_id))
+            connect_on_receiver(
+                worker,
+                "finished()",
+                self,
+                lambda task_id=task["id"]: self._handle_preview_export_finished(task_id),
+            )
             worker.start()
             running_count = len(self._preview_export_active)
             queued_count = len(self._preview_export_queue)

@@ -25,11 +25,11 @@ from src.services.search_locate import (
     apply_locate_crop_anchor_stability,
     should_allow_pixel_refine,
 )
+from src.services.search_locate_constants import LOCATE_CROP_ANCHOR_WINDOW_SEC
 from src.services.search_neighbor_rerank import apply_bounded_neighbor_refine
 from src.services.search_scope import normalize_scope_path
 
 _LOCATE_ANCHOR_WINDOW_SEC = 30.0
-_LOCATE_CROP_ANCHOR_WINDOW_SEC = 5.0
 _LOCATE_PIXEL_MAX_SHIFT_SEC = 5.0
 _LOCATE_PIXEL_LOCALIZE_TOP_N = 3
 _LOCATE_RESULT_TOP_K = 3
@@ -182,7 +182,7 @@ def _search_locate_crop_trusted_hits(
         per_video_timestamps=per_video_timestamps,
         per_video_paths=per_video_paths,
         per_video_vectors=per_video_vectors,
-        window_sec=_LOCATE_CROP_ANCHOR_WINDOW_SEC,
+        window_sec=LOCATE_CROP_ANCHOR_WINDOW_SEC,
         skip_neighbor_refine=True,
     )
     return apply_locate_crop_anchor_stability(pool, anchor_sec, target_video_path)

@@ -339,8 +339,10 @@ def list_agent_subtitle_libraries(config=None) -> Dict[str, Any]:
     try:
         register_subtitle_library_videos(config=cfg)
         libraries = list_subtitle_libraries(config=cfg, seed=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/agent_library_service.py:list_agent_subtitle_libraries")
     by_lib: Dict[str, Dict[str, int]] = {}
     for item in list_subtitle_search_scope_entries(config=cfg):
         lib = normalize_scope_path(str(item.get("library_path") or ""))
@@ -434,8 +436,10 @@ def list_agent_subtitle_videos(
     cfg = config or load_config()
     try:
         register_subtitle_library_videos(config=cfg)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/agent_library_service.py:list_agent_subtitle_videos")
     libraries = list_subtitle_libraries(config=cfg, seed=True)
     video_id_text = str(video_id or "").strip()
     safe_limit = max(1, min(int(limit or _DEFAULT_VIDEO_PAGE_LIMIT), _MAX_VIDEO_PAGE_LIMIT))

@@ -2832,16 +2832,26 @@ class LibraryIndexingGuiMixin:
     def _start_local_vector_detail_validation(self, dialog):
         worker = LocalVectorDetailsWorker()
         self._local_vector_detail_worker = worker
-        worker.result_ready.connect(
-            lambda detail, dlg=dialog: self._finish_local_vector_detail_validation(
-                dlg,
-                detail,
-            )
+        from ui.threading_utils import connect_on_receiver
+
+        connect_on_receiver(
+            worker,
+            "result_ready(QVariantMap)",
+            self,
+            lambda detail, dlg=dialog: self._finish_local_vector_detail_validation(dlg, detail),
         )
-        worker.error_signal.connect(
-            lambda _message, dlg=dialog: self._fail_local_vector_detail_validation(dlg)
+        connect_on_receiver(
+            worker,
+            "error_signal(QString)",
+            self,
+            lambda _message, dlg=dialog: self._fail_local_vector_detail_validation(dlg),
         )
-        worker.finished.connect(lambda active_worker=worker: self._cleanup_local_vector_detail_worker(active_worker))
+        connect_on_receiver(
+            worker,
+            "finished()",
+            self,
+            lambda active_worker=worker: self._cleanup_local_vector_detail_worker(active_worker),
+        )
         worker.start()
 
     def _finish_local_vector_detail_validation(self, dialog, detail):

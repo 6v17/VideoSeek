@@ -57,7 +57,10 @@ def resolve_indexing_video_workers(config=None) -> int:
         from src.app.config import DEFAULT_CONFIG
 
         default = int(DEFAULT_CONFIG.get("indexing_video_workers", 2))
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/indexing_service.py:index_video_workers")
         default = 2
     try:
         value = int((config or {}).get("indexing_video_workers", default))

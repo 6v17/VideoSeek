@@ -116,7 +116,10 @@ def resolve_lance_ann_min_rows(config=None) -> int:
         value = int(runtime.get("lance_ann_min_rows", default))
         lo, hi = CONFIG_BOUNDS.get("lance_ann_min_rows", (500, 100000))
         return max(int(lo), min(int(hi), value))
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_store.py:resolve_lance_ann_min_rows")
         return int(LANCE_ANN_MIN_ROWS)
 
 
@@ -129,7 +132,10 @@ def resolve_lance_ann_refine_multiplier(config=None) -> int:
         value = int(runtime.get("lance_ann_refine_multiplier", default))
         lo, hi = CONFIG_BOUNDS.get("lance_ann_refine_multiplier", (2, 16))
         return max(int(lo), min(int(hi), value))
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_store.py:resolve_lance_ann_refine_multiplier")
         return 4
 
 
@@ -1199,8 +1205,10 @@ def _import_npy_to_lance_locked(
                 data = load_vectors(vector_file)
                 locked_dimension = _infer_vector_dimension(data.get("vector"))
                 summary["dimension"] = locked_dimension
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/storage/lance_store.py:infer_import_dimension")
 
     _write_import_state(
         profile_base_dir,
@@ -1564,8 +1572,10 @@ def _invalidate_lance_search_caches(profile_base_dir: str = "") -> None:
 
         invalidate_lance_runtime_caches(profile_base_dir)
         invalidate_search_asset_caches()
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_store.py:invalidate_lance_search_caches")
 
 
 def video_has_lance_vectors(video_id: str, config=None) -> bool:

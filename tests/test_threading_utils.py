@@ -109,3 +109,47 @@ class ReleaseFinishedThreadTests(unittest.TestCase):
         self.assertIsNone(owner.worker)
         self.assertIn(thread, threading_utils.parked_threads())
         self.assertFalse(hasattr(thread, "deleteLater"))
+
+
+class ConnectOnReceiverTests(unittest.TestCase):
+    def test_same_thread_emit_reaches_the_receiver_slot(self):
+        from PySide6.QtCore import QCoreApplication, QObject, Signal
+
+        if QCoreApplication.instance() is None:
+            QCoreApplication([])
+        host = QObject()
+
+        class _Emitter(QObject):
+            result_ready = Signal(dict)
+
+        emitter = _Emitter()
+        seen = []
+        threading_utils.connect_on_receiver(
+            emitter,
+            "result_ready(QVariantMap)",
+            host,
+            lambda payload: seen.append(payload),
+        )
+        emitter.result_ready.emit({"ok": 1})
+        self.assertEqual(seen, [{"ok": 1}])
+
+    def test_object_and_string_signal_reaches_the_receiver_slot(self):
+        from PySide6.QtCore import QCoreApplication, QObject, Signal
+
+        if QCoreApplication.instance() is None:
+            QCoreApplication([])
+
+        class _Emitter(QObject):
+            finished_export = Signal(object, str)
+
+        emitter = _Emitter()
+        host = QObject()
+        seen = []
+        threading_utils.connect_on_receiver(
+            emitter,
+            "finished_export(PyObject,QString)",
+            host,
+            lambda result, path: seen.append((result, path)),
+        )
+        emitter.finished_export.emit({"ok": True}, "D:/clip.mp4")
+        self.assertEqual(seen, [({"ok": True}, "D:/clip.mp4")])

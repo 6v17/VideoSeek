@@ -49,8 +49,10 @@ def save_model_metadata(meta, config=None, *, pretty: bool = True, invalidate_pa
         from src.services.search_scope import invalidate_searchable_path_index_cache
 
         invalidate_searchable_path_index_cache()
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/asset_store.py:invalidate_searchable_path_index_cache")
 
 
 def load_vector_payload(vector_file):

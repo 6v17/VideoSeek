@@ -303,7 +303,10 @@ def prepare_inference_runtime(prefer_gpu=None, provider=None):
     if not resolved_provider:
         try:
             resolved_provider = str(get_active_model_profile(config=runtime_config).get("provider", "") or "").strip()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/core/clip_embedding.py:prepare_inference_runtime")
             resolved_provider = "clip_onnx"
     inference_ep = resolve_inference_ep(runtime_config)
     logger.info(

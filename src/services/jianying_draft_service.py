@@ -574,7 +574,10 @@ def export_recap_to_jianying_draft(
     media_duration = 0.0
     try:
         media_duration = float(probe_recap_media(media).get("duration") or 0.0)
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/jianying_draft_service.py:probe_recap_media")
         media_duration = 0.0
     prepared = stretch_recap_clips_for_vo(clips, media_duration=media_duration)
     spans = recap_export_clip_spans(prepared)

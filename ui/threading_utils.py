@@ -43,6 +43,20 @@ def release_finished_thread(owner, attr: str, thread) -> None:
         pass
 
 
+def connect_on_receiver(sender, signature: str, receiver, slot):
+    """Queue ``slot`` onto ``receiver``'s thread.
+
+    A bare lambda has no QObject, so a worker can run it before ``run()``
+    returns. ``signature`` is the Qt signal, such as ``result_ready(QVariantMap)``.
+    """
+    from PySide6.QtCore import QObject, SIGNAL
+
+    connection = QObject.connect(sender, SIGNAL(signature), receiver, slot)
+    if not connection:
+        raise RuntimeError(f"Could not connect {signature}")
+    return connection
+
+
 def bind_thread_release(owner, attr: str, thread) -> None:
     """Release ``thread`` after Qt reports that it has stopped."""
     if thread is None:

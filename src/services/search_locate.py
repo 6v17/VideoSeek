@@ -7,20 +7,21 @@ from typing import List, Sequence
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit, coerce_search_hit
 from src.services.image_search_rerank import is_likely_cropped_query_image
+from src.services.search_locate_constants import (
+    CLIP_CONFIDENCE_HIGH,
+    CLIP_CONFIDENCE_MEDIUM,
+    CLIP_CONFIDENCE_VERY_HIGH,
+    LOCATE_CLIP_CONFIDENCE_HIGH,
+    LOCATE_CLIP_CONFIDENCE_LOW,
+    LOCATE_CLIP_WINDOW_TIGHT_SEC,
+    LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN,
+    LOCATE_CLIP_WINDOW_WIDE_SEC,
+    LOCATE_CROP_ANCHOR_MIN_GAIN,
+    LOCATE_CROP_ANCHOR_WINDOW_SEC,
+    LOCATE_CROP_MIN_CLIP_SCORE,
+)
 
 logger = get_logger("search_locate")
-
-_LOCATE_CROP_ANCHOR_WINDOW_SEC = 5.0
-_LOCATE_CLIP_WINDOW_TIGHT_SEC = 10.0
-_LOCATE_CLIP_WINDOW_WIDE_SEC = 40.0
-_LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN = 0.05
-_LOCATE_CLIP_CONFIDENCE_LOW = 0.42
-_LOCATE_CLIP_CONFIDENCE_HIGH = 0.99
-_LOCATE_CROP_MIN_CLIP_SCORE = 0.6
-_LOCATE_CROP_ANCHOR_MIN_GAIN = 0.03
-_CLIP_CONFIDENCE_VERY_HIGH = 0.85
-_CLIP_CONFIDENCE_HIGH = 0.70
-_CLIP_CONFIDENCE_MEDIUM = 0.60
 
 
 def compute_locate_score_margin(
@@ -67,28 +68,28 @@ def resolve_locate_clip_window_sec(
 ) -> float:
     """Resolve CLIP anchor window from continuous confidence; pixel refine stays fixed."""
     if is_crop:
-        return _LOCATE_CROP_ANCHOR_WINDOW_SEC
+        return LOCATE_CROP_ANCHOR_WINDOW_SEC
 
     confidence = compute_locate_confidence(score, margin)
     if confidence is None:
-        window = _LOCATE_CLIP_WINDOW_WIDE_SEC
-    elif confidence <= _LOCATE_CLIP_CONFIDENCE_LOW:
-        window = _LOCATE_CLIP_WINDOW_WIDE_SEC
-    elif confidence >= _LOCATE_CLIP_CONFIDENCE_HIGH:
-        window = _LOCATE_CLIP_WINDOW_TIGHT_SEC
+        window = LOCATE_CLIP_WINDOW_WIDE_SEC
+    elif confidence <= LOCATE_CLIP_CONFIDENCE_LOW:
+        window = LOCATE_CLIP_WINDOW_WIDE_SEC
+    elif confidence >= LOCATE_CLIP_CONFIDENCE_HIGH:
+        window = LOCATE_CLIP_WINDOW_TIGHT_SEC
     else:
-        span = _LOCATE_CLIP_CONFIDENCE_HIGH - _LOCATE_CLIP_CONFIDENCE_LOW
-        ratio = (confidence - _LOCATE_CLIP_CONFIDENCE_LOW) / span
-        window = _LOCATE_CLIP_WINDOW_WIDE_SEC - (
-            ratio * (_LOCATE_CLIP_WINDOW_WIDE_SEC - _LOCATE_CLIP_WINDOW_TIGHT_SEC)
+        span = LOCATE_CLIP_CONFIDENCE_HIGH - LOCATE_CLIP_CONFIDENCE_LOW
+        ratio = (confidence - LOCATE_CLIP_CONFIDENCE_LOW) / span
+        window = LOCATE_CLIP_WINDOW_WIDE_SEC - (
+            ratio * (LOCATE_CLIP_WINDOW_WIDE_SEC - LOCATE_CLIP_WINDOW_TIGHT_SEC)
         )
 
     try:
         gap = max(0.0, float(margin))
     except (TypeError, ValueError):
         gap = None
-    if gap is not None and gap < _LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN:
-        window = max(window, _LOCATE_CLIP_WINDOW_WIDE_SEC)
+    if gap is not None and gap < LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN:
+        window = max(window, LOCATE_CLIP_WINDOW_WIDE_SEC)
 
     try:
         from src.services.search_telemetry import get_locate_clip_window_bias_sec
@@ -97,7 +98,7 @@ def resolve_locate_clip_window_sec(
     except Exception as exc:
         logger.debug("Locate clip window bias unavailable: %s", exc)
 
-    return max(_LOCATE_CROP_ANCHOR_WINDOW_SEC, window)
+    return max(LOCATE_CROP_ANCHOR_WINDOW_SEC, window)
 
 
 def should_allow_pixel_refine(
@@ -113,13 +114,13 @@ def should_allow_pixel_refine(
         value = max(0.0, float(score))
     except (TypeError, ValueError):
         return False
-    if value < _CLIP_CONFIDENCE_HIGH:
+    if value < CLIP_CONFIDENCE_HIGH:
         return False
     try:
         gap = max(0.0, float(margin))
     except (TypeError, ValueError):
         gap = 0.0
-    if gap < _LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN:
+    if gap < LOCATE_CLIP_WINDOW_UNSTABLE_MARGIN:
         return False
     return True
 
@@ -139,11 +140,11 @@ def format_clip_score_percent(score: float) -> str:
 
 def resolve_clip_confidence_tier_key(score: float) -> str:
     value = max(0.0, float(score))
-    if value >= _CLIP_CONFIDENCE_VERY_HIGH:
+    if value >= CLIP_CONFIDENCE_VERY_HIGH:
         return "clip_confidence_very_high"
-    if value >= _CLIP_CONFIDENCE_HIGH:
+    if value >= CLIP_CONFIDENCE_HIGH:
         return "clip_confidence_high"
-    if value >= _CLIP_CONFIDENCE_MEDIUM:
+    if value >= CLIP_CONFIDENCE_MEDIUM:
         return "clip_confidence_medium"
     return "clip_confidence_low"
 
@@ -173,7 +174,7 @@ def apply_locate_crop_anchor_stability(
     if abs(best_time - anchor) <= 0.05:
         result = [best]
         anchor_kept = True
-    elif (best_score - anchor_score) < _LOCATE_CROP_ANCHOR_MIN_GAIN:
+    elif (best_score - anchor_score) < LOCATE_CROP_ANCHOR_MIN_GAIN:
         stable_score = anchor_score if anchor_score > 0 else best_score
         stable_path = str(best.video_path or path or anchor_hit.video_path)
         result = [SearchHit(anchor, anchor, stable_score, stable_path)]
@@ -215,7 +216,7 @@ def locate_crop_confidence_warning_key(
     rerank_query = _resolve_rerank_query(query_data, pixel_query_data)
     if not is_likely_cropped_query_image(rerank_query):
         return None
-    threshold = float(min_score if min_score is not None else _LOCATE_CROP_MIN_CLIP_SCORE)
+    threshold = float(min_score if min_score is not None else LOCATE_CROP_MIN_CLIP_SCORE)
     if not hits:
         return "locate_crop_low_confidence_empty"
     if float(hits[0].score) < threshold:
@@ -224,5 +225,4 @@ def locate_crop_confidence_warning_key(
 
 
 # Public names for cross-module callers (engineering.md rule 4).
-LOCATE_CROP_MIN_CLIP_SCORE = _LOCATE_CROP_MIN_CLIP_SCORE
 resolve_rerank_query = _resolve_rerank_query

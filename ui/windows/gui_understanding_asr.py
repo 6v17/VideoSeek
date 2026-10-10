@@ -263,9 +263,21 @@ class UnderstandingAsrGuiMixin:
             except Exception:
                 pass
 
-        worker.result_ready.connect(lambda probe: self._finish_asr_connection_test(probe, form))
-        worker.error_signal.connect(lambda message: self._fail_asr_connection_test(message, form))
-        worker.finished.connect(_finish)
+        from ui.threading_utils import connect_on_receiver
+
+        connect_on_receiver(
+            worker,
+            "result_ready(QVariantMap)",
+            self,
+            lambda probe: self._finish_asr_connection_test(probe, form),
+        )
+        connect_on_receiver(
+            worker,
+            "error_signal(QString)",
+            self,
+            lambda message: self._fail_asr_connection_test(message, form),
+        )
+        connect_on_receiver(worker, "finished()", self, _finish)
         worker.start()
 
     def _finish_asr_connection_test(self, probe, form):

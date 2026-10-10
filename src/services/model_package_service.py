@@ -928,15 +928,19 @@ def rediscover_model_profiles(model_root: str | None = None) -> dict:
                     if parent:
                         root = parent
                     break
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/model_package_service.py:trim_model_root")
 
     manifests = _discover_manifest_files(root)
     import_result = import_model_packages(root, manifest_files=manifests or None)
     try:
         heal_stale_model_embedding_dimensions()
     except Exception as exc:
-        logger.debug("heal_stale_model_embedding_dimensions after rediscover failed: %s", exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/model_package_service.py:heal_stale_model_embedding_dimensions")
     prune_result = prune_incomplete_model_profiles()
     active_before = str(import_result.get("active_profile", "") or "").strip()
     active_after = str(prune_result.get("active_profile", "") or active_before).strip()

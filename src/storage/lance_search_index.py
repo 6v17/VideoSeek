@@ -75,8 +75,10 @@ def invalidate_lance_runtime_caches(profile_base_dir: str = "") -> None:
         from src.services.understanding_service import invalidate_ready_video_entries_cache
 
         invalidate_ready_video_entries_cache()
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:invalidate_ready_video_entries_cache")
 
 
 def _neighbor_rows_from_arrow(arrow) -> list[LanceSearchRow]:
@@ -188,7 +190,10 @@ def _scan_all_column_values(table, column: str) -> list:
         return []
     try:
         total_rows = int(table.count_rows())
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:count_rows")
         total_rows = -1
     if total_rows == 0:
         return []
@@ -364,8 +369,10 @@ class LanceTableSearchIndex:
             if callable(nprobes):
                 try:
                     builder = nprobes(64)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "src/storage/lance_search_index.py:nprobes")
             return builder
         # IVF_PQ indexes trade recall for speed; default path stays exact.
         if hasattr(builder, "bypass_vector_index"):
@@ -818,7 +825,10 @@ def _scan_all_column_pairs(table, column_a: str, column_b: str) -> list[tuple[ob
         return []
     try:
         total_rows = int(table.count_rows())
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:count_rows")
         total_rows = -1
     if total_rows == 0:
         return []
