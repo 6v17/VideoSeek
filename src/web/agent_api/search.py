@@ -313,6 +313,7 @@ def _get_video_duration_cached(video_path: str) -> Optional[float]:
         if key in _duration_cache:
             return _duration_cache[key]
     duration = None
+    probe_failed = False
     try:
         from src.utils import get_video_duration_seconds
 
@@ -321,10 +322,15 @@ def _get_video_duration_cached(video_path: str) -> Optional[float]:
             duration = float(raw)
             if duration <= 0:
                 duration = None
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/web/agent_api/search.py:_get_video_duration_cached")
+        probe_failed = True
         duration = None
-    with _duration_cache_lock:
-        _duration_cache[key] = duration
+    if not probe_failed:
+        with _duration_cache_lock:
+            _duration_cache[key] = duration
     return duration
 
 

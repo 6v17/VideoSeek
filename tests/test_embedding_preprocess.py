@@ -38,6 +38,18 @@ class EmbeddingPreprocessLockTests(unittest.TestCase):
                 with patch.object(ep, "profile_has_visual_assets", return_value=False):
                     self.assertEqual(ep.resolve_embedding_preprocess({}), PREPROCESS_STRETCH)
 
+    def test_failed_asset_probe_does_not_lock_center_crop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = str(Path(tmp) / "profile")
+            ensure_profile_library_db(base, migrate=False)
+            with patch.object(ep, "profile_has_visual_assets", return_value=None), patch(
+                "src.storage.config_store.get_local_model_asset_dirs",
+                return_value={"base_dir": base},
+            ), patch("src.storage.config_store.load_config", return_value={}):
+                mode = ep.resolve_embedding_preprocess({})
+                self.assertEqual(mode, PREPROCESS_STRETCH)
+                self.assertEqual(ep.get_locked_embedding_preprocess(base), "")
+
 
 if __name__ == "__main__":
     unittest.main()

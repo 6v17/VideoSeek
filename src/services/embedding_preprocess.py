@@ -20,25 +20,34 @@ logger = logging.getLogger(__name__)
 _META_KEY = "embedding_preprocess"
 
 
-def profile_has_visual_assets(profile_base_dir: str) -> bool:
-    """True when this profile already has ready videos or Lance frame rows."""
+def profile_has_visual_assets(profile_base_dir: str) -> bool | None:
+    """True/False when the asset probe succeeded. None when the probe itself failed."""
     profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
     if not profile_base_dir:
         return False
+    probe_failed = False
     try:
         from src.storage.lance_search_index import lance_search_is_ready
 
         if lance_search_is_ready(profile_base_dir):
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/embedding_preprocess.py:lance_search_is_ready")
+        probe_failed = True
     try:
         from src.storage.lance_store import _count_profile_ready_videos
 
         if int(_count_profile_ready_videos(profile_base_dir) or 0) > 0:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/embedding_preprocess.py:ready_video_count")
+        probe_failed = True
+    if probe_failed:
+        return None
     return False
 
 
@@ -74,11 +83,16 @@ def resolve_embedding_preprocess(config=None) -> str:
     locked = get_locked_embedding_preprocess(base_dir)
     if locked:
         return locked
-    mode = (
-        PREPROCESS_STRETCH
-        if profile_has_visual_assets(base_dir)
-        else PREPROCESS_CENTER_CROP
-    )
+    has_assets = profile_has_visual_assets(base_dir)
+    if has_assets is None:
+        from src.app.logging_utils import get_logger
+
+        get_logger("embedding_preprocess").warning(
+            "Asset probe failed for %s; embedding_preprocess stays unlocked",
+            base_dir,
+        )
+        return PREPROCESS_STRETCH
+    mode = PREPROCESS_STRETCH if has_assets else PREPROCESS_CENTER_CROP
     set_locked_embedding_preprocess(base_dir, mode)
     logger.info(
         "Locked embedding_preprocess=%s for profile %s",

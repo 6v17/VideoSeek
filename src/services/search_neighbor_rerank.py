@@ -18,6 +18,12 @@ _PRECISE_NEIGHBOR_WINDOW_SEC = 5.0
 _PRECISE_NEIGHBOR_BLEND = 0.1
 
 
+def _note_bad_neighbor_query(exc: BaseException, where: str) -> None:
+    from src.app.logging_utils import note_swallowed
+
+    note_swallowed(exc, where)
+
+
 def _retimed_hit(hit: SearchHit, timestamp: float, score: float, *, video_path: str | None = None) -> SearchHit:
     """Keep video_id when a neighbor frame replaces the seed.
 
@@ -184,7 +190,8 @@ def _apply_bounded_neighbor_refine_lance(
         return list(results or [])
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        _note_bad_neighbor_query(exc, "src/services/search_neighbor_rerank.py:bounded_lance")
         return list(results or [])
 
     configured_top_n = int(get_frame_neighbor_rerank_top_n({}) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
@@ -238,7 +245,8 @@ def _apply_frame_neighbor_rerank_lance(
 
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        _note_bad_neighbor_query(exc, "src/services/search_neighbor_rerank.py:frame_lance")
         return results
 
     reranked = list(results)
@@ -284,7 +292,8 @@ def _expand_neighbor_rerank_candidates_lance(
 
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        _note_bad_neighbor_query(exc, "src/services/search_neighbor_rerank.py:expand_lance")
         return list(results or [])
 
     candidates: dict[tuple[str, int], SearchHit] = {}
@@ -337,7 +346,8 @@ def _apply_bounded_neighbor_refine(
         return list(results or [])
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        _note_bad_neighbor_query(exc, "src/services/search_neighbor_rerank.py:bounded")
         return list(results or [])
 
     configured_top_n = int(get_frame_neighbor_rerank_top_n({}) or DEFAULT_CONFIG["frame_neighbor_rerank_top_n"])
@@ -419,7 +429,8 @@ def _apply_frame_neighbor_rerank(
 
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        _note_bad_neighbor_query(exc, "src/services/search_neighbor_rerank.py:frame")
         return results
 
     reranked = list(results)
@@ -501,7 +512,8 @@ def _expand_neighbor_rerank_candidates(
 
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        _note_bad_neighbor_query(exc, "src/services/search_neighbor_rerank.py:expand")
         return list(results or [])
 
     candidates: dict[tuple[str, int], SearchHit] = {}

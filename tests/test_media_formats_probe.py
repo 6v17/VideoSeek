@@ -81,6 +81,15 @@ class ProbeDurationTests(unittest.TestCase):
         cmd = mock_run.call_args.args[0]
         self.assertIn("10M", cmd)
         self.assertNotIn("100M", cmd)
+        self.assertNotIn("probe_failed", info)
+
+    @patch("src.media.probe.get_ffprobe_path", return_value="ffprobe")
+    @patch("src.media.probe.subprocess.run", side_effect=OSError("ffprobe crashed"))
+    def test_probe_failure_is_marked(self, _mock_run, _mock_path):
+        info = probe_mod.get_video_stream_info(r"D:\lib\clip.mp4")
+        self.assertTrue(info["probe_failed"])
+        self.assertIsNone(info["width"])
+        self.assertIsNone(info["height"])
 
 
 if __name__ == "__main__":

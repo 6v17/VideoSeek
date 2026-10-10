@@ -141,7 +141,10 @@ def _search_frame_results_in_time_window(
     window = max(1.0, float(window_sec))
     try:
         query = np.asarray(query_vector[0], dtype=np.float32).reshape(-1)
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/search_frame_query.py:time_window")
         return [], []
 
     candidate_ids: List[int] = []
@@ -165,7 +168,10 @@ def _search_frame_results_in_time_window(
             matrix = np.asarray(preloaded_vectors, dtype=np.float32)
             if matrix.ndim == 2 and matrix.shape[0] >= total:
                 vector_matrix = matrix
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/search_frame_query.py:preloaded_vectors")
             vector_matrix = None
 
     vector_cache: dict[int, np.ndarray] = {}

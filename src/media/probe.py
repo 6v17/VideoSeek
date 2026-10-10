@@ -28,9 +28,18 @@ def get_video_stream_info(video_path):
         "bits_per_raw_sample": None,
         "profile": "",
     }
+
+    def _failed(reason: str):
+        from src.app.logging_utils import get_logger
+
+        get_logger("media.probe").warning("video probe failed for %s: %s", video_path, reason)
+        payload = dict(empty)
+        payload["probe_failed"] = True
+        return payload
+
     ffprobe_path = get_ffprobe_path()
     if not ffprobe_path:
-        return dict(empty)
+        return _failed("ffprobe missing")
 
     path = os.fspath(video_path)
     transport_like = is_transport_like_video_path(path)
@@ -74,7 +83,7 @@ def get_video_stream_info(video_path):
             **run_kwargs,
         )
         if result.returncode != 0:
-            return dict(empty)
+            return _failed(f"ffprobe exit {result.returncode}")
 
         payload = json.loads(result.stdout or "{}")
         streams = payload.get("streams") or []
@@ -93,8 +102,8 @@ def get_video_stream_info(video_path):
             "bits_per_raw_sample": _safe_int(stream.get("bits_per_raw_sample")),
             "profile": str(stream.get("profile") or "").strip().lower(),
         }
-    except Exception:
-        return dict(empty)
+    except Exception as exc:
+        return _failed(str(exc))
 
 
 def has_readable_video_stream(video_path):
