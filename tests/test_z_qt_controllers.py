@@ -898,7 +898,7 @@ class PreviewControllerTests(unittest.TestCase):
         self.assertEqual(done.call_count, 2)
 
     @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
-    @patch("src.media.export_clip._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_prefers_vlc_for_direct_preview(self, mock_vlc_cls, _mock_window, _mock_instance):
         parent = _make_parent_window()
@@ -930,7 +930,7 @@ class PreviewControllerTests(unittest.TestCase):
             parent.search_page.preview_placeholder
         )
 
-    @patch("src.media.export_clip._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_http_uses_vlc_without_ffmpeg_fallback(self, mock_vlc_cls, _mock_window):
         parent = _make_parent_window()
@@ -947,7 +947,7 @@ class PreviewControllerTests(unittest.TestCase):
 
     @patch("src.media.export_clip.create_preview_clip")
     @patch("src.media.export_clip.build_preview_cache_path", return_value="D:/cache/preview.mp4")
-    @patch("src.media.export_clip._resolve_base_clip_window", return_value=(27.0, 6.0))
+    @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_falls_back_to_generated_clip_when_vlc_playback_fails(
         self,
