@@ -183,10 +183,12 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
     payload: Dict[str, Any]
 
     if format_key == "jianying":
+        from src.services.clip_export_service import output_path_allowed
         from src.services.jianying_draft_service import (
             JianyingDraftError,
             export_shot_list_to_jianying_draft,
             is_jianying_draft_support_available,
+            resolve_jianying_drafts_dir,
         )
 
         if not is_jianying_draft_support_available():
@@ -194,10 +196,13 @@ def execute_agent_timeline_export(body: AgentTimelineExportRequest) -> Dict[str,
                 "pyJianYingDraft is not installed. "
                 "Install with: pip install pyJianYingDraft"
             )
+        drafts_dir = str(body.drafts_dir or "").strip() or resolve_jianying_drafts_dir()
+        if drafts_dir and not output_path_allowed(drafts_dir):
+            raise ValueError("drafts_dir must not be inside an indexed library root.")
         try:
             result = export_shot_list_to_jianying_draft(
                 shots,
-                drafts_dir=body.drafts_dir,
+                drafts_dir=drafts_dir or None,
                 draft_name=body.draft_name,
             )
         except JianyingDraftError as exc:

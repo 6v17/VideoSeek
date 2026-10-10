@@ -12,7 +12,7 @@ from typing import Any
 
 from src.app.config import DEFAULT_CONFIG
 from src.app.logging_utils import get_app_data_dir, get_logger
-from src.storage.meta_io import _commit_meta_file
+from src.storage.meta_io import commit_temp_file
 
 logger = get_logger("search_telemetry_store")
 
@@ -282,7 +282,7 @@ def _write_dirty_state() -> None:
         with open(tmp_path, "w", encoding="utf-8") as handle:
             # Compact JSON: locate samples can be thousands of rows; indent=2 was multi-MB.
             json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
-        _commit_meta_file(tmp_path, path)
+        commit_temp_file(tmp_path, path)
         tmp_path = ""
     except Exception as exc:
         logger.warning("Failed to persist search telemetry: %s", exc)

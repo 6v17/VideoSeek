@@ -12,7 +12,7 @@
 
 | 前提 | 动作 |
 |------|------|
-| VideoSeek 运行中 | 设置 → **搜索接口** → 选 **本机 Agent API**（或旧项「本机搜索接口」开启）→ 保存 |
+| VideoSeek 运行中 | 设置 → **搜索接口** → 选 **本机 Agent API** → 保存 |
 | `index_ready: true` | 否则让用户在软件里同步索引 |
 | 基址 | `http://127.0.0.1:8765/api/v1`（仅 `127.0.0.1`，无鉴权） |
 | 与团队模式区分 | **服务机 / 用户机**走局域网共享检索，**不是**本文的本机 Agent HTTP；Agent 仍只连本机 `127.0.0.1` |
@@ -63,14 +63,14 @@
 | 400 | `invalid_request` | 请求体/参数不合法（含 Pydantic 校验失败） |
 | 404 | `invalid_request` / `doc_not_found` | 库/视频/源文件不存在；或 `agent-doc` 缺 md |
 | 409 | `index_not_ready` | 索引未就绪 |
-| 422 | `query_failed` / `export_failed` / `no_chunks` / `video_not_found` | 搜索/导出执行失败 |
-| 503 | `engine_busy` | 超时、并发满、FFmpeg 不可用、导出队列忙 |
+| 422 | `query_failed` / `export_failed` / `timeline_export_failed` / `frame_extract_failed` | 搜索、成片、时间线或抽帧执行失败。单条 `/export/clip` 在 FFmpeg 不可用时也是 `export_failed`。`/export/manifest` 超过 30s 同样落成 `query_failed` |
+| 503 | `engine_busy` | 搜索超时、搜索并发满、导出队列忙、时间线超时、批量导出超时。批量导出时 FFmpeg 不可用也走这里 |
 
 ### 2.2 路径规则（必读）
 
 - **`video_path`**：必须**原样**来自 `hits[]`、`GET /videos`（或 `/libraries/videos` / `/subtitle-libraries/videos`）、或导出响应；禁止按显示名/语义/终端乱码猜中文文件名。搜索 `hits[].video_path` 会按 `video_id` 回填绝对路径（台词命中尤其依赖此字段，勿自行拼路径）。
 - **`library_path`**：必须来自 `/libraries` 的 `library_path`。
-- **写出路径**（`output_path`、`export.output_dir`、`write_path`）：**不得**落在已索引库根目录内（防覆盖源媒体）。
+- **写出路径**（`output_path`、`export.output_dir`、`write_path`、剪映 `drafts_dir`）：**不得**落在已索引库根目录内（防覆盖源媒体）。
 - Python 写 JSON：`ensure_ascii=False`；POST body 用 UTF-8。
 
 ### 2.3 搜索范围 `scope`
@@ -139,7 +139,7 @@
 
 | 字段 | 说明 |
 |------|------|
-| `index_ready` | 当前 mode 下 Lance 向量库是否可用（`lance_search_is_ready`） |
+| `index_ready` | `mode=frame`：Lance 已就绪且帧行数 > 0。`mode=chunk`：chunk 行数 > 0 |
 | `index_sync_in_progress` | 桌面是否正在同步/重建索引；为 true 时搜索结果可能不完整 |
 | `index_sync_target_library_path` | 同步中的库路径；省略表示全库或未知 |
 | `index_stale` / `global_index_state` | 兼容字段；本地搜索实际以 Lance 是否就绪、桌面是否在同步为准 |
@@ -154,7 +154,7 @@
 | `search_mode_default` / `search_mode_checked` | 默认与本次检查的 mode |
 | `max_concurrent_searches` | 搜索并发上限（默认 10，可配 `agent_api_max_concurrent_searches`） |
 | `search_queue_wait_sec` | 拿不到搜索槽位时最多等待秒数（默认 12，可配 `agent_api_search_queue_wait_sec`）；超时返回 `503 engine_busy` |
-| `search_timeout_sec` / `search_timeout_precise_sec` | 单次搜索超时（可配置） |
+| `search_timeout_sec` / `search_timeout_precise_sec` | 单次搜索超时（可配置）。带 `preview_anchor_sec` 或精确模式时用后者 |
 | `max_batch_queries` | 64 |
 | `max_batch_export_clips` | 64 |
 | `batch_timeout_sec` | batch 基础超时 |
@@ -302,6 +302,10 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `preset_id` | 二选一 | — | 与 `query` 互斥 |
 | `query` | 二选一 | — | 文本或图片路径 |
 | `query_type` | 否 | `text` | `text` \| `image_path`（`image_path` 时 `query` 为本地图片绝对路径）；也可用顶层字段 `image_path` 简写 |
+| `image_base64` / `image_mime` | 否 | — | 团队客户端直接上传图片；服务端解码成临时文件 |
+| `query_vector` | 否 | — | 已算好的 CLIP 向量；有值时服务端不再编码 |
+| `video_discovery_enabled` | 否 | — | 图搜每个视频只留最佳命中（桌面「视频择优」） |
+| `team_play_urls` | 否 | `false` | 为 true 时命中附带团队播放地址 |
 | `search_kind` | 否 | `visual` | `visual` \| `dialogue` \| `tags`；台词用 `dialogue`，VLM 标签用 `tags`（均仅文本 query） |
 | `match_mode` | 否 | `auto` | `dialogue` / `tags`：`exact` \| `fuzzy` \| `auto`；团队客户端也可经 `search_mode` 透传 |
 | `text_enhance` | 否 | 跟 `/health` | **Agent 可显式开关**画面文搜增强；见 §3 机制说明；`meta.text_enhance_applied` 表示是否生效 |
@@ -313,7 +317,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `scope` | 否 | 桌面范围 | 见 §2.3 |
 | `expand_frame_hits` | 否 | `true` | frame 模式下点命中扩成段 |
 | `pad_before_sec` / `pad_after_sec` | 否 | **3.0** | 扩段 padding（秒） |
-| `preview_anchor_sec` | 否 | — | 图搜 + `scope.video_paths` 恰好 1 条；服务端强制 `precise` |
+| `preview_anchor_sec` | 否 | — | 图搜 + `scope.video_paths` 恰好 1 条；服务端强制 `precise`，超时用 `search_timeout_precise_sec` |
 | `locate_anchor_score` | 否 | — | 片内定位时的粗搜命中分；与 `preview_anchor_sec` 一起传 |
 | `locate_score_margin` | 否 | — | 粗搜 top1 与 top2 的分差；与 `preview_anchor_sec` 一起传 |
 
@@ -377,11 +381,11 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 | 字段 | 必填 | 默认 | 说明 |
 |------|------|------|------|
-| `queries` | 与 folder 二选一 | `[]` | 最多 **64** 条；每项同单次 search，可单独 override `top_k`/`mode`/`scope` 等 |
+| `queries` | 与 folder 二选一 | `[]` | 最多 **64** 条；每项同单次 search，可单独带 `image_base64` / `query_vector`，也可 override `top_k`/`mode`/`scope` |
 | `image_folder` | 与 queries 二选一 | — | 扫描目录下 `.png/.jpg/.jpeg/.webp/.bmp/.gif`，每条图一条 query（`query_type=image_path`） |
 | `top_k`, `mode`, `min_score`, `search_precision_mode`, `text_enhance` | 否 | — | **批量默认**，单条未设时继承 |
 | `continue_on_error` | 否 | `true` | 单条失败是否继续 |
-| `scope`, `expand_frame_hits`, `pad_before_sec`, `pad_after_sec` | 否 | 同单次 | 批量级默认 |
+| `scope`, `expand_frame_hits`, `pad_before_sec`, `pad_after_sec` | 否 | 同单次 | 批量默认。单项 JSON 里写了同名字段时，以单项为准；没写则用批量值。任一条带 `preview_anchor_sec` 时，整批超时按精确搜索算 |
 | `export` | 否 | — | 内嵌导出，见下 |
 
 **`export`（可选，搜完自动写 mp4）：**
@@ -395,7 +399,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `dedupe` | 否 | `true` | 导出前去重 |
 | `continue_on_error` | 否 | `true` | 导出项失败是否继续 |
 
-内嵌导出文件名规则：`{client_request_id或query}_rank{NN}.mp4`（冲突加后缀）。导出条目数 > 64 → 400。
+内嵌导出文件名规则：`{client_request_id或query}_rank{NN}.mp4`（冲突加后缀）。导出条目数 > 64 时，搜索结果仍返回，HTTP 200，`export.ok` 为 false，`export.error.code` 为 `invalid_request`。
 
 **成功响应：**
 
@@ -449,7 +453,7 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 | `keep_per_source` | 否 | **2** | 仅 **sources** 模式：每条 result 取前 N hit |
 | `dedupe` | 否 | `true` | 同视频区间重叠 >50%（frame 模式另：起点差 ≤2s）则去重 |
 | `write_path` | 否 | — | 若提供则写入磁盘 JSON |
-| `expand_frame_hits`, `pad_*`, `mode` | 否 | 同搜索默认 | 仅 **sources** 模式重新解析 hit 时用 |
+| `expand_frame_hits`, `pad_*`, `mode` | 否 | 桌面 `search_mode` | **sources** 直接采用 hits 里已经算好的 `start_sec`/`end_sec`，不再套扩段或 padding。`mode` 只影响去重（重叠 >50%；frame 另计起点差 ≤2s）。省略 `mode` 时跟桌面搜索模式 |
 
 **`items[]` 每项必填：** `video_path`, `start_sec`, `end_sec`；可选 `id`, `query`, `client_request_id`, `score`, `rank`, `notes`
 
@@ -514,6 +518,8 @@ GET /api/v1/libraries/videos?library_path=D:/222库路径
 
 **成功响应：** `{ "ok", "results": [ 同单次… \| {ok:false,error} ], "meta": { total, succeeded, failed, max_batch_frame_extract } }`
 
+单条失败时 `error.code`：文件不存在是 `not_found`，抽帧运行失败是 `frame_extract_failed`，参数不合法是 `invalid_request`。
+
 推荐链路：`POST /search` → 选 hit → `POST /frames/extract/batch`。
 
 ---
@@ -557,7 +563,7 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 | 字段 | 必填 | 默认 | 说明 |
 |------|------|------|------|
 | `video_path` | 是 | — | 源视频绝对路径（须来自 `hits[]` / `/videos`，勿自拼） |
-| `start_sec` / `end_sec` | 是 | — | `end_sec` **必须大于** `start_sec` |
+| `start_sec` / `end_sec` | 是 | — | `end_sec` 大于 `start_sec` 时按区间裁切。`end_sec` 小于或等于 `start_sec` 时当成点命中，按预览中心开一段 |
 | `output_path` | 与 `output_dir` 二选一 | — | 完整输出文件路径；必须以 **`.mp4` / `.mkv` / `.mov`** 结尾；勿在库根内 |
 | `output_dir` | 与 `output_path` 二选一 | — | 输出目录；服务端按源文件名+起止秒自动生成 `.mp4`（与 batch 内嵌 `export.output_dir` 同类） |
 | `encode_mode` | 否 | `copy` | `copy`（流复制，快）\| `original`（libx264 重编码，慢，时长准） |
@@ -580,13 +586,13 @@ XML 另有 `write_path`；剪映另有 `draft_name` / `draft_path` / `drafts_dir
 
 | 字段 | 说明 |
 |------|------|
-| `items[]` | 必填，最多 **64** 条；字段同单条；单项可 override `encode_mode`/`silent` |
+| `items[]` | 必填，最多 **64** 条。每项必填 `video_path`、`start_sec`、`end_sec`、`output_path`（没有 `output_dir`）。单项可 override `encode_mode`/`silent` |
 | `encode_mode` / `silent` | 批量默认 |
 | `continue_on_error` | 默认 `true` |
 
 **批量响应：** `{ "ok", "results": [ { "ok", "output_path", … } | { "ok": false, "error": {code,message} } ], "meta": { total, succeeded, failed, batch_timeout_sec } }`
 
-超时：单条 120s；批量按条数估算（copy 最多 3 路并行）。
+超时：单条 120s，超时为 503 `engine_busy`。批量按条数估算，copy 最多 3 路并行，上限 900s；到点后 HTTP 返回，磁盘上的写出可能还在继续。
 
 ---
 

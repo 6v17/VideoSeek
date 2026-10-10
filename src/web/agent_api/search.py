@@ -245,6 +245,8 @@ def _resolve_agent_search_scope(
 def _resolve_search_timeout_sec(body: AgentSearchRequest, config=None) -> float:
     cfg = config or load_config()
     timeouts = _agent_timeout_settings(cfg)
+    if getattr(body, "preview_anchor_sec", None) is not None:
+        return timeouts["search_timeout_precise_sec"]
     try:
         resolved = _resolve_agent_search_inputs(body, config=cfg)
         if resolved["search_precision_mode"] == "precise":
@@ -262,6 +264,8 @@ def _batch_requests_precise_mode(body: AgentBatchSearchRequest, config=None) -> 
     except ValueError:
         return False
     for item in queries:
+        if getattr(item, "preview_anchor_sec", None) is not None:
+            return True
         try:
             resolved = _resolve_agent_search_inputs(item, config=cfg)
         except ValueError:
@@ -1036,9 +1040,13 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         preset_id=item.preset_id,
         query_type=item.query_type,
         image_path=item.image_path,
+        image_base64=item.image_base64,
+        image_mime=item.image_mime,
+        query_vector=item.query_vector,
         search_kind=item.search_kind if item.search_kind is not None else batch.search_kind,
         top_k=item.top_k if item.top_k is not None else batch.top_k,
         mode=item.mode if item.mode is not None else batch.mode,
+        search_mode=item.search_mode,
         min_score=item.min_score if item.min_score is not None else batch.min_score,
         search_precision_mode=(
             item.search_precision_mode
@@ -1056,9 +1064,21 @@ def _merge_search_request(item: AgentSearchRequest, batch: AgentBatchSearchReque
         match_mode=item.match_mode,
         client_request_id=item.client_request_id,
         scope=item.scope if item.scope is not None else batch.scope,
-        expand_frame_hits=batch.expand_frame_hits,
-        pad_before_sec=batch.pad_before_sec,
-        pad_after_sec=batch.pad_after_sec,
+        expand_frame_hits=(
+            item.expand_frame_hits
+            if "expand_frame_hits" in item.model_fields_set
+            else batch.expand_frame_hits
+        ),
+        pad_before_sec=(
+            item.pad_before_sec
+            if "pad_before_sec" in item.model_fields_set
+            else batch.pad_before_sec
+        ),
+        pad_after_sec=(
+            item.pad_after_sec
+            if "pad_after_sec" in item.model_fields_set
+            else batch.pad_after_sec
+        ),
         preview_anchor_sec=item.preview_anchor_sec,
         locate_anchor_score=item.locate_anchor_score,
         locate_score_margin=item.locate_score_margin,

@@ -156,7 +156,7 @@ def execute_export_manifest(
         pad_after_sec = float(getattr(body, "pad_after_sec", pad_after_sec))
         mode = getattr(body, "mode", mode)
 
-    resolved_mode = normalize_manifest_mode(mode) if mode else "chunk"
+    resolved_mode = normalize_manifest_mode(mode)
     if items:
         raw_items = [_coerce_manifest_item(item) for item in items]
     elif sources:

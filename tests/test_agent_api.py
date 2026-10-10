@@ -159,6 +159,21 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(_resolve_search_timeout_sec(body), 200.0)
 
     @patch("src.web.agent_api.search.load_config")
+    @patch("src.web.agent_api.search.os.path.isfile", return_value=True)
+    def test_preview_anchor_uses_precise_timeout(self, _mock_isfile, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 90,
+            "agent_api_search_timeout_precise_sec": 200,
+        }
+        body = AgentSearchRequest(
+            query="D:/ref.png",
+            query_type="image_path",
+            search_precision_mode="fast",
+            preview_anchor_sec=12.5,
+        )
+        self.assertEqual(_resolve_search_timeout_sec(body), 200.0)
+
+    @patch("src.web.agent_api.search.load_config")
     def test_resolve_batch_timeout_scales_with_query_count(self, mock_load_config):
         mock_load_config.return_value = {
             "agent_api_search_timeout_fast_sec": 90,
@@ -195,6 +210,44 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertTrue(_batch_requests_precise_mode(body))
         timeout = _resolve_batch_timeout_sec(body)
         self.assertGreaterEqual(timeout, 180.0)
+
+    @patch("src.web.agent_api.search.load_config")
+    def test_batch_preview_anchor_uses_precise_timeout(self, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 90,
+            "agent_api_search_timeout_precise_sec": 180,
+            "agent_api_batch_timeout_sec": 1200,
+        }
+        body = AgentBatchSearchRequest(
+            queries=[
+                AgentSearchRequest(query="still", preview_anchor_sec=4.0),
+            ],
+        )
+        self.assertTrue(_batch_requests_precise_mode(body))
+        timeout = _resolve_batch_timeout_sec(body)
+        self.assertGreaterEqual(timeout, 180.0)
+
+    def test_batch_merge_keeps_item_image_and_explicit_padding(self):
+        from src.web.agent_api.search import _merge_search_request
+
+        item = AgentSearchRequest(
+            query_type="image_path",
+            image_base64="abc",
+            query_vector=[0.1, 0.2],
+            expand_frame_hits=False,
+            pad_before_sec=1.0,
+        )
+        batch = AgentBatchSearchRequest(
+            expand_frame_hits=True,
+            pad_before_sec=3.0,
+            pad_after_sec=3.0,
+        )
+        merged = _merge_search_request(item, batch)
+        self.assertEqual(merged.image_base64, "abc")
+        self.assertEqual(list(merged.query_vector), [0.1, 0.2])
+        self.assertFalse(merged.expand_frame_hits)
+        self.assertEqual(merged.pad_before_sec, 1.0)
+        self.assertEqual(merged.pad_after_sec, 3.0)
 
     @patch("src.web.agent_api.health._index_snapshot")
     def test_build_health_payload_includes_timeout_fields(self, mock_snapshot):
