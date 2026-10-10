@@ -631,6 +631,11 @@ QPushButton:disabled {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __ACCENT__;
 }
+#GhostButton:checked {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    color: __ACCENT__;
+}
 #SearchFilterToggle {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE_STRONG__;

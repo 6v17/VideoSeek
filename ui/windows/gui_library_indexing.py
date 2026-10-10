@@ -522,9 +522,6 @@ class LibraryIndexingGuiMixin:
             "btn_remove_lib": not client,
             "btn_sync_db": not client,
             "btn_refresh_visual_library": not client,
-            "btn_index_issues": not client,
-            "btn_fix_missing_vectors": not client,
-            "btn_cleanup_missing": not client,
             "btn_remove_selected_videos": not client,
             "btn_vector_details": not client,
             "btn_build_dialogue_index": not client,
@@ -532,6 +529,7 @@ class LibraryIndexingGuiMixin:
             "btn_clear_dialogue": not client,
             "btn_export_dialogue": not client,
             "btn_refresh_dialogue_library": not client,
+            "btn_subtitle_sample_advanced": not client,
             "input_subtitle_sample_interval": not client,
             "input_subtitle_sample_strategy": not client,
             "input_subtitle_ocr_batch": not client,
@@ -548,6 +546,13 @@ class LibraryIndexingGuiMixin:
             widget = getattr(page, name, None)
             if widget is not None:
                 widget.setVisible(bool(visible))
+        if client:
+            advanced = getattr(page, "btn_subtitle_sample_advanced", None)
+            if advanced is not None:
+                advanced.setChecked(False)
+            row = getattr(page, "subtitle_sample_advanced_row", None)
+            if row is not None:
+                row.setVisible(False)
         action_caption = getattr(page, "lbl_action_caption", None)
         if action_caption is not None:
             action_caption.setVisible(not client)
@@ -569,6 +574,10 @@ class LibraryIndexingGuiMixin:
             hint.hide()
             self._refresh_library_action_hints()
         self._refresh_remove_selected_videos_button()
+        self._apply_index_issue_button_state(bool(getattr(self, "_last_index_issues", ())))
+        self._refresh_fix_missing_vectors_button(
+            count=int(getattr(self, "_last_fix_missing_count", 0) or 0)
+        )
         self._refresh_cleanup_missing_button_state(probe=False)
 
     def refresh_selected_visual_libraries(self):
@@ -2507,12 +2516,17 @@ class LibraryIndexingGuiMixin:
         self.show_info_dialog(self.texts["warning_title"], message, kind="warning")
 
     def _apply_index_issue_button_state(self, has_issues):
+        from src.services.team_mode_service import is_team_client_mode
+
         button = self.library_page.btn_index_issues
-        button.setEnabled(bool(has_issues))
-        button.setObjectName("WarningButton" if has_issues else "GhostButton")
+        show = bool(has_issues) and not is_team_client_mode()
+        button.setVisible(show)
+        button.setEnabled(show)
+        button.setObjectName("WarningButton" if show else "GhostButton")
         button.style().unpolish(button)
         button.style().polish(button)
         button.update()
+        self._sync_visual_repair_divider()
 
     def _probe_cleanup_missing_available(self) -> bool:
         """True when cleanup would find at least one invalid/missing source entry."""
@@ -2537,13 +2551,15 @@ class LibraryIndexingGuiMixin:
             return
         has_content = bool(has_content)
         self._last_cleanup_missing_available = has_content
-        button.setEnabled(bool(has_content) and not force_disabled)
+        button.setVisible(has_content)
+        button.setEnabled(has_content and not force_disabled)
         button.setObjectName("WarningButton" if has_content else "GhostButton")
         style = button.style()
         if style is not None:
             style.unpolish(button)
             style.polish(button)
         button.update()
+        self._sync_visual_repair_divider()
 
     def _cleanup_missing_button_busy(self) -> bool:
         return bool(
@@ -2580,6 +2596,8 @@ class LibraryIndexingGuiMixin:
             btn.setEnabled(False)
             btn.setText(self.texts.get("fix_missing_vectors", "修复向量"))
             btn.setToolTip(self.texts.get("fix_missing_vectors_hint", ""))
+            btn.setVisible(False)
+            self._apply_fix_missing_vectors_button_chrome(btn, actionable=False)
             return
         busy = bool(
             self.indexing_controller.is_busy()
@@ -2611,7 +2629,31 @@ class LibraryIndexingGuiMixin:
                 "为「向量/索引缺失」且源文件仍在的视频重新嵌入（无需先勾选）。",
             )
         )
-        btn.setEnabled((not busy) and self._last_fix_missing_count > 0)
+        actionable = self._last_fix_missing_count > 0
+        btn.setVisible(actionable)
+        btn.setEnabled((not busy) and actionable)
+        self._apply_fix_missing_vectors_button_chrome(btn, actionable=actionable)
+
+    def _apply_fix_missing_vectors_button_chrome(self, button, *, actionable: bool) -> None:
+        button.setObjectName("WarningButton" if actionable else "GhostButton")
+        style = button.style()
+        if style is not None:
+            style.unpolish(button)
+            style.polish(button)
+        button.update()
+        self._sync_visual_repair_divider()
+
+    def _sync_visual_repair_divider(self) -> None:
+        divider = getattr(self.library_page, "visual_repair_divider", None)
+        if divider is None:
+            return
+        show = False
+        for name in ("btn_index_issues", "btn_fix_missing_vectors", "btn_cleanup_missing"):
+            button = getattr(self.library_page, name, None)
+            if button is not None and not button.isHidden():
+                show = True
+                break
+        divider.setVisible(show)
 
     def show_last_index_issue_details(self):
         if not self._last_index_issues:

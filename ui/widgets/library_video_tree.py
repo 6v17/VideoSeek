@@ -38,7 +38,6 @@ from ui.widgets.list_find_bar import (
     reveal_grouped_find_hit,
 )
 
-_LIST_VIEW_HEIGHT = 280
 _COUNT_COL_MIN = 36
 _STATUS_COL_MIN = 88
 _ACTION_COL_MIN = 56
@@ -46,6 +45,30 @@ _STATUS_READY = QColor("#2ec27e")
 _STATUS_PENDING = QColor("#f4c95d")
 # Fixable missing vectors — stronger amber so it reads as “needs sync”.
 _STATUS_FIX = QColor("#d89b0d")
+
+
+def expanded_library_list_height(
+    *,
+    content_height: int,
+    viewport_height: int,
+    header_height: int,
+    body_margin: int = 4,
+) -> int:
+    """Fit an expanded video list to its rows, and never taller than the visible pane.
+
+    A zero viewport means the tree is not on screen yet, so the list keeps its
+    content height until a later resize can cap it.
+    """
+    content = max(0, int(content_height))
+    if content <= 0:
+        return 0
+    viewport = int(viewport_height)
+    if viewport <= 0:
+        return content
+    cap = viewport - max(0, int(header_height)) - max(0, int(body_margin))
+    if cap < 1:
+        cap = viewport
+    return min(content, cap)
 
 
 class _ClickLabel(QLabel):
@@ -930,7 +953,7 @@ class LibraryGroupedVideoTree(QWidget):
         view.setIconSize(QSize(16, 16))
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        view.setFixedHeight(_LIST_VIEW_HEIGHT)
+        view.setFixedHeight(0)
         hh = view.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -959,6 +982,7 @@ class LibraryGroupedVideoTree(QWidget):
 
         if block.expanded:
             self._ensure_populated(block)
+            self._fit_expanded_list(block)
         else:
             # Reflect sticky checks on header without loading rows.
             self._sync_lib_checkbox_from_sticky(block)
@@ -991,6 +1015,45 @@ class LibraryGroupedVideoTree(QWidget):
             )
         if block.expanded:
             self._ensure_populated(block)
+            self._fit_expanded_list(block)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._fit_expanded_lists()
+
+    def _fit_expanded_lists(self) -> None:
+        for block in self._blocks:
+            if block.expanded:
+                self._fit_expanded_list(block)
+
+    def _fit_expanded_list(self, block: _LibBlock) -> None:
+        view = block.view
+        if view is None:
+            return
+        model = view.model()
+        rows = model.rowCount() if model is not None else 0
+        if rows <= 0:
+            content = 0
+        else:
+            header = view.verticalHeader()
+            content = header.length()
+            if content <= 0:
+                content = rows * max(1, header.defaultSectionSize())
+            content += view.frameWidth() * 2
+        header_widget = block.collapse.parentWidget() if block.collapse is not None else None
+        header_height = header_widget.sizeHint().height() if header_widget is not None else 0
+        body_margin = 0
+        if block.body is not None and block.body.layout() is not None:
+            body_margin = block.body.layout().contentsMargins().bottom()
+        viewport = self._scroll.viewport().height() if self._scroll is not None else 0
+        height = expanded_library_list_height(
+            content_height=content,
+            viewport_height=viewport,
+            header_height=header_height,
+            body_margin=body_margin,
+        )
+        if view.height() != height:
+            view.setFixedHeight(height)
 
     def _ensure_populated(self, block: _LibBlock) -> None:
         if block.populated or block.model is None:

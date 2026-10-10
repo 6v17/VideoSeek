@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.services.search_scope import normalize_scope_path
+from ui.widgets.library_video_tree import expanded_library_list_height
 from ui.widgets.list_find_bar import (
     ListFindBar,
     ListFindHit,
@@ -36,8 +37,6 @@ from ui.widgets.list_find_bar import (
     collect_grouped_find_hits,
     reveal_grouped_find_hit,
 )
-
-_LIST_VIEW_HEIGHT = 280
 
 
 class _ClickLabel(QLabel):
@@ -275,7 +274,8 @@ class VideoScopeTreeWidget(QWidget):
         """Kept for API compatibility with MainWindow.apply_texts."""
 
     def reflow_all_lib_trees(self) -> None:
-        """No-op for virtualized tables; kept for search-scope editor polish hooks."""
+        """Refit expanded lists once the dialog has a real viewport."""
+        self._fit_expanded_lists()
 
     @staticmethod
     def _entry_abs_path(ent: dict) -> str:
@@ -546,7 +546,7 @@ class VideoScopeTreeWidget(QWidget):
         view.setIconSize(QSize(16, 16))
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        view.setFixedHeight(_LIST_VIEW_HEIGHT)
+        view.setFixedHeight(0)
         view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         hh = view.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -571,6 +571,7 @@ class VideoScopeTreeWidget(QWidget):
 
         if block.expanded:
             self._ensure_populated(block)
+            self._fit_expanded_list(block)
         else:
             self._sync_lib_checkbox(block)
 
@@ -602,6 +603,45 @@ class VideoScopeTreeWidget(QWidget):
             )
         if block.expanded:
             self._ensure_populated(block)
+            self._fit_expanded_list(block)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._fit_expanded_lists()
+
+    def _fit_expanded_lists(self) -> None:
+        for block in self._blocks:
+            if block.expanded:
+                self._fit_expanded_list(block)
+
+    def _fit_expanded_list(self, block: _LibBlock) -> None:
+        view = block.view
+        if view is None:
+            return
+        model = view.model()
+        rows = model.rowCount() if model is not None else 0
+        if rows <= 0:
+            content = 0
+        else:
+            header = view.verticalHeader()
+            content = header.length()
+            if content <= 0:
+                content = rows * max(1, header.defaultSectionSize())
+            content += view.frameWidth() * 2
+        header_widget = block.collapse.parentWidget() if block.collapse is not None else None
+        header_height = header_widget.sizeHint().height() if header_widget is not None else 0
+        body_margin = 0
+        if block.body is not None and block.body.layout() is not None:
+            body_margin = block.body.layout().contentsMargins().bottom()
+        viewport = self._scroll.viewport().height() if self._scroll is not None else 0
+        height = expanded_library_list_height(
+            content_height=content,
+            viewport_height=viewport,
+            header_height=header_height,
+            body_margin=body_margin,
+        )
+        if view.height() != height:
+            view.setFixedHeight(height)
 
     def _ensure_populated(self, block: _LibBlock) -> None:
         if block.populated or block.model is None:

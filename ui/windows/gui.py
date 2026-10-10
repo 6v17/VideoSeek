@@ -981,6 +981,9 @@ class MainWindow(
         self.library_page.btn_export_dialogue.setToolTip(
             t.get("export_dialogue_library_hint", "")
         )
+        self.library_page.btn_subtitle_sample_advanced.setText(
+            t.get("subtitle_sample_advanced", "Advanced")
+        )
         self.library_page.btn_refresh_dialogue_library.setText(
             t.get("refresh_dialogue_library", "Refresh")
         )
