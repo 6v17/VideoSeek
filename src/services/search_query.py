@@ -7,7 +7,7 @@ from typing import List
 import numpy as np
 
 from src.core.clip_embedding import get_clip_embeddings_batch, get_text_embedding
-from src.core.faiss_index import _normalize_vectors
+from src.core.vector_norm import normalize_vectors as _normalize_vectors
 from src.domain.search_hit import SearchHit
 
 

@@ -9,6 +9,7 @@ import tempfile
 
 from src.app.logging_utils import get_logger
 from src.core.semantic_chunking import pack_chunks
+from src.core.vector_norm import normalize_vectors as _normalize_vectors
 from src.utils import measure_time
 
 logger = get_logger("faiss_index")
@@ -122,16 +123,6 @@ def _atomic_save_npy(output_file, data):
 
 def atomic_save_numpy(output_file, data):
     _atomic_save_npy(output_file, data)
-
-
-def _normalize_vectors(vectors):
-    vectors = np.asarray(vectors, dtype="float32")
-    if vectors.ndim == 1:
-        vectors = vectors.reshape(1, -1)
-    if vectors.size == 0:
-        return vectors
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    return vectors / np.maximum(norms, 1e-10)
 
 
 class IncrementalClipIndex:

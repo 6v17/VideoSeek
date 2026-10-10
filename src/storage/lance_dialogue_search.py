@@ -14,7 +14,7 @@ from typing import Any
 
 
 from src.app.logging_utils import get_logger
-from src.core.faiss_index import _normalize_vectors
+from src.core.vector_norm import normalize_vectors as _normalize_vectors
 from src.storage.config_store import get_active_embedding_spec, get_local_model_asset_dirs
 from src.storage.lance_store import (
     DIALOGUE_SEGMENTS_TABLE_NAME,

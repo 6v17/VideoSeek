@@ -38,7 +38,7 @@ python import_runtime_resources.py --status
 
 **构建完成但新增向量为 0** — 链接被预检拦截、重复，或源视频解析失败；看 UI 构建摘要。
 
-**从旧版升级（≥ 1.0.82）** — 遗留 npy/faiss → **Lance**：到 **设置 → 路径管理 → 迁移遗留索引** 主动执行（启动不再自动跑重迁移）。配置 schema / 视频 ID 等轻量检查仍会在启动快速完成。详见 `docs/migration_forced_upgrade_checklist.md` §4–§5。
+**从旧版升级（≥ 1.0.82）** — 遗留 npy/faiss → **Lance**：到 **设置 → 路径管理 → 迁移遗留索引** 主动执行（启动不再自动跑重迁移）。配置 schema / 视频 ID 等轻量检查仍会在启动快速完成。
 
 ### 版本号（正式 / QQ 群测）
 

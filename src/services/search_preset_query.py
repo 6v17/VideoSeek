@@ -73,7 +73,7 @@ def invalidate_all_preset_query_caches(preset_id: str, config=None) -> None:
 
 
 def _normalize_query_vector(vector) -> np.ndarray:
-    from src.core.faiss_index import _normalize_vectors
+    from src.core.vector_norm import normalize_vectors as _normalize_vectors
 
     query_vector = np.asarray(vector, dtype=np.float32)
     if query_vector.ndim == 1:

@@ -109,7 +109,7 @@ flowchart TB
   US --> DISK
 ```
 
-进入理解页时本地 profile/组件检查同步完成；**描述服务连通性**在 `UnderstandingResourceStatusWorker` 后台探测（不阻塞切页）。流水线仅跑画面描述（`image_caption` / OpenAI 兼容描述服务）；不再内置目标检测引擎。旧 evidence JSON 若含 `object_detection` 仍可展示。生成仍走 `understanding_service`，与搜索/索引解耦。
+进入理解页时界面先切过去。本地 profile 和组件检查放在下一拍，仍在主线程上做，且不探测描述服务是否连通。连通性由用户点测试连接时的 `RemoteVlmConnectionTestWorker` 探测。流水线仅跑画面描述（`image_caption` / OpenAI 兼容描述服务）；不再内置目标检测引擎。旧 evidence JSON 若含 `object_detection` 仍可展示。生成仍走 `understanding_service`，与搜索/索引解耦。
 
 ### 各层实际权重
 

@@ -9,7 +9,7 @@ from typing import Sequence
 import numpy as np
 
 from src.app.logging_utils import get_logger
-from src.core.faiss_index import _normalize_vectors
+from src.core.vector_norm import normalize_vectors as _normalize_vectors
 from src.storage.lance_store import (
     CHUNKS_TABLE_NAME,
     FRAMES_TABLE_NAME,

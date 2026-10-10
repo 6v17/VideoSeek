@@ -841,7 +841,7 @@ def _infer_vector_dimension(vectors) -> int:
 
 
 def _vectors_to_fixed_list(vectors, dimension: int) -> list[list[float]]:
-    from src.core.faiss_index import _normalize_vectors
+    from src.core.vector_norm import normalize_vectors as _normalize_vectors
 
     array = _normalize_vectors(vectors)
     if array.size == 0:
