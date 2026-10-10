@@ -6,6 +6,7 @@ import threading
 from typing import Iterable, List, Mapping
 
 from src.app.config import DEFAULT_CONFIG, load_config
+from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
 from src.services.search_scope import normalize_scope_path
 from src.services.search_skip_ranges import (
@@ -16,6 +17,8 @@ from src.services.search_skip_ranges import (
     probe_in_skip_intervals,
     resolve_skip_intervals,
 )
+
+logger = get_logger("search_edge_filter")
 
 _EDGE_FETCH_CAP = 500
 _MIN_KEEP_SPAN_SEC = 30.0
@@ -200,6 +203,26 @@ def hit_in_skipped_edge(
     return probe_in_skip_intervals(probe, intervals)
 
 
+def _rules_need_video_end(rules) -> bool:
+    return any(str(rule.get("kind") or "") == "from_end" for rule in rules or [])
+
+
+def _load_indexed_video_end_lookup(config) -> dict[str, float]:
+    """Last indexed time per path. Used when search did not materialize timestamps."""
+    try:
+        from src.storage.config_store import get_local_model_asset_dirs
+        from src.storage.lance_search_index import get_lance_video_end_lookup
+
+        profile_base_dir = str(get_local_model_asset_dirs(config=config).get("base_dir") or "")
+        if not profile_base_dir:
+            return {}
+        loaded = get_lance_video_end_lookup(profile_base_dir)
+        return dict(loaded) if loaded else {}
+    except Exception as exc:
+        logger.debug("indexed video end lookup unavailable: %s", exc)
+        return {}
+
+
 def filter_search_edge_hits(
     hits: List[SearchHit] | None,
     config=None,
@@ -213,7 +236,15 @@ def filter_search_edge_hits(
     rules = parse_search_skip_ranges(get_search_skip_ranges_text(config))
     if not rules:
         return prepared
-    lookup = dict(end_lookup) if end_lookup is not None else get_video_end_lookup()
+    if end_lookup is not None:
+        lookup = dict(end_lookup)
+    else:
+        lookup = get_video_end_lookup()
+        if not lookup and _rules_need_video_end(rules):
+            loaded = _load_indexed_video_end_lookup(config)
+            if loaded:
+                merge_video_end_lookup(list(loaded.keys()), list(loaded.values()))
+                lookup = get_video_end_lookup()
     return [
         hit
         for hit in prepared

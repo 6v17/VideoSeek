@@ -261,6 +261,22 @@ class ConfigMigrationTests(unittest.TestCase):
 
             self.assertEqual(loaded["fps"], 1.5)
 
+    def test_save_config_keeps_previous_file_when_write_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            user_config_file = root / "config.json"
+
+            with patch.object(config_module, "CONFIG_FILE", str(user_config_file)):
+                config_module.save_config({"fps": 1.5})
+                with patch.object(config_module.json, "dump", side_effect=OSError("disk full")):
+                    with self.assertRaises(OSError):
+                        config_module.save_config({"fps": 8})
+                loaded = json.loads(user_config_file.read_text(encoding="utf-8"))
+
+            self.assertEqual(loaded["fps"], 1.5)
+            leftovers = list(root.glob(".tmp_config_*.json"))
+            self.assertEqual(leftovers, [])
+
     def test_load_config_uses_dynamic_sampling_mode_by_default_for_new_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

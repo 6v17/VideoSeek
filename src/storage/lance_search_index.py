@@ -29,6 +29,7 @@ _READY_CACHE: dict[str, tuple[float, bool]] = {}
 _INDEXED_VIDEO_IDS_CACHE: dict[str, tuple[float, frozenset[str]]] = {}
 _VIDEO_ROW_COUNTS_CACHE: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
 _LIBRARY_PATHS_BY_VIDEO_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+_VIDEO_END_CACHE: dict[str, tuple[float, dict[str, float]]] = {}
 _LANCE_ROW_SCAN_LIMIT = 2_000_000
 
 
@@ -56,11 +57,13 @@ def invalidate_lance_runtime_caches(profile_base_dir: str = "") -> None:
         _INDEXED_VIDEO_IDS_CACHE.pop(key, None)
         _VIDEO_ROW_COUNTS_CACHE.pop(key, None)
         _LIBRARY_PATHS_BY_VIDEO_CACHE.pop(key, None)
+        _VIDEO_END_CACHE.pop(key, None)
     else:
         _READY_CACHE.clear()
         _INDEXED_VIDEO_IDS_CACHE.clear()
         _VIDEO_ROW_COUNTS_CACHE.clear()
         _LIBRARY_PATHS_BY_VIDEO_CACHE.clear()
+        _VIDEO_END_CACHE.clear()
     try:
         from src.services.understanding_service import invalidate_ready_video_entries_cache
 
@@ -839,18 +842,19 @@ def get_lance_video_row_counts(profile_base_dir: str) -> dict[str, dict[str, int
     return counts
 
 
-def _lance_cache_key(profile_base_dir: str, *, library_path: str = "", table_name: str = FRAMES_TABLE_NAME) -> tuple | None:
-    lance_dir = get_lance_dir(profile_base_dir)
-    state_file = get_lance_state_file(profile_base_dir)
-    try:
-        return (
-            os.path.abspath(lance_dir),
-            os.path.getmtime(state_file),
-            table_name,
-            os.path.normcase(library_path or ""),
-        )
-    except OSError:
-        return None
+def _lance_cache_key(profile_base_dir: str, *, library_path: str = "", table_name: str = FRAMES_TABLE_NAME) -> tuple:
+    """Identity for in-process search-asset reuse.
+
+    Keyed on ``library.db`` (mtime + revision), not the legacy
+    ``lance/import_state.json`` file. That JSON is no longer written, so a
+    missing file used to disable the cache and reopen Lance on every search.
+    """
+    return (
+        os.path.abspath(get_lance_dir(profile_base_dir)),
+        _lance_state_mtime(profile_base_dir),
+        table_name,
+        os.path.normcase(library_path or ""),
+    )
 
 
 def _table_to_arrays(table, *, library_path: str = "", video_id: str = ""):
@@ -987,6 +991,64 @@ def load_lance_chunk_search_assets(
 
 def lance_cache_key_for_profile(profile_base_dir: str, *, library_path: str = "", table_name: str = FRAMES_TABLE_NAME):
     return _lance_cache_key(profile_base_dir, library_path=library_path, table_name=table_name)
+
+
+def _accumulate_video_ends(lookup: dict[str, float], pairs) -> None:
+    for raw_path, raw_value in pairs:
+        path = str(raw_path or "").strip()
+        if not path:
+            continue
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if value < 0:
+            continue
+        previous = lookup.get(path)
+        if previous is None or value > previous:
+            lookup[path] = value
+
+
+def _scan_lance_video_end_lookup(profile_base_dir: str) -> dict[str, float]:
+    """Max indexed time per video_path. Frame timestamp and chunk end both count."""
+    db = _connect_lance(profile_base_dir)
+    names = set(_list_table_names(db))
+    lookup: dict[str, float] = {}
+    if FRAMES_TABLE_NAME in names:
+        _accumulate_video_ends(
+            lookup,
+            _scan_all_column_pairs(db.open_table(FRAMES_TABLE_NAME), "video_path", "timestamp"),
+        )
+    if CHUNKS_TABLE_NAME in names:
+        _accumulate_video_ends(
+            lookup,
+            _scan_all_column_pairs(db.open_table(CHUNKS_TABLE_NAME), "video_path", "end"),
+        )
+    return lookup
+
+
+def get_lance_video_end_lookup(profile_base_dir: str) -> dict[str, float]:
+    """Last indexed time per video, for ``end-*`` skip rules on the streaming search path.
+
+    Global and library searches do not materialize timestamps, so the in-memory
+    end map stays empty unless this scan fills it. The result is cached until
+    ``library.db`` changes or runtime caches are invalidated.
+    """
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    if not profile_base_dir or not lance_search_is_ready(profile_base_dir):
+        return {}
+    state_mtime = _lance_state_mtime(profile_base_dir)
+    cached = _VIDEO_END_CACHE.get(profile_base_dir)
+    if cached is not None and cached[0] == state_mtime:
+        return cached[1]
+
+    try:
+        lookup = _scan_lance_video_end_lookup(profile_base_dir)
+    except Exception as exc:
+        logger.debug("Failed to build Lance video end lookup for %s: %s", profile_base_dir, exc)
+        return {}
+    _VIDEO_END_CACHE[profile_base_dir] = (state_mtime, lookup)
+    return lookup
 
 
 def load_lance_video_frame_arrays(profile_base_dir: str, video_id: str):

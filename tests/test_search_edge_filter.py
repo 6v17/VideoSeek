@@ -1,6 +1,7 @@
 """Multi-range skip filter for search result lists."""
 
 import unittest
+from unittest.mock import patch
 
 from src.domain.search_hit import SearchHit
 from src.services import search_edge_filter as edge_mod
@@ -215,6 +216,42 @@ class SearchEdgeFilterTests(unittest.TestCase):
         self.assertTrue(server["enabled"])
         self.assertEqual(server["summary"], "0-90")
         self.assertIn("对所有用户生效", server["tooltip"])
+
+    def test_from_end_loads_indexed_ends_when_timestamps_were_not_materialized(self):
+        cfg = {
+            "search_skip_edges_enabled": True,
+            "search_skip_ranges": "end-90",
+        }
+        hits = [
+            SearchHit(100.0, 100.0, 0.9, "a.mp4"),
+            SearchHit(1350.0, 1350.0, 0.95, "a.mp4"),
+        ]
+        with (
+            patch(
+                "src.storage.config_store.get_local_model_asset_dirs",
+                return_value={"base_dir": "D:/profile"},
+            ),
+            patch(
+                "src.storage.lance_search_index.get_lance_video_end_lookup",
+                return_value={"a.mp4": 1400.0},
+            ) as load_ends,
+        ):
+            kept = filter_search_edge_hits(hits, cfg)
+        self.assertEqual([float(hit.start_sec) for hit in kept], [100.0])
+        load_ends.assert_called_once_with("D:/profile")
+
+    def test_absolute_skip_does_not_scan_video_ends(self):
+        cfg = {
+            "search_skip_edges_enabled": True,
+            "search_skip_ranges": "0-90",
+        }
+        hits = [SearchHit(30.0, 30.0, 0.9, "a.mp4"), SearchHit(400.0, 400.0, 0.8, "a.mp4")]
+        with patch(
+            "src.storage.lance_search_index.get_lance_video_end_lookup",
+        ) as load_ends:
+            kept = filter_search_edge_hits(hits, cfg)
+        self.assertEqual([float(hit.start_sec) for hit in kept], [400.0])
+        load_ends.assert_not_called()
 
     def test_api_meta_reports_server_rule_without_request_override(self):
         off = skip_edges_api_meta({"search_skip_ranges": "", "search_skip_edges_enabled": False})

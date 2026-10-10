@@ -1,5 +1,7 @@
 import json
 import os
+import tempfile
+import threading
 
 from src.app.app_meta import get_app_meta
 from src.app.logging_utils import get_logger
@@ -12,6 +14,7 @@ from src.services.search_skip_ranges import (
 )
 
 logger = get_logger("config")
+_CONFIG_WRITE_LOCK = threading.Lock()
 _LAST_MIGRATION_NOTICE = None
 _LAST_STARTUP_MIGRATION_SUMMARY = None
 STORAGE_DIR_NAME = "data"
@@ -814,8 +817,33 @@ def save_config(config):
     config = _sanitize_general_settings(config)
     target = _active_config_file()
     _ensure_parent_dir(target)
-    with open(target, "w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=4, ensure_ascii=False)
+    _write_config_file(target, config)
+
+
+def _write_config_file(target, config):
+    """Write config JSON via a temp file so a crash cannot truncate config.json."""
+    from src.storage.meta_io import commit_temp_file
+
+    folder = os.path.dirname(os.path.abspath(target)) or "."
+    fd, temp_path = tempfile.mkstemp(prefix=".tmp_config_", suffix=".json", dir=folder)
+    os.close(fd)
+    try:
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(config, handle, indent=4, ensure_ascii=False)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        with _CONFIG_WRITE_LOCK:
+            commit_temp_file(temp_path, target)
+        temp_path = ""
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def get_configured_data_root(config=None):

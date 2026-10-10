@@ -14,21 +14,21 @@ from src.infra.paths import ensure_folder_exists
 logger = get_logger("meta_io")
 
 
-def _commit_meta_file(temp_path, meta_file):
-    """Commit a finished temp JSON file to ``meta_file`` with Windows-friendly retries."""
-    if os.path.normcase(os.path.abspath(temp_path)) == os.path.normcase(os.path.abspath(meta_file)):
+def commit_temp_file(temp_path, dest_path):
+    """Replace ``dest_path`` with a finished temp file. Retries when Windows locks the dest."""
+    if os.path.normcase(os.path.abspath(temp_path)) == os.path.normcase(os.path.abspath(dest_path)):
         return
 
     attempts = 8 if os.name == "nt" else 3
     last_exc = None
     for attempt in range(1, attempts + 1):
         try:
-            if os.path.exists(meta_file):
+            if os.path.exists(dest_path):
                 try:
-                    os.chmod(meta_file, 0o666)
+                    os.chmod(dest_path, 0o666)
                 except OSError:
                     pass
-            os.replace(temp_path, meta_file)
+            os.replace(temp_path, dest_path)
             return
         except PermissionError as exc:
             last_exc = exc
@@ -39,16 +39,16 @@ def _commit_meta_file(temp_path, meta_file):
                 raise
         if attempt < attempts:
             logger.warning(
-                "Retrying metadata commit (%s/%s): %s",
+                "Retrying file replace (%s/%s): %s",
                 attempt,
                 attempts,
-                meta_file,
+                dest_path,
             )
             time.sleep(min(0.05 * attempt, 0.4))
 
     try:
-        shutil.copy2(temp_path, meta_file)
-        logger.warning("Metadata commit used copy fallback: %s", meta_file)
+        shutil.copy2(temp_path, dest_path)
+        logger.warning("File replace used copy fallback: %s", dest_path)
         return
     except Exception as copy_exc:
         if last_exc is not None:
@@ -72,7 +72,7 @@ def save_meta(meta, meta_file, *, pretty: bool = True):
                 json.dump(meta, handle, indent=4, ensure_ascii=False)
             else:
                 json.dump(meta, handle, ensure_ascii=False, separators=(",", ":"))
-        _commit_meta_file(temp_path, meta_file)
+        commit_temp_file(temp_path, meta_file)
         temp_path = ""
     finally:
         if temp_path and os.path.exists(temp_path):

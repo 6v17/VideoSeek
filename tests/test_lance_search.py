@@ -15,6 +15,7 @@ from src.storage.asset_store import save_metadata
 from src.storage.lance_search_index import (
     InMemoryFlatSearchIndex,
     LanceTableSearchIndex,
+    get_lance_video_end_lookup,
     get_lance_video_row_counts,
     load_lance_frame_search_assets,
 )
@@ -227,6 +228,53 @@ class LanceSearchTests(unittest.TestCase):
             counts = get_lance_video_row_counts(profile_dir)
             self.assertEqual(counts["vid999"]["frame_count"], 4)
             self.assertGreaterEqual(counts["vid999"]["chunk_count"], 0)
+
+    def test_video_end_lookup_uses_last_indexed_timestamp(self):
+        if importlib.util.find_spec("lancedb") is None:
+            self.skipTest("lancedb not installed")
+
+        vectors = np.random.randn(3, 8).astype(np.float32)
+        timestamps = np.asarray([0.0, 4.0, 12.5], dtype=np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            profile_dir = os.path.join(data_dir, "model_assets", "openai-clip", "vit-base-patch32")
+            vector_dir = os.path.join(profile_dir, "vector")
+            os.makedirs(vector_dir, exist_ok=True)
+            save_metadata({"libraries": {}}, os.path.join(profile_dir, "meta.json"))
+            save_vectors(vectors, timestamps, os.path.join(vector_dir, "vid999_vectors.npy"))
+            video_path = os.path.join(tmp, "clip.mp4")
+            config = {
+                "schema_version": 2,
+                "vector_search_backend": "lance",
+                "data_root": tmp,
+                "meta_file": os.path.join(data_dir, "meta.json"),
+                "models": {
+                    "active_profile": "clip_test",
+                    "profiles": [
+                        {
+                            "id": "clip_test",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "model_dir": os.path.join(tmp, "models"),
+                                "model_variant": "vit-base-patch32",
+                            },
+                        }
+                    ],
+                },
+            }
+            os.makedirs(data_dir, exist_ok=True)
+            result = upsert_profile_video_vectors(
+                "vid999",
+                config=config,
+                library_path=tmp,
+                video_path=video_path,
+            )
+            self.assertFalse(result.get("error"))
+
+            ends = get_lance_video_end_lookup(profile_dir)
+            again = get_lance_video_end_lookup(profile_dir)
+            self.assertEqual(ends.get(video_path), 12.5)
+            self.assertIs(ends, again)
 
 
 class LanceStorageHelperTests(unittest.TestCase):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -46,6 +47,27 @@ class SearchAssetsMissingLanceTests(unittest.TestCase):
         self.assertEqual(result, (None, None, None))
         mock_logger.warning.assert_called()
         mock_logger.error.assert_not_called()
+
+    def test_frame_asset_cache_hits_without_import_state_file(self):
+        sentinel = object()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("src.services.search_assets.lance_search_is_ready", return_value=True),
+                patch(
+                    "src.services.search_assets.get_local_model_asset_dirs",
+                    return_value={"base_dir": temp_dir},
+                ),
+                patch(
+                    "src.services.search_assets.load_lance_frame_search_assets",
+                    return_value=(sentinel, None, None),
+                ) as load_assets,
+            ):
+                first = search_assets.load_search_assets({})
+                second = search_assets.load_search_assets({})
+
+        self.assertIs(first[0], sentinel)
+        self.assertIs(second[0], sentinel)
+        self.assertEqual(load_assets.call_count, 1)
 
 
 if __name__ == "__main__":
