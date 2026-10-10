@@ -229,12 +229,10 @@ class SearchScopeTests(unittest.TestCase):
     @patch("src.storage.config_store.get_search_scope_library_paths", return_value=["D:/lib"])
     @patch("src.storage.config_store.get_search_scope_mode", return_value="selected")
     @patch("src.services.library_service.needs_search_index_schema_upgrade", return_value=False)
-    @patch("src.services.search_scope.per_library_indexes_ready", return_value=False)
     @patch("src.services.search_scope.list_ready_video_paths_for_libraries", return_value=["D:/lib/a.mp4"])
-    def test_resolve_active_search_video_scope_expands_library_when_index_not_ready(
+    def test_resolve_active_search_video_scope_keeps_library_scope(
         self,
-        _mock_expand,
-        _mock_ready,
+        mock_expand,
         _mock_upgrade,
         _mock_mode,
         _mock_libs,
@@ -242,7 +240,8 @@ class SearchScopeTests(unittest.TestCase):
     ):
         from src.services.search_scope import resolve_active_search_video_scope
 
-        self.assertEqual(resolve_active_search_video_scope(), ["D:/lib/a.mp4"])
+        self.assertIsNone(resolve_active_search_video_scope())
+        mock_expand.assert_not_called()
 
     def test_resolve_explicit_scope_library_paths_explicit_wins(self):
         scope = {

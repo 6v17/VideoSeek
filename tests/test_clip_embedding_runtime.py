@@ -412,6 +412,27 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
         self.assertTrue(status["initialized"])
         self.assertEqual(status["backend"], "CPU")
 
+    def test_encode_failure_kills_ffmpeg(self):
+        holder = {"process": object()}
+
+        class _Engine:
+            def encode_images(self, _batch):
+                raise RuntimeError("encode failed")
+
+        def frames():
+            yield (object(), 0.0)
+
+        with patch("src.core.clip_embedding.get_engine", return_value=_Engine()):
+            with patch("src.core.clip_embedding._kill_indexing_ffmpeg") as kill:
+                with self.assertRaises(RuntimeError):
+                    clip_embedding._encode_batched_from_frame_stream(
+                        frames(),
+                        None,
+                        1,
+                        process_holder=holder,
+                    )
+        kill.assert_called_once_with(holder)
+
     @patch(
         "src.core.clip_embedding.build_chunk_config",
         return_value={

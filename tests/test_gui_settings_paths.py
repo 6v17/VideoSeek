@@ -17,6 +17,28 @@ def _get_gui_target():
 
 
 class GuiSettingsPathTests(unittest.TestCase):
+    def test_abandon_team_switch_quits_loops_without_committing(self):
+        host = types.SimpleNamespace(
+            _application_shutting_down=True,
+            _team_connect_loop=MagicMock(),
+            _team_lifecycle_loop=MagicMock(),
+            _team_connect_worker=MagicMock(),
+            _team_lifecycle_worker=MagicMock(),
+        )
+        host._team_connect_worker.isRunning.return_value = True
+        host._team_connect_worker.wait.return_value = True
+        host._team_lifecycle_worker.isRunning.return_value = True
+        host._team_lifecycle_worker.wait.return_value = True
+        target = _get_gui_target()
+
+        self.assertTrue(target._team_switch_cancelled(host))
+        target._abandon_team_switch_workers(host)
+
+        host._team_connect_loop.quit.assert_called_once()
+        host._team_lifecycle_loop.quit.assert_called_once()
+        host._team_connect_worker.stop.assert_called_once()
+        host._team_lifecycle_worker.stop.assert_called_once()
+        host._team_connect_worker.blockSignals.assert_called_once_with(True)
     @classmethod
     def setUpClass(cls):
         cls.Target = _get_gui_target()

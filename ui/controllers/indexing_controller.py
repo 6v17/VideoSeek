@@ -62,6 +62,8 @@ class IndexingController(QObject):
         if debug_failure:
             worker_kwargs["debug_failure"] = debug_failure
         self.worker = IndexUpdateWorker(**worker_kwargs)
+        self.worker.result_target = target_lib
+        self.worker.result_rebuild_global_assets = self.current_rebuild_global_assets
         self.worker.progress_signal.connect(self.status_changed.emit)
         self.worker.runtime_status_signal.connect(self.runtime_status_changed.emit)
         self.worker.error_signal.connect(self.error_occurred.emit)
@@ -132,12 +134,20 @@ class IndexingController(QObject):
         self.register_finished.emit(bool(success), result)
 
     def _finish(self, success, stopped, has_search_assets, issues):
+        self._finish_worker(self.sender() or self.worker, success, stopped, has_search_assets, issues)
+
+    def _finish_worker(self, worker, success, stopped, has_search_assets, issues):
         from src.services.indexing_runtime_status import clear_index_sync_running
 
-        # Safety net if the worker/flow exited without releasing the claim.
-        clear_index_sync_running()
-        target = self.current_target
-        rebuild_global_assets = self.current_rebuild_global_assets
-        self.current_target = None
-        self.current_rebuild_global_assets = True
+        target = getattr(worker, "result_target", self.current_target) if worker is not None else self.current_target
+        rebuild_global_assets = (
+            getattr(worker, "result_rebuild_global_assets", self.current_rebuild_global_assets)
+            if worker is not None
+            else self.current_rebuild_global_assets
+        )
+        # A queued finish from the previous worker must not clear the run that already started.
+        if worker is None or self.worker is worker:
+            clear_index_sync_running()
+            self.current_target = None
+            self.current_rebuild_global_assets = True
         self.finished.emit(success, target, stopped, has_search_assets, issues, rebuild_global_assets)

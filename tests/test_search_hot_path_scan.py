@@ -87,6 +87,22 @@ class SearchHotPathScanTests(unittest.TestCase):
         self.assertIn("timestamp >= -1.0", table.where_sql[0])
         self.assertIn("timestamp >= 38.0", table.where_sql[0])
 
+    def test_neighbor_read_does_not_repeat_a_video_id_list(self):
+        table = _Table()
+        huge = "video_id IN (" + ", ".join(f"'v{i}'" for i in range(40)) + ")"
+        with patch.object(LanceTableSearchIndex, "_count_rows", return_value=2):
+            with patch.object(LanceTableSearchIndex, "_read_dimension", return_value=2):
+                with patch.object(LanceTableSearchIndex, "_detect_vector_index", return_value=False):
+                    index = LanceTableSearchIndex(table, where=huge, config={"lance_ann_enabled": False})
+        index.fetch_neighbor_rows_grouped(
+            [("D:/a.mp4", 1.0, "v3")],
+            window_sec=2.0,
+        )
+        self.assertEqual(len(table.where_sql), 1)
+        self.assertNotIn("v0", table.where_sql[0])
+        self.assertIn("video_id = 'v3'", table.where_sql[0])
+        self.assertIn("video_path = 'D:/a.mp4'", table.where_sql[0])
+
     def test_chunk_time_ranges_reuse_the_library_token(self):
         invalidate_lance_runtime_caches("D:/profile")
         arrow = _Arrow([{"video_path": "D:/a.mp4", "start": 0.0, "end": 4.0}])

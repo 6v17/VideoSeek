@@ -202,7 +202,10 @@ def _apply_bounded_neighbor_refine_lance(
     reranked = list(results)
     blend = max(0.0, min(float(neighbor_blend), 1.0))
     neighbor_by_rank = lance_index.fetch_neighbor_rows_grouped(
-        [(str(reranked[rank].video_path or ""), float(reranked[rank].start_sec)) for rank in range(max_index)],
+        [
+            (str(reranked[rank].video_path or ""), float(reranked[rank].start_sec), str(reranked[rank].video_id or ""))
+            for rank in range(max_index)
+        ],
         window_sec=window_sec,
     )
     for rank in range(max_index):
@@ -252,7 +255,10 @@ def _apply_frame_neighbor_rerank_lance(
     reranked = list(results)
     max_index = min(len(results), max_top_n)
     neighbor_by_rank = lance_index.fetch_neighbor_rows_grouped(
-        [(str(reranked[rank].video_path or ""), float(reranked[rank].start_sec)) for rank in range(max_index)],
+        [
+            (str(reranked[rank].video_path or ""), float(reranked[rank].start_sec), str(reranked[rank].video_id or ""))
+            for rank in range(max_index)
+        ],
         window_sec=window_sec,
     )
     for rank in range(max_index):
@@ -298,7 +304,10 @@ def _expand_neighbor_rerank_candidates_lance(
 
     candidates: dict[tuple[str, int], SearchHit] = {}
     neighbor_by_rank = lance_index.fetch_neighbor_rows_grouped(
-        [(str(results[rank].video_path or ""), float(results[rank].start_sec)) for rank in range(max_top_n)],
+        [
+            (str(results[rank].video_path or ""), float(results[rank].start_sec), str(results[rank].video_id or ""))
+            for rank in range(max_top_n)
+        ],
         window_sec=window_sec,
     )
     for rank in range(max_top_n):

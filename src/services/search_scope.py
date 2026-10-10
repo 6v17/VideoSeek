@@ -154,13 +154,9 @@ def resolve_active_search_video_scope(config=None) -> list[str] | None:
         return list(video_paths)
     library_paths = get_search_scope_library_paths(config)
     if library_paths:
-        if is_team_client_mode(config):
-            # Prefer library-level scope on the server (per-library indexes live there).
-            return None
-        if per_library_indexes_ready(library_paths, config=config):
-            return None
-        expanded = list_ready_video_paths_for_libraries(library_paths, config=config)
-        return expanded or None
+        # Keep this as library scope. Expanding every ready video into
+        # video_id IN (...) made the Lance predicate, and every neighbor read, huge.
+        return None
     return None
 
 

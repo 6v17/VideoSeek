@@ -1,8 +1,15 @@
 import unittest
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from ui.workers import IndexUpdateWorker, SearchConfig, SearchWorker, VersionCheckWorker
+from ui.workers import (
+    IndexUpdateWorker,
+    SearchConfig,
+    SearchWorker,
+    TeamConnectWorker,
+    TeamServerLifecycleWorker,
+    VersionCheckWorker,
+)
 
 
 class WorkersTests(unittest.TestCase):
@@ -154,6 +161,44 @@ class WorkersTests(unittest.TestCase):
         self.assertTrue(callable(kwargs.get("should_stop_callback")))
         worker.stop()
         self.assertTrue(kwargs["should_stop_callback"]())
+
+    def test_team_connect_stop_skips_session_and_finished(self):
+        worker = TeamConnectWorker("client", "http://127.0.0.1:9")
+        finished = []
+        worker.finished_signal.connect(finished.append)
+        worker.stop()
+
+        with patch("src.services.team_client_search.prepare_team_client_session") as prepare:
+            worker.run()
+
+        prepare.assert_not_called()
+        self.assertEqual(finished, [])
+
+    def test_team_connect_stop_after_prepare_does_not_emit_finished(self):
+        worker = TeamConnectWorker("client", "http://127.0.0.1:9")
+        finished = []
+        worker.finished_signal.connect(finished.append)
+
+        def _prepare(*_args, **_kwargs):
+            worker.stop()
+            return {"libraries": []}
+
+        with patch("src.services.team_client_search.prepare_team_client_session", side_effect=_prepare):
+            worker.run()
+
+        self.assertEqual(finished, [])
+
+    def test_team_lifecycle_stop_skips_start(self):
+        controller = MagicMock()
+        worker = TeamServerLifecycleWorker(controller, "start")
+        finished = []
+        worker.finished_signal.connect(finished.append)
+        worker.stop()
+
+        worker.run()
+
+        controller.start_server.assert_not_called()
+        self.assertEqual(finished, [])
 
 
 if __name__ == "__main__":

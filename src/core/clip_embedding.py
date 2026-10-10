@@ -972,43 +972,46 @@ def _encode_batched_from_frame_stream(
     if progress_reporter is not None:
         progress_reporter.emit("decode", 0, estimated_total, force=True)
 
-    for frame, timestamp in frame_stream:
-        if _indexing_should_stop(should_stop_callback, stop_event):
-            _kill_indexing_ffmpeg(process_holder)
-            raise InterruptedError("Index update stopped during frame extraction")
-        frames_decoded += 1
+    try:
+        for frame, timestamp in frame_stream:
+            if _indexing_should_stop(should_stop_callback, stop_event):
+                raise InterruptedError("Index update stopped during frame extraction")
+            frames_decoded += 1
+            if progress_reporter is not None:
+                total = max(estimated_total, frames_decoded)
+                progress_reporter.emit("decode", frames_decoded, total)
+            frame_batch.append(frame)
+            timestamp_batch.append(timestamp)
+            if len(frame_batch) < frame_batch_size:
+                continue
+            batch_vectors = get_engine().encode_images(frame_batch)
+            if len(batch_vectors) > 0:
+                added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
+                timestamps.extend(timestamp_batch[:added])
+                frames_encoded += added
+                if progress_reporter is not None:
+                    total = max(estimated_total, frames_decoded, frames_encoded)
+                    progress_reporter.emit("encode", frames_encoded, total)
+            frame_batch = []
+            timestamp_batch = []
+        if frame_batch:
+            batch_vectors = get_engine().encode_images(frame_batch)
+            if len(batch_vectors) > 0:
+                added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
+                timestamps.extend(timestamp_batch[:added])
+                frames_encoded += added
+                if progress_reporter is not None:
+                    total = max(estimated_total, frames_decoded, frames_encoded)
+                    progress_reporter.emit("encode", frames_encoded, total, force=True)
         if progress_reporter is not None:
-            total = max(estimated_total, frames_decoded)
-            progress_reporter.emit("decode", frames_decoded, total)
-        frame_batch.append(frame)
-        timestamp_batch.append(timestamp)
-        if len(frame_batch) < frame_batch_size:
-            continue
-        batch_vectors = get_engine().encode_images(frame_batch)
-        if len(batch_vectors) > 0:
-            added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
-            timestamps.extend(timestamp_batch[:added])
-            frames_encoded += added
-            if progress_reporter is not None:
-                total = max(estimated_total, frames_decoded, frames_encoded)
-                progress_reporter.emit("encode", frames_encoded, total)
-        frame_batch = []
-        timestamp_batch = []
-    if frame_batch:
-        batch_vectors = get_engine().encode_images(frame_batch)
-        if len(batch_vectors) > 0:
-            added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
-            timestamps.extend(timestamp_batch[:added])
-            frames_encoded += added
-            if progress_reporter is not None:
-                total = max(estimated_total, frames_decoded, frames_encoded)
-                progress_reporter.emit("encode", frames_encoded, total, force=True)
-    if progress_reporter is not None:
-        total = max(estimated_total, frames_decoded, frames_encoded)
-        progress_reporter.emit("decode", frames_decoded, total, force=True)
-        progress_reporter.emit("encode", frames_encoded, total, force=True)
-
-    return timestamps
+            total = max(estimated_total, frames_decoded, frames_encoded)
+            progress_reporter.emit("decode", frames_decoded, total, force=True)
+            progress_reporter.emit("encode", frames_encoded, total, force=True)
+        return timestamps
+    finally:
+        _kill_indexing_ffmpeg(process_holder)
+        if stop_event is not None:
+            stop_event.set()
 
 
 def generate_vectors_and_index_for_video(
@@ -1127,8 +1130,9 @@ def generate_vectors_and_index_for_video(
                 raise reader_error[0]
         finally:
             stop_event.set()
+            _kill_indexing_ffmpeg(process_holder)
             _drain_index_frame_queue(frame_queue)
-            reader_thread.join(timeout=600.0)
+            reader_thread.join(timeout=15.0)
             if reader_thread.is_alive():
                 logger.warning("Indexing frame reader thread did not stop within join timeout for %s", video_path)
     else:

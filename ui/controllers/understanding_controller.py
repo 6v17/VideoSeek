@@ -32,6 +32,8 @@ class UnderstandingController(QObject):
             mode=self.current_mode,
             skip_existing=skip_existing,
         )
+        self.worker.result_target = self.current_target
+        self.worker.result_mode = self.current_mode
         self.worker.progress_signal.connect(self.status_changed.emit)
         if hasattr(self.worker, "video_started"):
             self.worker.video_started.connect(self.video_started.emit)
@@ -50,6 +52,8 @@ class UnderstandingController(QObject):
         self.current_target = video_id
         self.current_mode = str(mode or "tags").strip() or "tags"
         self.worker = UnderstandingVideoWorker(video_id=video_id, mode=self.current_mode)
+        self.worker.result_target = self.current_target
+        self.worker.result_mode = self.current_mode
         self.worker.progress_signal.connect(self.status_changed.emit)
         self.worker.chunk_completed.connect(self.chunk_completed.emit)
         self.worker.error_signal.connect(self.error_occurred.emit)
@@ -67,10 +71,14 @@ class UnderstandingController(QObject):
         return False
 
     def _finish(self, success, stopped, result):
-        target = self.current_target
-        mode = self.current_mode
-        self.current_target = None
-        self.current_mode = ""
+        self._finish_worker(self.sender() or self.worker, success, stopped, result)
+
+    def _finish_worker(self, worker, success, stopped, result):
+        target = getattr(worker, "result_target", self.current_target) if worker is not None else self.current_target
+        mode = getattr(worker, "result_mode", self.current_mode) if worker is not None else self.current_mode
+        if worker is None or self.worker is worker:
+            self.current_target = None
+            self.current_mode = ""
         payload = dict(result or {})
         payload["mode"] = mode
         self.finished.emit(success, target, stopped, payload)

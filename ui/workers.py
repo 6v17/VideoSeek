@@ -114,9 +114,19 @@ class TeamConnectWorker(QThread):
         self.mode = str(mode or "off").strip().lower() or "off"
         self.server_url = str(server_url or "").strip()
         self.api_port = int(api_port or 8765)
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def _stopped(self) -> bool:
+        return bool(self._stop_requested or self.isInterruptionRequested())
 
     def run(self):
         try:
+            if self._stopped():
+                return
             if self.mode == "client":
                 from src.services.team_client_search import prepare_team_client_session
 
@@ -125,11 +135,17 @@ class TeamConnectWorker(QThread):
                     self.server_url,
                     api_port_default=self.api_port,
                 )
+                if self._stopped():
+                    return
                 self.progress_signal.emit("ready")
                 self.finished_signal.emit(dict(payload or {}))
                 return
+            if self._stopped():
+                return
             self.finished_signal.emit({})
         except Exception as exc:
+            if self._stopped():
+                return
             logger.exception("Team connect failed")
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
@@ -145,14 +161,29 @@ class TeamServerLifecycleWorker(QThread):
         super().__init__()
         self.controller = controller
         self.action = str(action or "start").strip().lower() or "start"
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def _stopped(self) -> bool:
+        return bool(self._stop_requested or self.isInterruptionRequested())
 
     def run(self):
         try:
+            if self._stopped():
+                return
+
             def _progress(phase: str) -> None:
+                if self._stopped():
+                    return
                 self.progress_signal.emit(str(phase or ""))
 
             if self.action == "start":
                 status = self.controller.start_server(progress_callback=_progress)
+                if self._stopped():
+                    return
                 if isinstance(status, dict) and status.get("error") and not status.get("api_running"):
                     self.error_signal.emit(str(status.get("error") or "server start failed"))
                     return
@@ -160,11 +191,17 @@ class TeamServerLifecycleWorker(QThread):
                 return
             if self.action == "stop":
                 self.controller.stop_server(progress_callback=_progress)
+                if self._stopped():
+                    return
                 self.finished_signal.emit({})
                 return
             status = self.controller.apply_from_config(progress_callback=_progress)
+            if self._stopped():
+                return
             self.finished_signal.emit(dict(status or {}))
         except Exception as exc:
+            if self._stopped():
+                return
             logger.exception("Team server lifecycle failed (%s)", self.action)
             self.error_signal.emit(str(exc).strip() or repr(exc))
 

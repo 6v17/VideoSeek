@@ -220,6 +220,9 @@ class TrayGuiMixin:
         return True
 
     def _shutdown_application(self, event):
+        self._application_shutting_down = True
+        if hasattr(self, "_abandon_team_switch_workers"):
+            self._abandon_team_switch_workers()
         if hasattr(self, "_collapse_preview_maximize"):
             self._collapse_preview_maximize()
         if hasattr(self, "preview_controller") and self.preview_controller is not None:

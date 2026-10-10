@@ -394,6 +394,81 @@ class SettingsGuiMixin:
                     )
                 )
 
+    def _team_switch_cancelled(self) -> bool:
+        return bool(getattr(self, "_application_shutting_down", False))
+
+    def _abandon_team_switch_workers(self):
+        """Stop a team connect/lifecycle wait so quit cannot fall through into save_config."""
+        for loop_name in ("_team_connect_loop", "_team_lifecycle_loop"):
+            loop = getattr(self, loop_name, None)
+            if loop is None:
+                continue
+            try:
+                loop.quit()
+            except Exception:
+                pass
+        shutdown_thread(getattr(self, "_team_connect_worker", None), stop_first=True)
+        shutdown_thread(getattr(self, "_team_lifecycle_worker", None), stop_first=True)
+
+    def _on_team_connect_progress(self, phase):
+        dialog = getattr(self, "_team_connect_dialog", None)
+        if dialog is None:
+            return
+        key = str(phase or "").strip().lower()
+        if key == "connecting":
+            dialog.setLabelText(self.texts.get("setting_team_connecting", "正在连接服务机…"))
+        else:
+            dialog.setLabelText(
+                self.texts.get("setting_team_loading_library", "正在加载共享片库与字幕库…")
+            )
+
+    def _on_team_connect_finished(self, payload):
+        if self.sender() is not getattr(self, "_team_connect_worker", None):
+            return
+        box = getattr(self, "_team_connect_box", None)
+        if box is not None:
+            box["payload"] = dict(payload or {})
+        loop = getattr(self, "_team_connect_loop", None)
+        if loop is not None:
+            loop.quit()
+
+    def _on_team_connect_error(self, message):
+        if self.sender() is not getattr(self, "_team_connect_worker", None):
+            return
+        box = getattr(self, "_team_connect_box", None)
+        if box is not None:
+            box["error"] = str(message or "").strip() or "connect failed"
+        loop = getattr(self, "_team_connect_loop", None)
+        if loop is not None:
+            loop.quit()
+
+    def _on_team_lifecycle_progress(self, phase):
+        dialog = getattr(self, "_team_lifecycle_dialog", None)
+        if dialog is None:
+            return
+        action = str(getattr(self, "_team_lifecycle_action", "") or "")
+        dialog.setLabelText(self._team_server_progress_label(phase, action=action))
+
+    def _on_team_lifecycle_finished(self, payload):
+        if self.sender() is not getattr(self, "_team_lifecycle_worker", None):
+            return
+        box = getattr(self, "_team_lifecycle_box", None)
+        if box is not None:
+            box["status"] = dict(payload or {})
+        loop = getattr(self, "_team_lifecycle_loop", None)
+        if loop is not None:
+            loop.quit()
+
+    def _on_team_lifecycle_error(self, message):
+        if self.sender() is not getattr(self, "_team_lifecycle_worker", None):
+            return
+        box = getattr(self, "_team_lifecycle_box", None)
+        if box is not None:
+            box["error"] = str(message or "").strip() or "server lifecycle failed"
+        loop = getattr(self, "_team_lifecycle_loop", None)
+        if loop is not None:
+            loop.quit()
+
     def _apply_team_mode_from_ui(self):
         """Apply pending share mode from settings widgets (called from Save)."""
         if getattr(self, "_team_mode_ui_applying", False):
@@ -473,7 +548,6 @@ class SettingsGuiMixin:
                 minimum_width=440,
             )
             dialog.show()
-            QApplication.processEvents()
             try:
                 api_port = int(config.get("team_api_port", 8765) or 8765)
                 preload = {}
@@ -482,36 +556,20 @@ class SettingsGuiMixin:
                     worker = TeamConnectWorker(new_mode, new_url, api_port=api_port)
                     loop = QEventLoop()
                     box = {"payload": None, "error": None}
-
-                    def _on_progress(phase):
-                        key = str(phase or "").strip().lower()
-                        if key == "connecting":
-                            dialog.setLabelText(
-                                self.texts.get("setting_team_connecting", "正在连接服务机…")
-                            )
-                        else:
-                            dialog.setLabelText(
-                                self.texts.get(
-                                    "setting_team_loading_library",
-                                    "正在加载共享片库与字幕库…",
-                                )
-                            )
-                        QApplication.processEvents()
-
-                    def _on_finished(payload):
-                        box["payload"] = dict(payload or {})
-                        loop.quit()
-
-                    def _on_error(message):
-                        box["error"] = str(message or "").strip() or "connect failed"
-                        loop.quit()
-
-                    worker.progress_signal.connect(_on_progress)
-                    worker.finished_signal.connect(_on_finished)
-                    worker.error_signal.connect(_on_error)
+                    self._team_connect_worker = worker
+                    self._team_connect_loop = loop
+                    self._team_connect_box = box
+                    self._team_connect_dialog = dialog
+                    worker.progress_signal.connect(self._on_team_connect_progress)
+                    worker.finished_signal.connect(self._on_team_connect_finished)
+                    worker.error_signal.connect(self._on_team_connect_error)
                     worker.start()
                     loop.exec()
-                    shutdown_thread(worker)
+                    self._team_connect_loop = None
+                    shutdown_thread(worker, stop_first=True)
+                    self._team_connect_worker = None
+                    if self._team_switch_cancelled():
+                        return
                     if box["error"]:
                         set_session_team_mode(previous_team)
                         config["team_server_url"] = previous_url
@@ -542,25 +600,21 @@ class SettingsGuiMixin:
                     lifecycle = TeamServerLifecycleWorker(self.team_mode_controller, action)
                     life_loop = QEventLoop()
                     life_box = {"status": None, "error": None}
-
-                    def _on_life_progress(phase):
-                        dialog.setLabelText(self._team_server_progress_label(phase, action=action))
-                        QApplication.processEvents()
-
-                    def _on_life_finished(payload):
-                        life_box["status"] = dict(payload or {})
-                        life_loop.quit()
-
-                    def _on_life_error(message):
-                        life_box["error"] = str(message or "").strip() or "server lifecycle failed"
-                        life_loop.quit()
-
-                    lifecycle.progress_signal.connect(_on_life_progress)
-                    lifecycle.finished_signal.connect(_on_life_finished)
-                    lifecycle.error_signal.connect(_on_life_error)
+                    self._team_lifecycle_worker = lifecycle
+                    self._team_lifecycle_loop = life_loop
+                    self._team_lifecycle_box = life_box
+                    self._team_lifecycle_dialog = dialog
+                    self._team_lifecycle_action = action
+                    lifecycle.progress_signal.connect(self._on_team_lifecycle_progress)
+                    lifecycle.finished_signal.connect(self._on_team_lifecycle_finished)
+                    lifecycle.error_signal.connect(self._on_team_lifecycle_error)
                     lifecycle.start()
                     life_loop.exec()
-                    shutdown_thread(lifecycle)
+                    self._team_lifecycle_loop = None
+                    shutdown_thread(lifecycle, stop_first=True)
+                    self._team_lifecycle_worker = None
+                    if self._team_switch_cancelled():
+                        return
                     if life_box["error"]:
                         set_session_team_mode(previous_team)
                         config["agent_api_enabled"] = previous_agent

@@ -575,6 +575,26 @@ class IndexingControllerTests(unittest.TestCase):
         )
         worker.start.assert_called_once()
 
+    @patch("ui.controllers.indexing_controller.IndexUpdateWorker")
+    def test_late_finish_keeps_the_newer_target(self, mock_worker_cls):
+        parent = _make_parent_window()
+        controller = IndexingController(parent)
+        old_worker = MagicMock()
+        new_worker = MagicMock()
+        old_worker.isRunning.return_value = False
+        new_worker.isRunning.return_value = False
+        mock_worker_cls.side_effect = [old_worker, new_worker]
+        finished = []
+        controller.finished.connect(lambda *args: finished.append(args))
+
+        self.assertTrue(controller.start(target_lib="D:/old", rebuild_global_assets=False))
+        self.assertTrue(controller.start(target_lib="D:/new"))
+        controller._finish_worker(old_worker, True, False, True, [])
+
+        self.assertEqual(controller.current_target, "D:/new")
+        self.assertEqual(finished[0][1], "D:/old")
+        self.assertFalse(finished[0][5])
+
 
 class MobileBridgeControllerTests(unittest.TestCase):
     @patch("src.web.mobile_bridge.MobileBridgeService")

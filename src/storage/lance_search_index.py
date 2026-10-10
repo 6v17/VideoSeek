@@ -456,6 +456,18 @@ class LanceTableSearchIndex:
         self._last_rows = rows
         return rows
 
+    def _neighbor_scope_predicates(self, video_id: str = "") -> list[str]:
+        """Scope a neighbor read without repeating a library-sized video_id IN list."""
+        where = str(self._where or "")
+        if "video_id IN (" in where:
+            normalized = str(video_id or "").strip()
+            if not normalized:
+                return []
+            return [f"video_id = {_sql_literal(normalized)}"]
+        if where:
+            return [f"({where})"]
+        return []
+
     def search(self, query_vector, top_k: int):
         rows = self.search_rows(query_vector, top_k)
         empty = np.empty((1, 0), dtype=np.float32)
@@ -482,6 +494,7 @@ class LanceTableSearchIndex:
         center_sec: float,
         window_sec: float,
         limit: int = 512,
+        video_id: str = "",
     ) -> list[LanceSearchRow]:
         normalized_path = str(video_path or "").strip()
         if not normalized_path:
@@ -495,8 +508,7 @@ class LanceTableSearchIndex:
             f"timestamp >= {lo}",
             f"timestamp <= {hi}",
         ]
-        if self._where:
-            predicates.insert(0, f"({self._where})")
+        predicates[0:0] = self._neighbor_scope_predicates(video_id)
         where = " AND ".join(predicates)
         try:
             arrow = (
@@ -513,7 +525,7 @@ class LanceTableSearchIndex:
 
     def fetch_neighbor_rows_grouped(
         self,
-        seeds: Sequence[tuple[str, float]],
+        seeds: Sequence[tuple],
         *,
         window_sec: float,
         limit_per_seed: int = 512,
@@ -521,14 +533,17 @@ class LanceTableSearchIndex:
         """One Lance read per video for every seed window on that video."""
         window = max(0.0, float(window_sec))
         per_seed = max(int(limit_per_seed), 1)
-        grouped: dict[str, list[tuple[int, float]]] = {}
+        restrict_by_seed_id = "video_id IN (" in str(self._where or "")
+        grouped: dict[tuple[str, str], list[tuple[int, float]]] = {}
         results: list[list[LanceSearchRow]] = [[] for _ in seeds]
-        for index, (video_path, center_sec) in enumerate(seeds):
-            path = str(video_path or "").strip()
+        for index, seed in enumerate(seeds):
+            path = str(seed[0] or "").strip()
             if not path:
                 continue
-            grouped.setdefault(path, []).append((index, float(center_sec)))
-        for path, items in grouped.items():
+            video_id = str(seed[2] or "").strip() if len(seed) > 2 else ""
+            key = (path, video_id if restrict_by_seed_id else "")
+            grouped.setdefault(key, []).append((index, float(seed[1])))
+        for (path, video_id), items in grouped.items():
             clauses = [
                 f"(timestamp >= {center - window} AND timestamp <= {center + window})"
                 for _, center in items
@@ -537,8 +552,7 @@ class LanceTableSearchIndex:
                 f"video_path = {_sql_literal(path)}",
                 "(" + " OR ".join(clauses) + ")",
             ]
-            if self._where:
-                predicates.insert(0, f"({self._where})")
+            predicates[0:0] = self._neighbor_scope_predicates(video_id)
             try:
                 arrow = (
                     self._table.search()
