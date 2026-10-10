@@ -127,6 +127,26 @@ def list_jianying_drafts(drafts_dir: str | None = None, *, config=None) -> List[
     return items
 
 
+def _draft_name_is_single_segment(name: str) -> bool:
+    text = str(name or "").strip()
+    if not text or text in {".", ".."}:
+        return False
+    if any(char in text for char in ("/", "\\", "\x00", ":")):
+        return False
+    return True
+
+
+def draft_directory(root: str, name: str) -> str:
+    """Resolve ``name`` as one child folder of ``root``. Reject parent escapes."""
+    if not _draft_name_is_single_segment(name):
+        raise JianyingDraftError("草稿名称无效", detail=str(name or ""))
+    root_abs = os.path.abspath(root)
+    draft_path = os.path.abspath(os.path.join(root_abs, str(name).strip()))
+    if os.path.normcase(os.path.dirname(draft_path)) != os.path.normcase(root_abs):
+        raise JianyingDraftError("草稿名称无效", detail=str(name or ""))
+    return draft_path
+
+
 def allocate_unique_draft_name(root: str, prefix: str) -> str:
     stamp = datetime.now().strftime("%m%d-%H%M")
     base = str(prefix or "").strip() or _DEFAULT_COLLECT_DRAFT_PREFIX
@@ -397,8 +417,7 @@ def append_clip_to_jianying_draft(
         raise JianyingDraftError("找不到剪映草稿目录", detail=root or "(empty)")
     if not name:
         raise JianyingDraftError("未选择草稿")
-
-    draft_path = os.path.join(root, name)
+    draft_path = draft_directory(root, name)
     if not os.path.isdir(draft_path):
         raise JianyingDraftError("找不到所选草稿", detail=name)
     if not is_plain_json_draft_content(draft_path):
@@ -467,6 +486,7 @@ def export_shot_list_to_jianying_draft(
     name = str(draft_name or "").strip()
     if not name:
         name = allocate_unique_draft_name(root, _DEFAULT_COLLECT_DRAFT_PREFIX)
+    draft_directory(root, name)
 
     folder = draft.DraftFolder(root)
     try:
@@ -507,15 +527,7 @@ def export_shot_list_to_jianying_draft(
             skipped.append({"path": path, "reason": str(exc)})
 
     if exported <= 0:
-        # Remove the empty draft folder we just created.
-        draft_path = os.path.join(root, name)
-        try:
-            import shutil
-
-            if os.path.isdir(draft_path):
-                shutil.rmtree(draft_path)
-        except OSError:
-            pass
+        _remove_draft_folder(root, name)
         detail = skipped[0]["reason"] if skipped else "no clips"
         raise JianyingDraftError("没有可写入剪映的本地片段", detail=detail)
 
@@ -581,6 +593,7 @@ def export_recap_to_jianying_draft(
     if not name:
         slug = _safe_draft_slug(title)
         name = allocate_unique_draft_name(root, f"{_RECAP_DRAFT_PREFIX}-{slug}")
+    draft_directory(root, name)
 
     import pyJianYingDraft as draft
 
@@ -735,12 +748,18 @@ def _place_clip_onto_track(
 def _remove_draft_folder(root: str, name: str) -> None:
     import shutil
 
-    draft_path = os.path.join(root, name)
+    from src.app.logging_utils import get_logger
+
+    try:
+        draft_path = draft_directory(root, name)
+    except JianyingDraftError as exc:
+        get_logger("jianying_draft").debug("refusing to delete draft outside root: %s", exc)
+        return
     try:
         if os.path.isdir(draft_path):
             shutil.rmtree(draft_path)
-    except OSError:
-        pass
+    except OSError as exc:
+        get_logger("jianying_draft").debug("empty draft cleanup failed: %s", exc)
 
 
 def export_clone_match_to_jianying_draft(
@@ -787,6 +806,7 @@ def export_clone_match_to_jianying_draft(
         slug_src = title or os.path.splitext(os.path.basename(str(query_path or "").strip()))[0]
         slug = _safe_draft_slug(slug_src, fallback="匹配")
         name = allocate_unique_draft_name(root, f"{_CLONE_DRAFT_PREFIX}-{slug}")
+    draft_directory(root, name)
 
     width, height, fps = 1920, 1080, 24
     if media_cache:
@@ -909,6 +929,7 @@ def create_jianying_draft(
         raise JianyingDraftError("找不到剪映草稿目录", detail=root or "(empty)")
     if not name:
         raise JianyingDraftError("草稿名称不能为空")
+    draft_directory(root, name)
 
     folder = draft.DraftFolder(root)
     try:

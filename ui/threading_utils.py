@@ -1,12 +1,43 @@
-def shutdown_thread(thread, stop_first=False, allow_terminate=True, wait_ms=1500):
-    """Stop a QThread. On app quit, prefer allow_terminate=True so the process can exit."""
+# Still-running QThreads kept here so Qt does not destroy them on quit.
+_PARKED_THREADS: list = []
+
+
+def parked_threads() -> list:
+    return list(_PARKED_THREADS)
+
+
+def park_running_thread(thread) -> None:
+    """Retain ``thread`` if it is still running."""
+    if thread is None:
+        return
+    try:
+        running = bool(thread.isRunning())
+    except Exception:
+        running = True
+    if not running:
+        return
+    if thread not in _PARKED_THREADS:
+        _PARKED_THREADS.append(thread)
+
+
+def shutdown_thread(thread, stop_first=False, allow_terminate=False, wait_ms=1500):
+    """Stop a QThread without destroying it while it is still running.
+
+    ``allow_terminate`` stays off unless the caller is sure the thread is stuck
+    in native I/O and does not hold the library write lock. A thread that is
+    still running after the wait is parked so its QObject is not deleted.
+    """
     if not thread or not thread.isRunning():
         return
+    try:
+        thread.blockSignals(True)
+    except Exception:
+        pass
     if stop_first and hasattr(thread, "stop"):
         thread.stop()
     thread.requestInterruption()
     thread.quit()
-    # Soft path (allow_terminate=False) still needs a finite wait — never hang forever.
+    # Soft path still needs a finite wait — never hang forever.
     soft_wait = max(int(wait_ms), 3000) if not allow_terminate else int(wait_ms)
     if thread.wait(soft_wait):
         return
@@ -15,4 +46,6 @@ def shutdown_thread(thread, stop_first=False, allow_terminate=True, wait_ms=1500
         return
     if allow_terminate:
         thread.terminate()
-        thread.wait(1000)
+        if thread.wait(1000):
+            return
+    park_running_thread(thread)

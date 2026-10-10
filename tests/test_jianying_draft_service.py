@@ -531,6 +531,30 @@ class JianyingDraftServiceTests(unittest.TestCase):
         self.assertAlmostEqual(duration, 1.0)
 
 
+    def test_draft_directory_rejects_parent_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "drafts"
+            outside = Path(tmp) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            secret = outside / "secret.txt"
+            secret.write_text("keep", encoding="utf-8")
+            with self.assertRaises(jy.JianyingDraftError):
+                jy.draft_directory(str(root), "..\\outside")
+            with self.assertRaises(jy.JianyingDraftError):
+                jy.draft_directory(str(root), "../outside")
+            jy._remove_draft_folder(str(root), "..\\outside")
+            self.assertEqual(secret.read_text(encoding="utf-8"), "keep")
+
+            child = root / "假期混剪"
+            child.mkdir()
+            (child / "draft_content.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(jy.draft_directory(str(root), "假期混剪"), os.path.abspath(child))
+            jy._remove_draft_folder(str(root), "假期混剪")
+            self.assertFalse(child.exists())
+            self.assertTrue(outside.is_dir())
+
+
 class NleTimelineSnapTests(unittest.TestCase):
     def test_snap_trims_one_frame_overlap(self):
         from src.services.nle_timeline_export import _snap_packed_timeline_clips

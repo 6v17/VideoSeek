@@ -100,8 +100,8 @@ class IndexingController(QObject):
         return True
 
     def shutdown(self):
-        shutdown_thread(self.register_worker, stop_first=True, allow_terminate=True, wait_ms=3000)
-        shutdown_thread(self.worker, stop_first=True, allow_terminate=True, wait_ms=3000)
+        shutdown_thread(self.register_worker, stop_first=True, wait_ms=3000)
+        shutdown_thread(self.worker, stop_first=True, wait_ms=3000)
 
     def request_stop(self):
         if self.is_registering() and hasattr(self.register_worker, "stop"):

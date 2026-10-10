@@ -2006,25 +2006,33 @@ class UnderstandingGuiMixin:
             "_speaker_cluster_worker",
             "_asr_connection_test_worker",
         )
+        from src.app.logging_utils import get_logger
+        from ui.threading_utils import park_running_thread
+
+        log = get_logger("understanding.ui")
         running = []
         for attr in attrs:
             worker = getattr(self, attr, None)
             if worker is None:
                 continue
             if getattr(worker, "isRunning", lambda: False)():
+                try:
+                    worker.blockSignals(True)
+                except Exception as exc:
+                    log.debug("understanding worker blockSignals failed: %s", exc)
                 if hasattr(worker, "stop"):
                     try:
                         worker.stop()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log.debug("understanding worker stop failed: %s", exc)
                 try:
                     worker.requestInterruption()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("understanding worker interrupt failed: %s", exc)
                 try:
                     worker.quit()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("understanding worker quit failed: %s", exc)
                 running.append((attr, worker))
             else:
                 setattr(self, attr, None)
@@ -2035,8 +2043,9 @@ class UnderstandingGuiMixin:
             if remaining_ms > 0:
                 try:
                     worker.wait(remaining_ms)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("understanding worker wait failed: %s", exc)
+            park_running_thread(worker)
             setattr(self, attr, None)
 
     def understanding_side_workers_busy(self) -> bool:
