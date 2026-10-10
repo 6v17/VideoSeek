@@ -263,7 +263,10 @@ class UnderstandingLlmGuiMixin:
             page.btn_test_vlm_connection.setEnabled(True)
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:266")
                 pass
 
         from ui.threading_utils import connect_on_receiver
@@ -509,7 +512,10 @@ class UnderstandingLlmGuiMixin:
                 self._sync_tray_stop_action()
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:512")
                 pass
             if hasattr(self, "_maybe_close_when_busy_work_stops"):
                 self._maybe_close_when_busy_work_stops()
@@ -1320,7 +1326,10 @@ class UnderstandingLlmGuiMixin:
                 if video_id:
                     chunks = list(load_video_chunks_by_id(video_id, load_config()) or [])
                     self._understanding_index_chunks = list(chunks)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:1323")
                 chunks = []
         if not chunks:
             self.show_info_dialog(
@@ -1563,7 +1572,10 @@ class UnderstandingLlmGuiMixin:
             self._sync_recap_review_rewrite_button()
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:1566")
                 pass
 
         def _on_progress(pct: int, label: str, active_page=page):
@@ -1695,7 +1707,10 @@ class UnderstandingLlmGuiMixin:
             self._sync_recap_review_rewrite_button()
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:1698")
                 pass
 
         def _on_progress(pct: int, label: str, active_page=page):
@@ -1831,7 +1846,10 @@ class UnderstandingLlmGuiMixin:
             self._sync_recap_review_rewrite_button()
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:1834")
                 pass
 
         def _on_progress(pct: int, label: str, active_page=page):
@@ -1925,7 +1943,10 @@ class UnderstandingLlmGuiMixin:
                 from ui.widgets.styles import theme_color_map
 
                 colors = theme_color_map(bool(getattr(self, "is_dark_mode", True)))
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_llm.py:1928")
                 colors = {}
             return colors
 

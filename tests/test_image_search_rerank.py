@@ -42,6 +42,21 @@ class FrameHashTests(unittest.TestCase):
 
 
 class ImageSearchRerankTests(unittest.TestCase):
+    def test_frame_read_failure_falls_back_to_thumbnail(self):
+        from src.services.image_search_rerank import VideoThumbnailSession
+
+        frame = np.zeros((4, 4, 3), dtype=np.uint8)
+        capture = unittest.mock.Mock()
+        capture.isOpened.return_value = True
+        capture.set.side_effect = RuntimeError("seek")
+        with unittest.mock.patch("cv2.VideoCapture", return_value=capture):
+            with unittest.mock.patch("src.media.thumbnail.get_single_thumbnail", return_value=frame) as thumb:
+                with unittest.mock.patch("src.app.logging_utils.note_swallowed") as noted:
+                    got = VideoThumbnailSession().read("a.mp4", 1.5)
+        self.assertIs(got, frame)
+        thumb.assert_called_once_with("a.mp4", 1.5)
+        self.assertEqual(noted.call_args.args[1], "src/services/image_search_rerank.py:frame_read")
+
     @unittest.mock.patch("src.media.thumbnail.get_single_thumbnail")
     def test_pixel_rerank_prefers_matching_frame(self, mock_thumb):
         query = np.full((80, 80, 3), 128, dtype=np.uint8)

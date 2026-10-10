@@ -61,8 +61,10 @@ def classify_package_zip(zip_path: str) -> str:
                     hits.append(kind)
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/understanding_import_service.py:detect_zip")
     if len(hits) > 1:
         raise RuntimeError(
             f"Package {os.path.basename(zip_path)} contains mixed kinds: {', '.join(hits)}"

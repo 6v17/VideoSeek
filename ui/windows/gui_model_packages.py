@@ -35,7 +35,10 @@ class ModelPackagesGuiMixin:
             from src.core.clip_embedding import reset_engine
 
             reset_engine()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_model_packages.py:38")
             pass
         config = load_config()
         if hasattr(self, "_populate_model_profile_options"):
@@ -158,7 +161,10 @@ class ModelPackagesGuiMixin:
                     parent = os.path.dirname(os.path.dirname(model_root))
                     if parent:
                         model_root = parent
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_model_packages.py:161")
             pass
         return model_root
 
@@ -289,7 +295,10 @@ class ModelPackagesGuiMixin:
             self._model_package_import_worker = None
         try:
             worker.deleteLater()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_model_packages.py:292")
             pass
 
     def remove_current_model_profile(self):
@@ -347,7 +356,10 @@ class ModelPackagesGuiMixin:
             refresh_error = str(exc)
             try:
                 self.load_settings_values()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_model_packages.py:350")
                 pass
 
         active_profile = str(result.get("active_profile", "") or "").strip()

@@ -322,8 +322,10 @@ def build_clone_match_export_payload(
             probed = float(get_video_duration_seconds(query_path) or 0.0)
             if probed > 0:
                 query_duration = probed
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/nle_timeline_export.py:query_duration")
         coverage_payload = compute_query_coverage(flat_for_cov, query_duration_sec=query_duration)
     stats_payload = dict(track_stats or {})
     if not stats_payload:

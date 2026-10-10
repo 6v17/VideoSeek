@@ -118,7 +118,10 @@ def rewrite_team_scope_video_paths(
             active = get_active_media_mounts()
             if not active:
                 active = build_media_mounts(list_local_library_paths())
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/team_media_map.py:rewrite_team_scope_video_paths")
             active = []
     out: List[str] = []
     for raw in video_paths:

@@ -525,7 +525,10 @@ def reconcile_ready_assets_with_lance(meta, *, config=None) -> int:
 
     try:
         profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/library_service.py:profile_base_dir")
         profile_base_dir = ""
 
     demoted = 0
@@ -613,8 +616,10 @@ def remove_library(path, delete_video_data, progress_callback=None):
             return
         try:
             progress_callback(int(percent), str(text or ""))
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/library_service.py:remove_library_progress")
 
     # Snapshot exclusive ids before mutating meta. A video_id still referenced by
     # any other library in this CLIP profile must keep its Lance payload.
@@ -638,8 +643,10 @@ def remove_library(path, delete_video_data, progress_callback=None):
     del meta["libraries"][normalized_path]
     try:
         garbage_collect_orphan_library_indexes(meta, config=config)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/library_service.py:garbage_collect_after_library_removal")
     save_model_metadata(meta, config=config)
 
     if removable_video_ids:
@@ -693,8 +700,10 @@ def remove_library_videos(entries, delete_video_data, progress_callback=None) ->
             return
         try:
             progress_callback(int(percent), str(text or ""))
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/library_service.py:remove_videos_progress")
 
     planned: list[tuple[str, str, str]] = []
     seen_keys: set[tuple[str, str]] = set()
@@ -708,7 +717,10 @@ def remove_library_videos(entries, delete_video_data, progress_callback=None) ->
             if lib_path and video_path:
                 try:
                     rel_raw = os.path.relpath(video_path, lib_path)
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "src/services/library_service.py:video_relpath")
                     rel_raw = ""
         rel_path = canonicalize_library_rel_path(rel_raw) if rel_raw else ""
         video_id = str(ent.get("video_id") or "").strip()
@@ -749,12 +761,16 @@ def remove_library_videos(entries, delete_video_data, progress_callback=None) ->
     for lib_path in affected_libs:
         try:
             clear_library_search_index(lib_path, config=config)
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/library_service.py:clear_index_after_video_removal")
     try:
         garbage_collect_orphan_library_indexes(meta, config=config)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/library_service.py:garbage_collect_after_video_removal")
     save_model_metadata(meta, config=config)
 
     payload_ids: list[str] = []

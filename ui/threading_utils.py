@@ -39,7 +39,10 @@ def release_finished_thread(owner, attr: str, thread) -> None:
         return
     try:
         thread.deleteLater()
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "ui/threading_utils.py:42")
         pass
 
 
@@ -75,7 +78,10 @@ def shutdown_thread(thread, stop_first=False, allow_terminate=False, wait_ms=150
         return
     try:
         thread.blockSignals(True)
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "ui/threading_utils.py:78")
         pass
     if stop_first and hasattr(thread, "stop"):
         thread.stop()

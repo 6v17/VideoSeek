@@ -75,6 +75,21 @@ def _coerce_agent_query_vector(raw) -> Any:
     return (arr / norms).astype(np.float32)
 
 
+def _resolve_team_play_urls(body, cfg) -> bool:
+    """Turn on team play URLs for a server-mode library. A failed check stays off."""
+    if bool(getattr(body, "team_play_urls", False)):
+        return True
+    try:
+        from src.services.team_mode_service import is_team_server_mode
+
+        return bool(is_team_server_mode(cfg))
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/web/agent_api/search.py:team_play_urls")
+        return False
+
+
 def _resolve_dialogue_match_mode(body: AgentSearchRequest) -> str:
     raw = getattr(body, "match_mode", None)
     if raw is None or not str(raw).strip():
@@ -711,15 +726,7 @@ def _resolve_agent_search_inputs(
         except Exception:
             logger.exception("Failed to rewrite team play_url scope paths")
 
-    team_play_urls = bool(getattr(body, "team_play_urls", False))
-    if not team_play_urls:
-        try:
-            from src.services.team_mode_service import is_team_server_mode
-
-            if is_team_server_mode(cfg):
-                team_play_urls = True
-        except Exception:
-            pass
+    team_play_urls = _resolve_team_play_urls(body, cfg)
 
     return {
         "preset": query_part.get("preset"),
@@ -977,15 +984,7 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
         _scope_from_resolved_paths(scope_video_paths, scope_library_paths),
         config=cfg,
     )
-    team_play_urls = bool(getattr(body, "team_play_urls", False))
-    if not team_play_urls:
-        try:
-            from src.services.team_mode_service import is_team_server_mode
-
-            if is_team_server_mode(cfg):
-                team_play_urls = True
-        except Exception:
-            pass
+    team_play_urls = _resolve_team_play_urls(body, cfg)
     response = {
         "api_version": API_VERSION,
         "ok": True,
@@ -1054,15 +1053,7 @@ def _execute_agent_tag_search(body: AgentSearchRequest, *, config=None) -> Dict[
         _scope_from_resolved_paths(scope_video_paths, scope_library_paths),
         config=cfg,
     )
-    team_play_urls = bool(getattr(body, "team_play_urls", False))
-    if not team_play_urls:
-        try:
-            from src.services.team_mode_service import is_team_server_mode
-
-            if is_team_server_mode(cfg):
-                team_play_urls = True
-        except Exception:
-            pass
+    team_play_urls = _resolve_team_play_urls(body, cfg)
     response = {
         "api_version": API_VERSION,
         "ok": True,

@@ -3794,7 +3794,9 @@ def get_texts(language):
             overlay = texts_zh if lang == "zh" else texts_en
             if overlay:
                 selected.update(overlay)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/app/i18n.py:load_overlay")
     return apply_copy_overrides(selected, lang)
 from src.app.copy_overrides import apply_copy_overrides

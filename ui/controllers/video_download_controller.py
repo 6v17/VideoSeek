@@ -158,7 +158,10 @@ class VideoDownloadController(QObject):
                 continue
             try:
                 btn.clicked.disconnect()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/video_download_controller.py:161")
                 pass
             btn.clicked.connect(lambda _checked=False, r=row: self.start_download_row(r))
 

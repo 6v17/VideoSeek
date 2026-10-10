@@ -199,8 +199,10 @@ def stop_nginx() -> None:
         try:
             if _process.poll() is None:
                 _process.terminate()
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/team_nginx_service.py:terminate")
     _process = None
 
 

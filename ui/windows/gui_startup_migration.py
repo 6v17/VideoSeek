@@ -232,7 +232,10 @@ class StartupMigrationGuiMixin:
         except Exception:
             try:
                 self.stack.setCurrentWidget(self.settings_page)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_startup_migration.py:235")
                 pass
         btn = getattr(self.settings_page, "btn_migrate_legacy_index", None)
         if btn is not None:

@@ -70,7 +70,10 @@ def _search_preset_summaries(*, limit: int = STARTER_PRESET_SNAPSHOT_LIMIT) -> T
         }
         try:
             ref_count = len(resolve_preset_ref_paths(item, config=cfg))
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/agent_starter_service.py:preset_ref_count")
             ref_count = 0
         if ref_count > 0:
             entry["image"] = True

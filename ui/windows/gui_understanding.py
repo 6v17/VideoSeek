@@ -658,7 +658,10 @@ class UnderstandingGuiMixin:
             page.btn_test_vlm_connection.setEnabled(True)
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding.py:661")
                 pass
 
         worker.result_ready.connect(
@@ -1161,7 +1164,10 @@ class UnderstandingGuiMixin:
                 config=config,
                 probe_duration=False,
             )
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_understanding.py:1164")
             self._understanding_video_context = {}
         index_chunks = load_video_chunks_by_id(video_id, config)
         self._understanding_index_chunks = list(index_chunks)
@@ -2083,15 +2089,24 @@ class UnderstandingGuiMixin:
             if hasattr(worker, "stop"):
                 try:
                     worker.stop()
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_understanding.py:2086")
                     pass
             try:
                 worker.requestInterruption()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding.py:2090")
                 pass
             try:
                 worker.quit()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding.py:2094")
                 pass
         return stopped_any
 
@@ -2534,7 +2549,10 @@ class UnderstandingGuiMixin:
             path = str(context.get("video_path") or "").strip()
             if path and os.path.isfile(path):
                 return path
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_understanding.py:2537")
             pass
         return ""
 

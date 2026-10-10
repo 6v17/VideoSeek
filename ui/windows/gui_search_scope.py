@@ -46,7 +46,10 @@ class SearchScopeGuiMixin:
         if hasattr(self, "_search_active_tab"):
             try:
                 active = str(self._search_active_tab() or "")
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_search_scope.py:49")
                 active = ""
         if active == getattr(self, "SEARCH_TAB_DIALOGUE", "dialogue"):
             return "dialogue"

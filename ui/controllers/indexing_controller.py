@@ -152,7 +152,10 @@ class IndexingController(QObject):
         if worker is not None:
             try:
                 worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/indexing_controller.py:155")
                 pass
         self.register_finished.emit(bool(success), result)
 

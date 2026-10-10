@@ -173,7 +173,10 @@ def layout_viewport_height(window=None, *, margin=None) -> int | None:
             height = int(window.height() or 0)
             if height >= 240:
                 return height
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "ui/widgets/layout.py:176")
         pass
     return _available_height(margin)
 

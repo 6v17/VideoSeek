@@ -159,7 +159,10 @@ class LibraryIndexingGuiMixin:
         if not entries and libraries and not register:
             try:
                 register_subtitle_library_videos()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_library_indexing.py:162")
                 pass
             entries = list_subtitle_library_video_entries(register=False)
             libraries = list_subtitle_libraries()
@@ -296,7 +299,10 @@ class LibraryIndexingGuiMixin:
                 try:
                     if self._search_scope_is_dialogue():
                         self._refresh_search_scope_ui(force_entries=True)
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_library_indexing.py:299")
                     pass
         except Exception as exc:
             self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
@@ -361,7 +367,10 @@ class LibraryIndexingGuiMixin:
 
             if is_team_client_mode():
                 return
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:364")
             pass
 
         if hint is not None:
@@ -476,7 +485,10 @@ class LibraryIndexingGuiMixin:
                 try:
                     tree.refresh_from_entries([], library_paths=[])
                     self._refresh_team_client_library_chrome()
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_library_indexing.py:479")
                     pass
             self.show_error_dialog(self.texts["library_load_failed"], exc)
             return
@@ -492,11 +504,17 @@ class LibraryIndexingGuiMixin:
         dialogue_indexing = False
         try:
             visual_indexing = bool(self.indexing_controller.is_running())
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:495")
             visual_indexing = False
         try:
             dialogue_indexing = bool(self._dialogue_index_running())
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:499")
             dialogue_indexing = False
 
         visibility = {
@@ -971,7 +989,10 @@ class LibraryIndexingGuiMixin:
                 if hasattr(self, "_refresh_search_scope_ui"):
                     try:
                         self._refresh_search_scope_ui(force_entries=True)
-                    except Exception:
+                    except Exception as exc:
+                        from src.app.logging_utils import note_swallowed
+
+                        note_swallowed(exc, "ui/windows/gui_library_indexing.py:974")
                         pass
             else:
                 self.library_page.lbl_status.setText(
@@ -1070,7 +1091,10 @@ class LibraryIndexingGuiMixin:
             self.remove_library_worker = None
         try:
             worker.deleteLater()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1073")
             pass
 
     def _update_remove_library_progress(self, value, text):
@@ -1342,7 +1366,10 @@ class LibraryIndexingGuiMixin:
             if previous is None or abs(float(previous) - value) > 1e-6:
                 config["subtitle_sample_interval_sec"] = value
                 save_config(config)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1345")
             pass
         return value
 
@@ -1397,7 +1424,10 @@ class LibraryIndexingGuiMixin:
             if previous != value:
                 config["subtitle_sample_strategy"] = value
                 save_config(config)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1400")
             pass
         return value
 
@@ -1448,7 +1478,10 @@ class LibraryIndexingGuiMixin:
             if previous is None or int(previous) != value:
                 config["subtitle_ocr_batch_size"] = value
                 save_config(config)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1451")
             pass
         return value
 
@@ -1471,7 +1504,10 @@ class LibraryIndexingGuiMixin:
                 try:
                     # Never auto-delete OCR here. Offline/removable drives must not wipe transcripts.
                     prune_missing_subtitle_sources(clear_orphan_transcripts=False)
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_library_indexing.py:1474")
                     pass
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
@@ -1509,14 +1545,20 @@ class LibraryIndexingGuiMixin:
                 try:
                     if self._search_scope_is_dialogue():
                         self._refresh_search_scope_ui(force_entries=True)
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_library_indexing.py:1512")
                     pass
         except Exception as exc:
             if is_team_client_mode():
                 try:
                     self.library_page.subtitle_video_tree.refresh_from_entries([], library_paths=[])
                     self._refresh_team_client_library_chrome()
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_library_indexing.py:1519")
                     pass
             self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
 
@@ -1894,7 +1936,10 @@ class LibraryIndexingGuiMixin:
             self.dialogue_index_worker = None
         try:
             worker.deleteLater()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1897")
             pass
 
     def _update_dialogue_index_progress(self, value, text):
@@ -1987,16 +2032,25 @@ class LibraryIndexingGuiMixin:
     def _refresh_after_dialogue_index(self) -> None:
         try:
             self.refresh_library_table()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1990")
             pass
         try:
             self.refresh_dialogue_library_table()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:1994")
             pass
         if hasattr(self, "_sync_tray_stop_action"):
             try:
                 self._sync_tray_stop_action()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_library_indexing.py:1999")
                 pass
 
     def start_debug_gpu_oom(self):
@@ -2281,7 +2335,10 @@ class LibraryIndexingGuiMixin:
                 from src.services.library_service import collect_reindexable_missing_video_ids
 
                 leftover = len(collect_reindexable_missing_video_ids())
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_library_indexing.py:2284")
                 leftover = 0
             if leftover:
                 status_text = (
@@ -2307,7 +2364,10 @@ class LibraryIndexingGuiMixin:
                 from src.services.library_service import collect_reindexable_missing_video_ids
 
                 leftover = len(collect_reindexable_missing_video_ids())
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_library_indexing.py:2310")
                 leftover = 0
             if leftover:
                 status_text = (
@@ -2788,7 +2848,10 @@ class LibraryIndexingGuiMixin:
                 dialog.set_subtitle(self._format_local_vector_subtitle(detail))
                 dialog.set_summary_text(self.texts["library_vectors_validation_loading"])
                 self._start_local_vector_detail_validation(dialog)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_library_indexing.py:2791")
                 pass
         else:
             self.show_info_dialog(
@@ -2872,7 +2935,10 @@ class LibraryIndexingGuiMixin:
             self._local_vector_detail_worker = None
         try:
             worker.deleteLater()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:2875")
             pass
 
     def _local_vector_asset_state_text(self, asset_state):

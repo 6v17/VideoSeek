@@ -56,8 +56,10 @@ def resolve_mobile_bridge_host(preferred: str | None = None) -> str:
         lan = str(detect_lan_ip() or "").strip()
         if lan and lan not in {"0.0.0.0", "::"}:
             return lan
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/web/mobile_bridge.py:lan_ip")
     logger.warning("LAN IP unavailable; mobile bridge falling back to bind 0.0.0.0")
     return "0.0.0.0"
 

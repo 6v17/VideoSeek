@@ -260,7 +260,10 @@ class UnderstandingAsrGuiMixin:
             page.btn_test_vlm_connection.setEnabled(True)
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:263")
                 pass
 
         from ui.threading_utils import connect_on_receiver
@@ -384,7 +387,10 @@ class UnderstandingAsrGuiMixin:
 
             try:
                 context = resolve_video_context(video_id, config=load_config(), probe_duration=False)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:387")
                 context = {}
         language = ""
         if page is not None:
@@ -461,7 +467,10 @@ class UnderstandingAsrGuiMixin:
             self._sync_recap_export_button(running=False)
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:464")
                 pass
             if hasattr(self, "_maybe_close_when_busy_work_stops"):
                 self._maybe_close_when_busy_work_stops()
@@ -590,7 +599,10 @@ class UnderstandingAsrGuiMixin:
 
             try:
                 context = resolve_video_context(video_id, config=load_config(), probe_duration=False)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:593")
                 context = {}
         running_text = self.texts.get("understanding_speaker_cluster_running", "Clustering speakers…")
         if page is not None:
@@ -658,7 +670,10 @@ class UnderstandingAsrGuiMixin:
             self._sync_recap_export_button(running=False)
             try:
                 active_worker.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:661")
                 pass
             if hasattr(self, "_maybe_close_when_busy_work_stops"):
                 self._maybe_close_when_busy_work_stops()

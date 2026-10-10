@@ -75,5 +75,7 @@ def emit_search_progress(phase: str, message: str = "") -> None:
         callback(str(phase or "").strip(), str(message or "").strip())
     except InterruptedError:
         raise
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/search_progress.py:progress_callback")

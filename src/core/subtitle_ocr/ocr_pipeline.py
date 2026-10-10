@@ -205,8 +205,10 @@ def collect_ocr_observations(
             # After GPU→CPU sticky fallback, flush one ROI at a time so progress moves.
             if not _effective_prefer_gpu(True):
                 return 1
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/core/subtitle_ocr/ocr_pipeline.py:ocr_batch_size")
         return batch_n
 
     def _flush_pending() -> None:

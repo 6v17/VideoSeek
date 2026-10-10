@@ -1359,8 +1359,10 @@ def delete_profile_dialogue_segments(
         try:
             refresh_import_state(base)
             _invalidate_lance_search_caches(base)
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/storage/lance_store.py:refresh_after_delete")
 
 
 def delete_profile_video_vectors(
@@ -1680,8 +1682,10 @@ def upsert_profile_video_vectors_from_arrays(
         )
         try:
             _invalidate_lance_search_caches(profile_base_dir)
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/storage/lance_store.py:invalidate_after_upsert_failure")
         return {"error": str(exc), "video_id": video_id, "frame_rows": 0, "chunk_rows": 0}
 
     if isinstance(chunk_config, dict):

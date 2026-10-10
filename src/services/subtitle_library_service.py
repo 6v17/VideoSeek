@@ -422,8 +422,10 @@ def remove_subtitle_library(path, *, config=None, progress_callback=None) -> boo
             return
         try:
             progress_callback(int(percent), str(text or ""))
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/subtitle_library_service.py:remove_progress")
 
     from src.services.library_service import count_video_id_refs
 
@@ -456,8 +458,10 @@ def remove_subtitle_library(path, *, config=None, progress_callback=None) -> boo
             )
             try:
                 delete_dialogue_transcript(str(video_id or ""), config=cfg)
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/subtitle_library_service.py:delete_transcript")
         _progress(85, "remove_library|side_state")
         _clear_dialogue_side_effects(removable_video_ids, config=cfg)
 

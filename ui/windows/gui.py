@@ -655,7 +655,10 @@ class MainWindow(
             order = list(getattr(self, "_nav_page_order", ()) or ())
             if 0 <= idx < len(order):
                 current = order[idx]
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:658")
             current = ""
         for page_id, spec in specs.items():
             button = sidebar.nav_button(page_id)
@@ -666,7 +669,10 @@ class MainWindow(
             if callable(visible_fn):
                 try:
                     visible = bool(visible_fn())
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui.py:669")
                     visible = False
             button.setVisible(visible)
             if not visible and current == page_id:
@@ -1368,7 +1374,10 @@ class MainWindow(
             from src.services.library_service import maintain_library_metadata
 
             maintain_library_metadata()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:1371")
             pass
 
     def _bootstrap_understanding_resources(self):
@@ -1381,7 +1390,10 @@ class MainWindow(
 
             ensure_understanding_profiles_installed()
             ensure_understanding_components_installed()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:1384")
             pass
 
     def show_notice(self):
@@ -2219,7 +2231,10 @@ class MainWindow(
         texts = getattr(self, "texts", {}) or {}
         try:
             ranges_text = get_search_skip_ranges_text()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:2222")
             ranges_text = ""
         team_mode = get_team_mode()
         chrome = resolve_skip_edges_chrome(
@@ -2255,7 +2270,10 @@ class MainWindow(
 
         try:
             ranges_text = get_search_skip_ranges_text()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:2258")
             ranges_text = ""
         dialog = SkipEdgesDialog(
             parent=self,
@@ -2284,7 +2302,10 @@ class MainWindow(
         self.search_page.img_label.setText(self.texts["image_drop_hint"])
         try:
             self._refresh_search_panel_state()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:2287")
             pass
 
     def clear_all_content(self):
@@ -2302,7 +2323,10 @@ class MainWindow(
         self._update_preview_action_button_styles()
         try:
             self._refresh_search_panel_state()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui.py:2305")
             # Safe after removing all CLIP models (fallback profile may have empty asset dirs).
             pass
         self.search_page.lbl_status.setText(self.texts["ready"])
@@ -2341,7 +2365,10 @@ class MainWindow(
                     server_url=str(cfg.get("team_server_url") or ""),
                     api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
                 )
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui.py:2344")
                 browse_url = ""
         if not browse_url:
             browse_url = absolute_path_to_library_browse_url(

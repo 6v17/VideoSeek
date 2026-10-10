@@ -111,8 +111,10 @@ def export_path_guard_strict(config=None) -> bool:
 
         if is_team_server_mode(cfg):
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/clip_export_service.py:export_path_guard_strict")
     return False
 
 
@@ -295,7 +297,10 @@ def execute_export_clip(
         stderr = ""
         try:
             stderr = (result.stderr or b"").decode("utf-8", errors="replace").strip()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/clip_export_service.py:ffmpeg_stderr")
             stderr = ""
         message = stderr or f"FFmpeg exited with code {result.returncode}"
         raise RuntimeError(message[:2000])

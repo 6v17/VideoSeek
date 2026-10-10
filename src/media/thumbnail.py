@@ -98,8 +98,10 @@ def get_single_thumbnail(video_path, time_sec):
             ok, frame = capture.read()
             if ok and frame is not None and frame.size > 0:
                 return frame
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/media/thumbnail.py:capture_read")
     finally:
         capture.release()
 

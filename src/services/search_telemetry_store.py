@@ -324,8 +324,10 @@ def _maybe_add_profile_counter(name: str, delta: int = 1) -> None:
 
         if profiling_active():
             add_profile_counter(name, delta)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/search_telemetry_store.py:profile_counter")
 
 
 def _ratio(numerator: int, denominator: int) -> float:

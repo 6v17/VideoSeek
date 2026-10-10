@@ -31,7 +31,10 @@ def force_widget_foreground(widget) -> None:
             user32.AllowSetForegroundWindow(-1)
             user32.SetForegroundWindow(hwnd)
             user32.BringWindowToTop(hwnd)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/widgets/results_float_window.py:34")
             pass
 
 

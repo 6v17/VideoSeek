@@ -854,7 +854,10 @@ def scan_understanding_components(model_dir: str | None = None) -> list[dict[str
             try:
                 manifest = _read_json_file(manifest_path)
                 entry["id"] = str(manifest.get("id", "") or "")
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/understanding_resource_service.py:manifest_id")
                 entry["id"] = ""
         results.append(entry)
     return results

@@ -1772,7 +1772,10 @@ def _index_video_commit(
         if not video_id and abs_path:
             try:
                 video_id = get_video_hash(abs_path)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/indexing_service.py:video_hash")
                 video_id = ""
         metadata_updated = False
         if video_id and video_mod_time is not None:
@@ -1845,7 +1848,10 @@ def process_single_video(
             video_mod_time = None
         try:
             video_id = get_video_id(abs_path)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/indexing_service.py:video_id_after_failure")
             video_id = ""
         result = {
             "kind": "error",
@@ -1917,7 +1923,10 @@ def _run_planned_videos_with_prefetch(
                 video_mod_time = None
             try:
                 video_id = get_video_id(abs_path)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/indexing_service.py:video_id_after_prefetch_failure")
                 video_id = ""
             result = {
                 "kind": "error",

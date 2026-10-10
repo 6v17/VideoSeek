@@ -598,6 +598,8 @@ def index_video_subtitles(
                 DIALOGUE_INDEX_STATE_FAILED,
                 extras={"dialogue_error": str(exc)},
             )
-        except Exception:
-            pass
+        except Exception as mark_exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(mark_exc, "src/services/subtitle_index_service.py:mark_failed")
         return {"ok": False, "error": str(exc), "segment_rows": 0, "mode": "ocr"}

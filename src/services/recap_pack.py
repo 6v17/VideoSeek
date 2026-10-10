@@ -42,7 +42,10 @@ def build_recap_pack(video_id: str, *, config=None) -> dict[str, Any]:
     if not duration or not video_path:
         try:
             context = resolve_video_context(video_id, config=cfg, probe_duration=not duration)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/recap_pack.py:video_context")
             context = {}
         if not video_path:
             video_path = str(context.get("video_path") or "")

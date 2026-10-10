@@ -227,8 +227,10 @@ def _iter_rapidocr_config_candidates() -> list[Path]:
     ):
         try:
             candidates.append(Path(get_resource_path(rel)))
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/core/subtitle_ocr/rapidocr_engine.py:resource_path")
     candidates.append(Path(get_app_data_dir()) / "rapidocr_onnxruntime" / "config.yaml")
     return candidates
 
@@ -378,8 +380,10 @@ def _mark_force_cpu(reason: str) -> None:
         def _drop_engines(refs: list[Any] = doomed) -> None:
             try:
                 refs.clear()
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/core/subtitle_ocr/rapidocr_engine.py:drop_engines")
 
         threading.Thread(target=_drop_engines, name="VSRapidOcrEngineDrop", daemon=True).start()
 

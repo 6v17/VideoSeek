@@ -86,7 +86,10 @@ class OnnxVisionBatchMixin:
             from src.app.config import load_config
 
             config = load_config()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/core/onnx_vision_engine.py:load_config")
             config = None
         return resolve_onnx_providers(prefer_gpu=prefer_gpu, config=config)
 

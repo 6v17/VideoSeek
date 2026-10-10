@@ -19,8 +19,10 @@ def resolve_model_dir_info():
         configured_model_dir = str(get_effective_model_dir(config=config) or "").strip()
         if configured_model_dir:
             return os.path.normpath(configured_model_dir), "configured"
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/infra/model_paths.py:configured_model_dir")
 
     return os.path.normpath(get_default_model_dir()), "default"
 
@@ -138,8 +140,10 @@ def get_model_path(filename):
             normalized = os.path.normcase(os.path.normpath(canonical_path))
             if normalized not in seen:
                 candidate_paths.append(canonical_path)
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/infra/model_paths.py:candidate_path")
     for candidate in candidate_paths:
         if os.path.exists(candidate):
             return candidate

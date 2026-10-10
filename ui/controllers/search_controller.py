@@ -343,7 +343,10 @@ class SearchController(QObject):
                 from src.storage.config_store import get_text_search_enhance_enabled
 
                 enhance_on = bool(get_text_search_enhance_enabled())
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/search_controller.py:346")
                 enhance_on = False
             if not enhance_on:
                 tip = str(texts.get("search_empty_try_text_enhance", "") or "").strip()
@@ -381,7 +384,10 @@ class SearchController(QObject):
             empty_message = status
             try:
                 result_view.set_empty_message(empty_message)
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/search_controller.py:384")
                 pass
             return
 
@@ -568,7 +574,10 @@ class SearchController(QObject):
                     str(getattr(coerce_search_hit(row), "match_kind", "") or "").strip().lower() == "video"
                     for row in results
                 )
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/controllers/search_controller.py:571")
                 has_video_hit = False
             if has_video_hit:
                 deep_hint = str(texts.get("search_done_deep_locate_hint", "") or "").strip()

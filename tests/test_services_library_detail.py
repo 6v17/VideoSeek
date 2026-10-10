@@ -369,6 +369,80 @@ class LibraryDetailServiceTests(unittest.TestCase):
         self.assertIn("b.mp4", _files_for("shared"))
         mock_compact.assert_called_once_with(_TEST_PROFILE)
 
+    def test_remove_library_records_orphan_index_cleanup_failure(self):
+        meta = {
+            "libraries": {
+                "D:\\videos": {
+                    "files": {
+                        "a.mp4": {"vid": "vid_a", "asset_state": "ready"},
+                    }
+                }
+            }
+        }
+        with (
+            patch("src.services.library_service.load_config", return_value={"meta_file": "source/meta.json"}),
+            patch("src.services.library_service.load_model_metadata", return_value=meta),
+            patch("src.services.library_service.save_model_metadata") as save_meta,
+            patch("src.services.library_service.os.path.exists", return_value=True),
+            patch(
+                "src.services.library_service.get_local_model_asset_dirs",
+                return_value={"base_dir": _TEST_PROFILE},
+            ),
+            patch("src.services.library_service.clear_library_search_index"),
+            patch(
+                "src.services.library_service.garbage_collect_orphan_library_indexes",
+                side_effect=RuntimeError("gc failed"),
+            ),
+            patch("src.storage.lance_store.garbage_collect_orphan_lance_videos"),
+            patch("src.storage.lance_store.compact_lance_storage"),
+            patch("src.app.logging_utils.note_swallowed") as noted,
+        ):
+            result = library_service.remove_library("D:\\videos", lambda *_args, **_kwargs: None)
+        self.assertTrue(result)
+        save_meta.assert_called_once()
+        labels = [call.args[1] for call in noted.call_args_list]
+        self.assertIn("src/services/library_service.py:garbage_collect_after_library_removal", labels)
+
+    def test_remove_library_videos_records_index_cleanup_failure(self):
+        meta = {
+            "libraries": {
+                "D:\\videos": {
+                    "files": {
+                        "a.mp4": {"vid": "vid_a", "asset_state": "ready"},
+                    }
+                }
+            }
+        }
+        with (
+            patch("src.services.library_service.load_config", return_value={"meta_file": "source/meta.json"}),
+            patch("src.services.library_service.load_model_metadata", return_value=meta),
+            patch("src.services.library_service.save_model_metadata") as save_meta,
+            patch(
+                "src.services.library_service.get_local_model_asset_dirs",
+                return_value={"base_dir": _TEST_PROFILE},
+            ),
+            patch(
+                "src.services.library_service.clear_library_search_index",
+                side_effect=RuntimeError("clear failed"),
+            ),
+            patch(
+                "src.services.library_service.garbage_collect_orphan_library_indexes",
+                side_effect=RuntimeError("gc failed"),
+            ),
+            patch("src.storage.lance_store.garbage_collect_orphan_lance_videos"),
+            patch("src.storage.lance_store.compact_lance_storage"),
+            patch("src.app.logging_utils.note_swallowed") as noted,
+        ):
+            result = library_service.remove_library_videos(
+                [{"library_path": "D:\\videos", "video_rel_path": "a.mp4", "video_id": "vid_a"}],
+                lambda *_args, **_kwargs: None,
+            )
+        self.assertEqual(result["removed_count"], 1)
+        save_meta.assert_called_once()
+        labels = [call.args[1] for call in noted.call_args_list]
+        self.assertIn("src/services/library_service.py:clear_index_after_video_removal", labels)
+        self.assertIn("src/services/library_service.py:garbage_collect_after_video_removal", labels)
+
     @patch("src.storage.lance_search_index.get_lance_indexed_video_ids", return_value=set())
     @patch("src.services.library_service.get_local_model_asset_dirs", side_effect=_model_dirs_from_test_config)
     @patch("src.services.library_service.os.path.exists")

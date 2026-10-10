@@ -42,7 +42,10 @@ def campplus_install_dir(*, model_dir: str | None = None) -> str:
             from src.infra.model_paths import get_configured_model_dir
 
             root = str(get_configured_model_dir() or "").strip()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/core/asr/campplus_onnx.py:model_dir")
             root = ""
     if not root:
         from src.infra.paths import get_default_model_dir
@@ -65,8 +68,10 @@ def resolve_campplus_model_path(
         from src.infra.paths import get_resource_path
 
         candidates.append(get_resource_path(BUNDLED_CAMPPLUS_RELPATH))
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/core/asr/campplus_onnx.py:bundled_path")
 
     install_dir = campplus_install_dir(model_dir=model_dir)
     candidates.append(os.path.join(install_dir, "campplus.onnx"))

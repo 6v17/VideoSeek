@@ -151,8 +151,10 @@ class VideoThumbnailSession:
             if capture is not None:
                 try:
                     capture.release()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "src/services/image_search_rerank.py:release_capture")
             capture = cv2.VideoCapture(path)
             self._captures[path] = capture
         if capture.isOpened():
@@ -161,8 +163,10 @@ class VideoThumbnailSession:
                 ok, frame = capture.read()
                 if ok and frame is not None and frame.size > 0:
                     return frame
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/image_search_rerank.py:frame_read")
         from src.media.thumbnail import get_single_thumbnail
 
         return get_single_thumbnail(path, time_sec)
@@ -171,8 +175,10 @@ class VideoThumbnailSession:
         for capture in self._captures.values():
             try:
                 capture.release()
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/image_search_rerank.py:close_captures")
         self._captures.clear()
 
 

@@ -82,6 +82,23 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(query, "D:/shot.png")
         self.assertEqual(query_type, "image_path")
 
+    def test_team_play_urls_stay_off_when_the_mode_check_fails(self):
+        from src.web.agent_api.search import _resolve_team_play_urls
+
+        body = AgentSearchRequest(query="hello")
+        with patch("src.services.team_mode_service.is_team_server_mode", side_effect=RuntimeError("mode")):
+            with patch("src.app.logging_utils.note_swallowed") as noted:
+                enabled = _resolve_team_play_urls(body, {})
+        self.assertFalse(enabled)
+        self.assertEqual(noted.call_args.args[1], "src/web/agent_api/search.py:team_play_urls")
+
+    def test_explicit_team_play_urls_skip_the_mode_check(self):
+        from src.web.agent_api.search import _resolve_team_play_urls
+
+        body = AgentSearchRequest(query="hello", team_play_urls=True)
+        with patch("src.services.team_mode_service.is_team_server_mode", side_effect=AssertionError("unchecked")):
+            self.assertTrue(_resolve_team_play_urls(body, {}))
+
     def test_resolve_export_clip_output_path_from_dir(self):
         from src.web.agent_api.export_ops import resolve_export_clip_output_path
 

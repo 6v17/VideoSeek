@@ -405,7 +405,10 @@ class SettingsGuiMixin:
                 continue
             try:
                 loop.quit()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_settings.py:408")
                 pass
         shutdown_thread(getattr(self, "_team_connect_worker", None), stop_first=True)
         shutdown_thread(getattr(self, "_team_lifecycle_worker", None), stop_first=True)
@@ -894,7 +897,10 @@ class SettingsGuiMixin:
             previous_active_profile_id = str(previous_models.get("active_profile", "") or "").strip()
             try:
                 previous_effective_model_dir = str(get_effective_model_dir(config=config) or "").strip()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_settings.py:897")
                 previous_effective_model_dir = ""
             new_fps = self.settings_page.input_fps.value()
             new_sampling_fps_mode = normalize_sampling_fps_mode(
@@ -1030,7 +1036,10 @@ class SettingsGuiMixin:
                     break
             try:
                 new_effective_model_dir = str(get_effective_model_dir(config=config) or "").strip()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_settings.py:1033")
                 new_effective_model_dir = ""
             profile_switched = bool(selected_profile_id) and selected_profile_id != previous_active_profile_id
             effective_model_dir_changed = (

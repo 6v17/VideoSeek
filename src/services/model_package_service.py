@@ -898,7 +898,10 @@ def rediscover_model_profiles(model_root: str | None = None) -> dict:
             from src.storage.config_store import get_effective_model_dir
 
             root = str(get_effective_model_dir(config=cfg) or "").strip()
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/model_package_service.py:model_root")
             root = ""
     if not root:
         return {

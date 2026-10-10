@@ -76,8 +76,10 @@ def resolve_silero_vad_model_path(
         from src.infra.paths import get_resource_path
 
         candidates.append(get_resource_path(BUNDLED_SILERO_VAD_RELPATH))
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/core/asr/vad_segment.py:bundled_path")
 
     seen: set[str] = set()
     for path in candidates:

@@ -17,8 +17,10 @@ def _resolve_runtime_model_dir(config):
         model_dir = get_active_model_resource_dir(config=config)
         if model_dir:
             return model_dir
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/runtime_resource_service.py:active_model_dir")
     return str(config.get("model_dir", "") or "").strip()
 
 
@@ -42,8 +44,10 @@ def _resolve_runtime_model_root_dir(config):
                 candidate = os.path.dirname(os.path.dirname(model_root_dir))
                 if candidate:
                     model_root_dir = candidate
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/runtime_resource_service.py:trim_model_root")
     # Fallback heuristic: if path itself looks like "<root>/<provider>/<variant>", trim to "<root>".
     # This protects against stale configs that accidentally persist a profile leaf as model_dir.
     provider_leaf = os.path.basename(os.path.dirname(model_root_dir)).strip().lower()

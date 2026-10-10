@@ -40,8 +40,10 @@ def urlopen_json_with_stop(
         for response in list(response_holder):
             try:
                 response.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "src/services/cancellable_http.py:close_response")
 
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:

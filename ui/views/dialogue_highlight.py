@@ -22,7 +22,10 @@ def _highlight_color() -> str:
             bg = app.palette().color(app.palette().ColorRole.Window)
             colors = THEME_COLORS_DARK if bg.lightness() < 128 else THEME_COLORS_LIGHT
             return str(colors.get("WARN") or colors.get("ACCENT") or "#e67e22")
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "ui/views/dialogue_highlight.py:25")
         pass
     return "#e67e22"
 

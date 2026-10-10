@@ -42,14 +42,20 @@ def _raise_from_http_error(exc: urllib.error.HTTPError) -> None:
     raw = ""
     try:
         raw = exc.read().decode("utf-8", errors="replace")
-    except Exception:
+    except Exception as read_exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(read_exc, "src/services/team_client_search.py:read_error_body")
         raw = ""
     data: dict = {}
     try:
         parsed = json.loads(raw or "{}")
         if isinstance(parsed, dict):
             data = parsed
-    except Exception:
+    except Exception as parse_exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(parse_exc, "src/services/team_client_search.py:parse_error_body")
         data = {}
     err = data.get("error") if isinstance(data.get("error"), dict) else {}
     code = str(err.get("code") or "").strip().lower()

@@ -46,6 +46,19 @@ class ExportPathGuardTests(unittest.TestCase):
                 self.assertTrue(output_path_allowed(good, config={}))
                 self.assertFalse(output_path_allowed(bad, config={}))
 
+    def test_team_mode_check_failure_keeps_the_guard_off(self):
+        with patch.dict(os.environ, {"VIDEOSEEK_AGENT_EXPORT_STRICT": ""}, clear=False):
+            with patch(
+                "src.services.team_mode_service.is_team_server_mode",
+                side_effect=RuntimeError("mode"),
+            ):
+                with patch("src.app.logging_utils.note_swallowed") as noted:
+                    self.assertFalse(export_path_guard_strict({}))
+        self.assertEqual(
+            noted.call_args.args[1],
+            "src/services/clip_export_service.py:export_path_guard_strict",
+        )
+
     def test_configured_roots_enforced_even_when_not_team(self):
         with tempfile.TemporaryDirectory() as tmp:
             allowed = os.path.join(tmp, "out")

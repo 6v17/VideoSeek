@@ -554,7 +554,10 @@ class SearchPanelStateMixin:
                 self._dialogue_stats_cache = {"at": now, "indexed": indexed}
             if indexed > 0:
                 return texts.get(ready_key, fallback).format(count=indexed)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_search_panel_state.py:557")
             pass
         return fallback
 
@@ -591,7 +594,10 @@ class SearchPanelStateMixin:
             if indexed > 0:
                 # Keep one short status line; interaction tips live in the placeholder.
                 return texts.get(ready_key, fallback).format(count=indexed)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_search_panel_state.py:594")
             pass
         return fallback
 
@@ -735,7 +741,10 @@ class SearchPanelStateMixin:
                 exclude_tags=exclude,
                 required_tags=exclude or None,
             )
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_search_panel_state.py:738")
             tags = []
         panel.show_tag_suggestions(tags)
 

@@ -71,7 +71,10 @@ def get_video_stream_info(video_path):
         from src.infra.win_process import hidden_subprocess_kwargs
 
         run_kwargs = hidden_subprocess_kwargs()
-    except Exception:
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/media/probe.py:hidden_subprocess_kwargs")
         run_kwargs = {}
 
     try:

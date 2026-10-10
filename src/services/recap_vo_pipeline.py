@@ -346,7 +346,10 @@ def rewrite_recap_clip_caption(
     if vid:
         try:
             pack = _rs().build_recap_pack(vid, config=cfg)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/recap_vo_pipeline.py:recap_pack")
             pack = None
     prev = ""
     for cursor in range(index - 1, -1, -1):

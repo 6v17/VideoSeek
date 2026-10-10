@@ -210,8 +210,10 @@ def garbage_collect_orphan_library_indexes(meta, config=None) -> int:
             from src.storage.config_store import get_global_model_asset_paths
 
             global_dir = get_global_model_asset_paths(config=config).get("global_dir", "")
-        except Exception:
-            pass
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/services/search_index_schema.py:global_index_dir")
         library_root = os.path.join(global_dir, "library_indexes") if global_dir else ""
         if library_root and os.path.isdir(library_root):
             try:

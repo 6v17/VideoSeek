@@ -219,7 +219,10 @@ def iter_frames_at_times(
                             frame = grabbed
                     if frame is not None:
                         last_msec = float(capture.get(cv2.CAP_PROP_POS_MSEC) or target_msec)
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "src/core/subtitle_ocr/frame_sample.py:capture_frame")
                     frame = None
             if frame is None:
                 frame = get_single_thumbnail(path, t)

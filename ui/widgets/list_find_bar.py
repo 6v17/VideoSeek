@@ -111,7 +111,10 @@ def clear_find_hit_highlights(blocks: Sequence[Any]) -> None:
             # Find temporarily enables SingleSelection; restore idle mode so the
             # old hit row cannot keep glowing after the user clicks away.
             view.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/widgets/list_find_bar.py:114")
             pass
 
 
@@ -145,7 +148,10 @@ def scroll_widget_into_view(target: QWidget | None, *, x_margin: int = 0, y_marg
                     desired = max(0, int(pos.y()) - int(y_margin))
                     if abs(bar.value() - desired) > 4:
                         bar.setValue(min(desired, bar.maximum()))
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/widgets/list_find_bar.py:148")
                     pass
         parent = parent.parentWidget()
 
@@ -331,7 +337,10 @@ class ListFindBar(QWidget):
             try:
                 old.setParent(None)
                 old.deleteLater()
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/widgets/list_find_bar.py:334")
                 pass
         self._hosted_shortcuts = []
 

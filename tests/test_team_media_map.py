@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.services.team_media_map import absolute_path_to_play_url, build_media_mounts
 from src.services.team_paths import normalize_http_base, normalize_team_mode
@@ -70,6 +71,22 @@ class TeamMediaMapTests(unittest.TestCase):
                 os.path.normcase(os.path.abspath(rewritten[0])),
                 os.path.normcase(os.path.abspath(video)),
             )
+
+    def test_mount_lookup_failure_keeps_the_play_url(self):
+        from src.services.team_media_map import rewrite_team_scope_video_paths
+
+        url = "http://127.0.0.1:8765/videos/lib1/clip.mp4"
+        with patch(
+            "src.services.team_mode_service.get_active_media_mounts",
+            side_effect=RuntimeError("mounts"),
+        ):
+            with patch("src.app.logging_utils.note_swallowed") as noted:
+                rewritten = rewrite_team_scope_video_paths([url])
+        self.assertEqual(rewritten, [url])
+        self.assertEqual(
+            noted.call_args.args[1],
+            "src/services/team_media_map.py:rewrite_team_scope_video_paths",
+        )
 
     def test_library_browse_url_from_play_url(self):
         from src.services.team_media_map import absolute_path_to_library_browse_url
