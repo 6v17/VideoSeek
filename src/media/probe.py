@@ -158,6 +158,9 @@ def _probe_video_stream_with_opencv(video_path):
     }
 
 
+probe_video_stream_with_opencv = _probe_video_stream_with_opencv
+
+
 def _safe_float(value):
     try:
         parsed = float(value)

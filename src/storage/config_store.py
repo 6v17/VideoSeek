@@ -240,6 +240,9 @@ def _read_on_disk_embedding_dimension(model_resource_dir: str) -> int:
     return 0
 
 
+read_on_disk_embedding_dimension = _read_on_disk_embedding_dimension
+
+
 def get_active_embedding_spec(config=None):
     cfg = dict(config or load_config())
     profile = get_active_model_profile(config=cfg)

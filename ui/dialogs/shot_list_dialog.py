@@ -17,7 +17,7 @@ from src.app.path_display import video_display_name
 from src.services.shot_list_service import ShotListStore
 from src.services.search_locate import format_clip_score_percent
 from ui.dialogs.shell import VSDialogShell
-from ui.views.table_views import _format_time_range
+from ui.views.table_views import format_time_range as _format_time_range
 from ui.widgets.scaffold import VSCard
 
 

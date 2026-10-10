@@ -42,7 +42,7 @@ python import_runtime_resources.py --status
 
 ### 版本号（正式 / QQ 群测）
 
-- **唯一真相源：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。
+- **运行时版本：** `src/app/app_meta.py` 的 `version`（窗口标题、关于页、打包 `VERSION.txt` 都读它）。改版时同步 `pyproject.toml` 的 `version`。
 - **群测：** `1.0.92-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.92-beta.1.zip`；**不要**写入公开 `version.json`。
 - **正式：** `1.0.92`（以 `app_meta.py` 为准）；打 tag `v1.0.92`；再更新 OSS `version.json`。
 - 比较规则：同基线时 `beta` **小于** 正式版（`1.0.92-beta.1` < `1.0.92`）。

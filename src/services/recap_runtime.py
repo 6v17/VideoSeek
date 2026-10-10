@@ -50,7 +50,7 @@ def parse_cut_list(text: str, pack: Mapping[str, Any]) -> tuple[str, list[dict[s
     return title, normalize_cut_list(payload, pack)
 
 def _probe_media(video_path: str) -> dict[str, Any]:
-    from src.media.probe import _probe_video_stream_with_opencv
+    from src.media.probe import probe_video_stream_with_opencv as _probe_video_stream_with_opencv
 
     info = _probe_video_stream_with_opencv(video_path)
     if not info.get("fps"):

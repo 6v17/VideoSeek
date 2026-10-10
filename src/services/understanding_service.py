@@ -780,7 +780,7 @@ def list_ready_video_entries(
     from src.services.library_service import list_libraries
     from src.storage.config_store import get_local_model_asset_dirs
     from src.storage.lance_search_index import (
-        _lance_state_mtime,
+        lance_state_mtime as _lance_state_mtime,
         get_lance_indexed_video_ids,
         lance_search_is_ready,
     )
@@ -1547,6 +1547,9 @@ def _remove_paths(paths: list[str]) -> tuple[list[str], list[str]]:
             logger.warning("Failed to delete evidence path %s: %s", path, exc)
             errors.append(f"{path}: {exc}")
     return removed, errors
+
+
+remove_paths = _remove_paths
 
 
 def delete_evidence_for_video(video_id: str, *, config=None) -> bool:

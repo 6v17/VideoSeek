@@ -103,6 +103,9 @@ def _format_duration_token(seconds: float) -> str:
     return str(secs)
 
 
+format_duration_token = _format_duration_token
+
+
 def parse_search_skip_range_item(item, index: int = 0) -> dict:
     raw = str(item or "").strip()
     if not raw:

@@ -22,6 +22,9 @@ def _cv2():
     return cv2
 
 
+load_cv2 = _cv2
+
+
 def _is_http_media_url(path: str) -> bool:
     text = str(path or "").strip().lower()
     return text.startswith("http://") or text.startswith("https://")
@@ -67,6 +70,9 @@ def _ffmpeg_capture_frame(video_path: str, time_sec: float, *, timeout_sec: floa
     except Exception as exc:
         logger.warning("Thumbnail capture failed: %s", exc)
     return None
+
+
+ffmpeg_capture_frame = _ffmpeg_capture_frame
 
 
 def get_single_thumbnail(video_path, time_sec):

@@ -19,7 +19,7 @@ from ui.widgets.styles import repolish_widget
 from src.app.path_display import video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_locate import format_clip_score_percent, resolve_clip_confidence_label
-from ui.views.table_views import _format_time_range
+from ui.views.table_views import format_time_range as _format_time_range
 from ui.widgets.thumb_cell import make_thumb_label
 
 # Thumbnail-first card. ~200px lets five columns fit the content area beside the sidebar.

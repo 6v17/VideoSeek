@@ -24,7 +24,7 @@ from src.utils import format_timecode_range, format_timecode_seconds, open_folde
 from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
 from ui.dialogs import ResourceTableDialog
 from ui.playback.preview_dialog import ExportCancelledError, ExportClipWorker, PreviewDialog
-from ui.views.table_views import _result_mode_label
+from ui.views.table_views import result_mode_label as _result_mode_label
 from ui.widgets.styles import repolish_widget
 
 logger = get_logger("gui_preview")
@@ -90,7 +90,10 @@ class _SameVideoThumbLoader(QThread):
 
     def run(self) -> None:
         from src.app.config import load_config
-        from src.media.thumbnail import _cv2, _ffmpeg_capture_frame
+        from src.media.thumbnail import (
+            ffmpeg_capture_frame as _ffmpeg_capture_frame,
+            load_cv2 as _cv2,
+        )
         from ui.thumb_cache import get_thumb_cache
 
         if not self._running:
@@ -211,7 +214,7 @@ class PreviewGuiMixin:
             )
         else:
             from src.app.config import load_config
-            from src.media.export_clip import _resolve_base_clip_window
+            from src.media.export_clip import resolve_base_clip_window as _resolve_base_clip_window
 
             clip_start, clip_duration = _resolve_base_clip_window(
                 video_path,

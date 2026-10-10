@@ -559,6 +559,10 @@ def _result_mode_label(start_sec, end_sec, texts, match_kind="frame"):
     return texts["result_mode_chunk"]
 
 
+format_time_range = _format_time_range
+result_mode_label = _result_mode_label
+
+
 def _build_link_result_actions(video_path, match_sec, source_link, on_preview, on_locate, texts):
     container = QWidget()
     layout = QHBoxLayout(container)

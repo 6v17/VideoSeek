@@ -24,7 +24,7 @@ from ui.widgets.components import (
     NoWheelDoubleSpinBox,
     NoWheelSpinBox,
     SettingDetailPopup,
-    _fallback_text,
+    fallback_text as _fallback_text,
 )
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.scaffold import PageScaffold, VSCard

@@ -50,6 +50,9 @@ def _fallback_text(texts, key, zh_text, en_text):
     return en_text if str(texts.get("delete", "")).lower() == "delete" else zh_text
 
 
+fallback_text = _fallback_text
+
+
 class SamplingRuleRow(QWidget):
     def __init__(self, on_change, on_remove, parent=None):
         super().__init__(parent)

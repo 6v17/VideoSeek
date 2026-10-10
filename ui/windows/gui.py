@@ -62,7 +62,7 @@ from ui.controllers.indexing_controller import IndexingController
 from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
 from ui.widgets.list_find_bar import list_find_text_kwargs
-from ui.widgets.preview_panel import _scroll_ancestor_vertically
+from ui.widgets.preview_panel import scroll_ancestor_vertically as _scroll_ancestor_vertically
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.team_mode_controller import TeamModeController
 from ui.controllers.mobile_bridge_controller import MobileBridgeController

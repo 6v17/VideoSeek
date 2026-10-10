@@ -19,7 +19,7 @@ from src.services.search_skip_ranges import (
     parse_search_skip_range_item,
     parse_search_skip_ranges,
     validate_search_skip_ranges,
-    _format_duration_token,
+    format_duration_token as _format_duration_token,
 )
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 

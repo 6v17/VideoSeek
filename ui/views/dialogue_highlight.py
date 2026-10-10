@@ -5,7 +5,7 @@ from __future__ import annotations
 from html import escape
 
 from src.storage.dialogue_transcript_store import (
-    _nfkc_casefold,
+    nfkc_casefold as _nfkc_casefold,
     build_dialogue_scatter_keys,
     normalize_dialogue_query,
 )

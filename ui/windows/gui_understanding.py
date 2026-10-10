@@ -2902,7 +2902,7 @@ class UnderstandingGuiMixin:
             if evidence_file:
                 paths.append(evidence_file)
                 paths.append(f"{evidence_file}.tmp")
-        from src.services.understanding_service import _remove_paths
+        from src.services.understanding_service import remove_paths as _remove_paths
 
         removed, errors = _remove_paths(paths)
         detail = self._reload_evidence_detail_dialog(dialog)

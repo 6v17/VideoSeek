@@ -942,6 +942,9 @@ def _nfkc_casefold(text: str) -> str:
     return unicodedata.normalize("NFKC", str(text or "")).casefold()
 
 
+nfkc_casefold = _nfkc_casefold
+
+
 def _strip_noise(text: str) -> str:
     """Remove spaces/punct so BT-style titles still match (``a.b_c`` ↔ ``abc``)."""
     return _TOKEN_SPLIT_RE.sub("", _nfkc_casefold(text))

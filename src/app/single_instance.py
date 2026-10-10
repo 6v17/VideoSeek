@@ -11,7 +11,7 @@ _ACTIVATE_MESSAGE = b"activate"
 
 
 def single_instance_server_name() -> str:
-    from src.infra.paths import _is_standalone_app
+    from src.infra.paths import is_standalone_app as _is_standalone_app
 
     user = getpass.getuser() or "default"
     suffix = "app" if _is_standalone_app() else "dev"

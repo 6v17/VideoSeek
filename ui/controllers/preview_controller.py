@@ -25,7 +25,7 @@ class PreviewController:
         self._warmup_done_callbacks: list = []
 
     def resolve_clip_window(self, video_path, start_sec, end_sec=None):
-        from src.media.export_clip import _resolve_base_clip_window
+        from src.media.export_clip import resolve_base_clip_window as _resolve_base_clip_window
 
         return _resolve_base_clip_window(
             video_path,

@@ -50,6 +50,9 @@ def _lance_state_mtime(profile_base_dir: str) -> float:
         return 0.0
 
 
+lance_state_mtime = _lance_state_mtime
+
+
 def invalidate_lance_runtime_caches(profile_base_dir: str = "") -> None:
     if profile_base_dir:
         key = os.path.normpath(profile_base_dir)

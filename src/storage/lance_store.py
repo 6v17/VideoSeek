@@ -261,6 +261,9 @@ def _count_profile_ready_videos(profile_base_dir: str) -> int:
     return count
 
 
+count_profile_ready_videos = _count_profile_ready_videos
+
+
 def _finalize_lance_maintenance(profile_base_dir: str) -> None:
     refresh_import_state(profile_base_dir)
     _invalidate_lance_search_caches(profile_base_dir)

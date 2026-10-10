@@ -253,7 +253,7 @@ def _probe_media(path: str) -> Dict[str, Optional[float]]:
     # Bundled installs often ship ffmpeg.exe without ffprobe — OpenCV fills fps/size.
     if info["fps"] is None or info["width"] is None or info["height"] is None or info["duration"] is None:
         try:
-            from src.media.probe import _probe_video_stream_with_opencv
+            from src.media.probe import probe_video_stream_with_opencv as _probe_video_stream_with_opencv
 
             opencv = _probe_video_stream_with_opencv(path) or {}
             if info["width"] is None and opencv.get("width"):

@@ -37,7 +37,7 @@ def profile_has_visual_assets(profile_base_dir: str) -> bool | None:
         note_swallowed(exc, "src/services/embedding_preprocess.py:lance_search_is_ready")
         probe_failed = True
     try:
-        from src.storage.lance_store import _count_profile_ready_videos
+        from src.storage.lance_store import count_profile_ready_videos as _count_profile_ready_videos
 
         if int(_count_profile_ready_videos(profile_base_dir) or 0) > 0:
             return True

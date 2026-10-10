@@ -31,6 +31,9 @@ def _scroll_ancestor_vertically(widget, event: QWheelEvent) -> bool:
     return False
 
 
+scroll_ancestor_vertically = _scroll_ancestor_vertically
+
+
 class PreviewHostFrame(QFrame):
     """Preview surface that forwards vertical wheel to the page scroll area."""
 

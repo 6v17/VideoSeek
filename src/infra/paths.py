@@ -85,6 +85,9 @@ def _is_standalone_app() -> bool:
     return exe_name.endswith(".exe") and exe_name not in {"python.exe", "pythonw.exe", "py.exe"}
 
 
+is_standalone_app = _is_standalone_app
+
+
 def get_app_install_dir() -> str:
     """Directory containing the app entrypoint (repo root in dev, exe dir when packaged)."""
     if _is_standalone_app():

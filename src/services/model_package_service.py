@@ -11,7 +11,7 @@ import zipfile
 from src.app.config import load_config, save_config
 from src.app.logging_utils import get_logger
 from src.storage.config_store import (
-    _read_on_disk_embedding_dimension,
+    read_on_disk_embedding_dimension as _read_on_disk_embedding_dimension,
     get_config_schema_version,
     get_data_paths,
     iter_provider_resource_dir_candidates,

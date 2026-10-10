@@ -102,7 +102,7 @@ flowchart TB
   UW["UnderstandingVideoWorker / UnderstandingWorker"]
   US["understanding_service.generate_evidence_for_video"]
   PIPE["core/understanding/pipeline — remote caption only"]
-  DISK[("data/evidence/<video_id>.json")]
+  DISK[("data/evidence/tags/<video_id>.json")]
 
   GU --> URS
   GU --> UC --> UW --> US --> PIPE
@@ -128,7 +128,7 @@ flowchart TB
 | `IndexingController` / `AgentApiController` / `MobileBridgeController` / `UnderstandingController` | 启停后台服务 | 薄层 |
 | `src/domain/search_hit.py` | `SearchHit` dataclass | 边界类型 |
 | `src/domain/evidence_bundle.py` | `EvidenceBundle` schema | 视频总结边界类型 |
-| `inference_registry.py` | 3 个 provider 工厂（约 25 行） | 小插件表 |
+| `src/core/inference_registry.py` | provider 工厂表 | 小插件表 |
 
 Frame/chunk、scope over-fetch、rerank、预设与 Agent 批处理在 **services**；**core** 负责推理与向量 I/O 原语；**storage/lance_*** 负责 Lance 持久化与检索资产加载。
 
@@ -245,7 +245,7 @@ sequenceDiagram
 2. 就绪检查 → `understanding_resource_service.get_understanding_resource_status`（描述服务后台 probe）
 3. 用户点「生成总结」→ `UnderstandingController` → `UnderstandingVideoWorker` → `understanding_service.generate_evidence_for_video`
 4. 推理 → `core/understanding/pipeline`（仅 OpenAI 兼容描述服务 caption/summary）
-5. 落盘 → `data/evidence/videos/<video_id>.json`（路径由 `understanding_paths` 解析）
+5. 落盘 → 默认 `data/evidence/tags/<video_id>.json`（总结在 `summaries/`，动态在 `motion/`；`videos/` 是旧的合并目录）。路径由 `understanding_paths.get_evidence_path` 解析
 
 不影响 `run_search` / 索引主链路。不经 Agent HTTP 暴露。
 

@@ -129,6 +129,9 @@ def _resolve_base_clip_window(
     return clip_start, clip_duration
 
 
+resolve_base_clip_window = _resolve_base_clip_window
+
+
 def estimate_export_copy_duration_sec(config=None, *, explicit_range_sec=None) -> float:
     """Approximate clip length shown in the fast-export dialog."""
     from src.app.config import load_config
