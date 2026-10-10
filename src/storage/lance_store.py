@@ -18,16 +18,21 @@ from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("lance_store")
 _BATCH_STATE_LOCK = threading.Lock()
-_PROFILE_MUTATION_LOCKS: dict[str, threading.Lock] = {}
+_PROFILE_MUTATION_LOCKS: dict[str, threading.RLock] = {}
 _PROFILE_MUTATION_GUARD = threading.Lock()
 
 
-def _profile_mutation_lock(profile_base_dir: str) -> threading.Lock:
+def _profile_mutation_lock(profile_base_dir: str) -> threading.RLock:
+    """Per-profile mutation lock.
+
+    Re-entrant because ``import_npy_to_lance`` already holds it when
+    ``_connect_lance`` recovers an interrupted upsert on the same thread.
+    """
     key = os.path.normpath(str(profile_base_dir or ""))
     with _PROFILE_MUTATION_GUARD:
         lock = _PROFILE_MUTATION_LOCKS.get(key)
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
             _PROFILE_MUTATION_LOCKS[key] = lock
         return lock
 
