@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
@@ -211,7 +212,10 @@ class TeamModeController(QObject):
                 logger.exception("Failed to stop team API")
             self._api_service = None
         self._emit_progress(progress_callback, "stopping_media")
-        stop_team_server_media()
+        if threading.current_thread() is threading.main_thread():
+            threading.Thread(target=stop_team_server_media, name="TeamMediaStop", daemon=True).start()
+        else:
+            stop_team_server_media()
         # Restore normal agent API if enabled
         self._emit_progress(progress_callback, "restoring_agent")
         agent = getattr(self.parent_window, "agent_api_controller", None)

@@ -16,6 +16,7 @@ from src.services.agent_library_service import (
     list_agent_videos,
 )
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
+from src.web.server_stop import release_server_thread
 
 from ._fastapi import FastAPI, HTTPException, JSONResponse, PlainTextResponse, _IMPORT_ERROR, uvicorn
 from .constants import API_VERSION, DEFAULT_HOST, DEFAULT_PORT
@@ -52,6 +53,7 @@ class AgentApiService:
         self.port = int(port)
         self._thread: Optional[threading.Thread] = None
         self._server = None
+        self._stop_waiter: Optional[threading.Thread] = None
         self._started = threading.Event()
         self._lock = threading.Lock()
 
@@ -106,6 +108,7 @@ class AgentApiService:
     def start(self):
         from .constants import configure_search_concurrency
 
+        self._wait_for_previous_stop()
         configure_search_concurrency()
         with self._lock:
             if self.is_running():
@@ -134,7 +137,7 @@ class AgentApiService:
         self._started.set()
         logger.info("Agent API listening on http://%s:%s", self.host, self.port)
 
-    def stop(self):
+    def stop(self, *, wait: bool | None = None):
         with self._lock:
             server = self._server
             thread = self._thread
@@ -146,8 +149,13 @@ class AgentApiService:
             return
 
         server.should_exit = True
-        if thread is not None:
-            thread.join(timeout=3.0)
+        self._stop_waiter = release_server_thread(thread, wait=wait)
+
+    def _wait_for_previous_stop(self) -> None:
+        waiter = self._stop_waiter
+        if waiter is not None and waiter.is_alive():
+            waiter.join(timeout=3.0)
+        self._stop_waiter = None
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive() and self._started.is_set()

@@ -25,6 +25,7 @@ else:
     _IMPORT_ERROR = None
 
 from src.app.logging_utils import get_logger
+from src.web.server_stop import release_server_thread
 from src.app.config import get_data_storage_paths
 from src.services.mobile_search_service import (
     build_mobile_search_payload,
@@ -245,6 +246,7 @@ class MobileBridgeService:
         self._on_search_requested = on_search_requested
         self._thread: Optional[threading.Thread] = None
         self._server = None
+        self._stop_waiter: Optional[threading.Thread] = None
         self._started = threading.Event()
         self._lock = threading.Lock()
         self._static_dir = get_resource_path("static")
@@ -263,6 +265,10 @@ class MobileBridgeService:
         self.app.get("/health")(self._health)
 
     def start(self):
+        waiter = self._stop_waiter
+        if waiter is not None and waiter.is_alive():
+            waiter.join(timeout=3.0)
+        self._stop_waiter = None
         with self._lock:
             if self.is_running():
                 return
@@ -293,7 +299,7 @@ class MobileBridgeService:
             raise RuntimeError("Mobile bridge server failed to start within 3 seconds.")
         self._started.set()
 
-    def stop(self):
+    def stop(self, *, wait: bool | None = None):
         with self._lock:
             server = self._server
             thread = self._thread
@@ -305,8 +311,7 @@ class MobileBridgeService:
             return
 
         server.should_exit = True
-        if thread is not None:
-            thread.join(timeout=3.0)
+        self._stop_waiter = release_server_thread(thread, wait=wait)
 
     def is_running(self):
         return self._thread is not None and self._thread.is_alive() and self._started.is_set()
