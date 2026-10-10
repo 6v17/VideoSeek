@@ -206,6 +206,31 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 self.assertEqual(len(hits), 1)
                 self.assertEqual(hits[0]["video_id"], "vid_motion")
 
+    def test_schema_is_recreated_after_the_db_file_is_replaced(self):
+        from src.storage import evidence_tags_store as store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                store._SCHEMA_READY.clear()
+                self.assertEqual(store.replace_video_tags_from_bundle("vid1", _sample_bundle()), 3)
+                db_path = store.get_evidence_tags_db_path()
+                os.remove(db_path)
+                for suffix in ("-wal", "-shm"):
+                    sidecar = db_path + suffix
+                    if os.path.isfile(sidecar):
+                        os.remove(sidecar)
+                self.assertEqual(
+                    store.replace_video_tags_from_bundle("vid2", _sample_bundle(video_id="vid2")),
+                    3,
+                )
+                hits = store.search_tags("orange_chair", match_mode="exact", top_k=5)
+                self.assertEqual([hit["video_id"] for hit in hits], ["vid2"])
+
 
 class RunTagSearchTests(unittest.TestCase):
     def test_run_tag_search_exact(self):

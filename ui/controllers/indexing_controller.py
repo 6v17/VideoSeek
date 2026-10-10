@@ -96,6 +96,11 @@ class IndexingController(QObject):
         self._pending_index_kwargs = dict(index_kwargs or {}) if then_index else None
         self._register_context = dict(context or {})
         self.register_worker = LibraryRegisterWorker(paths, mode=mode)
+        self.register_worker.result_then_index = self._register_then_index
+        self.register_worker.result_index_kwargs = (
+            dict(self._pending_index_kwargs) if self._pending_index_kwargs is not None else None
+        )
+        self.register_worker.result_context = dict(self._register_context)
         self.register_worker.progress_signal.connect(self.register_progress.emit)
         self.register_worker.error_signal.connect(self.register_error.emit)
         self.register_worker.finished_signal.connect(self._finish_register)
@@ -120,17 +125,30 @@ class IndexingController(QObject):
         return False
 
     def _finish_register(self, success, payload):
+        self._finish_register_worker(self.sender() or self.register_worker, success, payload)
+
+    def _finish_register_worker(self, worker, success, payload):
         result = dict(payload or {})
-        result["then_index"] = bool(self._register_then_index)
-        if self._pending_index_kwargs is not None:
-            result["index_kwargs"] = dict(self._pending_index_kwargs)
-        if self._register_context:
-            result.update(self._register_context)
-        self._register_then_index = False
-        self._pending_index_kwargs = None
-        self._register_context = {}
-        worker = self.register_worker
-        self.register_worker = None
+        if worker is not None:
+            result["then_index"] = bool(getattr(worker, "result_then_index", False))
+            index_kwargs = getattr(worker, "result_index_kwargs", None)
+            if index_kwargs is not None:
+                result["index_kwargs"] = dict(index_kwargs)
+            context = getattr(worker, "result_context", None) or {}
+            if context:
+                result.update(dict(context))
+        else:
+            result["then_index"] = bool(self._register_then_index)
+            if self._pending_index_kwargs is not None:
+                result["index_kwargs"] = dict(self._pending_index_kwargs)
+            if self._register_context:
+                result.update(self._register_context)
+        # A queued finish from the previous worker must not clear the register that already started.
+        if worker is None or self.register_worker is worker:
+            self._register_then_index = False
+            self._pending_index_kwargs = None
+            self._register_context = {}
+            self.register_worker = None
         if worker is not None:
             try:
                 worker.deleteLater()

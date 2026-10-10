@@ -597,8 +597,47 @@ class IndexingControllerTests(unittest.TestCase):
         self.assertIs(controller.worker, new_worker)
 
         old_worker.finished.connect.call_args.args[0]()
-
         self.assertIs(controller.worker, new_worker)
+        old_worker.deleteLater.assert_called_once()
+        new_worker.deleteLater.assert_not_called()
+
+    @patch("ui.controllers.indexing_controller.LibraryRegisterWorker")
+    def test_late_register_finish_keeps_the_newer_job(self, mock_worker_cls):
+        parent = _make_parent_window()
+        controller = IndexingController(parent)
+        old_worker = MagicMock()
+        new_worker = MagicMock()
+        old_worker.isRunning.return_value = False
+        new_worker.isRunning.return_value = False
+        mock_worker_cls.side_effect = [old_worker, new_worker]
+        finished = []
+        controller.register_finished.connect(lambda *args: finished.append(args))
+
+        self.assertTrue(
+            controller.start_register(
+                ["D:/old"],
+                then_index=True,
+                index_kwargs={"video_ids": ["a"]},
+                context={"kind": "old"},
+            )
+        )
+        self.assertTrue(
+            controller.start_register(
+                ["D:/new"],
+                then_index=False,
+                context={"kind": "new"},
+            )
+        )
+        controller._finish_register_worker(old_worker, True, {"registered": 1})
+
+        self.assertIs(controller.register_worker, new_worker)
+        self.assertFalse(controller._register_then_index)
+        self.assertEqual(controller._register_context, {"kind": "new"})
+        self.assertTrue(finished[0][0])
+        self.assertEqual(finished[0][1]["then_index"], True)
+        self.assertEqual(finished[0][1]["kind"], "old")
+        self.assertEqual(finished[0][1]["index_kwargs"], {"video_ids": ["a"]})
+        self.assertEqual(finished[0][1]["registered"], 1)
         old_worker.deleteLater.assert_called_once()
         new_worker.deleteLater.assert_not_called()
 

@@ -122,6 +122,22 @@ class SearchHotPathScanTests(unittest.TestCase):
         load_cols.assert_called_once()
         invalidate_lance_runtime_caches("D:/profile")
 
+    def test_chunk_time_range_scan_failure_is_not_cached_as_empty(self):
+        invalidate_lance_runtime_caches("D:/profile")
+        with patch("src.storage.lance_search_index.lance_search_is_ready", return_value=True):
+            with patch("src.storage.lance_search_index._lance_state_mtime", return_value=7.0):
+                with patch("src.storage.lance_search_index._open_lance_table", return_value=object()) as open_table:
+                    with patch(
+                        "src.storage.lance_search_index._load_columns_arrow",
+                        side_effect=RuntimeError("disk"),
+                    ):
+                        with self.assertRaises(RuntimeError):
+                            load_lance_chunk_time_ranges("D:/profile")
+                        with self.assertRaises(RuntimeError):
+                            load_lance_chunk_time_ranges("D:/profile")
+        self.assertEqual(open_table.call_count, 2)
+        invalidate_lance_runtime_caches("D:/profile")
+
 
 class LanceReconstructIsolationTests(unittest.TestCase):
     def test_each_thread_reconstructs_its_own_search(self):

@@ -1239,10 +1239,8 @@ def load_lance_chunk_time_ranges(
             video_ids=video_ids,
         )
     except Exception as exc:
-        from src.app.logging_utils import note_swallowed
-
-        note_swallowed(exc, "src/storage/lance_search_index.py:chunk_time_ranges")
-        return {}
+        logger.warning("Lance chunk time range scan failed: %s", exc)
+        raise
     if arrow.num_rows <= 0:
         if cacheable:
             _CHUNK_RANGE_CACHE[profile_base_dir] = (state_mtime, {})

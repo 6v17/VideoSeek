@@ -64,12 +64,23 @@ def _db(*, config=None):
         conn.execute("PRAGMA synchronous=NORMAL")
         norm = os.path.normpath(db_path)
         with _WRITE_LOCK:
-            if norm not in _SCHEMA_READY:
+            if norm not in _SCHEMA_READY or not _schema_tables_ready(conn):
                 _ensure_schema(conn)
                 _SCHEMA_READY.add(norm)
         yield conn
     finally:
         conn.close()
+
+
+def _schema_tables_ready(conn: sqlite3.Connection) -> bool:
+    """False when the file was deleted and SQLite created a new empty database."""
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='transcripts' LIMIT 1"
+        ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:

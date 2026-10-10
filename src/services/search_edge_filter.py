@@ -193,13 +193,10 @@ def hit_in_skipped_edge(
     end = None
     if end_lookup:
         direct = end_lookup.get(path)
+        if direct is None:
+            direct = end_lookup.get(str(getattr(hit, "video_path", "") or ""))
         if direct is not None:
             end = float(direct)
-        else:
-            for key, value in end_lookup.items():
-                if normalize_scope_path(key) == path:
-                    end = float(value)
-                    break
 
     intervals = resolve_skip_intervals(rules, end)
     if not intervals:

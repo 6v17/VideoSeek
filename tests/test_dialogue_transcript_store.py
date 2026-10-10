@@ -580,6 +580,42 @@ class DialogueTranscriptSqliteStoreTests(unittest.TestCase):
             self.assertIn("zzz_late", video_ids)
             self.assertTrue(any(vid.startswith("aaa_") for vid in video_ids))
 
+    def test_schema_is_recreated_after_the_db_file_is_replaced(self):
+        from src.storage.dialogue_transcript_store import (
+            get_dialogue_transcripts_db_path,
+            load_dialogue_transcript,
+            save_dialogue_transcript,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": data_dir},
+            ):
+                first = save_dialogue_transcript(
+                    "vid1",
+                    [{"start": 1.0, "end": 2.0, "text": "hello", "language": "en"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "a.mp4"),
+                )
+                self.assertTrue(first["ok"])
+                db_path = get_dialogue_transcripts_db_path()
+                os.remove(db_path)
+                for suffix in ("-wal", "-shm"):
+                    sidecar = db_path + suffix
+                    if os.path.isfile(sidecar):
+                        os.remove(sidecar)
+                second = save_dialogue_transcript(
+                    "vid2",
+                    [{"start": 1.0, "end": 2.0, "text": "again", "language": "en"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "b.mp4"),
+                )
+                self.assertTrue(second["ok"])
+                self.assertEqual(load_dialogue_transcript("vid2")["segments"][0]["text"], "again")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import List
 
 from src.app.config import load_config
@@ -185,21 +184,9 @@ def _collect_frame_candidates_for_chunk_search(
     return _prepare_frame_candidates_for_chunk_aggregate(candidates)
 
 
-def _resolve_video_id_for_path(video_path: str, config) -> str | None:
-    from src.services.search_scope import build_indexed_video_lookup
-
-    from src.storage.asset_store import load_model_metadata
-
-    lookup = build_indexed_video_lookup(load_model_metadata(config=config))
-    normalized = normalize_scope_path(video_path)
-    video_id = lookup.get(normalized)
-    if video_id:
-        return video_id
-    normalized_case = os.path.normcase(normalized)
-    for path, candidate_id in lookup.items():
-        if os.path.normcase(str(path)) == normalized_case:
-            return candidate_id
-    return None
+def _resolve_video_id_for_path(video_path: str, lookup: dict[str, str]) -> str | None:
+    """``lookup`` keys are already ``normalize_scope_path`` results."""
+    return lookup.get(normalize_scope_path(video_path)) or None
 
 
 def _chunk_hit_from_range(frame_hit: SearchHit, chunk_start: float, chunk_end: float) -> SearchHit:
@@ -232,15 +219,8 @@ def _load_global_chunk_ranges_by_path(config) -> dict[str, list[tuple[float, flo
 
 
 def _lookup_path_in_index(path_index: dict[str, list[tuple[float, float]]], video_path: str):
-    normalized = normalize_scope_path(video_path)
-    values = path_index.get(normalized)
-    if values:
-        return values
-    normalized_case = os.path.normcase(normalized)
-    for path, items in path_index.items():
-        if os.path.normcase(path) == normalized_case:
-            return items
-    return None
+    """Index keys are already ``normalize_scope_path`` results."""
+    return path_index.get(normalize_scope_path(video_path))
 
 
 def _find_range_for_timestamp(ranges, timestamp: float):
@@ -252,17 +232,32 @@ def _find_range_for_timestamp(ranges, timestamp: float):
     return None, None, None
 
 
+def _indexed_video_id_lookup(config, cache: dict) -> dict[str, str]:
+    lookup = cache.get("lookup")
+    if lookup is None:
+        from src.services.search_scope import build_indexed_video_lookup
+        from src.storage.asset_store import load_model_metadata
+
+        lookup = build_indexed_video_lookup(load_model_metadata(config=config))
+        cache["lookup"] = lookup
+    return lookup
+
+
 def _chunk_ranges_for_video(
     video_path: str,
     config,
     *,
     range_index: dict[str, list[tuple[float, float]]] | None = None,
+    id_lookup_cache: dict | None = None,
 ) -> list[tuple[float, float]]:
     range_index = range_index if range_index is not None else _load_global_chunk_ranges_by_path(config)
     indexed = _lookup_path_in_index(range_index, video_path)
     if indexed:
         return indexed
-    video_id = _resolve_video_id_for_path(video_path, config)
+    video_id = _resolve_video_id_for_path(
+        video_path,
+        _indexed_video_id_lookup(config, {} if id_lookup_cache is None else id_lookup_cache),
+    )
     if not video_id:
         return []
     # Prefer chunk table only; avoid load_video_chunks_by_id frame materialize.
@@ -274,6 +269,7 @@ def _aggregate_frame_hits_to_chunks(hits: List[SearchHit], top_k: int, config) -
     if not hits:
         return []
     range_index = _load_global_chunk_ranges_by_path(config)
+    id_lookup_cache: dict = {}
     range_cache: dict[str, list[tuple[float, float]]] = {}
     seen: set[tuple[str, int]] = set()
     aggregated: List[SearchHit] = []
@@ -288,6 +284,7 @@ def _aggregate_frame_hits_to_chunks(hits: List[SearchHit], top_k: int, config) -
                 video_path,
                 config,
                 range_index=range_index,
+                id_lookup_cache=id_lookup_cache,
             )
         chunk_idx, chunk_start, chunk_end = _find_range_for_timestamp(range_cache[path_key], hit.start_sec)
         if chunk_idx is None:

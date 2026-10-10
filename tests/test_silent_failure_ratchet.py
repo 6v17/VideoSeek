@@ -12,6 +12,11 @@ A bare ``return`` only leaves the handler and is not an empty value.
 This scan only sees those literals. Built expressions such as ``return [], []``
 or ``return list(results or [])`` are not flagged and need a human look when
 reviewing a broad except on a hot path.
+
+A second scan counts broad handlers whose whole body is ``pass`` / ``continue``
+or an assignment of ``None`` / ``0`` / ``False`` / ``""`` / ``-1`` / an empty
+collection, with no log. That count must not grow. Existing sites are not
+rewritten here.
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCAN_ROOTS = ("src", "ui")
 SILENT_EXCEPT_BASELINE = 0
+# Broad except whose whole body is pass/continue, or an assignment of
+# None/0/False/""/-1/[]/{}. Existing sites stay; a new one must log or raise.
+SILENT_PASS_BASELINE = 139
 
 
 def _is_empty_sentinel(node: ast.AST | None) -> bool:
@@ -120,9 +128,56 @@ def silent_except_sites() -> list[str]:
     return sites
 
 
+def _is_fallback_constant(node: ast.AST | None) -> bool:
+    if _is_empty_sentinel(node):
+        return True
+    return isinstance(node, ast.Constant) and node.value == -1
+
+
+def _is_silent_pass(handler: ast.ExceptHandler) -> bool:
+    """True when a broad except only passes or stores a constant fallback."""
+    if not _is_broad(handler) or _is_visible(handler):
+        return False
+    if not handler.body:
+        return False
+    for stmt in handler.body:
+        if isinstance(stmt, (ast.Pass, ast.Continue)):
+            continue
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and _is_fallback_constant(stmt.value):
+            continue
+        if isinstance(stmt, ast.AnnAssign) and _is_fallback_constant(stmt.value):
+            continue
+        return False
+    return True
+
+
+def silent_pass_sites() -> list[str]:
+    sites: list[str] = []
+    for folder in SCAN_ROOTS:
+        base = ROOT / folder
+        for path in sorted(base.rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError, UnicodeError):
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ExceptHandler) and _is_silent_pass(node):
+                    sites.append(f"{rel}:{node.lineno}")
+    return sites
+
+
 def test_silent_except_count_does_not_grow():
     sites = silent_except_sites()
     assert len(sites) <= SILENT_EXCEPT_BASELINE, (
         f"{len(sites)} broad except handlers still hide a failure. "
+        "Call note_swallowed, log, or raise. Sites:\n" + "\n".join(sites[:40])
+    )
+
+
+def test_silent_pass_count_does_not_grow():
+    sites = silent_pass_sites()
+    assert len(sites) <= SILENT_PASS_BASELINE, (
+        f"{len(sites)} broad except handlers only pass or store a constant. "
         "Call note_swallowed, log, or raise. Sites:\n" + "\n".join(sites[:40])
     )
