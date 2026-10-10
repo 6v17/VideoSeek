@@ -3,8 +3,9 @@
 Narrow catches (ValueError while parsing, OSError while deleting a temp file)
 may still return a fallback. ``except Exception`` / bare ``except`` that returns
 a literal ``None`` / ``False`` / ``0`` / ``""`` / ``[]`` / ``()`` / ``{}`` must
-call ``note_swallowed``, log, emit a failure signal (name contains fail/error),
-or raise. Project helpers named ``_log*`` / ``log_*`` count as logging.
+call ``note_swallowed``, log at info or above, emit a failure signal
+(name contains fail/error), or raise. ``logger.debug`` does not count: the
+default level is INFO. Project helpers named ``_log*`` / ``log_*`` count as logging.
 
 A bare ``return`` only leaves the handler and is not an empty value.
 
@@ -82,7 +83,6 @@ def _is_visible(handler: ast.ExceptHandler) -> bool:
             or _emits_failure(func)
             or func.attr
             in {
-                "debug",
                 "info",
                 "warning",
                 "error",

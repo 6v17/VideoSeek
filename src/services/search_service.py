@@ -1110,17 +1110,25 @@ def run_dialogue_search(
     if not stats.get("dialogue_index_ready"):
         return [], "no dialogue index for active profile (build dialogue index first)", ""
 
-    scoped_video_ids = resolve_subtitle_scope_video_ids(
-        video_paths=scope_video_paths,
-        library_paths=scope_library_paths,
-        config=cfg,
-    )
+    # Explicit videos become ids. A library selection stays library_path so the
+    # query is not a video_id IN (...) of every ready subtitle video.
+    library_paths_for_query = None
+    if scope_video_paths:
+        scoped_video_ids = resolve_subtitle_scope_video_ids(
+            video_paths=scope_video_paths,
+            library_paths=None,
+            config=cfg,
+        )
+    else:
+        scoped_video_ids = None
+        library_paths_for_query = [
+            str(path).strip() for path in (scope_library_paths or []) if str(path or "").strip()
+        ] or None
     if scoped_video_ids is not None and not scoped_video_ids:
         return [], "no dialogue matches", ""
 
-    # When scoped to concrete videos, fetch_k need not be inflated — the loader
-    # already only opens those transcript files.
-    search_top_k = resolved_top_k if scoped_video_ids is not None else fetch_k
+    # Concrete videos or library roots are already in the SQL predicate.
+    search_top_k = resolved_top_k if (scoped_video_ids is not None or library_paths_for_query) else fetch_k
 
     routed = search_dialogue(
         text,
@@ -1130,6 +1138,7 @@ def run_dialogue_search(
         query_vector=query_vector,
         match_mode=match_mode,
         video_ids=scoped_video_ids,
+        library_paths=library_paths_for_query,
     )
     dialogue_hits = list(routed.get("hits") or [])
     matched_by = str(routed.get("matched_by") or "").strip()

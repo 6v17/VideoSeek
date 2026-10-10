@@ -193,7 +193,6 @@ def resolve_active_dialogue_search_library_scope(config=None) -> list[str] | Non
 def resolve_active_dialogue_search_video_scope(config=None) -> list[str] | None:
     """Selected subtitle-library video paths, or None to search all subtitle videos."""
     from src.storage.config_store import (
-        get_dialogue_search_scope_library_paths,
         get_dialogue_search_scope_mode,
         get_dialogue_search_scope_video_paths,
     )
@@ -203,25 +202,29 @@ def resolve_active_dialogue_search_video_scope(config=None) -> list[str] | None:
     video_paths = get_dialogue_search_scope_video_paths(config)
     if video_paths:
         return list(video_paths)
-    library_paths = get_dialogue_search_scope_library_paths(config)
-    if library_paths:
-        from src.services.subtitle_library_service import list_subtitle_search_scope_entries
-
-        roots = _normalized_library_roots(library_paths)
-        expanded: list[str] = []
-        seen: set[str] = set()
-        for item in list_subtitle_search_scope_entries(config=config):
-            if str(item.get("asset_state") or "").strip().lower() != "ready":
-                continue
-            abs_path = normalize_scope_path(str(item.get("video_path") or ""))
-            if not abs_path or abs_path in seen:
-                continue
-            if not any(video_path_under_library_root(abs_path, root) for root in roots):
-                continue
-            seen.add(abs_path)
-            expanded.append(abs_path)
-        return expanded or None
+    # Keep library selection on library_path. Expanding every ready subtitle
+    # video turned one library into a video_id IN (...) over the whole store.
     return None
+
+
+def count_ready_dialogue_videos_for_libraries(library_paths, config=None) -> int:
+    """How many ready subtitle videos sit under ``library_paths``. Display only."""
+    roots = _normalized_library_roots(library_paths)
+    if not roots:
+        return 0
+    from src.services.subtitle_library_service import list_subtitle_search_scope_entries
+
+    seen: set[str] = set()
+    for item in list_subtitle_search_scope_entries(config=config):
+        if str(item.get("asset_state") or "").strip().lower() != "ready":
+            continue
+        abs_path = normalize_scope_path(str(item.get("video_path") or ""))
+        if not abs_path or abs_path in seen:
+            continue
+        if not any(video_path_under_library_root(abs_path, root) for root in roots):
+            continue
+        seen.add(abs_path)
+    return len(seen)
 
 
 def resolve_default_active_dialogue_search_scope(

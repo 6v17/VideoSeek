@@ -292,10 +292,9 @@ class SearchScopeGuiMixin:
             if video_paths:
                 count = len(video_paths)
             elif self._search_scope_is_dialogue():
-                from src.services.search_scope import resolve_active_dialogue_search_video_scope
+                from src.services.search_scope import count_ready_dialogue_videos_for_libraries
 
-                expanded = resolve_active_dialogue_search_video_scope() or []
-                count = len(expanded)
+                count = count_ready_dialogue_videos_for_libraries(get_dialogue_search_scope_library_paths())
             elif self._search_scope_is_tags():
                 count = self._search_scope_ready_count()
             else:

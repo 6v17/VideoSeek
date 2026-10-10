@@ -6,7 +6,6 @@ import threading
 from typing import Iterable, List, Mapping
 
 from src.app.config import DEFAULT_CONFIG, load_config
-from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
 from src.services.search_scope import normalize_scope_path
 from src.services.search_skip_ranges import (
@@ -18,8 +17,6 @@ from src.services.search_skip_ranges import (
     try_parse_search_skip_ranges,
     resolve_skip_intervals,
 )
-
-logger = get_logger("search_edge_filter")
 
 _EDGE_FETCH_CAP = 500
 _MIN_KEEP_SPAN_SEC = 30.0
@@ -230,7 +227,9 @@ def _load_indexed_video_end_lookup(config) -> dict[str, float]:
         loaded = get_lance_video_end_lookup(profile_base_dir)
         return dict(loaded) if loaded else {}
     except Exception as exc:
-        logger.debug("indexed video end lookup unavailable: %s", exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/services/search_edge_filter.py:indexed_video_end_lookup")
         return {}
 
 

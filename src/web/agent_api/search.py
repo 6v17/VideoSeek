@@ -788,8 +788,10 @@ def _record_agent_search_telemetry(
         tier_key = resolve_clip_confidence_tier_key(top_score)
         source = "crop_locate" if preview_anchor_sec is not None else "crop_search"
         record_crop_confidence(score=top_score, tier_key=tier_key, source=source)
-    except Exception:
-        logger.debug("Agent search telemetry skipped", exc_info=True)
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/web/agent_api/search.py:record_agent_search_telemetry")
 
 
 def get_agent_search_telemetry(*, locale: str = "zh", config=None) -> Dict[str, Any]:

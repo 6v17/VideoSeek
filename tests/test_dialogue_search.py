@@ -24,6 +24,37 @@ class RunDialogueSearchTests(unittest.TestCase):
         self.assertEqual(matched_by, "")
         mock_search.assert_not_called()
 
+    @mock.patch("src.services.search_scope.resolve_subtitle_scope_video_ids")
+    @mock.patch("src.services.search_scope.enrich_hits_with_source_paths", side_effect=lambda hits, **kwargs: hits)
+    @mock.patch("src.services.search_service.apply_search_scope", side_effect=lambda hits, **kwargs: hits)
+    @mock.patch(
+        "src.storage.lance_dialogue_search.get_dialogue_index_stats",
+        return_value={"dialogue_index_ready": True},
+    )
+    @mock.patch(
+        "src.storage.lance_dialogue_search.search_dialogue",
+        return_value={"hits": [], "message": "no dialogue matches", "matched_by": ""},
+    )
+    @mock.patch(
+        "src.storage.config_store.get_local_model_asset_dirs",
+        return_value={"base_dir": "D:/tmp/profile"},
+    )
+    def test_library_scope_is_not_expanded_to_video_ids(
+        self,
+        _mock_dirs,
+        mock_search,
+        _mock_stats,
+        _mock_scope,
+        _mock_enrich,
+        mock_ids,
+    ):
+        from src.services.search_service import run_dialogue_search
+
+        run_dialogue_search("hello", scope_library_paths=["D:/Subs/A", "D:/Subs/B"])
+        mock_ids.assert_not_called()
+        self.assertIsNone(mock_search.call_args.kwargs.get("video_ids"))
+        self.assertEqual(mock_search.call_args.kwargs.get("library_paths"), ["D:/Subs/A", "D:/Subs/B"])
+
     @mock.patch("src.services.search_scope.enrich_hits_with_source_paths", side_effect=lambda hits, **kwargs: hits)
     @mock.patch("src.services.search_service.apply_search_scope", side_effect=lambda hits, **kwargs: hits)
     @mock.patch("src.storage.lance_dialogue_search.get_dialogue_index_stats")

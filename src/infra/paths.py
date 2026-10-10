@@ -44,8 +44,10 @@ def resolve_windows_long_path(path: str) -> str:
             written = int(get_long(text, buffer, needed) or 0)
             if written > 0 and buffer.value:
                 return buffer.value
-    except Exception:
-        pass
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/infra/paths.py:resolve_windows_long_path")
     try:
         return str(Path(text).resolve())
     except OSError:

@@ -240,7 +240,9 @@ def _scan_all_column_values(table, column: str) -> list:
     try:
         arrow = _load_columns_arrow(table, [column], limit=_LANCE_ROW_SCAN_LIMIT)
     except Exception as exc:
-        logger.debug("Failed to load Lance column %s via capped search: %s", column, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:capped_column_scan")
         return []
     if arrow.num_rows <= 0 or column not in arrow.column_names:
         return []
@@ -309,7 +311,9 @@ class LanceTableSearchIndex:
             has_index, unindexed = _lance_vector_index_status(self._table)
             return bool(has_index) and int(unindexed or 0) <= 0
         except Exception as exc:
-            logger.debug("Lance vector index probe failed: %s", exc)
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/storage/lance_search_index.py:vector_index_probe")
             return False
 
     def _count_rows(self) -> int:
@@ -329,7 +333,9 @@ class LanceTableSearchIndex:
             vector_value = arrow["vector"][0].as_py()
             return len(vector_value or [])
         except Exception as exc:
-            logger.debug("Lance dimension probe failed: %s", exc)
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/storage/lance_search_index.py:dimension_probe")
             return 0
 
     @property
@@ -538,7 +544,9 @@ class LanceTableSearchIndex:
                 .to_arrow()
             )
         except Exception as exc:
-            logger.debug("Lance neighbor fetch failed for %s: %s", normalized_path, exc)
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "src/storage/lance_search_index.py:neighbor_fetch")
             return []
         return _neighbor_rows_from_arrow(arrow)
 
@@ -700,7 +708,9 @@ def lance_video_has_vectors(profile_base_dir: str, video_id: str) -> bool:
             return int(table.count_rows(filter=where)) > 0
         return int(table.count_rows()) > 0
     except Exception as exc:
-        logger.debug("Failed to probe Lance vectors for %s: %s", video_id, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:probe_vectors")
         return False
 
 
@@ -745,7 +755,9 @@ def get_lance_video_location(
             video_path = os.path.normpath(raw) if raw else ""
         return library_path, video_path
     except Exception as exc:
-        logger.debug("Failed to read Lance location for %s: %s", video_id, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:read_location")
         return None
 
 
@@ -885,7 +897,9 @@ def _scan_all_column_pairs(table, column_a: str, column_b: str) -> list[tuple[ob
     try:
         arrow = _load_columns_arrow(table, [column_a, column_b], limit=_LANCE_ROW_SCAN_LIMIT)
     except Exception as exc:
-        logger.debug("Failed to load Lance columns %s/%s via capped search: %s", column_a, column_b, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:capped_column_pair_scan")
         return []
     return _pairs_from_arrow(arrow)
 
@@ -896,7 +910,9 @@ def _count_video_ids_in_table(table, *, column: str = "video_id") -> dict[str, i
     try:
         raw_values = _scan_all_column_values(table, column)
     except Exception as exc:
-        logger.debug("Failed to count Lance %s values: %s", column, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:count_column_values")
         return {}
     if not raw_values:
         return {}
@@ -1137,7 +1153,9 @@ def get_lance_video_end_lookup(profile_base_dir: str) -> dict[str, float]:
     try:
         lookup = _scan_lance_video_end_lookup(profile_base_dir)
     except Exception as exc:
-        logger.debug("Failed to build Lance video end lookup for %s: %s", profile_base_dir, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:video_end_lookup")
         return {}
     _VIDEO_END_CACHE[profile_base_dir] = (state_mtime, lookup)
     return lookup
@@ -1221,7 +1239,9 @@ def load_lance_chunk_time_ranges(
             video_ids=video_ids,
         )
     except Exception as exc:
-        logger.debug("Failed to load Lance chunk time ranges: %s", exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/storage/lance_search_index.py:chunk_time_ranges")
         return {}
     if arrow.num_rows <= 0:
         if cacheable:

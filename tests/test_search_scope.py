@@ -243,6 +243,42 @@ class SearchScopeTests(unittest.TestCase):
         self.assertIsNone(resolve_active_search_video_scope())
         mock_expand.assert_not_called()
 
+    @patch("src.services.subtitle_library_service.list_subtitle_search_scope_entries")
+    @patch("src.storage.config_store.get_dialogue_search_scope_video_paths", return_value=[])
+    @patch("src.storage.config_store.get_dialogue_search_scope_library_paths", return_value=["D:/subs"])
+    @patch("src.storage.config_store.get_dialogue_search_scope_mode", return_value="selected")
+    def test_dialogue_library_scope_is_not_expanded_to_videos(
+        self,
+        _mock_mode,
+        _mock_libs,
+        _mock_videos,
+        mock_entries,
+    ):
+        from src.services.search_scope import resolve_active_dialogue_search_video_scope
+
+        self.assertIsNone(resolve_active_dialogue_search_video_scope())
+        mock_entries.assert_not_called()
+
+    @patch(
+        "src.services.subtitle_library_service.list_subtitle_search_scope_library_options",
+        return_value=[{"path": "D:/subs"}, {"path": "D:/other"}],
+    )
+    @patch("src.storage.config_store.get_dialogue_search_scope_video_paths", return_value=[])
+    @patch("src.storage.config_store.get_dialogue_search_scope_library_paths", return_value=["D:/subs"])
+    @patch("src.storage.config_store.get_dialogue_search_scope_mode", return_value="selected")
+    def test_default_dialogue_scope_keeps_selected_libraries(
+        self,
+        _mock_mode,
+        _mock_libs,
+        _mock_videos,
+        _mock_options,
+    ):
+        from src.services.search_scope import resolve_default_active_dialogue_search_scope
+
+        videos, libraries = resolve_default_active_dialogue_search_scope()
+        self.assertIsNone(videos)
+        self.assertEqual(libraries, ["D:/subs"])
+
     def test_resolve_explicit_scope_library_paths_explicit_wins(self):
         scope = {
             "library_paths": ["D:/explicit"],

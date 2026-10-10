@@ -785,6 +785,21 @@ def list_transcript_library_paths(*, config=None) -> list[str]:
     return paths
 
 
+def canonical_library_paths(library_path: str = "", library_paths=None) -> list[str]:
+    """Canonical library roots from a single path and/or a list. Order kept."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    raw_items = list(library_paths or [])
+    if library_path:
+        raw_items.append(library_path)
+    for raw in raw_items:
+        lib = canonicalize_library_path(str(raw or ""))
+        if lib and lib not in seen:
+            seen.add(lib)
+            ordered.append(lib)
+    return ordered
+
+
 def _chunked(values: list[str], size: int = _IN_CHUNK) -> Iterator[list[str]]:
     for index in range(0, len(values), size):
         yield values[index : index + size]
@@ -1040,6 +1055,7 @@ def iter_matching_transcript_segment_rows(
     video_id: str = "",
     video_ids: list[str] | set[str] | None = None,
     library_path: str = "",
+    library_paths=None,
     limit: int | None = None,
     match_mode: str = "exact",
 ):
@@ -1065,7 +1081,8 @@ def iter_matching_transcript_segment_rows(
         want_ids = sorted({str(v).strip() for v in video_ids if str(v or "").strip()})
         if not want_ids:
             return
-    want_lib = canonicalize_library_path(library_path) if library_path else ""
+    want_libs = canonical_library_paths(library_path, library_paths)
+    want_lib_set = set(want_libs)
     max_hits = int(limit) if limit is not None else None
 
     select_cols = """
@@ -1103,16 +1120,19 @@ def iter_matching_transcript_segment_rows(
         if mode == "exact":
             yielded = 0
             base_select = select_cols + " WHERE instr(s.text_cf, ?) > 0"
-            if want_lib:
+            if len(want_libs) == 1:
                 # Push library scope into SQL so LIMIT cannot exhaust on other libs first.
                 base_select += " AND t.library_path = ?"
+            elif want_libs:
+                placeholders = ",".join("?" * len(want_libs))
+                base_select += f" AND t.library_path IN ({placeholders})"
 
             def _emit_exact(sql: str, params: list[Any]) -> Iterator[dict[str, Any]]:
                 nonlocal yielded
                 for row in conn.execute(sql, params):
-                    if want_lib:
+                    if want_lib_set:
                         row_lib = canonicalize_library_path(str(row["library_path"] or ""))
-                        if row_lib != want_lib:
+                        if row_lib not in want_lib_set:
                             continue
                     text = str(row["text"] or "").strip()
                     if not text:
@@ -1128,8 +1148,7 @@ def iter_matching_transcript_segment_rows(
 
             def _exact_params(*extra: Any) -> list[Any]:
                 params: list[Any] = [needle]
-                if want_lib:
-                    params.append(want_lib)
+                params.extend(want_libs)
                 params.extend(extra)
                 return params
 
@@ -1168,17 +1187,21 @@ def iter_matching_transcript_segment_rows(
         or_parts = ["instr(s.text_cf, ?) > 0" for _ in probes]
         where_params: list[Any] = list(probes)
         where_sql = "(" + " OR ".join(or_parts) + ")"
-        if want_lib:
+        if len(want_libs) == 1:
             where_sql = f"({where_sql}) AND t.library_path = ?"
-            where_params = [*where_params, want_lib]
+            where_params = [*where_params, want_libs[0]]
+        elif want_libs:
+            placeholders = ",".join("?" * len(want_libs))
+            where_sql = f"({where_sql}) AND t.library_path IN ({placeholders})"
+            where_params = [*where_params, *want_libs]
         scored: list[tuple[int, dict[str, Any]]] = []
         seen_keys: set[tuple[str, float, float, str]] = set()
 
         def _collect(sql: str, params: list[Any]) -> None:
             for row in conn.execute(sql, params):
-                if want_lib:
+                if want_lib_set:
                     row_lib = canonicalize_library_path(str(row["library_path"] or ""))
-                    if row_lib != want_lib:
+                    if row_lib not in want_lib_set:
                         continue
                 text = str(row["text"] or "").strip()
                 if not text:

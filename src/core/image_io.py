@@ -40,7 +40,9 @@ def _load_image_bgr_pillow(path: str):
         with Image.open(path) as image:
             rgb = np.asarray(image.convert("RGB"))
     except Exception as exc:
-        logger.debug("Pillow failed to load image %s: %s", path, exc)
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/core/image_io.py:load_image_bgr_pillow")
         return None
     if rgb.size == 0:
         return None

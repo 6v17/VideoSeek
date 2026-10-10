@@ -150,6 +150,7 @@ def keyword_search_dialogue(
     config=None,
     profile_base_dir: str = "",
     library_path: str = "",
+    library_paths=None,
     video_id: str = "",
     video_ids: list[str] | set[str] | None = None,
     top_k: int = 20,
@@ -160,8 +161,9 @@ def keyword_search_dialogue(
 
     ``match_mode`` ``exact`` uses SQLite INSTR substring match; ``fuzzy`` ranks
     complete query subfields first, then typo-tolerant scatter hit rate.
-    Pass ``video_ids`` (or ``video_id`` / ``library_path``) to avoid scanning the
-    whole shared store when the UI search scope is narrowed.
+    Pass ``video_ids`` (or ``video_id`` / ``library_path`` / ``library_paths``) to
+    avoid scanning the whole shared store when the UI search scope is narrowed.
+    A library selection stays a ``library_path`` predicate, not every video id.
 
     ``profile_base_dir`` / ``require_active_embedding_spec`` are ignored (kept for
     call-site compatibility); keyword search does not read Lance.
@@ -169,6 +171,7 @@ def keyword_search_dialogue(
     _ = profile_base_dir, require_active_embedding_spec
     from src.storage.dialogue_transcript_store import (
         ensure_shared_transcripts,
+        canonical_library_paths,
         fuzzy_dialogue_accepts,
         fuzzy_dialogue_match_score,
         iter_matching_transcript_segment_rows,
@@ -189,7 +192,8 @@ def keyword_search_dialogue(
 
     ensure_shared_transcripts(config=config)
     want_video = str(video_id or "").strip()
-    want_lib = canonicalize_library_path(library_path) if library_path else ""
+    want_libs = canonical_library_paths(library_path, library_paths)
+    want_lib_set = set(want_libs)
     want_ids = None
     if video_ids is not None:
         want_ids = {str(v).strip() for v in video_ids if str(v or "").strip()}
@@ -229,7 +233,7 @@ def keyword_search_dialogue(
         if want_ids is not None and video_key not in want_ids:
             return False
         row_lib = canonicalize_library_path(str(item.get("library_path", "") or ""))
-        if want_lib and row_lib != want_lib:
+        if want_lib_set and row_lib not in want_lib_set:
             return False
         start_sec = float(item.get("start", 0.0) or 0.0)
         end_sec = float(item.get("end", 0.0) or 0.0)
@@ -257,7 +261,7 @@ def keyword_search_dialogue(
         config=config,
         video_id=want_video,
         video_ids=want_ids,
-        library_path=want_lib,
+        library_paths=want_libs,
         limit=limit,
         match_mode=mode,
     ):
@@ -354,6 +358,7 @@ def search_dialogue(
     config=None,
     profile_base_dir: str = "",
     library_path: str = "",
+    library_paths=None,
     video_id: str = "",
     video_ids: list[str] | set[str] | None = None,
     top_k: int = 20,
@@ -404,6 +409,7 @@ def search_dialogue(
         config=config,
         profile_base_dir=profile_base_dir,
         library_path=library_path,
+        library_paths=library_paths,
         video_id=video_id,
         video_ids=video_ids,
         top_k=top_k,
