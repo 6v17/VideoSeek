@@ -37,6 +37,25 @@ def clear_search_stop_callback() -> None:
         delattr(_progress_local, "stop_callback")
 
 
+def bind_search_callbacks(progress_callback, stop_callback):
+    """Install callbacks for this search. ``None`` keeps the caller's callback.
+
+    Nested ``run_search`` must not wipe the outer progress/stop hooks.
+    """
+    previous = (get_search_progress_callback(), get_search_stop_callback())
+    if progress_callback is not None:
+        set_search_progress_callback(progress_callback)
+    if stop_callback is not None:
+        set_search_stop_callback(stop_callback)
+    return previous
+
+
+def restore_search_callbacks(previous) -> None:
+    progress_callback, stop_callback = previous
+    set_search_progress_callback(progress_callback)
+    set_search_stop_callback(stop_callback)
+
+
 def search_should_stop() -> bool:
     callback = get_search_stop_callback()
     return bool(callback and callback())

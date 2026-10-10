@@ -132,10 +132,11 @@ class TextSearchEnhanceTests(unittest.TestCase):
             return_value={},
         ), mock.patch.object(
             search_service,
-            "set_search_progress_callback",
+            "bind_search_callbacks",
+            return_value=(None, None),
         ), mock.patch.object(
             search_service,
-            "clear_search_progress_callback",
+            "restore_search_callbacks",
         ), mock.patch.object(
             search_service,
             "reset_search_index_steps",

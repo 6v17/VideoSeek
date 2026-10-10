@@ -23,12 +23,10 @@ from src.services.search_profiling import (
     search_profile_session,
 )
 from src.services.search_progress import (
-    clear_search_progress_callback,
-    clear_search_stop_callback,
+    bind_search_callbacks,
     emit_search_progress,
     ensure_search_not_stopped,
-    set_search_progress_callback,
-    set_search_stop_callback,
+    restore_search_callbacks,
 )
 from src.services.search_assets import (
     CHUNK_ASSET_INFO,
@@ -441,8 +439,7 @@ def run_search(
     )
     logger.info("Running %s search (is_text=%s, precise_image=%s)", mode, is_text, precise_image)
     reset_search_index_steps()
-    set_search_progress_callback(progress_callback)
-    set_search_stop_callback(should_stop_callback)
+    previous_callbacks = bind_search_callbacks(progress_callback, should_stop_callback)
     try:
         ensure_search_not_stopped()
         enhance_on = (
@@ -505,8 +502,7 @@ def run_search(
         path_index = load_searchable_path_index(config=config)
         return filter_hits_with_existing_sources(results, path_index=path_index, config=config)
     finally:
-        clear_search_progress_callback()
-        clear_search_stop_callback()
+        restore_search_callbacks(previous_callbacks)
 
 
 def _run_enhanced_text_search(

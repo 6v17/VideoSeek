@@ -312,8 +312,8 @@ class LanceTableSearchIndex:
                 return int(self._table.count_rows(filter=self._where))
             return int(self._table.count_rows())
         except Exception as exc:
-            logger.debug("Lance row count failed: %s", exc)
-            return 0
+            logger.warning("Lance row count failed: %s", exc)
+            raise
 
     def _read_dimension(self) -> int:
         try:

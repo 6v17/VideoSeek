@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import time
 
@@ -46,14 +45,9 @@ def commit_temp_file(temp_path, dest_path):
             )
             time.sleep(min(0.05 * attempt, 0.4))
 
-    try:
-        shutil.copy2(temp_path, dest_path)
-        logger.warning("File replace used copy fallback: %s", dest_path)
-        return
-    except Exception as copy_exc:
-        if last_exc is not None:
-            raise last_exc from copy_exc
-        raise
+    if last_exc is not None:
+        raise last_exc
+    raise OSError(f"failed to replace {dest_path}")
 
 
 def save_meta(meta, meta_file, *, pretty: bool = True):
