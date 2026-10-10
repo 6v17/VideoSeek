@@ -89,9 +89,10 @@ def _db(profile_base_dir: str):
         conn.execute("PRAGMA synchronous=NORMAL")
         norm = os.path.normpath(db_path)
         # Cache can go stale after remove-model deletes library.db then recreates an empty file.
-        if norm not in _SCHEMA_READY or not _schema_tables_ready(conn):
-            _ensure_schema(conn)
-            _SCHEMA_READY.add(norm)
+        with _WRITE_LOCK:
+            if norm not in _SCHEMA_READY or not _schema_tables_ready(conn):
+                _ensure_schema(conn)
+                _SCHEMA_READY.add(norm)
         yield conn
     finally:
         conn.close()

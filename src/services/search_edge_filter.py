@@ -15,6 +15,7 @@ from src.services.search_skip_ranges import (
     normalize_search_skip_ranges_text,
     parse_search_skip_ranges,
     probe_in_skip_intervals,
+    try_parse_search_skip_ranges,
     resolve_skip_intervals,
 )
 
@@ -87,7 +88,7 @@ def get_search_skip_ranges_text(config=None) -> str:
 
 
 def get_search_skip_edges_enabled(config=None) -> bool:
-    return bool(parse_search_skip_ranges(get_search_skip_ranges_text(config)))
+    return bool(try_parse_search_skip_ranges(get_search_skip_ranges_text(config)))
 
 
 def skip_edges_api_meta(config=None) -> dict[str, str | bool]:
@@ -95,7 +96,7 @@ def skip_edges_api_meta(config=None) -> dict[str, str | bool]:
     text = get_search_skip_ranges_text(config)
     return {
         "search_skip_ranges": text,
-        "search_skip_edges_applied": bool(parse_search_skip_ranges(text)),
+        "search_skip_edges_applied": bool(try_parse_search_skip_ranges(text)),
     }
 
 
@@ -166,6 +167,15 @@ def _hit_probe_sec(hit: SearchHit) -> float:
     return start
 
 
+def _normalized_end_lookup(end_lookup: Mapping[str, float] | None) -> dict[str, float]:
+    normalized: dict[str, float] = {}
+    for key, value in (end_lookup or {}).items():
+        path = normalize_scope_path(key)
+        if path:
+            normalized[path] = float(value)
+    return normalized
+
+
 def hit_in_skipped_edge(
     hit: SearchHit,
     *,
@@ -185,13 +195,14 @@ def hit_in_skipped_edge(
 
     end = None
     if end_lookup:
-        normalized_lookup = {
-            normalize_scope_path(key): float(value)
-            for key, value in end_lookup.items()
-            if normalize_scope_path(key)
-        }
-        if path in normalized_lookup:
-            end = normalized_lookup[path]
+        direct = end_lookup.get(path)
+        if direct is not None:
+            end = float(direct)
+        else:
+            for key, value in end_lookup.items():
+                if normalize_scope_path(key) == path:
+                    end = float(value)
+                    break
 
     intervals = resolve_skip_intervals(rules, end)
     if not intervals:
@@ -233,7 +244,7 @@ def filter_search_edge_hits(
     prepared = list(hits or [])
     if not prepared or not get_search_skip_edges_enabled(config):
         return prepared
-    rules = parse_search_skip_ranges(get_search_skip_ranges_text(config))
+    rules = try_parse_search_skip_ranges(get_search_skip_ranges_text(config))
     if not rules:
         return prepared
     if end_lookup is not None:
@@ -245,6 +256,7 @@ def filter_search_edge_hits(
             if loaded:
                 merge_video_end_lookup(list(loaded.keys()), list(loaded.values()))
                 lookup = get_video_end_lookup()
+    lookup = _normalized_end_lookup(lookup)
     return [
         hit
         for hit in prepared

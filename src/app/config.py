@@ -10,7 +10,8 @@ from src.media.sampling_fps import normalize_sampling_fps_mode, normalize_sampli
 from src.services.search_skip_ranges import (
     migrate_legacy_skip_edges_to_ranges,
     normalize_search_skip_ranges_text,
-    parse_search_skip_ranges,
+    try_parse_search_skip_ranges,
+    validate_search_skip_ranges,
 )
 
 logger = get_logger("config")
@@ -619,8 +620,12 @@ def _sanitize_general_settings(config):
             sanitized.get("search_skip_intro_sec", 0),
             sanitized.get("search_skip_outro_sec", 0),
         )
+    valid, _detail = validate_search_skip_ranges(ranges_text)
+    if not valid:
+        logger.warning("Ignoring invalid search_skip_ranges: %s", ranges_text)
+        ranges_text = ""
     sanitized["search_skip_ranges"] = ranges_text
-    sanitized["search_skip_edges_enabled"] = bool(parse_search_skip_ranges(ranges_text))
+    sanitized["search_skip_edges_enabled"] = bool(try_parse_search_skip_ranges(ranges_text))
     sanitized["experimental_hw_decode"] = _coerce_bool(
         sanitized.get("experimental_hw_decode", DEFAULT_CONFIG["experimental_hw_decode"]),
         DEFAULT_CONFIG["experimental_hw_decode"],

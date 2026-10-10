@@ -1,7 +1,7 @@
 import hashlib
 import os
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
 
 
@@ -1989,40 +1989,51 @@ def _run_planned_videos_with_prefetch(
         )
         return abs_path, rel_path, file_index, future
 
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="VSIndexPrefetch") as executor:
-        path_iter = iter(paths)
-        try:
-            while True:
-                if should_stop_callback and should_stop_callback():
-                    for _a, _r, _i, fut in pending:
-                        fut.cancel()
-                    raise IndexUpdateInterrupted(
-                        "Index update stopped before finishing current library",
-                        search_assets_changed=search_assets_changed,
-                    )
-                while len(pending) < workers:
-                    try:
-                        abs_path = next(path_iter)
-                    except StopIteration:
-                        break
-                    global_file_index += 1
-                    pending.append(_submit(executor, abs_path, global_file_index))
-                if not pending:
-                    break
-                abs_path, rel_path, file_index, future = pending.pop(0)
+    def _stop_requested() -> bool:
+        return bool(should_stop_callback and should_stop_callback())
+
+    def _cancel_pending() -> None:
+        for _a, _r, _i, fut in pending:
+            fut.cancel()
+
+    executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="VSIndexPrefetch")
+    path_iter = iter(paths)
+    try:
+        while True:
+            if _stop_requested():
+                _cancel_pending()
+                raise IndexUpdateInterrupted(
+                    "Index update stopped before finishing current library",
+                    search_assets_changed=search_assets_changed,
+                )
+            while len(pending) < workers:
                 try:
-                    result = future.result()
-                except InterruptedError:
-                    for _a, _r, _i, fut in pending:
-                        fut.cancel()
-                    raise
-                except Exception as exc:
-                    result = exc
-                _commit_one(abs_path, rel_path, file_index, result)
-        except BaseException:
-            for _a, _r, _i, fut in pending:
-                fut.cancel()
-            raise
+                    abs_path = next(path_iter)
+                except StopIteration:
+                    break
+                global_file_index += 1
+                pending.append(_submit(executor, abs_path, global_file_index))
+            if not pending:
+                break
+            abs_path, rel_path, file_index, future = pending[0]
+            try:
+                result = future.result(timeout=0.25)
+            except FuturesTimeoutError:
+                continue
+            except InterruptedError:
+                pending.pop(0)
+                _cancel_pending()
+                raise
+            except Exception as exc:
+                result = exc
+            pending.pop(0)
+            _commit_one(abs_path, rel_path, file_index, result)
+    except BaseException:
+        _cancel_pending()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
 
     return failed_videos, search_assets_changed, global_file_index
 

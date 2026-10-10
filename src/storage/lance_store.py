@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
@@ -16,6 +17,19 @@ from src.storage.asset_store import load_metadata
 from src.storage.video_identity import canonicalize_library_path
 
 logger = get_logger("lance_store")
+_BATCH_STATE_LOCK = threading.Lock()
+_PROFILE_MUTATION_LOCKS: dict[str, threading.Lock] = {}
+_PROFILE_MUTATION_GUARD = threading.Lock()
+
+
+def _profile_mutation_lock(profile_base_dir: str) -> threading.Lock:
+    key = os.path.normpath(str(profile_base_dir or ""))
+    with _PROFILE_MUTATION_GUARD:
+        lock = _PROFILE_MUTATION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PROFILE_MUTATION_LOCKS[key] = lock
+        return lock
 
 
 def _pa():
@@ -211,35 +225,38 @@ def begin_lance_index_batch(profile_base_dir: str, progress_callback: ProgressCa
         recover_interrupted_lance_upserts(key)
     except Exception as exc:
         logger.error("Lance upsert journal recovery failed at batch start: %s", exc, exc_info=True)
-    _INDEX_BATCH_DEPTH[key] = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) + 1
-    if progress_callback is not None:
-        _INDEX_BATCH_PROGRESS[key] = progress_callback
+    with _BATCH_STATE_LOCK:
+        _INDEX_BATCH_DEPTH[key] = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) + 1
+        if progress_callback is not None:
+            _INDEX_BATCH_PROGRESS[key] = progress_callback
 
 
 def end_lance_index_batch(profile_base_dir: str) -> None:
     key = os.path.normpath(str(profile_base_dir or ""))
     if not key:
         return
-    depth = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0)
-    if depth <= 1:
+    with _BATCH_STATE_LOCK:
+        depth = int(_INDEX_BATCH_DEPTH.get(key, 0) or 0)
+        if depth > 1:
+            _INDEX_BATCH_DEPTH[key] = depth - 1
+            return
         _INDEX_BATCH_DEPTH.pop(key, None)
         progress_callback = _INDEX_BATCH_PROGRESS.pop(key, None)
-        refresh_import_state(key)
-        _invalidate_lance_search_caches(key)
-        drop_lance_vector_indexes(key)
-        if is_lance_ann_enabled():
-            ensure_lance_vector_indexes(
-                key,
-                progress_callback=progress_callback,
-                min_rows=resolve_lance_ann_min_rows(),
-            )
-        return
-    _INDEX_BATCH_DEPTH[key] = depth - 1
+    refresh_import_state(key)
+    _invalidate_lance_search_caches(key)
+    drop_lance_vector_indexes(key)
+    if is_lance_ann_enabled():
+        ensure_lance_vector_indexes(
+            key,
+            progress_callback=progress_callback,
+            min_rows=resolve_lance_ann_min_rows(),
+        )
 
 
 def lance_index_batch_active(profile_base_dir: str) -> bool:
     key = os.path.normpath(str(profile_base_dir or ""))
-    return int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) > 0
+    with _BATCH_STATE_LOCK:
+        return int(_INDEX_BATCH_DEPTH.get(key, 0) or 0) > 0
 
 
 def _count_profile_ready_videos(profile_base_dir: str) -> int:
@@ -739,9 +756,10 @@ def recover_interrupted_lance_upserts(profile_base_dir: str) -> bool:
     profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
     if not profile_base_dir or not os.path.isdir(get_lance_dir(profile_base_dir)):
         return False
-    if not _read_upsert_journal(profile_base_dir):
-        return False
-    return _restore_from_upsert_journal(profile_base_dir)
+    with _profile_mutation_lock(profile_base_dir):
+        if not _read_upsert_journal(profile_base_dir):
+            return False
+        return _restore_from_upsert_journal(profile_base_dir)
 
 
 def _journaled_replace_video_tables(
@@ -759,6 +777,16 @@ def _journaled_replace_video_tables(
     profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
     if not profile_base_dir:
         raise ValueError("profile_base_dir required for journaled Lance replace")
+    with _profile_mutation_lock(profile_base_dir):
+        _journaled_replace_video_tables_locked(profile_base_dir, db, video_id, replacements)
+
+
+def _journaled_replace_video_tables_locked(
+    profile_base_dir: str,
+    db,
+    video_id: str,
+    replacements: list[tuple[str, pa.Schema, list[dict]]],
+) -> None:
     _assert_user_data_mutation_allowed(profile_base_dir, action="journaled Lance replace")
     if _read_upsert_journal(profile_base_dir):
         # Previous run died mid-upsert; restore before starting another mutation.

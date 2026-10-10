@@ -173,6 +173,14 @@ def parse_search_skip_ranges(rules_text) -> list[dict]:
     return rules
 
 
+def try_parse_search_skip_ranges(rules_text) -> list[dict]:
+    """Runtime parse. Invalid text is ignored so one bad value cannot fail config load."""
+    try:
+        return parse_search_skip_ranges(rules_text)
+    except (TypeError, ValueError):
+        return []
+
+
 def format_search_skip_range_item(rule: dict) -> str:
     kind = str(rule.get("kind") or "")
     if kind == "from_end":

@@ -201,17 +201,17 @@ def _apply_bounded_neighbor_refine_lance(
 
     reranked = list(results)
     blend = max(0.0, min(float(neighbor_blend), 1.0))
+    neighbor_by_rank = lance_index.fetch_neighbor_rows_grouped(
+        [(str(reranked[rank].video_path or ""), float(reranked[rank].start_sec)) for rank in range(max_index)],
+        window_sec=window_sec,
+    )
     for rank in range(max_index):
         hit = reranked[rank]
         seed_time = float(hit.start_sec)
         base_score = float(hit.score)
         best_timestamp = seed_time
         best_neighbor_score = base_score
-        neighbor_rows = lance_index.fetch_neighbor_rows(
-            video_path=str(hit.video_path or ""),
-            center_sec=seed_time,
-            window_sec=window_sec,
-        )
+        neighbor_rows = neighbor_by_rank[rank]
         for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
             if abs(candidate_ts - seed_time) > max_shift_sec:
                 continue
@@ -251,15 +251,15 @@ def _apply_frame_neighbor_rerank_lance(
 
     reranked = list(results)
     max_index = min(len(results), max_top_n)
+    neighbor_by_rank = lance_index.fetch_neighbor_rows_grouped(
+        [(str(reranked[rank].video_path or ""), float(reranked[rank].start_sec)) for rank in range(max_index)],
+        window_sec=window_sec,
+    )
     for rank in range(max_index):
         hit = reranked[rank]
         best_score = float(hit.score)
         best_timestamp = float(hit.start_sec)
-        neighbor_rows = lance_index.fetch_neighbor_rows(
-            video_path=str(hit.video_path or ""),
-            center_sec=best_timestamp,
-            window_sec=window_sec,
-        )
+        neighbor_rows = neighbor_by_rank[rank]
         for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
             if score > best_score:
                 best_score = score
@@ -297,13 +297,13 @@ def _expand_neighbor_rerank_candidates_lance(
         return list(results or [])
 
     candidates: dict[tuple[str, int], SearchHit] = {}
+    neighbor_by_rank = lance_index.fetch_neighbor_rows_grouped(
+        [(str(results[rank].video_path or ""), float(results[rank].start_sec)) for rank in range(max_top_n)],
+        window_sec=window_sec,
+    )
     for rank in range(max_top_n):
         hit = results[rank]
-        neighbor_rows = lance_index.fetch_neighbor_rows(
-            video_path=str(hit.video_path or ""),
-            center_sec=float(hit.start_sec),
-            window_sec=window_sec,
-        )
+        neighbor_rows = neighbor_by_rank[rank]
         for score, candidate_ts in _score_lance_neighbor_rows(query, neighbor_rows):
             base_path = str(hit.video_path or "")
             key = (base_path, int(round(candidate_ts * 1000)))

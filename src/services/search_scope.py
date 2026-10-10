@@ -376,7 +376,7 @@ def per_library_indexes_ready(library_paths: Optional[Sequence[str]], config=Non
     meta = load_model_metadata(config=cfg)
     if get_search_index_schema_version(meta) < TARGET_SEARCH_INDEX_SCHEMA_VERSION:
         return False
-    return all(library_index_is_ready(path, config=cfg) for path in library_paths)
+    return all(library_index_is_ready(path, config=cfg, meta=meta) for path in library_paths)
 
 
 def resolve_active_search_mode(config=None) -> str:

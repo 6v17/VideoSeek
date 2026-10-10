@@ -263,6 +263,25 @@ class SearchEdgeFilterTests(unittest.TestCase):
         self.assertEqual(on["search_skip_ranges"], "0-90")
         self.assertTrue(on["search_skip_edges_applied"])
 
+    def test_end_lookup_is_normalized_once_for_the_batch(self):
+        cfg = {
+            "search_skip_edges_enabled": True,
+            "search_skip_ranges": "0-5",
+        }
+        lookup = {f"D:/lib/v{index}.mp4": 1000.0 for index in range(20)}
+        hits = [SearchHit(10.0, 10.0, 0.5, f"D:/lib/v{index}.mp4") for index in range(5)]
+        calls = {"n": 0}
+        real = edge_mod.normalize_scope_path
+
+        def _count(path):
+            calls["n"] += 1
+            return real(path)
+
+        with patch.object(edge_mod, "normalize_scope_path", side_effect=_count):
+            kept = filter_search_edge_hits(hits, cfg, end_lookup=lookup)
+        self.assertEqual(len(kept), 5)
+        self.assertLess(calls["n"], 40)
+
 
 if __name__ == "__main__":
     unittest.main()

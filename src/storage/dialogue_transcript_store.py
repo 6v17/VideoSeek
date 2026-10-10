@@ -63,9 +63,10 @@ def _db(*, config=None):
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         norm = os.path.normpath(db_path)
-        if norm not in _SCHEMA_READY:
-            _ensure_schema(conn)
-            _SCHEMA_READY.add(norm)
+        with _WRITE_LOCK:
+            if norm not in _SCHEMA_READY:
+                _ensure_schema(conn)
+                _SCHEMA_READY.add(norm)
         yield conn
     finally:
         conn.close()

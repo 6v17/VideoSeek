@@ -57,12 +57,13 @@ def needs_search_index_upgrade(meta, config=None) -> bool:
     return False
 
 
-def library_index_is_ready(library_path: str, config=None) -> bool:
+def library_index_is_ready(library_path: str, config=None, *, meta=None) -> bool:
     from src.storage.asset_store import load_model_metadata
     from src.storage.config_store import get_local_model_asset_dirs
     from src.storage.lance_search_index import lance_search_is_ready
 
-    meta = load_model_metadata(config=config)
+    if meta is None:
+        meta = load_model_metadata(config=config)
     if not library_has_ready_videos(meta, library_path):
         return False
     profile_base_dir = get_local_model_asset_dirs(config=config)["base_dir"]

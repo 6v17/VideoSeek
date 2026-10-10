@@ -478,6 +478,18 @@ class ConfigMigrationTests(unittest.TestCase):
             self.assertTrue(loaded["gpu_probe_unknown_keep_gpu"])
             self.assertTrue(loaded["auto_cleanup_missing_files"])
 
+    def test_load_config_drops_invalid_skip_ranges(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            user_config_file = Path(temp_dir) / "config.json"
+            user_config_file.write_text(
+                json.dumps({"search_skip_ranges": "foo", "search_skip_edges_enabled": True}),
+                encoding="utf-8",
+            )
+            with patch.object(config_module, "CONFIG_FILE", str(user_config_file)):
+                loaded = config_module.load_config()
+            self.assertEqual(loaded["search_skip_ranges"], "")
+            self.assertFalse(loaded["search_skip_edges_enabled"])
+
     def test_load_config_backfills_frame_neighbor_rerank_defaults(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

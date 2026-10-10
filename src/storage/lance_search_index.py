@@ -30,6 +30,7 @@ _INDEXED_VIDEO_IDS_CACHE: dict[str, tuple[float, frozenset[str]]] = {}
 _VIDEO_ROW_COUNTS_CACHE: dict[str, tuple[float, dict[str, dict[str, int]]]] = {}
 _LIBRARY_PATHS_BY_VIDEO_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 _VIDEO_END_CACHE: dict[str, tuple[float, dict[str, float]]] = {}
+_CHUNK_RANGE_CACHE: dict[str, tuple[float, dict[str, list[tuple[float, float]]]]] = {}
 _LANCE_ROW_SCAN_LIMIT = 2_000_000
 
 
@@ -61,18 +62,39 @@ def invalidate_lance_runtime_caches(profile_base_dir: str = "") -> None:
         _VIDEO_ROW_COUNTS_CACHE.pop(key, None)
         _LIBRARY_PATHS_BY_VIDEO_CACHE.pop(key, None)
         _VIDEO_END_CACHE.pop(key, None)
+        _CHUNK_RANGE_CACHE.pop(key, None)
     else:
         _READY_CACHE.clear()
         _INDEXED_VIDEO_IDS_CACHE.clear()
         _VIDEO_ROW_COUNTS_CACHE.clear()
         _LIBRARY_PATHS_BY_VIDEO_CACHE.clear()
         _VIDEO_END_CACHE.clear()
+        _CHUNK_RANGE_CACHE.clear()
     try:
         from src.services.understanding_service import invalidate_ready_video_entries_cache
 
         invalidate_ready_video_entries_cache()
     except Exception:
         pass
+
+
+def _neighbor_rows_from_arrow(arrow) -> list[LanceSearchRow]:
+    if arrow is None or arrow.num_rows <= 0:
+        return []
+    timestamps = arrow["timestamp"].to_pylist()
+    paths = arrow["video_path"].to_pylist()
+    vectors = arrow["vector"].to_pylist()
+    rows: list[LanceSearchRow] = []
+    for index in range(arrow.num_rows):
+        rows.append(
+            LanceSearchRow(
+                score=0.0,
+                video_path=str(paths[index] or ""),
+                timestamp=float(timestamps[index]),
+                vector=np.asarray(vectors[index], dtype=np.float32).reshape(-1),
+            )
+        )
+    return rows
 
 
 def _sql_literal(value: str) -> str:
@@ -487,22 +509,53 @@ class LanceTableSearchIndex:
         except Exception as exc:
             logger.debug("Lance neighbor fetch failed for %s: %s", normalized_path, exc)
             return []
-        rows: list[LanceSearchRow] = []
-        if arrow.num_rows <= 0:
-            return rows
-        timestamps = arrow["timestamp"].to_pylist()
-        paths = arrow["video_path"].to_pylist()
-        vectors = arrow["vector"].to_pylist()
-        for index in range(arrow.num_rows):
-            rows.append(
-                LanceSearchRow(
-                    score=0.0,
-                    video_path=str(paths[index] or ""),
-                    timestamp=float(timestamps[index]),
-                    vector=np.asarray(vectors[index], dtype=np.float32).reshape(-1),
+        return _neighbor_rows_from_arrow(arrow)
+
+    def fetch_neighbor_rows_grouped(
+        self,
+        seeds: Sequence[tuple[str, float]],
+        *,
+        window_sec: float,
+        limit_per_seed: int = 512,
+    ) -> list[list[LanceSearchRow]]:
+        """One Lance read per video for every seed window on that video."""
+        window = max(0.0, float(window_sec))
+        per_seed = max(int(limit_per_seed), 1)
+        grouped: dict[str, list[tuple[int, float]]] = {}
+        results: list[list[LanceSearchRow]] = [[] for _ in seeds]
+        for index, (video_path, center_sec) in enumerate(seeds):
+            path = str(video_path or "").strip()
+            if not path:
+                continue
+            grouped.setdefault(path, []).append((index, float(center_sec)))
+        for path, items in grouped.items():
+            clauses = [
+                f"(timestamp >= {center - window} AND timestamp <= {center + window})"
+                for _, center in items
+            ]
+            predicates = [
+                f"video_path = {_sql_literal(path)}",
+                "(" + " OR ".join(clauses) + ")",
+            ]
+            if self._where:
+                predicates.insert(0, f"({self._where})")
+            try:
+                arrow = (
+                    self._table.search()
+                    .where(" AND ".join(predicates))
+                    .select(["timestamp", "video_path", "vector"])
+                    .limit(per_seed * len(items))
+                    .to_arrow()
                 )
-            )
-        return rows
+            except Exception as exc:
+                logger.debug("Lance neighbor fetch failed for %s: %s", path, exc)
+                continue
+            rows = _neighbor_rows_from_arrow(arrow)
+            for seed_index, center in items:
+                lo = center - window
+                hi = center + window
+                results[seed_index] = [row for row in rows if row.timestamp is not None and lo <= float(row.timestamp) <= hi]
+        return results
 
 
 class InMemoryFlatSearchIndex:
@@ -1110,10 +1163,19 @@ def load_lance_chunk_time_ranges(
     video_ids: Sequence[str] | None = None,
 ) -> dict[str, list[tuple[float, float]]]:
     """Stream chunk (start, end) by video_path without materializing embeddings."""
+    profile_base_dir = os.path.normpath(profile_base_dir)
+    cacheable = not str(library_path or "").strip() and not video_ids
+    state_mtime = _lance_state_mtime(profile_base_dir) if cacheable else 0.0
+    if cacheable:
+        cached = _CHUNK_RANGE_CACHE.get(profile_base_dir)
+        if cached is not None and cached[0] == state_mtime:
+            return cached[1]
     if not lance_search_is_ready(profile_base_dir):
         return {}
     table = _open_lance_table(profile_base_dir, CHUNKS_TABLE_NAME)
     if table is None:
+        if cacheable:
+            _CHUNK_RANGE_CACHE[profile_base_dir] = (state_mtime, {})
         return {}
     try:
         arrow = _load_columns_arrow(
@@ -1126,6 +1188,8 @@ def load_lance_chunk_time_ranges(
         logger.debug("Failed to load Lance chunk time ranges: %s", exc)
         return {}
     if arrow.num_rows <= 0:
+        if cacheable:
+            _CHUNK_RANGE_CACHE[profile_base_dir] = (state_mtime, {})
         return {}
     paths = [str(value or "") for value in arrow["video_path"].to_pylist()]
     starts = arrow["start"].to_pylist()
@@ -1136,4 +1200,6 @@ def load_lance_chunk_time_ranges(
         if not key:
             continue
         by_path.setdefault(key, []).append((float(starts[index] or 0.0), float(ends[index] or 0.0)))
+    if cacheable:
+        _CHUNK_RANGE_CACHE[profile_base_dir] = (state_mtime, by_path)
     return by_path
