@@ -403,6 +403,7 @@ class MainWindow(
         self.library_page.btn_refresh_dialogue_library.clicked.connect(
             self.refresh_selected_subtitle_libraries
         )
+        self.library_page.btn_import_subtitle_srt.clicked.connect(self.import_subtitle_srt)
         self.library_page.btn_export_dialogue.clicked.connect(self.export_dialogue_library)
         self.library_page.input_subtitle_sample_interval.editingFinished.connect(
             self._on_subtitle_sample_interval_changed
@@ -975,6 +976,12 @@ class MainWindow(
         self.library_page.input_subtitle_ocr_batch.setToolTip(batch_tip)
         if hasattr(self, "load_subtitle_ocr_batch"):
             self.load_subtitle_ocr_batch()
+        self.library_page.btn_import_subtitle_srt.setText(
+            t.get("import_subtitle_srt", "Import")
+        )
+        self.library_page.btn_import_subtitle_srt.setToolTip(
+            t.get("import_subtitle_srt_hint", "")
+        )
         self.library_page.btn_export_dialogue.setText(
             t.get("export_dialogue_library", "Export dialogue")
         )

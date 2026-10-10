@@ -527,6 +527,7 @@ class LibraryIndexingGuiMixin:
             "btn_build_dialogue_index": not client,
             "btn_reembed_dialogue": not client,
             "btn_clear_dialogue": not client,
+            "btn_import_subtitle_srt": not client,
             "btn_export_dialogue": not client,
             "btn_refresh_dialogue_library": not client,
             "btn_subtitle_sample_advanced": not client,
@@ -692,6 +693,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
+        self.library_page.btn_import_subtitle_srt.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
@@ -712,6 +714,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_build_dialogue_index.setEnabled(True)
         self.library_page.btn_reembed_dialogue.setEnabled(True)
         self.library_page.btn_clear_dialogue.setEnabled(True)
+        self.library_page.btn_import_subtitle_srt.setEnabled(True)
         self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.btn_refresh_dialogue_library.setEnabled(True)
         self.library_page.input_subtitle_sample_interval.setEnabled(True)
@@ -1066,6 +1069,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
+        self.library_page.btn_import_subtitle_srt.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
@@ -1144,6 +1148,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_clear_dialogue.setEnabled(True)
+            self.library_page.btn_import_subtitle_srt.setEnabled(True)
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
@@ -1571,6 +1576,164 @@ class LibraryIndexingGuiMixin:
                     pass
             self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
 
+    def import_subtitle_srt(self):
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.services.subtitle_srt_import import (
+            apply_subtitle_srt_import,
+            plan_subtitle_srt_import,
+        )
+
+        title = self.texts.get("import_subtitle_srt_title", "Import subtitles")
+        if (
+            self.indexing_controller.is_busy()
+            or self._dialogue_index_running()
+            or self._remove_library_worker_running()
+        ):
+            self.show_info_dialog(
+                title,
+                self.texts.get("index_already_running", ""),
+                kind="info",
+            )
+            return
+
+        paths, _selected = QFileDialog.getOpenFileNames(
+            self,
+            title,
+            "",
+            self.texts.get("import_subtitle_srt_filter", "SRT (*.srt)"),
+        )
+        if not paths:
+            return
+
+        try:
+            plan = plan_subtitle_srt_import(paths)
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("import_subtitle_srt_failed", "Subtitle import failed"),
+                exc,
+            )
+            return
+
+        matches = list(plan.get("matches") or [])
+        unmatched = list(plan.get("unmatched") or [])
+        skipped = list(plan.get("skipped") or [])
+        if not matches:
+            self.show_info_dialog(
+                title,
+                self._subtitle_srt_import_message(
+                    self.texts.get(
+                        "import_subtitle_srt_no_match",
+                        "No SRT matched a video in the library.",
+                    ),
+                    unmatched,
+                    skipped,
+                ),
+                kind="info",
+            )
+            return
+
+        segments = sum(int(item.get("segment_count") or 0) for item in matches)
+        replaced = sum(1 for item in matches if item.get("replaces"))
+        confirm = self.texts.get(
+            "import_subtitle_srt_confirm",
+            "Write {count} SRT file(s)?",
+        ).format(
+            count=len(matches),
+            segments=segments,
+            replaced=replaced,
+            unmatched=len(unmatched),
+            skipped=len(skipped),
+        )
+        if not self.show_confirm_dialog(self.texts.get("confirm_title", "Confirm"), confirm):
+            return
+
+        try:
+            applied = apply_subtitle_srt_import(matches)
+        except Exception as exc:
+            self.show_error_dialog(
+                self.texts.get("import_subtitle_srt_failed", "Subtitle import failed"),
+                exc,
+            )
+            return
+
+        if int(applied.get("imported") or 0) <= 0:
+            detail = "; ".join(applied.get("errors") or []) or self.texts.get(
+                "import_subtitle_srt_failed",
+                "Subtitle import failed",
+            )
+            self.show_error_dialog(
+                self.texts.get("import_subtitle_srt_failed", "Subtitle import failed"),
+                detail,
+            )
+            return
+
+        done = self.texts.get(
+            "import_subtitle_srt_done",
+            "Wrote {count} video(s), {segments} cues.",
+        ).format(
+            count=int(applied.get("imported") or 0),
+            segments=int(applied.get("segments") or 0),
+        )
+        message = self._subtitle_srt_import_message(done, unmatched, skipped)
+        errors = list(applied.get("errors") or [])
+        if errors:
+            message = message + "\n" + "\n".join(errors[:8])
+        self.show_info_dialog(
+            self.texts.get("success_title", "Success"),
+            message,
+            kind="success",
+        )
+        self.library_page.lbl_status.setText(done)
+        self.refresh_dialogue_library_table()
+
+    def _subtitle_srt_import_message(self, lead: str, unmatched: list, skipped: list) -> str:
+        lines = [str(lead or "").strip()]
+        if unmatched:
+            lines.append(
+                self.texts.get(
+                    "import_subtitle_srt_unmatched",
+                    "Unmatched ({count}):\n{names}",
+                ).format(count=len(unmatched), names=self._subtitle_srt_names(unmatched))
+            )
+        if skipped:
+            lines.append(
+                self.texts.get(
+                    "import_subtitle_srt_skipped",
+                    "Skipped ({count}):\n{names}",
+                ).format(
+                    count=len(skipped),
+                    names=self._subtitle_srt_names(
+                        skipped,
+                        path_key="srt_path",
+                        reason_key="reason",
+                    ),
+                )
+            )
+        return "\n".join(line for line in lines if line)
+
+    def _subtitle_srt_names(self, items, *, path_key: str = "", reason_key: str = "", limit: int = 8) -> str:
+        import os
+
+        names: list[str] = []
+        for item in list(items or [])[:limit]:
+            if isinstance(item, str):
+                label = os.path.basename(item)
+                reason = ""
+            else:
+                label = os.path.basename(str(item.get(path_key or "srt_path") or ""))
+                reason = str(item.get(reason_key) or "").strip() if reason_key else ""
+            if reason:
+                reason_text = self.texts.get(f"import_subtitle_srt_reason_{reason}", reason)
+                label = f"{label} ({reason_text})"
+            if label:
+                names.append(label)
+        extra = len(list(items or [])) - len(names)
+        text = "\n".join(names)
+        if extra > 0:
+            text = f"{text}\n+{extra}" if text else f"+{extra}"
+        return text
+
     def export_dialogue_library(self):
         from PySide6.QtWidgets import QFileDialog, QInputDialog
 
@@ -1905,6 +2068,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_build_dialogue_index.setEnabled(False)
         self.library_page.btn_reembed_dialogue.setEnabled(False)
         self.library_page.btn_clear_dialogue.setEnabled(False)
+        self.library_page.btn_import_subtitle_srt.setEnabled(False)
         self.library_page.btn_export_dialogue.setEnabled(False)
         self.library_page.btn_refresh_dialogue_library.setEnabled(False)
         self.library_page.input_subtitle_sample_interval.setEnabled(False)
@@ -1987,6 +2151,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_build_dialogue_index.setEnabled(True)
             self.library_page.btn_reembed_dialogue.setEnabled(True)
             self.library_page.btn_clear_dialogue.setEnabled(True)
+            self.library_page.btn_import_subtitle_srt.setEnabled(True)
             self.library_page.btn_export_dialogue.setEnabled(True)
             self.library_page.btn_refresh_dialogue_library.setEnabled(True)
             self.library_page.input_subtitle_sample_interval.setEnabled(True)
@@ -2223,6 +2388,7 @@ class LibraryIndexingGuiMixin:
             self.library_page.btn_build_dialogue_index.setEnabled(False)
             self.library_page.btn_reembed_dialogue.setEnabled(False)
             self.library_page.btn_clear_dialogue.setEnabled(False)
+            self.library_page.btn_import_subtitle_srt.setEnabled(False)
             self.library_page.btn_export_dialogue.setEnabled(False)
             self.library_page.input_subtitle_sample_interval.setEnabled(False)
             self.library_page.input_subtitle_sample_strategy.setEnabled(False)
@@ -2314,6 +2480,7 @@ class LibraryIndexingGuiMixin:
         self.library_page.btn_build_dialogue_index.setEnabled(True)
         self.library_page.btn_reembed_dialogue.setEnabled(True)
         self.library_page.btn_clear_dialogue.setEnabled(True)
+        self.library_page.btn_import_subtitle_srt.setEnabled(True)
         self.library_page.btn_export_dialogue.setEnabled(True)
         self.library_page.input_subtitle_sample_interval.setEnabled(True)
         self.library_page.input_subtitle_sample_strategy.setEnabled(True)
