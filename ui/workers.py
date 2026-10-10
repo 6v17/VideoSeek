@@ -756,15 +756,7 @@ class IndexUpdateWorker(QThread):
 
     def run(self):
         issues = []
-        previous_gpu_debug = os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM")
-        previous_system_debug = os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM")
         try:
-            if self.debug_failure == "gpu_oom":
-                os.environ["VIDEOSEEK_DEBUG_FORCE_GPU_OOM"] = "1"
-                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM", None)
-            elif self.debug_failure == "system_oom":
-                os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = "1"
-                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
             from src.core.clip_embedding import get_engine_runtime_status, prepare_inference_runtime
             from src.workflows.update_video import update_videos_flow
 
@@ -799,6 +791,7 @@ class IndexUpdateWorker(QThread):
                 issue_callback=issues.append,
                 rebuild_global_assets=self.rebuild_global_assets,
                 video_ids=self.video_ids,
+                debug_failure=self.debug_failure,
             )
             self.finished_signal.emit(True, False, result[0] is not None, issues)
         except InterruptedError:
@@ -814,15 +807,6 @@ class IndexUpdateWorker(QThread):
                 logger.exception("Index update worker failed")
                 self.error_signal.emit(str(exc))
                 self.finished_signal.emit(False, False, False, issues)
-        finally:
-            if previous_gpu_debug is None:
-                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
-            else:
-                os.environ["VIDEOSEEK_DEBUG_FORCE_GPU_OOM"] = previous_gpu_debug
-            if previous_system_debug is None:
-                os.environ.pop("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM", None)
-            else:
-                os.environ["VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"] = previous_system_debug
 
 
 class UnderstandingVideoWorker(QThread):

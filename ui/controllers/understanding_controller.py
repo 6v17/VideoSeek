@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, Signal
 
-from ui.threading_utils import shutdown_thread
+from ui.threading_utils import bind_thread_release, release_finished_thread, shutdown_thread
 from ui.workers import UnderstandingVideoWorker, UnderstandingWorker
 
 
@@ -41,6 +41,7 @@ class UnderstandingController(QObject):
             self.worker.chunk_completed.connect(self.chunk_completed.emit)
         self.worker.error_signal.connect(self.error_occurred.emit)
         self.worker.finished_signal.connect(self._finish)
+        bind_thread_release(self, "worker", self.worker)
         self.worker.start()
         return True
 
@@ -58,11 +59,14 @@ class UnderstandingController(QObject):
         self.worker.chunk_completed.connect(self.chunk_completed.emit)
         self.worker.error_signal.connect(self.error_occurred.emit)
         self.worker.finished_signal.connect(self._finish)
+        bind_thread_release(self, "worker", self.worker)
         self.worker.start()
         return True
 
     def shutdown(self):
-        shutdown_thread(self.worker, stop_first=True, wait_ms=3000)
+        worker = self.worker
+        shutdown_thread(worker, stop_first=True, wait_ms=3000)
+        release_finished_thread(self, "worker", worker)
 
     def request_stop(self):
         if self.is_running() and hasattr(self.worker, "stop"):

@@ -9,8 +9,6 @@ from src.app.config import load_config
 from src.app.logging_utils import get_logger
 from src.domain.search_hit import SearchHit
 from src.services.search_assets import (
-    FRAME_ASSET_INFO,
-    check_asset_profile_compatibility,
     library_indexes_ready,
     profile_base_dir,
     load_library_frame_search_assets,
@@ -158,7 +156,6 @@ def _collect_frame_candidates_for_chunk_search(
         if search_index is None:
             return []
         merge_search_index_steps(video_paths, timestamps)
-        check_asset_profile_compatibility(config, FRAME_ASSET_INFO, asset_label="frame")
         matched_results, matched_ids = search_frame_results_with_ids(
             query_vector,
             search_index,

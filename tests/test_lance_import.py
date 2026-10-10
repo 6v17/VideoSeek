@@ -97,6 +97,19 @@ class LanceImportTests(unittest.TestCase):
             state = load_import_state_dict(profile_dir)
             self.assertEqual(state["videos_imported"], 1)
 
+    def test_import_npy_to_lance_refuses_while_index_sync_is_held(self):
+        from src.services.indexing_runtime_status import clear_index_sync_running, set_index_sync_running
+
+        set_index_sync_running("D:/other")
+        try:
+            summary = import_npy_to_lance("D:/profile")
+        finally:
+            clear_index_sync_running()
+
+        self.assertTrue(summary["busy"])
+        self.assertEqual(summary["videos_imported"], 0)
+        self.assertIn("already running", summary["errors"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

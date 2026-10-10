@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, Signal
 
-from ui.threading_utils import shutdown_thread
+from ui.threading_utils import bind_thread_release, release_finished_thread, shutdown_thread
 from ui.workers import AboutFetchWorker, NoticeFetchWorker, VersionCheckWorker
 
 
@@ -26,6 +26,7 @@ class AppMetaController(QObject):
             return
         self.version_worker = VersionCheckWorker(language)
         self.version_worker.result_ready.connect(self.version_ready.emit)
+        bind_thread_release(self, "version_worker", self.version_worker)
         self.version_worker.start()
 
     def refresh_notice(self, language):
@@ -33,6 +34,7 @@ class AppMetaController(QObject):
             return
         self.notice_worker = NoticeFetchWorker(language)
         self.notice_worker.result_ready.connect(self.notice_ready.emit)
+        bind_thread_release(self, "notice_worker", self.notice_worker)
         self.notice_worker.start()
 
     def refresh_about(self, language):
@@ -40,8 +42,16 @@ class AppMetaController(QObject):
             return
         self.about_worker = AboutFetchWorker(language)
         self.about_worker.result_ready.connect(self.about_ready.emit)
+        bind_thread_release(self, "about_worker", self.about_worker)
         self.about_worker.start()
 
     def shutdown(self):
-        for worker in (self.version_worker, self.notice_worker, self.about_worker):
+        workers = (
+            ("version_worker", self.version_worker),
+            ("notice_worker", self.notice_worker),
+            ("about_worker", self.about_worker),
+        )
+        for _name, worker in workers:
             shutdown_thread(worker)
+        for name, worker in workers:
+            release_finished_thread(self, name, worker)

@@ -546,23 +546,69 @@ def _prune_backup_dirs(config, keep_count=1):
     return removed
 
 
-def _write_migration_state(config, backup_dir):
+def _save_migration_state(config, patch: dict) -> None:
+    """Merge ``patch`` into migration_state.json without dropping other keys."""
     state_file = _migration_state_file(config)
     os.makedirs(os.path.dirname(state_file), exist_ok=True)
-    # Preserve Lance / video-id stamps written by later maintenance steps.
     payload = dict(_read_migration_state(config))
-    payload.update(
+    payload.update(patch)
+    temp_path = f"{state_file}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(temp_path, state_file)
+
+
+def _write_migration_state(config, backup_dir):
+    _save_migration_state(
+        config,
         {
             "completed": True,
             "schema_version": TARGET_SCHEMA_VERSION,
             "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "backup_dir": backup_dir,
-        }
+            "backup_recorded": True,
+        },
     )
-    temp_path = f"{state_file}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-    os.replace(temp_path, state_file)
+
+
+def _schema_migration_completed(state) -> bool:
+    return bool(state.get("completed")) and _read_schema_version(
+        state.get("schema_version"), default=0
+    ) >= TARGET_SCHEMA_VERSION
+
+
+def _prepare_pre_migration_backup(config, progress_callback=None) -> str:
+    """Back up ``data/`` once, and remember that choice before later steps run.
+
+    ``completed`` stays false until every step finishes. A crash after this
+    write must not copy ``data/`` again on the next startup.
+    """
+    state = _read_migration_state(config)
+    backup_dir = str(state.get("backup_dir", "") or "").strip()
+    if _schema_migration_completed(state):
+        logger.info(
+            "Skipping pre-migration backup: schema migration already completed (backup_dir=%s)",
+            backup_dir or "n/a",
+        )
+        _emit(progress_callback, 12, "正在升级配置结构（跳过重复备份）")
+        return backup_dir
+    if state.get("backup_recorded") and (not backup_dir or os.path.isdir(backup_dir)):
+        logger.info(
+            "Skipping pre-migration backup: backup already recorded (backup_dir=%s)",
+            backup_dir or "n/a",
+        )
+        _emit(progress_callback, 12, "正在升级配置结构（跳过重复备份）")
+        return backup_dir
+    if _data_dir_has_user_payload(config):
+        _emit(progress_callback, 12, "正在备份现有数据")
+        backup_dir = _create_backup(config)
+        logger.info("Created pre-migration backup: %s", backup_dir)
+    else:
+        backup_dir = ""
+        logger.info("Skipping pre-migration backup: no existing user data to copy")
+        _emit(progress_callback, 12, "正在准备数据结构升级")
+    _save_migration_state(config, {"backup_recorded": True, "backup_dir": backup_dir})
+    return backup_dir
 
 
 def needs_search_index_schema_migration(config=None):
@@ -811,26 +857,7 @@ def run_startup_migration(progress_callback=None):
             search_index_result,
         )
 
-    prior_state = _read_migration_state(config)
-    prior_schema_done = bool(prior_state.get("completed")) and _read_schema_version(
-        prior_state.get("schema_version"), default=0
-    ) >= TARGET_SCHEMA_VERSION
-    if prior_schema_done:
-        backup_dir = str(prior_state.get("backup_dir", "") or "").strip()
-        logger.info(
-            "Skipping pre-migration backup: schema migration already completed (backup_dir=%s)",
-            backup_dir or "n/a",
-        )
-        _emit(progress_callback, 12, "正在升级配置结构（跳过重复备份）")
-    else:
-        if _data_dir_has_user_payload(config):
-            _emit(progress_callback, 12, "正在备份现有数据")
-            backup_dir = _create_backup(config)
-            logger.info("Created pre-migration backup: %s", backup_dir)
-        else:
-            backup_dir = ""
-            logger.info("Skipping pre-migration backup: no existing user data to copy")
-            _emit(progress_callback, 12, "正在准备数据结构升级")
+    backup_dir = _prepare_pre_migration_backup(config, progress_callback=progress_callback)
 
     _emit(progress_callback, 30, "正在升级配置结构")
     normalized_config = _normalize_config_v2(config)

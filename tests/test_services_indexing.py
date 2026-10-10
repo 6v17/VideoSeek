@@ -1395,6 +1395,39 @@ class IndexingServiceTests(unittest.TestCase):
         self.assertEqual(issues[0]["reason"], "gpu_out_of_memory")
         self.assertIn("debug injection", issues[0]["detail"].lower())
 
+    @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
+    @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")
+    @patch("src.services.indexing_service.get_video_hash", return_value="vid_a")
+    @patch("src.services.indexing_service.os.path.getmtime", return_value=123.0)
+    @patch("src.services.indexing_service._is_valid_video_source", return_value=True)
+    def test_process_single_video_debug_failure_argument_does_not_use_environ(
+        self,
+        _mock_stream,
+        _mock_getmtime,
+        _mock_video_hash,
+        _mock_legacy_hash,
+        _mock_model_dirs,
+    ):
+        os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
+        os.environ.pop("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM", None)
+        lib_files = {}
+        issues = []
+
+        vectors, _timestamps, _metadata_updated, _search_assets_changed = indexing_service.process_single_video(
+            "D:\\videos\\clip.mp4",
+            "clip.mp4",
+            lib_files,
+            {"index_dir": "index", "vector_dir": "vector"},
+            lambda _path: "vid_a",
+            library_path="D:\\videos",
+            issue_callback=issues.append,
+            debug_failure="system_oom",
+        )
+
+        self.assertIsNone(vectors)
+        self.assertEqual(issues[0]["reason"], "system_out_of_memory")
+        self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"))
+
     @patch.dict("src.services.indexing_service.os.environ", {"VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM": "1"}, clear=False)
     @patch("src.services.indexing_service.get_local_model_asset_dirs", return_value=_TEST_ASSET_DIRS)
     @patch("src.services.indexing_service.get_legacy_video_hash", return_value="")

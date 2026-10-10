@@ -198,6 +198,56 @@ class StartupMigrationGateTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(backup_dir))
             self.assertTrue(os.path.exists(os.path.join(backup_dir, "meta.json")))
 
+    def test_recorded_backup_is_not_copied_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with open(os.path.join(data_dir, "meta.json"), "w", encoding="utf-8") as handle:
+                json.dump({"libraries": {"D:/lib": {}}}, handle)
+            config = {"schema_version": 1, "data_root": tmp}
+            first = migration_runner_module._prepare_pre_migration_backup(config)
+            self.assertTrue(os.path.isdir(first))
+            with open(os.path.join(data_dir, "migration_state.json"), "r", encoding="utf-8") as handle:
+                state = json.load(handle)
+            self.assertTrue(state.get("backup_recorded"))
+            self.assertFalse(state.get("completed"))
+            self.assertEqual(state.get("backup_dir"), first)
+            with patch.object(migration_runner_module, "_create_backup", side_effect=AssertionError("backup")):
+                second = migration_runner_module._prepare_pre_migration_backup(config)
+            self.assertEqual(second, first)
+
+    def test_missing_recorded_backup_is_created_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with open(os.path.join(data_dir, "meta.json"), "w", encoding="utf-8") as handle:
+                json.dump({"libraries": {}}, handle)
+            missing = os.path.join(tmp, "data.backup-pre-v2-missing")
+            with open(os.path.join(data_dir, "migration_state.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"backup_recorded": True, "backup_dir": missing, "completed": False},
+                    handle,
+                )
+            config = {"schema_version": 2, "data_root": tmp}
+            backup_dir = migration_runner_module._prepare_pre_migration_backup(config)
+            self.assertTrue(os.path.isdir(backup_dir))
+            self.assertNotEqual(backup_dir, missing)
+
+    def test_completed_schema_skips_backup_even_if_the_folder_is_gone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            with open(os.path.join(data_dir, "meta.json"), "w", encoding="utf-8") as handle:
+                json.dump({"libraries": {}}, handle)
+            gone = os.path.join(tmp, "data.backup-pre-v2-gone")
+            with open(os.path.join(data_dir, "migration_state.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"completed": True, "schema_version": 2, "backup_dir": gone},
+                    handle,
+                )
+            config = {"schema_version": 2, "data_root": tmp}
+            with patch.object(migration_runner_module, "_create_backup", side_effect=AssertionError("backup")):
+                self.assertEqual(migration_runner_module._prepare_pre_migration_backup(config), gone)
 
     def test_run_startup_migration_fresh_install(self):
         with tempfile.TemporaryDirectory() as tmp:

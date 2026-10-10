@@ -20,6 +20,36 @@ def park_running_thread(thread) -> None:
         _PARKED_THREADS.append(thread)
 
 
+def release_finished_thread(owner, attr: str, thread) -> None:
+    """Drop ``owner.attr`` when it still points at ``thread``, then delete it.
+
+    Call this from ``QThread.finished``, not from a signal emitted inside
+    ``run()``. A thread that is still running is parked and not deleted.
+    """
+    if thread is None:
+        return
+    if getattr(owner, attr, None) is thread:
+        setattr(owner, attr, None)
+    try:
+        running = bool(thread.isRunning())
+    except Exception:
+        running = True
+    if running:
+        park_running_thread(thread)
+        return
+    try:
+        thread.deleteLater()
+    except Exception:
+        pass
+
+
+def bind_thread_release(owner, attr: str, thread) -> None:
+    """Release ``thread`` after Qt reports that it has stopped."""
+    if thread is None:
+        return
+    thread.finished.connect(lambda finished=thread, name=attr: release_finished_thread(owner, name, finished))
+
+
 def shutdown_thread(thread, stop_first=False, allow_terminate=False, wait_ms=1500):
     """Stop a QThread without destroying it while it is still running.
 

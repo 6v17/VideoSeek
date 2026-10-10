@@ -136,28 +136,6 @@ class SearchServiceTests(unittest.TestCase):
         mock_per_video_search.assert_called_once()
         self.assertTrue(mock_per_video_search.call_args.kwargs.get("precise_image"))
 
-    def test_check_asset_profile_compatibility_is_noop_under_lance(self):
-        asset_info = {
-            "embedding_spec": {
-                "model_id": "clip_onnx_default",
-                "provider": "clip_onnx",
-                "embedding_space": "clip_onnx_default",
-                "dimension": 512,
-                "metric": "ip",
-            },
-            "index_dim": 512,
-        }
-
-        self.assertIsNone(
-            search_service.check_asset_profile_compatibility({}, asset_info, asset_label="frame")
-        )
-
-    def test_check_asset_profile_compatibility_ignores_missing_embedding_spec(self):
-        asset_info = {"embedding_spec": None, "index_dim": 512}
-
-        self.assertIsNone(
-            search_service.check_asset_profile_compatibility({}, asset_info, asset_label="frame")
-        )
     def test_apply_frame_neighbor_rerank_disabled_by_default(self):
         class DummyIndex:
             def reconstruct(self, idx):

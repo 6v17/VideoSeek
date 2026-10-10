@@ -579,14 +579,12 @@ class ChunkSearchTests(unittest.TestCase):
         self.assertIn((video_path, 1.0), prepared_by_video)
         self.assertIn((video_path, 2.0), prepared_by_video)
 
-    @patch("src.services.search_chunk_pipeline.check_asset_profile_compatibility")
     @patch("src.services.search_chunk_pipeline.load_search_assets")
     @patch("src.services.search_chunk_pipeline.search_frame_results_with_ids")
     def test_collect_frame_candidates_expands_neighbors_for_chunk_aggregate(
         self,
         mock_search,
         mock_load_assets,
-        _mock_check_profile,
     ):
         class DummyIndex:
             def reconstruct(self, idx):

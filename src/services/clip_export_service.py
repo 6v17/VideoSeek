@@ -153,14 +153,56 @@ def list_export_allowed_roots(config=None) -> list[str]:
     return ordered
 
 
+def _resolve_export_path(path: str) -> str:
+    """Absolute path with symlinks and Windows junctions resolved.
+
+    A missing final file name stays on the resolved parent, so a new export
+    still follows a link in its directory. ``os.path.islink`` is not enough
+    here: it does not see junctions.
+    """
+    expanded = os.path.abspath(os.path.expanduser(str(path or "").strip()))
+    if not expanded:
+        return ""
+    try:
+        resolved = os.path.realpath(expanded)
+    except (OSError, ValueError):
+        resolved = expanded
+    if resolved.startswith("\\\\?\\UNC\\"):
+        resolved = "\\\\" + resolved[8:]
+    elif resolved.startswith("\\\\?\\"):
+        resolved = resolved[4:]
+    return os.path.normcase(os.path.normpath(resolved or expanded))
+
+
+def _export_path_roots(*raw_roots: str) -> list[str]:
+    roots: list[str] = []
+    for raw in raw_roots:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        lexical = normalize_scope_path(text)
+        resolved = _resolve_export_path(text)
+        for candidate in (lexical, resolved):
+            if candidate and candidate not in roots:
+                roots.append(candidate)
+    return roots
+
+
 def output_path_allowed(output_path: str, config=None) -> bool:
-    """Reject library overwrites; in team/strict mode require an allowed export root."""
+    """Reject library overwrites; in team/strict mode require an allowed export root.
+
+    The path that would be written is the symlink/junction target, not only the
+    lexical path. A link that points into a library is rejected. A link that
+    leaves an allowed export root is rejected too.
+    """
     from src.services.library_service import list_libraries
 
     cfg = config or load_config()
-    normalized_output = normalize_scope_path(output_path)
-    for library_path in list_libraries().keys():
-        if video_path_under_library_root(normalized_output, library_path):
+    lexical = normalize_scope_path(output_path)
+    resolved = _resolve_export_path(output_path)
+    library_roots = _export_path_roots(*(str(path) for path in list_libraries().keys()))
+    for candidate in (lexical, resolved):
+        if candidate and any(video_path_under_library_root(candidate, root) for root in library_roots):
             return False
 
     roots = list_export_allowed_roots(cfg)
@@ -169,7 +211,9 @@ def output_path_allowed(output_path: str, config=None) -> bool:
         return True
     if not roots:
         return False
-    return any(video_path_under_library_root(normalized_output, root) for root in roots)
+    allowed = _export_path_roots(*roots)
+    landing = resolved or lexical
+    return bool(landing) and any(video_path_under_library_root(landing, root) for root in allowed)
 
 
 def _export_semaphore_for_mode(encode_mode: str) -> threading.Semaphore:

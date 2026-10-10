@@ -1101,9 +1101,6 @@ def import_npy_to_lance(
 ) -> dict:
     """Import all per-video ``*_vectors.npy`` under one model profile into LanceDB."""
     profile_base_dir = os.path.normpath(profile_base_dir)
-    meta_file = os.path.join(profile_base_dir, "meta.json")
-    vector_dir = os.path.join(profile_base_dir, "vector")
-
     summary = {
         "profile_base_dir": profile_base_dir,
         "videos_total": 0,
@@ -1114,7 +1111,35 @@ def import_npy_to_lance(
         "chunk_rows": 0,
         "dimension": 0,
         "errors": [],
+        "busy": False,
     }
+    from src.services.indexing_runtime_status import clear_index_sync_running, try_acquire_index_sync
+
+    if not try_acquire_index_sync(profile_base_dir):
+        summary["busy"] = True
+        summary["errors"].append("An indexing task is already running.")
+        return summary
+    try:
+        with _profile_mutation_lock(profile_base_dir):
+            return _import_npy_to_lance_locked(
+                profile_base_dir,
+                summary,
+                replace_existing=replace_existing,
+                progress_callback=progress_callback,
+            )
+    finally:
+        clear_index_sync_running()
+
+
+def _import_npy_to_lance_locked(
+    profile_base_dir: str,
+    summary: dict,
+    *,
+    replace_existing: bool = True,
+    progress_callback: ProgressCallback | None = None,
+) -> dict:
+    meta_file = os.path.join(profile_base_dir, "meta.json")
+    vector_dir = os.path.join(profile_base_dir, "vector")
 
     if not os.path.isdir(vector_dir):
         summary["errors"].append(f"vector dir not found: {vector_dir}")

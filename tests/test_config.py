@@ -183,6 +183,15 @@ class ConfigMigrationTests(unittest.TestCase):
                 self.assertEqual(loaded["data_root"], str(user_root))
                 self.assertIsNone(config_module.pop_migration_notice())
 
+    def test_startup_migration_summary_is_delivered_once(self):
+        config_module.set_startup_migration_summary(
+            {"migrated": True, "migrated_local_payloads": 1, "backup_dir": "D:/bak"}
+        )
+        first = config_module.pop_startup_migration_summary()
+        second = config_module.pop_startup_migration_summary()
+        self.assertEqual(first["migrated_local_payloads"], 1)
+        self.assertIsNone(second)
+
     def test_load_config_resets_invalid_legacy_runtime_paths(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

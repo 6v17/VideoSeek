@@ -1,3 +1,4 @@
+import base64
 import os
 import tempfile
 import unittest
@@ -172,6 +173,40 @@ class AgentApiHelperTests(unittest.TestCase):
             preview_anchor_sec=12.5,
         )
         self.assertEqual(_resolve_search_timeout_sec(body), 200.0)
+
+    @patch("src.web.agent_api.search.load_config")
+    def test_base64_timeout_does_not_write_a_temp_file(self, mock_load_config):
+        mock_load_config.return_value = {
+            "agent_api_search_timeout_fast_sec": 90,
+            "agent_api_search_timeout_precise_sec": 200,
+            "agent_api_default_image_precision": "precise",
+        }
+        body = AgentSearchRequest(
+            image_base64=base64.b64encode(b"png").decode("ascii"),
+            image_mime="image/png",
+            search_precision_mode="precise",
+        )
+        with patch("tempfile.mkstemp", wraps=tempfile.mkstemp) as mkstemp:
+            timeout = _resolve_search_timeout_sec(body)
+        self.assertEqual(timeout, 200.0)
+        self.assertFalse(any(call.kwargs.get("prefix") == "team_query_" for call in mkstemp.call_args_list))
+
+    def test_base64_image_is_written_once_and_removed(self):
+        from src.web.agent_api.search import (
+            _discard_materialized_agent_image,
+            _normalize_agent_search_query_fields,
+        )
+
+        body = AgentSearchRequest(image_base64=base64.b64encode(b"png").decode("ascii"), image_mime="image/png")
+        with tempfile.TemporaryDirectory() as cache_dir:
+            with patch("src.app.config.get_data_storage_paths", return_value={"mobile_upload_dir": cache_dir}):
+                first, kind = _normalize_agent_search_query_fields(body)
+                second, _kind = _normalize_agent_search_query_fields(body)
+            self.assertEqual(kind, "image_path")
+            self.assertEqual(first, second)
+            self.assertTrue(os.path.isfile(first))
+            _discard_materialized_agent_image(body)
+            self.assertFalse(os.path.isfile(first))
 
     @patch("src.web.agent_api.search.load_config")
     def test_resolve_batch_timeout_scales_with_query_count(self, mock_load_config):

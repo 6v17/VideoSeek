@@ -76,6 +76,7 @@ def update_videos_flow(
     include_existing_assets=True,
     rebuild_global_assets=True,
     video_ids=None,
+    debug_failure: str = "",
 ):
     # Retained intentionally: imported dynamically inside IndexUpdateWorker.run().
     del rebuild_global_assets
@@ -107,6 +108,7 @@ def update_videos_flow(
             issue_callback=issue_callback,
             include_existing_assets=include_existing_assets,
             video_ids=video_ids,
+            debug_failure=debug_failure,
             flow_start=flow_start,
         )
     finally:
@@ -124,6 +126,7 @@ def _update_videos_flow_body(
     include_existing_assets=True,
     video_ids=None,
     flow_start=None,
+    debug_failure: str = "",
 ):
     if flow_start is None:
         flow_start = time.perf_counter()
@@ -185,6 +188,7 @@ def _update_videos_flow_body(
             issue_callback=issue_callback,
             include_existing_assets=include_existing_assets,
             video_ids=video_ids,
+            debug_failure=debug_failure,
         )
     except IndexUpdateInterrupted:
         scan_s = time.perf_counter() - t_scan

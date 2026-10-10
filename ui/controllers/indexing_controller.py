@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, Signal
 
-from ui.threading_utils import shutdown_thread
+from ui.threading_utils import bind_thread_release, release_finished_thread, shutdown_thread
 from ui.workers import IndexUpdateWorker, LibraryRegisterWorker
 
 
@@ -68,6 +68,7 @@ class IndexingController(QObject):
         self.worker.runtime_status_signal.connect(self.runtime_status_changed.emit)
         self.worker.error_signal.connect(self.error_occurred.emit)
         self.worker.finished_signal.connect(self._finish)
+        bind_thread_release(self, "worker", self.worker)
         self.worker.start()
         return True
 
@@ -102,8 +103,12 @@ class IndexingController(QObject):
         return True
 
     def shutdown(self):
-        shutdown_thread(self.register_worker, stop_first=True, wait_ms=3000)
-        shutdown_thread(self.worker, stop_first=True, wait_ms=3000)
+        register_worker = self.register_worker
+        worker = self.worker
+        shutdown_thread(register_worker, stop_first=True, wait_ms=3000)
+        shutdown_thread(worker, stop_first=True, wait_ms=3000)
+        release_finished_thread(self, "register_worker", register_worker)
+        release_finished_thread(self, "worker", worker)
 
     def request_stop(self):
         if self.is_registering() and hasattr(self.register_worker, "stop"):

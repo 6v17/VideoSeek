@@ -29,9 +29,6 @@ from src.services.search_progress import (
     restore_search_callbacks,
 )
 from src.services.search_assets import (
-    CHUNK_ASSET_INFO,
-    FRAME_ASSET_INFO,
-    check_asset_profile_compatibility,
     library_indexes_ready,
     load_per_video_frame_assets,
     load_chunk_search_assets,
@@ -824,7 +821,6 @@ def _run_search_impl(
         if search_index is None:
             record_search_profile_result_count(0)
             return []
-        check_asset_profile_compatibility(config, FRAME_ASSET_INFO, asset_label="frame")
 
         with profile_phase("faiss_search"):
             matched_results, matched_ids = search_frame_results_with_ids(
@@ -908,11 +904,6 @@ def _run_search_impl(
                 scoped_hits,
                 merge_keep_k if use_video_discovery else top_k,
             )
-        if precise_image and scoped and scope_video_paths:
-            from src.services.search_scope import filter_hits_by_video_paths
-
-            results = filter_hits_by_video_paths(results, scope_video_paths)
-            results = merge_search_hits(results, top_k)
         results = apply_video_discovery_presentation(
             results,
             top_k,
@@ -1045,7 +1036,6 @@ def run_chunk_search(
         if search_index is None:
             record_search_profile_result_count(0)
             return []
-        check_asset_profile_compatibility(config, CHUNK_ASSET_INFO, asset_label="chunk")
 
         actual_k = min(fetch_k, search_index.ntotal)
         if actual_k <= 0:

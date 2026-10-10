@@ -8,7 +8,7 @@ from src.services.runtime_resource_service import (
     get_runtime_resource_status,
 )
 from ui.dialogs import ModelDownloadDialog
-from ui.threading_utils import shutdown_thread
+from ui.threading_utils import bind_thread_release, release_finished_thread, shutdown_thread
 from ui.workers import ResourceDownloadWorker
 
 
@@ -136,10 +136,13 @@ class RuntimeResourceController(QObject):
         self.worker.progress_signal.connect(self._update_progress)
         self.worker.finished_signal.connect(self._finish_download)
         self.worker.error_signal.connect(self._fail_download)
+        bind_thread_release(self, "worker", self.worker)
         self.worker.start()
 
     def shutdown(self):
-        shutdown_thread(self.worker)
+        worker = self.worker
+        shutdown_thread(worker)
+        release_finished_thread(self, "worker", worker)
 
     def _ensure_dialog(self):
         current_theme = bool(self.parent_window.is_dark_mode)

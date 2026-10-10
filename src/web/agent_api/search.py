@@ -248,7 +248,7 @@ def _resolve_search_timeout_sec(body: AgentSearchRequest, config=None) -> float:
     if getattr(body, "preview_anchor_sec", None) is not None:
         return timeouts["search_timeout_precise_sec"]
     try:
-        resolved = _resolve_agent_search_inputs(body, config=cfg)
+        resolved = _resolve_agent_search_inputs(body, config=cfg, materialize_base64=False)
         if resolved["search_precision_mode"] == "precise":
             return timeouts["search_timeout_precise_sec"]
     except Exception:
@@ -267,7 +267,7 @@ def _batch_requests_precise_mode(body: AgentBatchSearchRequest, config=None) -> 
         if getattr(item, "preview_anchor_sec", None) is not None:
             return True
         try:
-            resolved = _resolve_agent_search_inputs(item, config=cfg)
+            resolved = _resolve_agent_search_inputs(item, config=cfg, materialize_base64=False)
         except ValueError:
             continue
         if resolved["search_precision_mode"] == "precise":
@@ -550,6 +550,46 @@ def get_agent_search_preset(preset_id: str, config=None) -> Dict[str, Any]:
     }
 
 
+def _cached_query_image_path(body: AgentSearchRequest) -> str:
+    path = str(getattr(body, "_query_image_path", "") or "")
+    if path and os.path.isfile(path):
+        return path
+    return ""
+
+
+def _remember_query_image_path(body: AgentSearchRequest, path: str) -> None:
+    object.__setattr__(body, "_query_image_path", path)
+
+
+def _discard_materialized_agent_image(body: AgentSearchRequest) -> None:
+    path = str(getattr(body, "_query_image_path", "") or "")
+    if not path or not os.path.basename(path).startswith("team_query_"):
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    object.__setattr__(body, "_query_image_path", "")
+
+
+def _synthetic_base64_image_query() -> Dict[str, Any]:
+    """Image-shaped inputs for timeout checks that must not write a file."""
+    return {
+        "preset": None,
+        "preset_id": None,
+        "query_data": "",
+        "query_label": "image",
+        "query_type": "image_path",
+        "is_text": False,
+        "has_image": True,
+        "query_vector": None,
+        "pixel_query_data": None,
+        "default_top_k": None,
+        "default_min_score": None,
+        "preset_scope_video_paths": None,
+    }
+
+
 def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Optional[str], str]:
     """Map common aliases (image_path / image_base64) onto query + query_type."""
     query = str(body.query or "").strip() or None
@@ -557,6 +597,9 @@ def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Opti
     image_path = str(getattr(body, "image_path", None) or "").strip()
     image_b64 = str(getattr(body, "image_base64", None) or "").strip()
     if image_b64:
+        cached = _cached_query_image_path(body)
+        if cached:
+            return cached, "image_path"
         import base64
         import tempfile
 
@@ -578,6 +621,7 @@ def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Opti
         os.close(fd)
         with open(tmp_path, "wb") as handle:
             handle.write(raw)
+        _remember_query_image_path(body, tmp_path)
         return tmp_path, "image_path"
     if image_path:
         if query and query != image_path:
@@ -589,11 +633,23 @@ def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Opti
     return query, query_type
 
 
-def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[str, Any]:
+def _resolve_agent_search_inputs(
+    body: AgentSearchRequest,
+    config=None,
+    *,
+    materialize_base64: bool = True,
+) -> Dict[str, Any]:
     cfg = config or load_config()
     explicit_vector = getattr(body, "query_vector", None)
-    query, query_type = _normalize_agent_search_query_fields(body)
-    if not body.preset_id and not query and explicit_vector is None:
+    image_b64 = str(getattr(body, "image_base64", None) or "").strip()
+    skip_query_resolve = bool(image_b64 and not materialize_base64 and explicit_vector is None and not body.preset_id)
+    if skip_query_resolve:
+        query_part = _synthetic_base64_image_query()
+        query = None
+        query_type = "image_path"
+    else:
+        query, query_type = _normalize_agent_search_query_fields(body)
+    if not skip_query_resolve and not body.preset_id and not query and explicit_vector is None:
         raise ValueError(
             "Provide preset_id, query, or query_vector. "
             "For image search: {\"query\": \"D:/a.png\", \"query_type\": \"image_path\"} "
@@ -622,7 +678,7 @@ def _resolve_agent_search_inputs(body: AgentSearchRequest, config=None) -> Dict[
             "default_min_score": None,
             "preset_scope_video_paths": None,
         }
-    else:
+    elif not skip_query_resolve:
         query_part = resolve_search_query_inputs(
             preset_id=body.preset_id,
             query=query,
@@ -773,6 +829,13 @@ def _skip_edges_meta(config) -> Dict[str, Any]:
 
 
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
+    try:
+        return _execute_agent_search_work(body)
+    finally:
+        _discard_materialized_agent_image(body)
+
+
+def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
     config = load_config()
     search_kind = _normalize_search_kind(body.search_kind)
     if search_kind == "dialogue":
@@ -796,10 +859,6 @@ def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
     )
     snapshot = _index_snapshot(mode, config=config)
     if not _search_index_ready_for_request(mode, _scope_for_request_meta(body, resolved), config=config):
-        if scope_library_paths and snapshot.get("library_indexes_upgrade_needed"):
-            raise IndexNotReadyError(
-                "Per-library search indexes are not ready. Restart VideoSeek and wait for startup data migration to finish."
-            )
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
     with acquire_search_slot():
@@ -1146,15 +1205,10 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
     snapshot = _index_snapshot(default_mode, config=config)
     if _scope_request_is_explicit(body.scope):
         batch_scope = body.scope
-        batch_library_paths = _resolve_scope_library_paths(body.scope, config=config)
     else:
         batch_video_paths, batch_library_paths = _resolve_default_active_scope(config=config)
         batch_scope = _scope_from_resolved_paths(batch_video_paths, batch_library_paths)
     if not _search_index_ready_for_request(default_mode, batch_scope, config=config):
-        if batch_library_paths and snapshot.get("library_indexes_upgrade_needed"):
-            raise IndexNotReadyError(
-                "Per-library search indexes are not ready. Restart VideoSeek and wait for startup data migration to finish."
-            )
         raise IndexNotReadyError("Search index is not ready. Sync the library in VideoSeek first.")
 
     results = []

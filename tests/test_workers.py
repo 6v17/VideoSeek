@@ -94,7 +94,8 @@ class WorkersTests(unittest.TestCase):
         os.environ.pop("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", None)
         os.environ.pop("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM", None)
 
-        def capture_env(**_kwargs):
+        def capture_env(**kwargs):
+            seen["debug_failure"] = kwargs.get("debug_failure")
             seen["gpu"] = os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM")
             seen["system"] = os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM")
             return (None, None, None, None)
@@ -104,7 +105,7 @@ class WorkersTests(unittest.TestCase):
 
         worker.run()
 
-        self.assertEqual(seen, {"gpu": "1", "system": None})
+        self.assertEqual(seen, {"debug_failure": "gpu_oom", "gpu": None, "system": None})
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM"))
         self.assertIsNone(os.environ.get("VIDEOSEEK_DEBUG_FORCE_SYSTEM_OOM"))
 

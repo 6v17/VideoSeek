@@ -17,6 +17,24 @@ class ThumbCacheTests(unittest.TestCase):
         self.assertEqual(cache.get(key_b), "pixmap-b")
         self.assertEqual(cache.get(key_c), "pixmap-c")
 
+    def test_qimage_put_and_get_do_not_share_the_instance(self):
+        from PySide6.QtGui import QImage
+        from PySide6.QtWidgets import QApplication
+
+        _app = QApplication.instance() or QApplication([])
+        cache = ThumbPixmapCache(max_entries=2)
+        key = cache.make_key("a.mp4", 1.0, 8, 8)
+        image = QImage(8, 8, QImage.Format_RGB888)
+        image.fill(1)
+
+        cache.put(key, image)
+        got = cache.get(key)
+
+        self.assertIsInstance(got, QImage)
+        self.assertIsNot(got, image)
+        image.fill(2)
+        self.assertNotEqual(got.pixel(0, 0), image.pixel(0, 0))
+
     def test_search_controller_converts_qimage_on_ui_thread(self):
         from PySide6.QtCore import QObject
         from PySide6.QtGui import QImage, QPixmap

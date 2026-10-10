@@ -21,12 +21,6 @@ _FRAME_ASSET_CACHE = {"key": None, "value": (None, None, None)}
 _CHUNK_ASSET_CACHE = {"key": None, "value": (None, None, None)}
 _LIBRARY_FRAME_ASSET_CACHE: dict[tuple, tuple] = {}
 _LIBRARY_CHUNK_ASSET_CACHE: dict[tuple, tuple] = {}
-_FRAME_ASSET_INFO = {"key": None, "embedding_spec": None, "index_dim": 0}
-_CHUNK_ASSET_INFO = {"key": None, "embedding_spec": None, "index_dim": 0}
-
-
-def _check_asset_profile_compatibility(config, asset_info, asset_label):
-    return
 
 
 def invalidate_search_asset_caches() -> None:
@@ -190,9 +184,6 @@ def _load_per_video_frame_assets(video_id, abs_path, config, *, include_vectors:
 
 
 # Public names for cross-module callers (engineering.md rule 4).
-FRAME_ASSET_INFO = _FRAME_ASSET_INFO
-CHUNK_ASSET_INFO = _CHUNK_ASSET_INFO
-check_asset_profile_compatibility = _check_asset_profile_compatibility
 profile_base_dir = _profile_base_dir
 library_indexes_ready = _library_indexes_ready
 load_per_video_frame_assets = _load_per_video_frame_assets

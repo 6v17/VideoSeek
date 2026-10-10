@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, replace
 from typing import Sequence
 
@@ -293,7 +294,7 @@ class LanceTableSearchIndex:
         self._is_chunk = bool(is_chunk)
         self._ntotal = self._count_rows()
         self._d = self._read_dimension()
-        self._last_rows: list[LanceSearchRow] = []
+        self._row_local = threading.local()
         self._ann_enabled = is_lance_ann_enabled(config)
         self._ann_refine_multiplier = resolve_lance_ann_refine_multiplier(config)
         self._has_vector_index = self._detect_vector_index()
@@ -334,9 +335,19 @@ class LanceTableSearchIndex:
     def d(self) -> int:
         return int(self._d)
 
+    def _set_last_rows(self, rows: list[LanceSearchRow]) -> None:
+        # Per-thread snapshot. The cached index is shared by the desktop worker
+        # and the mobile bridge; a shared list would let one search's reconstruct
+        # read the other search's vectors.
+        self._row_local.rows = rows
+
+    def _get_last_rows(self) -> list[LanceSearchRow]:
+        rows = getattr(self._row_local, "rows", None)
+        return rows if rows is not None else []
+
     @property
     def last_rows(self) -> list[LanceSearchRow]:
-        return list(self._last_rows)
+        return list(self._get_last_rows())
 
     def _build_vector_search(self, query_vector, *, use_ann: bool = False):
         query = np.asarray(query_vector, dtype=np.float32)
@@ -382,7 +393,7 @@ class LanceTableSearchIndex:
     def search_rows(self, query_vector, top_k: int) -> list[LanceSearchRow]:
         actual_k = min(max(int(top_k), 0), self._ntotal)
         if actual_k <= 0:
-            self._last_rows = []
+            self._set_last_rows([])
             return []
 
         query = np.asarray(query_vector, dtype=np.float32)
@@ -413,16 +424,16 @@ class LanceTableSearchIndex:
                     arrow = self._build_vector_search(query, use_ann=False).limit(actual_k).to_arrow()
                 except Exception as exact_exc:
                     logger.error("Lance vector search failed: %s", exact_exc)
-                    self._last_rows = []
+                    self._set_last_rows([])
                     return []
             else:
                 logger.error("Lance vector search failed: %s", exc)
-                self._last_rows = []
+                self._set_last_rows([])
                 return []
 
         rows: list[LanceSearchRow] = []
         if arrow is None or arrow.num_rows <= 0:
-            self._last_rows = rows
+            self._set_last_rows(rows)
             return rows
 
         timestamps = arrow["timestamp"].to_pylist() if "timestamp" in arrow.column_names else [None] * arrow.num_rows
@@ -453,7 +464,7 @@ class LanceTableSearchIndex:
             rows = self._refine_rows_exact_cosine(query, rows, actual_k)
         elif len(rows) > actual_k:
             rows = rows[:actual_k]
-        self._last_rows = rows
+        self._set_last_rows(rows)
         return rows
 
     def _neighbor_scope_predicates(self, video_id: str = "") -> list[str]:
@@ -479,10 +490,11 @@ class LanceTableSearchIndex:
         return scores, indices
 
     def reconstruct(self, index_value: int):
+        rows = self._get_last_rows()
         idx = int(index_value)
-        if idx < 0 or idx >= len(self._last_rows):
+        if idx < 0 or idx >= len(rows):
             raise IndexError(index_value)
-        vector = self._last_rows[idx].vector
+        vector = rows[idx].vector
         if vector is None:
             raise IndexError(index_value)
         return np.asarray(vector, dtype=np.float32)

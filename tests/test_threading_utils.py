@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import MagicMock
 
 from ui import threading_utils
 
@@ -60,3 +61,51 @@ class ShutdownThreadTests(unittest.TestCase):
         threading_utils.shutdown_thread(thread, wait_ms=10)
         self.assertFalse(thread.terminated)
         self.assertEqual(threading_utils.parked_threads(), [])
+
+
+class _Owner:
+    def __init__(self):
+        self.worker = None
+
+
+class ReleaseFinishedThreadTests(unittest.TestCase):
+    def setUp(self):
+        threading_utils._PARKED_THREADS.clear()
+
+    def tearDown(self):
+        threading_utils._PARKED_THREADS.clear()
+
+    def test_stopped_thread_is_cleared_and_deleted(self):
+        owner = _Owner()
+        thread = MagicMock()
+        thread.isRunning.return_value = False
+        owner.worker = thread
+
+        threading_utils.release_finished_thread(owner, "worker", thread)
+
+        self.assertIsNone(owner.worker)
+        thread.deleteLater.assert_called_once()
+
+    def test_older_thread_release_keeps_the_current_one(self):
+        owner = _Owner()
+        old = MagicMock()
+        old.isRunning.return_value = False
+        current = MagicMock()
+        owner.worker = current
+
+        threading_utils.release_finished_thread(owner, "worker", old)
+
+        self.assertIs(owner.worker, current)
+        old.deleteLater.assert_called_once()
+        current.deleteLater.assert_not_called()
+
+    def test_running_thread_is_cleared_but_not_deleted(self):
+        owner = _Owner()
+        thread = _FakeThread()
+        owner.worker = thread
+
+        threading_utils.release_finished_thread(owner, "worker", thread)
+
+        self.assertIsNone(owner.worker)
+        self.assertIn(thread, threading_utils.parked_threads())
+        self.assertFalse(hasattr(thread, "deleteLater"))

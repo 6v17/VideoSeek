@@ -16,7 +16,6 @@ from src.services.search_skip_ranges import (
 
 logger = get_logger("config")
 _CONFIG_WRITE_LOCK = threading.Lock()
-_LAST_MIGRATION_NOTICE = None
 _LAST_STARTUP_MIGRATION_SUMMARY = None
 STORAGE_DIR_NAME = "data"
 
@@ -695,7 +694,6 @@ def _apply_legacy_storage_path_defaults(config):
 
 def _migrate_legacy_storage_if_needed(config):
     """Rewrite oldest install-relative data/ paths to the user profile. Install-dir data/ is not copied."""
-    global _LAST_MIGRATION_NOTICE
     migrated = dict(config)
     if not _should_migrate_to_user_data(migrated):
         return migrated
@@ -877,10 +875,8 @@ def get_data_storage_paths(config=None):
 
 
 def pop_migration_notice():
-    global _LAST_MIGRATION_NOTICE
-    notice = _LAST_MIGRATION_NOTICE
-    _LAST_MIGRATION_NOTICE = None
-    return notice
+    """No notice: install-dir data is rewritten in config and is not moved."""
+    return None
 
 
 def should_report_startup_migration_summary(result):
@@ -913,14 +909,16 @@ def should_report_startup_migration_summary(result):
 
 def set_startup_migration_summary(result):
     global _LAST_STARTUP_MIGRATION_SUMMARY
-    if not should_report_startup_migration_summary(result):
-        _LAST_STARTUP_MIGRATION_SUMMARY = None
-        return
-    _LAST_STARTUP_MIGRATION_SUMMARY = dict(result)
+    with _CONFIG_WRITE_LOCK:
+        if not should_report_startup_migration_summary(result):
+            _LAST_STARTUP_MIGRATION_SUMMARY = None
+            return
+        _LAST_STARTUP_MIGRATION_SUMMARY = dict(result)
 
 
 def pop_startup_migration_summary():
     global _LAST_STARTUP_MIGRATION_SUMMARY
-    summary = _LAST_STARTUP_MIGRATION_SUMMARY
-    _LAST_STARTUP_MIGRATION_SUMMARY = None
-    return summary
+    with _CONFIG_WRITE_LOCK:
+        summary = _LAST_STARTUP_MIGRATION_SUMMARY
+        _LAST_STARTUP_MIGRATION_SUMMARY = None
+        return summary

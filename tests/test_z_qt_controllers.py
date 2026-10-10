@@ -594,6 +594,13 @@ class IndexingControllerTests(unittest.TestCase):
         self.assertEqual(controller.current_target, "D:/new")
         self.assertEqual(finished[0][1], "D:/old")
         self.assertFalse(finished[0][5])
+        self.assertIs(controller.worker, new_worker)
+
+        old_worker.finished.connect.call_args.args[0]()
+
+        self.assertIs(controller.worker, new_worker)
+        old_worker.deleteLater.assert_called_once()
+        new_worker.deleteLater.assert_not_called()
 
 
 class MobileBridgeControllerTests(unittest.TestCase):

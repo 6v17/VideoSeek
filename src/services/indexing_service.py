@@ -229,7 +229,19 @@ def _has_usable_vectors(vectors, timestamps):
     return vector_count > 0 and vector_count == timestamp_count
 
 
-def _get_debug_forced_failure():
+def _forced_failure_for_mode(mode: str):
+    normalized = str(mode or "").strip().lower()
+    if normalized == "gpu_oom":
+        return RuntimeError("DirectML debug injection: GPU out of memory")
+    if normalized == "system_oom":
+        return MemoryError("Debug injection: system out of memory")
+    return None
+
+
+def _get_debug_forced_failure(debug_failure: str = ""):
+    forced = _forced_failure_for_mode(debug_failure)
+    if forced is not None:
+        return forced
     gpu_flag = str(os.environ.get("VIDEOSEEK_DEBUG_FORCE_GPU_OOM", "") or "").strip().lower()
     if gpu_flag in {"1", "true", "yes", "on"}:
         return RuntimeError("DirectML debug injection: GPU out of memory")
@@ -1381,6 +1393,7 @@ def _index_video_compute(
     file_total=1,
     indexed_ids=None,
     library_paths_by_id=None,
+    debug_failure: str = "",
 ) -> dict[str, Any]:
     """Decode/embed (or decide reuse) without mutating meta or writing Lance.
 
@@ -1424,7 +1437,7 @@ def _index_video_compute(
 
     video_mod_time = os.path.getmtime(abs_path)
     base["video_mod_time"] = video_mod_time
-    forced_failure = _get_debug_forced_failure()
+    forced_failure = _get_debug_forced_failure(debug_failure)
     if forced_failure is not None:
         raise forced_failure
 
@@ -1798,6 +1811,7 @@ def process_single_video(
     indexed_ids=None,
     meta=None,
     library_paths_by_id=None,
+    debug_failure: str = "",
 ):
     """Index one video: compute then commit (serial API for tests and workers=1)."""
     rel_path = canonicalize_library_rel_path(rel_path)
@@ -1816,6 +1830,7 @@ def process_single_video(
             file_total=file_total,
             indexed_ids=indexed_ids,
             library_paths_by_id=library_paths_by_id,
+            debug_failure=debug_failure,
         )
     except InterruptedError:
         raise
@@ -1877,6 +1892,7 @@ def _run_planned_videos_with_prefetch(
     report_scan_progress,
     queue_meta_persist,
     library_paths_by_id=None,
+    debug_failure: str = "",
 ) -> tuple[list[str], bool, int]:
     """Compute up to ``workers`` videos ahead; commit in plan order on this thread."""
     failed_videos: list[str] = []
@@ -1954,6 +1970,7 @@ def _run_planned_videos_with_prefetch(
                 indexed_ids=indexed_ids,
                 meta=meta,
                 library_paths_by_id=library_paths_by_id,
+                debug_failure=debug_failure,
             )
             search_assets_changed = search_assets_changed or file_search_assets_changed
             if vectors is _SKIP_VIDEO_ALREADY_INDEXED:
@@ -1986,6 +2003,7 @@ def _run_planned_videos_with_prefetch(
             total_files or 1,
             indexed_ids,
             library_paths_by_id,
+            debug_failure,
         )
         return abs_path, rel_path, file_index, future
 
@@ -2049,6 +2067,7 @@ def scan_target_libraries(
     issue_callback=None,
     include_existing_assets=True,
     video_ids=None,
+    debug_failure: str = "",
 ):
     from src.storage.lance_store import META_PERSIST_INTERVAL, begin_lance_index_batch, end_lance_index_batch
     from src.services.indexing_runtime_status import set_index_sync_progress
@@ -2221,6 +2240,7 @@ def scan_target_libraries(
                     report_scan_progress=_report_scan_progress,
                     queue_meta_persist=_queue_meta_persist,
                     library_paths_by_id=library_paths_by_id,
+                    debug_failure=debug_failure,
                 )
                 failed_videos.extend(batch_failed)
                 search_assets_changed = search_assets_changed or batch_changed

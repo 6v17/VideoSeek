@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import threading
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from src.storage.lance_search_index import (
+    LanceSearchRow,
     LanceTableSearchIndex,
     invalidate_lance_runtime_caches,
     load_lance_chunk_time_ranges,
@@ -117,3 +121,27 @@ class SearchHotPathScanTests(unittest.TestCase):
         open_table.assert_called_once()
         load_cols.assert_called_once()
         invalidate_lance_runtime_caches("D:/profile")
+
+
+class LanceReconstructIsolationTests(unittest.TestCase):
+    def test_each_thread_reconstructs_its_own_search(self):
+        index = object.__new__(LanceTableSearchIndex)
+        index._row_local = threading.local()
+        barrier = threading.Barrier(2)
+        seen = {}
+
+        def _search(name, vector):
+            index._set_last_rows(
+                [LanceSearchRow(score=1.0, video_path=name, vector=np.asarray(vector, dtype=np.float32))]
+            )
+            barrier.wait()
+            seen[name] = index.reconstruct(0).copy()
+
+        first = threading.Thread(target=_search, args=("a", [1.0, 0.0]))
+        second = threading.Thread(target=_search, args=("b", [0.0, 1.0]))
+        first.start()
+        second.start()
+        first.join()
+        second.join()
+        self.assertEqual(seen["a"].tolist(), [1.0, 0.0])
+        self.assertEqual(seen["b"].tolist(), [0.0, 1.0])
