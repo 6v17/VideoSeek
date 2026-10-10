@@ -372,7 +372,7 @@ def _signed_subprocess_code(code: int) -> int:
     return code
 
 
-def terminate_ffmpeg_process(process):
+def terminate_ffmpeg_process(process, *, wait: bool = True):
     if process is None:
         return
     try:
@@ -383,7 +383,8 @@ def terminate_ffmpeg_process(process):
     try:
         if process.poll() is None:
             process.kill()
-            process.wait(timeout=5)
+            if wait:
+                process.wait(timeout=5)
     except OSError:
         pass
 

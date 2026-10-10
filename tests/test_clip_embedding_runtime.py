@@ -433,6 +433,49 @@ class ClipEmbeddingRuntimeTests(unittest.TestCase):
                     )
         kill.assert_called_once_with(holder)
 
+    def test_stop_before_encode_does_not_start_the_batch(self):
+        holder = {"process": object()}
+        seen = {"n": 0}
+
+        def should_stop():
+            seen["n"] += 1
+            return seen["n"] >= 2
+
+        class _Engine:
+            def encode_images(self, _batch):
+                raise AssertionError("encode should not start")
+
+        def frames():
+            yield (object(), 0.0)
+
+        with patch("src.core.clip_embedding.get_engine", return_value=_Engine()):
+            with patch("src.core.clip_embedding._kill_indexing_ffmpeg") as kill:
+                with self.assertRaises(InterruptedError):
+                    clip_embedding._encode_batched_from_frame_stream(
+                        frames(),
+                        None,
+                        1,
+                        should_stop_callback=should_stop,
+                        process_holder=holder,
+                    )
+        kill.assert_called_with(holder)
+
+    def test_stop_active_index_extracts_kills_ffmpeg_immediately(self):
+        event = threading.Event()
+        process = object()
+        holder = {"process": process}
+        clip_embedding.register_index_extract(event, holder)
+        try:
+            with patch("src.core.clip_embedding.terminate_ffmpeg_process") as kill:
+                clip_embedding.stop_active_index_extracts()
+            kill.assert_called_once_with(process, wait=False)
+            self.assertTrue(event.is_set())
+        finally:
+            clip_embedding.unregister_index_extract(event)
+        with patch("src.core.clip_embedding.terminate_ffmpeg_process") as kill:
+            clip_embedding.stop_active_index_extracts()
+        kill.assert_not_called()
+
     @patch(
         "src.core.clip_embedding.build_chunk_config",
         return_value={

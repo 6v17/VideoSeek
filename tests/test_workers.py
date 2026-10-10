@@ -13,6 +13,13 @@ from ui.workers import (
 
 
 class WorkersTests(unittest.TestCase):
+    def test_index_update_stop_kills_the_active_extract(self):
+        worker = IndexUpdateWorker(target_lib="D:/videos")
+        with patch("src.core.clip_embedding.stop_active_index_extracts") as stop_extracts:
+            worker.stop()
+        self.assertTrue(worker._stop_requested)
+        stop_extracts.assert_called_once_with()
+
     @patch("src.workflows.update_video.update_videos_flow")
     @patch("src.core.clip_embedding.get_engine_runtime_status", return_value={})
     @patch("src.core.clip_embedding.prepare_inference_runtime", return_value={})

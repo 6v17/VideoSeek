@@ -753,6 +753,9 @@ class IndexUpdateWorker(QThread):
     def stop(self):
         self._stop_requested = True
         self.requestInterruption()
+        from src.core.clip_embedding import stop_active_index_extracts
+
+        stop_active_index_extracts()
 
     def run(self):
         issues = []

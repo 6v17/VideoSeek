@@ -1951,6 +1951,9 @@ def _run_planned_videos_with_prefetch(
     if workers <= 1:
         for abs_path in planned_files:
             if should_stop_callback and should_stop_callback():
+                from src.core.clip_embedding import stop_active_index_extracts
+
+                stop_active_index_extracts()
                 raise IndexUpdateInterrupted(
                     "Index update stopped before finishing current library",
                     search_assets_changed=search_assets_changed,
@@ -2011,7 +2014,12 @@ def _run_planned_videos_with_prefetch(
         return abs_path, rel_path, file_index, future
 
     def _stop_requested() -> bool:
-        return bool(should_stop_callback and should_stop_callback())
+        if not (should_stop_callback and should_stop_callback()):
+            return False
+        from src.core.clip_embedding import stop_active_index_extracts
+
+        stop_active_index_extracts()
+        return True
 
     def _cancel_pending() -> None:
         for _a, _r, _i, fut in pending:
@@ -2191,6 +2199,9 @@ def scan_target_libraries(
 
         for root_path, lib_data, valid_files in scan_plan:
             if should_stop_callback and should_stop_callback():
+                from src.core.clip_embedding import stop_active_index_extracts
+
+                stop_active_index_extracts()
                 raise IndexUpdateInterrupted(
                     "Index update stopped before finishing library scan",
                     search_assets_changed=search_assets_changed,

@@ -866,12 +866,45 @@ def _indexing_should_stop(should_stop_callback, stop_event):
     return bool(should_stop_callback and should_stop_callback())
 
 
-def _kill_indexing_ffmpeg(process_holder):
+def _kill_indexing_ffmpeg(process_holder, *, wait: bool = True):
     if not process_holder:
         return
     process = process_holder.get("process")
     if process is not None:
-        terminate_ffmpeg_process(process)
+        terminate_ffmpeg_process(process, wait=wait)
+
+
+_ACTIVE_INDEX_EXTRACTS: dict[int, tuple[threading.Event, dict]] = {}
+_ACTIVE_INDEX_EXTRACTS_LOCK = threading.Lock()
+
+
+def register_index_extract(stop_event: threading.Event, process_holder: dict) -> None:
+    """Publish the live reader so a stop from another thread can kill FFmpeg now."""
+    with _ACTIVE_INDEX_EXTRACTS_LOCK:
+        _ACTIVE_INDEX_EXTRACTS[id(stop_event)] = (stop_event, process_holder)
+
+
+def unregister_index_extract(stop_event: threading.Event) -> None:
+    with _ACTIVE_INDEX_EXTRACTS_LOCK:
+        _ACTIVE_INDEX_EXTRACTS.pop(id(stop_event), None)
+
+
+def stop_active_index_extracts() -> None:
+    """Stop in-flight frame readers. A batch already inside ONNX still finishes."""
+    with _ACTIVE_INDEX_EXTRACTS_LOCK:
+        active = list(_ACTIVE_INDEX_EXTRACTS.values())
+    for stop_event, process_holder in active:
+        stop_event.set()
+        _kill_indexing_ffmpeg(process_holder, wait=False)
+
+
+def _raise_if_index_extract_stopped(should_stop_callback, stop_event, process_holder) -> None:
+    if not _indexing_should_stop(should_stop_callback, stop_event):
+        return
+    if stop_event is not None:
+        stop_event.set()
+    _kill_indexing_ffmpeg(process_holder)
+    raise InterruptedError("Index update stopped during frame extraction")
 
 
 def _run_indexing_frame_reader(
@@ -987,6 +1020,7 @@ def _encode_batched_from_frame_stream(
             timestamp_batch.append(timestamp)
             if len(frame_batch) < frame_batch_size:
                 continue
+            _raise_if_index_extract_stopped(should_stop_callback, stop_event, process_holder)
             batch_vectors = get_engine().encode_images(frame_batch)
             if len(batch_vectors) > 0:
                 added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
@@ -998,6 +1032,7 @@ def _encode_batched_from_frame_stream(
             frame_batch = []
             timestamp_batch = []
         if frame_batch:
+            _raise_if_index_extract_stopped(should_stop_callback, stop_event, process_holder)
             batch_vectors = get_engine().encode_images(frame_batch)
             if len(batch_vectors) > 0:
                 added = _accumulate_inference_batch(vector_parts, chunk_builder, batch_vectors, timestamp_batch)
@@ -1038,159 +1073,165 @@ def generate_vectors_and_index_for_video(
     pipe_start = time.perf_counter()
     process_holder = {}
     stop_event = threading.Event()
-    runtime_config = load_config()
-    estimated_frame_total = _estimate_index_frame_total(video_path, config=runtime_config)
-    chunk_config = build_chunk_config(runtime_config)
-    chunk_builder = SemanticChunkStreamBuilder(**chunk_builder_kwargs(chunk_config))
-    progress_reporter = (
-        IndexingProgressReporter(
-            progress_callback,
-            video_name=os.path.basename(video_path),
-            file_index=file_index,
-            file_total=file_total,
+    register_index_extract(stop_event, process_holder)
+    try:
+        runtime_config = load_config()
+        estimated_frame_total = _estimate_index_frame_total(video_path, config=runtime_config)
+        chunk_config = build_chunk_config(runtime_config)
+        chunk_builder = SemanticChunkStreamBuilder(**chunk_builder_kwargs(chunk_config))
+        progress_reporter = (
+            IndexingProgressReporter(
+                progress_callback,
+                video_name=os.path.basename(video_path),
+                file_index=file_index,
+                file_total=file_total,
+            )
+            if progress_callback
+            else None
         )
-        if progress_callback
-        else None
-    )
-    frames_decoded = 0
-    frames_encoded = 0
+        frames_decoded = 0
+        frames_encoded = 0
 
-    def _should_stop():
-        return _indexing_should_stop(should_stop_callback, stop_event)
+        def _should_stop():
+            return _indexing_should_stop(should_stop_callback, stop_event)
 
-    def _report_decode(force=False):
-        if progress_reporter is None:
-            return
-        total = max(estimated_frame_total, frames_decoded, frames_encoded)
-        progress_reporter.emit("decode", frames_decoded, total, force=force)
+        def _report_decode(force=False):
+            if progress_reporter is None:
+                return
+            total = max(estimated_frame_total, frames_decoded, frames_encoded)
+            progress_reporter.emit("decode", frames_decoded, total, force=force)
 
-    def _report_encode(force=False):
-        if progress_reporter is None:
-            return
-        total = max(estimated_frame_total, frames_decoded, frames_encoded)
-        progress_reporter.emit("encode", frames_encoded, total, force=force)
+        def _report_encode(force=False):
+            if progress_reporter is None:
+                return
+            total = max(estimated_frame_total, frames_decoded, frames_encoded)
+            progress_reporter.emit("encode", frames_encoded, total, force=force)
 
-    stream_kwargs = {
-        "should_stop": _should_stop,
-        "process_holder": process_holder,
-    }
+        stream_kwargs = {
+            "should_stop": _should_stop,
+            "process_holder": process_holder,
+        }
 
-    if progress_reporter is not None:
-        progress_reporter.emit("decode", 0, estimated_frame_total, force=True)
+        if progress_reporter is not None:
+            progress_reporter.emit("decode", 0, estimated_frame_total, force=True)
 
-    if _indexing_use_overlap_frame_reader():
-        frame_queue = queue.Queue(maxsize=resolve_index_frame_queue_size(frame_batch_size))
-        reader_error = []
-        reader_thread = threading.Thread(
-            target=_run_indexing_frame_reader,
-            args=(video_path, frame_queue, stop_event, reader_error, stream_kwargs),
-            name="VSIndexFrameReader",
-            daemon=True,
-        )
-        reader_thread.start()
-        try:
-            while True:
-                if _should_stop():
-                    _kill_indexing_ffmpeg(process_holder)
-                    raise InterruptedError("Index update stopped during frame extraction")
-                try:
-                    item = frame_queue.get(timeout=0.5)
-                except queue.Empty:
-                    continue
-                if item is None:
-                    break
-                frame, timestamp = item
-                frames_decoded += 1
-                _report_decode()
-                frame_batch.append(frame)
-                timestamp_batch.append(timestamp)
-                if len(frame_batch) < frame_batch_size:
-                    continue
-                batch_vectors = get_engine().encode_images(frame_batch)
-                if len(batch_vectors) > 0:
-                    added = _accumulate_inference_batch(
-                        vector_parts, chunk_builder, batch_vectors, timestamp_batch
-                    )
-                    timestamps.extend(timestamp_batch[:added])
-                    frames_encoded += added
-                    _report_encode()
-                frame_batch = []
-                timestamp_batch = []
+        if _indexing_use_overlap_frame_reader():
+            frame_queue = queue.Queue(maxsize=resolve_index_frame_queue_size(frame_batch_size))
+            reader_error = []
+            reader_thread = threading.Thread(
+                target=_run_indexing_frame_reader,
+                args=(video_path, frame_queue, stop_event, reader_error, stream_kwargs),
+                name="VSIndexFrameReader",
+                daemon=True,
+            )
+            reader_thread.start()
+            try:
+                while True:
+                    if _should_stop():
+                        _kill_indexing_ffmpeg(process_holder)
+                        raise InterruptedError("Index update stopped during frame extraction")
+                    try:
+                        item = frame_queue.get(timeout=0.5)
+                    except queue.Empty:
+                        continue
+                    if item is None:
+                        break
+                    frame, timestamp = item
+                    frames_decoded += 1
+                    _report_decode()
+                    frame_batch.append(frame)
+                    timestamp_batch.append(timestamp)
+                    if len(frame_batch) < frame_batch_size:
+                        continue
+                    _raise_if_index_extract_stopped(should_stop_callback, stop_event, process_holder)
+                    batch_vectors = get_engine().encode_images(frame_batch)
+                    if len(batch_vectors) > 0:
+                        added = _accumulate_inference_batch(
+                            vector_parts, chunk_builder, batch_vectors, timestamp_batch
+                        )
+                        timestamps.extend(timestamp_batch[:added])
+                        frames_encoded += added
+                        _report_encode()
+                    frame_batch = []
+                    timestamp_batch = []
 
-            if frame_batch:
-                batch_vectors = get_engine().encode_images(frame_batch)
-                if len(batch_vectors) > 0:
-                    added = _accumulate_inference_batch(
-                        vector_parts, chunk_builder, batch_vectors, timestamp_batch
-                    )
-                    timestamps.extend(timestamp_batch[:added])
-                    frames_encoded += added
-                    _report_encode(force=True)
-            _report_decode(force=True)
-            _report_encode(force=True)
+                if frame_batch:
+                    _raise_if_index_extract_stopped(should_stop_callback, stop_event, process_holder)
+                    batch_vectors = get_engine().encode_images(frame_batch)
+                    if len(batch_vectors) > 0:
+                        added = _accumulate_inference_batch(
+                            vector_parts, chunk_builder, batch_vectors, timestamp_batch
+                        )
+                        timestamps.extend(timestamp_batch[:added])
+                        frames_encoded += added
+                        _report_encode(force=True)
+                _report_decode(force=True)
+                _report_encode(force=True)
 
-            if reader_error:
-                raise reader_error[0]
-        finally:
-            stop_event.set()
-            _kill_indexing_ffmpeg(process_holder)
-            _drain_index_frame_queue(frame_queue)
-            reader_thread.join(timeout=15.0)
-            if reader_thread.is_alive():
-                logger.warning("Indexing frame reader thread did not stop within join timeout for %s", video_path)
-    else:
+                if reader_error:
+                    raise reader_error[0]
+            finally:
+                stop_event.set()
+                _kill_indexing_ffmpeg(process_holder)
+                _drain_index_frame_queue(frame_queue)
+                reader_thread.join(timeout=15.0)
+                if reader_thread.is_alive():
+                    logger.warning("Indexing frame reader thread did not stop within join timeout for %s", video_path)
+        else:
+            logger.info(
+                "Per-video index %s: overlap reader disabled (VIDEOSEEK_DISABLE_INDEX_FRAME_OVERLAP)",
+                log_tag,
+            )
+            timestamps = _encode_batched_from_frame_stream(
+                stream_frames_with_ffmpeg(video_path, **stream_kwargs),
+                engine_instance,
+                frame_batch_size,
+                should_stop_callback=should_stop_callback,
+                process_holder=process_holder,
+                stop_event=stop_event,
+                progress_reporter=progress_reporter,
+                estimated_frame_total=estimated_frame_total,
+                vector_parts=vector_parts,
+                chunk_builder=chunk_builder,
+            )
+
+        pipe_s = time.perf_counter() - pipe_start
+        logger.info("Per-video index %s: decode_queue+encode_batches %.2fs", log_tag, pipe_s)
+
+        if not vector_parts:
+            logger.info("Per-video index %s: total %.2fs (no vectors)", log_tag, time.perf_counter() - wall_start)
+            return [], [], None, []
+
+        if progress_reporter is not None:
+            progress_reporter.emit("chunk", force=True)
+        t_chunks = time.perf_counter()
+        chunks = chunk_builder.finish()
+        chunks_s = time.perf_counter() - t_chunks
+
+        t_stack = time.perf_counter()
+        vectors = np.vstack(vector_parts).astype(np.float32)
+        del vector_parts
+        stack_s = time.perf_counter() - t_stack
+        free_memory()
+
+        save_s = 0.0
+        if progress_reporter is not None:
+            progress_reporter.emit("save", force=True)
+        t_save = time.perf_counter()
+        save_s = time.perf_counter() - t_save
         logger.info(
-            "Per-video index %s: overlap reader disabled (VIDEOSEEK_DISABLE_INDEX_FRAME_OVERLAP)",
+            "Per-video index %s: stack_vectors %.2fs semantic_chunks %.2fs lance_persist deferred %.2fs "
+            "| parts_sum=%.2fs wall_total=%.2fs",
             log_tag,
+            stack_s,
+            chunks_s,
+            save_s,
+            stack_s + chunks_s + save_s,
+            time.perf_counter() - wall_start,
         )
-        timestamps = _encode_batched_from_frame_stream(
-            stream_frames_with_ffmpeg(video_path, **stream_kwargs),
-            engine_instance,
-            frame_batch_size,
-            should_stop_callback=should_stop_callback,
-            process_holder=process_holder,
-            stop_event=stop_event,
-            progress_reporter=progress_reporter,
-            estimated_frame_total=estimated_frame_total,
-            vector_parts=vector_parts,
-            chunk_builder=chunk_builder,
-        )
-
-    pipe_s = time.perf_counter() - pipe_start
-    logger.info("Per-video index %s: decode_queue+encode_batches %.2fs", log_tag, pipe_s)
-
-    if not vector_parts:
-        logger.info("Per-video index %s: total %.2fs (no vectors)", log_tag, time.perf_counter() - wall_start)
-        return [], [], None, []
-
-    if progress_reporter is not None:
-        progress_reporter.emit("chunk", force=True)
-    t_chunks = time.perf_counter()
-    chunks = chunk_builder.finish()
-    chunks_s = time.perf_counter() - t_chunks
-
-    t_stack = time.perf_counter()
-    vectors = np.vstack(vector_parts).astype(np.float32)
-    del vector_parts
-    stack_s = time.perf_counter() - t_stack
-    free_memory()
-
-    save_s = 0.0
-    if progress_reporter is not None:
-        progress_reporter.emit("save", force=True)
-    t_save = time.perf_counter()
-    save_s = time.perf_counter() - t_save
-    logger.info(
-        "Per-video index %s: stack_vectors %.2fs semantic_chunks %.2fs lance_persist deferred %.2fs "
-        "| parts_sum=%.2fs wall_total=%.2fs",
-        log_tag,
-        stack_s,
-        chunks_s,
-        save_s,
-        stack_s + chunks_s + save_s,
-        time.perf_counter() - wall_start,
-    )
-    return vectors, timestamps, None, chunks
+        return vectors, timestamps, None, chunks
+    finally:
+        unregister_index_extract(stop_event)
 
 
 def _runtime_image_size(runtime_config, default=224):
