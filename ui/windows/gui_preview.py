@@ -531,7 +531,7 @@ class PreviewGuiMixin:
         if hasattr(page, "btn_preview_back"):
             if dialogue or chunks:
                 page.btn_preview_back.setText(
-                    self.texts.get("understanding_preview_back", "返回理解")
+                    self.texts.get("understanding_preview_back", "Back to understanding")
                 )
             else:
                 page.btn_preview_back.setText(self.texts.get("search_preview_back", "返回结果"))

@@ -501,10 +501,7 @@ class UnderstandingAsrGuiMixin:
             if hasattr(self, "_maybe_close_when_busy_work_stops"):
                 self._maybe_close_when_busy_work_stops()
 
-        def _progress(value, _text, label=running_text):
-            self._update_understanding_progress(value, label)
-
-        worker.progress_signal.connect(_progress)
+        worker.progress_signal.connect(self._on_understanding_ocr_progress)
         worker.finished_signal.connect(self._finish_ocr_extract)
         worker.error_signal.connect(
             lambda message: self.show_error_dialog(
@@ -514,6 +511,34 @@ class UnderstandingAsrGuiMixin:
         )
         worker.finished.connect(_finish)
         worker.start()
+
+    def _on_understanding_ocr_progress(self, value, text) -> None:
+        self._update_understanding_progress(value, self._format_understanding_ocr_progress(text))
+
+    def _format_understanding_ocr_progress(self, text: str) -> str:
+        """Turn ``dialogue_index|1|1|subtitle_ocr|12|400`` into a readable stage line."""
+        raw = str(text or "").strip()
+        fallback = self.texts.get("understanding_ocr_extract_running", "Reading burned-in subtitles…")
+        if not raw.startswith("dialogue_index|"):
+            return raw or fallback
+        parts = raw.split("|")
+        if len(parts) < 3:
+            return raw or fallback
+        stage_token = "|".join(parts[3:]) if len(parts) > 3 else ""
+        stage = ""
+        if stage_token and hasattr(self, "_format_dialogue_stage"):
+            formatted = str(self._format_dialogue_stage(stage_token) or "")
+            if formatted and formatted != stage_token:
+                stage = formatted
+        current, total = parts[1], parts[2]
+        if not stage:
+            stage = fallback
+        if current == total == "1":
+            return stage
+        return self.texts.get(
+            "build_dialogue_index_progress",
+            "Subtitles {current}/{total}: {stage}",
+        ).format(current=current, total=total, stage=stage)
 
     def _finish_ocr_extract(self, ok: bool, stopped: bool, payload: object):
         page = getattr(self, "understanding_page", None)

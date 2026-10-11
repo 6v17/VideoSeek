@@ -40,6 +40,28 @@ from ui.widgets.table_specs import (
 from ui.widgets.understanding_services_panel import UnderstandingServicesPanel
 from ui.widgets.vertical_stretch import add_filling_widget, add_vertically_stretchable
 
+# English stand-ins until apply_wizard_texts loads the active language.
+_WIZARD_LABEL_KEYS = {
+    "select": "understanding_wizard_select",
+    "speech": "understanding_wizard_speech",
+    "notes": "understanding_wizard_notes",
+    "notes_tags": "understanding_wizard_notes_tags",
+    "recap": "understanding_wizard_recap",
+    "review": "understanding_wizard_review",
+}
+_WIZARD_LABEL_DEFAULTS = {
+    "select": "Select video",
+    "speech": "Extract lines",
+    "notes": "Visual understanding",
+    "notes_tags": "Generate tags",
+    "recap": "Edit plan",
+    "review": "Edit script",
+}
+_WIZARD_NAV_DEFAULTS = {
+    "prev": "Previous",
+    "next": "Next",
+}
+
 
 class _StepConnector(QWidget):
     """Hairline between steps. QWidget only paints a stylesheet background from paintEvent."""
@@ -260,14 +282,7 @@ class UnderstandingEvidencePage(QWidget):
         stack.setCurrentWidget(host)
 
     def _install_workflow(self, page_body: QVBoxLayout) -> None:
-        self._wizard_labels = {
-            "select": "选择视频",
-            "speech": "提取台词",
-            "notes": "画面理解",
-            "notes_tags": "生成标签",
-            "recap": "剪辑规划",
-            "review": "稿件编辑",
-        }
+        self._wizard_labels = dict(_WIZARD_LABEL_DEFAULTS)
         self._recap_first = True
         self._include_motion_steps = True
 
@@ -306,8 +321,8 @@ class UnderstandingEvidencePage(QWidget):
         nav_layout.setSpacing(8)
         self.btn_wizard_prev = _action_button("GhostButton")
         self.btn_wizard_next = _action_button("PrimaryButton")
-        self.btn_wizard_prev.setText("上一步")
-        self.btn_wizard_next.setText("下一步")
+        self.btn_wizard_prev.setText(_WIZARD_NAV_DEFAULTS["prev"])
+        self.btn_wizard_next.setText(_WIZARD_NAV_DEFAULTS["next"])
         self.btn_wizard_prev.setMinimumWidth(88)
         self.btn_wizard_next.setMinimumWidth(88)
         self.btn_wizard_prev.clicked.connect(self._go_wizard_prev)
@@ -334,7 +349,6 @@ class UnderstandingEvidencePage(QWidget):
             show_actions=False,
             object_name="UnderstandingPreviewLayer",
         )
-        self.embedded_preview.btn_preview_back.setText("返回理解")
         self.content_stack.addWidget(self.workflow_host)
         self.content_stack.addWidget(self.embedded_preview)
         page_body.addWidget(self.content_stack, 1)
@@ -407,7 +421,7 @@ class UnderstandingEvidencePage(QWidget):
             return labels["speech"]
         if card is self.generate_card:
             if not self._include_motion_steps:
-                return labels.get("notes_tags", "生成标签")
+                return labels.get("notes_tags", _WIZARD_LABEL_DEFAULTS["notes_tags"])
             return labels["notes"]
         if card is self.review_card:
             return labels["review"]
@@ -415,15 +429,11 @@ class UnderstandingEvidencePage(QWidget):
 
     def apply_wizard_texts(self, texts: dict) -> None:
         self._wizard_labels = {
-            "select": texts.get("understanding_wizard_select", "选择视频"),
-            "speech": texts.get("understanding_wizard_speech", "提取台词"),
-            "notes": texts.get("understanding_wizard_notes", "画面理解"),
-            "notes_tags": texts.get("understanding_wizard_notes_tags", "生成标签"),
-            "recap": texts.get("understanding_wizard_recap", "剪辑规划"),
-            "review": texts.get("understanding_wizard_review", "稿件编辑"),
+            key: texts.get(i18n_key, _WIZARD_LABEL_DEFAULTS[key])
+            for key, i18n_key in _WIZARD_LABEL_KEYS.items()
         }
-        self.btn_wizard_prev.setText(texts.get("understanding_wizard_prev", "上一步"))
-        self.btn_wizard_next.setText(texts.get("understanding_wizard_next", "下一步"))
+        self.btn_wizard_prev.setText(texts.get("understanding_wizard_prev", _WIZARD_NAV_DEFAULTS["prev"]))
+        self.btn_wizard_next.setText(texts.get("understanding_wizard_next", _WIZARD_NAV_DEFAULTS["next"]))
         self._refresh_wizard_chrome()
 
     def set_motion_steps_enabled(self, enabled: bool) -> None:
@@ -457,7 +467,7 @@ class UnderstandingEvidencePage(QWidget):
         host_layout = QVBoxLayout(host)
         host_layout.setContentsMargins(0, 0, 0, 0)
         host_layout.setSpacing(0)
-        # Shadows paint past the card and can sit on top of 上一步/下一步.
+        # Shadows paint past the card and can sit on top of the step nav.
         card.setGraphicsEffect(None)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         host_layout.addWidget(card, 1)
@@ -482,7 +492,7 @@ class UnderstandingEvidencePage(QWidget):
     def _mount_select_step(self, card: QWidget) -> QWidget:
         """Model test/save stay inside the select card, under the form.
 
-        The wizard's 上一步/下一步 is the only page-level action row.
+        The wizard Previous/Next row is the only page-level action row.
         """
         actions = self.services_panel.actions_bar
         form_host = QWidget()

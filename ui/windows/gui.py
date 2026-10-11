@@ -1329,7 +1329,7 @@ class MainWindow(
         )
         layer = getattr(self.understanding_page, "embedded_preview", None)
         if layer is not None and hasattr(layer, "btn_preview_back"):
-            layer.btn_preview_back.setText(t.get("understanding_preview_back", "返回理解"))
+            layer.btn_preview_back.setText(t.get("understanding_preview_back", "Back to understanding"))
         if getattr(self, "_understanding_preview_embedded", False) or getattr(self, "_search_preview_embedded", False):
             self._sync_preview_layer_chrome()
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])

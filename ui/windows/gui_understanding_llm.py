@@ -2104,7 +2104,14 @@ class UnderstandingLlmGuiMixin:
             config=load_config(),
         )
         if not video_path or not os.path.isfile(video_path):
-            self.show_error_dialog(title, f"找不到原片：{video_path or '(空路径)'}")
+            missing_path = video_path or self.texts.get("understanding_recap_source_empty", "(empty path)")
+            self.show_error_dialog(
+                title,
+                self.texts.get(
+                    "understanding_recap_source_missing",
+                    "Source video not found: {path}",
+                ).format(path=missing_path),
+            )
             return
         drafts_dir = resolve_jianying_drafts_dir()
         if not drafts_dir or not os.path.isdir(drafts_dir):
