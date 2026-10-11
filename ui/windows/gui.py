@@ -50,6 +50,7 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.scaffold import make_runtime_inline_tip
 from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog
 from ui.dialogs.html_links import open_html_link
@@ -797,14 +798,14 @@ class MainWindow(
             else t["notice_short"]
         )
         if self.version_info and self.version_info.get("has_update"):
-            self.sidebar.btn_notice.setObjectName("UpdateButton")
+            set_button_role(self.sidebar.btn_notice, "AccentGhostButton", chrome="update")
         else:
-            self.sidebar.btn_notice.setObjectName("SidebarFooterButton")
+            set_button_role(self.sidebar.btn_notice, "GhostButton", chrome="sidebarFooter")
         self.sidebar.btn_notice.style().unpolish(self.sidebar.btn_notice)
         self.sidebar.btn_notice.style().polish(self.sidebar.btn_notice)
         self.sidebar.btn_notice.update()
         self.sidebar.btn_about.setText(t["about_short"])
-        self.sidebar.btn_about.setObjectName("SidebarFooterButton")
+        set_button_role(self.sidebar.btn_about, "GhostButton", chrome="sidebarFooter")
         self.sidebar.btn_about.style().unpolish(self.sidebar.btn_about)
         self.sidebar.btn_about.style().polish(self.sidebar.btn_about)
         self.sidebar.btn_about.update()

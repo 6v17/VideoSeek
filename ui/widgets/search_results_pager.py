@@ -6,9 +6,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from src.app.search_results_paging import SEARCH_RESULTS_PAGE_SIZE, search_results_page_count
+from ui.widgets.button_roles import set_button_role
 
 _PAGER_ROW_HEIGHT = 24
-# QSS `#SearchResultsPagerButton` uses padding 0 8px + 1px border.
+# QSS `#GhostButton[chrome="pager"]` uses padding 0 8px + 1px border.
 _PAGER_BTN_PAD_X = 24
 _PAGER_BTN_MIN_WIDTH = 48
 
@@ -34,7 +35,7 @@ class SearchResultsPager(QWidget):
         button_policy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         self.btn_prev = QPushButton()
-        self.btn_prev.setObjectName("SearchResultsPagerButton")
+        set_button_role(self.btn_prev, "GhostButton", chrome="pager")
         self.btn_prev.setFixedHeight(_PAGER_ROW_HEIGHT)
         self.btn_prev.setSizePolicy(button_policy)
         self.btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -46,7 +47,7 @@ class SearchResultsPager(QWidget):
         self.lbl_page.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
 
         self.btn_next = QPushButton()
-        self.btn_next.setObjectName("SearchResultsPagerButton")
+        set_button_role(self.btn_next, "GhostButton", chrome="pager")
         self.btn_next.setFixedHeight(_PAGER_ROW_HEIGHT)
         self.btn_next.setSizePolicy(button_policy)
         self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)

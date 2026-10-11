@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
 from ui.dialogs.html_links import ExternalLinkTextBrowser
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
@@ -99,7 +100,7 @@ class NoticeDialog(QDialog):
 
         if has_update and download_url:
             download_button = QPushButton(texts["download_latest"])
-            download_button.setObjectName("UpdateButton")
+            set_button_role(download_button, "AccentGhostButton", chrome="update")
             download_button.setFixedHeight(36)
             download_button.setCursor(Qt.CursorShape.PointingHandCursor)
             download_button.clicked.connect(lambda: webbrowser.open(download_url))

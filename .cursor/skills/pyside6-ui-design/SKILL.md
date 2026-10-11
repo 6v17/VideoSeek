@@ -28,7 +28,7 @@ Small tweaks (“move this button”, “rename label”) skip the full checklis
 5. **Library lists:** Keep grouped tree/card patterns already in `LibraryGroupedVideoTree` / library rows — do not replace with a random `QListWidget` gallery.
 6. **Styling:** Colors/spacing via `ui/widgets/styles.py` tokens + `objectName`. No one-off pastel gradient themes, purple glow stacks, or Inter-default marketing landing patterns.
 7. **Both themes:** Any new chrome must work in dark **and** light (`THEME_COLORS_*`).
-8. **Actions:** One primary CTA per toolbar group (`PrimaryButton`); secondary = `AccentGhostButton` / `GhostButton`; destructive = `DangerGhostButton`.
+8. **Actions:** One primary CTA per toolbar group (`PrimaryButton`); secondary = `AccentGhostButton` / `GhostButton`; destructive = `DangerGhostButton`. Main-window `QPushButton`s use `set_button_role`; specialized look uses `chrome` property, not a one-off objectName.
 9. **Async UX:** >400ms work shows progress/status (`VSProgressStatusRow` / page `lbl_status`); never freeze the window.
 10. **i18n:** No hard-coded-only UI strings; add zh+en keys.
 

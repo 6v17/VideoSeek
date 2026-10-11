@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.layout import (
     COMPONENT_SIZES,
     compute_search_panel_width,
@@ -100,7 +101,7 @@ class ImageQueryThumb(QFrame):
         self._text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         self._clear = QPushButton("×")
-        self._clear.setObjectName("ImageQueryClear")
+        set_button_role(self._clear, "GhostButton", chrome="imageClear")
         self._clear.setCursor(Qt.CursorShape.PointingHandCursor)
         self._clear.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._clear.setFixedSize(22, 22)
@@ -632,7 +633,7 @@ class SearchPanel(VSCard):
         self.btn_clear.setObjectName("DangerGhostButton")
         self.btn_clear.setFixedHeight(32)
         self.btn_filters = QPushButton("高级参数")
-        self.btn_filters.setObjectName("SearchFilterToggle")
+        set_button_role(self.btn_filters, "GhostButton", chrome="filterToggle")
         self.btn_filters.setCheckable(True)
         self.btn_filters.setChecked(False)
         self.btn_filters.setCursor(Qt.CursorShape.PointingHandCursor)

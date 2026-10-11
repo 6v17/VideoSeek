@@ -26,6 +26,7 @@ from ui.widgets.components import (
     SettingDetailPopup,
     fallback_text as _fallback_text,
 )
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.scaffold import PageScaffold, VSCard
 from ui.widgets.settings.form import SettingsFormMixin
@@ -291,12 +292,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.mobile_toggle_label = QLabel()
         self.mobile_toggle_label.setObjectName("InlineFieldLabel")
         self.btn_mobile_toggle = QPushButton()
-        self.btn_mobile_toggle.setObjectName("MobileBridgeToggle")
+        set_button_role(self.btn_mobile_toggle, "GhostButton", chrome="mobileToggle")
         self.btn_mobile_toggle.setCursor(Qt.PointingHandCursor)
         self.btn_mobile_toggle.setCheckable(True)
         self.btn_mobile_toggle.setFixedSize(52, 28)
         self.btn_mobile_qr = QPushButton()
-        self.btn_mobile_qr.setObjectName("MobileBridgeQrButton")
+        set_button_role(self.btn_mobile_qr, "AccentGhostButton", chrome="mobileQr")
         self.btn_mobile_qr.setProperty("placement", "settings")
         self.btn_mobile_qr.setProperty("qrState", "visible")
         self.btn_mobile_qr.setEnabled(False)
@@ -389,7 +390,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_indexing_video_workers = QLabel()
         self.hint_chunk_policy = QLabel()
         self.btn_toggle_chunk_advanced = QPushButton()
-        self.btn_toggle_chunk_advanced.setObjectName("LinkUtilityButton")
+        set_button_role(self.btn_toggle_chunk_advanced, "AccentGhostButton", chrome="linkUtility")
         self.btn_toggle_chunk_advanced.setFlat(True)
         self.btn_toggle_chunk_advanced.setCursor(Qt.PointingHandCursor)
         self.input_chunk_policy_bundle = QWidget()

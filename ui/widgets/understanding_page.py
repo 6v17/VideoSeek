@@ -26,6 +26,7 @@ from ui.widgets.chunk_timeline import ChunkTimelineWidget
 from ui.widgets.components import NoWheelComboBox
 from ui.widgets.data_table import DataTable
 from ui.widgets.recap_review_delegate import RecapReviewItemDelegate
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.scaffold import PageScaffold, VSCard, VSProgressStatusRow, make_runtime_banner
 from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.table_specs import (
@@ -35,9 +36,9 @@ from ui.widgets.understanding_services_panel import UnderstandingServicesPanel
 from ui.widgets.vertical_stretch import add_filling_widget, add_vertically_stretchable
 
 
-def _action_button(object_name: str) -> QPushButton:
+def _action_button(object_name: str, *, chrome: str = "") -> QPushButton:
     button = QPushButton()
-    button.setObjectName(object_name)
+    set_button_role(button, object_name, chrome=chrome)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     # Mouse activates without taking focus — avoids QScrollArea yanking to the button.
@@ -229,7 +230,7 @@ class UnderstandingEvidencePage(QWidget):
         self._step_scrolls: dict[QWidget, QScrollArea] = {}
         self._step_pages: dict[QWidget, QWidget] = {}
         for index in range(5):
-            button = _action_button("WizardStepButton")
+            button = _action_button("GhostButton", chrome="wizardStep")
             button.setCheckable(True)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.setMinimumHeight(36)

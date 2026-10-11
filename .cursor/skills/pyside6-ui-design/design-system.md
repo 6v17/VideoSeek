@@ -26,6 +26,8 @@ Source of truth: `docs/pyside6_ui_architecture.md`, `ui/widgets/styles.py`, `ui/
 
 ## Button objectNames
 
+Every main-window `QPushButton` uses one action role via `ui.widgets.button_roles.set_button_role`.
+
 | Role | objectName |
 |------|------------|
 | Primary | `PrimaryButton` |
@@ -33,8 +35,19 @@ Source of truth: `docs/pyside6_ui_architecture.md`, `ui/widgets/styles.py`, `ui/
 | Neutral secondary | `GhostButton` |
 | Danger | `DangerGhostButton` |
 | Success/add | `SuccessGhostButton` |
-| Sidebar navigation | `NavButton` |
-| Sidebar icon | `SidebarIconButton` |
+
+Special chrome (nav, wizard steps, mode segments, toggles) keeps the role objectName and sets Qt property `chrome` for QSS overrides, e.g. `#GhostButton[chrome="nav"]`, `#GhostButton[chrome="wizardStep"]`, `#GhostButton[chrome="mobileToggle"]`.
+
+| Chrome | Typical role | Notes |
+|--------|--------------|-------|
+| `nav` | GhostButton | Sidebar page switch (checkable) |
+| `wizardStep` | GhostButton | Understanding step chips |
+| `modeSegment` | GhostButton | Library / results view segment |
+| `sidebarFooter` / `sidebarFooterGhost` | GhostButton | Sidebar bottom text actions |
+| `mobileToggle` / `mobileQr` | Ghost / AccentGhost | Settings mobile bridge |
+| Settings Save | PrimaryButton | Stays primary when clean; dirty only enables it |
+| Understanding model test/save | Ghost / Primary | Inside the select-step card, not beside 下一步 |
+| Sidebar icon tools | `SidebarIconButton` | `QToolButton`, not a QPushButton role |
 
 ## Key layout constants (`layout.py`)
 

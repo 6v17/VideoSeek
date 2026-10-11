@@ -385,7 +385,7 @@ QCheckBox:disabled {
     background: __WINDOW__;
     border: none;
 }
-#WizardStepButton {
+#GhostButton[chrome="wizardStep"] {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE_STRONG__;
     border-left: 3px solid __LINE_STRONG__;
@@ -394,24 +394,24 @@ QCheckBox:disabled {
     padding: __SPACE_2__ __SPACE_4__;
     border-radius: __RADIUS_MD__;
 }
-#WizardStepButton:hover {
+#GhostButton[chrome="wizardStep"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
     border-left: 3px solid __LINE_STRONG__;
     color: __HEADLINE__;
 }
-#WizardStepButton:checked {
+#GhostButton[chrome="wizardStep"]:checked {
     background: __ACCENT_SOFT__;
     border: 1px solid __ACCENT__;
     border-left: 3px solid __ACCENT__;
     color: __HEADLINE__;
 }
-#WizardStepButton:checked:hover {
+#GhostButton[chrome="wizardStep"]:checked:hover {
     background: __ACCENT_SOFT_HOVER__;
     border: 1px solid __ACCENT_HOVER__;
     border-left: 3px solid __ACCENT_HOVER__;
 }
-#WizardStepButton:pressed {
+#GhostButton[chrome="wizardStep"]:pressed {
     background: __BUTTON_SOFT_PRESSED__;
 }
 #UnderstandingTimelineBlock {
@@ -508,16 +508,16 @@ QPushButton:disabled {
     color: __MUTED__;
     font-weight: 600;
 }
-#UpdateButton {
+#AccentGhostButton[chrome="update"] {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
     color: __ACCENT__;
     font-weight: 700;
 }
-#UpdateButton:hover {
+#AccentGhostButton[chrome="update"]:hover {
     background: __BUTTON_SOFT_HOVER__;
 }
-#UpdateButton:pressed {
+#AccentGhostButton[chrome="update"]:pressed {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
 }
@@ -530,7 +530,7 @@ QPushButton:disabled {
 #WarningButton:hover {
     background: __BUTTON_SOFT_HOVER__;
 }
-#MobileBridgeToggle {
+#GhostButton[chrome="mobileToggle"] {
     min-width: 52px;
     max-width: 52px;
     min-height: 28px;
@@ -543,24 +543,24 @@ QPushButton:disabled {
     font-weight: 700;
     text-align: center;
 }
-#MobileBridgeToggle[bridgeState="off"] {
+#GhostButton[chrome="mobileToggle"][bridgeState="off"] {
     background: __BUTTON_SOFT__;
     border-color: __LINE_STRONG__;
     color: __MUTED__;
 }
-#MobileBridgeToggle[bridgeState="on"] {
+#GhostButton[chrome="mobileToggle"][bridgeState="on"] {
     background: __SUCCESS_SOFT__;
     border-color: __SUCCESS__;
     color: __SUCCESS__;
 }
-#MobileBridgeToggle:hover {
+#GhostButton[chrome="mobileToggle"]:hover {
     border-color: currentColor;
     background: __BUTTON_SOFT_HOVER__;
 }
-#MobileBridgeToggle[bridgeState="on"]:hover {
+#GhostButton[chrome="mobileToggle"][bridgeState="on"]:hover {
     background: __SUCCESS_SOFT__;
 }
-#MobileBridgeToggle[bridgeState="off"]:hover {
+#GhostButton[chrome="mobileToggle"][bridgeState="off"]:hover {
     background: __BUTTON_SOFT_HOVER__;
 }
 #SearchPrecisionToggle {
@@ -599,7 +599,7 @@ QPushButton:disabled {
 #SearchPrecisionToggle:disabled {
     opacity: 0.45;
 }
-#MobileBridgeQrButton {
+#AccentGhostButton[chrome="mobileQr"] {
     min-width: 56px;
     max-width: 56px;
     min-height: 28px;
@@ -611,38 +611,38 @@ QPushButton:disabled {
     font-weight: 700;
     text-align: center;
 }
-#MobileBridgeQrButton[qrState="hidden"] {
+#AccentGhostButton[chrome="mobileQr"][qrState="hidden"] {
     background: transparent;
     border: none;
     color: transparent;
     padding: 0;
 }
-#MobileBridgeQrButton[qrState="hidden"]:hover {
+#AccentGhostButton[chrome="mobileQr"][qrState="hidden"]:hover {
     background: transparent;
     border: none;
 }
-#MobileBridgeQrButton[placement="settings"] {
+#AccentGhostButton[chrome="mobileQr"][placement="settings"] {
     min-width: 72px;
     max-width: 88px;
     min-height: 32px;
     max-height: 32px;
 }
-#MobileBridgeQrButton:hover {
+#AccentGhostButton[chrome="mobileQr"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __ACCENT__;
 }
-#MobileBridgeQrButton:disabled {
+#AccentGhostButton[chrome="mobileQr"]:disabled {
     background: __FIELD__;
     border: 1px solid __LINE__;
     color: __MUTED__;
 }
-#LinkUtilityButton {
+#AccentGhostButton[chrome="linkUtility"] {
     background: __ACCENT_SOFT__;
     border-color: __LINE_STRONG__;
     color: __HEADLINE__;
     font-weight: 600;
 }
-#LinkUtilityButton:hover {
+#AccentGhostButton[chrome="linkUtility"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __ACCENT__;
 }
@@ -665,28 +665,28 @@ QPushButton:disabled {
     border-color: __ACCENT__;
     color: __ACCENT__;
 }
-#SearchFilterToggle {
+#GhostButton[chrome="filterToggle"] {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE_STRONG__;
     color: __HEADLINE__;
     font-weight: 600;
     padding: __SPACE_1__ __SPACE_3__;
 }
-#SearchFilterToggle:hover {
+#GhostButton[chrome="filterToggle"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
 }
-#SearchFilterToggle[active="true"] {
+#GhostButton[chrome="filterToggle"][active="true"] {
     color: __ACCENT__;
     border-color: __ACCENT__;
 }
-#SearchFilterToggle:checked {
+#GhostButton[chrome="filterToggle"]:checked {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
     color: __ACCENT__;
     padding: __SPACE_1__ __SPACE_3__;
 }
-#SearchFilterToggle:pressed {
+#GhostButton[chrome="filterToggle"]:pressed {
     background: __BUTTON_SOFT_PRESSED__;
     padding: __SPACE_1__ __SPACE_3__;
 }
@@ -802,18 +802,18 @@ QPushButton:disabled {
     font-size: __FS_XS__;
     background: transparent;
 }
-#PresetManageButton {
+#GhostButton[chrome="presetManage"] {
     background: transparent;
     color: __ACCENT__;
     border: 1px solid __ACCENT__;
     font-weight: 600;
 }
-#PresetManageButton:hover {
+#GhostButton[chrome="presetManage"]:hover {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT_HOVER__;
     color: __ACCENT_HOVER__;
 }
-#PresetManageButton:pressed {
+#GhostButton[chrome="presetManage"]:pressed {
     background: __ACCENT_SOFT__;
     border-color: __ACCENT__;
 }
@@ -823,7 +823,7 @@ QPushButton:disabled {
 #SearchResultsPager {
     background: transparent;
 }
-QPushButton#SearchResultsPagerButton {
+#GhostButton[chrome="pager"] {
     background-color: transparent;
     border: 1px solid __ACCENT__;
     border-radius: __RADIUS_MD__;
@@ -834,17 +834,17 @@ QPushButton#SearchResultsPagerButton {
     min-height: 22px;
     max-height: 24px;
 }
-QPushButton#SearchResultsPagerButton:hover:enabled {
+#GhostButton[chrome="pager"]:hover:enabled {
     background-color: __ACCENT_SOFT__;
     border-color: __ACCENT_HOVER__;
     color: __ACCENT_HOVER__;
 }
-QPushButton#SearchResultsPagerButton:pressed:enabled {
+#GhostButton[chrome="pager"]:pressed:enabled {
     background-color: __ACCENT_SOFT__;
     border-color: __ACCENT__;
     padding-top: 1px;
 }
-QPushButton#SearchResultsPagerButton:disabled {
+#GhostButton[chrome="pager"]:disabled {
     background-color: transparent;
     border-color: __ACCENT__;
     color: __MUTED__;
@@ -949,7 +949,7 @@ QPushButton#SearchResultsPagerButton:disabled {
     max-width: 1px;
     margin: __SPACE_2__ __SPACE_1__;
 }
-#NavButton {
+#GhostButton[chrome="nav"] {
     text-align: left;
     padding: __SPACE_2__ __SPACE_3__;
     font-weight: 600;
@@ -958,29 +958,29 @@ QPushButton#SearchResultsPagerButton:disabled {
     background: __PANEL__;
     color: __HEADLINE__;
 }
-#NavButton:hover {
+#GhostButton[chrome="nav"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border: 1px solid __LINE_STRONG__;
 }
-#NavButton:pressed {
+#GhostButton[chrome="nav"]:pressed {
     background: __BUTTON_SOFT_PRESSED__;
     border: 1px solid __LINE_STRONG__;
     padding-top: 9px;
     padding-bottom: 7px;
 }
-#NavButton:checked {
+#GhostButton[chrome="nav"]:checked {
     background: __ACCENT_SOFT__;
     border: 1px solid __ACCENT__;
     border-left: 3px solid __ACCENT__;
     color: __HEADLINE__;
 }
-#NavButton:checked:hover {
+#GhostButton[chrome="nav"]:checked:hover {
     background: __ACCENT_SOFT_HOVER__;
     border: 1px solid __ACCENT_HOVER__;
     border-left: 3px solid __ACCENT_HOVER__;
 }
 /* Sidebar bottom row + link-page file/cache utilities: visible on light panels (avoid four identical AccentGhost). */
-#SidebarFooterButton, #NeutralToolButton {
+#GhostButton[chrome="sidebarFooter"], #NeutralToolButton {
     border-radius: __RADIUS_MD__;
     border: 1px solid __LINE_STRONG__;
     background: __PANEL__;
@@ -988,23 +988,23 @@ QPushButton#SearchResultsPagerButton:disabled {
     padding: __SPACE_2__ __SPACE_3__;
     font-weight: 600;
 }
-#SidebarFooterButton:hover, #NeutralToolButton:hover {
+#GhostButton[chrome="sidebarFooter"]:hover, #NeutralToolButton:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
 }
-#SidebarFooterButton:pressed, #NeutralToolButton:pressed {
+#GhostButton[chrome="sidebarFooter"]:pressed, #NeutralToolButton:pressed {
     background: __BUTTON_SOFT_PRESSED__;
     border-color: __LINE_STRONG__;
     padding-top: 8px;
     padding-bottom: 6px;
 }
-#SidebarFooterButton:disabled, #NeutralToolButton:disabled {
+#GhostButton[chrome="sidebarFooter"]:disabled, #NeutralToolButton:disabled {
     color: __MUTED__;
     border-color: __LINE__;
     background: __FIELD__;
     font-weight: 600;
 }
-#SidebarFooterGhost {
+#GhostButton[chrome="sidebarFooterGhost"] {
     border-radius: __RADIUS_MD__;
     border: 1px solid __LINE_STRONG__;
     background: __PANEL__;
@@ -1012,17 +1012,17 @@ QPushButton#SearchResultsPagerButton:disabled {
     padding: __SPACE_2__ __SPACE_3__;
     font-weight: 600;
 }
-#SidebarFooterGhost:hover {
+#GhostButton[chrome="sidebarFooterGhost"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
 }
-#SidebarFooterGhost:pressed {
+#GhostButton[chrome="sidebarFooterGhost"]:pressed {
     background: __TRACK__;
     border-color: __LINE_STRONG__;
     padding-top: 8px;
     padding-bottom: 6px;
 }
-#SidebarFooterGhost:disabled {
+#GhostButton[chrome="sidebarFooterGhost"]:disabled {
     color: __MUTED__;
     border-color: __LINE__;
     background: __FIELD__;
@@ -1166,7 +1166,7 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
 }
-#TagChipNavButton {
+#GhostButton[chrome="chipNav"] {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
@@ -1178,11 +1178,11 @@ QTextEdit#SearchInput:focus, QPlainTextEdit#SearchInput:focus {
     min-height: 32px;
     max-height: 32px;
 }
-#TagChipNavButton:hover {
+#GhostButton[chrome="chipNav"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     border-color: __LINE_STRONG__;
 }
-#TagChipNavButton:disabled {
+#GhostButton[chrome="chipNav"]:disabled {
     color: __MUTED__;
     border-color: transparent;
 }
@@ -1490,7 +1490,7 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
 }
-#LibraryModeBtn {
+#GhostButton[chrome="modeSegment"] {
     background: transparent;
     border: 1px solid transparent;
     border-radius: __RADIUS_MD__;
@@ -1500,11 +1500,11 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     min-height: 26px;
     padding: __SPACE_1__ __SPACE_3__;
 }
-#LibraryModeBtn:hover:!checked {
+#GhostButton[chrome="modeSegment"]:hover:!checked {
     background: __BUTTON_SOFT_HOVER__;
     color: __TEXT__;
 }
-#LibraryModeBtn:checked {
+#GhostButton[chrome="modeSegment"]:checked {
     background: __ACCENT_SOFT__;
     color: __ACCENT__;
     border: 1px solid __ACCENT__;
@@ -1774,7 +1774,7 @@ QTableView#LibraryGroupedLibTree::item:selected:!active {
     border: none;
     padding: 0;
 }
-#ImageQueryClear {
+#GhostButton[chrome="imageClear"] {
     background: transparent;
     border: none;
     border-radius: __RADIUS_SM__;
@@ -1787,12 +1787,12 @@ QTableView#LibraryGroupedLibTree::item:selected:!active {
     min-height: 22px;
     max-height: 22px;
 }
-#ImageQueryClear:hover {
+#GhostButton[chrome="imageClear"]:hover {
     background: __BUTTON_SOFT_HOVER__;
     color: __DANGER__;
     padding: 0;
 }
-#ImageQueryClear:pressed {
+#GhostButton[chrome="imageClear"]:pressed {
     background: __BUTTON_SOFT_HOVER__;
     color: __DANGER__;
     padding: 0;

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.styles import repolish_widget
 
 
@@ -152,7 +153,7 @@ class TagSearchForm(QWidget):
         self.btn_chips_prev = QPushButton("‹")
         self.btn_chips_next = QPushButton("›")
         for button in (self.btn_chips_prev, self.btn_chips_next):
-            button.setObjectName("TagChipNavButton")
+            set_button_role(button, "GhostButton", chrome="chipNav")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.setFixedSize(22, 32)

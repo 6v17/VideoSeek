@@ -37,6 +37,7 @@ from ui.widgets.scaffold import (
     make_runtime_banner,
 )
 from ui.widgets.search_panel import SearchPanel
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.styles import repolish_widget
 from ui.widgets.library_video_tree import LibraryGroupedVideoTree
 from ui.widgets.video_download_page import VideoDownloadPage
@@ -313,11 +314,11 @@ class NavigationSidebar(QWidget):
         layout.addStretch()
 
         self.btn_notice = QPushButton("Notes")
-        self.btn_notice.setObjectName("SidebarFooterButton")
+        set_button_role(self.btn_notice, "GhostButton", chrome="sidebarFooter")
         self.btn_about = QPushButton("About")
-        self.btn_about.setObjectName("SidebarFooterButton")
+        set_button_role(self.btn_about, "GhostButton", chrome="sidebarFooter")
         self.btn_language = QPushButton("EN")
-        self.btn_language.setObjectName("SidebarFooterGhost")
+        set_button_role(self.btn_language, "GhostButton", chrome="sidebarFooterGhost")
 
         self.footer_icon_row = QWidget()
         footer_icon_layout = QHBoxLayout(self.footer_icon_row)
@@ -363,7 +364,7 @@ class NavigationSidebar(QWidget):
 
     def _build_nav_button(self, text, checked=False):
         button = QPushButton(text)
-        button.setObjectName("NavButton")
+        set_button_role(button, "GhostButton", chrome="nav")
         button.setCheckable(True)
         button.setChecked(checked)
         button.setCursor(Qt.PointingHandCursor)
@@ -509,7 +510,7 @@ class SearchPage(QWidget):
         results_toolbar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.search_presets_bar = SearchPresetsBar()
         self.btn_manage_presets = QPushButton()
-        self.btn_manage_presets.setObjectName("PresetManageButton")
+        set_button_role(self.btn_manage_presets, "GhostButton", chrome="presetManage")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
         self.btn_shot_list = QPushButton()
@@ -527,13 +528,13 @@ class SearchPage(QWidget):
         view_row.setContentsMargins(2, 2, 2, 2)
         view_row.setSpacing(2)
         self.btn_results_view_table = QPushButton()
-        self.btn_results_view_table.setObjectName("LibraryModeBtn")
+        set_button_role(self.btn_results_view_table, "GhostButton", chrome="modeSegment")
         self.btn_results_view_table.setCheckable(True)
         self.btn_results_view_table.setChecked(False)
         self.btn_results_view_table.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_results_view_table.setMinimumWidth(52)
         self.btn_results_view_grid = QPushButton()
-        self.btn_results_view_grid.setObjectName("LibraryModeBtn")
+        set_button_role(self.btn_results_view_grid, "GhostButton", chrome="modeSegment")
         self.btn_results_view_grid.setCheckable(True)
         self.btn_results_view_grid.setChecked(True)
         self.btn_results_view_grid.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -774,13 +775,13 @@ class LibraryPage(QWidget):
         mode_row.setSpacing(2)
         mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.btn_tab_visual = QPushButton()
-        self.btn_tab_visual.setObjectName("LibraryModeBtn")
+        set_button_role(self.btn_tab_visual, "GhostButton", chrome="modeSegment")
         self.btn_tab_visual.setCheckable(True)
         self.btn_tab_visual.setChecked(True)
         self.btn_tab_visual.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_tab_visual.setMinimumWidth(108)
         self.btn_tab_dialogue = QPushButton()
-        self.btn_tab_dialogue.setObjectName("LibraryModeBtn")
+        set_button_role(self.btn_tab_dialogue, "GhostButton", chrome="modeSegment")
         self.btn_tab_dialogue.setCheckable(True)
         self.btn_tab_dialogue.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_tab_dialogue.setMinimumWidth(108)
