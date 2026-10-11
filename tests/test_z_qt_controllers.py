@@ -1427,6 +1427,9 @@ class PreviewDialogTests(unittest.TestCase):
     @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     def test_play_same_file_seeks_without_media_new(self, _mock_timer):
         host = _make_host_widget()
+        host.resize(320, 180)
+        host.show()
+        self.addCleanup(host.close)
         player = VlcPreviewPlayer(host)
         mock_mp = MagicMock()
         mock_mp.play.return_value = 0
@@ -1451,6 +1454,9 @@ class PreviewDialogTests(unittest.TestCase):
     @patch("ui.playback.vlc_player.QTimer.singleShot", side_effect=lambda _ms, fn: fn())
     def test_play_same_file_reloads_when_seek_is_before_start_time(self, _mock_timer):
         host = _make_host_widget()
+        host.resize(320, 180)
+        host.show()
+        self.addCleanup(host.close)
         player = VlcPreviewPlayer(host)
         mock_mp = MagicMock()
         mock_mp.play.return_value = 0

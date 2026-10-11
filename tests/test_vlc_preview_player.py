@@ -14,6 +14,9 @@ class VlcSameFileSeekTests(unittest.TestCase):
         if QApplication.instance() is None:
             self._app = QApplication([])
         host = QWidget()
+        host.resize(320, 180)
+        host.show()
+        self.addCleanup(host.close)
         self.addCleanup(host.deleteLater)
         mock_mp = MagicMock()
         mock_mp.play.return_value = 0
@@ -73,6 +76,9 @@ class VlcResumeSeekTests(unittest.TestCase):
         if QApplication.instance() is None:
             self._app = QApplication([])
         host = QWidget()
+        host.resize(320, 180)
+        host.show()
+        self.addCleanup(host.close)
         self.addCleanup(host.deleteLater)
         mock_mp = MagicMock()
         mock_mp.play.return_value = 0
