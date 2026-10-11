@@ -454,6 +454,9 @@ class SearchPage(QWidget):
         self.btn_search = self.search_panel.btn_search
         self.btn_clear = self.search_panel.btn_clear
         self.btn_filters = self.search_panel.btn_filters
+        self.score_input = self.search_panel.score_input
+        self.score_label = self.search_panel.score_label
+        self.score_cluster = self.search_panel.score_cluster
         self.search_scope_cluster = self.search_panel.search_scope_cluster
         self.search_scope_label = self.search_panel.search_scope_label
         self.search_scope_select = self.search_panel.search_scope_select

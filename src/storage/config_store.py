@@ -301,6 +301,54 @@ def _app_cfg(config=None):
     return dict(config or load_config())
 
 
+# First search window. The desktop list grows by SEARCH_WINDOW_STEP once the
+# user reaches the current cap minus SEARCH_WINDOW_LEAD, and stops when the
+# score threshold (or the index) returns a short page.
+SEARCH_WINDOW_INITIAL = 300
+SEARCH_WINDOW_STEP = 100
+SEARCH_WINDOW_LEAD = 100
+SEARCH_CANDIDATE_LIMIT = SEARCH_WINDOW_INITIAL
+
+
+def next_result_window(limit, reached_index, exhausted=False):
+    """Return the next fetch cap, or None when the current window still covers the user.
+
+    ``reached_index`` is the furthest 0-based row that has entered the viewport.
+    Growing starts at ``limit - lead`` (300 → 200, then 400 → 300, and so on).
+    """
+    if exhausted:
+        return None
+    try:
+        current = int(limit)
+        reached = int(reached_index)
+    except (TypeError, ValueError):
+        return None
+    if current <= 0 or reached < 0:
+        return None
+    if reached + 1 < current - SEARCH_WINDOW_LEAD:
+        return None
+    return current + SEARCH_WINDOW_STEP
+
+
+_SEARCH_MIN_SCORE_KEYS = {
+    "image": "search_min_score_image",
+    "text": "search_min_score_text",
+    "compose": "search_min_score_compose",
+}
+
+
+def get_search_min_score(config=None, kind: str = "image") -> float:
+    cfg = _app_cfg(config)
+    score_kind = str(kind or "image").strip().lower()
+    key = _SEARCH_MIN_SCORE_KEYS.get(score_kind, "search_min_score_image")
+    raw = cfg.get(key, DEFAULT_CONFIG[key])
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = float(DEFAULT_CONFIG[key])
+    return max(0.0, min(1.0, value))
+
+
 def get_search_top_k(config=None) -> int:
     cfg = _app_cfg(config)
     try:

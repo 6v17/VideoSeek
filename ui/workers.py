@@ -206,6 +206,18 @@ class TeamServerLifecycleWorker(QThread):
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
+def _search_score_kind(config: SearchConfig) -> str | None:
+    """Image, text, and compose each have their own score floor. Keyword search does not."""
+    kind = str(config.search_kind or "").strip().lower()
+    if kind in {"dialogue", "tags"}:
+        return None
+    if kind == "compose" or config.compose_text is not None or config.compose_image_paths is not None:
+        return "compose"
+    if config.is_text:
+        return "text"
+    return "image"
+
+
 class SearchWorker(QThread):
     result_ready = Signal(list)
     error_signal = Signal(str)
@@ -247,6 +259,16 @@ class SearchWorker(QThread):
             )
 
             app_cfg = load_config()
+            from src.storage.config_store import SEARCH_CANDIDATE_LIMIT, get_search_min_score
+
+            resolved_top_k = config.top_k
+            if resolved_top_k is None:
+                resolved_top_k = SEARCH_CANDIDATE_LIMIT
+            resolved_min_score = config.min_score
+            if resolved_min_score is None:
+                score_kind = _search_score_kind(config)
+                if score_kind is not None:
+                    resolved_min_score = get_search_min_score(app_cfg, score_kind)
             if is_team_client_mode(app_cfg):
                 from src.services.team_client_search import run_team_client_search
                 from src.storage.config_store import get_text_search_enhance_enabled
@@ -292,8 +314,8 @@ class SearchWorker(QThread):
                     search_mode=config.search_mode,
                     search_precision_mode=config.search_precision_mode,
                     search_kind=kind or None,
-                    top_k=config.top_k,
-                    min_score=config.min_score,
+                    top_k=resolved_top_k,
+                    min_score=resolved_min_score,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
                     video_discovery_enabled=config.video_discovery_enabled,
@@ -305,7 +327,7 @@ class SearchWorker(QThread):
                     text_enhance=text_enhance,
                     api_port_default=int(app_cfg.get("team_api_port", 8765) or 8765),
                 )
-                results = filter_hits_by_min_score(results, config.min_score)
+                results = filter_hits_by_min_score(results, resolved_min_score)
                 if kind in {"dialogue", "tags"}:
                     self.dialogue_status_message = ""
                     self.dialogue_matched_by = "team"
@@ -317,10 +339,10 @@ class SearchWorker(QThread):
                 match_mode = str(config.search_mode or "exact").strip().lower() or "exact"
                 results, message, matched_by = run_dialogue_search(
                     str(config.query or ""),
-                    top_k=config.top_k,
+                    top_k=resolved_top_k,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
-                    min_score=config.min_score,
+                    min_score=resolved_min_score,
                     query_vector=config.query_vector,
                     match_mode=match_mode,
                 )
@@ -333,10 +355,10 @@ class SearchWorker(QThread):
                 match_mode = str(config.search_mode or "exact").strip().lower() or "exact"
                 results, message, matched_by = run_tag_search(
                     str(config.query or ""),
-                    top_k=config.top_k,
+                    top_k=resolved_top_k,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
-                    min_score=config.min_score,
+                    min_score=resolved_min_score,
                     match_mode=match_mode,
                     required_tags=list(config.required_tags or []) or None,
                 )
@@ -357,7 +379,7 @@ class SearchWorker(QThread):
                     query=str(config.compose_text if config.compose_text is not None else ""),
                     source_image_paths=compose_paths,
                     fusion=config.compose_fusion,
-                    top_k=config.top_k,
+                    top_k=resolved_top_k,
                     search_mode=mode or None,
                     scope_video_paths=config.scope_video_paths or None,
                     scope_library_paths=config.scope_library_paths or None,
@@ -374,7 +396,7 @@ class SearchWorker(QThread):
                 base_kwargs = {
                     "query_data": config.query,
                     "is_text": config.is_text,
-                    "top_k": config.top_k,
+                    "top_k": resolved_top_k,
                     "scope_video_paths": config.scope_video_paths or None,
                     "scope_library_paths": config.scope_library_paths or None,
                     "query_vector": config.query_vector,
@@ -391,7 +413,7 @@ class SearchWorker(QThread):
                     should_stop_callback=self._should_stop,
                     **base_kwargs,
                 )
-            results = filter_hits_by_min_score(results, config.min_score)
+            results = filter_hits_by_min_score(results, resolved_min_score)
             from src.services.search_service import locate_crop_confidence_warning_key
 
             self.locate_warning_key = locate_crop_confidence_warning_key(
@@ -981,7 +1003,7 @@ class ThumbLoader(QThread):
 
     def run(self):
         from src.utils import get_single_thumbnail
-        from ui.thumb_cache import get_thumb_cache
+        from ui.thumb_cache import get_thumb_cache, result_thumb_key
 
         config = load_config()
         thumb_width = config.get("thumb_width", 130)
@@ -1003,16 +1025,15 @@ class ThumbLoader(QThread):
                 self.thumb_ready.emit(table_row, None)
                 continue
 
-            thumb_time = float(hit.start_sec)
-            if float(hit.end_sec) > float(hit.start_sec):
-                thumb_time = (float(hit.start_sec) + float(hit.end_sec)) / 2.0
-
-            cache_key = cache.make_key(video_path, thumb_time, thumb_width, thumb_height)
+            cache_key = result_thumb_key(video_path, hit.start_sec, hit.end_sec, thumb_width, thumb_height)
             cached = cache.get(cache_key)
             if cached is not None:
                 self.thumb_ready.emit(table_row, cached)
                 continue
 
+            thumb_time = float(hit.start_sec)
+            if float(hit.end_sec) > float(hit.start_sec):
+                thumb_time = (float(hit.start_sec) + float(hit.end_sec)) / 2.0
             frame = get_single_thumbnail(video_path, thumb_time)
             if not self._running or self.isInterruptionRequested():
                 break

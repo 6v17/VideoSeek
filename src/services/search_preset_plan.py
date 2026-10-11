@@ -12,7 +12,7 @@ from src.services.search_preset_query import (
     resolve_preset_query_vector,
 )
 from src.services.search_preset_storage import resolve_preset_ref_paths
-from src.storage.config_store import get_search_mode, get_search_top_k
+from src.storage.config_store import get_search_mode
 
 
 def _resolve_preset_video_scope(preset: dict, config=None) -> list[str] | None:
@@ -44,11 +44,10 @@ def build_compose_search_plan(
         config=cfg,
     )
     mode = get_search_mode(cfg)
-    top_k = get_search_top_k(cfg)
     return {
         "query_vector": query_vector,
         "search_mode": mode,
-        "top_k": int(top_k),
+        "top_k": None,
         "min_score": None,
         "is_text": bool(query) and not ref_paths,
         "has_image": bool(ref_paths),
@@ -64,16 +63,13 @@ def build_preset_search_plan(preset_id: str, config=None) -> dict[str, Any]:
     cfg = config or load_config()
     query_vector = resolve_preset_query_vector(preset, config=cfg)
     mode = get_search_mode(cfg)
-    top_k = preset.get("top_k")
-    if top_k is None:
-        top_k = get_search_top_k(cfg)
     query = str(preset.get("query", "") or "").strip()
     ref_paths = resolve_preset_ref_paths(preset, config=cfg)
     return {
         "preset": preset,
         "query_vector": query_vector,
         "search_mode": mode,
-        "top_k": int(top_k),
+        "top_k": None,
         "min_score": preset.get("min_score"),
         "scope_library_paths": None,
         "scope_video_paths": _resolve_preset_video_scope(preset, config=cfg),

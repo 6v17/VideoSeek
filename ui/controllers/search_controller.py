@@ -1,13 +1,41 @@
 import time
+from dataclasses import replace
 
 from PySide6.QtCore import QObject
 
 from src.app.logging_utils import get_logger
-from src.app.search_results_paging import SEARCH_RESULTS_PAGE_SIZE, slice_search_results_page
+from src.app.search_results_paging import slice_search_results_page, visible_end_index
+from src.domain.search_hit import coerce_search_hit
+from src.storage.config_store import (
+    SEARCH_CANDIDATE_LIMIT,
+    next_result_window,
+)
 from ui.threading_utils import shutdown_thread
 from ui.workers import SearchConfig, SearchWarmupWorker, SearchWorker, ThumbLoader
 
 logger = get_logger("search_controller")
+
+
+def _hit_key(row) -> tuple:
+    hit = coerce_search_hit(row)
+    return (
+        str(hit.video_path or ""),
+        round(float(hit.start_sec), 3),
+        round(float(hit.end_sec), 3),
+        str(hit.match_kind or ""),
+    )
+
+
+def _unseen_hits(existing, incoming):
+    seen = {_hit_key(row) for row in existing or []}
+    extra = []
+    for row in incoming or []:
+        key = _hit_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        extra.append(row)
+    return extra
 
 
 class SearchController(QObject):
@@ -27,6 +55,14 @@ class SearchController(QObject):
         self._current_page = 0
         self._last_search_duration = 0.0
         self._result_display_context = {}
+        self._more_worker = None
+        self._search_config = None
+        self._window_limit = 0
+        self._window_exhausted = True
+        self._window_epoch = 0
+        self._prefetch_hold = False
+        self._scroll_hooked = False
+        self._suppress_window_growth = False
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
@@ -72,6 +108,12 @@ class SearchController(QObject):
         required_tags=None,
     ):
         self._stop_active_search_worker()
+        self._stop_more_worker()
+        self._window_epoch += 1
+        self._window_limit = 0
+        self._window_exhausted = True
+        self._prefetch_hold = False
+        self._search_config = None
         self.stop_thumbnail_loading()
         self.start_time = time.time()
         self._scope_library_paths = list(scope_library_paths or [])
@@ -167,6 +209,11 @@ class SearchController(QObject):
         )
 
     def clear_results(self):
+        self._stop_more_worker()
+        self._window_epoch += 1
+        self._window_exhausted = True
+        self._window_limit = 0
+        self._search_config = None
         self.stop_thumbnail_loading()
         self._all_results = []
         self._current_page = 0
@@ -174,10 +221,15 @@ class SearchController(QObject):
         self._result_view().clear()
         self._sync_results_pager()
 
+    def _results_page_size(self) -> int:
+        """Mount the whole hit list. The result view scrolls; a short fixed page looks empty on a large screen."""
+        return max(1, len(self._all_results))
+
     def go_to_results_page(self, page_index: int) -> None:
         if not self._all_results:
             return
-        pages = max(1, (len(self._all_results) + SEARCH_RESULTS_PAGE_SIZE - 1) // SEARCH_RESULTS_PAGE_SIZE)
+        page_size = self._results_page_size()
+        pages = max(1, (len(self._all_results) + page_size - 1) // page_size)
         self._current_page = max(0, min(int(page_index), pages - 1))
         self._render_current_page()
         result_view = self._result_view()
@@ -196,18 +248,196 @@ class SearchController(QObject):
         pager.configure(
             total_count=len(self._all_results),
             current_page=self._current_page,
-            page_size=SEARCH_RESULTS_PAGE_SIZE,
+            page_size=self._results_page_size(),
         )
 
     def shutdown(self):
         self._is_shutdown = True
         self.stop_thumbnail_loading()
+        self._stop_more_worker()
         self._disconnect_search_worker(self.worker)
         shutdown_thread(self.worker, stop_first=True, allow_terminate=False, wait_ms=2000)
         self.worker = None
         self._disconnect_warmup_worker(self.warmup_worker)
         shutdown_thread(self.warmup_worker, allow_terminate=True, wait_ms=2000)
         self.warmup_worker = None
+
+    def _stop_more_worker(self):
+        worker = self._more_worker
+        if worker is None:
+            return
+        self._disconnect_more_worker(worker)
+        shutdown_thread(worker, stop_first=True, allow_terminate=False, wait_ms=1500)
+        if worker is self._more_worker:
+            self._more_worker = None
+
+    def _disconnect_more_worker(self, worker):
+        if worker is None:
+            return
+        for signal, slot in (
+            (worker.result_ready, self._on_window_ready),
+            (worker.error_signal, self._on_window_error),
+            (worker.finished, self._on_window_finished),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _ensure_result_scroll_hooks(self) -> None:
+        if self._scroll_hooked:
+            return
+        view = self._result_view()
+        view.grid.verticalScrollBar().valueChanged.connect(self._on_results_scrolled)
+        view.table.verticalScrollBar().valueChanged.connect(self._on_results_scrolled)
+        self._scroll_hooked = True
+
+    def _on_results_scrolled(self, _value: int = 0) -> None:
+        furthest = self._furthest_visible_index()
+        if self._prefetch_hold and furthest > int(getattr(self, "_prefetch_hold_index", -1)):
+            self._prefetch_hold = False
+        self._maybe_grow_window()
+
+    def _furthest_visible_index(self) -> int:
+        """Last row that has entered the viewport. -1 when the list is empty."""
+        view = self._result_view()
+        if view.view_mode == "grid":
+            grid = view.grid
+            count = int(grid.count())
+            cards = list(getattr(grid, "_cards", None) or [])
+            card_h = int(cards[0].sizeHint().height()) + 12 if cards else 192
+            cols = max(1, int(getattr(grid, "_cols", 1) or 1))
+            bar = grid.verticalScrollBar()
+            return visible_end_index(
+                count,
+                int(bar.value()),
+                int(bar.maximum()),
+                int(grid.viewport().height()),
+                card_h,
+                cols,
+            )
+        table = view.table
+        header = table.verticalHeader()
+        row_h = max(1, int(header.defaultSectionSize() or 88))
+        bar = table.verticalScrollBar()
+        if int(bar.value()) > 0:
+            idx = table.rowAt(max(0, int(table.viewport().height()) - 1))
+            if idx >= 0:
+                return min(int(table.rowCount()) - 1, int(idx)) if table.rowCount() else -1
+        return visible_end_index(
+            int(table.rowCount()),
+            int(bar.value()),
+            int(bar.maximum()),
+            int(table.viewport().height()),
+            row_h,
+            1,
+        )
+
+    def _arm_result_window(self) -> None:
+        """Desktop searches start at 300 and grow. An explicit top_k stays fixed."""
+        config = self._search_config
+        if config is None or config.top_k is not None:
+            self._window_limit = int(getattr(config, "top_k", 0) or 0)
+            self._window_exhausted = True
+            return
+        self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
+        self._window_exhausted = len(self._all_results) < self._window_limit
+        self._prefetch_hold = False
+
+    def _maybe_grow_window(self, *, ignore_worker=None) -> None:
+        if self._suppress_window_growth or self._is_shutdown or self._window_exhausted or self._prefetch_hold:
+            return
+        if self._search_config is None or self._search_config.top_k is not None:
+            return
+        active = self._more_worker
+        if active is not None and active is not ignore_worker and active.isRunning():
+            return
+        nxt = next_result_window(
+            self._window_limit,
+            self._furthest_visible_index(),
+            exhausted=self._window_exhausted,
+        )
+        if nxt is None:
+            return
+        self._start_window_prefetch(int(nxt), retiring=ignore_worker)
+
+    def _start_window_prefetch(self, limit: int, *, retiring=None) -> None:
+        config = self._search_config
+        if config is None:
+            return
+        current = self._more_worker
+        if current is not None and current is retiring:
+            self._disconnect_more_worker(current)
+            self._more_worker = None
+        else:
+            self._stop_more_worker()
+        worker = SearchWorker(replace(config, top_k=int(limit)))
+        worker.window_limit = int(limit)
+        worker.window_epoch = int(self._window_epoch)
+        worker.result_ready.connect(self._on_window_ready)
+        worker.error_signal.connect(self._on_window_error)
+        worker.finished.connect(self._on_window_finished)
+        self._more_worker = worker
+        worker.start()
+
+    def _on_window_ready(self, rows) -> None:
+        worker = self.sender()
+        if self._is_shutdown or worker is not self._more_worker:
+            return
+        if int(getattr(worker, "window_epoch", -1)) != int(self._window_epoch):
+            return
+        requested = int(getattr(worker, "window_limit", 0) or 0)
+        incoming = list(rows or [])
+        if requested <= 0 or len(incoming) < requested:
+            self._window_exhausted = True
+        extra = _unseen_hits(self._all_results, incoming)
+        if not extra:
+            self._window_exhausted = True
+        else:
+            self._all_results.extend(extra)
+            self._append_rendered(extra)
+            self._update_results_status_text(self._all_results, dict(self._result_display_context or {}))
+            self._start_page_thumbnails(self._all_results)
+        if requested > 0:
+            self._window_limit = requested
+        self._maybe_grow_window(ignore_worker=worker)
+
+    def _on_window_error(self, _error_text) -> None:
+        worker = self.sender()
+        if worker is not self._more_worker:
+            return
+        logger.warning("Search window prefetch failed")
+        self._prefetch_hold = True
+        self._prefetch_hold_index = self._furthest_visible_index()
+
+    def _on_window_finished(self) -> None:
+        worker = self.sender()
+        if worker is None or worker is not self._more_worker:
+            return
+        if not worker.isRunning():
+            self._more_worker = None
+
+    def _append_rendered(self, extra) -> None:
+        if not extra:
+            return
+        texts = self.parent_window.texts
+        context = dict(self._result_display_context or {})
+        rank_offset = len(self._all_results) - len(extra)
+        self._result_view().append_local(
+            extra,
+            self.parent_window.handle_play,
+            self.parent_window.open_result_in_explorer,
+            self.parent_window.handle_export_clip,
+            texts,
+            on_deep_locate=getattr(self.parent_window, "start_in_video_deep_search", None),
+            on_add_to_shot_list=getattr(self.parent_window, "add_hit_to_shot_list", None),
+            clip_score_mode=bool(context.get("clip_score_mode")),
+            low_confidence_score=context.get("low_confidence_score"),
+            rank_offset=rank_offset,
+            highlight_query=str(context.get("highlight_query") or ""),
+            dialogue_match_mode=str(context.get("dialogue_match_mode") or ""),
+        )
+        self._sync_results_pager()
 
     def _disconnect_search_worker(self, worker):
         if worker is None:
@@ -373,6 +603,8 @@ class SearchController(QObject):
         self._all_results = list(results or [])
         self._current_page = 0
         self._last_search_duration = max(0.0, time.time() - self.start_time)
+        self._search_config = getattr(self.worker, "config", None)
+        self._arm_result_window()
 
         result_view = self._result_view()
         if not self._all_results:
@@ -421,6 +653,7 @@ class SearchController(QObject):
             "highlight_query": highlight_query,
             "dialogue_match_mode": dialogue_match_mode,
         }
+        self._ensure_result_scroll_hooks()
         self._render_current_page()
 
     def _render_current_page(self) -> None:
@@ -429,15 +662,24 @@ class SearchController(QObject):
             self._result_view().clear()
             self._sync_results_pager()
             return
+        self._suppress_window_growth = True
+        try:
+            self._paint_current_page(results)
+        finally:
+            from PySide6.QtCore import QTimer
 
+            QTimer.singleShot(0, self._resume_window_growth)
+
+    def _paint_current_page(self, results) -> None:
         texts = self.parent_window.texts
         context = dict(self._result_display_context or {})
+        page_size = self._results_page_size()
         page_results = slice_search_results_page(
             results,
             self._current_page,
-            SEARCH_RESULTS_PAGE_SIZE,
+            page_size,
         )
-        rank_offset = self._current_page * SEARCH_RESULTS_PAGE_SIZE
+        rank_offset = self._current_page * page_size
         result_view = self._result_view()
         result_view.populate_local(
             page_results,
@@ -457,6 +699,9 @@ class SearchController(QObject):
         self._update_results_status_text(results, context)
         self._start_page_thumbnails(page_results)
         self._sync_embedded_preview_strip()
+
+    def _resume_window_growth(self) -> None:
+        self._suppress_window_growth = False
 
     def _sync_embedded_preview_strip(self) -> None:
         window = self.parent_window
@@ -585,13 +830,75 @@ class SearchController(QObject):
                     status_text = f"{status_text} · {deep_hint}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
+    def _visible_result_rows(self, total: int) -> list[int]:
+        """Rows that fit in the results viewport, so those thumbnails load first."""
+        count = max(0, int(total))
+        if count <= 0:
+            return []
+        slots = count
+        view = self._result_view()
+        if view.view_mode == "grid":
+            grid = view.grid
+            cols = max(1, int(getattr(grid, "_cols", 1) or 1))
+            cards = list(getattr(grid, "_cards", None) or [])
+            card_h = int(cards[0].sizeHint().height()) if cards else 180
+            row_h = max(1, card_h + 12)
+            rows = max(1, int(grid.viewport().height()) // row_h)
+            slots = cols * rows
+        else:
+            header = view.table.verticalHeader()
+            row_h = max(1, int(header.defaultSectionSize() or 88))
+            slots = max(1, int(view.table.viewport().height()) // row_h)
+        slots = max(1, min(count, int(slots)))
+        return list(range(slots))
+
     def _start_page_thumbnails(self, page_results) -> None:
         self.stop_thumbnail_loading()
-        if not page_results:
+        rows = list(page_results or [])
+        if not rows:
             return
-        self.thumb_thread = ThumbLoader(page_results)
+        from src.app.config import load_config
+        from ui.thumb_cache import get_thumb_cache, result_thumb_key
+
+        config = load_config()
+        thumb_width = int(config.get("thumb_width", 130) or 130)
+        thumb_height = int(config.get("thumb_height", 75) or 75)
+        cache = get_thumb_cache()
+        misses = []
+        for index, raw in enumerate(rows):
+            if (
+                isinstance(raw, (tuple, list))
+                and len(raw) == 2
+                and isinstance(raw[0], int)
+                and not isinstance(raw[0], bool)
+            ):
+                index, raw = int(raw[0]), raw[1]
+            hit = coerce_search_hit(raw)
+            cached = cache.get(
+                result_thumb_key(hit.video_path, hit.start_sec, hit.end_sec, thumb_width, thumb_height)
+            )
+            pixmap = self._pixmap_from_cached_thumb(cached)
+            if pixmap is not None:
+                self._result_view().set_thumbnail(index, pixmap)
+            else:
+                misses.append((index, raw))
+        if not misses:
+            return
+        self.thumb_thread = ThumbLoader(
+            misses,
+            priority_rows=self._visible_result_rows(len(rows)),
+        )
         self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
+
+    def _pixmap_from_cached_thumb(self, image):
+        from PySide6.QtGui import QImage, QPixmap
+
+        if isinstance(image, QImage) and not image.isNull():
+            return QPixmap.fromImage(image)
+        if isinstance(image, QPixmap) and not image.isNull():
+            return image
+        return None
 
     def _finish_search(self):
         if self._is_shutdown or not self._is_current_worker():

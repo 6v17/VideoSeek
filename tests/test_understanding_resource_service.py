@@ -599,6 +599,65 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
         self.assertEqual(probe.get("error_code"), "model_not_found")
         self.assertIn("gpt-4o-mini", probe.get("available_models") or [])
 
+    def test_finalize_rewrites_retired_dashscope_vision_id(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "provider_mode": "cloud",
+                "provider_preset": "dashscope",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "model": "qwen-vl-max",
+            }
+        )
+        self.assertEqual(settings["model"], "qwen3-vl-plus")
+
+    def test_finalize_keeps_retired_name_on_a_local_endpoint(self):
+        settings = understanding_resource_service.finalize_remote_vlm_settings(
+            {
+                "provider_mode": "local",
+                "provider_preset": "custom",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "model": "qwen-vl-max",
+            }
+        )
+        self.assertEqual(settings["model"], "qwen-vl-max")
+
+    def test_pick_available_vlm_model_skips_text_only_ids(self):
+        chosen = understanding_resource_service.pick_available_vlm_model(
+            "qwen-vl-max",
+            ["qwen-plus", "qwen-max", "qwen3-vl-plus"],
+        )
+        self.assertEqual(chosen, "qwen3-vl-plus")
+        unchanged = understanding_resource_service.pick_available_vlm_model(
+            "my-vision",
+            ["qwen-plus", "qwen-max"],
+        )
+        self.assertEqual(unchanged, "my-vision")
+
+    def test_probe_dashscope_missing_catalog_row_stays_usable(self):
+        response_body = json.dumps({"data": [{"id": "qwen-plus"}]}).encode("utf-8")
+        fake_response = MagicMock()
+        fake_response.read.return_value = response_body
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        config = {
+            "understanding": {
+                "remote_vlm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "dashscope",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model": "qwen-vl-max",
+                    "api_keys": {"dashscope": "sk-test"},
+                }
+            }
+        }
+        with patch("urllib.request.urlopen", return_value=fake_response):
+            probe = understanding_resource_service.probe_remote_vlm(config, timeout_sec=3.0)
+        self.assertTrue(probe.get("reachable"))
+        self.assertTrue(probe.get("model_available"))
+        self.assertTrue(probe.get("model_unlisted"))
+        self.assertEqual(probe.get("error_code"), "model_unlisted")
+        self.assertEqual(probe.get("configured_model"), "qwen3-vl-plus")
+
 
 if __name__ == "__main__":
     unittest.main()

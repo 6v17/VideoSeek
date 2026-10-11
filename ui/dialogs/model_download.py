@@ -415,7 +415,7 @@ class ModelDownloadDialog(QDialog):
             return
         if has_files:
             self.import_button.setText(self.texts.get("model_upload_package", "Import"))
-            self.import_button.setObjectName("SearchButton")
+            self.import_button.setObjectName("PrimaryButton")
             self.import_button.setEnabled(True)
         else:
             self.import_button.setText(self.texts.get("model_upload_choose_cta", "Choose package"))

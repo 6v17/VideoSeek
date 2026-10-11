@@ -95,7 +95,7 @@ class SearchResultsPager(QWidget):
             self._current_page = 0
         else:
             self._current_page = max(0, min(int(current_page), pages - 1))
-        self.setVisible(self._total_count > 0)
+        self.setVisible(pages > 1)
         self._sync_controls()
 
     @property

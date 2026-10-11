@@ -38,6 +38,10 @@ class FontScaleTests(unittest.TestCase):
                     "SCROLL": "#c4c4c4",
                     "BUTTON_SOFT": "#f5f5f5",
                     "BUTTON_SOFT_HOVER": "#ebebeb",
+                    "BUTTON_SOFT_PRESSED": "#d8d8d8",
+                    "ACCENT_SOFT_HOVER": "#d0e7f8",
+                    "DANGER_SOFT_HOVER": "#f8d0d4",
+                    "SUCCESS_SOFT_HOVER": "#cfead9",
                     "VIDEO_BG": "#111",
                     "NOTICE_BG": "#e6f2fb",
                     "NOTICE_LINE": "#0078d4",
@@ -54,6 +58,28 @@ class FontScaleTests(unittest.TestCase):
         self.assertIn("font-size: 16px", style)
         self.assertIn("font-size: 18px", style)
         self.assertIn("font-size: 22px", style)
+        self.assertNotIn("__FS_", style)
+        self.assertNotIn("__RADIUS_", style)
+        self.assertNotIn("__SPACE_", style)
+
+    def test_font_scale_125_uses_logical_steps(self):
+        from ui.widgets.styles import THEME_COLORS_LIGHT, _font_size_tokens
+
+        self.assertEqual(
+            _font_size_tokens(1.25),
+            {
+                "FS_XS": "15px",
+                "FS_SM": "18px",
+                "FS_MD": "20px",
+                "FS_LG": "22px",
+                "FS_XL": "28px",
+            },
+        )
+        with patch("src.infra.paths.get_resource_path", side_effect=lambda p: p):
+            style = build_style(THEME_COLORS_LIGHT, font_scale=1.25)
+        self.assertIn("font-size: 15px", style)
+        self.assertIn("font-size: 28px", style)
+        self.assertNotIn("__", style)
 
 
 if __name__ == "__main__":

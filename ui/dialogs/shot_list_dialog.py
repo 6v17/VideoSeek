@@ -101,8 +101,8 @@ class ShotListDialog(VSDialogShell):
         self.btn_move_down = QPushButton(self.texts.get("shot_list_move_down", "Move down"))
         self.btn_remove = QPushButton(self.texts.get("shot_list_remove", "Remove"))
         self.btn_clear = QPushButton(self.texts.get("shot_list_clear", "Clear all"))
-        self.btn_move_up.setObjectName("NeutralToolButton")
-        self.btn_move_down.setObjectName("NeutralToolButton")
+        self.btn_move_up.setObjectName("GhostButton")
+        self.btn_move_down.setObjectName("GhostButton")
         self.btn_remove.setObjectName("DangerGhostButton")
         self.btn_clear.setObjectName("DangerGhostButton")
         for button in (self.btn_move_up, self.btn_move_down, self.btn_remove, self.btn_clear):

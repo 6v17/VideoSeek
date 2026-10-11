@@ -308,6 +308,56 @@ class ResultGrid(QScrollArea):
         self._reflow(force=True)
         QTimer.singleShot(0, self._sync_host_height)
 
+    def append(
+        self,
+        results,
+        on_preview,
+        on_locate,
+        on_export,
+        texts,
+        on_deep_locate=None,
+        on_add_to_shot_list=None,
+        *,
+        clip_score_mode: bool = False,
+        low_confidence_score: float | None = None,
+        rank_offset: int = 0,
+        highlight_query: str = "",
+        dialogue_match_mode: str = "",
+    ) -> None:
+        """Add hits under the current list without moving the scroll position."""
+        del highlight_query, dialogue_match_mode
+        rows = list(results or [])
+        if not rows:
+            return
+        bar = self.verticalScrollBar()
+        scroll_pos = int(bar.value())
+        loading = texts.get("thumb_loading", "…")
+        for index, raw in enumerate(rows):
+            card = ResultGridCard(self._host)
+            low_confidence = (
+                low_confidence_score is not None
+                and rank_offset + index == 0
+                and float(coerce_search_hit(raw).score) < float(low_confidence_score)
+            )
+            card.bind(
+                rank=rank_offset + index + 1,
+                hit=raw,
+                texts=texts,
+                on_preview=on_preview,
+                on_locate=on_locate,
+                on_export=on_export,
+                on_deep_locate=on_deep_locate,
+                on_add_to_shot_list=on_add_to_shot_list,
+                clip_score_mode=clip_score_mode,
+                low_confidence=low_confidence,
+                loading_text=loading,
+            )
+            card._on_select = self._select_card
+            self._cards.append(card)
+        self._reflow(force=True)
+        bar.setValue(scroll_pos)
+        QTimer.singleShot(0, self._sync_host_height)
+
     def _select_card(self, card: ResultGridCard) -> None:
         self._selected = card
         for other in self._cards:

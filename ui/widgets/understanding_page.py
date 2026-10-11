@@ -1,10 +1,11 @@
-"""Understanding page: stacked workflow cards (tags/summary vs ASR-first recap)."""
+"""Understanding page: one workflow step at a time (tags/summary vs ASR-first recap)."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QTabWidget,
     QTreeWidget,
     QVBoxLayout,
@@ -29,7 +31,8 @@ from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.table_specs import (
     UNDERSTANDING_DIALOGUE_TABLE_SPEC,
 )
-from ui.widgets.vertical_stretch import add_vertically_stretchable
+from ui.widgets.understanding_services_panel import UnderstandingServicesPanel
+from ui.widgets.vertical_stretch import add_filling_widget, add_vertically_stretchable
 
 
 def _action_button(object_name: str) -> QPushButton:
@@ -118,6 +121,16 @@ class _UnderstandingSection(QWidget):
         return self._layout
 
 
+class _CurrentStepStack(QStackedWidget):
+    """Fill the page. Step pages scroll themselves; hidden cards must not grow the page."""
+
+    def sizeHint(self):
+        return QSize(640, 420)
+
+    def minimumSizeHint(self):
+        return QSize(480, 280)
+
+
 class UnderstandingEvidencePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -141,15 +154,12 @@ class UnderstandingEvidencePage(QWidget):
         self.workspace_title = QLabel()
         self.workspace_title.setObjectName("CardTitle")
         self.select_hint = _step_hint()
-        self.btn_open_services = _action_button("AccentGhostButton")
         _add_step_header(
             self.workspace_card.content_layout,
             self.workspace_title,
             self.select_hint,
-            self.btn_open_services,
         )
         self._build_select_step(self.workspace_card.content_layout)
-        page_body.addWidget(self.workspace_card)
 
         self.generate_card = VSCard(margins=(20, 16, 20, 16), spacing=12)
         self.generate_title = QLabel()
@@ -157,7 +167,6 @@ class UnderstandingEvidencePage(QWidget):
         self.generate_hint = _step_hint()
         _add_step_header(self.generate_card.content_layout, self.generate_title, self.generate_hint)
         self._build_generate_step(self.generate_card.content_layout)
-        page_body.addWidget(self.generate_card)
 
         self.dialogue_card = VSCard(margins=(20, 16, 20, 16), spacing=12)
         self.dialogue_title = QLabel()
@@ -165,7 +174,6 @@ class UnderstandingEvidencePage(QWidget):
         self.dialogue_hint = _step_hint()
         _add_step_header(self.dialogue_card.content_layout, self.dialogue_title, self.dialogue_hint)
         self._build_dialogue_step(self.dialogue_card.content_layout)
-        page_body.addWidget(self.dialogue_card)
 
         self.export_card = VSCard(margins=(20, 16, 20, 16), spacing=12)
         self.export_title = QLabel()
@@ -173,9 +181,11 @@ class UnderstandingEvidencePage(QWidget):
         self.export_hint = _step_hint()
         _add_step_header(self.export_card.content_layout, self.export_title, self.export_hint)
         self._build_export_step(self.export_card.content_layout)
-        page_body.addWidget(self.export_card)
-        page_body.addStretch(1)
-        self.order_workflow_cards(recap_first=True)
+
+        self.review_card = VSCard(margins=(20, 16, 20, 16), spacing=12)
+        self.recap_review_panel = self.review_card
+        self._build_review_step(self.review_card.content_layout)
+        self._install_workflow(page_body)
         self._hide_section_manuals()
 
     def _hide_section_manuals(self) -> None:
@@ -197,28 +207,236 @@ class UnderstandingEvidencePage(QWidget):
         if hasattr(self.header, "subtitle"):
             self.header.subtitle.hide()
 
-    def order_workflow_cards(self, *, recap_first: bool) -> None:
-        layout = self.scaffold.content_layout
+    def _install_workflow(self, page_body: QVBoxLayout) -> None:
+        self._wizard_labels = {
+            "select": "选片",
+            "speech": "语音",
+            "notes": "说明",
+            "recap": "剪辑",
+            "review": "审稿",
+        }
+        self._recap_first = True
+        self._include_motion_steps = True
+
+        self.wizard_bar = QWidget()
+        self.wizard_bar.setObjectName("UnderstandingWizardBar")
+        bar_layout = QHBoxLayout(self.wizard_bar)
+        bar_layout.setContentsMargins(0, 0, 0, 0)
+        bar_layout.setSpacing(8)
+        self._wizard_group = QButtonGroup(self)
+        self._wizard_group.setExclusive(True)
+        self._wizard_buttons: list[QPushButton] = []
+        self._step_scrolls: dict[QWidget, QScrollArea] = {}
+        self._step_pages: dict[QWidget, QWidget] = {}
+        for index in range(5):
+            button = _action_button("WizardStepButton")
+            button.setCheckable(True)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setMinimumHeight(36)
+            self._wizard_group.addButton(button, index)
+            self._wizard_buttons.append(button)
+            setattr(self, f"btn_wizard_step_{index + 1}", button)
+            bar_layout.addWidget(button, 1)
+            button.clicked.connect(lambda _checked=False, step=index: self._on_wizard_step_clicked(step))
+
+        self.workflow_stack = _CurrentStepStack()
+        self.workflow_stack.setObjectName("UnderstandingWorkflowStack")
+        self.workflow_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self.wizard_nav = QWidget()
+        self.wizard_nav.setObjectName("UnderstandingWizardNav")
+        nav_layout = QHBoxLayout(self.wizard_nav)
+        nav_layout.setContentsMargins(0, 4, 0, 0)
+        nav_layout.setSpacing(8)
+        self.btn_wizard_prev = _action_button("GhostButton")
+        self.btn_wizard_next = _action_button("PrimaryButton")
+        self.btn_wizard_prev.setText("上一步")
+        self.btn_wizard_next.setText("下一步")
+        self.btn_wizard_prev.setMinimumWidth(88)
+        self.btn_wizard_next.setMinimumWidth(88)
+        self.btn_wizard_prev.clicked.connect(self._go_wizard_prev)
+        self.btn_wizard_next.clicked.connect(self._go_wizard_next)
+        nav_layout.addWidget(self.btn_wizard_prev)
+        nav_layout.addStretch(1)
+        nav_layout.addWidget(self.btn_wizard_next)
+
+        page_body.addWidget(self.wizard_bar)
+        page_body.addWidget(self.workflow_stack, 1)
+        page_body.addWidget(self.wizard_nav)
+        self.wizard_nav.raise_()
+        self.order_workflow_cards(recap_first=True)
+
+    def _workflow_card_order(self, recap_first: bool) -> tuple:
         if recap_first:
-            cards = (self.workspace_card, self.dialogue_card, self.generate_card, self.export_card)
+            cards = (
+                self.workspace_card,
+                self.dialogue_card,
+                self.generate_card,
+                self.export_card,
+                self.review_card,
+            )
         else:
-            cards = (self.workspace_card, self.generate_card, self.dialogue_card, self.export_card)
-        insert_at = layout.indexOf(self.understanding_notice) + 1
-        if insert_at <= 0:
-            insert_at = 0
-        # Reshuffling an already-correct order rebuilds geometry and jumps the page scroll.
-        already = True
-        for offset, card in enumerate(cards):
-            item = layout.itemAt(insert_at + offset)
-            if item is None or item.widget() is not card:
-                already = False
-                break
-        if already:
+            cards = (
+                self.workspace_card,
+                self.generate_card,
+                self.dialogue_card,
+                self.export_card,
+                self.review_card,
+            )
+        if not self._include_motion_steps:
+            motion_only = {self.dialogue_card, self.export_card, self.review_card}
+            cards = tuple(card for card in cards if card not in motion_only)
+        return cards
+
+    def _wizard_label_for(self, card: QWidget) -> str:
+        labels = self._wizard_labels
+        if card is self.workspace_card:
+            return labels["select"]
+        if card is self.dialogue_card:
+            return labels["speech"]
+        if card is self.generate_card:
+            return labels["notes"]
+        if card is self.review_card:
+            return labels["review"]
+        return labels["recap"]
+
+    def apply_wizard_texts(self, texts: dict) -> None:
+        self._wizard_labels = {
+            "select": texts.get("understanding_wizard_select", "选片"),
+            "speech": texts.get("understanding_wizard_speech", "语音"),
+            "notes": texts.get("understanding_wizard_notes", "说明"),
+            "recap": texts.get("understanding_wizard_recap", "剪辑"),
+            "review": texts.get("understanding_wizard_review", "审稿"),
+        }
+        self.btn_wizard_prev.setText(texts.get("understanding_wizard_prev", "上一步"))
+        self.btn_wizard_next.setText(texts.get("understanding_wizard_next", "下一步"))
+        self._refresh_wizard_chrome()
+
+    def set_motion_steps_enabled(self, enabled: bool) -> None:
+        """Tags mode keeps select + notes. Recap mode also shows speech, recap, and review."""
+        self._include_motion_steps = bool(enabled)
+        self.order_workflow_cards(recap_first=self._include_motion_steps)
+
+    def current_workflow_step(self) -> int:
+        return max(0, self.workflow_stack.currentIndex())
+
+    def set_workflow_step(self, index: int, *, scroll_to_top: bool = False) -> None:
+        count = self.workflow_stack.count()
+        if count <= 0:
             return
-        for card in cards:
-            layout.removeWidget(card)
-        for offset, card in enumerate(cards):
-            layout.insertWidget(insert_at + offset, card)
+        index = max(0, min(int(index), count - 1))
+        if self.workflow_stack.currentIndex() != index:
+            self.workflow_stack.setCurrentIndex(index)
+        self._refresh_wizard_chrome()
+        self.workflow_stack.updateGeometry()
+        self.updateGeometry()
+        if scroll_to_top:
+            self._scroll_workflow_to_top()
+
+    def _ensure_step_scroll(self, card: QWidget) -> QWidget:
+        page = self._step_pages.get(card)
+        if page is not None:
+            return page
+        host = QWidget()
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+        # Shadows paint past the card and can sit on top of 上一步/下一步.
+        card.setGraphicsEffect(None)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        host_layout.addWidget(card, 1)
+        scroll = QScrollArea()
+        scroll.setObjectName("UnderstandingStepScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(host)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        scroll.setMinimumHeight(0)
+        viewport = scroll.viewport()
+        viewport.setObjectName("UnderstandingStepScrollViewport")
+        self._step_scrolls[card] = scroll
+        # Test/Save stay under the scrolling form so a layout change is not
+        # required before the buttons can take a click.
+        if card is self.workspace_card:
+            step = QWidget()
+            step.setObjectName("UnderstandingSelectStep")
+            step_layout = QVBoxLayout(step)
+            step_layout.setContentsMargins(0, 0, 0, 0)
+            step_layout.setSpacing(8)
+            step_layout.addWidget(scroll, 1)
+            step_layout.addWidget(self.services_panel.actions_bar, 0)
+            page = step
+        else:
+            page = scroll
+        self._step_pages[card] = page
+        return page
+
+    def _card_for_step_page(self, page: QWidget | None) -> QWidget | None:
+        if page is None:
+            return None
+        for card, step_page in self._step_pages.items():
+            if step_page is page:
+                return card
+        return None
+
+    def order_workflow_cards(self, *, recap_first: bool) -> None:
+        """Reorder stack pages and short step labels. Does not rebuild the page."""
+        cards = list(self._workflow_card_order(recap_first))
+        pages = [self._ensure_step_scroll(card) for card in cards]
+        current = self._card_for_step_page(self.workflow_stack.currentWidget())
+        existing = [
+            self.workflow_stack.widget(index)
+            for index in range(self.workflow_stack.count())
+        ]
+        self._recap_first = recap_first
+        if existing != pages:
+            for page in existing:
+                self.workflow_stack.removeWidget(page)
+            for page in pages:
+                self.workflow_stack.addWidget(page)
+            if current in cards:
+                self.workflow_stack.setCurrentWidget(self._step_pages[current])
+            else:
+                self.workflow_stack.setCurrentIndex(0)
+        self._refresh_wizard_chrome()
+        self.workflow_stack.updateGeometry()
+
+    def _refresh_wizard_chrome(self) -> None:
+        count = self.workflow_stack.count()
+        index = self.current_workflow_step() if count else 0
+        for step, button in enumerate(self._wizard_buttons):
+            page = self.workflow_stack.widget(step) if step < count else None
+            card = self._card_for_step_page(page)
+            label = self._wizard_label_for(card) if card is not None else ""
+            button.setText(f"{step + 1}  {label}")
+            button.setChecked(step == index and card is not None)
+            button.setVisible(card is not None)
+        self.btn_wizard_prev.setVisible(index > 0)
+        self.btn_wizard_next.setVisible(count > 0 and index < count - 1)
+
+    def _on_wizard_step_clicked(self, index: int) -> None:
+        if index < 0 or index >= self.workflow_stack.count():
+            return
+        self.set_workflow_step(index, scroll_to_top=True)
+
+    def _go_wizard_prev(self) -> None:
+        self.set_workflow_step(self.current_workflow_step() - 1, scroll_to_top=True)
+
+    def _go_wizard_next(self) -> None:
+        next_index = self.current_workflow_step() + 1
+        if next_index >= self.workflow_stack.count():
+            return
+        self.set_workflow_step(next_index, scroll_to_top=True)
+
+    def _scroll_workflow_to_top(self) -> None:
+        card = self._card_for_step_page(self.workflow_stack.currentWidget())
+        scroll = self._step_scrolls.get(card) if card is not None else None
+        if isinstance(scroll, QScrollArea):
+            bar = scroll.verticalScrollBar()
+            if bar is not None:
+                bar.setValue(0)
 
     def _build_select_step(self, layout: QVBoxLayout) -> None:
         self.picker_strip = QWidget()
@@ -261,6 +479,10 @@ class UnderstandingEvidencePage(QWidget):
         self.lbl_understanding_hint = _status_hint()
         layout.addWidget(self.lbl_understanding_hint)
 
+        self.services_panel = UnderstandingServicesPanel()
+        self.services_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self.services_panel, 1)
+
     def _build_generate_step(self, layout: QVBoxLayout) -> None:
         prompt_row = QHBoxLayout()
         prompt_row.setContentsMargins(0, 0, 0, 0)
@@ -292,8 +514,8 @@ class UnderstandingEvidencePage(QWidget):
         self._vlm_prompt_stretch = add_vertically_stretchable(
             layout,
             self.vlm_prompt_tabs,
-            default_height=168,
-            min_height=120,
+            default_height=72,
+            min_height=64,
             max_height=720,
         )
 
@@ -370,37 +592,42 @@ class UnderstandingEvidencePage(QWidget):
         segment_header.addWidget(self.chunk_time_label, 0)
         chunk_detail_layout.addLayout(segment_header)
 
+        self.chunk_detail_row = QWidget()
+        detail_row = QHBoxLayout(self.chunk_detail_row)
+        detail_row.setContentsMargins(0, 0, 0, 0)
+        detail_row.setSpacing(8)
+
         self.chunk_sample_frames = QWidget()
+        self.chunk_sample_frames.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         sample_frames_layout = QHBoxLayout(self.chunk_sample_frames)
         sample_frames_layout.setContentsMargins(0, 0, 0, 0)
         sample_frames_layout.setSpacing(8)
         self.chunk_frame_start = QLabel()
-        self.chunk_frame_start.setObjectName("UnderstandingSampleFrame")
-        self.chunk_frame_start.setFixedHeight(96)
-        self.chunk_frame_start.setMinimumWidth(120)
-        self.chunk_frame_start.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chunk_frame_end = QLabel()
-        self.chunk_frame_end.setObjectName("UnderstandingSampleFrame")
-        self.chunk_frame_end.setFixedHeight(96)
-        self.chunk_frame_end.setMinimumWidth(120)
-        self.chunk_frame_end.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sample_frames_layout.addWidget(self.chunk_frame_start, 1)
-        sample_frames_layout.addWidget(self.chunk_frame_end, 1)
-        self.chunk_sample_frames.setVisible(False)
-        chunk_detail_layout.addWidget(self.chunk_sample_frames)
+        for frame in (self.chunk_frame_start, self.chunk_frame_end):
+            frame.setObjectName("UnderstandingSampleFrame")
+            frame.setFixedWidth(168)
+            frame.setMinimumHeight(96)
+            frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            sample_frames_layout.addWidget(frame)
+        detail_row.addWidget(self.chunk_sample_frames, 0)
 
         self.chunk_caption_text = QPlainTextEdit()
         self.chunk_caption_text.setObjectName("UnderstandingOutput")
         self.chunk_caption_text.setReadOnly(True)
         self.chunk_caption_text.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.chunk_caption_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        detail_row.addWidget(self.chunk_caption_text, 1)
         self._chunk_caption_stretch = add_vertically_stretchable(
             chunk_detail_layout,
-            self.chunk_caption_text,
-            default_height=160,
-            min_height=100,
+            self.chunk_detail_row,
+            default_height=168,
+            min_height=120,
             max_height=900,
         )
         layout.addWidget(self.chunk_detail_card)
+        layout.addStretch(1)
 
     def _build_dialogue_step(self, layout: QVBoxLayout) -> None:
         actions, row = _command_bar()
@@ -408,7 +635,7 @@ class UnderstandingEvidencePage(QWidget):
         self.btn_open_subtitle_library.setVisible(False)
         self.btn_extract_asr = _action_button("PrimaryButton")
         self.btn_cluster_speakers = _action_button("AccentGhostButton")
-        self.btn_rename_speakers = _action_button("NeutralToolButton")
+        self.btn_rename_speakers = _action_button("GhostButton")
         self.btn_reset_speakers = _action_button("DangerGhostButton")
         self.btn_export_dialogue_json = _action_button("GhostButton")
         self.btn_stop_asr = _action_button("DangerGhostButton")
@@ -434,13 +661,8 @@ class UnderstandingEvidencePage(QWidget):
         self.dialogue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dialogue_table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.dialogue_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._dialogue_table_stretch = add_vertically_stretchable(
-            layout,
-            self.dialogue_table,
-            default_height=240,
-            min_height=140,
-            max_height=1200,
-        )
+        add_filling_widget(layout, self.dialogue_table, min_height=180)
+        self._dialogue_table_stretch = None
 
     def _build_export_step(self, layout: QVBoxLayout) -> None:
         prompt_row = QHBoxLayout()
@@ -475,13 +697,8 @@ class UnderstandingEvidencePage(QWidget):
         self.recap_prompt_tabs.addTab(self.input_recap_prompt, "")
         self.recap_prompt_tabs.addTab(self.input_recap_caption_prompt, "")
         self.recap_prompt_tabs.addTab(self.input_recap_polish_prompt, "")
-        self._recap_prompt_stretch = add_vertically_stretchable(
-            layout,
-            self.recap_prompt_tabs,
-            default_height=168,
-            min_height=120,
-            max_height=720,
-        )
+        add_filling_widget(layout, self.recap_prompt_tabs, min_height=160)
+        self._recap_prompt_stretch = None
 
         steps, step_row = _command_bar("UnderstandingStepBar")
         self.recap_step_bar = steps
@@ -513,15 +730,9 @@ class UnderstandingEvidencePage(QWidget):
         self.recap_progress_bar.setVisible(False)
         layout.addWidget(self.recap_progress_status)
 
-        self.recap_review_panel = VSCard(
-            variant="sub",
-            margins=(14, 12, 14, 12),
-            spacing=8,
-            object_name="RecapReviewPanel",
-        )
-        review = self.recap_review_panel.content_layout
+    def _build_review_step(self, review: QVBoxLayout) -> None:
         self.recap_review_title = QLabel()
-        self.recap_review_title.setObjectName("SectionTitle")
+        self.recap_review_title.setObjectName("CardTitle")
         self.recap_review_hint = _step_hint()
         _add_step_header(review, self.recap_review_title, self.recap_review_hint)
         self.recap_review_status = _status_hint()
@@ -604,5 +815,4 @@ class UnderstandingEvidencePage(QWidget):
         )
         # Alias for older callers that still look for recap_review_table.
         self.recap_review_table = self.recap_review_tree
-        self.recap_review_panel.setVisible(False)
-        layout.addWidget(self.recap_review_panel)
+        review.addStretch(1)

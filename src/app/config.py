@@ -104,6 +104,9 @@ DEFAULT_CONFIG = {
     "sampling_fps_mode": "dynamic",
     "sampling_fps_rules": "0-10m=2; 10m-=1",
     "search_top_k": 100,
+    "search_min_score_image": 0.5,
+    "search_min_score_text": 0.15,
+    "search_min_score_compose": 0.1,
     "text_search_enhance_enabled": False,
     "search_skip_edges_enabled": False,
     "search_skip_ranges": "",
@@ -206,6 +209,9 @@ DEFAULT_CONFIG = {
 CONFIG_BOUNDS = {
     "fps": (0.01, 24.0),
     "search_top_k": (1, 300),
+    "search_min_score_image": (0.0, 1.0),
+    "search_min_score_text": (0.0, 1.0),
+    "search_min_score_compose": (0.0, 1.0),
     "search_skip_intro_sec": (0, 600),
     "search_skip_outro_sec": (0, 600),
     "frame_neighbor_rerank_top_n": (1, 100),
@@ -576,6 +582,18 @@ def _sanitize_general_settings(config):
     # Legacy default (20) cannot fill multiple 20-item pages; bump once for pagination UX.
     if int(sanitized.get("search_top_k", DEFAULT_CONFIG["search_top_k"])) == 20:
         sanitized["search_top_k"] = DEFAULT_CONFIG["search_top_k"]
+
+    # The first score control used one 20% floor for every mode. Split that into
+    # the per-mode defaults when none of the three has been changed yet.
+    score_keys = (
+        "search_min_score_image",
+        "search_min_score_text",
+        "search_min_score_compose",
+    )
+    if all(abs(float(sanitized.get(key, 0.2)) - 0.2) < 1e-6 for key in score_keys):
+        for key in score_keys:
+            sanitized[key] = DEFAULT_CONFIG[key]
+    sanitized.pop("search_min_score", None)
 
     for key, allowed_values in CONFIG_ENUMS.items():
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()

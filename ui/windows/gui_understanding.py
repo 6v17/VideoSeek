@@ -317,6 +317,10 @@ class UnderstandingGuiMixin:
             page.dialogue_card.setVisible(is_motion)
         if hasattr(page, "export_card"):
             page.export_card.setVisible(is_motion)
+        if hasattr(page, "review_card"):
+            page.review_card.setVisible(is_motion)
+        if hasattr(page, "set_motion_steps_enabled"):
+            page.set_motion_steps_enabled(is_motion)
         recap_buttons = (
             "btn_export_recap",
             "btn_recap_step_plan",
@@ -564,6 +568,18 @@ class UnderstandingGuiMixin:
         model = str(probe.get("configured_model", "") or "").strip()
         base_url = str(probe.get("base_url", "") or "").strip()
         error_code = str(probe.get("error_code", "") or "").strip()
+        if probe.get("model_unlisted") or error_code == "model_unlisted":
+            available = [str(item) for item in (probe.get("available_models") or []) if str(item).strip()]
+            sample = ", ".join(available[:8])
+            if len(available) > 8:
+                sample = f"{sample} (+{len(available) - 8})"
+            return self.texts.get(
+                "understanding_test_vlm_model_unlisted",
+                "Connected. {model} is not in the provider catalog; requests still use this name. Catalog sample: {samples}",
+            ).format(
+                model=model or "?",
+                samples=sample or self.texts.get("understanding_test_vlm_no_models", "none"),
+            )
         if probe.get("reachable") and probe.get("model_available"):
             if base_url:
                 return self.texts.get(
@@ -605,6 +621,8 @@ class UnderstandingGuiMixin:
 
     def _probe_status_state(self, probe: dict) -> str:
         probe = dict(probe or {})
+        if probe.get("model_unlisted") or str(probe.get("error_code", "") or "").strip() == "model_unlisted":
+            return "warn"
         if probe.get("reachable") and probe.get("model_available"):
             return "ok"
         error_code = str(probe.get("error_code", "") or "").strip()
@@ -674,23 +692,66 @@ class UnderstandingGuiMixin:
         worker.start()
 
     def _finish_vlm_connection_test(self, probe, page, hint):
+        from src.services.understanding_resource_service import pick_available_vlm_model
         from ui.widgets.understanding_form_common import set_status_hint
 
-        self._cached_vlm_connection_probe = dict(probe or {})
+        probe = dict(probe or {})
+        self._cached_vlm_connection_probe = probe
+        typed = str(page.input_remote_vlm_model.text() or "").strip()
+        live = str(probe.get("configured_model") or "").strip()
+        if probe.get("reachable") and live and typed and live != typed:
+            page.input_remote_vlm_model.setText(live)
+            self._sync_vlm_provider_ui()
+            message = self.texts.get(
+                "understanding_test_vlm_model_replaced",
+                "Connected. {old} is retired; the model name is now {model}. Save to keep it.",
+            ).format(old=typed, model=live)
+            set_status_hint(hint, message, state="warn")
+            self._refresh_understanding_settings_status()
+            self.show_info_dialog(
+                self.texts.get("understanding_test_vlm_title", "Connection test"),
+                message,
+                kind="warning",
+            )
+            return
+        if probe.get("reachable") and not probe.get("model_available"):
+            suggested = pick_available_vlm_model(typed or live, probe.get("available_models") or [])
+            current = typed or live
+            if suggested and suggested != current:
+                page.input_remote_vlm_model.setText(suggested)
+                self._sync_vlm_provider_ui()
+                message = self.texts.get(
+                    "understanding_test_llm_model_switched",
+                    "Connected. {old} is not on this account; filled in {model}. Save, then test again.",
+                ).format(old=current or "?", model=suggested)
+                set_status_hint(hint, message, state="warn")
+                self._refresh_understanding_settings_status()
+                self.show_info_dialog(
+                    self.texts.get("understanding_test_vlm_title", "Connection test"),
+                    message,
+                    kind="warning",
+                )
+                return
         message = self._format_vlm_probe_status(probe)
         set_status_hint(hint, message, state=self._probe_status_state(probe))
-        live = str(dict(probe or {}).get("configured_model") or "").strip()
-        if live and dict(probe or {}).get("reachable"):
+        if live and probe.get("reachable"):
             page.input_remote_vlm_model.setText(live)
             self._sync_vlm_provider_ui()
         self._refresh_understanding_settings_status()
-        if dict(probe or {}).get("reachable") and dict(probe or {}).get("model_available"):
+        unlisted = bool(probe.get("model_unlisted")) or str(probe.get("error_code") or "") == "model_unlisted"
+        if probe.get("reachable") and probe.get("model_available") and not unlisted:
             self.show_info_dialog(
                 self.texts.get("understanding_test_vlm_title", "Connection test"),
                 message,
                 kind="success",
             )
-        elif dict(probe or {}).get("error_code") != "cloud_api_key_required":
+        elif unlisted:
+            self.show_info_dialog(
+                self.texts.get("understanding_test_vlm_title", "Connection test"),
+                message,
+                kind="warning",
+            )
+        elif probe.get("error_code") != "cloud_api_key_required":
             self.show_error_dialog(message)
 
     def _fail_vlm_connection_test(self, message, page, hint):
@@ -1255,9 +1316,18 @@ class UnderstandingGuiMixin:
             return
         from src.media.thumbnail import get_single_thumbnail
 
-        start_pix = self._pixmap_from_bgr_frame(get_single_thumbnail(video_path, stamps[0]))
+        frame_height = 150
+        if hasattr(page, "chunk_frame_start"):
+            frame_height = max(96, int(page.chunk_frame_start.height() or 150))
+        start_pix = self._pixmap_from_bgr_frame(
+            get_single_thumbnail(video_path, stamps[0]),
+            height=frame_height,
+        )
         end_stamp = stamps[1] if len(stamps) > 1 else stamps[0]
-        end_pix = self._pixmap_from_bgr_frame(get_single_thumbnail(video_path, end_stamp))
+        end_pix = self._pixmap_from_bgr_frame(
+            get_single_thumbnail(video_path, end_stamp),
+            height=frame_height,
+        )
         page.chunk_frame_start.setPixmap(start_pix)
         page.chunk_frame_end.setPixmap(end_pix)
 
@@ -1561,14 +1631,9 @@ class UnderstandingGuiMixin:
 
     def open_understanding_settings(self):
         self.switch_page("understanding")
-        dialog = getattr(self, "understanding_services_dialog", None)
-        if dialog is None:
-            return
-        if dialog.isVisible():
-            dialog.raise_()
-            dialog.activateWindow()
-            return
-        dialog.exec()
+        page = getattr(self, "understanding_page", None)
+        if page is not None and hasattr(page, "set_workflow_step"):
+            page.set_workflow_step(0)
 
     def _remote_vlm_status_line(self, status=None) -> str:
         cached_probe = getattr(self, "_cached_vlm_connection_probe", None)

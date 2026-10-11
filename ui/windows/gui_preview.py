@@ -1129,7 +1129,7 @@ class PreviewGuiMixin:
         for btn in (self.search_page.btn_export_tasks,):
             self._set_button_object_name(
                 btn,
-                "PrimaryButton" if has_export_tasks else "GhostButton",
+                "AccentGhostButton" if has_export_tasks else "GhostButton",
             )
         self._sync_preview_layer_actions()
 

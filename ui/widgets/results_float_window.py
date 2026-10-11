@@ -8,6 +8,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QDialog, QSizePolicy, QVBoxLayout, QWidget
 
+from ui.widgets.elevation import apply_elevation
+
 
 def force_widget_foreground(widget) -> None:
     """Raise ``widget`` above other windows; Windows needs SetForegroundWindow."""
@@ -69,6 +71,7 @@ class ResultsFloatWindow(QDialog):
         self.host_layout.setContentsMargins(0, 0, 0, 0)
         self.host_layout.setSpacing(0)
         root.addWidget(self.host, 1)
+        apply_elevation(self, 2)
 
     def is_hosting(self) -> bool:
         return self._card is not None

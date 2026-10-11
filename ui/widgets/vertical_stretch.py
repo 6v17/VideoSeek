@@ -103,3 +103,17 @@ def add_vertically_stretchable(
     handle = VerticalStretchHandle(widget, min_height=min_height, max_height=max_height)
     layout.addWidget(handle, 0)
     return handle
+
+
+def add_filling_widget(
+    layout: QVBoxLayout,
+    widget: QWidget,
+    *,
+    min_height: int = 120,
+    stretch: int = 1,
+) -> None:
+    """Add ``widget`` so it absorbs leftover vertical space in the card."""
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    widget.setMinimumHeight(max(48, int(min_height)))
+    widget.setMaximumHeight(16777215)
+    layout.addWidget(widget, stretch)

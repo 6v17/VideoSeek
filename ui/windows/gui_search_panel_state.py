@@ -360,6 +360,13 @@ class SearchPanelStateMixin:
         if btn_save_preset is not None:
             btn_save_preset.setText(texts.get("search_compose_save_preset", "Save preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
+        if hasattr(page.search_panel, "show_score_kind"):
+            score_kind = active_tab if active_tab in {
+                self.SEARCH_TAB_IMAGE,
+                self.SEARCH_TAB_TEXT,
+                self.SEARCH_TAB_COMPOSE,
+            } else None
+            page.search_panel.show_score_kind(score_kind)
 
         mode_stack = getattr(page, "search_mode_options_stack", None)
         if mode_stack is not None:
@@ -472,6 +479,42 @@ class SearchPanelStateMixin:
         self._refresh_search_model_display()
         self._refresh_search_filter_summary()
 
+    def _load_search_score_thresholds(self) -> None:
+        from src.storage.config_store import get_search_min_score
+
+        panel = getattr(getattr(self, "search_page", None), "search_panel", None)
+        if panel is None or not hasattr(panel, "set_score_thresholds"):
+            return
+        panel.set_score_thresholds(
+            image=get_search_min_score(kind="image"),
+            text=get_search_min_score(kind="text"),
+            compose=get_search_min_score(kind="compose"),
+        )
+
+    def _on_search_score_threshold_changed(self, _value: int) -> None:
+        panel = getattr(getattr(self, "search_page", None), "search_panel", None)
+        kind = getattr(panel, "_score_kind", None) if panel is not None else None
+        if kind:
+            self._save_search_score_threshold(kind)
+
+    def _save_search_score_threshold(self, kind: str) -> None:
+        from src.app.config import load_config, save_config
+
+        panel = getattr(getattr(self, "search_page", None), "search_panel", None)
+        if panel is None:
+            return
+        key = {
+            "image": "search_min_score_image",
+            "text": "search_min_score_text",
+            "compose": "search_min_score_compose",
+        }.get(str(kind or "").strip().lower())
+        if key is None:
+            return
+        config = load_config()
+        config[key] = panel.score_threshold(kind)
+        save_config(config)
+        self._refresh_search_filter_summary()
+
     def _refresh_search_filter_summary(self) -> None:
         page = getattr(self, "search_page", None)
         panel = getattr(page, "search_panel", None) if page is not None else None
@@ -519,6 +562,26 @@ class SearchPanelStateMixin:
                 mode = combo.currentText().strip() if combo is not None else ""
                 if mode:
                     parts.append(mode)
+        score_kind = None
+        if active == self.SEARCH_TAB_IMAGE:
+            score_kind = "image"
+        elif active == self.SEARCH_TAB_TEXT:
+            score_kind = "text"
+        elif active == self.SEARCH_TAB_COMPOSE:
+            score_kind = "compose"
+        if score_kind is not None:
+            from src.app.config import DEFAULT_CONFIG
+
+            key = {
+                "image": "search_min_score_image",
+                "text": "search_min_score_text",
+                "compose": "search_min_score_compose",
+            }[score_kind]
+            percent = int(round(panel.score_threshold(score_kind) * 100))
+            default_percent = int(round(float(DEFAULT_CONFIG[key]) * 100))
+            if percent != default_percent:
+                label = panel.score_label.text().strip()
+                parts.append(f"{label} {percent}%" if label else f"{percent}%")
         panel.set_filter_summary(" · ".join(parts))
 
     def _dialogue_search_hint_text(self, texts) -> str:

@@ -224,7 +224,7 @@ class VideoDownloadPage(QWidget):
         self.btn_clear.setObjectName("DangerGhostButton")
         self.btn_clear.setMinimumHeight(38)
         self.btn_open_dir = QPushButton()
-        self.btn_open_dir.setObjectName("NeutralToolButton")
+        self.btn_open_dir.setObjectName("GhostButton")
         self.btn_open_dir.setMinimumHeight(38)
         self.btn_clear_legacy = QPushButton()
         self.btn_clear_legacy.setObjectName("GhostButton")

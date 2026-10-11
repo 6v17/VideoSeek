@@ -50,7 +50,7 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
-from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog, UnderstandingServicesDialog
+from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog
 from ui.dialogs.html_links import open_html_link
 from ui.widgets.sidebar_icons import (
     bilibili_toolbar_icon,
@@ -70,7 +70,7 @@ from ui.controllers.video_download_controller import VideoDownloadController
 from ui.controllers.preview_controller import PreviewController
 from ui.controllers.runtime_resource_controller import RuntimeResourceController
 from ui.controllers.search_controller import SearchController
-from ui.widgets.styles import DARK_STYLE, LIGHT_STYLE
+from ui.controllers.theme_manager import ThemeManager
 from ui.windows.gui_settings import SettingsGuiMixin
 from ui.windows.gui_preview import PreviewGuiMixin
 from ui.windows.gui_library_indexing import LibraryIndexingGuiMixin
@@ -161,6 +161,7 @@ class MainWindow(
 
         self.init_ui()
         self._init_plugin_features()
+        self.theme_manager = ThemeManager(self)
         self.app_meta_controller = AppMetaController(self)
         self.app_meta_controller.version_ready.connect(self._update_version_info)
         self.app_meta_controller.notice_ready.connect(self._update_notice_payload)
@@ -219,6 +220,7 @@ class MainWindow(
             self.search_controller.shutdown()
             self.preview_controller.shutdown()
             return
+        self.theme_manager.bind_screen()
         self.apply_theme()
 
     def init_ui(self):
@@ -251,11 +253,7 @@ class MainWindow(
         self.link_page = LinkSearchPage()
         self.library_page = LibraryPage()
         self.understanding_page = UnderstandingEvidencePage()
-        self.understanding_services_dialog = UnderstandingServicesDialog(
-            self,
-            is_dark=self.is_dark_mode,
-            language=self.language,
-        )
+        self.understanding_services_dialog = self.understanding_page.services_panel
         self.settings_page = SettingsPage()
         self._plugin_page_widgets = {}
         self._plugin_page_specs = {}
@@ -354,6 +352,8 @@ class MainWindow(
                 self._on_text_search_enhance_changed
             )
         self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
+        self.search_page.score_input.valueChanged.connect(self._on_search_score_threshold_changed)
+        self._load_search_score_thresholds()
         if hasattr(self.search_page, "dialogue_search_mode"):
             self.search_page.dialogue_search_mode.currentIndexChanged.connect(
                 self._on_dialogue_search_mode_changed
@@ -513,7 +513,8 @@ class MainWindow(
                 self.delete_selected_recap_review
             )
         self.understanding_page.btn_understanding_setup.clicked.connect(self.open_understanding_settings)
-        self.understanding_page.btn_open_services.clicked.connect(self.open_understanding_settings)
+        if hasattr(self.understanding_page, "btn_open_services"):
+            self.understanding_page.btn_open_services.clicked.connect(self.open_understanding_settings)
         self.understanding_page.btn_stop.clicked.connect(self.stop_understanding_generation)
         if hasattr(self.understanding_page, "btn_stop_asr"):
             self.understanding_page.btn_stop_asr.clicked.connect(self.stop_understanding_generation)
@@ -835,6 +836,11 @@ class MainWindow(
         if filters is not None:
             filters.setText(t.get("search_filters_toggle", "高级参数"))
             filters.setToolTip(t.get("search_filters_toggle_tip", ""))
+        panel = self.search_page.search_panel
+        score_hint = t.get("search_min_score_hint", "")
+        panel.score_label.setText(t.get("search_min_score_label", "最低相关度"))
+        panel.score_label.setToolTip(score_hint)
+        panel.score_input.setToolTip(score_hint)
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
         self.search_page.skip_edges_label.setText(t.get("search_skip_edges_label", "跳过时段"))
         if hasattr(self, "_refresh_skip_edges_summary"):
@@ -1037,6 +1043,8 @@ class MainWindow(
         )
         self.understanding_page.header.subtitle.hide()
         self.understanding_page.workspace_title.setText(t["understanding_workspace_title"])
+        if hasattr(self.understanding_page, "apply_wizard_texts"):
+            self.understanding_page.apply_wizard_texts(t)
         if hasattr(self.understanding_page, "select_hint"):
             self.understanding_page.select_hint.setText(
                 t.get("understanding_step_select_hint_motion", t.get("understanding_step_select_hint", ""))
@@ -1253,9 +1261,10 @@ class MainWindow(
                     t.get("understanding_custom_motion_prompt_label", "Segment change"),
                 ),
             )
-        self.understanding_page.btn_open_services.setText(
-            t.get("understanding_open_services", t.get("understanding_config_title", "Model services"))
-        )
+        if hasattr(self.understanding_page, "btn_open_services"):
+            self.understanding_page.btn_open_services.setText(
+                t.get("understanding_open_services", t.get("understanding_config_title", "Model services"))
+            )
         self.understanding_page.scope_label.setText(t["understanding_scope_label"])
         self.understanding_page.video_label.setText(t["understanding_video_label"])
         self.understanding_page.timeline_label.setText(t["understanding_timeline_label"])
@@ -2409,24 +2418,7 @@ class MainWindow(
             self._set_image_query(path, clear_text=True)
 
     def apply_theme(self):
-        from PySide6.QtGui import QColor, QPalette
-
-        from ui.widgets.styles import theme_color_map
-
-        style = DARK_STYLE if self.is_dark_mode else LIGHT_STYLE
-        app = QApplication.instance()
-        if app:
-            app.setProperty("videoseek_is_dark", self.is_dark_mode)
-            app.setStyleSheet(style)
-            # Keep Highlight roles in sync so selectable QLabel / unstyled editors stay readable.
-            colors = theme_color_map(self.is_dark_mode)
-            palette = app.palette()
-            palette.setColor(QPalette.ColorRole.Highlight, QColor(str(colors.get("ACCENT") or "#0078d4")))
-            palette.setColor(
-                QPalette.ColorRole.HighlightedText,
-                QColor(str(colors.get("INVERSE_TEXT") or "#ffffff")),
-            )
-            app.setPalette(palette)
+        self.theme_manager.apply(self.is_dark_mode)
         self.update()
         self.sidebar.btn_theme.setText("☀" if self.is_dark_mode else "🌙")
         self._refresh_sidebar_icon_buttons()

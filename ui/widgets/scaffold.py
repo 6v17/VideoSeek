@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.elevation import apply_elevation
 from ui.widgets.layout import COMPONENT_SIZES
 
 # QSS objectName variants (see ui/widgets/styles.py STYLE_TEMPLATE).
@@ -42,6 +43,7 @@ class VSCard(QFrame):
         super().__init__(parent)
         resolved = (object_name or "").strip() or CARD_VARIANTS.get(variant, CARD_VARIANTS["panel"])
         self.setObjectName(resolved)
+        apply_elevation(self, 3 if variant == "dialog" else 1)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(*margins)
         self._layout.setSpacing(spacing)

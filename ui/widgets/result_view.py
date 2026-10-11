@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
 
-from ui.views.table_views import populate_result_table
+from ui.views.table_views import append_result_table_rows, populate_result_table
 from ui.widgets.result_grid import ResultGrid
 from ui.widgets.result_table import ResultTable
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
@@ -163,6 +163,42 @@ class ResultView(QWidget):
         else:
             self.grid.clear()
             populate_result_table(self.table, **kwargs)
+        self._sync_empty_overlay()
+
+    def append_local(
+        self,
+        results,
+        on_preview,
+        on_locate,
+        on_export,
+        texts,
+        on_deep_locate=None,
+        on_add_to_shot_list=None,
+        *,
+        clip_score_mode: bool = False,
+        low_confidence_score: float | None = None,
+        rank_offset: int = 0,
+        highlight_query: str = "",
+        dialogue_match_mode: str = "",
+    ) -> None:
+        kwargs = dict(
+            results=results,
+            on_preview=on_preview,
+            on_locate=on_locate,
+            on_export=on_export,
+            texts=texts,
+            on_deep_locate=on_deep_locate,
+            on_add_to_shot_list=on_add_to_shot_list,
+            clip_score_mode=clip_score_mode,
+            low_confidence_score=low_confidence_score,
+            rank_offset=rank_offset,
+            highlight_query=highlight_query,
+            dialogue_match_mode=dialogue_match_mode,
+        )
+        if self._mode == VIEW_GRID:
+            self.grid.append(**kwargs)
+        else:
+            append_result_table_rows(self.table, **kwargs)
         self._sync_empty_overlay()
 
     def set_thumbnail(self, row: int, pixmap, column: int | None = None) -> None:

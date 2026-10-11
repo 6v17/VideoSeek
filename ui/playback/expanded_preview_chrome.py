@@ -66,7 +66,7 @@ class ExpandedPreviewChrome(QWidget):
         transport.setSpacing(6)
         self.play_button = QPushButton()
         self.maximize_button = QPushButton()
-        self.maximize_button.setObjectName("NeutralToolButton")
+        self.maximize_button.setObjectName("GhostButton")
         self.collapse_button = QPushButton()
         self.collapse_button.setObjectName("GhostButton")
 

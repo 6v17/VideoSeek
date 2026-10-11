@@ -571,13 +571,47 @@ class SearchPanel(VSCard):
         options_row_layout.addWidget(self.search_scope_cluster, 0)
         options_row_layout.addWidget(self.skip_edges_cluster, 0)
         options_row_layout.addWidget(self.search_mode_options_stack, 0)
+
+        from ui.widgets.components import NoWheelSpinBox
+
+        self._score_defaults = {"image": 50, "text": 15, "compose": 10}
+        self._score_values = dict(self._score_defaults)
+        self._score_kind = "image"
+        self.score_label = QLabel()
+        self.score_label.setObjectName("InlineFieldLabel")
+        _configure_field_label(self.score_label)
+        self.score_input = NoWheelSpinBox()
+        self.score_input.setObjectName("SearchScoreInput")
+        self.score_input.setRange(0, 100)
+        self.score_input.setSuffix("%")
+        self.score_input.setValue(self._score_defaults["image"])
+        self.score_input.setFixedWidth(72)
+        self.score_input.setFixedHeight(options_combo_height)
+        self.score_input.valueChanged.connect(self._remember_score)
+        self.score_cluster = QWidget()
+        self.score_cluster.setObjectName("SearchScoreCluster")
+        score_row = QHBoxLayout(self.score_cluster)
+        score_row.setContentsMargins(0, 2, 0, 2)
+        score_row.setSpacing(field_gap)
+        score_row.addWidget(self.score_label, 0)
+        score_row.addWidget(self.score_input, 0)
+        score_row.addStretch(1)
+        self.score_cluster.setFixedHeight(options_row_height)
+        options_row_layout.addWidget(self.score_cluster, 0)
+
         self.options_row.setFixedHeight(options_row_height)
         self.options_row.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         )
 
+        self.filters_panel = QWidget()
+        filters_layout = QVBoxLayout(self.filters_panel)
+        filters_layout.setContentsMargins(0, 0, 0, 0)
+        filters_layout.setSpacing(0)
+        filters_layout.addWidget(self.options_row)
+
         self.btn_search = QPushButton()
-        self.btn_search.setObjectName("SearchButton")
+        self.btn_search.setObjectName("PrimaryButton")
         self.btn_search.setFixedHeight(32)
         self.btn_save_preset = QPushButton()
         self.btn_save_preset.setObjectName("GhostButton")
@@ -591,7 +625,7 @@ class SearchPanel(VSCard):
         self.btn_filters.setChecked(False)
         self.btn_filters.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_filters.setFixedHeight(32)
-        self.btn_filters.setToolTip("搜索范围、跳过时段和搜索模式")
+        self.btn_filters.setToolTip("搜索范围、跳过时段、搜索模式，以及当前搜索的最低相关度")
         self.lbl_filter_summary = QLabel()
         self.lbl_filter_summary.setObjectName("SearchFilterSummary")
         self.lbl_filter_summary.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -600,7 +634,7 @@ class SearchPanel(VSCard):
         self._filter_summary = ""
         options_row_layout.addWidget(self.btn_save_preset, 0)
         options_row_layout.addStretch(1)
-        self.options_row.hide()
+        self.filters_panel.hide()
         self.btn_filters.toggled.connect(self._on_filters_toggled)
 
         tab_row = QHBoxLayout()
@@ -625,7 +659,7 @@ class SearchPanel(VSCard):
 
         layout.addLayout(tab_row, 0)
         layout.addLayout(query_row, 0)
-        layout.addWidget(self.options_row, 0)
+        layout.addWidget(self.filters_panel, 0)
 
         default_width = compute_search_panel_width()
         self._width_ceiling = default_width
@@ -652,12 +686,46 @@ class SearchPanel(VSCard):
         self._sync_card_height()
 
     def _on_filters_toggled(self, opened: bool) -> None:
-        self.options_row.setVisible(bool(opened))
+        self.filters_panel.setVisible(bool(opened))
         self._sync_card_height()
         self._apply_filter_summary_visibility()
 
+    def set_score_thresholds(self, *, image: float, text: float, compose: float) -> None:
+        values = {"image": image, "text": text, "compose": compose}
+        for kind, score in values.items():
+            self._score_values[kind] = max(0, min(100, int(round(float(score) * 100))))
+        self.show_score_kind(self._score_kind)
+
+    def show_score_kind(self, kind: str | None) -> None:
+        """Show this mode's own threshold. Subtitle and tag search have none."""
+        normalized = str(kind or "").strip().lower()
+        if normalized not in self._score_values:
+            normalized = ""
+        self._score_kind = normalized or None
+        self.score_cluster.setVisible(self._score_kind is not None)
+        if self._score_kind is None:
+            return
+        percent = int(self._score_values[self._score_kind])
+        if self.score_input.value() == percent:
+            return
+        self.score_input.blockSignals(True)
+        self.score_input.setValue(percent)
+        self.score_input.blockSignals(False)
+
+    def _remember_score(self, value: int) -> None:
+        if self._score_kind:
+            self._score_values[self._score_kind] = int(value)
+
+    def score_threshold(self, kind: str) -> float:
+        normalized = str(kind or "").strip().lower()
+        if normalized == self._score_kind:
+            percent = int(self.score_input.value())
+        else:
+            percent = int(self._score_values.get(normalized, self._score_defaults.get(normalized, 0)))
+        return max(0.0, min(1.0, percent / 100.0))
+
     def _sync_card_height(self) -> None:
-        """Collapsed bar stays 116. The filter row adds one line only while open."""
+        """Collapsed bar stays 116. Open advanced adds the existing filter line."""
         extra = 0
         if self.btn_filters.isChecked():
             extra = int(self._filter_row_height) + int(self.content_layout.spacing())
@@ -749,6 +817,7 @@ class SearchPanel(VSCard):
                 "text_search_enhance_label",
                 "image_search_mode_label",
                 "dialogue_search_mode_label",
+                "score_label",
             )
         ]
         labeled = [label for label in labels if isinstance(label, QLabel)]
@@ -795,6 +864,10 @@ class SearchPanel(VSCard):
         if hasattr(self, "dialogue_search_mode_cluster"):
             self.dialogue_search_mode_cluster.setMinimumWidth(
                 _cluster_width(self.dialogue_search_mode_label, dialogue_mode_w)
+            )
+        if hasattr(self, "score_cluster"):
+            self.score_cluster.setMinimumWidth(
+                _cluster_width(self.score_label, self.score_input.width() or 72)
             )
         if hasattr(self, "text_granularity_cluster"):
             mode_only = _cluster_width(self.search_mode_label, mode_w)

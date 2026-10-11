@@ -63,7 +63,6 @@ class SettingsGuiMixin:
         if sampling_fps_mode == "dynamic" and not sampling_rules:
             sampling_rules = DEFAULT_CONFIG["sampling_fps_rules"]
         self.settings_page.set_sampling_fps_rules_text(sampling_rules)
-        self.settings_page.input_top_k.setValue(config.get("search_top_k", DEFAULT_CONFIG["search_top_k"]))
         lance_ann_enabled = bool(config.get("lance_ann_enabled", DEFAULT_CONFIG["lance_ann_enabled"]))
         self.settings_page.input_lance_ann_enabled.setCurrentIndex(1 if lance_ann_enabled else 0)
         frame_neighbor_rerank_enabled = bool(
@@ -715,7 +714,6 @@ class SettingsGuiMixin:
         self._settings_dirty_tracking_bound = True
         editors = [
             self.settings_page.input_fps,
-            self.settings_page.input_top_k,
             self.settings_page.input_lance_ann_enabled,
             self.settings_page.input_frame_neighbor_rerank_enabled,
             self.settings_page.input_frame_neighbor_rerank_top_n,
@@ -939,7 +937,6 @@ class SettingsGuiMixin:
             # Preserve the user's rule set even while fixed mode is active so
             # switching back to dynamic mode does not silently drop it.
             config["sampling_fps_rules"] = new_sampling_fps_rules
-            config["search_top_k"] = self.settings_page.input_top_k.value()
             config["lance_ann_enabled"] = bool(self.settings_page.input_lance_ann_enabled.currentData())
             config["frame_neighbor_rerank_enabled"] = bool(
                 self.settings_page.input_frame_neighbor_rerank_enabled.currentData()

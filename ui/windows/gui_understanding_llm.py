@@ -758,9 +758,10 @@ class UnderstandingLlmGuiMixin:
         payload = self._load_current_recap_cuts()
         clips = list((payload or {}).get("clips") or [])
         show = bool(clips)
-        if panel is not None:
+        # Review is its own wizard step. Keep the step mounted and show the empty state.
+        if panel is not None and panel is not getattr(page, "review_card", None):
             panel.setVisible(show)
-        else:
+        if panel is None:
             for name in (
                 "recap_review_title",
                 "recap_review_hint",

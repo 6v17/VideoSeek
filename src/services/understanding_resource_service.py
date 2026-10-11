@@ -96,13 +96,22 @@ REMOTE_VLM_PRESETS: dict[str, dict[str, str]] = {
     "dashscope": {
         "mode": REMOTE_VLM_MODE_CLOUD,
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-vl-max",
+        "model": "qwen3-vl-plus",
     },
     "siliconflow": {
         "mode": REMOTE_VLM_MODE_CLOUD,
         "base_url": "https://api.siliconflow.cn/v1",
         "model": "Qwen/Qwen2.5-VL-32B-Instruct",
     },
+}
+
+# DashScope retires vision ids without keeping them on /v1/models. Map only the
+# official names we used to preset, and only when the endpoint is DashScope.
+DASHSCOPE_RETIRED_VLM_MODELS = {
+    "qwen-vl-max": "qwen3-vl-plus",
+    "qwen-vl-max-latest": "qwen3-vl-plus",
+    "qwen-vl-plus": "qwen3-vl-plus",
+    "qwen-vl-plus-latest": "qwen3-vl-plus",
 }
 
 LOCAL_VLM_PRESET_IDS = ("lm_studio", "ollama", REMOTE_VLM_PRESET_CUSTOM)
@@ -491,6 +500,44 @@ def resolve_remote_vlm_caption_language(raw_remote_vlm: Mapping[str, Any]) -> st
         else CAPTION_LANGUAGE_ZH
     )
 
+def migrate_dashscope_vlm_model(model: str) -> str:
+    text = str(model or "").strip()
+    return DASHSCOPE_RETIRED_VLM_MODELS.get(text, text)
+
+
+def _uses_dashscope_endpoint(base_url: str, preset: str = "") -> bool:
+    if str(preset or "").strip().lower() == "dashscope":
+        return True
+    return "dashscope.aliyuncs.com" in str(base_url or "").lower()
+
+
+def pick_available_vlm_model(configured: str, available: list[str] | None) -> str:
+    """Pick a vision id from the server catalog. Never falls back to a text model."""
+    configured_id = str(configured or "").strip()
+    migrated = migrate_dashscope_vlm_model(configured_id)
+    names = [str(item).strip() for item in (available or []) if str(item).strip()]
+    if configured_id and configured_id in names:
+        return configured_id
+    if migrated and migrated in names:
+        return migrated
+    vision = [
+        item
+        for item in names
+        if any(hint in item.lower() for hint in ("vl", "vision", "gpt-4o"))
+    ]
+    for preferred in (
+        "qwen3-vl-plus",
+        "qwen3-vl-flash",
+        "gpt-4o",
+        "Qwen/Qwen2.5-VL-32B-Instruct",
+    ):
+        if preferred in names:
+            return preferred
+    if vision:
+        return vision[0]
+    return migrated or configured_id
+
+
 def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> dict[str, Any]:
     if not isinstance(raw_remote_vlm, dict):
         raw_remote_vlm = {}
@@ -550,6 +597,9 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
             remote_vlm["model"] = raw_model
         elif defaults.get("model"):
             remote_vlm["model"] = defaults["model"]
+
+    if _uses_dashscope_endpoint(str(remote_vlm.get("base_url") or ""), str(remote_vlm.get("provider_preset") or "")):
+        remote_vlm["model"] = migrate_dashscope_vlm_model(str(remote_vlm.get("model") or ""))
 
     remote_vlm["api_keys"] = normalize_remote_vlm_api_keys(raw_remote_vlm.get("api_keys"))
     return remote_vlm
@@ -1006,6 +1056,18 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     available_models = sorted(model_ids)
     model_available = model in model_ids
     sample_models = ", ".join(available_models[:8])
+    if not model_available and _uses_dashscope_endpoint(base_url, str(settings.get("provider_preset") or "")):
+        # DashScope's catalog omits many live vision ids, so a missing row is not
+        # proof the model is gone. Keep the typed id and let the chat call decide.
+        return _result(
+            reachable=True,
+            model_available=True,
+            model_unlisted=True,
+            auth_ok=True,
+            error_code="model_unlisted",
+            error=f"model {model!r} is not in the server catalog; the request will still use this name.",
+            available_models=available_models,
+        )
     if not model_available:
         suffix = f" Available: {sample_models}" if sample_models else ""
         if len(available_models) > 8:

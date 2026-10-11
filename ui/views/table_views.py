@@ -177,9 +177,77 @@ def populate_result_table(
         table.apply_header_labels(display_texts)
     else:
         table.setHorizontalHeaderLabels(display_texts.get("result_headers", texts["result_headers"]))
-    table.setUpdatesEnabled(False)
+    _fill_result_table_rows(
+        table,
+        results,
+        on_preview,
+        on_locate,
+        on_export,
+        texts,
+        on_deep_locate=on_deep_locate,
+        on_add_to_shot_list=on_add_to_shot_list,
+        clip_score_mode=clip_score_mode,
+        low_confidence_score=low_confidence_score,
+        rank_offset=rank_offset,
+        highlight_query=highlight_query,
+        dialogue_match_mode=dialogue_match_mode,
+    )
 
-    for row, raw in enumerate(results):
+
+def append_result_table_rows(
+    table,
+    results,
+    on_preview,
+    on_locate,
+    on_export,
+    texts,
+    on_deep_locate=None,
+    on_add_to_shot_list=None,
+    *,
+    clip_score_mode: bool = False,
+    low_confidence_score: float | None = None,
+    rank_offset: int = 0,
+    highlight_query: str = "",
+    dialogue_match_mode: str = "",
+):
+    _fill_result_table_rows(
+        table,
+        results,
+        on_preview,
+        on_locate,
+        on_export,
+        texts,
+        on_deep_locate=on_deep_locate,
+        on_add_to_shot_list=on_add_to_shot_list,
+        clip_score_mode=clip_score_mode,
+        low_confidence_score=low_confidence_score,
+        rank_offset=rank_offset,
+        highlight_query=highlight_query,
+        dialogue_match_mode=dialogue_match_mode,
+    )
+
+
+def _fill_result_table_rows(
+    table,
+    results,
+    on_preview,
+    on_locate,
+    on_export,
+    texts,
+    on_deep_locate=None,
+    on_add_to_shot_list=None,
+    *,
+    clip_score_mode: bool = False,
+    low_confidence_score: float | None = None,
+    rank_offset: int = 0,
+    highlight_query: str = "",
+    dialogue_match_mode: str = "",
+):
+    table.setUpdatesEnabled(False)
+    start = table.rowCount()
+
+    for offset, raw in enumerate(results or []):
+        row = start + offset
         hit = coerce_search_hit(raw)
         start_sec, end_sec, score, video_path = (
             hit.start_sec,
@@ -192,7 +260,7 @@ def populate_result_table(
         match_kind = str(getattr(hit, "match_kind", "frame") or "frame")
         matched_text = str(getattr(hit, "matched_text", "") or "").strip()
 
-        order_item = QTableWidgetItem(str(rank_offset + row + 1))
+        order_item = QTableWidgetItem(str(rank_offset + offset + 1))
         order_item.setTextAlignment(Qt.AlignCenter)
         order_item.setData(
             Qt.UserRole,
@@ -278,7 +346,7 @@ def populate_result_table(
 
         low_confidence = (
             low_confidence_score is not None
-            and rank_offset + row == 0
+            and rank_offset + offset == 0
             and float(score) < float(low_confidence_score)
         )
         score_item = _format_score_cell(
@@ -308,6 +376,8 @@ def populate_result_table(
         )
 
     table.setUpdatesEnabled(True)
+
+
 def populate_link_result_table(table, results, source_link, on_preview, on_locate, texts):
     table.setRowCount(0)
     table.setHorizontalHeaderLabels(texts["link_result_headers"])

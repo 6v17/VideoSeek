@@ -167,8 +167,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_fps.setSingleStep(0.1)
         self.input_sampling_fps_mode = NoWheelComboBox()
         self.input_sampling_fps_rules = QLineEdit(self)
-        self.input_top_k = NoWheelSpinBox()
-        self.input_top_k.setRange(1, 300)
         self.input_lance_ann_enabled = NoWheelComboBox()
         self.input_frame_neighbor_rerank_enabled = NoWheelComboBox()
         self.input_frame_neighbor_rerank_top_n = NoWheelSpinBox()
@@ -337,7 +335,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.section_model_gpu_title = QLabel()
         self.section_paths_title = QLabel()
         self.label_fps = ClickableLabel()
-        self.label_top_k = ClickableLabel()
         self.label_lance_ann_enabled = ClickableLabel()
         self.label_frame_neighbor_rerank_enabled = ClickableLabel()
         self.label_frame_neighbor_rerank_top_n = ClickableLabel()
@@ -375,7 +372,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_sampling_fps_preview = QLabel()
         self.sampling_rules_summary = QLabel()
         self.btn_edit_sampling_rules = QPushButton()
-        self.hint_top_k = QLabel()
         self.hint_lance_ann_enabled = QLabel()
         self.hint_frame_neighbor_rerank_enabled = QLabel()
         self.hint_frame_neighbor_rerank_top_n = QLabel()
@@ -427,7 +423,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
 
         self._configure_setting_input(self.input_fps, width=94)
         self._configure_setting_input(self.input_sampling_fps_mode, width=136)
-        self._configure_setting_input(self.input_top_k, width=COMPONENT_SIZES["settings_input_width"])
         self._configure_setting_input(self.input_lance_ann_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
         self._configure_setting_input(
             self.input_frame_neighbor_rerank_enabled,
@@ -622,13 +617,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._add_setting_row(
             self.section_search_form,
             0,
-            self.label_top_k,
-            self.input_top_k,
-            self.hint_top_k,
-        )
-        self._add_setting_row(
-            self.section_search_form,
-            1,
             self.label_lance_ann_enabled,
             self.input_lance_ann_enabled,
             self.hint_lance_ann_enabled,
@@ -1097,7 +1085,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.input_sampling_fps_rules.setPlaceholderText(texts["setting_sampling_fps_rules_placeholder"])
         self.btn_edit_sampling_rules.setText(texts["setting_sampling_fps_rules_edit"])
         self.refresh_sampling_rules_summary()
-        self.label_top_k.setText(texts["setting_top_k"])
         self.label_lance_ann_enabled.setText(texts["setting_lance_ann_enabled"])
         current_lance_ann = self.input_lance_ann_enabled.currentData()
         self.input_lance_ann_enabled.blockSignals(True)
@@ -1303,7 +1290,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.hint_sampling_fps_mode.setText(texts["setting_sampling_fps_mode_hint"])
         self.hint_sampling_fps_rules.setText(texts["setting_sampling_fps_rules_hint"])
         self.hint_sampling_fps_preview.setText(texts["setting_sampling_fps_preview"])
-        self.hint_top_k.setText(texts["setting_top_k_hint"])
         self.hint_lance_ann_enabled.setText(texts["setting_lance_ann_enabled_hint"])
         self.hint_frame_neighbor_rerank_enabled.setText(texts["setting_frame_neighbor_rerank_enabled_hint"])
         self.hint_frame_neighbor_rerank_top_n.setText(texts["setting_frame_neighbor_rerank_top_n_hint"])
@@ -1373,7 +1359,6 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._update_image_pixel_probe_mode_visibility()
         for label in [
             self.label_fps,
-            self.label_top_k,
             self.label_lance_ann_enabled,
             self.label_frame_neighbor_rerank_enabled,
             self.label_frame_neighbor_rerank_top_n,
