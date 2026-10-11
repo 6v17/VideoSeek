@@ -66,6 +66,8 @@ class SearchController(QObject):
         self._resetting_scroll = False
         self._pin_top_guard = False
         self._pin_top_on_resume = False
+        self._thumb_loading_indices: set[int] = set()
+        self._thumb_scroll_timer = None
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
@@ -320,6 +322,7 @@ class SearchController(QObject):
         if self._prefetch_hold and furthest > int(getattr(self, "_prefetch_hold_index", -1)):
             self._prefetch_hold = False
         self._maybe_grow_window()
+        self._schedule_visible_thumbnails()
 
     def _furthest_visible_index(self) -> int:
         """Last row that has entered the viewport. -1 when the list is empty."""
@@ -421,7 +424,7 @@ class SearchController(QObject):
             self._all_results.extend(extra)
             self._append_rendered(extra)
             self._update_results_status_text(self._all_results, dict(self._result_display_context or {}))
-            self._start_page_thumbnails(self._all_results)
+            self._ensure_visible_thumbnails()
         if requested > 0:
             self._window_limit = requested
         self._maybe_grow_window(ignore_worker=worker)
@@ -500,6 +503,10 @@ class SearchController(QObject):
         return worker is not None and worker.isRunning()
 
     def stop_thumbnail_loading(self):
+        timer = self._thumb_scroll_timer
+        if timer is not None:
+            timer.stop()
+        self._thumb_loading_indices = set()
         thread = self.thumb_thread
         self.thumb_thread = None
         if thread is None:
@@ -513,6 +520,10 @@ class SearchController(QObject):
     def _on_thumb_ready(self, row, image):
         if self._is_shutdown:
             return
+        try:
+            self._thumb_loading_indices.discard(int(row))
+        except (TypeError, ValueError):
+            pass
         from PySide6.QtGui import QImage, QPixmap
 
         pixmap = None
@@ -713,6 +724,7 @@ class SearchController(QObject):
     def _release_pin_guard(self) -> None:
         self._reset_result_scroll()
         self._pin_top_guard = False
+        self._ensure_visible_thumbnails()
 
     def _paint_current_page(self, results) -> None:
         texts = self.parent_window.texts
@@ -741,7 +753,7 @@ class SearchController(QObject):
         )
         self._sync_results_pager()
         self._update_results_status_text(results, context)
-        self._start_page_thumbnails(page_results)
+        self._ensure_visible_thumbnails()
         self._sync_embedded_preview_strip()
 
     def _sync_embedded_preview_strip(self) -> None:
@@ -871,12 +883,8 @@ class SearchController(QObject):
                     status_text = f"{status_text} · {deep_hint}"
         self.parent_window.search_page.lbl_status.setText(status_text)
 
-    def _visible_result_rows(self, total: int) -> list[int]:
-        """Rows that fit in the results viewport, so those thumbnails load first."""
-        count = max(0, int(total))
-        if count <= 0:
-            return []
-        slots = count
+    def _viewport_thumb_slots(self) -> int:
+        """How many result rows fit on one screen."""
         view = self._result_view()
         if view.view_mode == "grid":
             grid = view.grid
@@ -885,16 +893,46 @@ class SearchController(QObject):
             card_h = int(cards[0].sizeHint().height()) if cards else 180
             row_h = max(1, card_h + 12)
             rows = max(1, int(grid.viewport().height()) // row_h)
-            slots = cols * rows
-        else:
-            header = view.table.verticalHeader()
-            row_h = max(1, int(header.defaultSectionSize() or 88))
-            slots = max(1, int(view.table.viewport().height()) // row_h)
-        slots = max(1, min(count, int(slots)))
-        return list(range(slots))
+            return max(1, cols * rows)
+        header = view.table.verticalHeader()
+        row_h = max(1, int(header.defaultSectionSize() or 88))
+        return max(1, int(view.table.viewport().height()) // row_h)
+
+    def _visible_thumb_indices(self, total: int, *, lookahead_screens: int = 1) -> list[int]:
+        """Decode only the viewport plus one screen ahead. Hundreds of seeks make the fans scream."""
+        count = max(0, int(total))
+        if count <= 0:
+            return []
+        end = self._furthest_visible_index()
+        if end < 0:
+            end = min(count - 1, self._viewport_thumb_slots() - 1)
+        slots = self._viewport_thumb_slots()
+        start = max(0, int(end) - slots + 1)
+        last = min(count - 1, int(end) + slots * max(0, int(lookahead_screens)))
+        return list(range(start, last + 1))
+
+    def _schedule_visible_thumbnails(self) -> None:
+        from PySide6.QtCore import QTimer
+
+        timer = self._thumb_scroll_timer
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(80)
+            timer.timeout.connect(self._ensure_visible_thumbnails)
+            self._thumb_scroll_timer = timer
+        timer.start()
+
+    def _ensure_visible_thumbnails(self) -> None:
+        if self._pin_top_guard or self._resetting_scroll:
+            return
+        rows = list(self._all_results or [])
+        if not rows:
+            return
+        jobs = [(index, rows[index]) for index in self._visible_thumb_indices(len(rows))]
+        self._start_page_thumbnails(jobs)
 
     def _start_page_thumbnails(self, page_results) -> None:
-        self.stop_thumbnail_loading()
         rows = list(page_results or [])
         if not rows:
             return
@@ -925,10 +963,18 @@ class SearchController(QObject):
                 misses.append((index, raw))
         if not misses:
             return
-        self.thumb_thread = ThumbLoader(
-            misses,
-            priority_rows=self._visible_result_rows(len(rows)),
-        )
+        miss_indices = {int(item[0]) for item in misses}
+        active = self.thumb_thread
+        if (
+            active is not None
+            and active.isRunning()
+            and miss_indices
+            and miss_indices.issubset(self._thumb_loading_indices)
+        ):
+            return
+        self.stop_thumbnail_loading()
+        self._thumb_loading_indices = miss_indices
+        self.thumb_thread = ThumbLoader(misses, priority_rows=miss_indices)
         self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
 

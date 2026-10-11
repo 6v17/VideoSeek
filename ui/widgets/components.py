@@ -1,5 +1,5 @@
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize, Signal
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
