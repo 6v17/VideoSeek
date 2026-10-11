@@ -1369,6 +1369,15 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     font-weight: 600;
     padding: 0 __SPACE_1__ 0 0;
 }
+#SearchQueryTabs {
+    background: transparent;
+    border: none;
+}
+#SearchQueryTabs QTabBar {
+    background: transparent;
+    border: none;
+    qproperty-drawBase: 0;
+}
 #SearchQueryTabs[barOnly="true"]::pane {
     border: none;
     background: transparent;
@@ -1386,12 +1395,12 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #SearchQueryTabs QTabBar::tab {
     background: __BUTTON_SOFT__;
     border: 1px solid __LINE__;
-    border-bottom: none;
-    border-top-left-radius: __RADIUS_MD__;
-    border-top-right-radius: __RADIUS_MD__;
-    /* Keep compact so EN labels (Image/Text/Compose/Subs/Tags) fit the search panel width. */
-    padding: __SPACE_2__ __SPACE_2__;
+    border-radius: __RADIUS_MD__;
+    /* Open-bottom folder tabs make Qt stroke the top as a straight line that misses the corners. */
+    padding: 3px __SPACE_2__;
+    margin-top: 2px;
     margin-right: __SPACE_1__;
+    min-height: 22px;
     color: __MUTED__;
     font-weight: 600;
 }

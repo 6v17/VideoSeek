@@ -512,14 +512,16 @@ class SearchPanel(VSCard):
         self.search_query_tabs.setProperty("barOnly", True)
         self.search_query_tabs.setDocumentMode(True)
         self.search_query_tabs.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.search_query_tabs.tabBar().setUsesScrollButtons(False)
-        self.search_query_tabs.tabBar().setExpanding(False)
-        self.search_query_tabs.tabBar().setFixedHeight(28)
+        tab_bar = self.search_query_tabs.tabBar()
+        tab_bar.setUsesScrollButtons(False)
+        tab_bar.setExpanding(False)
+        tab_bar.setDrawBase(False)
+        tab_bar.setFixedHeight(32)
         for _name in ("image", "text", "compose", "dialogue", "tags"):
             placeholder = QWidget()
             placeholder.setMaximumHeight(0)
             self.search_query_tabs.addTab(placeholder, "")
-        self.search_query_tabs.setFixedHeight(30)
+        self.search_query_tabs.setFixedHeight(36)
         self.search_query_tabs.currentChanged.connect(self.query_stack.setCurrentIndex)
 
         self.search_scope_label = QLabel()
@@ -806,7 +808,7 @@ class SearchPanel(VSCard):
         card = int(self._default_height or 116)
         margin_v = int(COMPONENT_SIZES.get("search_panel_card_margin", 8)) * 2
         spacing = max(6, int(COMPONENT_SIZES.get("search_panel_row_spacing", 4)))
-        tabs = self.search_query_tabs.height() or 30
+        tabs = self.search_query_tabs.height() or 36
         # Panel border sits outside the layout.
         available = card - margin_v - spacing - int(tabs) - 2
         line = max(16, self.fontMetrics().lineSpacing())
