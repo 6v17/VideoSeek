@@ -339,6 +339,7 @@ class GuiSettingsPathTests(unittest.TestCase):
                 btn_build_dialogue_index=MagicMock(),
                 btn_reembed_dialogue=MagicMock(),
                 btn_clear_dialogue=MagicMock(),
+                btn_import_subtitle_srt=MagicMock(),
                 btn_export_dialogue=MagicMock(),
                 input_subtitle_sample_interval=MagicMock(),
                 input_subtitle_sample_strategy=MagicMock(),
@@ -369,6 +370,7 @@ class GuiSettingsPathTests(unittest.TestCase):
         self.Target._start_index_update(dummy, target_lib="D:/videos", rebuild_global_assets=False)
 
         dummy.library_page.btn_sync_db.setEnabled.assert_called_once_with(False)
+        dummy.library_page.btn_import_subtitle_srt.setEnabled.assert_called_once_with(False)
         dummy.library_page.btn_add_lib.setEnabled.assert_called_once_with(False)
         dummy.library_page.btn_remove_lib.setEnabled.assert_called_once_with(False)
         dummy.refresh_library_table.assert_not_called()
