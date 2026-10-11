@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -16,6 +17,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
+    QStyleOption,
     QTabWidget,
     QTreeWidget,
     QVBoxLayout,
@@ -28,6 +31,7 @@ from ui.widgets.components import NoWheelComboBox
 from ui.widgets.data_table import DataTable
 from ui.widgets.recap_review_delegate import RecapReviewItemDelegate
 from ui.widgets.button_roles import set_button_role
+from ui.widgets.styles import repolish_widget
 from ui.widgets.scaffold import PageScaffold, VSCard, VSProgressStatusRow, make_runtime_banner
 from ui.widgets.searchable_id_combo import SearchableIdCombo
 from ui.widgets.table_specs import (
@@ -35,6 +39,38 @@ from ui.widgets.table_specs import (
 )
 from ui.widgets.understanding_services_panel import UnderstandingServicesPanel
 from ui.widgets.vertical_stretch import add_filling_widget, add_vertically_stretchable
+
+
+class _StepConnector(QWidget):
+    """Hairline between steps. QWidget only paints a stylesheet background from paintEvent."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("UnderstandingStepConnector")
+        self.setFixedHeight(2)
+        self.setMinimumWidth(28)
+        self.setMaximumWidth(64)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def paintEvent(self, event):  # noqa: N802 — Qt API
+        del event
+        painter = QPainter(self)
+        option = QStyleOption()
+        option.initFrom(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+
+
+class _WizardStepButton(QPushButton):
+    """QPushButton sizes itself from its caption and ignores the child layout."""
+
+    def sizeHint(self):  # noqa: N802 — Qt API
+        lay = self.layout()
+        if lay is not None:
+            return lay.sizeHint()
+        return super().sizeHint()
+
+    def minimumSizeHint(self):  # noqa: N802 — Qt API
+        return self.sizeHint()
 
 
 def _action_button(object_name: str, *, chrome: str = "") -> QPushButton:
@@ -225,11 +261,12 @@ class UnderstandingEvidencePage(QWidget):
 
     def _install_workflow(self, page_body: QVBoxLayout) -> None:
         self._wizard_labels = {
-            "select": "选片",
-            "speech": "语音",
-            "notes": "说明",
-            "recap": "剪辑",
-            "review": "审稿",
+            "select": "选择视频",
+            "speech": "提取台词",
+            "notes": "画面理解",
+            "notes_tags": "生成标签",
+            "recap": "剪辑规划",
+            "review": "稿件编辑",
         }
         self._recap_first = True
         self._include_motion_steps = True
@@ -237,23 +274,26 @@ class UnderstandingEvidencePage(QWidget):
         self.wizard_bar = QWidget()
         self.wizard_bar.setObjectName("UnderstandingWizardBar")
         bar_layout = QHBoxLayout(self.wizard_bar)
-        bar_layout.setContentsMargins(0, 0, 0, 0)
-        bar_layout.setSpacing(8)
+        bar_layout.setContentsMargins(0, 2, 0, 2)
+        bar_layout.setSpacing(10)
+        bar_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self._wizard_group = QButtonGroup(self)
         self._wizard_group.setExclusive(True)
         self._wizard_buttons: list[QPushButton] = []
+        self._wizard_connectors: list[QWidget] = []
         self._step_scrolls: dict[QWidget, QScrollArea] = {}
         self._step_pages: dict[QWidget, QWidget] = {}
         for index in range(5):
-            button = _action_button("GhostButton", chrome="wizardStep")
-            button.setCheckable(True)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.setMinimumHeight(36)
+            button = self._make_wizard_step(index)
             self._wizard_group.addButton(button, index)
             self._wizard_buttons.append(button)
             setattr(self, f"btn_wizard_step_{index + 1}", button)
-            bar_layout.addWidget(button, 1)
+            bar_layout.addWidget(button, 0)
+            connector = _StepConnector()
+            self._wizard_connectors.append(connector)
+            bar_layout.addWidget(connector, 1)
             button.clicked.connect(lambda _checked=False, step=index: self._on_wizard_step_clicked(step))
+        bar_layout.addStretch(1)
 
         self.workflow_stack = _CurrentStepStack()
         self.workflow_stack.setObjectName("UnderstandingWorkflowStack")
@@ -323,6 +363,42 @@ class UnderstandingEvidencePage(QWidget):
             cards = tuple(card for card in cards if card not in motion_only)
         return cards
 
+    def _make_wizard_step(self, index: int) -> QPushButton:
+        """Numbered step plus a short label. The row is the click target, not a filled button."""
+        button = _WizardStepButton()
+        set_button_role(button, "GhostButton", chrome="wizardStep")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setAutoDefault(False)
+        button.setDefault(False)
+        button.setCheckable(True)
+        button.setText("")
+        button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        button.setMinimumHeight(28)
+        row = QHBoxLayout(button)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        number = QLabel(str(index + 1))
+        number.setObjectName("UnderstandingStepIndex")
+        number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        number.setFixedSize(22, 22)
+        number.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        title = QLabel()
+        title.setObjectName("UnderstandingStepTitle")
+        title.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        row.addWidget(number, 0)
+        row.addWidget(title, 0)
+        button._step_index = number
+        button._step_title = title
+        return button
+
+    def _set_step_state(self, widget: QWidget, state: str) -> None:
+        if widget.property("stepState") == state:
+            return
+        widget.setProperty("stepState", state)
+        repolish_widget(widget)
+
     def _wizard_label_for(self, card: QWidget) -> str:
         labels = self._wizard_labels
         if card is self.workspace_card:
@@ -330,6 +406,8 @@ class UnderstandingEvidencePage(QWidget):
         if card is self.dialogue_card:
             return labels["speech"]
         if card is self.generate_card:
+            if not self._include_motion_steps:
+                return labels.get("notes_tags", "生成标签")
             return labels["notes"]
         if card is self.review_card:
             return labels["review"]
@@ -337,11 +415,12 @@ class UnderstandingEvidencePage(QWidget):
 
     def apply_wizard_texts(self, texts: dict) -> None:
         self._wizard_labels = {
-            "select": texts.get("understanding_wizard_select", "选片"),
-            "speech": texts.get("understanding_wizard_speech", "语音"),
-            "notes": texts.get("understanding_wizard_notes", "说明"),
-            "recap": texts.get("understanding_wizard_recap", "剪辑"),
-            "review": texts.get("understanding_wizard_review", "审稿"),
+            "select": texts.get("understanding_wizard_select", "选择视频"),
+            "speech": texts.get("understanding_wizard_speech", "提取台词"),
+            "notes": texts.get("understanding_wizard_notes", "画面理解"),
+            "notes_tags": texts.get("understanding_wizard_notes_tags", "生成标签"),
+            "recap": texts.get("understanding_wizard_recap", "剪辑规划"),
+            "review": texts.get("understanding_wizard_review", "稿件编辑"),
         }
         self.btn_wizard_prev.setText(texts.get("understanding_wizard_prev", "上一步"))
         self.btn_wizard_next.setText(texts.get("understanding_wizard_next", "下一步"))
@@ -466,9 +545,35 @@ class UnderstandingEvidencePage(QWidget):
             page = self.workflow_stack.widget(step) if step < count else None
             card = self._card_for_step_page(page)
             label = self._wizard_label_for(card) if card is not None else ""
-            button.setText(f"{step + 1}  {label}")
-            button.setChecked(step == index and card is not None)
-            button.setVisible(card is not None)
+            title = getattr(button, "_step_title", None)
+            if title is not None:
+                title.setText(label)
+            button.setText("")
+            button.updateGeometry()
+            visible = card is not None
+            button.setChecked(step == index and visible)
+            button.setVisible(visible)
+            if visible:
+                if step < index:
+                    state = "done"
+                elif step == index:
+                    state = "current"
+                else:
+                    state = "upcoming"
+                self._set_step_state(button, state)
+                self._set_step_state(button._step_index, state)
+                self._set_step_state(button._step_title, state)
+        previous = None
+        for step, button in enumerate(self._wizard_buttons):
+            connector = self._wizard_connectors[step]
+            connector.setVisible(False)
+            if button.isHidden():
+                continue
+            if previous is not None:
+                link = self._wizard_connectors[previous]
+                link.setVisible(True)
+                self._set_step_state(link, "done" if index > previous else "upcoming")
+            previous = step
         self.btn_wizard_prev.setVisible(index > 0)
         self.btn_wizard_next.setVisible(count > 0 and index < count - 1)
 

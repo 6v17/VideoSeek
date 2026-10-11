@@ -1081,11 +1081,11 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "generate_title"):
             self.understanding_page.generate_title.setText(
-                t.get("understanding_step_generate_title_motion", "3. Optional full-video change notes")
+                t.get("understanding_step_generate_title_motion", "3. Visual understanding")
             )
         if hasattr(self.understanding_page, "export_title"):
             self.understanding_page.export_title.setText(
-                t.get("understanding_step_export_title_motion", "4. Recap cuts")
+                t.get("understanding_step_export_title_motion", "4. Edit plan")
             )
         if hasattr(self.understanding_page, "export_hint"):
             self.understanding_page.export_hint.setText(
@@ -1093,7 +1093,7 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "dialogue_title"):
             self.understanding_page.dialogue_title.setText(
-                t.get("understanding_step_dialogue_title_motion", "2. Extract speech")
+                t.get("understanding_step_dialogue_title_motion", "2. Extract lines")
             )
         if hasattr(self.understanding_page, "dialogue_hint"):
             self.understanding_page.dialogue_hint.setText(

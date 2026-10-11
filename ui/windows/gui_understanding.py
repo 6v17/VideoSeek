@@ -160,26 +160,26 @@ class UnderstandingGuiMixin:
         is_motion = self._current_understanding_mode() == UNDERSTANDING_MODE_MOTION
         if is_motion:
             page.btn_generate_evidence.setText(
-                self.texts.get("understanding_generate_motion_button", "Generate change notes")
+                self.texts.get("understanding_generate_motion_button", "Visual understanding")
             )
             page.btn_generate_batch.setText(
                 self.texts.get("understanding_generate_batch_motion", "Batch change notes")
             )
             page.chunk_detail_title.setText(
-                self.texts.get("understanding_chunk_detail_title_motion", "Segment change")
+                self.texts.get("understanding_chunk_detail_title_motion", "Visual understanding")
             )
             if hasattr(page, "generate_title"):
                 page.generate_title.setText(
                     self.texts.get(
                         "understanding_step_generate_title_motion",
-                        "3. Optional full-video change notes",
+                        "3. Visual understanding",
                     )
                 )
             if hasattr(page, "generate_hint"):
                 page.generate_hint.setText(
                     self.texts.get(
                         "understanding_step_generate_hint_motion",
-                        "Generate full-video change notes before recap when you can.",
+                        "Run visual understanding before the edit plan when you can.",
                     )
                 )
             if hasattr(page, "select_hint"):
@@ -198,11 +198,11 @@ class UnderstandingGuiMixin:
                 page.order_workflow_cards(recap_first=True)
             if hasattr(page, "dialogue_title"):
                 page.dialogue_title.setText(
-                    self.texts.get("understanding_step_dialogue_title_motion", "2. Extract speech")
+                    self.texts.get("understanding_step_dialogue_title_motion", "2. Extract lines")
                 )
             if hasattr(page, "export_title"):
                 page.export_title.setText(
-                    self.texts.get("understanding_step_export_title_motion", "4. Recap cuts")
+                    self.texts.get("understanding_step_export_title_motion", "4. Edit plan")
                 )
             if hasattr(page, "export_hint"):
                 page.export_hint.setText(
@@ -1005,7 +1005,7 @@ class UnderstandingGuiMixin:
         if hasattr(page, "vlm_prompt_label"):
             if index == 1:
                 page.vlm_prompt_label.setText(
-                    self.texts.get("understanding_custom_motion_prompt_label", "Change prompt")
+                    self.texts.get("understanding_custom_motion_prompt_label", "Visual understanding prompt")
                 )
             else:
                 page.vlm_prompt_label.setText(

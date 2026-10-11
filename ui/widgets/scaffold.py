@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.button_roles import set_button_role
 from ui.widgets.elevation import apply_elevation
 from ui.widgets.layout import COMPONENT_SIZES
 
@@ -102,8 +103,10 @@ def make_runtime_inline_tip(parent=None) -> tuple[QFrame, QLabel, QPushButton]:
     label.setWordWrap(False)
     label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
     action = QPushButton(frame)
-    action.setObjectName("AccentGhostButton")
-    action.setMinimumHeight(32)
+    set_button_role(action, "AccentGhostButton", chrome="textLink")
+    action.setCursor(Qt.CursorShape.PointingHandCursor)
+    action.setFlat(True)
+    action.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     layout.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
     layout.addWidget(action, 0, Qt.AlignmentFlag.AlignVCenter)
     frame.hide()

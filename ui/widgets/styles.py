@@ -102,28 +102,34 @@ QMenu::separator {
     font-size: __FS_MD__;
     font-weight: 700;
 }
-#RuntimeInlineTip #AccentGhostButton {
-    min-height: 32px;
-    max-height: 34px;
-    padding: __SPACE_1__ __SPACE_4__;
-    border-radius: __RADIUS_MD__;
-    font-size: __FS_SM__;
-    font-weight: 600;
+#RuntimeInlineTip #AccentGhostButton[chrome="textLink"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid __ACCENT__;
+    border-radius: 0;
+    padding: 0 0 1px 0;
+    min-height: 0;
+    max-height: 28px;
+    font-size: __FS_MD__;
+    font-weight: 700;
+    color: __ACCENT__;
 }
-#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton {
-    color: __WARN__;
-    border: 1px solid __WARN__;
-    background: __WARN_SOFT__;
+#RuntimeInlineTip #AccentGhostButton[chrome="textLink"]:hover,
+#RuntimeInlineTip #AccentGhostButton[chrome="textLink"]:pressed {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid __ACCENT_HOVER__;
+    padding: 0 0 1px 0;
+    color: __ACCENT_HOVER__;
 }
-#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton:hover {
+#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton[chrome="textLink"],
+#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton[chrome="textLink"]:hover,
+#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton[chrome="textLink"]:pressed {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid __WARN__;
+    padding: 0 0 1px 0;
     color: __WARN__;
-    border-color: __WARN__;
-    background: __WARN_SOFT__;
-}
-#RuntimeInlineTip[bannerTone="warn"] #AccentGhostButton:pressed {
-    color: __WARN__;
-    border-color: __WARN__;
-    background: __WARN_SOFT__;
 }
 #NoticeTitle {
     color: __NOTICE_TEXT__;
@@ -376,6 +382,67 @@ QCheckBox:disabled {
     background: transparent;
     border: none;
 }
+#GhostButton[chrome="wizardStep"] {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 28px;
+    max-height: 32px;
+    border-radius: 0;
+}
+#GhostButton[chrome="wizardStep"]:hover,
+#GhostButton[chrome="wizardStep"]:pressed,
+#GhostButton[chrome="wizardStep"]:checked,
+#GhostButton[chrome="wizardStep"]:checked:hover {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: __HEADLINE__;
+}
+#UnderstandingStepIndex {
+    background: transparent;
+    color: __MUTED__;
+    border: 1px solid __LINE_STRONG__;
+    border-radius: 11px;
+    font-size: __FS_XS__;
+    font-weight: 700;
+    padding: 0;
+    margin: 0;
+}
+#UnderstandingStepIndex[stepState="done"] {
+    color: __ACCENT__;
+    border-color: __ACCENT__;
+    background: transparent;
+}
+#UnderstandingStepIndex[stepState="current"] {
+    color: __INVERSE_TEXT__;
+    border-color: __ACCENT__;
+    background: __ACCENT__;
+}
+#UnderstandingStepTitle {
+    background: transparent;
+    border: none;
+    color: __MUTED__;
+    font-size: __FS_SM__;
+    font-weight: 600;
+    padding: 0;
+}
+#UnderstandingStepTitle[stepState="done"] {
+    color: __TEXT__;
+}
+#UnderstandingStepTitle[stepState="current"] {
+    color: __HEADLINE__;
+    font-weight: 700;
+}
+#UnderstandingStepConnector {
+    background: __LINE__;
+    border: none;
+    min-height: 2px;
+    max-height: 2px;
+}
+#UnderstandingStepConnector[stepState="done"] {
+    background: __ACCENT__;
+}
 #UnderstandingStepScroll, #UnderstandingStepScrollViewport {
     background: transparent;
     border: none;
@@ -384,35 +451,6 @@ QCheckBox:disabled {
 #UnderstandingServicesActions {
     background: __WINDOW__;
     border: none;
-}
-#GhostButton[chrome="wizardStep"] {
-    background: __BUTTON_SOFT__;
-    border: 1px solid __LINE_STRONG__;
-    border-left: 3px solid __LINE_STRONG__;
-    color: __HEADLINE__;
-    font-weight: 600;
-    padding: __SPACE_2__ __SPACE_4__;
-    border-radius: __RADIUS_MD__;
-}
-#GhostButton[chrome="wizardStep"]:hover {
-    background: __BUTTON_SOFT_HOVER__;
-    border-color: __LINE_STRONG__;
-    border-left: 3px solid __LINE_STRONG__;
-    color: __HEADLINE__;
-}
-#GhostButton[chrome="wizardStep"]:checked {
-    background: __ACCENT_SOFT__;
-    border: 1px solid __ACCENT__;
-    border-left: 3px solid __ACCENT__;
-    color: __HEADLINE__;
-}
-#GhostButton[chrome="wizardStep"]:checked:hover {
-    background: __ACCENT_SOFT_HOVER__;
-    border: 1px solid __ACCENT_HOVER__;
-    border-left: 3px solid __ACCENT_HOVER__;
-}
-#GhostButton[chrome="wizardStep"]:pressed {
-    background: __BUTTON_SOFT_PRESSED__;
 }
 #UnderstandingTimelineBlock {
     background: __FIELD__;
