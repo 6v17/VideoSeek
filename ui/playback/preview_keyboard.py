@@ -110,6 +110,27 @@ class PreviewTransportKeyFilter(QObject):
             return
         self._on_seek(self._held_dir * self._hold_seek_step_ms)
 
+    def _handle_embedded_escape(self, event) -> bool:
+        """Esc on the in-page player returns to the result list."""
+        leave = getattr(self._host, "_on_embedded_escape", None)
+        if not callable(leave):
+            return False
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        if event.isAutoRepeat():
+            return True
+        host = self._host
+        if host is None or not host.isVisible():
+            return False
+        window = host.window()
+        active = QApplication.activeWindow()
+        if active is not None and window is not None and window is not active:
+            return False
+        if focus_blocks_preview_keys(QApplication.focusWidget()):
+            return False
+        leave()
+        return True
+
     def _can_handle_transport(self) -> bool:
         host = self._host
         if host is None:
@@ -133,6 +154,8 @@ class PreviewTransportKeyFilter(QObject):
         if etype not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             return False
         key = event.key()
+        if key == Qt.Key.Key_Escape:
+            return self._handle_embedded_escape(event)
         if key not in (Qt.Key.Key_Space, Qt.Key.Key_Left, Qt.Key.Key_Right):
             return False
 

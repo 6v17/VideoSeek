@@ -335,7 +335,12 @@ class VlcPreviewPlayer:
         self.clear_session()
 
     def suspend(self):
-        """Pause and mute without detaching the embed hwnd."""
+        """Pause without detaching the embed hwnd.
+
+        Mute only while this player is actually playing. On Windows, libvlc mute
+        is the process audio session: muting an already-paused sibling silences
+        the other MediaPlayer (the in-page preview) that is still running.
+        """
         if self._released or self._player is None:
             return
         self._timer.stop()
@@ -343,10 +348,15 @@ class VlcPreviewPlayer:
         self._locked_stop_at_ms = -1
         self._pending_seek_ms = None
         try:
-            self._player.audio_set_mute(True)
+            if bool(self._player.is_playing()):
+                self._player.audio_set_mute(True)
         except Exception as exc:
             _log_vlc_debug("mute on suspend", exc)
         self._set_paused(True)
+
+    def restore_audio(self) -> None:
+        """Clear a process-wide libvlc mute left by another player on this instance."""
+        self._unmute()
 
     def clear_session(self):
         """End the current clip so UI cannot resume it; avoids native stop()/set_media(None).

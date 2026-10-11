@@ -132,6 +132,52 @@ class PreviewKeyboardHelperTests(unittest.TestCase):
         space = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier)
         self.assertFalse(filt.eventFilter(host, space))
 
+    def test_escape_on_embedded_preview_returns_to_results(self):
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtWidgets import QWidget
+
+        from ui.playback.preview_keyboard import PreviewTransportKeyFilter
+
+        host = QWidget()
+        host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        left = []
+        host._on_embedded_escape = lambda: left.append(1)
+        host.show()
+        host.activateWindow()
+        self.addCleanup(host.close)
+        self.addCleanup(host.deleteLater)
+
+        filt = PreviewTransportKeyFilter(
+            host,
+            is_active=lambda: False,
+            on_toggle=MagicMock(),
+            on_seek=MagicMock(),
+            parent=host,
+        )
+        esc = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        self.assertTrue(filt.eventFilter(host, esc))
+        self.assertEqual(left, [1])
+
+    def test_escape_without_embedded_preview_is_ignored(self):
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtWidgets import QWidget
+
+        from ui.playback.preview_keyboard import PreviewTransportKeyFilter
+
+        host = QWidget()
+        self.addCleanup(host.deleteLater)
+        filt = PreviewTransportKeyFilter(
+            host,
+            is_active=lambda: True,
+            on_toggle=MagicMock(),
+            on_seek=MagicMock(),
+            parent=host,
+        )
+        esc = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        self.assertFalse(filt.eventFilter(host, esc))
+
 
 class ExpandedPreviewNudgeTests(unittest.TestCase):
     @classmethod

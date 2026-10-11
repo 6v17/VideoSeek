@@ -178,13 +178,29 @@ class PreviewController:
             # End the clip session so Play cannot resume after 清空.
             self.vlc_player.clear_session()
         self._set_preview_surface_idle(True)
-        try:
-            self.parent_window.media_player.pause()
-        except Exception as exc:
-            logger.debug("QMediaPlayer pause on stop_preview skipped: %s", exc)
-        self.parent_window.media_player.setSource(QUrl())
+        if self._embedded_preview_is_active():
+            # QMediaPlayer shares the process audio device with the in-page
+            # libvlc player. Resetting it while that preview is running drops
+            # the sound even though the picture keeps going.
+            self._restore_embedded_preview_audio()
+        else:
+            try:
+                self.parent_window.media_player.pause()
+            except Exception as exc:
+                logger.debug("QMediaPlayer pause on stop_preview skipped: %s", exc)
+            self.parent_window.media_player.setSource(QUrl())
         self.cleanup_previous_preview()
         self.current_preview_context = None
+
+    def _embedded_preview_is_active(self) -> bool:
+        return getattr(self.parent_window, "_search_preview_embedded", False) is True
+
+    def _restore_embedded_preview_audio(self) -> None:
+        dialog = getattr(self.parent_window, "_preview_dialog", None)
+        player = getattr(dialog, "player", None) if dialog is not None else None
+        restore = getattr(player, "restore_audio", None)
+        if callable(restore):
+            restore()
 
     def record_playback_telemetry(self, *, source: str = "inline") -> None:
         self._record_playback_telemetry(source=source)

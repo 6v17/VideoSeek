@@ -1005,6 +1005,7 @@ class ThumbLoader(QThread):
         self._running = False
 
     def run(self):
+        from src.media.thumbnail import preview_max_drift_sec, preview_sample_time
         from src.utils import get_single_thumbnail
         from ui.thumb_cache import get_thumb_cache, result_thumb_key
 
@@ -1034,10 +1035,14 @@ class ThumbLoader(QThread):
                 self.thumb_ready.emit(table_row, cached)
                 continue
 
-            thumb_time = float(hit.start_sec)
-            if float(hit.end_sec) > float(hit.start_sec):
-                thumb_time = (float(hit.start_sec) + float(hit.end_sec)) / 2.0
-            frame = get_single_thumbnail(video_path, thumb_time)
+            thumb_time = preview_sample_time(hit.start_sec, hit.end_sec)
+            frame = get_single_thumbnail(
+                video_path,
+                thumb_time,
+                max_drift_sec=preview_max_drift_sec(hit.start_sec, hit.end_sec),
+                segment_start=float(hit.start_sec),
+                segment_end=float(hit.end_sec),
+            )
             if not self._running or self.isInterruptionRequested():
                 break
             if frame is None:

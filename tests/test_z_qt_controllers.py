@@ -930,6 +930,22 @@ class PreviewControllerTests(unittest.TestCase):
             parent.search_page.preview_placeholder
         )
 
+    @patch("ui.controllers.preview_controller.create_vlc_preview_instance", return_value=None)
+    def test_stop_preview_keeps_embedded_dialog_audio(self, _mock_instance):
+        parent = _make_parent_window()
+        parent._search_preview_embedded = True
+        dialog_player = MagicMock()
+        parent._preview_dialog = MagicMock()
+        parent._preview_dialog.player = dialog_player
+        controller = PreviewController(parent)
+        controller.vlc_player = MagicMock()
+
+        controller.stop_preview(skip_telemetry=True)
+
+        parent.media_player.pause.assert_not_called()
+        parent.media_player.setSource.assert_not_called()
+        dialog_player.restore_audio.assert_called_once_with()
+
     @patch("src.media.export_clip.resolve_base_clip_window", return_value=(27.0, 6.0))
     @patch("ui.controllers.preview_controller.VlcPreviewPlayer")
     def test_play_http_uses_vlc_without_ffmpeg_fallback(self, mock_vlc_cls, _mock_window):
@@ -1078,6 +1094,7 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         player._released = False
         player._timer = MagicMock()
         player._player = MagicMock()
+        player._player.is_playing.return_value = True
         player._stop_at_ms = 1000
         player._locked_stop_at_ms = 1000
         player._pending_seek_ms = 0
@@ -1093,6 +1110,21 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         player._player.audio_set_mute.assert_called_once_with(True)
         old_media.release.assert_not_called()
         self.assertIs(player._current_media, old_media)
+
+    def test_suspend_skips_mute_when_already_paused(self):
+        player = VlcPreviewPlayer.__new__(VlcPreviewPlayer)
+        player._released = False
+        player._timer = MagicMock()
+        player._player = MagicMock()
+        player._player.is_playing.return_value = False
+        player._stop_at_ms = -1
+        player._locked_stop_at_ms = -1
+        player._pending_seek_ms = None
+
+        player.suspend()
+
+        player._player.audio_set_mute.assert_not_called()
+        player._player.set_pause.assert_called_once_with(1)
 
     def test_set_media_releases_previous_media(self):
         host = _make_host_widget()

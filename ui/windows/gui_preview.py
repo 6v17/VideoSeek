@@ -92,7 +92,11 @@ class _SameVideoThumbLoader(QThread):
         from src.app.config import load_config
         from src.media.thumbnail import (
             ffmpeg_capture_frame as _ffmpeg_capture_frame,
+            is_blank_preview_frame,
             load_cv2 as _cv2,
+            nudge_off_blank_frame,
+            preview_max_drift_sec,
+            read_captured_frame,
         )
         from ui.thumb_cache import get_thumb_cache
 
@@ -111,6 +115,28 @@ class _SameVideoThumbLoader(QThread):
             if not self._running or self.isInterruptionRequested():
                 return
             spans.sort(key=lambda item: _thumb_sample_time(item[0], item[1]))
+            if str(path).lower().startswith(("http://", "https://")):
+                from src.media.thumbnail import get_single_thumbnail
+
+                for start, end in spans:
+                    if not self._running or self.isInterruptionRequested():
+                        return
+                    sample = _thumb_sample_time(start, end)
+                    frame = get_single_thumbnail(
+                        path,
+                        sample,
+                        max_drift_sec=preview_max_drift_sec(start, end),
+                        segment_start=float(start),
+                        segment_end=float(end),
+                    )
+                    if frame is None:
+                        continue
+                    image = _scaled_thumb_image(cv2, frame, thumb_width, thumb_height)
+                    if image is None:
+                        continue
+                    cache.put(cache.make_key(path, sample, thumb_width, thumb_height), image)
+                    self.thumb_ready.emit(self.generation, path, float(start), image)
+                continue
             capture = cv2.VideoCapture(path)
             try:
                 opened = capture.isOpened()
@@ -119,11 +145,29 @@ class _SameVideoThumbLoader(QThread):
                         return
                     sample = _thumb_sample_time(start, end)
                     frame = None
+                    landed = None
                     if opened:
-                        capture.set(cv2.CAP_PROP_POS_MSEC, sample * 1000.0)
-                        ok, grabbed = capture.read()
-                        if ok and grabbed is not None and getattr(grabbed, "size", 0) > 0:
-                            frame = grabbed
+                        frame, landed = read_captured_frame(capture, cv2, sample)
+                    drift = preview_max_drift_sec(start, end)
+                    # Keep the fast keyframe when it is already near the clip middle.
+                    if (
+                        frame is not None
+                        and drift is not None
+                        and landed is not None
+                        and abs(float(landed) - sample) > drift
+                    ):
+                        frame = None
+                    elif frame is not None and drift is not None:
+                        frame = nudge_off_blank_frame(
+                            capture,
+                            cv2,
+                            frame,
+                            sample,
+                            start_sec=float(start),
+                            end_sec=float(end),
+                        )
+                    elif frame is not None and drift is None and is_blank_preview_frame(frame):
+                        frame = None
                     if frame is None:
                         frame = _ffmpeg_capture_frame(path, sample, timeout_sec=3.0)
                     if frame is None:
@@ -138,11 +182,9 @@ class _SameVideoThumbLoader(QThread):
 
 
 def _thumb_sample_time(start: float, end: float) -> float:
-    start = float(start)
-    end = float(end)
-    if end > start:
-        return (start + end) / 2.0
-    return max(0.0, start)
+    from src.media.thumbnail import preview_sample_time
+
+    return preview_sample_time(start, end)
 
 
 def _scaled_thumb_image(cv2, frame, width: int, height: int):

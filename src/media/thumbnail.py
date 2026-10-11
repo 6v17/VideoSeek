@@ -75,7 +75,131 @@ def _ffmpeg_capture_frame(video_path: str, time_sec: float, *, timeout_sec: floa
 ffmpeg_capture_frame = _ffmpeg_capture_frame
 
 
-def get_single_thumbnail(video_path, time_sec):
+def preview_sample_time(start_sec: float, end_sec: float) -> float:
+    """Point hits stay on their timestamp. A real span uses the middle of the clip."""
+    start = max(0.0, float(start_sec))
+    end = float(end_sec)
+    if end > start:
+        return (start + end) / 2.0
+    return start
+
+
+def preview_max_drift_sec(start_sec: float, end_sec: float) -> float | None:
+    """How far a fast keyframe may sit from the clip middle before ffmpeg is worth it.
+
+    A keyframe near the middle is good enough for a thumbnail. FFmpeg only runs
+    when the fast seek lands far away, usually on the opening frame of the clip.
+    """
+    start = float(start_sec)
+    end = float(end_sec)
+    if end <= start:
+        return None
+    return max(1.5, (end - start) * 0.35)
+
+
+def read_captured_frame(capture, cv2, time_sec: float):
+    """Seek with an already-open capture. Returns ``(frame, landed_sec)``."""
+    target = max(0.0, float(time_sec))
+    try:
+        capture.set(cv2.CAP_PROP_POS_MSEC, target * 1000.0)
+        ok, frame = capture.read()
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/media/thumbnail.py:read_captured_frame")
+        return None, None
+    landed = None
+    try:
+        pos_ms = float(capture.get(cv2.CAP_PROP_POS_MSEC))
+        if pos_ms >= 0:
+            landed = pos_ms / 1000.0
+    except Exception as exc:
+        from src.app.logging_utils import note_swallowed
+
+        note_swallowed(exc, "src/media/thumbnail.py:read_captured_pos")
+        landed = None
+    if not ok or frame is None or getattr(frame, "size", 0) <= 0:
+        return None, landed
+    return frame, landed
+
+
+def _frame_close_enough(landed_sec, target_sec: float, max_drift_sec: float | None) -> bool:
+    if max_drift_sec is None or landed_sec is None:
+        return True
+    return abs(float(landed_sec) - float(target_sec)) <= float(max_drift_sec)
+
+
+def is_blank_preview_frame(frame) -> bool:
+    """True when the frame is a near-uniform black or white flash.
+
+    Samples pixels already in memory. No extra decode.
+    """
+    if frame is None or getattr(frame, "size", 0) < 16 or getattr(frame, "ndim", 0) < 2:
+        return False
+    height, width = int(frame.shape[0]), int(frame.shape[1])
+    sample = frame[:: max(1, height // 16), :: max(1, width // 16)]
+    pixels = np.asarray(sample, dtype=np.float32)
+    if pixels.size == 0:
+        return False
+    mean = float(pixels.mean())
+    spread = float(pixels.std())
+    if spread > 10.0:
+        return False
+    return mean < 16.0 or mean > 242.0
+
+
+def segment_blank_offsets(start_sec: float, end_sec: float) -> tuple[float, float] | None:
+    """In-segment times to try after a blank middle: mid + span/4, then mid - span/4."""
+    start = float(start_sec)
+    end = float(end_sec)
+    if end <= start:
+        return None
+    span = end - start
+    mid = (start + end) / 2.0
+    return (mid + span / 4.0, mid - span / 4.0)
+
+
+def nudge_off_blank_frame(
+    capture,
+    cv2,
+    frame,
+    _time_sec: float,
+    *,
+    start_sec: float,
+    end_sec: float,
+):
+    """If the segment middle is a black/white flash, try two other in-segment times.
+
+    Order is the middle (already in ``frame``), then middle + span/4, then
+    middle - span/4. Both offsets stay inside the segment. A decoder keyframe
+    that lands outside the segment is skipped. If neither offset has content,
+    the middle frame is kept. Point hits are not adjusted.
+    """
+    start = float(start_sec)
+    end = float(end_sec)
+    if end <= start or not is_blank_preview_frame(frame):
+        return frame
+    offsets = segment_blank_offsets(start, end)
+    if offsets is None:
+        return frame
+    for candidate in offsets:
+        alt, landed = read_captured_frame(capture, cv2, candidate)
+        if alt is None or is_blank_preview_frame(alt):
+            continue
+        if landed is not None and not (start - 0.02 <= float(landed) <= end + 0.02):
+            continue
+        return alt
+    return frame
+
+
+def get_single_thumbnail(
+    video_path,
+    time_sec,
+    *,
+    max_drift_sec: float | None = None,
+    segment_start: float | None = None,
+    segment_end: float | None = None,
+):
     # Retained intentionally: imported dynamically inside ThumbLoader.run().
     path = str(video_path or "").strip()
     if not path:
@@ -86,17 +210,50 @@ def get_single_thumbnail(video_path, time_sec):
     safe_time = max(0.0, float(time_sec))
 
     # Remote team play URLs: ffmpeg handles HTTP range seeks more reliably than OpenCV.
+    # Segment blank retries use the same mid ± span/4 offsets as a local file.
     if http:
-        return _ffmpeg_capture_frame(path, safe_time, timeout_sec=8.0)
+        frame = _ffmpeg_capture_frame(path, safe_time, timeout_sec=8.0)
+        offsets = None
+        if (
+            frame is not None
+            and segment_start is not None
+            and segment_end is not None
+        ):
+            offsets = segment_blank_offsets(float(segment_start), float(segment_end))
+        if frame is not None and offsets is not None and is_blank_preview_frame(frame):
+            for candidate in offsets:
+                alt = _ffmpeg_capture_frame(path, candidate, timeout_sec=8.0)
+                if alt is not None and not is_blank_preview_frame(alt):
+                    return alt
+        return frame
 
-    # Fast path: keep one lightweight local decoder process.
+    # Fast path: one lightweight seek. OpenCV stops on the previous keyframe, which
+    # is usually still near the middle of a clip. FFmpeg only if that frame is far off.
     cv2 = _cv2()
     capture = cv2.VideoCapture(path)
     try:
         if capture.isOpened():
-            capture.set(cv2.CAP_PROP_POS_MSEC, safe_time * 1000.0)
-            ok, frame = capture.read()
-            if ok and frame is not None and frame.size > 0:
+            frame, landed = read_captured_frame(capture, cv2, safe_time)
+            if frame is not None and _frame_close_enough(landed, safe_time, max_drift_sec):
+                if (
+                    segment_start is not None
+                    and segment_end is not None
+                    and float(segment_end) > float(segment_start)
+                ):
+                    return nudge_off_blank_frame(
+                        capture,
+                        cv2,
+                        frame,
+                        safe_time,
+                        start_sec=float(segment_start),
+                        end_sec=float(segment_end),
+                    )
+                # Frame hits stay on their timestamp. A blank keyframe is rare, so
+                # one accurate seek is cheap and usually lands on the real picture.
+                if is_blank_preview_frame(frame):
+                    accurate = _ffmpeg_capture_frame(path, safe_time, timeout_sec=3.0)
+                    if accurate is not None:
+                        return accurate
                 return frame
     except Exception as exc:
         from src.app.logging_utils import note_swallowed
