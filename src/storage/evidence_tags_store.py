@@ -601,7 +601,9 @@ def search_tags(
         mode = "fuzzy"
     else:
         mode = "exact"
-    keep = max(1, min(300, int(top_k or 50)))
+    from src.storage.config_store import clamp_search_top_k
+
+    keep = clamp_search_top_k(top_k or 50, default=50)
     want_ids: list[str] | None = None
     if video_ids is not None:
         want_ids = [str(v).strip() for v in video_ids if str(v or "").strip()]

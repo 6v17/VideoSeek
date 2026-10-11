@@ -302,19 +302,23 @@ def _app_cfg(config=None):
 
 
 # First search window. The desktop list grows by SEARCH_WINDOW_STEP once the
-# user reaches the current cap minus SEARCH_WINDOW_LEAD, and stops when the
-# score threshold (or the index) returns a short page.
+# user nears the loaded rows, and stops when a larger fetch adds nothing new.
 SEARCH_WINDOW_INITIAL = 300
 SEARCH_WINDOW_STEP = 100
 SEARCH_WINDOW_LEAD = 100
 SEARCH_CANDIDATE_LIMIT = SEARCH_WINDOW_INITIAL
+# Safety ceiling for one request. The desktop window grows by SEARCH_WINDOW_STEP
+# until the score floor; this only stops a runaway top_k.
+SEARCH_TOP_K_MAX = 10000
 
 
-def next_result_window(limit, reached_index, exhausted=False):
+def next_result_window(limit, reached_index, exhausted=False, loaded_count=None):
     """Return the next fetch cap, or None when the current window still covers the user.
 
     ``reached_index`` is the furthest 0-based row that has entered the viewport.
-    Growing starts at ``limit - lead`` (300 → 200, then 400 → 300, and so on).
+    A full window grows at ``limit - lead`` (300 → 200, then 400 → 300).
+    A short list, such as chunk search collapsing many frames into fewer segments,
+    grows once the user reaches its last row. That shortfall is not the end of the index.
     """
     if exhausted:
         return None
@@ -325,6 +329,16 @@ def next_result_window(limit, reached_index, exhausted=False):
         return None
     if current <= 0 or reached < 0:
         return None
+    loaded = None
+    if loaded_count is not None:
+        try:
+            loaded = int(loaded_count)
+        except (TypeError, ValueError):
+            loaded = None
+    if loaded is not None and 0 < loaded < current - SEARCH_WINDOW_LEAD:
+        if reached < loaded - 1:
+            return None
+        return current + SEARCH_WINDOW_STEP
     if reached + 1 < current - SEARCH_WINDOW_LEAD:
         return None
     return current + SEARCH_WINDOW_STEP
@@ -332,9 +346,81 @@ def next_result_window(limit, reached_index, exhausted=False):
 
 _SEARCH_MIN_SCORE_KEYS = {
     "image": "search_min_score_image",
+    "image_chunk": "search_min_score_image_chunk",
     "text": "search_min_score_text",
     "compose": "search_min_score_compose",
+    "dialogue": "search_min_score_dialogue",
 }
+
+
+def search_min_score_config_key(kind: str) -> str | None:
+    return _SEARCH_MIN_SCORE_KEYS.get(str(kind or "").strip().lower())
+
+
+def resolve_search_score_kind(
+    *,
+    search_kind: str | None = None,
+    is_text: bool = False,
+    search_mode: str | None = None,
+    search_precision_mode: str | None = None,
+    video_discovery_enabled: bool | None = None,
+    compose_text: str | None = None,
+    compose_image_paths: list | None = None,
+) -> str | None:
+    """Which stored floor applies. Frame, best-per-video, and deep search share one."""
+    del search_precision_mode, video_discovery_enabled
+    kind = str(search_kind or "").strip().lower()
+    if kind == "tags":
+        return None
+    if kind == "dialogue":
+        mode = str(search_mode or "").strip().lower()
+        if mode in {"fuzzy", "tolerant", "approx"}:
+            return "dialogue"
+        return None
+    if kind == "compose" or compose_text is not None or compose_image_paths is not None:
+        return "compose"
+    if is_text:
+        return "text"
+    if str(search_mode or "").strip().lower() == "chunk":
+        return "image_chunk"
+    return "image"
+
+
+def clamp_search_top_k(top_k, *, default: int) -> int:
+    """Honor an explicit window size. Missing or invalid values use ``default``."""
+    try:
+        value = int(default if top_k is None else top_k)
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(1, min(SEARCH_TOP_K_MAX, value))
+
+
+def resolve_effective_min_score(
+    explicit,
+    *,
+    config=None,
+    search_kind: str | None = None,
+    is_text: bool = False,
+    search_mode: str | None = None,
+    search_precision_mode: str | None = None,
+    video_discovery_enabled: bool | None = None,
+) -> float | None:
+    """Use a caller-supplied floor, otherwise the host's per-mode slider."""
+    if explicit is not None:
+        try:
+            return max(0.0, min(1.0, float(explicit)))
+        except (TypeError, ValueError):
+            pass
+    kind = resolve_search_score_kind(
+        search_kind=search_kind,
+        is_text=is_text,
+        search_mode=search_mode,
+        search_precision_mode=search_precision_mode,
+        video_discovery_enabled=video_discovery_enabled,
+    )
+    if kind is None:
+        return None
+    return get_search_min_score(config, kind)
 
 
 def get_search_min_score(config=None, kind: str = "image") -> float:
@@ -350,11 +436,9 @@ def get_search_min_score(config=None, kind: str = "image") -> float:
 
 
 def get_search_top_k(config=None) -> int:
-    cfg = _app_cfg(config)
-    try:
-        return int(cfg.get("search_top_k", DEFAULT_CONFIG["search_top_k"]))
-    except (TypeError, ValueError):
-        return int(DEFAULT_CONFIG["search_top_k"])
+    """First result window. Omitted top_k on desktop, team, and Agent all use this."""
+    del config
+    return int(SEARCH_CANDIDATE_LIMIT)
 
 
 def get_search_mode(config=None) -> str:

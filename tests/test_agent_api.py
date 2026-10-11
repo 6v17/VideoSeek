@@ -123,10 +123,13 @@ class AgentApiHelperTests(unittest.TestCase):
         self.assertEqual(filtered[0].video_path, "b.mp4")
 
     def test_clamp_top_k(self):
+        from src.storage.config_store import SEARCH_TOP_K_MAX
+
         with patch("src.web.agent_api.search.get_search_top_k", return_value=20):
             self.assertEqual(_clamp_top_k(None), 20)
             self.assertEqual(_clamp_top_k(3), 3)
-            self.assertEqual(_clamp_top_k(999), 300)
+            self.assertEqual(_clamp_top_k(999), 999)
+            self.assertEqual(_clamp_top_k(10**9), SEARCH_TOP_K_MAX)
             self.assertEqual(_clamp_top_k("bad"), 20)
 
     @patch.object(config_store_module, "get_search_scope_video_paths", return_value=[])

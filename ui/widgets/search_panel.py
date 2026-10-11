@@ -572,21 +572,32 @@ class SearchPanel(VSCard):
         options_row_layout.addWidget(self.skip_edges_cluster, 0)
         options_row_layout.addWidget(self.search_mode_options_stack, 0)
 
-        from ui.widgets.components import NoWheelSpinBox
+        from ui.widgets.components import NoWheelSlider
 
-        self._score_defaults = {"image": 50, "text": 15, "compose": 10}
+        self._score_defaults = {
+            "image": 50,
+            "image_chunk": 20,
+            "text": 15,
+            "compose": 10,
+            "dialogue": 0,
+        }
         self._score_values = dict(self._score_defaults)
         self._score_kind = "image"
         self.score_label = QLabel()
         self.score_label.setObjectName("InlineFieldLabel")
         _configure_field_label(self.score_label)
-        self.score_input = NoWheelSpinBox()
-        self.score_input.setObjectName("SearchScoreInput")
+        self.score_input = NoWheelSlider(Qt.Orientation.Horizontal)
+        self.score_input.setObjectName("SearchScoreSlider")
         self.score_input.setRange(0, 100)
-        self.score_input.setSuffix("%")
+        self.score_input.setSingleStep(1)
+        self.score_input.setPageStep(5)
         self.score_input.setValue(self._score_defaults["image"])
-        self.score_input.setFixedWidth(72)
+        self.score_input.setFixedWidth(148)
         self.score_input.setFixedHeight(options_combo_height)
+        self.score_value = QLabel("50%")
+        self.score_value.setObjectName("SearchScoreValue")
+        self.score_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.score_value.setFixedWidth(40)
         self.score_input.valueChanged.connect(self._remember_score)
         self.score_cluster = QWidget()
         self.score_cluster.setObjectName("SearchScoreCluster")
@@ -595,6 +606,7 @@ class SearchPanel(VSCard):
         score_row.setSpacing(field_gap)
         score_row.addWidget(self.score_label, 0)
         score_row.addWidget(self.score_input, 0)
+        score_row.addWidget(self.score_value, 0)
         score_row.addStretch(1)
         self.score_cluster.setFixedHeight(options_row_height)
         options_row_layout.addWidget(self.score_cluster, 0)
@@ -690,14 +702,15 @@ class SearchPanel(VSCard):
         self._sync_card_height()
         self._apply_filter_summary_visibility()
 
-    def set_score_thresholds(self, *, image: float, text: float, compose: float) -> None:
-        values = {"image": image, "text": text, "compose": compose}
-        for kind, score in values.items():
+    def set_score_thresholds(self, **scores: float) -> None:
+        for kind, score in scores.items():
+            if kind not in self._score_values:
+                continue
             self._score_values[kind] = max(0, min(100, int(round(float(score) * 100))))
         self.show_score_kind(self._score_kind)
 
     def show_score_kind(self, kind: str | None) -> None:
-        """Show this mode's own threshold. Subtitle and tag search have none."""
+        """Show the floor for the active mode. Tag search has no similarity percent."""
         normalized = str(kind or "").strip().lower()
         if normalized not in self._score_values:
             normalized = ""
@@ -706,13 +719,18 @@ class SearchPanel(VSCard):
         if self._score_kind is None:
             return
         percent = int(self._score_values[self._score_kind])
+        self._set_score_readout(percent)
         if self.score_input.value() == percent:
             return
         self.score_input.blockSignals(True)
         self.score_input.setValue(percent)
         self.score_input.blockSignals(False)
 
+    def _set_score_readout(self, value: int) -> None:
+        self.score_value.setText(f"{int(value)}%")
+
     def _remember_score(self, value: int) -> None:
+        self._set_score_readout(value)
         if self._score_kind:
             self._score_values[self._score_kind] = int(value)
 
@@ -866,8 +884,10 @@ class SearchPanel(VSCard):
                 _cluster_width(self.dialogue_search_mode_label, dialogue_mode_w)
             )
         if hasattr(self, "score_cluster"):
+            readout = int(self.score_value.width() or 40)
+            slider_w = int(self.score_input.width() or 148)
             self.score_cluster.setMinimumWidth(
-                _cluster_width(self.score_label, self.score_input.width() or 72)
+                _cluster_width(self.score_label, slider_w + field_gap + readout)
             )
         if hasattr(self, "text_granularity_cluster"):
             mode_only = _cluster_width(self.search_mode_label, mode_w)

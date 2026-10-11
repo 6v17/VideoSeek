@@ -207,15 +207,18 @@ class TeamServerLifecycleWorker(QThread):
 
 
 def _search_score_kind(config: SearchConfig) -> str | None:
-    """Image, text, and compose each have their own score floor. Keyword search does not."""
-    kind = str(config.search_kind or "").strip().lower()
-    if kind in {"dialogue", "tags"}:
-        return None
-    if kind == "compose" or config.compose_text is not None or config.compose_image_paths is not None:
-        return "compose"
-    if config.is_text:
-        return "text"
-    return "image"
+    """Frame, best-per-video, and deep search share one floor. Chunk is separate."""
+    from src.storage.config_store import resolve_search_score_kind
+
+    return resolve_search_score_kind(
+        search_kind=config.search_kind,
+        is_text=bool(config.is_text),
+        search_mode=config.search_mode,
+        search_precision_mode=config.search_precision_mode,
+        video_discovery_enabled=config.video_discovery_enabled,
+        compose_text=config.compose_text,
+        compose_image_paths=config.compose_image_paths,
+    )
 
 
 class SearchWorker(QThread):

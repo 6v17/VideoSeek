@@ -355,6 +355,14 @@ class PreviewDialog(QDialog):
             caption_text=caption_text,
         )
 
+    def reject(self) -> None:  # noqa: N802 — Qt API
+        """Embedded preview uses Esc to return to the result list, not to hide the player in place."""
+        leave = getattr(self, "_on_embedded_escape", None)
+        if callable(leave):
+            leave()
+            return
+        super().reject()
+
     def closeEvent(self, event):
         # Always hide immediately so the user is never trapped behind a busy/frozen dialog.
         if self._close_requested:

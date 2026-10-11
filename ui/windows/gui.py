@@ -353,6 +353,9 @@ class MainWindow(
             )
         self.search_page.image_search_mode.currentIndexChanged.connect(self._on_image_search_mode_changed)
         self.search_page.score_input.valueChanged.connect(self._on_search_score_threshold_changed)
+        self.search_page.score_input.sliderReleased.connect(
+            lambda: self._on_search_score_threshold_changed(self.search_page.score_input.value())
+        )
         self._load_search_score_thresholds()
         if hasattr(self.search_page, "dialogue_search_mode"):
             self.search_page.dialogue_search_mode.currentIndexChanged.connect(
@@ -821,7 +824,6 @@ class MainWindow(
         self.search_page.preview_strip_label.setText(t.get("search_preview_strip", "同视频就近候选"))
         self.search_page.preview_strip_label.setToolTip(t.get("search_preview_strip_tip", "双击播放"))
         self.search_page.preview_detail_title.setText(t.get("search_preview_detail", "当前视频"))
-        self.search_page.apply_results_float_texts(t)
         self.search_page.btn_export_tasks.setText(t.get("preview_export_tasks", "Export Tasks"))
         self._update_shot_list_button()
         self._update_preview_action_button_styles()
@@ -841,6 +843,7 @@ class MainWindow(
         panel.score_label.setText(t.get("search_min_score_label", "最低相关度"))
         panel.score_label.setToolTip(score_hint)
         panel.score_input.setToolTip(score_hint)
+        panel.score_value.setToolTip(score_hint)
         self.search_page.search_scope_label.setText(t.get("search_scope_label", ""))
         self.search_page.skip_edges_label.setText(t.get("search_skip_edges_label", "跳过时段"))
         if hasattr(self, "_refresh_skip_edges_summary"):

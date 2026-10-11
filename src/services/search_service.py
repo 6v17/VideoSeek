@@ -1085,7 +1085,7 @@ def run_dialogue_search(
     Returns ``(hits, message, matched_by)`` where ``matched_by`` is
     ``keyword`` / ``keyword_fuzzy`` / ``""``.
     """
-    from src.storage.config_store import get_local_model_asset_dirs, get_search_top_k
+    from src.storage.config_store import clamp_search_top_k, get_local_model_asset_dirs, get_search_top_k
     from src.storage.lance_dialogue_search import get_dialogue_index_stats, search_dialogue
 
     cfg = dict(config or load_config())
@@ -1093,11 +1093,7 @@ def run_dialogue_search(
     if not text:
         return [], "empty query", ""
 
-    try:
-        resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
-    except (TypeError, ValueError):
-        resolved_top_k = get_search_top_k(cfg)
-    resolved_top_k = max(1, min(300, resolved_top_k))
+    resolved_top_k = clamp_search_top_k(top_k, default=get_search_top_k(cfg))
 
     # Over-fetch when scoped so post-filter still has candidates.
     fetch_k = resolve_fetch_top_k(
@@ -1187,7 +1183,7 @@ def run_tag_search(
 
     Multiple tags (``required_tags`` or ``query`` split on `` · ``) are AND-combined.
     """
-    from src.storage.config_store import get_search_top_k
+    from src.storage.config_store import clamp_search_top_k, get_search_top_k
     from src.storage.evidence_tags_store import get_tag_index_stats, search_tags
 
     cfg = dict(config or load_config())
@@ -1205,11 +1201,7 @@ def run_tag_search(
     if not terms:
         return [], "empty query", ""
 
-    try:
-        resolved_top_k = int(top_k) if top_k is not None else get_search_top_k(cfg)
-    except (TypeError, ValueError):
-        resolved_top_k = get_search_top_k(cfg)
-    resolved_top_k = max(1, min(300, resolved_top_k))
+    resolved_top_k = clamp_search_top_k(top_k, default=get_search_top_k(cfg))
 
     stats = get_tag_index_stats(config=cfg)
     if not stats.get("tag_index_ready"):

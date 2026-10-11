@@ -49,6 +49,14 @@ class SearchWindowGrowthTests(unittest.TestCase):
         self.assertIsNone(next_result_window(300, 299, exhausted=True))
         self.assertIsNone(next_result_window(0, 10))
 
+    def test_short_list_grows_when_the_user_reaches_its_last_row(self):
+        self.assertIsNone(next_result_window(300, 100, loaded_count=120))
+        self.assertEqual(next_result_window(300, 119, loaded_count=120), 400)
+
+    def test_nearly_full_window_still_uses_the_cap_horizon(self):
+        self.assertIsNone(next_result_window(400, 298, loaded_count=399))
+        self.assertEqual(next_result_window(400, 299, loaded_count=399), 500)
+
 
 class SearchResultsPagerLabelTests(unittest.TestCase):
     @classmethod

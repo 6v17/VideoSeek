@@ -63,6 +63,9 @@ class SearchController(QObject):
         self._prefetch_hold = False
         self._scroll_hooked = False
         self._suppress_window_growth = False
+        self._resetting_scroll = False
+        self._pin_top_guard = False
+        self._pin_top_on_resume = False
 
     def _result_view(self):
         return self.parent_window.search_page.result_view
@@ -219,6 +222,9 @@ class SearchController(QObject):
         self._current_page = 0
         self._result_display_context = {}
         self._result_view().clear()
+        self._pin_top_guard = True
+        self._reset_result_scroll()
+        self._pin_top_guard = False
         self._sync_results_pager()
 
     def _results_page_size(self) -> int:
@@ -292,7 +298,24 @@ class SearchController(QObject):
         view.table.verticalScrollBar().valueChanged.connect(self._on_results_scrolled)
         self._scroll_hooked = True
 
+    def _reset_result_scroll(self) -> None:
+        """New searches start at the first row. A leftover scrollbar looks like the user already scrolled."""
+        view = self._result_view()
+        self._resetting_scroll = True
+        try:
+            view.grid.verticalScrollBar().setValue(0)
+            view.table.scrollToTop()
+            view.table.verticalScrollBar().setValue(0)
+        finally:
+            self._resetting_scroll = False
+
     def _on_results_scrolled(self, _value: int = 0) -> None:
+        if self._resetting_scroll:
+            return
+        if self._pin_top_guard:
+            if int(_value) > 0:
+                self._reset_result_scroll()
+            return
         furthest = self._furthest_visible_index()
         if self._prefetch_hold and furthest > int(getattr(self, "_prefetch_hold_index", -1)):
             self._prefetch_hold = False
@@ -341,7 +364,9 @@ class SearchController(QObject):
             self._window_exhausted = True
             return
         self._window_limit = int(SEARCH_CANDIDATE_LIMIT)
-        self._window_exhausted = len(self._all_results) < self._window_limit
+        # A short first page (chunk collapse, nearby-frame dedupe) is not the end.
+        # Growth stops only when a larger fetch adds no new hits.
+        self._window_exhausted = len(self._all_results) == 0
         self._prefetch_hold = False
 
     def _maybe_grow_window(self, *, ignore_worker=None) -> None:
@@ -356,6 +381,7 @@ class SearchController(QObject):
             self._window_limit,
             self._furthest_visible_index(),
             exhausted=self._window_exhausted,
+            loaded_count=len(self._all_results),
         )
         if nxt is None:
             return
@@ -388,8 +414,6 @@ class SearchController(QObject):
             return
         requested = int(getattr(worker, "window_limit", 0) or 0)
         incoming = list(rows or [])
-        if requested <= 0 or len(incoming) < requested:
-            self._window_exhausted = True
         extra = _unseen_hits(self._all_results, incoming)
         if not extra:
             self._window_exhausted = True
@@ -654,21 +678,41 @@ class SearchController(QObject):
             "dialogue_match_mode": dialogue_match_mode,
         }
         self._ensure_result_scroll_hooks()
-        self._render_current_page()
+        self._render_current_page(pin_top=True)
 
-    def _render_current_page(self) -> None:
+    def _render_current_page(self, *, pin_top: bool = False) -> None:
         results = self._all_results
         if not results:
             self._result_view().clear()
             self._sync_results_pager()
             return
         self._suppress_window_growth = True
+        self._pin_top_on_resume = bool(pin_top)
+        if pin_top:
+            self._pin_top_guard = True
         try:
             self._paint_current_page(results)
+            if pin_top:
+                self._reset_result_scroll()
         finally:
             from PySide6.QtCore import QTimer
 
             QTimer.singleShot(0, self._resume_window_growth)
+
+    def _resume_window_growth(self) -> None:
+        pin = bool(self._pin_top_on_resume)
+        self._pin_top_on_resume = False
+        if pin:
+            self._reset_result_scroll()
+        self._suppress_window_growth = False
+        if pin:
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, self._release_pin_guard)
+
+    def _release_pin_guard(self) -> None:
+        self._reset_result_scroll()
+        self._pin_top_guard = False
 
     def _paint_current_page(self, results) -> None:
         texts = self.parent_window.texts
@@ -699,9 +743,6 @@ class SearchController(QObject):
         self._update_results_status_text(results, context)
         self._start_page_thumbnails(page_results)
         self._sync_embedded_preview_strip()
-
-    def _resume_window_growth(self) -> None:
-        self._suppress_window_growth = False
 
     def _sync_embedded_preview_strip(self) -> None:
         window = self.parent_window

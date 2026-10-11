@@ -105,8 +105,10 @@ DEFAULT_CONFIG = {
     "sampling_fps_rules": "0-10m=2; 10m-=1",
     "search_top_k": 100,
     "search_min_score_image": 0.5,
+    "search_min_score_image_chunk": 0.2,
     "search_min_score_text": 0.15,
     "search_min_score_compose": 0.1,
+    "search_min_score_dialogue": 0.0,
     "text_search_enhance_enabled": False,
     "search_skip_edges_enabled": False,
     "search_skip_ranges": "",
@@ -210,8 +212,10 @@ CONFIG_BOUNDS = {
     "fps": (0.01, 24.0),
     "search_top_k": (1, 300),
     "search_min_score_image": (0.0, 1.0),
+    "search_min_score_image_chunk": (0.0, 1.0),
     "search_min_score_text": (0.0, 1.0),
     "search_min_score_compose": (0.0, 1.0),
+    "search_min_score_dialogue": (0.0, 1.0),
     "search_skip_intro_sec": (0, 600),
     "search_skip_outro_sec": (0, 600),
     "frame_neighbor_rerank_top_n": (1, 100),
@@ -594,6 +598,8 @@ def _sanitize_general_settings(config):
         for key in score_keys:
             sanitized[key] = DEFAULT_CONFIG[key]
     sanitized.pop("search_min_score", None)
+    sanitized.pop("search_min_score_video_discovery", None)
+    sanitized.pop("search_min_score_precise", None)
 
     for key, allowed_values in CONFIG_ENUMS.items():
         value = str(sanitized.get(key, DEFAULT_CONFIG[key]) or "").strip().lower()

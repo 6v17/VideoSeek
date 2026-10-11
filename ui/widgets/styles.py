@@ -690,6 +690,38 @@ QPushButton:disabled {
     background: __BUTTON_SOFT_PRESSED__;
     padding: __SPACE_1__ __SPACE_3__;
 }
+#SearchScoreSlider {
+    min-height: 22px;
+}
+#SearchScoreSlider::groove:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: __LINE_STRONG__;
+}
+#SearchScoreSlider::sub-page:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: __ACCENT__;
+}
+#SearchScoreSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+    background: __ACCENT__;
+    border: 2px solid __WINDOW__;
+}
+#SearchScoreSlider::handle:horizontal:hover {
+    background: __ACCENT_HOVER__;
+}
+#SearchScoreValue {
+    color: __HEADLINE__;
+    font-size: __FS_XS__;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
 #SearchFilterSummary {
     color: __MUTED__;
     font-size: __FS_XS__;

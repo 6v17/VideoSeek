@@ -244,8 +244,6 @@ class TrayGuiMixin:
 
                 note_swallowed(exc, "ui/windows/gui_tray.py:236")
                 pass
-        if hasattr(self, "search_page") and self.search_page is not None:
-            self.search_page.shutdown_results_float()
         self.search_controller.shutdown()
         self.video_download_controller.shutdown()
         from ui.threading_utils import shutdown_thread

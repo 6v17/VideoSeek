@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QStackedWidget,
     QToolButton,
@@ -28,7 +29,6 @@ from ui.widgets.layout import (
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.search_results_pager import SearchResultsPager
 from ui.widgets.result_view import ResultView
-from ui.widgets.results_float_window import ResultsFloatWindow, force_widget_foreground
 from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
     PageScaffold,
@@ -131,6 +131,10 @@ class _NoWheelMixin:
 
 
 class NoWheelSpinBox(_NoWheelMixin, QSpinBox):
+    pass
+
+
+class NoWheelSlider(_NoWheelMixin, QSlider):
     pass
 
 
@@ -400,8 +404,6 @@ class NavigationSidebar(QWidget):
 
 
 class SearchPage(QWidget):
-    results_float_changed = Signal(bool)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -488,7 +490,6 @@ class SearchPage(QWidget):
         self._preview_layout_maximized = False
         self._workspace_sizes_before_preview_max = None
 
-        # Slot stays in the page layout; results_card can reparent into a float window.
         self.results_slot = QWidget()
         self.results_slot.setObjectName("SearchResultsSlot")
         self.results_slot.setMinimumHeight(160)
@@ -509,8 +510,6 @@ class SearchPage(QWidget):
         self.search_presets_bar = SearchPresetsBar()
         self.btn_manage_presets = QPushButton()
         self.btn_manage_presets.setObjectName("PresetManageButton")
-        self.btn_detach_results = QPushButton("弹出窗口")
-        self.btn_detach_results.setObjectName("GhostButton")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
         self.btn_shot_list = QPushButton()
@@ -548,7 +547,6 @@ class SearchPage(QWidget):
 
         actions_layout.addWidget(self.results_view_segment)
         actions_layout.addWidget(self.btn_manage_presets)
-        actions_layout.addWidget(self.btn_detach_results)
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
@@ -564,35 +562,6 @@ class SearchPage(QWidget):
         results_layout.addWidget(self.results_pager, 0, Qt.AlignmentFlag.AlignHCenter)
         results_layout.setSpacing(8)
         results_layout.addWidget(self.result_view, 1)
-
-        # Same footprint as results while floated — main split stays unchanged.
-        self.results_float_placeholder = VSCard(margins=(14, 12, 14, 12), spacing=8)
-        self.results_float_placeholder.setObjectName("PanelCard")
-        self.results_float_placeholder.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self.results_float_placeholder.setMinimumHeight(160)
-        placeholder_layout = self.results_float_placeholder.content_layout
-        placeholder_row = QHBoxLayout()
-        placeholder_row.setContentsMargins(0, 0, 0, 0)
-        placeholder_row.setSpacing(10)
-        self.results_float_hint = QLabel()
-        self.results_float_hint.setObjectName("Hint")
-        self.results_float_hint.setWordWrap(True)
-        self.results_float_hint.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.btn_focus_results = QPushButton()
-        self.btn_focus_results.setObjectName("AccentGhostButton")
-        self.btn_focus_results.setMinimumHeight(30)
-        self.btn_dock_results = QPushButton()
-        self.btn_dock_results.setObjectName("GhostButton")
-        self.btn_dock_results.setMinimumHeight(30)
-        placeholder_row.addWidget(self.results_float_hint, 1)
-        placeholder_row.addWidget(self.btn_focus_results, 0)
-        placeholder_row.addWidget(self.btn_dock_results, 0)
-        # Keep the strip at the top of the results slot (do not vertically center).
-        placeholder_layout.addLayout(placeholder_row)
-        placeholder_layout.addStretch(1)
-        self.results_float_placeholder.hide()
 
         self.results_slot_layout.addWidget(self.results_card, 1)
 
@@ -687,19 +656,6 @@ class SearchPage(QWidget):
         self.workspace_splitter = None
         self._workspace_splitter = None
 
-        self._results_float_window = None
-        self._results_float_texts = {
-            "title": "检索结果",
-            "detach": "弹出窗口",
-            "dock": "嵌回主窗口",
-            "focus": "返回列表",
-            "hint": "检索结果已在独立窗口中显示。",
-        }
-        self.btn_detach_results.clicked.connect(self.toggle_results_float)
-        self.btn_focus_results.clicked.connect(self.focus_results_float)
-        self.btn_dock_results.clicked.connect(self.dock_results)
-        self._sync_detach_button_label()
-
         self._viewport_budget_timer = QTimer(self)
         self._viewport_budget_timer.setSingleShot(True)
         self._viewport_budget_timer.setInterval(50)
@@ -724,10 +680,6 @@ class SearchPage(QWidget):
         if view is not None and hasattr(view, "set_viewport_min_height"):
             view.set_viewport_min_height(result_table_min_height(viewport_height=vh))
 
-    def is_results_floating(self) -> bool:
-        window = self._results_float_window
-        return window is not None and window.isVisible() and window.is_hosting()
-
     def set_preview_maximized(self, maximized: bool) -> None:
         """Preview is a dialog now; do not hide the browse layout."""
         del maximized
@@ -735,108 +687,6 @@ class SearchPage(QWidget):
 
     def is_preview_maximized(self) -> bool:
         return False
-
-    def apply_results_float_texts(self, texts: dict) -> None:
-        title = str(texts.get("results_panel", self._results_float_texts["title"]) or "检索结果")
-        detach = str(texts.get("results_detach", self._results_float_texts["detach"]) or "弹出窗口")
-        dock = str(texts.get("results_dock", self._results_float_texts["dock"]) or "嵌回主窗口")
-        focus = str(texts.get("results_focus_list", self._results_float_texts["focus"]) or "返回列表")
-        hint = str(
-            texts.get("results_float_hint", self._results_float_texts["hint"])
-            or "检索结果已在独立窗口中显示。"
-        )
-        self._results_float_texts = {
-            "title": title,
-            "detach": detach,
-            "dock": dock,
-            "focus": focus,
-            "hint": hint,
-        }
-        self.results_float_hint.setText(hint)
-        self.btn_focus_results.setText(focus)
-        self.btn_focus_results.setToolTip(focus)
-        self.btn_dock_results.setText(dock)
-        if self._results_float_window is not None:
-            self._results_float_window.setWindowTitle(title)
-        self._sync_detach_button_label()
-
-    def _sync_detach_button_label(self) -> None:
-        floating = self.is_results_floating()
-        label = self._results_float_texts["dock" if floating else "detach"]
-        self.btn_detach_results.setText(label)
-        self.btn_detach_results.setToolTip(label)
-
-    def toggle_results_float(self) -> None:
-        if self.is_results_floating():
-            self.dock_results()
-        else:
-            self.float_results()
-
-    def focus_results_float(self) -> None:
-        """Bring the floated results window to the front without docking."""
-        if not self.is_results_floating():
-            return
-        window = self._results_float_window
-        if window is None:
-            return
-        force_widget_foreground(window)
-
-    def lower_results_float(self) -> None:
-        """Send the floated results window behind other windows (e.g. before preview)."""
-        window = self._results_float_window
-        if window is None or not window.isVisible():
-            return
-        window.lower()
-
-    def float_results(self) -> None:
-        if self.is_results_floating():
-            self.focus_results_float()
-            return
-        window = self._ensure_results_float_window()
-        self.results_slot_layout.removeWidget(self.results_card)
-        window.take_card(self.results_card)
-        self.results_slot_layout.addWidget(self.results_float_placeholder, 1)
-        self.results_float_placeholder.show()
-        window.setWindowTitle(self._results_float_texts["title"])
-        force_widget_foreground(window)
-        self._sync_detach_button_label()
-        self.results_float_changed.emit(True)
-
-    def dock_results(self) -> None:
-        window = self._results_float_window
-        if window is None or not window.is_hosting():
-            self._sync_detach_button_label()
-            return
-        card = window.release_card()
-        window.hide()
-        while self.results_slot_layout.count():
-            item = self.results_slot_layout.takeAt(0)
-            widget = item.widget()
-            if widget is self.results_float_placeholder:
-                self.results_float_placeholder.hide()
-                self.results_float_placeholder.setParent(self)
-        if card is not None:
-            self.results_slot_layout.addWidget(card, 1)
-            card.show()
-        self._sync_detach_button_label()
-        self.results_float_changed.emit(False)
-
-    def _ensure_results_float_window(self) -> ResultsFloatWindow:
-        if self._results_float_window is None:
-            # Top-level (no parent) so the float can sit behind the main window on preview.
-            self._results_float_window = ResultsFloatWindow(None)
-            self._results_float_window.dock_requested.connect(self.dock_results)
-        return self._results_float_window
-
-    def shutdown_results_float(self) -> None:
-        """Dock back and release the float window (app shutdown)."""
-        if self._results_float_window is not None and self._results_float_window.is_hosting():
-            self.dock_results()
-        window = self._results_float_window
-        self._results_float_window = None
-        if window is not None:
-            window.close()
-            window.deleteLater()
 
 
 class DialogueLibraryRow(QFrame):

@@ -26,9 +26,11 @@ from src.services.search_scope import (
 )
 from src.services.search_service import run_dialogue_search, run_search, run_tag_search
 from src.storage.config_store import (
+    clamp_search_top_k,
     get_search_scope_mode,
     get_search_top_k,
     get_text_search_enhance_enabled,
+    resolve_effective_min_score,
 )
 
 from .constants import (
@@ -145,15 +147,9 @@ def _text_enhance_applied(
 
 
 def _clamp_top_k(top_k: Optional[int]) -> int:
+    """Desktop windows pass an explicit size; omitted requests keep search_top_k."""
     config = load_config()
-    default_k = get_search_top_k(config)
-    if top_k is None:
-        return default_k
-    try:
-        value = int(top_k)
-    except (TypeError, ValueError):
-        return default_k
-    return max(1, min(300, value))
+    return clamp_search_top_k(top_k, default=get_search_top_k(config))
 
 
 def _normalize_agent_path(path: str) -> str:
@@ -702,13 +698,22 @@ def _resolve_agent_search_inputs(
         )
     mode = _normalize_mode(body.mode or getattr(body, "search_mode", None))
     top_k = _clamp_top_k(body.top_k if body.top_k is not None else query_part.get("default_top_k"))
-    min_score = body.min_score if body.min_score is not None else query_part.get("default_min_score")
     search_precision_mode = normalize_search_precision_mode(
         body.search_precision_mode,
         is_text=bool(query_part["is_text"]),
         has_image=bool(query_part["has_image"]),
         config=cfg,
         use_agent_default=True,
+    )
+    explicit_min_score = body.min_score if body.min_score is not None else query_part.get("default_min_score")
+    min_score = resolve_effective_min_score(
+        explicit_min_score,
+        config=cfg,
+        search_kind=getattr(body, "search_kind", None),
+        is_text=bool(query_part["is_text"]),
+        search_mode=mode,
+        search_precision_mode=search_precision_mode,
+        video_discovery_enabled=getattr(body, "video_discovery_enabled", None),
     )
     scope_video_paths, scope_library_paths = resolve_effective_search_scope(
         body.scope,
@@ -975,7 +980,12 @@ def _execute_agent_dialogue_search(body: AgentSearchRequest, *, config=None) -> 
             top_k=top_k,
             scope_video_paths=scope_video_paths,
             scope_library_paths=scope_library_paths,
-            min_score=body.min_score,
+            min_score=resolve_effective_min_score(
+                body.min_score,
+                config=cfg,
+                search_kind="dialogue",
+                search_mode=_resolve_dialogue_match_mode(body),
+            ),
             config=cfg,
             match_mode=_resolve_dialogue_match_mode(body),
         )
@@ -1044,7 +1054,11 @@ def _execute_agent_tag_search(body: AgentSearchRequest, *, config=None) -> Dict[
             top_k=top_k,
             scope_video_paths=scope_video_paths,
             scope_library_paths=scope_library_paths,
-            min_score=body.min_score,
+            min_score=resolve_effective_min_score(
+                body.min_score,
+                config=cfg,
+                search_kind="tags",
+            ),
             config=cfg,
             match_mode=_resolve_dialogue_match_mode(body),
         )

@@ -361,12 +361,7 @@ class SearchPanelStateMixin:
             btn_save_preset.setText(texts.get("search_compose_save_preset", "Save preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
         if hasattr(page.search_panel, "show_score_kind"):
-            score_kind = active_tab if active_tab in {
-                self.SEARCH_TAB_IMAGE,
-                self.SEARCH_TAB_TEXT,
-                self.SEARCH_TAB_COMPOSE,
-            } else None
-            page.search_panel.show_score_kind(score_kind)
+            page.search_panel.show_score_kind(self._active_search_score_kind())
 
         mode_stack = getattr(page, "search_mode_options_stack", None)
         if mode_stack is not None:
@@ -479,20 +474,42 @@ class SearchPanelStateMixin:
         self._refresh_search_model_display()
         self._refresh_search_filter_summary()
 
+    def _active_search_score_kind(self) -> str | None:
+        """Same rules as the search itself. Do not keep a second copy here."""
+        from src.storage.config_store import resolve_search_score_kind
+
+        active = self._search_active_tab()
+        if active == self.SEARCH_TAB_TAGS:
+            return resolve_search_score_kind(search_kind="tags")
+        if active == self.SEARCH_TAB_DIALOGUE:
+            return resolve_search_score_kind(
+                search_kind="dialogue",
+                search_mode=self._dialogue_match_mode_from_ui(),
+            )
+        if active == self.SEARCH_TAB_COMPOSE:
+            return resolve_search_score_kind(search_kind="compose")
+        if active == self.SEARCH_TAB_TEXT:
+            return resolve_search_score_kind(is_text=True)
+        image_mode = self._image_search_mode_from_ui()
+        return resolve_search_score_kind(
+            is_text=False,
+            search_mode="chunk" if image_mode == "chunk" else "frame",
+        )
+
     def _load_search_score_thresholds(self) -> None:
         from src.storage.config_store import get_search_min_score
 
         panel = getattr(getattr(self, "search_page", None), "search_panel", None)
         if panel is None or not hasattr(panel, "set_score_thresholds"):
             return
-        panel.set_score_thresholds(
-            image=get_search_min_score(kind="image"),
-            text=get_search_min_score(kind="text"),
-            compose=get_search_min_score(kind="compose"),
-        )
+        kinds = tuple(getattr(panel, "_score_values", {}) or {})
+        panel.set_score_thresholds(**{kind: get_search_min_score(kind=kind) for kind in kinds})
 
     def _on_search_score_threshold_changed(self, _value: int) -> None:
         panel = getattr(getattr(self, "search_page", None), "search_panel", None)
+        slider = getattr(panel, "score_input", None) if panel is not None else None
+        if slider is not None and slider.isSliderDown():
+            return
         kind = getattr(panel, "_score_kind", None) if panel is not None else None
         if kind:
             self._save_search_score_threshold(kind)
@@ -503,11 +520,9 @@ class SearchPanelStateMixin:
         panel = getattr(getattr(self, "search_page", None), "search_panel", None)
         if panel is None:
             return
-        key = {
-            "image": "search_min_score_image",
-            "text": "search_min_score_text",
-            "compose": "search_min_score_compose",
-        }.get(str(kind or "").strip().lower())
+        from src.storage.config_store import search_min_score_config_key
+
+        key = search_min_score_config_key(kind)
         if key is None:
             return
         config = load_config()
@@ -562,21 +577,15 @@ class SearchPanelStateMixin:
                 mode = combo.currentText().strip() if combo is not None else ""
                 if mode:
                     parts.append(mode)
-        score_kind = None
-        if active == self.SEARCH_TAB_IMAGE:
-            score_kind = "image"
-        elif active == self.SEARCH_TAB_TEXT:
-            score_kind = "text"
-        elif active == self.SEARCH_TAB_COMPOSE:
-            score_kind = "compose"
+        score_kind = self._active_search_score_kind()
         if score_kind is not None:
             from src.app.config import DEFAULT_CONFIG
+            from src.storage.config_store import search_min_score_config_key
 
-            key = {
-                "image": "search_min_score_image",
-                "text": "search_min_score_text",
-                "compose": "search_min_score_compose",
-            }[score_kind]
+            key = search_min_score_config_key(score_kind)
+            if key is None:
+                panel.set_filter_summary(" · ".join(parts))
+                return
             percent = int(round(panel.score_threshold(score_kind) * 100))
             default_percent = int(round(float(DEFAULT_CONFIG[key]) * 100))
             if percent != default_percent:

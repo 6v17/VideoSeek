@@ -311,6 +311,9 @@ class PreviewGuiMixin:
 
     def _leave_search_preview_layer(self) -> None:
         self._search_preview_embedded = False
+        dialog = getattr(self, "_preview_dialog", None)
+        if dialog is not None:
+            dialog._on_embedded_escape = None
         page = getattr(self, "search_page", None)
         stack = getattr(page, "browse_stack", None)
         if stack is not None:
@@ -359,6 +362,7 @@ class PreviewGuiMixin:
             dialog.video_host.setMinimumHeight(0)
             dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._set_preview_fullscreen_button(dialog, visible=False)
+        dialog._on_embedded_escape = self._leave_search_preview_layer
         self._search_preview_embedded = True
         page.browse_stack.setCurrentWidget(page.preview_layer)
 
@@ -380,6 +384,7 @@ class PreviewGuiMixin:
         if hasattr(dialog, "video_host"):
             dialog.video_host.setMinimumHeight(480)
         self._search_preview_embedded = False
+        dialog._on_embedded_escape = None
         stack = getattr(page, "browse_stack", None)
         if stack is not None:
             stack.setCurrentIndex(0)
