@@ -55,6 +55,7 @@ def compact_ocr_cues(
     speech_only: bool = True,
 ) -> list[dict[str, Any]]:
     from src.services.asr_index_service import is_hardsub_ocr_source
+    from src.services.understanding_dialogue import load_working_copy
     from src.storage.dialogue_transcript_store import iter_shared_transcript_segment_rows
 
     cap = max(1, int(limit or 220))
@@ -62,9 +63,18 @@ def compact_ocr_cues(
     cues: list[dict[str, Any]] = []
     last_key = ""
     last_speaker = ""
-    for row in iter_shared_transcript_segment_rows(video_id=video_id, config=config):
+    working = load_working_copy(video_id, config=config)
+    # The understanding page works on a copy, including hard-sub OCR the user
+    # chose to load or extract there. Library fallback stays speech-only.
+    if working is not None:
+        rows = list(working.get("cues") or [])
+        filter_speech = False
+    else:
+        rows = iter_shared_transcript_segment_rows(video_id=video_id, config=config)
+        filter_speech = speech_only
+    for row in rows:
         source = str(row.get("asr_source") or "").strip()
-        if speech_only and (not source or is_hardsub_ocr_source(source)):
+        if filter_speech and (not source or is_hardsub_ocr_source(source)):
             continue
         text = str(row.get("text") or "").strip()
         key = _normalize_ocr_text(text)

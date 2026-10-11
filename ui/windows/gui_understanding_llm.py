@@ -375,10 +375,11 @@ class UnderstandingLlmGuiMixin:
             return
         page = self.understanding_page
         if start_from in {"plan", "plan_only"}:
-            from src.services.recap_service import list_speech_dialogue_cues, recap_speaker_stats
+            from src.services.recap_service import recap_speaker_stats
+            from src.services.understanding_dialogue import list_understanding_dialogue_cues
 
             speaker_stats = recap_speaker_stats(
-                list_speech_dialogue_cues(video_id, config=load_config())
+                list_understanding_dialogue_cues(video_id, config=load_config())
             )
             unnamed = int(speaker_stats.get("unnamed") or 0)
             if unnamed > 0 and not self.show_confirm_dialog(

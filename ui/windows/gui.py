@@ -471,6 +471,10 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "btn_extract_asr"):
             self.understanding_page.btn_extract_asr.clicked.connect(self.extract_current_video_asr)
+        if hasattr(self.understanding_page, "btn_dialogue_mode_ocr"):
+            self.understanding_page.btn_dialogue_mode_ocr.toggled.connect(self._sync_dialogue_extract_label)
+        if hasattr(self.understanding_page, "btn_dialogue_mode_asr"):
+            self.understanding_page.btn_dialogue_mode_asr.toggled.connect(self._sync_dialogue_extract_label)
         if hasattr(self.understanding_page, "btn_cluster_speakers"):
             self.understanding_page.btn_cluster_speakers.clicked.connect(self.cluster_current_video_speakers)
         if hasattr(self.understanding_page, "btn_rename_speakers"):
@@ -554,6 +558,7 @@ class MainWindow(
         self.understanding_page.video_combo.currentIndexChanged.connect(self._on_understanding_video_changed)
         self.understanding_page.chunk_timeline.chunk_clicked.connect(self._on_understanding_chunk_clicked)
         self.understanding_page.chunk_timeline.chunk_double_clicked.connect(self._on_understanding_chunk_double_clicked)
+        self.understanding_page.btn_chunk_preview_close.clicked.connect(self._leave_understanding_preview)
         self._understanding_chunk_payloads = {}
         self._understanding_index_chunks = []
 
@@ -699,7 +704,9 @@ class MainWindow(
         self.pages.setCurrentIndex(next_idx)
         self.sidebar.set_current_page(page_name)
         search_idx = mapping.get("search")
+        understanding_idx = mapping.get("understanding")
         embedded_preview = bool(getattr(self, "_search_preview_embedded", False))
+        understanding_preview = bool(getattr(self, "_understanding_preview_embedded", False))
         if search_idx is not None and prev_idx == search_idx and next_idx != search_idx:
             if hasattr(self, "_collapse_preview_maximize"):
                 self._collapse_preview_maximize()
@@ -708,9 +715,16 @@ class MainWindow(
                 self._reset_preview_chrome()
             if embedded_preview and hasattr(self, "_pause_embedded_preview"):
                 self._pause_embedded_preview()
-        # A floating preview should not linger on another page. The in-page
-        # search player stays mounted and is only paused.
-        if prev_idx != next_idx and not embedded_preview:
+        if (
+            understanding_idx is not None
+            and prev_idx == understanding_idx
+            and next_idx != understanding_idx
+            and understanding_preview
+            and hasattr(self, "_pause_embedded_preview")
+        ):
+            self._pause_embedded_preview()
+        # A floating preview should not linger on another page. In-page players stay mounted.
+        if prev_idx != next_idx and not embedded_preview and not understanding_preview:
             dlg = getattr(self, "_preview_dialog", None)
             if dlg is not None:
                 try:
@@ -721,6 +735,12 @@ class MainWindow(
                     note_swallowed(exc, "ui/windows/gui.py:switch_page")
         if page_name == "search" and embedded_preview and hasattr(self, "_restore_embedded_preview_surface"):
             QTimer.singleShot(0, self._restore_embedded_preview_surface)
+        if (
+            page_name == "understanding"
+            and understanding_preview
+            and hasattr(self, "_restore_understanding_preview_surface")
+        ):
+            QTimer.singleShot(0, self._restore_understanding_preview_surface)
         if page_name == "settings":
             self._refresh_agent_api_status()
             self.refresh_search_telemetry_panel()
@@ -1083,7 +1103,29 @@ class MainWindow(
             self.understanding_page.btn_open_subtitle_library.setText(
                 t.get("understanding_step_dialogue_open", "Extract subtitles")
             )
-        if hasattr(self.understanding_page, "btn_extract_asr"):
+        if hasattr(self.understanding_page, "btn_dialogue_mode_ocr"):
+            self.understanding_page.btn_dialogue_mode_ocr.setText(
+                t.get("understanding_dialogue_mode_ocr", "Hard subs")
+            )
+            self.understanding_page.btn_dialogue_mode_ocr.setToolTip(
+                t.get(
+                    "understanding_dialogue_mode_ocr_tip",
+                    "Read burned-in subtitles with local RapidOCR.",
+                )
+            )
+        if hasattr(self.understanding_page, "btn_dialogue_mode_asr"):
+            self.understanding_page.btn_dialogue_mode_asr.setText(
+                t.get("understanding_dialogue_mode_asr", "No subs")
+            )
+            self.understanding_page.btn_dialogue_mode_asr.setToolTip(
+                t.get(
+                    "understanding_dialogue_mode_asr_tip",
+                    "Use speech recognition when the picture has no subtitles.",
+                )
+            )
+        if hasattr(self, "_sync_dialogue_extract_label"):
+            self._sync_dialogue_extract_label()
+        elif hasattr(self.understanding_page, "btn_extract_asr"):
             self.understanding_page.btn_extract_asr.setText(
                 t.get("understanding_step_dialogue_extract_asr", "Extract speech")
             )
@@ -1279,6 +1321,17 @@ class MainWindow(
         self.understanding_page.video_label.setText(t["understanding_video_label"])
         self.understanding_page.timeline_label.setText(t["understanding_timeline_label"])
         self.understanding_page.timeline_hint.setText(t["understanding_timeline_hint"])
+        self.understanding_page.chunk_preview_label.setText(
+            t.get("understanding_chunk_preview_title", "This segment")
+        )
+        self.understanding_page.btn_chunk_preview_close.setText(
+            t.get("understanding_chunk_preview_close", "Close preview")
+        )
+        layer = getattr(self.understanding_page, "embedded_preview", None)
+        if layer is not None and hasattr(layer, "btn_preview_back"):
+            layer.btn_preview_back.setText(t.get("understanding_preview_back", "返回理解"))
+        if getattr(self, "_understanding_preview_embedded", False) or getattr(self, "_search_preview_embedded", False):
+            self._sync_preview_layer_chrome()
         self.understanding_page.btn_evidence_details.setText(t["library_evidence_detail"])
         self.understanding_page.btn_export_video_json.setText(t["understanding_export_video_json"])
         self.understanding_page.btn_export_recap.setText(t.get("understanding_export_recap", "Recap"))

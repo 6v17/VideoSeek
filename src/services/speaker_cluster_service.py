@@ -246,10 +246,14 @@ def cluster_video_speakers(
     embed_fn: Callable[[np.ndarray], np.ndarray] | None = None,
     progress_callback: ProgressCallback | None = None,
     stop_callback: Callable[[], bool] | None = None,
+    segments: list[dict[str, Any]] | None = None,
+    persist: bool = True,
 ) -> dict[str, Any]:
-    """Fill empty / auto speaker labels from CAM++ clusters. Manual names stay."""
+    """Fill empty / auto speaker labels from CAM++ clusters. Manual names stay.
+
+    Hard-sub OCR cues are included. Their on-screen time is the audio window.
+    """
     from src.core.understanding.base import UnderstandingStoppedError
-    from src.services.asr_index_service import is_hardsub_ocr_source
 
     vid = str(video_id or "").strip()
     if not vid:
@@ -262,16 +266,22 @@ def cluster_video_speakers(
         if progress_callback:
             progress_callback(float(value), stage)
 
-    payload = load_dialogue_transcript(vid, config=config) or {}
-    default_source = str(payload.get("asr_source") or "").strip()
-    segments = list(payload.get("segments") or [])
+    supplied_segments = segments is not None
+    if supplied_segments:
+        payload = {
+            "video_path": str(video_path or ""),
+            "library_path": "",
+            "asr_source": "",
+        }
+        segments = list(segments or [])
+    else:
+        payload = load_dialogue_transcript(vid, config=config) or {}
+        segments = list(payload.get("segments") or [])
     candidates: list[dict[str, Any]] = []
     skipped_manual = 0
+    skipped_short = 0
     for index, row in enumerate(segments):
         if not isinstance(row, dict):
-            continue
-        source = str(row.get("asr_source") or default_source or "").strip()
-        if not source or is_hardsub_ocr_source(source):
             continue
         text = str(row.get("text") or "").strip()
         if not text:
@@ -287,6 +297,7 @@ def cluster_video_speakers(
             skipped_manual += 1
             continue
         if (end - start) < MIN_EMBED_SEC:
+            skipped_short += 1
             continue
         candidates.append(
             {
@@ -302,6 +313,7 @@ def cluster_video_speakers(
             "skipped": skipped_manual,
             "speakers": 0,
             "video_id": vid,
+            "reason": "short" if skipped_short else "empty",
         }
 
     if _stopped():
@@ -325,7 +337,12 @@ def cluster_video_speakers(
                 "speakers": 0,
             }
         stored = str(payload.get("video_path") or "").strip()
-        if os.path.normcase(os.path.normpath(stored)) != os.path.normcase(media):
+        if (
+            persist
+            and not supplied_segments
+            and stored
+            and os.path.normcase(os.path.normpath(stored)) != os.path.normcase(media)
+        ):
             from src.storage.dialogue_transcript_store import update_dialogue_transcript_location
 
             update_dialogue_transcript_location(
@@ -396,6 +413,7 @@ def cluster_video_speakers(
             "skipped": skipped_manual,
             "speakers": 0,
             "video_id": vid,
+            "reason": "quiet",
         }
 
     seed_order = sorted(range(len(window_vectors)), key=lambda index: -window_energy[index])
@@ -419,7 +437,10 @@ def cluster_video_speakers(
             key=lambda pair: (pair[1], -pair[0]),
         )[0]
         assignments[int(item["seg_index"])] = speaker_cluster_label(best_label)
-    updated = update_dialogue_segment_speakers(vid, assignments, config=config)
+    if persist:
+        updated = update_dialogue_segment_speakers(vid, assignments, config=config)
+    else:
+        updated = len(assignments)
     speaker_count = len({label for label in assignments.values()})
     _progress(1.0, "done")
     return {
@@ -428,4 +449,5 @@ def cluster_video_speakers(
         "skipped": skipped_manual,
         "speakers": speaker_count,
         "video_id": vid,
+        "assignments": dict(assignments),
     }

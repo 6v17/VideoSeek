@@ -255,6 +255,24 @@ def _pick_candidate(srt_path: str, candidates: list[dict]) -> dict | None:
     return None
 
 
+def srt_filename_for_video(video_path: str) -> str:
+    """Basename the subtitle-library importer matches to this video."""
+    stem = os.path.splitext(os.path.basename(str(video_path or "").strip()))[0].strip()
+    return f"{stem}.srt" if stem else ""
+
+
+def srt_save_path_for_video(video_path: str, chosen_path: str) -> str:
+    """Keep the chosen folder, but name the file like the video."""
+    name = srt_filename_for_video(video_path)
+    chosen = str(chosen_path or "").strip()
+    if not name:
+        return chosen
+    folder = os.path.dirname(os.path.abspath(chosen)) if chosen else ""
+    if not folder:
+        return name
+    return os.path.join(folder, name)
+
+
 def _match_rank(item: dict[str, Any]) -> tuple:
     srt_dir = os.path.normcase(os.path.dirname(item["srt_path"]))
     video_dir = os.path.normcase(os.path.dirname(item["video_path"]))

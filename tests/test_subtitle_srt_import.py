@@ -189,3 +189,15 @@ class SubtitleSrtImportTests(unittest.TestCase):
                 )
                 self.assertEqual(saved["segments"][0]["text"], "新字幕")
                 self.assertEqual(saved["asr_source"], SRT_SOURCE_ID)
+
+
+class ExportNameTests(unittest.TestCase):
+    def test_export_name_matches_the_video_stem(self):
+        from src.services.subtitle_srt_import import srt_filename_for_video, srt_save_path_for_video
+
+        video = os.path.join("D:\\lib", "课堂 01.mp4")
+        self.assertEqual(srt_filename_for_video(video), "课堂 01.srt")
+        chosen = os.path.join("D:\\out", "notes.srt")
+        saved = srt_save_path_for_video(video, chosen)
+        self.assertEqual(os.path.basename(saved), "课堂 01.srt")
+        self.assertEqual(os.path.basename(os.path.dirname(saved)), "out")

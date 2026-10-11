@@ -312,6 +312,7 @@ def index_video_subtitles(
     ocr_batch_size: int | None = None,
     max_frames_per_segment: int = 0,
     max_total_frames: int = 0,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """Extract hard-subtitle cues with change-gated RapidOCR.
 
@@ -398,59 +399,7 @@ def index_video_subtitles(
 
         duration = float(get_video_duration_seconds(media_path) or 0.0)
         if duration <= 1e-3:
-            save_dialogue_transcript(
-                video_id,
-                [],
-                library_path=lib_path,
-                video_path=media_path,
-                asr_source=OCR_SOURCE_ID,
-                config=config,
-            )
-            try:
-                set_dialogue_index_state(
-                    profile_base_dir,
-                    video_id,
-                    DIALOGUE_INDEX_STATE_READY,
-                    extras={
-                        "dialogue_segment_rows": 0,
-                        "dialogue_asr_source": OCR_SOURCE_ID,
-                        "dialogue_error": "",
-                    },
-                )
-            except Exception as state_exc:
-                logger.warning(
-                    "Empty-subtitle state update failed for %s: %s",
-                    video_id,
-                    state_exc,
-                )
-            if progress_callback:
-                progress_callback(1.0, "subtitle_done")
-            return {
-                "ok": True,
-                "video_id": video_id,
-                "segment_rows": 0,
-                "mode": "ocr",
-                "sample_strategy": strategy,
-                "sample_frames": 0,
-                "speech_segments": 0,
-                "probed": 0,
-                "ocr_calls": 0,
-                "blank_skips": 0,
-                "unchanged_skips": 0,
-            }
-
-        speech_segments = 0
-        if strategy == SUBTITLE_SAMPLE_STRATEGY_VAD:
-            times, _frame_cap, speech_segments = _build_probe_times_vad(
-                media_path=media_path,
-                duration=duration,
-                sample_interval_sec=sample_interval_sec,
-                max_frames_per_segment=max_frames_per_segment,
-                max_total_frames=max_total_frames,
-                progress_callback=progress_callback,
-                stop_callback=stop_callback,
-            )
-            if not times:
+            if persist:
                 save_dialogue_transcript(
                     video_id,
                     [],
@@ -476,12 +425,68 @@ def index_video_subtitles(
                         video_id,
                         state_exc,
                     )
+            if progress_callback:
+                progress_callback(1.0, "subtitle_done")
+            return {
+                "ok": True,
+                "video_id": video_id,
+                "segment_rows": 0,
+                "segments": [],
+                "mode": "ocr",
+                "sample_strategy": strategy,
+                "sample_frames": 0,
+                "speech_segments": 0,
+                "probed": 0,
+                "ocr_calls": 0,
+                "blank_skips": 0,
+                "unchanged_skips": 0,
+            }
+
+        speech_segments = 0
+        if strategy == SUBTITLE_SAMPLE_STRATEGY_VAD:
+            times, _frame_cap, speech_segments = _build_probe_times_vad(
+                media_path=media_path,
+                duration=duration,
+                sample_interval_sec=sample_interval_sec,
+                max_frames_per_segment=max_frames_per_segment,
+                max_total_frames=max_total_frames,
+                progress_callback=progress_callback,
+                stop_callback=stop_callback,
+            )
+            if not times:
+                if persist:
+                    save_dialogue_transcript(
+                        video_id,
+                        [],
+                        library_path=lib_path,
+                        video_path=media_path,
+                        asr_source=OCR_SOURCE_ID,
+                        config=config,
+                    )
+                    try:
+                        set_dialogue_index_state(
+                            profile_base_dir,
+                            video_id,
+                            DIALOGUE_INDEX_STATE_READY,
+                            extras={
+                                "dialogue_segment_rows": 0,
+                                "dialogue_asr_source": OCR_SOURCE_ID,
+                                "dialogue_error": "",
+                            },
+                        )
+                    except Exception as state_exc:
+                        logger.warning(
+                            "Empty-subtitle state update failed for %s: %s",
+                            video_id,
+                            state_exc,
+                        )
                 if progress_callback:
                     progress_callback(1.0, "subtitle_done")
                 return {
                     "ok": True,
                     "video_id": video_id,
                     "segment_rows": 0,
+                    "segments": [],
                     "mode": "ocr",
                     "sample_strategy": strategy,
                     "sample_frames": 0,
@@ -536,14 +541,17 @@ def index_video_subtitles(
         if progress_callback:
             progress_callback(0.92, "subtitle_merge")
         cues = merge_ocr_observations(observations)
-        save = save_dialogue_transcript(
-            video_id,
-            cues,
-            library_path=lib_path,
-            video_path=media_path,
-            asr_source=OCR_SOURCE_ID,
-            config=config,
-        )
+        if persist:
+            save = save_dialogue_transcript(
+                video_id,
+                cues,
+                library_path=lib_path,
+                video_path=media_path,
+                asr_source=OCR_SOURCE_ID,
+                config=config,
+            )
+        else:
+            save = {"ok": True, "segment_count": len(cues)}
         if not save.get("ok"):
             set_dialogue_index_state(
                 profile_base_dir,
@@ -553,23 +561,24 @@ def index_video_subtitles(
             )
             return {"ok": False, "error": save.get("error") or "save failed", "segment_rows": 0, "mode": "ocr"}
 
-        try:
-            set_dialogue_index_state(
-                profile_base_dir,
-                video_id,
-                DIALOGUE_INDEX_STATE_READY,
-                extras={
-                    "dialogue_segment_rows": int(save.get("segment_count") or len(cues)),
-                    "dialogue_asr_source": OCR_SOURCE_ID,
-                    "dialogue_error": "",
-                },
-            )
-        except Exception as state_exc:
-            logger.warning(
-                "Subtitle transcript saved but dialogue index state update failed for %s: %s",
-                video_id,
-                state_exc,
-            )
+        if persist:
+            try:
+                set_dialogue_index_state(
+                    profile_base_dir,
+                    video_id,
+                    DIALOGUE_INDEX_STATE_READY,
+                    extras={
+                        "dialogue_segment_rows": int(save.get("segment_count") or len(cues)),
+                        "dialogue_asr_source": OCR_SOURCE_ID,
+                        "dialogue_error": "",
+                    },
+                )
+            except Exception as state_exc:
+                logger.warning(
+                    "Subtitle transcript saved but dialogue index state update failed for %s: %s",
+                    video_id,
+                    state_exc,
+                )
         if progress_callback:
             progress_callback(1.0, "subtitle_done")
         return {
@@ -586,18 +595,20 @@ def index_video_subtitles(
             "mode": "ocr",
             "reused_transcripts": False,
             "asr_source": OCR_SOURCE_ID,
+            "segments": list(cues),
         }
     except InterruptedError:
         return {"ok": False, "error": "stopped", "segment_rows": 0}
     except Exception as exc:
         logger.exception("Subtitle index failed for %s: %s", video_id, exc)
         try:
-            set_dialogue_index_state(
-                profile_base_dir,
-                video_id,
-                DIALOGUE_INDEX_STATE_FAILED,
-                extras={"dialogue_error": str(exc)},
-            )
+            if persist:
+                set_dialogue_index_state(
+                    profile_base_dir,
+                    video_id,
+                    DIALOGUE_INDEX_STATE_FAILED,
+                    extras={"dialogue_error": str(exc)},
+                )
         except Exception as mark_exc:
             from src.app.logging_utils import note_swallowed
 

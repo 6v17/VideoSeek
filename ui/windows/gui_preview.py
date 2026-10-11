@@ -6,12 +6,13 @@ import os
 import time
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -28,6 +29,23 @@ from ui.views.table_views import result_mode_label as _result_mode_label
 from ui.widgets.styles import repolish_widget
 
 logger = get_logger("gui_preview")
+
+_FLOATING_PREVIEW_SIZE = (1000, 660)
+_FLOATING_PREVIEW_MIN = (720, 480)
+
+
+def floating_preview_top_left(
+    dialog_width: int,
+    dialog_height: int,
+    frame_x: int,
+    frame_y: int,
+    frame_width: int,
+    frame_height: int,
+) -> tuple[int, int]:
+    """Screen position that centers a floating preview on the main window."""
+    x = int(frame_x + max(0, (int(frame_width) - int(dialog_width)) // 2))
+    y = int(frame_y + max(0, (int(frame_height) - int(dialog_height)) // 2))
+    return x, y
 
 
 class _NearbyCandidateButton(QPushButton):
@@ -213,6 +231,9 @@ class PreviewGuiMixin:
             self.search_page.lbl_status.setText(message)
 
         if self._search_preview_layer_available():
+            self._preview_strip_kind = ""
+            self._preview_return_page = ""
+            self._preview_surface = self.search_page
             self._enter_search_preview_layer(
                 path,
                 start,
@@ -279,6 +300,13 @@ class PreviewGuiMixin:
             return False
         return bool(self._is_current_page("search"))
 
+    def _preview_chrome(self):
+        """Widget that currently owns the embedded player host and strip."""
+        surface = getattr(self, "_preview_surface", None)
+        if surface is not None:
+            return surface
+        return getattr(self, "search_page", None)
+
     def _enter_search_preview_layer(
         self,
         video_path,
@@ -291,6 +319,42 @@ class PreviewGuiMixin:
         if not getattr(self, "_preview_back_wired", False):
             self.search_page.btn_preview_back.clicked.connect(self._leave_search_preview_layer)
             self._preview_back_wired = True
+        self._preview_surface = self.search_page
+        return self.open_floating_preview_dialog(
+            video_path,
+            start_sec,
+            end_sec,
+            suggested_sec=suggested_sec,
+            on_status=on_status,
+            embedded=True,
+        )
+
+    def _enter_understanding_preview_layer(
+        self,
+        video_path,
+        start_sec,
+        end_sec,
+        *,
+        suggested_sec=None,
+        on_status=None,
+    ) -> bool:
+        """Play on the understanding page's own copy of the embedded preview."""
+        page = getattr(self, "understanding_page", None)
+        layer = getattr(page, "embedded_preview", None) if page is not None else None
+        if page is None or layer is None:
+            return False
+        if not getattr(self, "_understanding_preview_back_wired", False):
+            layer.btn_preview_back.clicked.connect(self._leave_understanding_embedded_preview)
+            self._understanding_preview_back_wired = True
+        page._embedded_preview_dismiss = self._leave_understanding_embedded_preview
+        self._preview_surface = layer
+        self._preview_return_page = ""
+        page.show_embedded_preview()
+        scroller = getattr(self, "_understanding_outer_scroll", None)
+        scroll = scroller() if callable(scroller) else None
+        bar = scroll.verticalScrollBar() if scroll is not None else None
+        if bar is not None:
+            bar.setValue(0)
         return self.open_floating_preview_dialog(
             video_path,
             start_sec,
@@ -351,7 +415,88 @@ class PreviewGuiMixin:
         if player is not None and hasattr(player, "rebind_output_window"):
             QTimer.singleShot(80, player.rebind_output_window)
 
+    def _restore_understanding_preview_surface(self) -> None:
+        if not getattr(self, "_understanding_preview_embedded", False):
+            return
+        page = getattr(self, "understanding_page", None)
+        layer = getattr(page, "embedded_preview", None) if page is not None else None
+        dialog = getattr(self, "_preview_dialog", None)
+        if page is None or layer is None or dialog is None:
+            return
+        if getattr(dialog, "_closing", False):
+            dialog._closing = False
+            dialog._close_requested = False
+        self._preview_surface = layer
+        page.show_embedded_preview()
+        self._present_embedded_preview(dialog)
+        self._rebind_preview_output(dialog)
+
+    def _detach_understanding_embedded_host(self, dialog) -> None:
+        page = getattr(self, "understanding_page", None)
+        layer = getattr(page, "embedded_preview", None) if page is not None else None
+        layout = getattr(layer, "preview_layer_host_layout", None)
+        if layout is not None and dialog is not None and layout.indexOf(dialog) >= 0:
+            layout.removeWidget(dialog)
+        if page is not None:
+            page.hide_embedded_preview()
+        self._understanding_preview_embedded = False
+
+    def _leave_understanding_embedded_preview(self) -> None:
+        self._understanding_preview_embedded = False
+        self._preview_strip_kind = ""
+        if getattr(self, "_preview_surface", None) is getattr(
+            getattr(self, "understanding_page", None), "embedded_preview", None
+        ):
+            self._preview_surface = None
+        dialog = getattr(self, "_preview_dialog", None)
+        if dialog is not None:
+            dialog._on_embedded_escape = None
+            player = getattr(dialog, "player", None)
+            try:
+                if player is not None and hasattr(player, "pause"):
+                    player.pause()
+            except Exception as exc:
+                logger.debug("Pause understanding preview skipped: %s", exc)
+            dialog.hide()
+        page = getattr(self, "understanding_page", None)
+        if page is not None:
+            page.hide_embedded_preview()
+        thread = getattr(self, "_same_video_thumb_thread", None)
+        if thread is not None:
+            thread.stop()
+
+    def _detach_search_preview_host(self, dialog) -> None:
+        page = getattr(self, "search_page", None)
+        layout = getattr(page, "preview_layer_host_layout", None)
+        if layout is not None and dialog is not None and layout.indexOf(dialog) >= 0:
+            layout.removeWidget(dialog)
+        if not getattr(self, "_search_preview_embedded", False):
+            return
+        self._search_preview_embedded = False
+        stack = getattr(page, "browse_stack", None)
+        if stack is not None:
+            stack.setCurrentIndex(0)
+
+    def _detach_understanding_preview_host(self, dialog) -> None:
+        page = getattr(self, "understanding_page", None)
+        layout = getattr(page, "chunk_preview_host_layout", None)
+        if layout is not None and dialog is not None and layout.indexOf(dialog) >= 0:
+            layout.removeWidget(dialog)
+            removed = True
+        else:
+            removed = False
+        wrap = getattr(page, "chunk_preview_wrap", None)
+        if wrap is not None and (removed or not wrap.isVisible()):
+            wrap.setVisible(False)
+        if dialog is not None and getattr(dialog, "_on_embedded_escape", None) is self._leave_understanding_preview:
+            dialog._on_embedded_escape = None
+        if removed:
+            self._understanding_preview_embedded = False
+
     def _leave_search_preview_layer(self) -> None:
+        return_page = str(getattr(self, "_preview_return_page", "") or "")
+        self._preview_return_page = ""
+        self._preview_strip_kind = ""
         self._search_preview_embedded = False
         dialog = getattr(self, "_preview_dialog", None)
         if dialog is not None:
@@ -361,23 +506,62 @@ class PreviewGuiMixin:
         if stack is not None:
             stack.setCurrentIndex(0)
         dialog = getattr(self, "_preview_dialog", None)
-        if dialog is None:
-            return
-        player = getattr(dialog, "player", None)
-        try:
-            if player is not None and hasattr(player, "pause"):
-                player.pause()
-        except Exception as exc:
-            logger.debug("Pause in-page preview skipped: %s", exc)
-        dialog.hide()
+        if dialog is not None:
+            player = getattr(dialog, "player", None)
+            try:
+                if player is not None and hasattr(player, "pause"):
+                    player.pause()
+            except Exception as exc:
+                logger.debug("Pause in-page preview skipped: %s", exc)
+            dialog.hide()
         thread = getattr(self, "_same_video_thumb_thread", None)
         if thread is not None:
             thread.stop()
+        self._sync_preview_layer_chrome()
+        if return_page and return_page != "search" and hasattr(self, "switch_page"):
+            self.switch_page(return_page)
+
+    def _sync_preview_layer_chrome(self) -> None:
+        page = self._preview_chrome()
+        if page is None:
+            return
+        kind = str(getattr(self, "_preview_strip_kind", "") or "")
+        dialogue = kind == "dialogue"
+        chunks = kind == "chunks"
+        if hasattr(page, "btn_preview_back"):
+            if dialogue or chunks:
+                page.btn_preview_back.setText(
+                    self.texts.get("understanding_preview_back", "返回理解")
+                )
+            else:
+                page.btn_preview_back.setText(self.texts.get("search_preview_back", "返回结果"))
+        label = getattr(page, "preview_strip_label", None)
+        if label is None:
+            return
+        if dialogue:
+            label.setText(self.texts.get("understanding_preview_strip", "本片对白"))
+            label.setToolTip(self.texts.get("understanding_preview_strip_tip", "双击播放这一句"))
+        elif chunks:
+            label.setText(self.texts.get("understanding_chunk_preview_strip", "本片片段"))
+            label.setToolTip(self.texts.get("understanding_chunk_preview_strip_tip", "双击播放这一段"))
+        else:
+            label.setText(self.texts.get("search_preview_strip", "同视频就近候选"))
+            label.setToolTip(self.texts.get("search_preview_strip_tip", "双击播放"))
 
     def _present_embedded_preview(self, dialog) -> None:
-        page = self.search_page
-        host = page.preview_layer_host
-        layout = page.preview_layer_host_layout
+        self._detach_understanding_preview_host(dialog)
+        surface = self._preview_chrome()
+        search = getattr(self, "search_page", None)
+        on_understanding = surface is not None and surface is not search
+        if on_understanding:
+            self._detach_search_preview_host(dialog)
+        else:
+            self._detach_understanding_embedded_host(dialog)
+        if surface is None:
+            self._present_floating_preview(dialog)
+            return
+        host = surface.preview_layer_host
+        layout = surface.preview_layer_host_layout
         already = (
             dialog.parentWidget() is host
             and layout.indexOf(dialog) >= 0
@@ -388,6 +572,7 @@ class PreviewGuiMixin:
             dialog.setWindowFlags(Qt.WindowType.Widget)
             dialog.setParent(host)
             dialog.setMinimumSize(0, 0)
+            dialog.setMaximumSize(16777215, 16777215)
             dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             if hasattr(dialog, "video_host"):
                 dialog.video_host.setMinimumHeight(0)
@@ -404,16 +589,96 @@ class PreviewGuiMixin:
             dialog.video_host.setMinimumHeight(0)
             dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._set_preview_fullscreen_button(dialog, visible=False)
-        dialog._on_embedded_escape = self._leave_search_preview_layer
-        self._search_preview_embedded = True
-        page.browse_stack.setCurrentWidget(page.preview_layer)
+        if on_understanding:
+            dialog._on_embedded_escape = self._leave_understanding_embedded_preview
+            self._understanding_preview_embedded = True
+            self._search_preview_embedded = False
+            page = getattr(self, "understanding_page", None)
+            if page is not None:
+                page.show_embedded_preview()
+            stack = getattr(search, "browse_stack", None)
+            if stack is not None:
+                stack.setCurrentIndex(0)
+        else:
+            dialog._on_embedded_escape = self._leave_search_preview_layer
+            self._search_preview_embedded = True
+            self._understanding_preview_embedded = False
+            search.browse_stack.setCurrentWidget(search.preview_layer)
+
+    def _present_understanding_preview(self, dialog) -> None:
+        page = getattr(self, "understanding_page", None)
+        host = getattr(page, "chunk_preview_host", None)
+        layout = getattr(page, "chunk_preview_host_layout", None)
+        wrap = getattr(page, "chunk_preview_wrap", None)
+        if page is None or host is None or layout is None or wrap is None:
+            self._present_floating_preview(dialog)
+            return
+        self._detach_search_preview_host(dialog)
+        already = (
+            dialog.parentWidget() is host
+            and layout.indexOf(dialog) >= 0
+            and not dialog.isWindow()
+        )
+        if not already:
+            dialog.hide()
+            dialog.setWindowFlags(Qt.WindowType.Widget)
+            dialog.setParent(host)
+            dialog.setMinimumSize(0, 0)
+            dialog.setMaximumHeight(420)
+            dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            if hasattr(dialog, "video_host"):
+                dialog.video_host.setMinimumHeight(0)
+                dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            if layout.indexOf(dialog) < 0:
+                layout.addWidget(dialog, 1)
+            dialog.show()
+            self._rebind_preview_output(dialog)
+        elif not dialog.isVisible():
+            dialog.show()
+            self._rebind_preview_output(dialog)
+        wrap.setVisible(True)
+        self._set_preview_fullscreen_button(dialog, visible=False)
+        dialog._on_embedded_escape = self._leave_understanding_preview
+        self._understanding_preview_embedded = True
+        self._search_preview_embedded = False
+        QTimer.singleShot(0, self._reveal_understanding_chunk_preview)
+
+    def _reveal_understanding_chunk_preview(self) -> None:
+        page = getattr(self, "understanding_page", None)
+        wrap = getattr(page, "chunk_preview_wrap", None)
+        if wrap is None or not wrap.isVisible():
+            return
+        scroll = wrap.parentWidget()
+        while scroll is not None and not isinstance(scroll, QScrollArea):
+            scroll = scroll.parentWidget()
+        if isinstance(scroll, QScrollArea):
+            scroll.ensureWidgetVisible(wrap, 0, 24)
+
+    def _leave_understanding_preview(self) -> None:
+        self._understanding_preview_embedded = False
+        dialog = getattr(self, "_preview_dialog", None)
+        if dialog is not None:
+            dialog._on_embedded_escape = None
+            player = getattr(dialog, "player", None)
+            try:
+                if player is not None and hasattr(player, "pause"):
+                    player.pause()
+            except Exception as exc:
+                logger.debug("Pause understanding preview skipped: %s", exc)
+            dialog.hide()
+        page = getattr(self, "understanding_page", None)
+        wrap = getattr(page, "chunk_preview_wrap", None)
+        if wrap is not None:
+            wrap.setVisible(False)
 
     def _present_floating_preview(self, dialog) -> None:
+        self._detach_understanding_preview_host(dialog)
         page = getattr(self, "search_page", None)
         layout = getattr(page, "preview_layer_host_layout", None)
         embedded = layout is not None and layout.indexOf(dialog) >= 0
-        if embedded:
-            layout.removeWidget(dialog)
+        if embedded or not dialog.isWindow():
+            if embedded:
+                layout.removeWidget(dialog)
             dialog.hide()
             dialog.setParent(
                 self,
@@ -423,8 +688,7 @@ class PreviewGuiMixin:
                 | Qt.WindowType.WindowCloseButtonHint
                 | Qt.WindowType.WindowMinMaxButtonsHint,
             )
-        if hasattr(dialog, "video_host"):
-            dialog.video_host.setMinimumHeight(480)
+        self._restore_floating_preview_chrome(dialog)
         self._search_preview_embedded = False
         dialog._on_embedded_escape = None
         stack = getattr(page, "browse_stack", None)
@@ -432,17 +696,50 @@ class PreviewGuiMixin:
             stack.setCurrentIndex(0)
         self._set_preview_fullscreen_button(dialog, visible=True)
         self._attach_preview_dialog_host(dialog)
+        # setParent/setWindowFlags recreates the native window at (0, 0).
+        # Place it after that, and again after show(), or Windows keeps the origin.
+        self._center_floating_preview(dialog)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
-        if embedded:
-            self._rebind_preview_output(dialog)
+        self._center_floating_preview(dialog)
+        # First open and the embedded→window switch both need a post-show hwnd.
+        # Binding before the window exists leaves a white surface and a top-left popup.
+        self._rebind_preview_output(dialog)
+
+    def _restore_floating_preview_chrome(self, dialog) -> None:
+        dialog.setMaximumSize(16777215, 16777215)
+        dialog.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        dialog.setMinimumSize(*_FLOATING_PREVIEW_MIN)
+        if dialog.width() < _FLOATING_PREVIEW_MIN[0] or dialog.height() < _FLOATING_PREVIEW_MIN[1]:
+            dialog.resize(*_FLOATING_PREVIEW_SIZE)
+        if hasattr(dialog, "video_host"):
+            dialog.video_host.setMinimumHeight(480)
+            dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def _center_floating_preview(self, dialog) -> None:
+        anchor = self.frameGeometry()
+        if anchor.width() < 2 or anchor.height() < 2:
+            screen = QGuiApplication.primaryScreen()
+            anchor = screen.availableGeometry() if screen is not None else None
+        if anchor is None or anchor.width() < 2 or anchor.height() < 2:
+            return
+        x, y = floating_preview_top_left(
+            dialog.width(),
+            dialog.height(),
+            anchor.x(),
+            anchor.y(),
+            anchor.width(),
+            anchor.height(),
+        )
+        dialog.move(x, y)
 
     def _rebind_preview_output(self, dialog) -> None:
         player = getattr(dialog, "player", None)
         if player is None or not hasattr(player, "rebind_output_window"):
             return
         QTimer.singleShot(0, player.rebind_output_window)
+        QTimer.singleShot(80, player.rebind_output_window)
 
     def _set_preview_fullscreen_button(self, dialog, *, visible: bool) -> None:
         button = getattr(dialog, "fullscreen_button", None)
@@ -456,6 +753,9 @@ class PreviewGuiMixin:
         dialog._layer_dismiss_wired = True
 
     def _on_embedded_preview_dismissed(self) -> None:
+        if getattr(self, "_understanding_preview_embedded", False):
+            self._leave_understanding_embedded_preview()
+            return
         if not getattr(self, "_search_preview_embedded", False):
             return
         self._search_preview_embedded = False
@@ -464,13 +764,60 @@ class PreviewGuiMixin:
         if stack is not None:
             stack.setCurrentIndex(0)
 
+    def _preview_strip_signature_matches(self, page, signature) -> bool:
+        if getattr(page, "_strip_signature", None) != signature:
+            return False
+        row = getattr(page, "preview_strip_row", None)
+        return row is not None and row.count() > 0
+
+    def _focus_preview_strip_selection(self, page, current_path: str, current_start: float) -> bool:
+        """Move the highlight. Keep the tiles that are already on the strip."""
+        if not self._select_search_preview_strip_hit(current_path, current_start):
+            return False
+        row = page.preview_strip_row
+        for index in range(row.count()):
+            item = row.itemAt(index)
+            tile = item.widget() if item is not None else None
+            thumb = getattr(tile, "thumb", None)
+            if thumb is not None and bool(thumb.property("selected")):
+                page.preview_strip.ensureWidgetVisible(tile)
+                break
+        return True
+
     def _fill_search_preview_context(self, current_path: str, current_start: float) -> None:
         self._fill_search_preview_strip(current_path, current_start)
-        self._fill_search_preview_detail(current_path, current_start)
+        if self._preview_chrome() is getattr(self, "search_page", None):
+            self._fill_search_preview_detail(current_path, current_start)
 
-    def _fill_search_preview_strip(self, current_path: str, current_start: float) -> None:
-        page = getattr(self, "search_page", None)
+    def _fill_dialogue_preview_strip(self, current_path: str, current_start: float) -> None:
+        """Same embedded player. The strip lists this video's dialogue lines."""
+        page = self._preview_chrome()
         if page is None:
+            return
+        self._sync_preview_layer_chrome()
+        from src.app.config import load_config
+        from src.services.understanding_dialogue import list_understanding_dialogue_cues
+
+        video_id = str(getattr(self, "_preview_dialogue_video_id", "") or "")
+        cues = (
+            list_understanding_dialogue_cues(video_id, video_path=current_path, config=load_config())
+            if video_id
+            else []
+        )
+        signature = (
+            "dialogue",
+            video_id,
+            tuple(
+                (
+                    round(float(cue.get("start") or 0.0), 3),
+                    round(float(cue.get("end") or 0.0), 3),
+                    str(cue.get("text") or ""),
+                )
+                for cue in cues
+            ),
+        )
+        if self._preview_strip_signature_matches(page, signature):
+            self._focus_preview_strip_selection(page, current_path, current_start)
             return
         row = page.preview_strip_row
         while row.count():
@@ -480,7 +827,174 @@ class PreviewGuiMixin:
                 widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
+        page.preview_strip_wrap.setVisible(bool(cues))
+        path = str(current_path or "")
+        nearest = sorted(
+            cues,
+            key=lambda cue: abs(float(cue.get("start") or 0.0) - float(current_start or 0.0)),
+        )
+        thumb_starts = {round(float(cue.get("start") or 0.0), 3) for cue in nearest[:36]}
+        selected_button = None
+        pixmaps = self._page_preview_pixmaps()
+        thumb_size = self._candidate_thumb_size()
+        missing = []
+        for cue in cues:
+            start = float(cue.get("start") or 0.0)
+            end = float(cue.get("end") or start)
+            text = str(cue.get("text") or "").strip()
+            pix = self._pixmap_for_hit(pixmaps, path, start)
+            if pix is None or pix.isNull():
+                pix = self._cached_candidate_thumb(path, start, end, thumb_size)
+            if (pix is None or pix.isNull()) and round(start, 3) in thumb_starts:
+                missing.append((path, start, end))
+                pix = None
+
+            def activate(p=path, s=start, e=end):
+                self._switch_search_preview(p, s, e)
+
+            tile = _NearbyCandidateTile(activate)
+            tile._hit_path = path
+            tile._hit_start = start
+            tile.caption.setText(format_timecode_seconds(start))
+            tile.thumb.setToolTip(f"{format_timecode_range(start, end)}\n{text}")
+            if pix is not None and not pix.isNull():
+                tile.thumb.setIcon(QIcon(pix))
+                tile.thumb.setIconSize(QSize(108, 60))
+            selected = self._same_preview_hit(path, start, current_path, current_start)
+            tile.thumb.setProperty("selected", selected)
+            repolish_widget(tile.thumb)
+            row.addWidget(tile, 0)
+            if selected:
+                selected_button = tile
+        host = page.preview_strip_host
+        width = max(host.width(), 8 + len(cues) * 120)
+        host.setMinimumWidth(width)
+        host.resize(width, 86)
+        if selected_button is not None:
+            page.preview_strip.ensureWidgetVisible(selected_button)
+        page._strip_signature = signature
+        self._start_same_video_thumb_loader(missing)
+
+    def _fill_chunk_preview_strip(self, current_path: str, current_start: float) -> None:
+        """Same embedded player. The strip lists this video's understanding chunks."""
+        page = self._preview_chrome()
+        if page is None:
+            return
+        self._sync_preview_layer_chrome()
+        chunks = list(getattr(self, "_understanding_index_chunks", []) or [])
+        payloads = dict(getattr(self, "_understanding_chunk_payloads", {}) or {})
+        signature = (
+            "chunks",
+            self._norm_media_path(current_path),
+            tuple(
+                (
+                    round(float(chunk.get("start") or 0.0), 3),
+                    round(float(chunk.get("end") or 0.0), 3),
+                    str((payloads.get(index) or {}).get("visible") or (payloads.get(index) or {}).get("change") or ""),
+                )
+                for index, chunk in enumerate(chunks)
+            ),
+        )
+        if self._preview_strip_signature_matches(page, signature):
+            self._focus_preview_strip_selection(page, current_path, current_start)
+            return
+        row = page.preview_strip_row
+        while row.count():
+            item = row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+        page.preview_strip_wrap.setVisible(bool(chunks))
+        path = str(current_path or "")
+        nearest = sorted(
+            range(len(chunks)),
+            key=lambda index: abs(float(chunks[index].get("start") or 0.0) - float(current_start or 0.0)),
+        )
+        thumb_starts = {
+            round(float(chunks[index].get("start") or 0.0), 3) for index in nearest[:36]
+        }
+        selected_button = None
+        pixmaps = self._page_preview_pixmaps()
+        thumb_size = self._candidate_thumb_size()
+        missing = []
+        for index, chunk in enumerate(chunks):
+            start = float(chunk.get("start") or 0.0)
+            end = float(chunk.get("end") or start)
+            if end <= start:
+                end = start + 0.1
+            payload = dict(payloads.get(index) or {})
+            text = str(payload.get("visible") or payload.get("change") or "").strip()
+            pix = self._pixmap_for_hit(pixmaps, path, start)
+            if pix is None or pix.isNull():
+                pix = self._cached_candidate_thumb(path, start, end, thumb_size)
+            if (pix is None or pix.isNull()) and round(start, 3) in thumb_starts:
+                missing.append((path, start, end))
+                pix = None
+
+            def activate(p=path, s=start, e=end):
+                self._switch_search_preview(p, s, e)
+
+            tile = _NearbyCandidateTile(activate)
+            tile._hit_path = path
+            tile._hit_start = start
+            tile.caption.setText(str(index + 1))
+            tip = format_timecode_range(start, end)
+            if text:
+                tip = f"{tip}\n{text}"
+            tile.thumb.setToolTip(tip)
+            if pix is not None and not pix.isNull():
+                tile.thumb.setIcon(QIcon(pix))
+                tile.thumb.setIconSize(QSize(108, 60))
+            selected = self._same_preview_hit(path, start, current_path, current_start)
+            tile.thumb.setProperty("selected", selected)
+            repolish_widget(tile.thumb)
+            row.addWidget(tile, 0)
+            if selected:
+                selected_button = tile
+        host = page.preview_strip_host
+        width = max(host.width(), 8 + len(chunks) * 120)
+        host.setMinimumWidth(width)
+        host.resize(width, 86)
+        if selected_button is not None:
+            page.preview_strip.ensureWidgetVisible(selected_button)
+        page._strip_signature = signature
+        self._start_same_video_thumb_loader(missing)
+
+    def _fill_search_preview_strip(self, current_path: str, current_start: float) -> None:
+        if str(getattr(self, "_preview_strip_kind", "") or "") == "dialogue":
+            self._fill_dialogue_preview_strip(current_path, current_start)
+            return
+        if str(getattr(self, "_preview_strip_kind", "") or "") == "chunks":
+            self._fill_chunk_preview_strip(current_path, current_start)
+            return
+        page = self._preview_chrome()
+        if page is None:
+            return
         hits = self._same_video_candidates(current_path)
+        signature = (
+            "search",
+            tuple(
+                (
+                    self._norm_media_path(path),
+                    round(float(start), 3),
+                    round(float(end), 3),
+                )
+                for path, start, end, _score, _kind, _text in hits
+            ),
+        )
+        if self._preview_strip_signature_matches(page, signature):
+            self._focus_preview_strip_selection(page, current_path, current_start)
+            return
+        row = page.preview_strip_row
+        while row.count():
+            item = row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
         page.preview_strip_wrap.setVisible(True)
         selected_button = None
         pixmaps = self._page_preview_pixmaps()
@@ -519,11 +1033,12 @@ class PreviewGuiMixin:
         host.resize(width, 86)
         if selected_button is not None:
             page.preview_strip.ensureWidgetVisible(selected_button)
+        page._strip_signature = signature
         self._start_same_video_thumb_loader(missing)
 
     def _select_search_preview_strip_hit(self, current_path: str, current_start: float) -> bool:
         """Highlight the playing candidate without rebuilding the strip."""
-        page = getattr(self, "search_page", None)
+        page = self._preview_chrome()
         if page is None:
             return False
         row = page.preview_strip_row
@@ -606,7 +1121,7 @@ class PreviewGuiMixin:
     def _on_same_video_thumb(self, generation: int, path: str, start: float, image) -> None:
         if int(generation) != int(getattr(self, "_strip_thumb_generation", 0) or 0):
             return
-        page = getattr(self, "search_page", None)
+        page = self._preview_chrome()
         if page is None or image is None:
             return
         from PySide6.QtGui import QImage
@@ -960,6 +1475,7 @@ class PreviewGuiMixin:
         caption_text=None,
         on_status=None,
         embedded=False,
+        understanding=False,
     ) -> bool:
         """Open a floating PreviewDialog without leaving the current page."""
 
@@ -1036,7 +1552,9 @@ class PreviewGuiMixin:
                 )
             self._wire_preview_dialog_shot_list(dialog)
             self._wire_layered_preview(dialog)
-            if embedded:
+            if understanding:
+                self._present_understanding_preview(dialog)
+            elif embedded:
                 self._present_embedded_preview(dialog)
                 self._fill_search_preview_context(video_path, suggested)
             else:

@@ -1161,8 +1161,8 @@ class UnderstandingGuiMixin:
             return
 
         self._show_understanding_chunk_detail(int(index))
-        # Stay on Understanding — floating dialog instead of jumping to Search preview.
-        opened = self.open_floating_preview_dialog(
+        self._preview_strip_kind = "chunks"
+        opened = self._enter_understanding_preview_layer(
             video_path,
             start_sec,
             end_sec,
@@ -1170,6 +1170,7 @@ class UnderstandingGuiMixin:
             on_status=page.lbl_status.setText,
         )
         if opened:
+            self._sync_preview_layer_chrome()
             page.lbl_status.setText(
                 self.texts.get(
                     "understanding_chunk_play_started",
@@ -2307,12 +2308,19 @@ class UnderstandingGuiMixin:
         )
 
     def _current_video_recap_dialogue_status(self) -> dict:
-        from src.services.recap_service import recap_dialogue_status
-
         video_id = self._selected_understanding_video_id()
         if not video_id:
             return {"ready": False, "count": 0, "source": ""}
-        return recap_dialogue_status(video_id, config=load_config())
+        from src.services.understanding_dialogue import ensure_working_copy
+
+        payload = ensure_working_copy(video_id, config=load_config())
+        cues = list(payload.get("cues") or [])
+        return {
+            "ready": bool(cues),
+            "count": len(cues),
+            "source": str(payload.get("asr_source") or ""),
+            "origin": str(payload.get("origin") or ""),
+        }
 
     def _current_video_has_recap_dialogue(self) -> bool:
         page = getattr(self, "understanding_page", None)
@@ -2360,13 +2368,33 @@ class UnderstandingGuiMixin:
             )
             video_id = self._selected_understanding_video_id()
             cues = []
+            origin = ""
             if video_id:
-                from src.services.recap_service import list_speech_dialogue_cues
+                from src.services.understanding_dialogue import ensure_working_copy
 
-                cues = list_speech_dialogue_cues(video_id, config=load_config())
+                context = getattr(self, "_understanding_video_context", None) or {}
+                payload = ensure_working_copy(
+                    video_id,
+                    video_path=str(context.get("video_path") or ""),
+                    library_path=str(context.get("library_path") or ""),
+                    config=load_config(),
+                )
+                cues = list(payload.get("cues") or [])
+                origin = str(payload.get("origin") or "")
             self._populate_understanding_dialogue_table(cues)
             source = self._dialogue_source_label(str((cues[0] or {}).get("asr_source") or "") if cues else "")
-            if cues:
+            local_note = self.texts.get(
+                "understanding_dialogue_local_only",
+                "Edits here do not change the subtitle library.",
+            )
+            if origin == "library" and cues:
+                page.dialogue_status.setText(
+                    self.texts.get(
+                        "understanding_dialogue_from_library",
+                        "Copied {count} cues from the subtitle library ({source}). Edits here stay on this page.",
+                    ).format(count=len(cues), source=source)
+                )
+            elif cues:
                 from src.services.recap_service import recap_speaker_stats
 
                 unnamed = int(recap_speaker_stats(cues).get("unnamed") or 0)
@@ -2376,6 +2404,8 @@ class UnderstandingGuiMixin:
                             "understanding_step_dialogue_unnamed",
                             "{count} cues ({source}); {unnamed} still unnamed.",
                         ).format(count=len(cues), source=source, unnamed=unnamed)
+                        + " "
+                        + local_note
                     )
                 else:
                     page.dialogue_status.setText(
@@ -2383,6 +2413,8 @@ class UnderstandingGuiMixin:
                             "understanding_step_dialogue_ready",
                             "Showing {count} cues from this video ({source}). Double-click to play that speech span; Edit to rename.",
                         ).format(count=len(cues), source=source)
+                        + " "
+                        + local_note
                     )
             else:
                 page.dialogue_status.setText(
@@ -2394,7 +2426,7 @@ class UnderstandingGuiMixin:
             self._sync_asr_extract_button()
 
     def _populate_understanding_dialogue_table(self, cues: list) -> None:
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTableWidgetItem, QWidget
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QTableWidgetItem, QWidget
 
         page = getattr(self, "understanding_page", None)
         table = getattr(page, "dialogue_table", None) if page is not None else None
@@ -2431,7 +2463,7 @@ class UnderstandingGuiMixin:
             edit_button.setObjectName("GhostButton")
             edit_button.setProperty("class", "TableBtn")
             edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            edit_button.setFixedHeight(28)
+            edit_button.setFixedSize(56, 30)
             edit_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             edit_button.setAutoDefault(False)
             edit_button.setDefault(False)
@@ -2440,16 +2472,17 @@ class UnderstandingGuiMixin:
             delete_button.setObjectName("DangerGhostButton")
             delete_button.setProperty("class", "TableDeleteBtn")
             delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            delete_button.setFixedHeight(28)
+            delete_button.setFixedSize(56, 30)
             delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             delete_button.setAutoDefault(False)
             delete_button.setDefault(False)
             delete_button.clicked.connect(lambda _checked=False, r=index: self._delete_understanding_dialogue_cue(r))
             host = QWidget()
+            host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             row_layout = QHBoxLayout(host)
-            row_layout.setContentsMargins(4, 0, 4, 0)
-            row_layout.setSpacing(4)
-            row_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            row_layout.setContentsMargins(4, 0, 8, 0)
+            row_layout.setSpacing(8)
+            row_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             row_layout.addWidget(edit_button)
             row_layout.addWidget(delete_button)
             table.setCellWidget(index, 3, host)
@@ -2488,9 +2521,9 @@ class UnderstandingGuiMixin:
         if dialog.exec() != DialogueCueDialog.DialogCode.Accepted:
             return
         cue = dialog.result_cue() or {}
-        from src.storage.dialogue_transcript_store import update_dialogue_segment
+        from src.services.understanding_dialogue import update_working_cue
 
-        if not update_dialogue_segment(
+        if not update_working_cue(
             video_id,
             seg_index,
             start=float(cue.get("start") or start),
@@ -2546,9 +2579,9 @@ class UnderstandingGuiMixin:
             kind="warning",
         ):
             return
-        from src.storage.dialogue_transcript_store import delete_dialogue_segment
+        from src.services.understanding_dialogue import delete_working_cue
 
-        if not delete_dialogue_segment(video_id, seg_index, config=load_config()):
+        if not delete_working_cue(video_id, seg_index, config=load_config()):
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get("understanding_dialogue_delete_failed", "Could not delete this line."),
@@ -2571,10 +2604,8 @@ class UnderstandingGuiMixin:
             seg_index = int(item.data(Qt.ItemDataRole.UserRole))
         except (TypeError, ValueError):
             return
-        from src.storage.dialogue_transcript_store import (
-            normalize_dialogue_speaker,
-            update_dialogue_segment_speaker,
-        )
+        from src.storage.dialogue_transcript_store import normalize_dialogue_speaker
+        from src.services.understanding_dialogue import update_working_speaker
 
         speaker = normalize_dialogue_speaker(item.text())
         if speaker != str(item.text() or ""):
@@ -2584,7 +2615,7 @@ class UnderstandingGuiMixin:
             item.setText(speaker)
             if table is not None:
                 table.blockSignals(False)
-        update_dialogue_segment_speaker(video_id, seg_index, speaker, config=load_config())
+        update_working_speaker(video_id, seg_index, speaker, config=load_config())
         if hasattr(self, "_sync_asr_extract_button"):
             self._sync_asr_extract_button()
 
@@ -2656,15 +2687,22 @@ class UnderstandingGuiMixin:
         end_sec = float(end_sec)
         if end_sec <= start_sec:
             end_sec = start_sec + 0.1
-        opened = self.open_floating_preview_dialog(
+        self._preview_strip_kind = "dialogue"
+        self._preview_dialogue_video_id = self._selected_understanding_video_id()
+        opened = self._enter_understanding_preview_layer(
             video_path,
             start_sec,
             end_sec,
             suggested_sec=start_sec,
-            caption_text=caption_text,
             on_status=None if page is None else page.lbl_status.setText,
         )
-        if not opened or page is None:
+        if not opened:
+            return
+        self._sync_preview_layer_chrome()
+        self._set_understanding_dialogue_play_status(page, start_sec, end_sec)
+
+    def _set_understanding_dialogue_play_status(self, page, start_sec: float, end_sec: float) -> None:
+        if page is None:
             return
         message = self.texts.get(
             "understanding_dialogue_play_started",

@@ -280,3 +280,47 @@ class SpeakerClusterLogicTests(unittest.TestCase):
                 self.assertEqual(os.path.normcase(called_path), os.path.normcase(living))
                 payload = load_dialogue_transcript("vid")
                 self.assertEqual(os.path.normcase(payload["video_path"]), os.path.normcase(living))
+
+    def test_ocr_cues_are_clustered_from_their_on_screen_time(self):
+        from src.services.speaker_cluster_service import cluster_video_speakers
+
+        sr = 16000
+        audio = np.zeros(sr * 4, dtype=np.float32)
+        audio[: sr * 2] = 0.8
+        audio[sr * 2 :] = -0.8
+
+        def embed_fn(clip):
+            vec = np.zeros(4, dtype=np.float32)
+            vec[0 if float(clip.mean()) > 0 else 1] = 1.0
+            return vec
+
+        result = cluster_video_speakers(
+            "vid-ocr",
+            video_path="movie.mp4",
+            waveform=audio,
+            sample_rate=sr,
+            embed_fn=embed_fn,
+            persist=False,
+            segments=[
+                {
+                    "seg_index": 0,
+                    "start": 0.2,
+                    "end": 1.4,
+                    "text": "硬字幕甲",
+                    "asr_source": "vision/ocr/rapidocr-zh",
+                    "speaker": "",
+                },
+                {
+                    "seg_index": 1,
+                    "start": 2.2,
+                    "end": 3.4,
+                    "text": "硬字幕乙",
+                    "asr_source": "vision/ocr/rapidocr-zh",
+                    "speaker": "",
+                },
+            ],
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["labeled"], 2)
+        self.assertEqual(result["speakers"], 2)
+        self.assertNotEqual(result["assignments"][0], result["assignments"][1])

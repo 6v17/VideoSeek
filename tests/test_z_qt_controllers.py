@@ -1163,6 +1163,43 @@ class VlcPreviewPlayerTests(unittest.TestCase):
         else:
             player._player.set_xwindow.assert_called_once_with(456)
 
+    def test_rebind_skips_hidden_or_empty_host(self):
+        player = VlcPreviewPlayer(_make_host_widget())
+        player._player = MagicMock()
+        player._released = False
+        host = MagicMock()
+        host.isVisible.return_value = False
+        host.width.return_value = 0
+        host.height.return_value = 0
+        player.host_widget = host
+
+        with patch("ui.playback.vlc_player.QTimer.singleShot") as mock_shot:
+            player.rebind_output_window()
+
+        player._player.set_hwnd.assert_not_called()
+        player._player.set_nsobject.assert_not_called()
+        player._player.set_xwindow.assert_not_called()
+        mock_shot.assert_called_once()
+
+    def test_play_waits_until_host_is_visible(self):
+        player = VlcPreviewPlayer(_make_host_widget())
+        player._player = MagicMock()
+        player._released = False
+        host = MagicMock()
+        host.isVisible.return_value = False
+        host.width.return_value = 0
+        host.height.return_value = 0
+        player.host_widget = host
+
+        with patch("ui.playback.vlc_player.QTimer.singleShot") as mock_shot:
+            started = player.play("clip.mp4", 1.0, 2.0)
+
+        self.assertTrue(started)
+        player._player.play.assert_not_called()
+        player._player.set_hwnd.assert_not_called()
+        mock_shot.assert_called_once()
+        self.assertEqual(player._queued_play[0], "clip.mp4")
+
     def test_resume_restarts_media_when_playback_has_reached_end(self):
         host = _make_host_widget()
         player = VlcPreviewPlayer(host)

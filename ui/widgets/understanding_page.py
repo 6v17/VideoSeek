@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.chunk_timeline import ChunkTimelineWidget
+from ui.widgets.embedded_preview import EmbeddedPreviewLayer
 from ui.widgets.components import NoWheelComboBox
 from ui.widgets.data_table import DataTable
 from ui.widgets.recap_review_delegate import RecapReviewItemDelegate
@@ -140,7 +141,7 @@ class UnderstandingEvidencePage(QWidget):
         root.setSpacing(0)
 
         self.scaffold = PageScaffold()
-        root.addWidget(self.scaffold)
+        root.addWidget(self.scaffold, 1)
         self.header = self.scaffold.header
         page_body = self.scaffold.content_layout
 
@@ -208,6 +209,20 @@ class UnderstandingEvidencePage(QWidget):
         if hasattr(self.header, "subtitle"):
             self.header.subtitle.hide()
 
+    def show_embedded_preview(self) -> None:
+        stack = getattr(self, "content_stack", None)
+        layer = getattr(self, "embedded_preview", None)
+        if stack is None or layer is None:
+            return
+        stack.setCurrentWidget(layer)
+
+    def hide_embedded_preview(self) -> None:
+        stack = getattr(self, "content_stack", None)
+        host = getattr(self, "workflow_host", None)
+        if stack is None or host is None:
+            return
+        stack.setCurrentWidget(host)
+
     def _install_workflow(self, page_body: QVBoxLayout) -> None:
         self._wizard_labels = {
             "select": "选片",
@@ -262,8 +277,27 @@ class UnderstandingEvidencePage(QWidget):
         nav_layout.addWidget(self.btn_wizard_next)
 
         page_body.addWidget(self.wizard_bar)
-        page_body.addWidget(self.workflow_stack, 1)
-        page_body.addWidget(self.wizard_nav)
+
+        self.workflow_host = QWidget()
+        self.workflow_host.setObjectName("UnderstandingWorkflowHost")
+        host_layout = QVBoxLayout(self.workflow_host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+        host_layout.addWidget(self.workflow_stack, 1)
+        host_layout.addWidget(self.wizard_nav)
+
+        self.content_stack = QStackedWidget()
+        self.content_stack.setObjectName("UnderstandingContentStack")
+        self.content_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.embedded_preview = EmbeddedPreviewLayer(
+            show_detail=False,
+            show_actions=False,
+            object_name="UnderstandingPreviewLayer",
+        )
+        self.embedded_preview.btn_preview_back.setText("返回理解")
+        self.content_stack.addWidget(self.workflow_host)
+        self.content_stack.addWidget(self.embedded_preview)
+        page_body.addWidget(self.content_stack, 1)
         self.wizard_nav.raise_()
         self.order_workflow_cards(recap_first=True)
 
@@ -441,6 +475,14 @@ class UnderstandingEvidencePage(QWidget):
     def _on_wizard_step_clicked(self, index: int) -> None:
         if index < 0 or index >= self.workflow_stack.count():
             return
+        stack = getattr(self, "content_stack", None)
+        layer = getattr(self, "embedded_preview", None)
+        if stack is not None and layer is not None and stack.currentWidget() is layer:
+            dismiss = getattr(self, "_embedded_preview_dismiss", None)
+            if callable(dismiss):
+                dismiss()
+            else:
+                self.hide_embedded_preview()
         self.set_workflow_step(index, scroll_to_top=True)
 
     def _go_wizard_prev(self) -> None:
@@ -584,6 +626,32 @@ class UnderstandingEvidencePage(QWidget):
         timeline_header.addWidget(self.timeline_hint, 1)
         timeline_layout.addLayout(timeline_header)
 
+        self.chunk_preview_wrap = QWidget()
+        self.chunk_preview_wrap.setObjectName("UnderstandingChunkPreview")
+        self.chunk_preview_wrap.setVisible(False)
+        preview_col = QVBoxLayout(self.chunk_preview_wrap)
+        preview_col.setContentsMargins(0, 0, 0, 0)
+        preview_col.setSpacing(6)
+        preview_header = QHBoxLayout()
+        preview_header.setContentsMargins(0, 0, 0, 0)
+        preview_header.setSpacing(8)
+        self.chunk_preview_label = QLabel()
+        self.chunk_preview_label.setObjectName("InlineFieldLabel")
+        self.btn_chunk_preview_close = _action_button("GhostButton")
+        preview_header.addWidget(self.chunk_preview_label, 0)
+        preview_header.addStretch(1)
+        preview_header.addWidget(self.btn_chunk_preview_close, 0)
+        preview_col.addLayout(preview_header)
+        self.chunk_preview_host = QWidget()
+        self.chunk_preview_host.setObjectName("UnderstandingChunkPreviewHost")
+        self.chunk_preview_host.setMinimumHeight(420)
+        self.chunk_preview_host.setMaximumHeight(420)
+        self.chunk_preview_host_layout = QVBoxLayout(self.chunk_preview_host)
+        self.chunk_preview_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.chunk_preview_host_layout.setSpacing(0)
+        preview_col.addWidget(self.chunk_preview_host, 1)
+        timeline_layout.addWidget(self.chunk_preview_wrap)
+
         self.chunk_timeline_scroll = QScrollArea()
         self.chunk_timeline_scroll.setObjectName("ChunkTimelineScroll")
         self.chunk_timeline_scroll.setWidgetResizable(False)
@@ -653,6 +721,22 @@ class UnderstandingEvidencePage(QWidget):
 
     def _build_dialogue_step(self, layout: QVBoxLayout) -> None:
         actions, row = _command_bar()
+        self.dialogue_mode_segment = QWidget()
+        self.dialogue_mode_segment.setObjectName("UnderstandingDialogueMode")
+        mode_row = QHBoxLayout(self.dialogue_mode_segment)
+        mode_row.setContentsMargins(2, 2, 2, 2)
+        mode_row.setSpacing(0)
+        self.btn_dialogue_mode_ocr = _action_button("GhostButton", chrome="modeSegment")
+        self.btn_dialogue_mode_asr = _action_button("GhostButton", chrome="modeSegment")
+        self.btn_dialogue_mode_ocr.setCheckable(True)
+        self.btn_dialogue_mode_asr.setCheckable(True)
+        self.btn_dialogue_mode_ocr.setChecked(True)
+        self._dialogue_mode_group = QButtonGroup(self)
+        self._dialogue_mode_group.setExclusive(True)
+        self._dialogue_mode_group.addButton(self.btn_dialogue_mode_ocr)
+        self._dialogue_mode_group.addButton(self.btn_dialogue_mode_asr)
+        mode_row.addWidget(self.btn_dialogue_mode_ocr)
+        mode_row.addWidget(self.btn_dialogue_mode_asr)
         self.btn_open_subtitle_library = _action_button("GhostButton")
         self.btn_open_subtitle_library.setVisible(False)
         self.btn_extract_asr = _action_button("PrimaryButton")
@@ -663,6 +747,7 @@ class UnderstandingEvidencePage(QWidget):
         self.btn_stop_asr = _action_button("DangerGhostButton")
         self.btn_stop_asr.setEnabled(False)
         self.btn_stop_asr.setVisible(False)
+        row.addWidget(self.dialogue_mode_segment, 0)
         row.addWidget(self.btn_extract_asr, 0)
         row.addWidget(self.btn_cluster_speakers, 0)
         row.addWidget(self.btn_rename_speakers, 0)

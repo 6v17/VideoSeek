@@ -92,6 +92,7 @@ def index_video_dialogue(
     sample_interval_sec: float | None = None,
     sample_strategy: str | None = None,
     ocr_batch_size: int | None = None,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """Build shared subtitle cues (timeline/VAD probe + RapidOCR). ``language`` ignored."""
     del language
@@ -111,6 +112,7 @@ def index_video_dialogue(
         "stop_callback": stop_callback,
         "keep_wav": keep_wav,
         "mode": subtitle_mode,
+        "persist": persist,
     }
     if sample_interval_sec is not None:
         kwargs["sample_interval_sec"] = float(sample_interval_sec)

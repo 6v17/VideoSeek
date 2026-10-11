@@ -13,6 +13,12 @@ class PreviewKeyboardHelperTests(unittest.TestCase):
         if QApplication.instance() is None:
             cls._app = QApplication([])
 
+    def test_floating_preview_top_left_centers_on_frame(self):
+        from ui.windows.gui_preview import floating_preview_top_left
+
+        self.assertEqual(floating_preview_top_left(1000, 660, 100, 80, 1600, 900), (400, 200))
+        self.assertEqual(floating_preview_top_left(2000, 1200, 0, 0, 800, 600), (0, 0))
+
     def test_clamp_seek_ms(self):
         from ui.playback.preview_keyboard import clamp_seek_ms
 

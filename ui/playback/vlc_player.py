@@ -192,11 +192,34 @@ class VlcPreviewPlayer:
             return False
         if getattr(self, "_play_busy", False):
             return False
+        # Starting libvlc before the embed host exists opens a separate
+        # "VLC (Direct3D11 output)" window that the app cannot close.
+        if not self._host_output_ready():
+            self._queued_play = (video_path, start_sec, stop_sec)
+            self._bind_retry_left = 40
+            QTimer.singleShot(80, self._flush_queued_play)
+            return True
+        self._queued_play = None
         self._play_busy = True
         try:
             return self._play_impl(video_path, start_sec, stop_sec=stop_sec)
         finally:
             self._play_busy = False
+
+    def _flush_queued_play(self) -> None:
+        queued = getattr(self, "_queued_play", None)
+        if not queued or self._released:
+            return
+        if not self._host_output_ready():
+            left = int(getattr(self, "_bind_retry_left", 0) or 0)
+            if left <= 0:
+                self._queued_play = None
+                return
+            self._bind_retry_left = left - 1
+            QTimer.singleShot(80, self._flush_queued_play)
+            return
+        self._queued_play = None
+        self.play(queued[0], queued[1], queued[2])
 
     def _canonical_play_path(self, video_path: str) -> str:
         text = normalize_http_media_url(os.fspath(video_path))
@@ -596,11 +619,43 @@ class VlcPreviewPlayer:
 
     def rebind_output_window(self):
         """Re-attach libvlc output after host resize / fullscreen toggles."""
+        # Fresh attempts after show/reparent. A hidden or 0-size host must not bind:
+        # set_hwnd on that window opens a "VLC (Direct3D11 output)" popup at (0, 0)
+        # and later players on the same instance stay white while audio continues.
+        self._bind_retry_left = 8
         self._bind_output_window()
+
+    def _host_output_ready(self) -> bool:
+        host = self.host_widget
+        if host is None:
+            return False
+        try:
+            visible = host.isVisible()
+        except Exception:
+            visible = True
+        if visible is False:
+            return False
+        try:
+            width = host.width()
+            height = host.height()
+        except Exception:
+            return True
+        # MagicMock sizes are not ints. Only a real 0-size widget must wait.
+        if not isinstance(width, int) or not isinstance(height, int):
+            return True
+        return width >= 2 and height >= 2
 
     def _bind_output_window(self):
         if self._player is None or self._released:
             return
+        if not self._host_output_ready():
+            left = int(getattr(self, "_bind_retry_left", 0) or 0)
+            if left <= 0:
+                return
+            self._bind_retry_left = left - 1
+            QTimer.singleShot(80, self._bind_output_window)
+            return
+        self._bind_retry_left = 0
         try:
             # Force native window creation before reading winId.
             self.host_widget.setAttribute(Qt.WA_NativeWindow, True)

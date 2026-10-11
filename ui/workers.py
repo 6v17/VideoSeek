@@ -476,6 +476,7 @@ class DialogueIndexWorker(QThread):
         sample_interval_sec: float | None = None,
         sample_strategy: str | None = None,
         ocr_batch_size: int | None = None,
+        persist: bool = True,
     ):
         super().__init__()
         self.targets = list(targets or [])
@@ -483,6 +484,7 @@ class DialogueIndexWorker(QThread):
         self.sample_interval_sec = None if sample_interval_sec is None else float(sample_interval_sec)
         self.sample_strategy = None if sample_strategy is None else str(sample_strategy)
         self.ocr_batch_size = None if ocr_batch_size is None else int(ocr_batch_size)
+        self.persist = bool(persist)
         self._stop_requested = False
 
     def stop(self):
@@ -532,7 +534,21 @@ class DialogueIndexWorker(QThread):
                     sample_interval_sec=self.sample_interval_sec,
                     sample_strategy=self.sample_strategy,
                     ocr_batch_size=self.ocr_batch_size,
+                    persist=self.persist,
                 )
+                if result.get("ok") and not self.persist:
+                    from src.app.config import load_config
+                    from src.services.understanding_dialogue import save_working_copy
+
+                    save_working_copy(
+                        video_id,
+                        list(result.get("segments") or []),
+                        origin="ocr",
+                        video_path=video_path,
+                        library_path=library_path,
+                        asr_source=str(result.get("asr_source") or ""),
+                        config=load_config(),
+                    )
                 if result.get("ok"):
                     summary["ok"] += 1
                     summary["segment_rows"] += int(result.get("segment_rows", 0) or 0)
@@ -1435,6 +1451,7 @@ class AsrTranscriptWorker(QThread):
         library_path: str = "",
         force: bool = True,
         language: str = "",
+        persist: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -1443,6 +1460,7 @@ class AsrTranscriptWorker(QThread):
         self.library_path = str(library_path or "").strip()
         self.force = bool(force)
         self.language = str(language or "").strip()
+        self.persist = bool(persist)
         self._stop_requested = False
 
     def stop(self):
@@ -1486,11 +1504,24 @@ class AsrTranscriptWorker(QThread):
                 force=self.force,
                 language=self.language,
                 config=config,
+                persist=self.persist,
                 progress_callback=_on_progress,
                 stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
             )
             if not dict(result or {}).get("ok"):
                 raise RuntimeError(str(dict(result or {}).get("error") or "ASR failed"))
+            if not self.persist:
+                from src.services.understanding_dialogue import save_working_copy
+
+                save_working_copy(
+                    self.video_id,
+                    list(dict(result or {}).get("segments") or []),
+                    origin="asr",
+                    video_path=self.video_path,
+                    library_path=self.library_path,
+                    asr_source=str(dict(result or {}).get("asr_source") or ""),
+                    config=config,
+                )
             self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))
             self.finished_signal.emit(True, False, dict(result or {}))
         except Exception as exc:
@@ -1556,13 +1587,31 @@ class SpeakerClusterWorker(QThread):
                         ).format(current=parts[1], total=parts[2])
                 self.progress_signal.emit(max(5, min(99, int(round(float(value) * 100)))), label)
 
+            from src.services.understanding_dialogue import (
+                apply_speaker_assignments,
+                ensure_working_copy,
+            )
+
+            copy = ensure_working_copy(
+                self.video_id,
+                video_path=self.video_path,
+                config=config,
+            )
             result = cluster_video_speakers(
                 self.video_id,
                 video_path=self.video_path,
                 config=config,
+                segments=list(copy.get("cues") or []),
+                persist=False,
                 progress_callback=_on_progress,
                 stop_callback=lambda: self._stop_requested or self.isInterruptionRequested(),
             )
+            if dict(result or {}).get("ok") and dict(result or {}).get("assignments"):
+                apply_speaker_assignments(
+                    self.video_id,
+                    dict(result.get("assignments") or {}),
+                    config=config,
+                )
             if not dict(result or {}).get("ok"):
                 raise RuntimeError(str(dict(result or {}).get("error") or "speaker cluster failed"))
             self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))

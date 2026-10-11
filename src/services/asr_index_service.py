@@ -105,8 +105,13 @@ def transcribe_video_asr(
     config=None,
     progress_callback: ProgressCallback | None = None,
     stop_callback: StopCallback | None = None,
+    persist: bool = True,
 ) -> dict[str, Any]:
-    """Extract speech for one video and overwrite its shared dialogue transcript."""
+    """Extract speech for one video.
+
+    ``persist=True`` overwrites the shared subtitle library. Understanding passes
+    ``persist=False`` and keeps the cues in its own working copy.
+    """
     vid = str(video_id or "").strip()
     if not vid:
         return {"ok": False, "error": "missing video_id", "segment_count": 0}
@@ -150,17 +155,28 @@ def transcribe_video_asr(
         waveform = extract_audio_mono_f32(media, progress_callback=None)
         duration = float(waveform.shape[0]) / float(DEFAULT_SAMPLE_RATE) if waveform.size else 0.0
         if duration < MIN_CLIP_SEC:
-            return _save_empty(vid, lib, media, config=config, profile_base_dir=profile_base_dir)
+            return _save_empty(
+                vid,
+                lib,
+                media,
+                config=config,
+                profile_base_dir=profile_base_dir,
+                persist=persist,
+            )
 
         if _stopped():
             raise UnderstandingStoppedError("ASR stopped by user")
         _progress(0.18, "vad")
         spans, vad_ok = _speech_spans(waveform)
         if vad_ok and not spans:
-            return _save_empty(vid, lib, media, config=config, profile_base_dir=profile_base_dir)
+            return _save_empty(
+                vid, lib, media, config=config, profile_base_dir=profile_base_dir, persist=persist
+            )
         windows = pack_speech_windows(spans, duration_sec=duration)
         if not windows:
-            return _save_empty(vid, lib, media, config=config, profile_base_dir=profile_base_dir)
+            return _save_empty(
+                vid, lib, media, config=config, profile_base_dir=profile_base_dir, persist=persist
+            )
 
         rows: list[dict[str, Any]] = []
         total = max(1, len(windows))
@@ -186,6 +202,17 @@ def transcribe_video_asr(
                     time.sleep(WINDOW_PAUSE_SEC)
 
         merged = merge_adjacent_transcripts(rows)
+        if not persist:
+            _progress(1.0, "asr_done")
+            return {
+                "ok": True,
+                "video_id": vid,
+                "segment_count": len(merged),
+                "window_count": len(windows),
+                "asr_source": ASR_SOURCE_ID,
+                "segments": merged,
+                "skipped": False,
+            }
         saved = save_dialogue_transcript(
             vid,
             merged,
@@ -218,12 +245,13 @@ def transcribe_video_asr(
     except Exception as exc:
         logger.exception("ASR transcribe failed for %s", vid)
         wrapped = format_asr_error(exc)
-        _mark_state(
-            profile_base_dir,
-            vid,
-            DIALOGUE_INDEX_STATE_FAILED,
-            extras={"dialogue_error": wrapped[:300], "dialogue_asr_source": ASR_SOURCE_ID},
-        )
+        if persist:
+            _mark_state(
+                profile_base_dir,
+                vid,
+                DIALOGUE_INDEX_STATE_FAILED,
+                extras={"dialogue_error": wrapped[:300], "dialogue_asr_source": ASR_SOURCE_ID},
+            )
         return {"ok": False, "error": wrapped, "segment_count": 0, "video_id": vid}
 
 
@@ -332,22 +360,38 @@ def _split_oversize(start: float, end: float, limit: float) -> list[tuple[float,
     return out
 
 
-def _save_empty(video_id: str, library_path: str, video_path: str, *, config, profile_base_dir: str) -> dict[str, Any]:
-    save_dialogue_transcript(
-        video_id,
-        [],
-        library_path=library_path,
-        video_path=video_path,
-        asr_source=ASR_SOURCE_ID,
-        config=config,
-    )
-    _mark_state(
-        profile_base_dir,
-        video_id,
-        DIALOGUE_INDEX_STATE_READY,
-        extras={"dialogue_segment_rows": 0, "dialogue_asr_source": ASR_SOURCE_ID, "dialogue_error": ""},
-    )
-    return {"ok": True, "video_id": video_id, "segment_count": 0, "asr_source": ASR_SOURCE_ID, "skipped": False}
+def _save_empty(
+    video_id: str,
+    library_path: str,
+    video_path: str,
+    *,
+    config,
+    profile_base_dir: str,
+    persist: bool = True,
+) -> dict[str, Any]:
+    if persist:
+        save_dialogue_transcript(
+            video_id,
+            [],
+            library_path=library_path,
+            video_path=video_path,
+            asr_source=ASR_SOURCE_ID,
+            config=config,
+        )
+        _mark_state(
+            profile_base_dir,
+            video_id,
+            DIALOGUE_INDEX_STATE_READY,
+            extras={"dialogue_segment_rows": 0, "dialogue_asr_source": ASR_SOURCE_ID, "dialogue_error": ""},
+        )
+    return {
+        "ok": True,
+        "video_id": video_id,
+        "segment_count": 0,
+        "asr_source": ASR_SOURCE_ID,
+        "segments": [],
+        "skipped": False,
+    }
 
 
 def _mark_state(profile_base_dir: str, video_id: str, state: str, *, extras: Mapping[str, Any]) -> None:

@@ -1485,7 +1485,8 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
     background: transparent;
     border: none;
 }
-#LibraryModeSegment {
+#LibraryModeSegment,
+#UnderstandingDialogueMode {
     background: __FIELD__;
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;

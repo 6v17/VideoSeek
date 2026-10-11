@@ -335,14 +335,234 @@ class UnderstandingAsrGuiMixin:
             or getattr(self, "_speaker_cluster_worker", None) is not None
         )
 
+    def _dialogue_extract_uses_ocr(self) -> bool:
+        page = getattr(self, "understanding_page", None)
+        button = getattr(page, "btn_dialogue_mode_ocr", None)
+        return bool(button is not None and button.isChecked())
+
+    def _sync_dialogue_extract_label(self, *_args) -> None:
+        page = getattr(self, "understanding_page", None)
+        button = getattr(page, "btn_extract_asr", None)
+        if button is None:
+            return
+        texts = getattr(self, "texts", None) or {}
+        if self._dialogue_extract_uses_ocr():
+            button.setText(texts.get("understanding_step_dialogue_open", "Extract subtitles"))
+        else:
+            button.setText(texts.get("understanding_step_dialogue_extract_asr", "Extract speech"))
+
+    def _set_dialogue_mode_enabled(self, enabled: bool) -> None:
+        page = getattr(self, "understanding_page", None)
+        for name in ("btn_dialogue_mode_ocr", "btn_dialogue_mode_asr"):
+            button = getattr(page, name, None)
+            if button is not None:
+                button.setEnabled(bool(enabled))
+
+    def _confirm_replace_local_dialogue(self) -> bool:
+        from src.services.understanding_dialogue import load_working_copy
+
+        video_id = self._selected_understanding_video_id()
+        payload = load_working_copy(video_id, config=load_config()) if video_id else None
+        if not list((payload or {}).get("cues") or []):
+            return True
+        return self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            self.texts.get(
+                "understanding_dialogue_replace_local_confirm",
+                "This replaces the dialogue on this page. The subtitle library stays unchanged. Continue?",
+            ),
+        )
+
+    def _extract_current_video_ocr(self):
+        from src.services.subtitle_index_service import ensure_subtitle_ocr_ready
+        from src.utils import has_ffmpeg
+        from ui.workers import DialogueIndexWorker
+
+        page = getattr(self, "understanding_page", None)
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        if not has_ffmpeg():
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_asr_missing_ffmpeg",
+                    "FFmpeg is required for speech extraction. Configure it in Settings.",
+                ),
+                kind="warning",
+            )
+            return
+        ready, error = ensure_subtitle_ocr_ready(config=load_config(), import_engine=False)
+        if not ready:
+            detail = self.texts.get(
+                "understanding_ocr_missing",
+                "Import RapidOCR first.",
+            )
+            if error:
+                detail = f"{detail}\n\n{error}"
+            self.show_info_dialog(self.texts.get("warning_title", "Warning"), detail, kind="warning")
+            return
+        if not self._confirm_replace_local_dialogue():
+            return
+        context = getattr(self, "_understanding_video_context", None) or {}
+        if str(context.get("video_id") or "") != video_id:
+            from src.services.understanding_service import resolve_video_context
+
+            try:
+                context = resolve_video_context(video_id, config=load_config(), probe_duration=False)
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:ocr_context")
+                context = {}
+        running_text = self.texts.get("understanding_ocr_extract_running", "Reading burned-in subtitles…")
+        if page is not None:
+            page.lbl_status.setText(running_text)
+            page.progress_bar.setVisible(True)
+            page.progress_bar.setValue(5)
+            page.btn_stop.setVisible(True)
+            page.btn_stop.setEnabled(True)
+            if hasattr(page, "btn_stop_asr"):
+                page.btn_stop_asr.setVisible(True)
+                page.btn_stop_asr.setEnabled(True)
+            if hasattr(page, "dialogue_progress_bar"):
+                page.dialogue_progress_bar.setVisible(True)
+                page.dialogue_progress_bar.setValue(5)
+            if hasattr(page, "dialogue_progress_status"):
+                page.dialogue_progress_status.set_status_text(running_text)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(running_text)
+            page.btn_generate_evidence.setEnabled(False)
+            if hasattr(page, "btn_generate_batch"):
+                page.btn_generate_batch.setEnabled(False)
+            page.scope_combo.setEnabled(False)
+            page.video_combo.setEnabled(False)
+        if hasattr(page, "btn_extract_asr"):
+            page.btn_extract_asr.setEnabled(False)
+        self._set_dialogue_mode_enabled(False)
+        if hasattr(page, "btn_cluster_speakers"):
+            page.btn_cluster_speakers.setEnabled(False)
+        if hasattr(page, "btn_rename_speakers"):
+            page.btn_rename_speakers.setEnabled(False)
+        if hasattr(page, "btn_reset_speakers"):
+            page.btn_reset_speakers.setEnabled(False)
+        if hasattr(page, "btn_export_dialogue_json"):
+            page.btn_export_dialogue_json.setEnabled(False)
+        self._sync_recap_export_button(running=True)
+        worker = DialogueIndexWorker(
+            [
+                {
+                    "video_id": video_id,
+                    "video_path": str(context.get("video_path") or ""),
+                    "library_path": str(context.get("library_path") or ""),
+                }
+            ],
+            mode="ocr",
+            persist=False,
+        )
+        worker.setParent(self)
+        self._asr_worker = worker
+
+        def _finish(active_worker=worker):
+            if getattr(self, "_asr_worker", None) is active_worker:
+                self._asr_worker = None
+            if page is not None:
+                page.progress_bar.setVisible(False)
+                if hasattr(page, "dialogue_progress_bar"):
+                    page.dialogue_progress_bar.setVisible(False)
+                generating = bool(
+                    getattr(self, "understanding_controller", None)
+                    and self.understanding_controller.is_running()
+                )
+                if not generating:
+                    page.btn_stop.setEnabled(False)
+                    page.btn_stop.setVisible(False)
+                    if hasattr(page, "btn_stop_asr"):
+                        page.btn_stop_asr.setEnabled(False)
+                        page.btn_stop_asr.setVisible(False)
+                    page.btn_generate_evidence.setEnabled(True)
+                    if hasattr(page, "btn_generate_batch"):
+                        page.btn_generate_batch.setEnabled(True)
+                    page.scope_combo.setEnabled(True)
+                    page.video_combo.setEnabled(True)
+            self._sync_asr_extract_button()
+            self._sync_recap_export_button(running=False)
+            try:
+                active_worker.deleteLater()
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_understanding_asr.py:ocr_finish")
+            if hasattr(self, "_maybe_close_when_busy_work_stops"):
+                self._maybe_close_when_busy_work_stops()
+
+        def _progress(value, _text, label=running_text):
+            self._update_understanding_progress(value, label)
+
+        worker.progress_signal.connect(_progress)
+        worker.finished_signal.connect(self._finish_ocr_extract)
+        worker.error_signal.connect(
+            lambda message: self.show_error_dialog(
+                self.texts.get("understanding_ocr_extract_failed", "Hard-sub OCR failed"),
+                Exception(message),
+            )
+        )
+        worker.finished.connect(_finish)
+        worker.start()
+
+    def _finish_ocr_extract(self, ok: bool, stopped: bool, payload: object):
+        page = getattr(self, "understanding_page", None)
+        self._refresh_understanding_dialogue_step()
+        summary = dict(payload or {})
+        if stopped or not ok or int(summary.get("failed") or 0) > 0:
+            if page is not None and stopped:
+                page.lbl_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+                if hasattr(page, "dialogue_status"):
+                    page.dialogue_status.setText(self.texts.get("understanding_stop_requested", "Stopping…"))
+            elif int(summary.get("failed") or 0) > 0:
+                detail = "; ".join(str(item) for item in list(summary.get("errors") or []) if str(item).strip())
+                self.show_error_dialog(
+                    self.texts.get("understanding_ocr_extract_failed", "Hard-sub OCR failed"),
+                    Exception(detail or "OCR failed"),
+                )
+            return
+        count = int(summary.get("segment_rows") or 0)
+        if count <= 0:
+            message = self.texts.get(
+                "understanding_ocr_extract_empty",
+                "No burned-in subtitles found.",
+            )
+            if page is not None:
+                page.lbl_status.setText(message)
+                if hasattr(page, "dialogue_status"):
+                    page.dialogue_status.setText(message)
+            self.show_info_dialog(self.texts.get("warning_title", "Warning"), message, kind="warning")
+            return
+        message = self.texts.get(
+            "understanding_ocr_extract_done",
+            "Saved {count} hard-sub cues.",
+        ).format(count=count)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(message)
+        self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
+
     def extract_current_video_asr(self):
-        from src.services.asr_index_service import is_hardsub_ocr_source
         from src.services.asr_settings import get_remote_asr_settings
         from src.utils import has_ffmpeg
 
         if self._asr_job_running():
             return
         if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
+            return
+        if self._dialogue_extract_uses_ocr():
+            self._extract_current_video_ocr()
             return
         page = getattr(self, "understanding_page", None)
         video_id = self._selected_understanding_video_id()
@@ -371,16 +591,8 @@ class UnderstandingAsrGuiMixin:
                 kind="warning",
             )
             return
-        status = self._current_video_recap_dialogue_status()
-        if status.get("ready") and is_hardsub_ocr_source(str(status.get("source") or "")):
-            if not self.show_confirm_dialog(
-                self.texts.get("confirm_title", "Confirm"),
-                self.texts.get(
-                    "understanding_asr_overwrite_ocr_confirm",
-                    "This video already has hard-sub OCR. Extracting speech will replace those cues.",
-                ),
-            ):
-                return
+        if not self._confirm_replace_local_dialogue():
+            return
         context = getattr(self, "_understanding_video_context", None) or {}
         if str(context.get("video_id") or "") != video_id:
             from src.services.understanding_service import resolve_video_context
@@ -422,6 +634,7 @@ class UnderstandingAsrGuiMixin:
             page.video_combo.setEnabled(False)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        self._set_dialogue_mode_enabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
@@ -437,6 +650,7 @@ class UnderstandingAsrGuiMixin:
             library_path=str(context.get("library_path") or ""),
             force=True,
             language=language,
+            persist=False,
             parent=self,
         )
         self._asr_worker = worker
@@ -533,6 +747,7 @@ class UnderstandingAsrGuiMixin:
             and bool(self._selected_understanding_video_id())
         )
         page.btn_extract_asr.setEnabled(can)
+        self._set_dialogue_mode_enabled(not running)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(can and self._current_video_has_recap_dialogue())
         if hasattr(page, "btn_rename_speakers"):
@@ -628,6 +843,7 @@ class UnderstandingAsrGuiMixin:
             page.video_combo.setEnabled(False)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        self._set_dialogue_mode_enabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
@@ -703,10 +919,22 @@ class UnderstandingAsrGuiMixin:
         speakers = int(result.get("speakers") or 0)
         skipped = int(result.get("skipped") or 0)
         if labeled <= 0:
-            message = self.texts.get(
-                "understanding_speaker_cluster_none",
-                "Too few or too short cues to cluster.",
-            )
+            reason = str(result.get("reason") or "")
+            if reason == "short":
+                message = self.texts.get(
+                    "understanding_speaker_cluster_short",
+                    "These lines are shorter than about 0.4 seconds, so there is not enough audio to cluster.",
+                )
+            elif reason == "quiet":
+                message = self.texts.get(
+                    "understanding_speaker_cluster_quiet",
+                    "Those time ranges have almost no speech, so the voices could not be separated.",
+                )
+            else:
+                message = self.texts.get(
+                    "understanding_speaker_cluster_none",
+                    "No dialogue lines to cluster.",
+                )
             if page is not None:
                 page.lbl_status.setText(message)
                 if hasattr(page, "dialogue_status"):
@@ -753,7 +981,7 @@ class UnderstandingAsrGuiMixin:
         return normalize_dialogue_speaker(item.text() if item is not None else "")
 
     def rename_current_video_speakers(self):
-        from src.storage.dialogue_transcript_store import rename_dialogue_speakers
+        from src.services.understanding_dialogue import rename_working_speakers
         from ui.dialogs.rename_speakers import prompt_rename_speakers
 
         if self._asr_job_running():
@@ -789,7 +1017,7 @@ class UnderstandingAsrGuiMixin:
             return
         old_speaker, new_speaker = picked
         try:
-            updated = rename_dialogue_speakers(
+            updated = rename_working_speakers(
                 video_id,
                 old_speaker,
                 new_speaker,
@@ -823,7 +1051,7 @@ class UnderstandingAsrGuiMixin:
         self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
 
     def reset_current_video_speakers(self):
-        from src.storage.dialogue_transcript_store import clear_dialogue_speakers
+        from src.services.understanding_dialogue import clear_working_speakers
 
         if self._asr_job_running():
             return
@@ -856,7 +1084,7 @@ class UnderstandingAsrGuiMixin:
         ):
             return
         try:
-            updated = clear_dialogue_speakers(video_id, config=load_config())
+            updated = clear_working_speakers(video_id, config=load_config())
         except Exception as exc:
             from src.app.logging_utils import note_swallowed
             note_swallowed(exc, 'ui/windows/gui_understanding_asr.py:831')
@@ -884,10 +1112,26 @@ class UnderstandingAsrGuiMixin:
                 page.dialogue_status.setText(message)
         self.show_info_dialog(self.texts.get("success_title", "Success"), message, kind="success")
 
+    def _dialogue_export_video_path(self, record: dict) -> str:
+        from src.app.config import load_config
+        from src.services.understanding_service import resolve_current_media_path
+
+        stored = str((record or {}).get("video_path") or "")
+        context = getattr(self, "_understanding_video_context", None) or {}
+        if not stored:
+            stored = str(context.get("video_path") or "")
+        video_id = str((record or {}).get("video_id") or self._selected_understanding_video_id() or "")
+        if hasattr(self, "_current_recap_video_path"):
+            current = str(self._current_recap_video_path() or "")
+            if current:
+                stored = current
+        return resolve_current_media_path(video_id, stored=stored, config=load_config())
+
     def export_current_video_dialogue_json(self):
         from src.app.config import load_config
-        from src.services.dialogue_export_service import export_dialogue_json_to_path
-        from src.storage.dialogue_transcript_store import load_dialogue_transcript
+        from src.services.dialogue_export_service import render_dialogue_srt
+        from src.services.subtitle_srt_import import srt_filename_for_video, srt_save_path_for_video
+        from src.services.understanding_dialogue import load_working_copy
 
         video_id = self._selected_understanding_video_id()
         if not video_id:
@@ -897,42 +1141,51 @@ class UnderstandingAsrGuiMixin:
                 kind="warning",
             )
             return
-        record = load_dialogue_transcript(video_id, config=load_config())
-        if not record or not (record.get("segments") or []):
+        record = load_working_copy(video_id, config=load_config()) or {}
+        cues = list(record.get("cues") or [])
+        if not cues:
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get(
                     "understanding_export_dialogue_json_empty",
-                    "No dialogue JSON for this video yet. Extract subtitles or speech first.",
+                    "No dialogue on this page yet. Copy it from the subtitle library, or extract subtitles or speech here.",
                 ),
                 kind="warning",
             )
             return
-        video_path = str(record.get("video_path") or "")
-        stem = os.path.splitext(os.path.basename(video_path))[0] or video_id[:12]
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            self.texts.get("understanding_export_dialogue_json_title", "Export dialogue JSON"),
-            f"{stem}_dialogue.json",
-            self.texts.get("details_export_filter", "JSON Files (*.json)"),
-        )
-        if not path:
-            return
-        try:
-            result = export_dialogue_json_to_path(video_id, path, config=load_config())
-        except Exception as exc:
-            from src.app.logging_utils import note_swallowed
-            note_swallowed(exc, 'ui/windows/gui_understanding_asr.py:892')
-            self.show_error_dialog(self.texts.get("details_export_failed", "Export failed."), exc)
-            return
-        if not result.get("ok"):
+        video_path = self._dialogue_export_video_path(record)
+        filename = srt_filename_for_video(video_path)
+        if not filename:
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
-                str(result.get("error") or "Export failed."),
+                self.texts.get(
+                    "understanding_export_dialogue_srt_unnamed",
+                    "This video has no file name, so the SRT cannot match a subtitle-library import.",
+                ),
                 kind="warning",
             )
             return
-        message = self.texts.get("details_export_done", "Exported: {path}").format(path=result.get("path") or path)
+        start_dir = os.path.dirname(video_path) if video_path else ""
+        suggested = os.path.join(start_dir, filename) if start_dir else filename
+        chosen, _selected = QFileDialog.getSaveFileName(
+            self,
+            self.texts.get("understanding_export_dialogue_json_title", "Export SRT"),
+            suggested,
+            self.texts.get("import_subtitle_srt_filter", "SRT subtitles (*.srt)"),
+        )
+        if not chosen:
+            return
+        path = srt_save_path_for_video(video_path, chosen)
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(render_dialogue_srt(cues))
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+            note_swallowed(exc, "ui/windows/gui_understanding_asr.py:export_srt")
+            self.show_error_dialog(self.texts.get("details_export_failed", "Export failed."), exc)
+            return
+        message = self.texts.get("details_export_done", "Exported: {path}").format(path=path)
         page = getattr(self, "understanding_page", None)
         if page is not None:
             page.lbl_status.setText(message)

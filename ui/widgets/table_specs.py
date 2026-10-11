@@ -64,13 +64,13 @@ LOCAL_SEARCH_TABLE_SPEC = TableSpec(
 
 UNDERSTANDING_DIALOGUE_TABLE_SPEC = TableSpec(
     texts_header_key="understanding_dialogue_headers",
-    row_height=36,
+    row_height=44,
     object_name="DataTable",
     columns=(
-        TableColumnSpec("range", width=118),
+        TableColumnSpec("range", width=148),
         TableColumnSpec("speaker", width=108),
         TableColumnSpec("text", resize="stretch"),
-        TableColumnSpec("actions", width=132),
+        TableColumnSpec("actions", width=140),
     ),
 )
 
