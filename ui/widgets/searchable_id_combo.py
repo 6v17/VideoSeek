@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.button_roles import name_line_edit_clear_button
+
 _MAX_POPUP_HEIGHT = 360
 _POPUP_WIDTH_PAD = 24
 
@@ -236,6 +238,7 @@ class SearchableIdCombo(QWidget):
         filter_edit = QLineEdit(popup)
         filter_edit.setObjectName("SearchableIdComboFilter")
         filter_edit.setClearButtonEnabled(True)
+        name_line_edit_clear_button(filter_edit)
         filter_edit.setPlaceholderText(self._filter_placeholder)
         filter_edit.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
         filter_edit.setInputMethodHints(Qt.InputMethodHint.ImhNone)

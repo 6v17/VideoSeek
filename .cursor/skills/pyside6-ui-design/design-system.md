@@ -1,6 +1,6 @@
 # VideoSeek Widgets design system (quick ref)
 
-Source of truth: `docs/pyside6_ui_architecture.md`, `ui/widgets/styles.py`, `ui/widgets/layout.py`, `ui/widgets/scaffold.py`.
+Source of truth: this file + `docs/pyside6_ui_architecture.md` (Widgets shell), `ui/widgets/styles.py`, `ui/widgets/layout.py`, `ui/widgets/scaffold.py`.
 
 ## App chrome
 
@@ -47,7 +47,10 @@ Special chrome (nav, wizard steps, mode segments, toggles) keeps the role object
 | `mobileToggle` / `mobileQr` | Ghost / AccentGhost | Settings mobile bridge |
 | Settings Save | PrimaryButton | Stays primary when clean; dirty only enables it |
 | Understanding model test/save | Ghost / Primary | Inside the select-step card, not beside 下一步 |
-| Sidebar icon tools | `SidebarIconButton` | `QToolButton`, not a QPushButton role |
+| Sidebar icon tools | `SidebarIconButton` / `SidebarDonateButton` | `QToolButton`, not a QPushButton role |
+| Line-edit clear | `FieldClearButton` | Qt clear `QToolButton` after `setClearButtonEnabled` |
+| Table corner | `TableCornerButton` | Bare `QAbstractButton` on `QTableWidget` |
+| Horizontal chip scroll | `ScrollLeftButton` / `ScrollRightButton` | Tag/chip strip arrows |
 
 ## Key layout constants (`layout.py`)
 

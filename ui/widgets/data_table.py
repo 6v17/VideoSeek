@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget
 
+from ui.widgets.button_roles import name_table_corner_button
 from ui.widgets.table_scroll import table_wheel_pixel_delta
 from ui.widgets.table_specs import TableSpec
 
@@ -19,6 +20,7 @@ class DataTable(QTableWidget):
     def _apply_spec(self) -> None:
         spec = self.spec
         self.setObjectName(spec.object_name)
+        name_table_corner_button(self)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(spec.row_height)

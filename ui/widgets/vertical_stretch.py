@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QFrame, QSizePolicy, QVBoxLayout, QWidget
 
 
@@ -69,8 +69,10 @@ class VerticalStretchHandle(QFrame):
         mid_y = self.height() // 2
         left = max(8, (self.width() - 28) // 2)
         right = left + 28
-        # Subtle grip dashes so users notice the handle.
-        pen = QPen(QColor(120, 120, 120, 140), 1.5)
+        # Subtle grip dashes; follow the active palette instead of a hard-coded gray.
+        grip = QColor(self.palette().color(QPalette.ColorRole.Mid))
+        grip.setAlpha(140)
+        pen = QPen(grip, 1.5)
         painter.setPen(pen)
         painter.drawLine(left, mid_y - 1, right, mid_y - 1)
         painter.drawLine(left, mid_y + 2, right, mid_y + 2)

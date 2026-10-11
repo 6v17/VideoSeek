@@ -7,7 +7,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QAbstractButton, QApplication, QCheckBox, QPushButton, QToolButton
 
 from ui.widgets.button_roles import ACTION_ROLES
 from ui.widgets.components import LibraryPage, LinkSearchPage, NavigationSidebar, SearchPage
@@ -52,6 +52,27 @@ class ButtonRoleTests(unittest.TestCase):
                 if name not in ACTION_ROLES:
                     outside.append((type(root).__name__, name, button.text()[:40]))
         self.assertEqual(outside, [], msg=f"non-role QPushButtons: {outside}")
+
+    def test_main_pages_tool_and_corner_buttons_are_named(self):
+        roots = (
+            NavigationSidebar(),
+            SearchPage(),
+            LibraryPage(),
+            LinkSearchPage(),
+            UnderstandingEvidencePage(),
+            SettingsPage(),
+        )
+        unnamed = []
+        for root in roots:
+            for button in root.findChildren(QToolButton):
+                if not str(button.objectName() or "").strip():
+                    unnamed.append((type(root).__name__, "QToolButton"))
+            for button in root.findChildren(QAbstractButton):
+                if isinstance(button, (QPushButton, QToolButton, QCheckBox)):
+                    continue
+                if not str(button.objectName() or "").strip():
+                    unnamed.append((type(root).__name__, type(button).__name__))
+        self.assertEqual(unnamed, [], msg=f"unnamed chrome buttons: {unnamed}")
 
 
 if __name__ == "__main__":

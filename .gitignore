@@ -57,7 +57,6 @@ sensevoice/onnx_test_output.txt
 # Private planning / process notes (keep local; not for public repo)
 docs/ai/
 docs/planned_features.md
-docs/pyside6_ui_architecture.md
 docs/migration_forced_upgrade_checklist.md
 docs/video_download_page_design.md
 docs/remote_links.example.txt

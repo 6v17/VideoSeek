@@ -139,17 +139,52 @@ class UnderstandingServicesPanel(QWidget):
             self.pages.setCurrentIndex(0)
         self.btn_test_vlm_connection.setVisible(True)
         self.btn_save_config.setVisible(True)
+        self._sync_test_button_copy(nav_id)
 
-    def apply_texts(self, texts: dict) -> None:
-        self.texts = texts
-        self.title.setText(texts.get("understanding_services_dialog_title", "Model services"))
+    def _sync_test_button_copy(self, nav_id: str | None = None) -> None:
+        """Label/tooltip match the active service tab (VLM / LLM / ASR)."""
+        texts = self.texts
+        nav = str(nav_id or self.current_nav_id() or _NAV_VLM)
+        if nav == _NAV_LLM:
+            self.btn_test_vlm_connection.setText(
+                texts.get("understanding_test_vlm_connection", "Test")
+            )
+            self.btn_test_vlm_connection.setToolTip(
+                texts.get(
+                    "understanding_test_llm_connection_hint",
+                    texts.get(
+                        "understanding_test_vlm_connection_hint",
+                        "Probes the language model with the current form values.",
+                    ),
+                )
+            )
+            return
+        if nav == _NAV_ASR:
+            self.btn_test_vlm_connection.setText(
+                texts.get("understanding_test_vlm_connection", "Test")
+            )
+            self.btn_test_vlm_connection.setToolTip(
+                texts.get(
+                    "understanding_test_asr_connection_hint",
+                    texts.get(
+                        "understanding_test_vlm_connection_hint",
+                        "Probes the speech model with the current form values.",
+                    ),
+                )
+            )
+            return
         self.btn_test_vlm_connection.setText(
             texts.get("understanding_test_vlm_connection", "Test connection")
         )
         self.btn_test_vlm_connection.setToolTip(
             texts.get("understanding_test_vlm_connection_hint", "")
         )
+
+    def apply_texts(self, texts: dict) -> None:
+        self.texts = texts
+        self.title.setText(texts.get("understanding_services_dialog_title", "Model services"))
         self.btn_save_config.setText(texts.get("understanding_save_config", "Save"))
+        self._sync_test_button_copy()
         vlm = self.vlm_form
         vlm.hint_vlm_body.setText(
             texts.get(

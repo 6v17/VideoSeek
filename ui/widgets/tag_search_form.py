@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.widgets.button_roles import set_button_role
+from ui.widgets.button_roles import name_line_edit_clear_button, set_button_role
 from ui.widgets.styles import repolish_widget
 
 
@@ -144,6 +144,7 @@ class TagSearchForm(QWidget):
         self.filter_edit = _TagFilterEdit()
         self.filter_edit.setObjectName("TagSearchBar")
         self.filter_edit.setClearButtonEnabled(True)
+        name_line_edit_clear_button(self.filter_edit)
         self.filter_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.filter_edit.setMinimumWidth(0)
         self.filter_edit.setFixedHeight(28)

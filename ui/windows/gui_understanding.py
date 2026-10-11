@@ -645,9 +645,14 @@ class UnderstandingGuiMixin:
 
     def test_understanding_vlm_connection(self):
         dialog = getattr(self, "understanding_services_dialog", None)
-        if dialog is not None and getattr(dialog, "current_nav_id", None) and dialog.current_nav_id() == "llm":
-            self.test_understanding_llm_connection()
-            return
+        if dialog is not None and getattr(dialog, "current_nav_id", None):
+            nav_id = str(dialog.current_nav_id() or "")
+            if nav_id == "llm":
+                self.test_understanding_llm_connection()
+                return
+            if nav_id == "asr":
+                self.test_understanding_asr_connection()
+                return
         page = self._understanding_config_widgets()
         if page is None:
             return
@@ -1707,14 +1712,18 @@ class UnderstandingGuiMixin:
         if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
             return
         try:
-            status = get_understanding_resource_status(config=load_config())
+            # Do not probe the remote VLM on the UI thread — that can stall ~3s.
+            status = self._fetch_understanding_resource_status(
+                probe_remote=False,
+                install_bootstrap=False,
+            )
         except Exception as exc:
             from src.app.logging_utils import note_swallowed
             note_swallowed(exc, 'ui/windows/gui_understanding.py:1647')
             self.show_error_dialog(self.texts.get("understanding_generation_failed", "Failed to generate evidence."), exc)
             return
         if not status.get("understanding_ready"):
-            self._refresh_understanding_ui()
+            self._refresh_understanding_ui(status=status)
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get("understanding_not_ready", "Understanding models are not ready."),
@@ -1872,14 +1881,18 @@ class UnderstandingGuiMixin:
         if getattr(self, "understanding_controller", None) and self.understanding_controller.is_running():
             return
         try:
-            status = get_understanding_resource_status(config=load_config())
+            # Do not probe the remote VLM on the UI thread — that can stall ~3s.
+            status = self._fetch_understanding_resource_status(
+                probe_remote=False,
+                install_bootstrap=False,
+            )
         except Exception as exc:
             from src.app.logging_utils import note_swallowed
             note_swallowed(exc, 'ui/windows/gui_understanding.py:1808')
             self.show_error_dialog(self.texts.get("understanding_generation_failed", "Failed to generate evidence."), exc)
             return
         if not status.get("understanding_ready"):
-            self._refresh_understanding_ui()
+            self._refresh_understanding_ui(status=status)
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
                 self.texts.get("understanding_not_ready", "Understanding models are not ready."),

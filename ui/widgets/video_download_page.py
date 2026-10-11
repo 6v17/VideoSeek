@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 
+from ui.widgets.button_roles import name_table_corner_button
 from ui.widgets.layout import COMPONENT_SIZES
 from ui.widgets.scaffold import PageScaffold, VSCard
 
@@ -246,6 +247,7 @@ class VideoDownloadPage(QWidget):
         self.list_title.setObjectName("CardTitle")
         self.download_table = QTableWidget(0, 7)
         self.download_table.setObjectName("DownloadListTable")
+        name_table_corner_button(self.download_table)
         self.download_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.download_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.download_table.setShowGrid(False)

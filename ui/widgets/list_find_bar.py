@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.button_roles import name_line_edit_clear_button
+
 
 @dataclass(frozen=True)
 class ListFindHit:
@@ -231,6 +233,7 @@ class ListFindBar(QWidget):
         self._input = QLineEdit()
         self._input.setObjectName("SearchInput")
         self._input.setClearButtonEnabled(True)
+        name_line_edit_clear_button(self._input)
         self._input.setPlaceholderText("Find library or video name…")
         self._input.textChanged.connect(self._on_text_changed)
         self._input.returnPressed.connect(self._on_return_pressed)
