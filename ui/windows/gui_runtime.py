@@ -22,36 +22,6 @@ logger = get_logger("gui.runtime")
 class RuntimeGuiMixin:
     """Inference hint, diagnostics clipboard/dialog, resource controller entry points, banners."""
 
-    def _iter_runtime_banner_pages(self):
-        """Pages whose ``PageHeader`` shows the shared runtime-resource banner.
-
-        Includes plugin pages (clone, etc.) so optional nav surfaces get the same
-        FFmpeg / model warning as search and library.
-        """
-        seen: set[int] = set()
-        pages = [
-            getattr(self, "search_page", None),
-            getattr(self, "link_page", None),
-            getattr(self, "library_page", None),
-            getattr(self, "understanding_page", None),
-            getattr(self, "settings_page", None),
-        ]
-        for page in getattr(self, "_plugin_page_widgets", {}).values():
-            pages.append(page)
-        for page in pages:
-            if page is None:
-                continue
-            marker = id(page)
-            if marker in seen:
-                continue
-            header = getattr(page, "header", None)
-            if header is None:
-                continue
-            if getattr(header, "runtime_banner_action", None) is None:
-                continue
-            seen.add(marker)
-            yield page
-
     def open_runtime_resource_folder(self):
         from src.services.runtime_resource_service import ensure_runtime_resource_dirs
 
@@ -613,13 +583,10 @@ class RuntimeGuiMixin:
 
     def _on_runtime_banner_action(self):
         # Prefer the tip kind currently shown: legacy migrate vs import resources.
+        banner = getattr(self, "runtime_banner", None)
         tip_kind = ""
-        for page in self._iter_runtime_banner_pages():
-            banner = getattr(getattr(page, "header", None), "runtime_banner", None)
-            if banner is not None and banner.isVisible():
-                tip_kind = str(banner.property("tipKind") or "").strip()
-                if tip_kind:
-                    break
+        if banner is not None and banner.isVisible():
+            tip_kind = str(banner.property("tipKind") or "").strip()
         if tip_kind == "legacy_migration" or (
             getattr(self, "_legacy_migration_tip_visible", False)
             and not self.is_startup_migration_busy()
@@ -692,24 +659,25 @@ class RuntimeGuiMixin:
         if status.get("resources_ready") and getattr(self, "_legacy_migration_tip_visible", False):
             self._show_legacy_migration_tip_banner()
             return
+        banner = getattr(self, "runtime_banner", None)
+        banner_label = getattr(self, "runtime_banner_text", None)
+        banner_btn = getattr(self, "runtime_banner_action", None)
+        if banner is None or banner_label is None or banner_btn is None:
+            return
         banner_text = self.texts.get("runtime_banner_missing", "Missing runtime resources")
         action_text = self.texts.get("runtime_banner_open_import", "Go to import")
         show_warn = not bool(status.get("resources_ready"))
-        for page in self._iter_runtime_banner_pages():
-            banner = page.header.runtime_banner
-            banner_label = page.header.runtime_banner_text
-            banner_btn = page.header.runtime_banner_action
-            banner_btn.setText(action_text)
-            if show_warn:
-                banner_label.setText(banner_text)
-                banner.setProperty("tipKind", "resources_missing")
-                set_runtime_banner_warn(banner, True)
-                banner_btn.show()
-                banner.show()
-            else:
-                banner.setProperty("tipKind", "")
-                set_runtime_banner_warn(banner, False)
-                banner.hide()
+        banner_btn.setText(action_text)
+        if show_warn:
+            banner_label.setText(banner_text)
+            banner.setProperty("tipKind", "resources_missing")
+            set_runtime_banner_warn(banner, True)
+            banner_btn.show()
+            banner.show()
+        else:
+            banner.setProperty("tipKind", "")
+            set_runtime_banner_warn(banner, False)
+            banner.hide()
         if show_warn:
             self._start_runtime_inline_tip_breathing()
         else:
@@ -728,11 +696,9 @@ class RuntimeGuiMixin:
             anims = {}
             self._runtime_inline_tip_animations = anims
 
-        for page in self._iter_runtime_banner_pages():
+        host = getattr(self, "runtime_banner", None)
+        if host is not None and host.isVisible():
             # Animate the whole tip (label + button) so both breathe together.
-            host = page.header.runtime_banner
-            if not host.isVisible():
-                continue
             key = id(host)
             effect = effects.get(key)
             if effect is None:

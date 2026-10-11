@@ -337,6 +337,8 @@ class UnderstandingEvidencePage(QWidget):
         page = self._step_pages.get(card)
         if page is not None:
             return page
+        if card is self.workspace_card:
+            return self._mount_select_step(card)
         host = QWidget()
         host_layout = QVBoxLayout(host)
         host_layout.setContentsMargins(0, 0, 0, 0)
@@ -345,33 +347,52 @@ class UnderstandingEvidencePage(QWidget):
         card.setGraphicsEffect(None)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         host_layout.addWidget(card, 1)
+        scroll = self._make_step_scroll()
+        scroll.setWidget(host)
+        self._step_scrolls[card] = scroll
+        self._step_pages[card] = scroll
+        return scroll
+
+    def _make_step_scroll(self) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setObjectName("UnderstandingStepScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setWidget(host)
         scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         scroll.setMinimumHeight(0)
-        viewport = scroll.viewport()
-        viewport.setObjectName("UnderstandingStepScrollViewport")
+        scroll.viewport().setObjectName("UnderstandingStepScrollViewport")
+        return scroll
+
+    def _mount_select_step(self, card: QWidget) -> QWidget:
+        """Model test/save stay inside the select card, under the form.
+
+        The wizard's 上一步/下一步 is the only page-level action row.
+        """
+        actions = self.services_panel.actions_bar
+        form_host = QWidget()
+        form_layout = QVBoxLayout(form_host)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(12)
+        card_layout = card.content_layout
+        while card_layout.count():
+            item = card_layout.takeAt(0)
+            widget = item.widget()
+            nested = item.layout()
+            if widget is not None:
+                form_layout.addWidget(widget)
+            elif nested is not None:
+                form_layout.addLayout(nested)
+        scroll = self._make_step_scroll()
+        scroll.setWidget(form_host)
+        card.setGraphicsEffect(None)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        card_layout.addWidget(scroll, 1)
+        card_layout.addWidget(actions, 0)
         self._step_scrolls[card] = scroll
-        # Test/Save stay under the scrolling form so a layout change is not
-        # required before the buttons can take a click.
-        if card is self.workspace_card:
-            step = QWidget()
-            step.setObjectName("UnderstandingSelectStep")
-            step_layout = QVBoxLayout(step)
-            step_layout.setContentsMargins(0, 0, 0, 0)
-            step_layout.setSpacing(8)
-            step_layout.addWidget(scroll, 1)
-            step_layout.addWidget(self.services_panel.actions_bar, 0)
-            page = step
-        else:
-            page = scroll
-        self._step_pages[card] = page
-        return page
+        self._step_pages[card] = card
+        return card
 
     def _card_for_step_page(self, page: QWidget | None) -> QWidget | None:
         if page is None:

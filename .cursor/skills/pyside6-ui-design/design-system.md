@@ -33,6 +33,8 @@ Source of truth: `docs/pyside6_ui_architecture.md`, `ui/widgets/styles.py`, `ui/
 | Neutral secondary | `GhostButton` |
 | Danger | `DangerGhostButton` |
 | Success/add | `SuccessGhostButton` |
+| Sidebar navigation | `NavButton` |
+| Sidebar icon | `SidebarIconButton` |
 
 ## Key layout constants (`layout.py`)
 
@@ -58,7 +60,8 @@ Source of truth: `docs/pyside6_ui_architecture.md`, `ui/widgets/styles.py`, `ui/
 
 | State | Mechanism |
 |-------|-----------|
-| Resources missing | `PageHeader.runtime_banner` |
+| Resources missing | one `RuntimeInlineTip` above the page stack |
+| Understanding model test/save | inside the select-step card, not beside 下一步 |
 | Indexing | search-page notice + library progress |
 | Inference/GPU text | settings via `gui_runtime` / `ui_state` |
 

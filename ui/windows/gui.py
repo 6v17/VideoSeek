@@ -50,6 +50,7 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
+from ui.widgets.scaffold import make_runtime_inline_tip
 from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog
 from ui.dialogs.html_links import open_html_link
 from ui.widgets.sidebar_icons import (
@@ -247,6 +248,12 @@ class MainWindow(
         self.content.setObjectName("ContentArea")
         content_layout = QVBoxLayout(self.content)
         content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+
+        self.runtime_banner, self.runtime_banner_text, self.runtime_banner_action = (
+            make_runtime_inline_tip(self.content)
+        )
+        content_layout.addWidget(self.runtime_banner, 0, Qt.AlignmentFlag.AlignRight)
 
         self.pages = QStackedWidget()
         self.search_page = SearchPage()
@@ -576,8 +583,7 @@ class MainWindow(
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
-        for page in self._iter_runtime_banner_pages():
-            page.header.runtime_banner_action.clicked.connect(self._on_runtime_banner_action)
+        self.runtime_banner_action.clicked.connect(self._on_runtime_banner_action)
 
     def _build_scroll_page(self, page_widget):
         scroll = QScrollArea()

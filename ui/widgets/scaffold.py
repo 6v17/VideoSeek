@@ -89,6 +89,27 @@ class VSProgressStatusRow(QWidget):
         self.status_label.setText(text)
 
 
+def make_runtime_inline_tip(parent=None) -> tuple[QFrame, QLabel, QPushButton]:
+    """Single content-area tip: one label and one action, shared by every page."""
+    frame = QFrame(parent)
+    frame.setObjectName("RuntimeInlineTip")
+    layout = QHBoxLayout(frame)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(10)
+    layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    label = QLabel(frame)
+    label.setObjectName("RuntimeInlineTipText")
+    label.setWordWrap(False)
+    label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+    action = QPushButton(frame)
+    action.setObjectName("AccentGhostButton")
+    action.setMinimumHeight(32)
+    layout.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
+    layout.addWidget(action, 0, Qt.AlignmentFlag.AlignVCenter)
+    frame.hide()
+    return frame, label, action
+
+
 def make_runtime_banner(parent=None) -> tuple[QFrame, QLabel]:
     """Runtime / indexing banner frame (#RuntimeBanner) with a text label."""
     frame = QFrame(parent)
@@ -137,26 +158,7 @@ class PageHeader(QFrame):
         self.subtitle.hide()
         title_col.addWidget(self.subtitle)
 
-        # Inline tip: right of the title card, vertically centered with it.
-        self.runtime_banner = QFrame()
-        self.runtime_banner.setObjectName("RuntimeInlineTip")
-        banner_layout = QHBoxLayout(self.runtime_banner)
-        banner_layout.setContentsMargins(0, 0, 0, 0)
-        banner_layout.setSpacing(10)
-        banner_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.runtime_banner_text = QLabel()
-        self.runtime_banner_text.setObjectName("RuntimeInlineTipText")
-        self.runtime_banner_text.setWordWrap(False)
-        self.runtime_banner_text.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.runtime_banner_action = QPushButton()
-        self.runtime_banner_action.setObjectName("AccentGhostButton")
-        self.runtime_banner_action.setMinimumHeight(32)
-        banner_layout.addWidget(self.runtime_banner_text, 0, Qt.AlignmentFlag.AlignVCenter)
-        banner_layout.addWidget(self.runtime_banner_action, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.runtime_banner.hide()
-
         layout.addWidget(title_block, 1)
-        layout.addWidget(self.runtime_banner, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def set_badge(self, text: str = "", *, visible: bool | None = None) -> None:
         label = str(text or "").strip()

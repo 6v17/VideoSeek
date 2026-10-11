@@ -805,9 +805,10 @@ class SettingsGuiMixin:
         self._settings_dirty = dirty
         btn = self.settings_page.btn_save
         btn.setEnabled(dirty)
-        target_object = "PrimaryButton" if dirty else "GhostButton"
-        if btn.objectName() != target_object:
-            btn.setObjectName(target_object)
+        # One primary on the settings action row. Dirty state is enabled/disabled,
+        # so a clean form does not demote Save back to a ghost button.
+        if btn.objectName() != "PrimaryButton":
+            btn.setObjectName("PrimaryButton")
             style = btn.style()
             style.unpolish(btn)
             style.polish(btn)

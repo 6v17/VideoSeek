@@ -170,10 +170,10 @@ class StartupMigrationGuiMixin:
         hint.setText(self.texts["startup_migration_banner"].format(percent=int(value), message=text))
         hint.setProperty("state", "warn")
         hint.show()
-        for page in self._iter_runtime_banner_pages():
-            banner = page.header.runtime_banner
-            banner_text = page.header.runtime_banner_text
-            action = page.header.runtime_banner_action
+        banner = getattr(self, "runtime_banner", None)
+        banner_text = getattr(self, "runtime_banner_text", None)
+        action = getattr(self, "runtime_banner_action", None)
+        if banner is not None and banner_text is not None and action is not None:
             action.hide()
             banner_text.setText(self.texts["startup_migration_banner"].format(percent=int(value), message=text))
             set_runtime_banner_warn(banner, True)
@@ -183,10 +183,13 @@ class StartupMigrationGuiMixin:
 
     def _hide_startup_migration_banner(self):
         self.sidebar.runtime_hint.hide()
-        for page in self._iter_runtime_banner_pages():
-            page.header.runtime_banner.setProperty("tipKind", "")
-            page.header.runtime_banner.hide()
-            page.header.runtime_banner_action.show()
+        banner = getattr(self, "runtime_banner", None)
+        action = getattr(self, "runtime_banner_action", None)
+        if banner is not None:
+            banner.setProperty("tipKind", "")
+            banner.hide()
+        if action is not None:
+            action.show()
         if hasattr(self, "_stop_runtime_inline_tip_breathing"):
             self._stop_runtime_inline_tip_breathing()
         if hasattr(self, "push_resources_status"):
@@ -206,10 +209,10 @@ class StartupMigrationGuiMixin:
         hint.setText(tip)
         hint.setProperty("state", "warn")
         hint.show()
-        for page in self._iter_runtime_banner_pages():
-            banner = page.header.runtime_banner
-            banner_text = page.header.runtime_banner_text
-            action = page.header.runtime_banner_action
+        banner = getattr(self, "runtime_banner", None)
+        banner_text = getattr(self, "runtime_banner_text", None)
+        action = getattr(self, "runtime_banner_action", None)
+        if banner is not None and banner_text is not None and action is not None:
             banner_text.setText(tip)
             action.setText(action_text)
             banner.setProperty("tipKind", "legacy_migration")

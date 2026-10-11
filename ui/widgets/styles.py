@@ -3130,28 +3130,57 @@ QScrollBar::add-line, QScrollBar::sub-line {
     height: 16px;
     margin: __SPACE_1__ __SPACE_2__ __SPACE_1__ __SPACE_2__;
 }
-QPushButton[class="TableBtn"], QPushButton[class="TableLocateBtn"], QPushButton[class="TableDeleteBtn"] {
+QPushButton[class="TableBtn"], QPushButton[class="TableLocateBtn"], QPushButton[class="TableDeleteBtn"],
+#GhostButton[class="TableBtn"],
+#SuccessGhostButton[class="TableBtn"],
+#SuccessGhostButton[class="TableLocateBtn"],
+#DangerGhostButton[class="TableDeleteBtn"] {
     background: transparent;
     border: 1px solid transparent;
     padding: __SPACE_1__ __SPACE_2__;
     border-radius: __RADIUS_MD__;
+    font-weight: 600;
+    min-height: 0px;
 }
-QPushButton[class="TableBtn"] {
+#GhostButton[class="TableBtn"]:pressed,
+#SuccessGhostButton[class="TableBtn"]:pressed,
+#SuccessGhostButton[class="TableLocateBtn"]:pressed,
+#DangerGhostButton[class="TableDeleteBtn"]:pressed {
+    padding: __SPACE_1__ __SPACE_2__;
+    border-color: transparent;
+}
+#GhostButton[class="TableBtn"]:disabled,
+#SuccessGhostButton[class="TableBtn"]:disabled,
+#SuccessGhostButton[class="TableLocateBtn"]:disabled,
+#DangerGhostButton[class="TableDeleteBtn"]:disabled {
+    background: transparent;
+    border-color: transparent;
+    color: __MUTED__;
+}
+QPushButton[class="TableBtn"],
+#GhostButton[class="TableBtn"] {
     color: __ACCENT__;
 }
-QPushButton[class="TableBtn"]:hover {
+QPushButton[class="TableBtn"]:hover,
+#GhostButton[class="TableBtn"]:hover {
     background: __ACCENT_SOFT__;
 }
-QPushButton[class="TableLocateBtn"] {
+QPushButton[class="TableLocateBtn"],
+#SuccessGhostButton[class="TableLocateBtn"],
+#SuccessGhostButton[class="TableBtn"] {
     color: __SUCCESS__;
 }
-QPushButton[class="TableLocateBtn"]:hover {
+QPushButton[class="TableLocateBtn"]:hover,
+#SuccessGhostButton[class="TableLocateBtn"]:hover,
+#SuccessGhostButton[class="TableBtn"]:hover {
     background: __SUCCESS_SOFT__;
 }
-QPushButton[class="TableDeleteBtn"] {
+QPushButton[class="TableDeleteBtn"],
+#DangerGhostButton[class="TableDeleteBtn"] {
     color: __DANGER__;
 }
-QPushButton[class="TableDeleteBtn"]:hover {
+QPushButton[class="TableDeleteBtn"]:hover,
+#DangerGhostButton[class="TableDeleteBtn"]:hover {
     background: __DANGER_SOFT__;
 }
 QToolTip, QMessageBox, QDialog {

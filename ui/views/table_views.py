@@ -491,6 +491,7 @@ def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts
     layout.setAlignment(Qt.AlignCenter)
 
     refresh_button = QPushButton(texts["sync"])
+    refresh_button.setObjectName("GhostButton")
     refresh_button.setProperty("class", "TableBtn")
     refresh_button.setFixedSize(56, 30)
     refresh_button.setCursor(Qt.PointingHandCursor)
@@ -498,6 +499,7 @@ def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts
     refresh_button.clicked.connect(lambda _, target=path: on_sync(target))
 
     delete_button = QPushButton(texts["delete"])
+    delete_button.setObjectName("DangerGhostButton")
     delete_button.setProperty("class", "TableDeleteBtn")
     delete_button.setFixedSize(56, 30)
     delete_button.setCursor(Qt.PointingHandCursor)
@@ -505,6 +507,7 @@ def _build_library_actions(path, is_indexing, on_sync, on_remove, on_open, texts
     delete_button.clicked.connect(lambda _, target=path: on_remove(target))
 
     open_button = QPushButton(texts["open_folder"])
+    open_button.setObjectName("SuccessGhostButton")
     open_button.setProperty("class", "TableLocateBtn")
     open_button.setFixedSize(56, 30)
     open_button.setCursor(Qt.PointingHandCursor)
@@ -544,6 +547,7 @@ def _build_result_actions(
     layout.setAlignment(Qt.AlignCenter)
 
     preview_button = _configure_table_action_button(QPushButton(texts["preview"]))
+    preview_button.setObjectName("GhostButton")
     preview_button.setProperty("class", "TableBtn")
     preview_button.setFixedSize(74, 32)
     preview_button.setCursor(Qt.PointingHandCursor)
@@ -553,6 +557,7 @@ def _build_result_actions(
     )
 
     locate_button = _configure_table_action_button(QPushButton(texts["locate"]))
+    locate_button.setObjectName("SuccessGhostButton")
     locate_button.setProperty("class", "TableLocateBtn")
     locate_button.setFixedSize(74, 32)
     locate_button.setCursor(Qt.PointingHandCursor)
@@ -565,6 +570,7 @@ def _build_result_actions(
         deep_button = _configure_table_action_button(
             QPushButton(_fallback_text(texts, "deep_locate", "定位镜头", "Find shot"))
         )
+        deep_button.setObjectName("GhostButton")
         deep_button.setProperty("class", "TableBtn")
         deep_button.setFixedSize(80, 32)
         deep_button.setCursor(Qt.PointingHandCursor)
@@ -581,6 +587,7 @@ def _build_result_actions(
     export_button = _configure_table_action_button(
         QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
     )
+    export_button.setObjectName("GhostButton")
     export_button.setProperty("class", "TableBtn")
     export_button.setFixedSize(74, 32)
     export_button.setCursor(Qt.PointingHandCursor)
@@ -594,6 +601,7 @@ def _build_result_actions(
         add_button = _configure_table_action_button(
             QPushButton(_fallback_text(texts, "shot_list_add", "加入", "Add"))
         )
+        add_button.setObjectName("SuccessGhostButton")
         add_button.setProperty("class", "TableBtn")
         add_button.setFixedSize(58, 32)
         add_button.setCursor(Qt.PointingHandCursor)
@@ -641,18 +649,21 @@ def _build_link_result_actions(video_path, match_sec, source_link, on_preview, o
     layout.setAlignment(Qt.AlignCenter)
 
     preview_button = _configure_table_action_button(QPushButton(texts["preview"]))
+    preview_button.setObjectName("GhostButton")
     preview_button.setProperty("class", "TableBtn")
     preview_button.setFixedSize(58, 30)
     preview_button.setCursor(Qt.PointingHandCursor)
     preview_button.clicked.connect(lambda _, path=video_path, sec=match_sec: on_preview(path, sec))
 
     locate_button = _configure_table_action_button(QPushButton(texts["locate"]))
+    locate_button.setObjectName("SuccessGhostButton")
     locate_button.setProperty("class", "TableLocateBtn")
     locate_button.setFixedSize(58, 30)
     locate_button.setCursor(Qt.PointingHandCursor)
     locate_button.clicked.connect(lambda _, path=video_path: on_locate(path))
 
     source_button = _configure_table_action_button(QPushButton(texts["open_link"]))
+    source_button.setObjectName("GhostButton")
     source_button.setProperty("class", "TableBtn")
     source_button.setFixedSize(58, 30)
     source_button.setCursor(Qt.PointingHandCursor)

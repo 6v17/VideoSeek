@@ -154,6 +154,7 @@ class SearchComposeFormWidget(QWidget):
         self.images_scroll.setWidget(self.images_host)
 
         self.btn_add_images = QPushButton()
+        self.btn_add_images.setObjectName("SuccessGhostButton")
         self.btn_remove_selected = QPushButton()
         self.btn_remove_selected.setObjectName("DangerGhostButton")
         self.btn_remove_selected.setEnabled(False)
