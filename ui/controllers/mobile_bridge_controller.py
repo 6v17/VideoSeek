@@ -19,8 +19,11 @@ class MobileBridgeController(QObject):
     # Worker-thread emit → UI-thread slot (blocking) so the phone learns if search started.
     _accept_on_ui = Signal(dict, object)
 
-    def __init__(self, parent_window):
-        super().__init__(parent_window)
+    def __init__(self, parent_window=None):
+        # Only adopt a real QObject parent (MainWindow). Tests may pass a
+        # SimpleNamespace — parenting that would crash / corrupt on Windows CI.
+        qt_parent = parent_window if isinstance(parent_window, QObject) else None
+        super().__init__(qt_parent)
         self.parent_window = parent_window
         self._service = None
         self._accept_on_ui.connect(self._run_accept_on_ui, Qt.ConnectionType.BlockingQueuedConnection)

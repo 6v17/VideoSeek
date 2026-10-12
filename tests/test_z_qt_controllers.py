@@ -377,7 +377,6 @@ def _install_pyside_stub():
 
 
 IndexingController = None
-MobileBridgeController = None
 PreviewController = None
 PreviewDialog = None
 RuntimeResourceController = None
@@ -386,12 +385,11 @@ VlcPreviewPlayer = None
 
 
 def setUpModule():
-    global IndexingController, MobileBridgeController, PreviewController
+    global IndexingController, PreviewController
     global PreviewDialog, RuntimeResourceController, SearchController, VlcPreviewPlayer
 
     for module_name in (
         "ui.controllers.indexing_controller",
-        "ui.controllers.mobile_bridge_controller",
         "ui.controllers.runtime_resource_controller",
         "ui.controllers.preview_controller",
         "ui.playback.preview_dialog",
@@ -409,7 +407,6 @@ def setUpModule():
             QApplication([])
 
     from ui.controllers.indexing_controller import IndexingController as _IndexingController
-    from ui.controllers.mobile_bridge_controller import MobileBridgeController as _MobileBridgeController
     from ui.controllers.runtime_resource_controller import RuntimeResourceController as _RuntimeResourceController
     from ui.controllers.preview_controller import PreviewController as _PreviewController
     from ui.playback.preview_dialog import PreviewDialog as _PreviewDialog
@@ -417,7 +414,6 @@ def setUpModule():
     from ui.playback.vlc_player import VlcPreviewPlayer as _VlcPreviewPlayer
 
     IndexingController = _IndexingController
-    MobileBridgeController = _MobileBridgeController
     RuntimeResourceController = _RuntimeResourceController
     PreviewController = _PreviewController
     PreviewDialog = _PreviewDialog
@@ -642,77 +638,8 @@ class IndexingControllerTests(unittest.TestCase):
         new_worker.deleteLater.assert_not_called()
 
 
-class MobileBridgeControllerTests(unittest.TestCase):
-    @patch("src.web.mobile_bridge.MobileBridgeService")
-    def test_start_creates_service_once_and_returns_access_url(self, mock_service_cls):
-        parent = _make_parent_window()
-        service = MagicMock()
-        service.is_running.side_effect = [False, True]
-        service.get_access_url.return_value = "http://192.168.1.2:8918/?token=abc"
-        mock_service_cls.return_value = service
-        controller = MobileBridgeController(parent)
-        statuses = []
-        controller.status_changed.connect(statuses.append)
-
-        url = controller.start()
-
-        mock_service_cls.assert_called_once()
-        kwargs = mock_service_cls.call_args.kwargs
-        self.assertTrue(callable(kwargs["on_search_requested"]))
-        service.start.assert_called_once()
-        self.assertEqual(url, "http://192.168.1.2:8918/?token=abc")
-        self.assertEqual(statuses, ["running"])
-
-    @patch("src.web.mobile_bridge.MobileBridgeService")
-    def test_start_reuses_running_service_without_restarting(self, mock_service_cls):
-        parent = _make_parent_window()
-        service = MagicMock()
-        service.is_running.return_value = True
-        service.get_access_url.return_value = "http://192.168.1.2:8918/?token=abc"
-        mock_service_cls.return_value = service
-        controller = MobileBridgeController(parent)
-        statuses = []
-        controller.status_changed.connect(statuses.append)
-
-        first_url = controller.start()
-        second_url = controller.start()
-
-        self.assertEqual(first_url, "http://192.168.1.2:8918/?token=abc")
-        self.assertEqual(second_url, "http://192.168.1.2:8918/?token=abc")
-        service.start.assert_not_called()
-        self.assertEqual(statuses, [])
-
-    def test_handle_search_requested_requires_ui_accept(self):
-        parent = _make_parent_window()
-        accepted = []
-
-        def _accept(payload):
-            accepted.append(dict(payload))
-            return {"ok": True}
-
-        parent.accept_mobile_search_request = _accept
-        controller = MobileBridgeController(parent)
-
-        payload = {
-            "search_kind": "compose",
-            "query": "night rain",
-            "image_path": "D:/Migrated/data/mobile_uploads/query.png",
-            "source": "192.168.1.10",
-        }
-        result = controller._handle_search_requested(payload)
-
-        self.assertEqual(accepted, [payload])
-        self.assertTrue(result.get("ok"))
-
-    def test_handle_search_requested_raises_when_ui_rejects(self):
-        parent = _make_parent_window()
-        parent.accept_mobile_search_request = lambda _payload: {
-            "ok": False,
-            "error": "search_not_ready",
-        }
-        controller = MobileBridgeController(parent)
-        with self.assertRaises(RuntimeError):
-            controller._handle_search_requested({"search_kind": "image"})
+# MobileBridgeControllerTests live in test_mobile_bridge_controller.py so they
+# run before VLC/preview suites that have corrupted Windows CI heaps.
 
 
 class SearchControllerTests(unittest.TestCase):
