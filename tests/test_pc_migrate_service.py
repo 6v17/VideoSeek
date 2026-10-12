@@ -8,6 +8,15 @@ from unittest.mock import patch
 from src.services import pc_migrate_service as svc
 
 
+def _abs_key(path) -> str:
+    """Compare paths the same way production code does (abspath, not Path.resolve).
+
+    On some Windows runners TEMP uses 8.3 prefixes (``RUNNER~1``); ``Path.resolve()``
+    expands them while ``os.path.abspath`` does not, so mixing the two flakes CI.
+    """
+    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(str(path)))))
+
+
 class PcMigrateServiceTests(unittest.TestCase):
     def test_sanitize_config_redacts_secrets(self):
         raw = {
@@ -106,7 +115,7 @@ class PcMigrateServiceTests(unittest.TestCase):
                 any(os.path.normcase(p) == os.path.normcase(str(lib_missing)) for p in imported["missing_libraries"])
             )
             self.assertTrue(saved)
-            self.assertEqual(os.path.normcase(saved[0]["data_root"]), os.path.normcase(str(target_root.resolve())))
+            self.assertEqual(_abs_key(saved[0]["data_root"]), _abs_key(target_root))
             self.assertEqual(saved[0]["model_dir"], config["model_dir"])
             self.assertEqual(saved[0]["ffmpeg_path"], config["ffmpeg_path"])
             self.assertFalse(saved[0]["prefer_gpu"])
@@ -205,15 +214,15 @@ class PcMigrateServiceTests(unittest.TestCase):
             libs = meta.get("libraries") or {}
             self.assertEqual(len(libs), 1)
             only_key = next(iter(libs))
-            self.assertEqual(os.path.normcase(only_key), os.path.normcase(str(new_lib.resolve())))
+            self.assertEqual(_abs_key(only_key), _abs_key(new_lib))
             self.assertTrue(saved)
             self.assertEqual(
-                os.path.normcase(saved[0]["search_scope_library_paths"][0]),
-                os.path.normcase(str(new_lib.resolve())),
+                _abs_key(saved[0]["search_scope_library_paths"][0]),
+                _abs_key(new_lib),
             )
             self.assertEqual(
-                os.path.normcase(saved[0]["download_target_library"]),
-                os.path.normcase(str(new_lib.resolve())),
+                _abs_key(saved[0]["download_target_library"]),
+                _abs_key(new_lib),
             )
 
 
@@ -245,10 +254,16 @@ class PcMigrateServiceTests(unittest.TestCase):
             media = old / "clip.mp4"
             media.write_bytes(b"x")
             rewritten = rewrite_path_under_library_root(str(media), str(old), str(new))
-            self.assertEqual(
-                os.path.normcase(rewritten),
-                os.path.normcase(str((new / "clip.mp4").resolve())),
+            self.assertEqual(_abs_key(rewritten), _abs_key(new / "clip.mp4"))
+            # Also when the old root is already canonicalize()'d (normcase).
+            from src.storage.video_identity import canonicalize_library_path
+
+            rewritten_canon = rewrite_path_under_library_root(
+                str(media),
+                canonicalize_library_path(str(old)),
+                str(new),
             )
+            self.assertEqual(_abs_key(rewritten_canon), _abs_key(new / "clip.mp4"))
             self.assertIsNone(
                 rewrite_path_under_library_root(str(root / "other" / "a.mp4"), str(old), str(new))
             )
@@ -327,10 +342,7 @@ class LanceLibraryRemapTests(unittest.TestCase):
                 canonicalize_library_path(str(new_lib)),
             )
             _lib, stored_path = get_lance_video_location(str(profile_dir), "vid_remap")
-            self.assertEqual(
-                os.path.normcase(stored_path),
-                os.path.normcase(str((new_lib / "clip.mp4").resolve())),
-            )
+            self.assertEqual(_abs_key(stored_path), _abs_key(new_lib / "clip.mp4"))
 
 
 if __name__ == "__main__":
