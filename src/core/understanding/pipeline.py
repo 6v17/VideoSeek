@@ -437,5 +437,6 @@ class UnderstandingPipeline:
                 validated,
                 component_dir=component_dir,
                 params=dict(step_params or {}),
+                config=self.config,
             )
         return self._component_cache[cache_key]

@@ -596,6 +596,19 @@ class AgentApiBatchTests(unittest.TestCase):
         self.assertEqual(payload["meta"]["failed"], 1)
         self.assertEqual(len(payload["results"]), 2)
 
+    @patch("src.web.agent_api.search.execute_agent_search")
+    @patch("src.web.agent_api.search._index_snapshot")
+    def test_execute_agent_batch_search_raises_without_continue(self, mock_snapshot, mock_search):
+        mock_snapshot.return_value = {"index_ready": True, "global_index_state": "fresh"}
+        mock_search.side_effect = RuntimeError("boom")
+        body = AgentBatchSearchRequest(
+            queries=[AgentSearchRequest(query="x", query_type="text")],
+            mode="chunk",
+            continue_on_error=False,
+        )
+        with self.assertRaises(RuntimeError):
+            execute_agent_batch_search(body)
+
     def test_expand_image_folder_sorted(self):
         import tempfile
 

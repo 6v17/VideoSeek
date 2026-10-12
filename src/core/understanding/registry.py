@@ -35,6 +35,7 @@ def build_understanding_component(
     *,
     component_dir: str | None = None,
     params: Mapping[str, Any] | None = None,
+    config=None,
 ) -> UnderstandingComponent:
     _ensure_builtin_components()
     engine = dict(manifest.get("engine") or {})
@@ -56,7 +57,7 @@ def build_understanding_component(
         raise RuntimeError(f"Component directory not found: {resolved_dir}")
 
     runtime = dict(manifest.get("runtime") or {})
-    return factory(manifest, resolved_dir, dict(params or {}), runtime)
+    return factory(manifest, resolved_dir, dict(params or {}), runtime, config=config)
 
 
 def infer_installed_component(
@@ -65,8 +66,10 @@ def infer_installed_component(
     *,
     model_dir: str | None = None,
     params: Mapping[str, Any] | None = None,
+    config=None,
 ) -> dict[str, Any]:
     _ensure_builtin_components()
+    from src.app.config import load_config
     from src.services.understanding_paths import get_component_manifest_path
     from src.services.understanding_resource_service import validate_component_manifest
 
@@ -74,7 +77,12 @@ def infer_installed_component(
     with open(manifest_path, "r", encoding="utf-8") as handle:
         manifest = json.load(handle)
     validated = validate_component_manifest(manifest, component_dir=os.path.dirname(manifest_path))
-    component = build_understanding_component(validated, component_dir=os.path.dirname(manifest_path), params=params)
+    component = build_understanding_component(
+        validated,
+        component_dir=os.path.dirname(manifest_path),
+        params=params,
+        config=config if config is not None else load_config(),
+    )
     try:
         return component.infer(image_bgr)
     finally:

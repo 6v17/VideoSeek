@@ -23,6 +23,7 @@ _active_media_base: str = ""
 # Session bind ports (may differ from defaults when preferred ports are busy).
 _active_api_port: int = 0
 _active_nginx_port: int = 0
+_active_api_token: str = ""
 # Session role — not persisted. Always starts as off.
 _session_team_mode: str = "off"
 
@@ -34,14 +35,23 @@ def get_preferred_team_ports() -> tuple[int, int]:
     return api, media
 
 
-def set_active_team_ports(*, api_port: int = 0, nginx_port: int = 0) -> None:
-    global _active_api_port, _active_nginx_port
+def set_active_team_ports(
+    *,
+    api_port: int = 0,
+    nginx_port: int = 0,
+    api_token: str | None = None,
+) -> None:
+    global _active_api_port, _active_nginx_port, _active_api_token
     _active_api_port = int(api_port or 0)
     _active_nginx_port = int(nginx_port or 0)
+    if api_token is not None:
+        _active_api_token = str(api_token or "").strip()
+    if not _active_api_port and not _active_nginx_port:
+        _active_api_token = ""
 
 
 def clear_active_team_ports() -> None:
-    set_active_team_ports(api_port=0, nginx_port=0)
+    set_active_team_ports(api_port=0, nginx_port=0, api_token="")
 
 
 def get_team_mode(config=None) -> str:
@@ -125,12 +135,17 @@ def build_team_server_status(config=None) -> Dict[str, Any]:
     api_port = int(_active_api_port or preferred_api)
     nginx_port = int(_active_nginx_port or preferred_media)
     media_base = str(_active_media_base or "").strip() or f"http://{lan_ip}:{nginx_port}"
+    token = str(_active_api_token or "").strip()
+    api_base = f"http://{lan_ip}:{api_port}"
+    if token:
+        api_base = f"{api_base}/?token={token}"
     return {
         "mode": mode,
         "lan_ip": lan_ip,
         "api_port": api_port,
         "nginx_port": nginx_port,
-        "api_base_url": f"http://{lan_ip}:{api_port}",
+        "api_base_url": api_base,
+        "api_token": token,
         "media_base_url": media_base,
         "nginx_ready": nginx_bundle_ready(),
         "nginx_running": is_nginx_running(),

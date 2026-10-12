@@ -65,12 +65,22 @@ def _raise_from_http_error(exc: urllib.error.HTTPError) -> None:
     raise RuntimeError(message)
 
 
-def _post_json(url: str, payload: dict, *, timeout: float = 120.0) -> dict:
+def _auth_headers(token: str = "", *, content_type: str = "") -> dict[str, str]:
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if content_type:
+        headers["Content-Type"] = content_type
+    text = str(token or "").strip()
+    if text:
+        headers["Authorization"] = f"Bearer {text}"
+    return headers
+
+
+def _post_json(url: str, payload: dict, *, timeout: float = 120.0, token: str = "") -> dict:
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=_auth_headers(token, content_type="application/json"),
         method="POST",
     )
     try:
@@ -85,8 +95,8 @@ def _post_json(url: str, payload: dict, *, timeout: float = 120.0) -> dict:
     return data
 
 
-def _get_json(url: str, *, timeout: float = 15.0) -> dict:
-    req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+def _get_json(url: str, *, timeout: float = 15.0, token: str = "") -> dict:
+    req = urllib.request.Request(url, headers=_auth_headers(token), method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
     data = json.loads(raw or "{}")
@@ -95,11 +105,34 @@ def _get_json(url: str, *, timeout: float = 15.0) -> dict:
     return data
 
 
-def _team_base(server_url: str, *, api_port_default: int = 8765) -> str:
-    base = normalize_http_base(server_url, default_port=api_port_default)
+def _split_team_server_url(server_url: str, *, api_port_default: int = 8765) -> tuple[str, str]:
+    """Return ``(api_base, access_token)``; token may be embedded as ``?token=``."""
+    text = str(server_url or "").strip()
+    token = ""
+    if text:
+        parsed = urllib.parse.urlparse(text if "://" in text else f"http://{text}")
+        qs = urllib.parse.parse_qs(parsed.query)
+        values = qs.get("token") or []
+        if values:
+            token = str(values[0] or "").strip()
+        clean = urllib.parse.urlunparse(
+            (parsed.scheme or "http", parsed.netloc, "", "", "", "")
+        )
+        base = normalize_http_base(clean, default_port=api_port_default)
+    else:
+        base = ""
     if not base:
         raise ValueError("team_server_url is empty")
+    return base, token
+
+
+def _team_base(server_url: str, *, api_port_default: int = 8765) -> str:
+    base, _token = _split_team_server_url(server_url, api_port_default=api_port_default)
     return base
+
+
+def _team_endpoint(server_url: str, *, api_port_default: int = 8765) -> tuple[str, str]:
+    return _split_team_server_url(server_url, api_port_default=api_port_default)
 
 
 def _browse_url_from_http_play_url(text: str) -> str:
@@ -136,8 +169,8 @@ def resolve_team_library_browse_url(
     try:
         from src.services.team_media_map import absolute_path_to_library_browse_url
 
-        base = _team_base(server_url, api_port_default=api_port_default)
-        health = _get_json(f"{base}/api/v1/health", timeout=8.0)
+        base, token = _team_endpoint(server_url, api_port_default=api_port_default)
+        health = _get_json(f"{base}/api/v1/health", timeout=8.0, token=token)
         team = health.get("team") if isinstance(health.get("team"), dict) else {}
         mounts = team.get("mounts") or []
         media_base = str(team.get("media_base_url") or "").strip()
@@ -155,14 +188,19 @@ def resolve_team_library_browse_url(
 
 def probe_team_server(server_url: str, *, api_port_default: int = 8765) -> dict:
     """Cheap connectivity check — uses health ping, not a full index snapshot."""
-    base = _team_base(server_url, api_port_default=api_port_default)
+    base, token = _team_endpoint(server_url, api_port_default=api_port_default)
     url = f"{base}/api/v1/health?mode=ping"
     parsed = urllib.parse.urlparse(base)
     port_text = str(parsed.port or api_port_default)
     try:
-        return _get_json(url, timeout=5.0)
+        return _get_json(url, timeout=5.0, token=token)
     except urllib.error.HTTPError as exc:
         code = int(getattr(exc, "code", 0) or 0)
+        if code in {401, 403}:
+            raise RuntimeError(
+                f"服务机拒绝访问（HTTP {code}）：请粘贴服务机分享的完整 API 地址"
+                "（须包含 ?token=…）。"
+            ) from exc
         raise RuntimeError(
             f"服务机有响应但返回 HTTP {code}：{base}。"
             "请确认对方是 VideoSeek「服务机」模式，且版本兼容。"
@@ -191,8 +229,8 @@ def list_team_client_libraries(
     timeout: float = 30.0,
 ) -> List[dict]:
     """Return shared libraries from the team server (Agent API shape)."""
-    base = _team_base(server_url, api_port_default=api_port_default)
-    data = _get_json(f"{base}/api/v1/libraries", timeout=timeout)
+    base, token = _team_endpoint(server_url, api_port_default=api_port_default)
+    data = _get_json(f"{base}/api/v1/libraries", timeout=timeout, token=token)
     if data.get("ok") is False:
         err = data.get("error") or {}
         raise RuntimeError(str(err.get("message") or "team libraries failed"))
@@ -210,7 +248,7 @@ def list_team_client_videos(
     page_limit: int = _VIDEO_PAGE_LIMIT,
 ) -> List[dict]:
     """Paginate through ready videos on the team server."""
-    base = _team_base(server_url, api_port_default=api_port_default)
+    base, token = _team_endpoint(server_url, api_port_default=api_port_default)
     out: List[dict] = []
     offset = 0
     safe_limit = max(1, min(int(page_limit or _VIDEO_PAGE_LIMIT), _VIDEO_PAGE_LIMIT))
@@ -223,7 +261,7 @@ def list_team_client_videos(
         if library_path:
             params["library_path"] = str(library_path)
         query = urllib.parse.urlencode(params)
-        data = _get_json(f"{base}/api/v1/libraries/videos?{query}", timeout=timeout)
+        data = _get_json(f"{base}/api/v1/libraries/videos?{query}", timeout=timeout, token=token)
         if data.get("ok") is False:
             err = data.get("error") or {}
             raise RuntimeError(str(err.get("message") or "team videos failed"))
@@ -245,43 +283,67 @@ def list_team_client_scope_entries(
     server_url: str,
     *,
     api_port_default: int = 8765,
+    libraries: Optional[List[dict]] = None,
 ) -> List[dict]:
-    """Build scope-tree entries from the shared server library (server absolute paths)."""
-    libraries = list_team_client_libraries(server_url, api_port_default=api_port_default)
-    entries: List[dict] = []
-    for lib in libraries:
-        lib_path = str(lib.get("library_path") or "").strip()
-        if not lib_path:
-            continue
-        try:
-            videos = list_team_client_videos(
-                server_url,
-                library_path=lib_path,
-                ready_only=True,
-                api_port_default=api_port_default,
-            )
-        except Exception:
-            logger.exception("Failed listing team videos for %s", lib_path)
-            continue
-        for row in videos:
-            video_path = str(row.get("video_path") or "").strip()
-            rel = str(row.get("video_rel_path") or "").strip()
-            video_id = str(row.get("video_id") or "").strip()
-            if not video_path or not video_id:
+    """Build scope-tree entries from the shared server library (server absolute paths).
+
+    Prefer one unscoped video listing (avoids N+1 HTTP). ``libraries`` is only used
+    for the per-library fallback path.
+    """
+    videos: List[dict] = []
+    try:
+        videos = list_team_client_videos(
+            server_url,
+            library_path=None,
+            ready_only=True,
+            api_port_default=api_port_default,
+        )
+    except Exception:
+        logger.exception("Failed listing all team videos; falling back per library")
+        lib_rows = list(libraries) if libraries is not None else list_team_client_libraries(
+            server_url, api_port_default=api_port_default
+        )
+        for lib in lib_rows:
+            lib_path = str(lib.get("library_path") or "").strip()
+            if not lib_path:
                 continue
-            # Server already filtered ready; treat as present for the client scope picker.
-            entries.append(
-                {
-                    "library_path": str(row.get("library_path") or lib_path),
-                    "video_path": video_path,
-                    "video_rel_path": rel,
-                    "video_id": video_id,
-                    "abs_path": video_path,
-                    "source_exists": True,
-                    "asset_state": "ready",
-                    "team_shared": True,
-                }
-            )
+            try:
+                videos.extend(
+                    list_team_client_videos(
+                        server_url,
+                        library_path=lib_path,
+                        ready_only=True,
+                        api_port_default=api_port_default,
+                    )
+                )
+            except Exception:
+                logger.exception("Failed listing team videos for %s", lib_path)
+
+    entries: List[dict] = []
+    seen_ids: set[str] = set()
+    for row in videos:
+        if not isinstance(row, dict):
+            continue
+        video_path = str(row.get("video_path") or "").strip()
+        rel = str(row.get("video_rel_path") or "").strip()
+        video_id = str(row.get("video_id") or "").strip()
+        if not video_path or not video_id or video_id in seen_ids:
+            continue
+        seen_ids.add(video_id)
+        state = str(row.get("asset_state") or "ready").strip().lower() or "ready"
+        # Server already filtered ready; treat as present for the client scope picker.
+        entries.append(
+            {
+                "library_path": str(row.get("library_path") or "").strip(),
+                "video_path": video_path,
+                "video_rel_path": rel,
+                "video_id": video_id,
+                "abs_path": video_path,
+                "source_exists": True,
+                "asset_state": state,
+                "team_shared": True,
+            }
+        )
     return entries
 
 
@@ -294,7 +356,12 @@ def list_team_client_library_tree(
     libraries = list_team_client_libraries(server_url, api_port_default=api_port_default)
     library_paths = [str(lib.get("library_path") or "").strip() for lib in libraries]
     library_paths = [p for p in library_paths if p]
-    entries = list_team_client_scope_entries(server_url, api_port_default=api_port_default)
+    # Pass libraries so a fallback path does not re-fetch /libraries.
+    entries = list_team_client_scope_entries(
+        server_url,
+        api_port_default=api_port_default,
+        libraries=libraries,
+    )
     # Enrich status text fields expected by library tree
     for item in entries:
         item.setdefault("status_text", "ready")
@@ -308,8 +375,8 @@ def list_team_client_subtitle_libraries(
     api_port_default: int = 8765,
     timeout: float = 30.0,
 ) -> List[dict]:
-    base = _team_base(server_url, api_port_default=api_port_default)
-    data = _get_json(f"{base}/api/v1/subtitle-libraries", timeout=timeout)
+    base, token = _team_endpoint(server_url, api_port_default=api_port_default)
+    data = _get_json(f"{base}/api/v1/subtitle-libraries", timeout=timeout, token=token)
     if data.get("ok") is False:
         err = data.get("error") or {}
         raise RuntimeError(str(err.get("message") or "team subtitle libraries failed"))
@@ -326,7 +393,7 @@ def list_team_client_subtitle_videos(
     timeout: float = 60.0,
     page_limit: int = _VIDEO_PAGE_LIMIT,
 ) -> List[dict]:
-    base = _team_base(server_url, api_port_default=api_port_default)
+    base, token = _team_endpoint(server_url, api_port_default=api_port_default)
     out: List[dict] = []
     offset = 0
     safe_limit = max(1, min(int(page_limit or _VIDEO_PAGE_LIMIT), _VIDEO_PAGE_LIMIT))
@@ -339,7 +406,11 @@ def list_team_client_subtitle_videos(
         if library_path:
             params["library_path"] = str(library_path)
         query = urllib.parse.urlencode(params)
-        data = _get_json(f"{base}/api/v1/subtitle-libraries/videos?{query}", timeout=timeout)
+        data = _get_json(
+            f"{base}/api/v1/subtitle-libraries/videos?{query}",
+            timeout=timeout,
+            token=token,
+        )
         if data.get("ok") is False:
             err = data.get("error") or {}
             raise RuntimeError(str(err.get("message") or "team subtitle videos failed"))
@@ -361,6 +432,7 @@ def list_team_client_subtitle_scope_entries(
     server_url: str,
     *,
     api_port_default: int = 8765,
+    libraries: Optional[List[dict]] = None,
 ) -> List[dict]:
     """Subtitle/dialogue scope entries from the team server."""
     # Prefer one unscoped listing — avoids Windows path key mismatches per library.
@@ -374,10 +446,10 @@ def list_team_client_subtitle_scope_entries(
     except Exception:
         logger.exception("Failed listing all team subtitle videos; falling back per library")
         videos = []
-        libraries = list_team_client_subtitle_libraries(
+        lib_rows = list(libraries) if libraries is not None else list_team_client_subtitle_libraries(
             server_url, api_port_default=api_port_default
         )
-        for lib in libraries:
+        for lib in lib_rows:
             lib_path = str(lib.get("library_path") or "").strip()
             if not lib_path:
                 continue
@@ -434,7 +506,9 @@ def list_team_client_subtitle_library_tree(
     library_paths = [str(lib.get("library_path") or "").strip() for lib in libraries]
     library_paths = [p for p in library_paths if p]
     entries = list_team_client_subtitle_scope_entries(
-        server_url, api_port_default=api_port_default
+        server_url,
+        api_port_default=api_port_default,
+        libraries=libraries,
     )
     for item in entries:
         has_transcript = bool(item.get("has_transcript"))
@@ -549,7 +623,7 @@ def run_team_client_search(
     api_port_default: int = 8765,
     timeout: float = 180.0,
 ) -> List[SearchHit]:
-    base = _team_base(server_url, api_port_default=api_port_default)
+    base, token = _team_endpoint(server_url, api_port_default=api_port_default)
 
     payload: dict[str, Any] = {
         # Keep expand for clip/export helpers on the server, but rebuild
@@ -628,7 +702,7 @@ def run_team_client_search(
             raise RuntimeError(f"{kind} search only supports text queries")
         payload.update(_encode_image_query(query_data) or {})
 
-    data = _post_json(f"{base}/api/v1/search", payload, timeout=timeout)
+    data = _post_json(f"{base}/api/v1/search", payload, timeout=timeout, token=token)
     if data.get("ok") is False:
         err = data.get("error") or {}
         raise RuntimeError(str(err.get("message") or data.get("message") or "team search failed"))

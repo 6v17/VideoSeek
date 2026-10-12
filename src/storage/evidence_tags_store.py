@@ -163,6 +163,36 @@ def _iter_tag_rows_from_bundle(
     return rows
 
 
+def _bundle_aligned_to_index_chunks(
+    bundle: Mapping[str, Any],
+    index_chunks: list,
+) -> Mapping[str, Any]:
+    """Drop evidence chunks whose times no longer match the search index."""
+    if not index_chunks:
+        return bundle
+    from src.services.understanding_service import chunk_meta_matches_payload
+
+    raw_chunks = bundle.get("chunks") if isinstance(bundle.get("chunks"), list) else []
+    kept: list = []
+    for raw in raw_chunks:
+        if not isinstance(raw, Mapping):
+            continue
+        try:
+            chunk_index = int(raw.get("chunk_index"))
+        except (TypeError, ValueError):
+            continue
+        if chunk_index < 0 or chunk_index >= len(index_chunks):
+            continue
+        if not chunk_meta_matches_payload(index_chunks[chunk_index], raw, chunk_index):
+            continue
+        kept.append(raw)
+    if len(kept) == len(raw_chunks):
+        return bundle
+    aligned = dict(bundle)
+    aligned["chunks"] = kept
+    return aligned
+
+
 def replace_video_tags_from_bundle(
     video_id: str,
     bundle: Mapping[str, Any],
@@ -173,8 +203,15 @@ def replace_video_tags_from_bundle(
     vid = str(video_id or "").strip()
     if not vid or not isinstance(bundle, Mapping):
         return 0
+    try:
+        from src.services.indexing_service import load_video_chunks_by_id
+
+        index_chunks = list(load_video_chunks_by_id(vid, config) or [])
+    except Exception:
+        index_chunks = []
+    aligned = _bundle_aligned_to_index_chunks(bundle, index_chunks)
     now = time.time()
-    rows = _iter_tag_rows_from_bundle(vid, bundle, updated_at=now)
+    rows = _iter_tag_rows_from_bundle(vid, aligned, updated_at=now)
     with _WRITE_LOCK:
         with _db(config=config) as conn:
             conn.execute("DELETE FROM tag_rows WHERE video_id = ?", (vid,))
@@ -342,11 +379,40 @@ def get_tag_index_stats(*, config=None) -> dict[str, Any]:
     }
 
 
+def _bundle_ready_for_tag_projection(bundle: Mapping[str, Any]) -> bool:
+    """Skip in-progress / incomplete evidence so mid-run JSON cannot wipe the index."""
+    provenance = bundle.get("provenance")
+    if not isinstance(provenance, Mapping):
+        # Legacy files without provenance were written as finished products.
+        return True
+    status = str(provenance.get("generation_status") or "").strip().lower()
+    if status and status != "completed":
+        return False
+    try:
+        chunk_total = int(provenance.get("chunk_total") or 0)
+    except (TypeError, ValueError):
+        chunk_total = 0
+    try:
+        chunks_completed = int(provenance.get("chunks_completed") or 0)
+    except (TypeError, ValueError):
+        chunks_completed = 0
+    if chunk_total > 0 and chunks_completed < chunk_total:
+        return False
+    chunks = bundle.get("chunks")
+    if chunk_total > 0 and isinstance(chunks, list) and len(chunks) < chunk_total:
+        return False
+    return True
+
+
 def rebuild_all_from_json(*, config=None) -> dict[str, Any]:
     """Rebuild projection from any evidence JSON that carries chunk tags.
 
     Preference per video: ``tags/`` → ``summaries/`` → ``motion/`` → legacy ``videos/``.
     Motion/summary runs often store the same ``chunks[].tags`` used for search.
+
+    Collects all rows first, then swaps the SQLite table in one transaction so a
+    crash mid-rebuild cannot leave an empty index. Incomplete ``in_progress``
+    bundles are skipped.
     """
     from src.services.understanding_paths import (
         get_evidence_motion_dir,
@@ -375,12 +441,13 @@ def rebuild_all_from_json(*, config=None) -> dict[str, Any]:
                 continue
             chosen[vid] = (store_kind, os.path.join(folder, name))
 
-    clear_all_tag_rows(config=cfg)
-    projected = 0
+    projected_rows: list[tuple] = []
     videos_ok = 0
     videos_skipped_no_tags = 0
+    videos_skipped_incomplete = 0
     scanned_by_store: dict[str, int] = {}
     errors: list[str] = []
+    now = time.time()
     for vid, (store_kind, path) in sorted(chosen.items()):
         scanned_by_store[store_kind] = scanned_by_store.get(store_kind, 0) + 1
         try:
@@ -389,25 +456,53 @@ def rebuild_all_from_json(*, config=None) -> dict[str, Any]:
             if not isinstance(bundle, Mapping):
                 videos_skipped_no_tags += 1
                 continue
+            if not _bundle_ready_for_tag_projection(bundle):
+                videos_skipped_incomplete += 1
+                continue
+            try:
+                from src.services.indexing_service import load_video_chunks_by_id
+
+                index_chunks = list(load_video_chunks_by_id(vid, cfg) or [])
+            except Exception:
+                index_chunks = []
+            bundle = _bundle_aligned_to_index_chunks(bundle, index_chunks)
             chunks = bundle.get("chunks") if isinstance(bundle.get("chunks"), list) else []
             if not any(isinstance(c, Mapping) and c.get("tags") for c in chunks):
                 videos_skipped_no_tags += 1
                 continue
-            n = replace_video_tags_from_bundle(vid, bundle, config=cfg)
-            projected += n
-            if n:
-                videos_ok += 1
-            else:
+            rows = _iter_tag_rows_from_bundle(vid, bundle, updated_at=now)
+            if not rows:
                 videos_skipped_no_tags += 1
+                continue
+            projected_rows.extend(rows)
+            videos_ok += 1
         except Exception as exc:
             errors.append(f"{vid}: {exc}")
             logger.exception("Failed to project tags for %s from %s", vid, path)
+
+    # Atomic swap: old rows stay readable until the new set commits.
+    with _WRITE_LOCK:
+        with _db(config=cfg) as conn:
+            conn.execute("DELETE FROM tag_rows")
+            if projected_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO tag_rows(
+                      video_id, video_path, library_path, chunk_index,
+                      start_sec, end_sec, tag, tag_cf, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    projected_rows,
+                )
+            conn.commit()
+    _invalidate_suggest_cache()
     return {
         "ok": not errors,
         "videos_scanned": len(chosen),
         "videos_projected": videos_ok,
         "videos_skipped_no_tags": videos_skipped_no_tags,
-        "tag_rows": projected,
+        "videos_skipped_incomplete": videos_skipped_incomplete,
+        "tag_rows": len(projected_rows),
         "scanned_by_store": scanned_by_store,
         "errors": errors,
     }

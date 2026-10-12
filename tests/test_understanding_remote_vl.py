@@ -34,7 +34,6 @@ class RemoteVlCaptionTests(unittest.TestCase):
         fake_response.__enter__ = MagicMock(return_value=fake_response)
         fake_response.__exit__ = MagicMock(return_value=False)
 
-        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote")
         config = {
             "understanding": {
                 "remote_vlm": {
@@ -46,10 +45,8 @@ class RemoteVlCaptionTests(unittest.TestCase):
                 }
             }
         }
-        with (
-            patch("src.core.understanding.components.remote_vl_caption.load_config", return_value=config),
-            patch("urllib.request.urlopen", return_value=fake_response) as mock_urlopen,
-        ):
+        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote", config=config)
+        with patch("urllib.request.urlopen", return_value=fake_response) as mock_urlopen:
             result = component.infer(image)
 
         self.assertEqual(result["text"], "a white square on black background")
@@ -71,7 +68,6 @@ class RemoteVlCaptionTests(unittest.TestCase):
         fake_response.__enter__ = MagicMock(return_value=fake_response)
         fake_response.__exit__ = MagicMock(return_value=False)
 
-        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote")
         config = {
             "understanding": {
                 "remote_vlm": {
@@ -86,10 +82,8 @@ class RemoteVlCaptionTests(unittest.TestCase):
                 }
             }
         }
-        with (
-            patch("src.core.understanding.components.remote_vl_caption.load_config", return_value=config),
-            patch("urllib.request.urlopen", return_value=fake_response) as mock_urlopen,
-        ):
+        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote", config=config)
+        with patch("urllib.request.urlopen", return_value=fake_response) as mock_urlopen:
             component.infer(image)
 
         request = mock_urlopen.call_args.args[0]
@@ -130,8 +124,6 @@ class RemoteVlCaptionTests(unittest.TestCase):
             def __exit__(self, *args):
                 return False
 
-        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote")
-        component.bind_should_stop_callback(lambda: stop["flag"])
         config = {
             "understanding": {
                 "remote_vlm": {
@@ -142,11 +134,10 @@ class RemoteVlCaptionTests(unittest.TestCase):
                 }
             }
         }
+        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote", config=config)
+        component.bind_should_stop_callback(lambda: stop["flag"])
         started = time.monotonic()
-        with (
-            patch("src.core.understanding.components.remote_vl_caption.load_config", return_value=config),
-            patch("urllib.request.urlopen", return_value=_BlockingResponse()),
-        ):
+        with patch("urllib.request.urlopen", return_value=_BlockingResponse()):
             def _arm_stop():
                 self.assertTrue(entered.wait(timeout=2.0))
                 stop["flag"] = True

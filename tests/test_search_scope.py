@@ -48,7 +48,22 @@ class SearchScopeTests(unittest.TestCase):
         tree_path = normalize_scope_path(raw)
         config_path = normalize_scope_path(os.path.normpath(raw))
         self.assertEqual(tree_path, config_path)
-        self.assertIn(tree_path, {config_path})
+
+    def test_normalize_scope_path_matches_canonicalize_library_path(self):
+        from src.services.search_scope import normalize_scope_path
+        from src.storage.video_identity import canonicalize_library_path
+
+        samples = [
+            "D:/Videos/Clip.mp4",
+            "  D:/Videos/Clip.mp4  ",
+            os.path.join("~", "Videos", "clip.mp4"),
+        ]
+        for raw in samples:
+            self.assertEqual(
+                normalize_scope_path(raw),
+                canonicalize_library_path(raw),
+                msg=raw,
+            )
 
     def test_filter_hits_by_library_paths(self):
         with tempfile.TemporaryDirectory() as lib_a, tempfile.TemporaryDirectory() as lib_b:

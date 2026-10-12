@@ -464,6 +464,7 @@ class UnderstandingAsrGuiMixin:
             ],
             mode="ocr",
             persist=False,
+            force_overwrite=True,  # user confirmed via _confirm_replace_local_dialogue
         )
         worker.setParent(self)
         self._asr_worker = worker
@@ -676,6 +677,7 @@ class UnderstandingAsrGuiMixin:
             force=True,
             language=language,
             persist=False,
+            force_overwrite=True,  # user confirmed via _confirm_replace_local_dialogue
             parent=self,
         )
         self._asr_worker = worker

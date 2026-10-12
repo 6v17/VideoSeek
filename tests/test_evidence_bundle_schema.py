@@ -115,6 +115,30 @@ class EvidenceBundleSchemaTests(unittest.TestCase):
         self.assertEqual(restored.provenance.components, bundle.provenance.components)
         self.assertEqual(len(restored.chunks), len(bundle.chunks))
 
+    def test_image_caption_motion_fields_round_trip(self):
+        payload = sample_evidence_bundle_payload()
+        payload["chunks"][0]["evidence"]["vision"]["image_caption"] = {
+            "source": "vision/image_caption/qwen3-vl-remote",
+            "text": "柜台前两人；递文件",
+            "raw_text": '{"visible":"柜台前两人","change":"递文件","inferred":"洽谈","inferred_weight":0.7}',
+            "visible": "柜台前两人",
+            "change": "递文件",
+            "inferred": "洽谈",
+            "inferred_weight": 0.7,
+            "tags": ["柜台"],
+        }
+        bundle = validate_evidence_bundle(payload)
+        caption = bundle.chunks[0].evidence.vision.image_caption
+        self.assertEqual(caption.visible, "柜台前两人")
+        self.assertEqual(caption.change, "递文件")
+        self.assertEqual(caption.inferred, "洽谈")
+        self.assertAlmostEqual(caption.inferred_weight, 0.7)
+        restored = validate_evidence_bundle(evidence_bundle_to_dict(bundle))
+        again = restored.chunks[0].evidence.vision.image_caption
+        self.assertEqual(again.visible, "柜台前两人")
+        self.assertEqual(again.inferred, "洽谈")
+        self.assertAlmostEqual(again.inferred_weight, 0.7)
+
     def test_optional_video_summary_round_trip(self):
         payload = sample_evidence_bundle_payload()
         payload["summary"] = {

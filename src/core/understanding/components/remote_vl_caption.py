@@ -9,7 +9,6 @@ from typing import Any, Callable, Mapping
 import cv2
 import numpy as np
 
-from src.app.config import load_config
 from src.core.understanding.base import UnderstandingComponent, UnderstandingStoppedError, merge_params
 from src.services.cancellable_http import urlopen_json_with_stop
 
@@ -55,12 +54,15 @@ class RemoteVlCaptionComponent(UnderstandingComponent):
         component_dir: str,
         params: Mapping[str, Any] | None = None,
         runtime: Mapping[str, Any] | None = None,
+        *,
+        config=None,
     ):
         self.component_id = str(manifest.get("id", "") or "").strip()
         self._manifest = dict(manifest)
         self._component_dir = component_dir
         self._params = merge_params(manifest, params)
         self._runtime = dict(runtime or manifest.get("runtime") or {})
+        self._config = config
         self._should_stop_callback: Callable[[], bool] | None = None
 
     def bind_should_stop_callback(self, should_stop_callback: Callable[[], bool] | None) -> None:
@@ -78,7 +80,9 @@ class RemoteVlCaptionComponent(UnderstandingComponent):
             get_remote_vlm_settings,
         )
 
-        settings = get_remote_vlm_settings(load_config())
+        if self._config is None:
+            raise RuntimeError("remote VLM component requires caller-supplied config")
+        settings = get_remote_vlm_settings(self._config)
         base_url = _normalize_base_url(settings["base_url"])
         model = str(settings.get("model", "") or "").strip()
         if not model:
@@ -170,7 +174,11 @@ def call_remote_vlm_text_completion(
         get_remote_vlm_settings,
     )
 
-    settings = get_remote_vlm_settings(load_config() if config is None else config)
+    if config is None:
+        from src.app.config import load_config
+
+        config = load_config()
+    settings = get_remote_vlm_settings(config)
     base_url = _normalize_base_url(settings["base_url"])
     model = str(settings.get("model", "") or "").strip()
     if not model:

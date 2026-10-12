@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import secrets
 import threading
 import time
 from typing import Optional
@@ -18,7 +20,7 @@ from src.services.agent_library_service import (
 from src.services.agent_starter_service import build_agent_doc_payload, build_agent_starter_payload
 from src.web.server_stop import release_server_thread
 
-from ._fastapi import FastAPI, HTTPException, JSONResponse, PlainTextResponse, _IMPORT_ERROR, uvicorn
+from ._fastapi import FastAPI, HTTPException, JSONResponse, PlainTextResponse, Request, _IMPORT_ERROR, uvicorn
 from .constants import API_VERSION, DEFAULT_HOST, DEFAULT_PORT
 from .errors import IndexNotReadyError, SearchEngineBusyError, api_error_payload, raise_api_error
 from .export_ops import _resolve_batch_search_export_timeout_sec, execute_export_manifest
@@ -44,13 +46,25 @@ from .search import (
 
 logger = get_logger("agent_api")
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _host_requires_auth(host: str) -> bool:
+    """LAN / wildcard binds need a token; loopback Agent API stays open (docs)."""
+    return str(host or "").strip().lower() not in _LOOPBACK_HOSTS
+
 
 class AgentApiService:
-    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
+    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *, access_token: str | None = None):
         if _IMPORT_ERROR is not None:
             raise RuntimeError("Missing FastAPI runtime. Install `fastapi` and `uvicorn`.") from _IMPORT_ERROR
         self.host = str(host)
         self.port = int(port)
+        self.require_auth = _host_requires_auth(self.host)
+        token = str(access_token or "").strip()
+        if self.require_auth and not token:
+            token = secrets.token_urlsafe(24)
+        self.access_token = token
         self._thread: Optional[threading.Thread] = None
         self._server = None
         self._stop_waiter: Optional[threading.Thread] = None
@@ -58,6 +72,8 @@ class AgentApiService:
         self._lock = threading.Lock()
 
         self.app = FastAPI(title="VideoSeek Agent API", version=API_VERSION)
+        if self.require_auth:
+            self.app.middleware("http")(self._auth_middleware)
         self._register_exception_handlers()
         self.app.get("/api/v1/health")(self._health)
         self.app.get("/api/v1/agent-starter")(self._agent_starter)
@@ -163,6 +179,37 @@ class AgentApiService:
     def get_base_url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
+    def _extract_access_token(self, request: Request) -> str:
+        query = str(request.query_params.get("token", "") or "").strip()
+        if query:
+            return query
+        header = str(request.headers.get("x-videoseek-token", "") or "").strip()
+        if header:
+            return header
+        auth = str(request.headers.get("authorization", "") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        return ""
+
+    def _validate_access_token(self, token: str) -> None:
+        provided = str(token or "").strip().encode("utf-8")
+        expected = str(self.access_token or "").encode("utf-8")
+        if not expected or not hmac.compare_digest(provided, expected):
+            raise HTTPException(
+                status_code=401,
+                detail=api_error_payload("unauthorized", "Invalid or missing access token."),
+            )
+
+    async def _auth_middleware(self, request: Request, call_next):
+        try:
+            self._validate_access_token(self._extract_access_token(request))
+        except HTTPException as exc:
+            body = exc.detail if isinstance(exc.detail, dict) else api_error_payload(
+                "unauthorized", str(exc.detail)
+            )
+            return JSONResponse(status_code=exc.status_code, content=body)
+        return await call_next(request)
+
     def _run_server(self):
         try:
             self._server.run()
@@ -172,12 +219,18 @@ class AgentApiService:
             self._started.clear()
 
     async def _health(self, mode: Optional[str] = None):
-        return build_health_payload(mode=mode)
+        # Index/library scans are sync and can block the event loop on large libraries.
+        return await asyncio.to_thread(build_health_payload, mode=mode)
 
     async def _agent_starter(self, mode: Optional[str] = None, locale: Optional[str] = None):
-        health = build_health_payload(mode=mode)
+        health = await asyncio.to_thread(build_health_payload, mode=mode)
         base_url = f"http://{self.host}:{self.port}"
-        return build_agent_starter_payload(base_url, health, locale=locale or "zh")
+        return await asyncio.to_thread(
+            build_agent_starter_payload,
+            base_url,
+            health,
+            locale=locale or "zh",
+        )
 
     async def _agent_doc(self, format: Optional[str] = None):
         fmt = str(format or "json").strip().lower()

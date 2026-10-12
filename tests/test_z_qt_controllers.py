@@ -682,11 +682,16 @@ class MobileBridgeControllerTests(unittest.TestCase):
         service.start.assert_not_called()
         self.assertEqual(statuses, [])
 
-    def test_handle_search_requested_emits_payload(self):
+    def test_handle_search_requested_requires_ui_accept(self):
         parent = _make_parent_window()
+        accepted = []
+
+        def _accept(payload):
+            accepted.append(dict(payload))
+            return {"ok": True}
+
+        parent.accept_mobile_search_request = _accept
         controller = MobileBridgeController(parent)
-        received = []
-        controller.search_requested.connect(received.append)
 
         payload = {
             "search_kind": "compose",
@@ -694,9 +699,20 @@ class MobileBridgeControllerTests(unittest.TestCase):
             "image_path": "D:/Migrated/data/mobile_uploads/query.png",
             "source": "192.168.1.10",
         }
-        controller._handle_search_requested(payload)
+        result = controller._handle_search_requested(payload)
 
-        self.assertEqual(received, [payload])
+        self.assertEqual(accepted, [payload])
+        self.assertTrue(result.get("ok"))
+
+    def test_handle_search_requested_raises_when_ui_rejects(self):
+        parent = _make_parent_window()
+        parent.accept_mobile_search_request = lambda _payload: {
+            "ok": False,
+            "error": "search_not_ready",
+        }
+        controller = MobileBridgeController(parent)
+        with self.assertRaises(RuntimeError):
+            controller._handle_search_requested({"search_kind": "image"})
 
 
 class SearchControllerTests(unittest.TestCase):

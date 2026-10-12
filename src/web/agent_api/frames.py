@@ -17,11 +17,28 @@ _JPEG_QUALITY = 85
 MAX_BATCH_FRAME_EXTRACT = 16
 
 
-def _normalize_video_path(video_path: str) -> str:
-    source = os.path.normpath(os.path.abspath(os.path.expanduser(str(video_path or "").strip())))
-    if not source or not os.path.isfile(source):
-        raise FileNotFoundError(f"video_path does not exist: {video_path}")
-    return source
+def _require_indexed_video_path(video_path: str) -> str:
+    """Resolve ``video_path`` only when it belongs to an indexed (or subtitle) library."""
+    raw = str(video_path or "").strip()
+    if not raw:
+        raise FileNotFoundError("video_path does not exist")
+    from src.services.search_scope import (
+        load_searchable_path_index,
+        load_subtitle_searchable_path_index,
+        normalize_scope_path,
+    )
+
+    try:
+        key = normalize_scope_path(os.path.abspath(os.path.expanduser(raw)))
+    except (OSError, ValueError) as exc:
+        raise FileNotFoundError(f"video_path does not exist: {video_path}") from exc
+
+    for loader in (load_searchable_path_index, load_subtitle_searchable_path_index):
+        index = loader()
+        canonical = index.by_normalized_path.get(key)
+        if canonical and os.path.isfile(canonical):
+            return canonical
+    raise FileNotFoundError(f"video_path does not exist: {video_path}")
 
 
 def _clamp_max_edge(max_edge: Optional[int]) -> int:
@@ -49,7 +66,7 @@ def _resize_bgr(frame, max_edge: int):
 
 def execute_agent_frame_extract(body: AgentFrameExtractRequest) -> Dict[str, Any]:
     started = time.perf_counter()
-    source = _normalize_video_path(body.video_path)
+    source = _require_indexed_video_path(body.video_path)
     try:
         time_sec = max(0.0, float(body.time_sec))
     except (TypeError, ValueError) as exc:

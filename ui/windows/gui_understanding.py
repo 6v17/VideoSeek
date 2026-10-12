@@ -27,6 +27,7 @@ from src.services.understanding_resource_service import (
     set_remote_vlm_api_key_for_preset,
 )
 from src.services.understanding_service import (
+    chunk_meta_matches_payload,
     clear_all_evidence,
     list_local_evidence_details,
     list_ready_video_entries,
@@ -1251,8 +1252,13 @@ class UnderstandingGuiMixin:
         segments: list[ChunkTimelineSegment] = []
         for index, chunk in enumerate(index_chunks):
             payload = evidence_chunks.get(index)
+            # Same timing gate as resume: chunk_index alone is not stable after re-chunk.
+            if payload is not None and not chunk_meta_matches_payload(chunk, payload, index):
+                payload = None
             if payload is not None:
                 self._understanding_chunk_payloads[index] = payload
+            else:
+                self._understanding_chunk_payloads.pop(index, None)
             state = "ready" if payload is not None and self._chunk_payload_has_evidence(payload) else "pending"
             segments.append(
                 ChunkTimelineSegment(
@@ -3033,14 +3039,31 @@ class UnderstandingGuiMixin:
         ):
             return
         paths = []
+        video_ids: set[str] = set()
         for item in selected:
             evidence_file = str(item.get("evidence_file", "") or "").strip()
             if evidence_file:
                 paths.append(evidence_file)
                 paths.append(f"{evidence_file}.tmp")
+            video_id = str(item.get("video_id", "") or "").strip()
+            if video_id:
+                video_ids.add(video_id)
         from src.services.understanding_service import remove_paths as _remove_paths
 
         removed, errors = _remove_paths(paths)
+        # Keep tag search in sync: deleting evidence JSON must drop its projection rows.
+        if video_ids:
+            try:
+                from src.storage.evidence_tags_store import delete_video_tags
+
+                for video_id in sorted(video_ids):
+                    delete_video_tags(video_id)
+            except Exception:
+                from src.app.logging_utils import get_logger
+
+                get_logger("gui_understanding").exception(
+                    "Failed to clear tag projection after evidence delete"
+                )
         detail = self._reload_evidence_detail_dialog(dialog)
         deleted_count = len({os.path.splitext(os.path.basename(path))[0] for path in removed})
         error_count = len(errors or [])

@@ -187,6 +187,25 @@ locked_vo_context = _locked_vo_context
 neighbor_beats_for_rematch = _neighbor_beats_for_rematch
 splice_recap_beat_cuts = _splice_recap_beat_cuts
 
+
+def _assert_other_beats_untouched(
+    other_before: Sequence[Mapping[str, Any]],
+    clips: Sequence[Mapping[str, Any]],
+    target_beat_id: int,
+) -> None:
+    """Ensure rematch did not alter other beats' source in / VO (checks the write payload)."""
+    other_after = [clip for clip in clips if _clip_beat_id(clip) != target_beat_id]
+    if len(other_after) != len(other_before):
+        raise RuntimeError(
+            f"重选镜保护失败：其它拍镜头数从 {len(other_before)} 变成 {len(other_after)}，已中止写入。"
+        )
+    for left, right in zip(other_before, other_after):
+        if round(float(left.get("src_in") or 0.0), 3) != round(float(right.get("src_in") or 0.0), 3):
+            raise RuntimeError("重选镜保护失败：其它拍原片起点被改动，已中止写入。")
+        if str(left.get("vo") or "") != str(right.get("vo") or ""):
+            raise RuntimeError("重选镜保护失败：其它拍旁白被改动，已中止写入。")
+
+
 def _rs():
     from src.services import recap_service as runner
 
@@ -307,16 +326,7 @@ def rematch_recap_beat(
     )
 
     merged = splice_recap_beat_cuts(existing, normalized, target_beat_id)
-    other_after = [clip for clip in merged if _clip_beat_id(clip) != target_beat_id]
-    if len(other_after) != len(other_before):
-        raise RuntimeError(
-            f"重选镜保护失败：其它拍镜头数从 {len(other_before)} 变成 {len(other_after)}，已中止写入。"
-        )
-    for left, right in zip(other_before, other_after):
-        if round(float(left.get("src_in") or 0.0), 3) != round(float(right.get("src_in") or 0.0), 3):
-            raise RuntimeError("重选镜保护失败：其它拍原片起点被改动，已中止写入。")
-        if str(left.get("vo") or "") != str(right.get("vo") or ""):
-            raise RuntimeError("重选镜保护失败：其它拍旁白被改动，已中止写入。")
+    _assert_other_beats_untouched(other_before, merged, target_beat_id)
 
     info = _rs().probe_recap_media(media)
     laid = layout_clips_on_timeline(
@@ -342,6 +352,9 @@ def rematch_recap_beat(
             pack=pack,
             should_stop_callback=should_stop_callback,
         )
+
+    # Guard the payload we actually write (layout/captions), not only the pre-layout merge.
+    _assert_other_beats_untouched(other_before, laid, target_beat_id)
 
     _progress(90, "writing")
     cuts_path = write_recap_cuts_file(

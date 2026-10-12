@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from xml.dom import minidom
@@ -11,12 +12,19 @@ import xml.etree.ElementTree as ET
 
 
 def atomic_write_text(path: str | Path, text: str) -> Path:
-    """Write text via ``*.tmp`` + ``os.replace`` so readers never see a partial file."""
+    """Write text via unique ``*.tmp`` + ``os.replace`` so readers never see a partial file."""
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = Path(f"{dest}.tmp")
-    temp_path.write_text(text, encoding="utf-8")
-    os.replace(temp_path, dest)
+    temp_path = dest.with_name(f"{dest.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(text, encoding="utf-8")
+        os.replace(temp_path, dest)
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     return dest
 
 
@@ -165,8 +173,7 @@ def write_fcpxml(
     pretty = minidom.parseString(rough).toprettyxml(indent="  ", encoding="utf-8")
     text = pretty.decode("utf-8")
     decl, rest = text.split("\n", 1)
-    dest.write_text(decl + "\n<!DOCTYPE fcpxml>\n" + rest, encoding="utf-8")
-    return dest
+    return atomic_write_text(dest, decl + "\n<!DOCTYPE fcpxml>\n" + rest)
 
 
 def layout_clips_on_timeline(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 
 import numpy as np
 
@@ -17,6 +18,7 @@ from src.utils import canonicalize_library_path
 
 logger = get_logger("search_assets")
 
+_CACHE_LOCK = threading.Lock()
 _FRAME_ASSET_CACHE = {"key": None, "value": (None, None, None)}
 _CHUNK_ASSET_CACHE = {"key": None, "value": (None, None, None)}
 _LIBRARY_FRAME_ASSET_CACHE: dict[tuple, tuple] = {}
@@ -24,12 +26,13 @@ _LIBRARY_CHUNK_ASSET_CACHE: dict[tuple, tuple] = {}
 
 
 def invalidate_search_asset_caches() -> None:
-    _FRAME_ASSET_CACHE["key"] = None
-    _FRAME_ASSET_CACHE["value"] = (None, None, None)
-    _CHUNK_ASSET_CACHE["key"] = None
-    _CHUNK_ASSET_CACHE["value"] = (None, None, None)
-    _LIBRARY_FRAME_ASSET_CACHE.clear()
-    _LIBRARY_CHUNK_ASSET_CACHE.clear()
+    with _CACHE_LOCK:
+        _FRAME_ASSET_CACHE["key"] = None
+        _FRAME_ASSET_CACHE["value"] = (None, None, None)
+        _CHUNK_ASSET_CACHE["key"] = None
+        _CHUNK_ASSET_CACHE["value"] = (None, None, None)
+        _LIBRARY_FRAME_ASSET_CACHE.clear()
+        _LIBRARY_CHUNK_ASSET_CACHE.clear()
 
 
 def _profile_base_dir(config) -> str:
@@ -54,6 +57,20 @@ def _log_lance_assets_missing(profile_base_dir: str, *, kind: str, config=None) 
     )
 
 
+def _cache_get(cache: dict, cache_key) -> tuple | None:
+    with _CACHE_LOCK:
+        if cache_key is not None and cache.get("key") == cache_key:
+            return cache["value"]
+    return None
+
+
+def _cache_set(cache: dict, cache_key, value) -> None:
+    """Store key+value under one lock so readers never see a mismatched pair."""
+    with _CACHE_LOCK:
+        cache["key"] = cache_key
+        cache["value"] = value
+
+
 def load_search_assets(config):
     profile_base_dir = _profile_base_dir(config)
     if not lance_search_is_ready(profile_base_dir):
@@ -61,15 +78,15 @@ def load_search_assets(config):
         return None, None, None
 
     cache_key = lance_cache_key_for_profile(profile_base_dir, table_name="frames")
-    if cache_key is not None and _FRAME_ASSET_CACHE["key"] == cache_key:
-        return _FRAME_ASSET_CACHE["value"]
+    hit = _cache_get(_FRAME_ASSET_CACHE, cache_key)
+    if hit is not None:
+        return hit
 
     value = load_lance_frame_search_assets(profile_base_dir)
     if value[0] is None:
         _log_lance_assets_missing(profile_base_dir, kind="frame", config=config)
         return None, None, None
-    _FRAME_ASSET_CACHE["key"] = cache_key
-    _FRAME_ASSET_CACHE["value"] = value
+    _cache_set(_FRAME_ASSET_CACHE, cache_key, value)
     return value
 
 
@@ -80,15 +97,15 @@ def load_chunk_search_assets(config):
         return None, None, None
 
     cache_key = lance_cache_key_for_profile(profile_base_dir, table_name="chunks")
-    if cache_key is not None and _CHUNK_ASSET_CACHE["key"] == cache_key:
-        return _CHUNK_ASSET_CACHE["value"]
+    hit = _cache_get(_CHUNK_ASSET_CACHE, cache_key)
+    if hit is not None:
+        return hit
 
     value = load_lance_chunk_search_assets(profile_base_dir)
     if value[0] is None:
         _log_lance_assets_missing(profile_base_dir, kind="chunk", config=config)
         return None, None, None
-    _CHUNK_ASSET_CACHE["key"] = cache_key
-    _CHUNK_ASSET_CACHE["value"] = value
+    _cache_set(_CHUNK_ASSET_CACHE, cache_key, value)
     return value
 
 
@@ -108,14 +125,17 @@ def load_library_frame_search_assets(library_path, config):
         library_path=normalized_library,
         table_name="frames",
     )
-    if cache_key is not None and cache_key in _LIBRARY_FRAME_ASSET_CACHE:
-        return _LIBRARY_FRAME_ASSET_CACHE[cache_key]
+    if cache_key is not None:
+        with _CACHE_LOCK:
+            if cache_key in _LIBRARY_FRAME_ASSET_CACHE:
+                return _LIBRARY_FRAME_ASSET_CACHE[cache_key]
     value = load_lance_frame_search_assets(
         profile_base_dir,
         library_path=library_path,
     )
     if cache_key is not None:
-        _LIBRARY_FRAME_ASSET_CACHE[cache_key] = value
+        with _CACHE_LOCK:
+            _LIBRARY_FRAME_ASSET_CACHE[cache_key] = value
     return value
 
 
@@ -127,14 +147,17 @@ def load_library_chunk_search_assets(library_path, config):
         library_path=normalized_library,
         table_name="chunks",
     )
-    if cache_key is not None and cache_key in _LIBRARY_CHUNK_ASSET_CACHE:
-        return _LIBRARY_CHUNK_ASSET_CACHE[cache_key]
+    if cache_key is not None:
+        with _CACHE_LOCK:
+            if cache_key in _LIBRARY_CHUNK_ASSET_CACHE:
+                return _LIBRARY_CHUNK_ASSET_CACHE[cache_key]
     value = load_lance_chunk_search_assets(
         profile_base_dir,
         library_path=library_path,
     )
     if cache_key is not None:
-        _LIBRARY_CHUNK_ASSET_CACHE[cache_key] = value
+        with _CACHE_LOCK:
+            _LIBRARY_CHUNK_ASSET_CACHE[cache_key] = value
     return value
 
 

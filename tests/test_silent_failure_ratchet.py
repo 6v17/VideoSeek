@@ -1,4 +1,4 @@
-"""Ratchet: broad except handlers must not return a literal empty value in silence.
+"""Ratchet: broad except handlers must not hide failures in silence.
 
 Narrow catches (ValueError while parsing, OSError while deleting a temp file)
 may still return a fallback. ``except Exception`` / bare ``except`` that returns
@@ -17,6 +17,10 @@ A second scan counts broad handlers whose whole body is ``pass`` / ``continue``
 or an assignment of ``None`` / ``0`` / ``False`` / ``""`` / ``-1`` / an empty
 collection, with no log. That count must not grow. Existing sites are not
 rewritten here.
+
+A third scan catches ``except Exception: cache = []; return`` style — assign an
+empty sentinel (optionally with bool dirty flags), then return, with no report.
+That pattern is as silent as returning ``[]`` and must not grow.
 """
 
 from __future__ import annotations
@@ -30,6 +34,9 @@ SILENT_EXCEPT_BASELINE = 0
 # Broad except whose whole body is pass/continue, or an assignment of
 # None/0/False/""/-1/[]/{}. Existing sites stay; a new one must log or raise.
 SILENT_PASS_BASELINE = 139
+# Broad except that clears state to an empty sentinel then returns (no report).
+# Recomputed when the detector ships; must not grow afterward.
+SILENT_EMPTY_ASSIGN_RETURN_BASELINE = 0
 
 
 def _is_empty_sentinel(node: ast.AST | None) -> bool:
@@ -167,6 +174,58 @@ def silent_pass_sites() -> list[str]:
     return sites
 
 
+def _is_bool_constant(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value in (True, False)
+
+
+def _is_silent_empty_assign_return(handler: ast.ExceptHandler) -> bool:
+    """True when a broad except clears to empty, then returns, with no report."""
+    if not _is_broad(handler) or _is_visible(handler):
+        return False
+    has_empty_assign = False
+    has_return = False
+    for stmt in handler.body:
+        if isinstance(stmt, (ast.Pass, ast.Continue)):
+            continue
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            if _is_empty_sentinel(stmt.value):
+                has_empty_assign = True
+                continue
+            if _is_bool_constant(stmt.value):
+                continue
+            return False
+        if isinstance(stmt, ast.AnnAssign):
+            if _is_empty_sentinel(stmt.value):
+                has_empty_assign = True
+                continue
+            if _is_bool_constant(stmt.value):
+                continue
+            return False
+        if isinstance(stmt, ast.Return):
+            if stmt.value is None or _is_empty_sentinel(stmt.value):
+                has_return = True
+                continue
+            return False
+        return False
+    return has_empty_assign and has_return
+
+
+def silent_empty_assign_return_sites() -> list[str]:
+    sites: list[str] = []
+    for folder in SCAN_ROOTS:
+        base = ROOT / folder
+        for path in sorted(base.rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except (OSError, SyntaxError, UnicodeError):
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ExceptHandler) and _is_silent_empty_assign_return(node):
+                    sites.append(f"{rel}:{node.lineno}")
+    return sites
+
+
 def test_silent_except_count_does_not_grow():
     sites = silent_except_sites()
     assert len(sites) <= SILENT_EXCEPT_BASELINE, (
@@ -179,5 +238,13 @@ def test_silent_pass_count_does_not_grow():
     sites = silent_pass_sites()
     assert len(sites) <= SILENT_PASS_BASELINE, (
         f"{len(sites)} broad except handlers only pass or store a constant. "
+        "Call note_swallowed, log, or raise. Sites:\n" + "\n".join(sites[:40])
+    )
+
+
+def test_silent_empty_assign_return_count_does_not_grow():
+    sites = silent_empty_assign_return_sites()
+    assert len(sites) <= SILENT_EMPTY_ASSIGN_RETURN_BASELINE, (
+        f"{len(sites)} broad except handlers clear state then return silently. "
         "Call note_swallowed, log, or raise. Sites:\n" + "\n".join(sites[:40])
     )

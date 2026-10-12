@@ -49,6 +49,19 @@ from .schemas import AgentBatchSearchRequest, AgentSearchRequest, AgentSearchSco
 
 logger = get_logger("agent_api")
 
+_MAX_PAD_SEC = 300.0
+
+
+def _bounded_pad_sec(value, *, field_name: str = "pad") -> float:
+    """Reject negative / huge pads (Pydantic also bounds these when installed)."""
+    try:
+        sec = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+    if sec < 0.0 or sec > _MAX_PAD_SEC:
+        raise ValueError(f"{field_name} must be between 0 and {_MAX_PAD_SEC:g} seconds")
+    return sec
+
 
 def _coerce_agent_query_vector(raw) -> Any:
     """Accept a flat float list / nested list and return a (1, D) float32 row."""
@@ -71,6 +84,8 @@ def _coerce_agent_query_vector(raw) -> Any:
         arr = arr.reshape(1, -1)
     if arr.shape[1] < 8:
         raise ValueError("query_vector dimension looks invalid")
+    if arr.shape[1] > 4096:
+        raise ValueError("query_vector dimension exceeds limit (4096)")
     # Keep cosine-ready; clients normally send L2-normalized CLIP rows.
     norms = np.linalg.norm(arr, axis=1, keepdims=True)
     norms = np.maximum(norms, 1e-12)
@@ -616,7 +631,12 @@ def _normalize_agent_search_query_fields(body: AgentSearchRequest) -> tuple[Opti
 
         from src.app.config import get_data_storage_paths
 
+        # Cap before/after decode so a huge payload cannot fill disk.
+        if len(image_b64) > (20 * 1024 * 1024 * 4) // 3 + 64:
+            raise ValueError("image_base64 exceeds the 20MB upload limit.")
         raw = base64.b64decode(image_b64, validate=False)
+        if len(raw) > 20 * 1024 * 1024:
+            raise ValueError("image_base64 exceeds the 20MB upload limit.")
         mime = str(getattr(body, "image_mime", None) or "").strip().lower()
         ext = ".png"
         if "jpeg" in mime or "jpg" in mime:
@@ -843,10 +863,16 @@ def _skip_edges_meta(config) -> Dict[str, Any]:
 
 
 def execute_agent_search(body: AgentSearchRequest) -> Dict[str, Any]:
+    # Request-scoped cleanup: thread-pool workers reuse threads; never leave a prior
+    # search's index-step / edge lookup for the next request on the same thread.
+    from src.services.search_hit_utils import reset_search_index_steps
+
+    reset_search_index_steps()
     try:
         return _execute_agent_search_work(body)
     finally:
         _discard_materialized_agent_image(body)
+        reset_search_index_steps()
 
 
 def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
@@ -923,8 +949,8 @@ def _execute_agent_search_work(body: AgentSearchRequest) -> Dict[str, Any]:
             hits,
             mode=mode,
             expand_frame_hits=bool(body.expand_frame_hits),
-            pad_before_sec=float(body.pad_before_sec),
-            pad_after_sec=float(body.pad_after_sec),
+            pad_before_sec=_bounded_pad_sec(body.pad_before_sec, field_name="pad_before_sec"),
+            pad_after_sec=_bounded_pad_sec(body.pad_after_sec, field_name="pad_after_sec"),
             team_play_urls=bool(getattr(body, "team_play_urls", False) or resolved.get("team_play_urls")),
         ),
         "meta": {
@@ -1206,6 +1232,8 @@ def _batch_item_error(
 
 
 def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
+    from .errors import SearchEngineBusyError
+
     queries = _resolve_batch_queries(body)
     config = load_config()
     default_mode = _normalize_mode(body.mode)
@@ -1227,18 +1255,20 @@ def execute_agent_batch_search(body: AgentBatchSearchRequest) -> Dict[str, Any]:
             payload["ok"] = True
             results.append(payload)
             succeeded += 1
+        except (IndexNotReadyError, SearchEngineBusyError):
+            # Same status codes as /search — never bury these in 200 ok:false.
+            raise
         except ValueError as exc:
-            failed += 1
-            entry = _batch_item_error(item, "invalid_request", str(exc))
-            results.append(entry)
             if not body.continue_on_error:
-                break
+                raise
+            failed += 1
+            results.append(_batch_item_error(item, "invalid_request", str(exc)))
         except Exception as exc:
-            failed += 1
-            entry = _batch_item_error(item, "query_failed", str(exc))
-            results.append(entry)
             if not body.continue_on_error:
-                break
+                # Match /search: outer handler maps this to HTTP 422 query_failed.
+                raise
+            failed += 1
+            results.append(_batch_item_error(item, "query_failed", str(exc)))
 
     payload = {
         "api_version": API_VERSION,

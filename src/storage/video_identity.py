@@ -7,7 +7,13 @@ import os
 
 
 def canonicalize_library_path(path):
-    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+    """Shared path key: strip + expanduser + abspath + normpath + normcase.
+
+    Same semantics as ``normalize_scope_path`` so library roots and search-scope
+    file paths cannot diverge on ``~`` / surrounding whitespace.
+    """
+    text = str(path or "").strip()
+    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(text))))
 
 
 def canonicalize_library_rel_path(rel_path) -> str:

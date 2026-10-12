@@ -185,13 +185,18 @@ class TeamModeController(QObject):
                 self.status_changed.emit(media_status)
                 return media_status
 
-        set_active_team_ports(api_port=api_port, nginx_port=media_port)
+        api_token = str(getattr(self._api_service, "access_token", "") or "").strip()
+        set_active_team_ports(api_port=api_port, nginx_port=media_port, api_token=api_token)
         self._emit_progress(progress_callback, "ready")
         lan_ip = detect_lan_ip()
         media_status["api_running"] = True
         media_status["api_port"] = api_port
         media_status["nginx_port"] = media_port
-        media_status["api_base_url"] = f"http://{lan_ip}:{api_port}"
+        api_base = f"http://{lan_ip}:{api_port}"
+        if api_token:
+            api_base = f"{api_base}/?token={api_token}"
+        media_status["api_base_url"] = api_base
+        media_status["api_token"] = api_token
         media_status["media_base_url"] = f"http://{lan_ip}:{media_port}"
         if port_notes:
             media_status["port_note"] = "；".join(port_notes)

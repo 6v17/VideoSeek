@@ -17,9 +17,17 @@ if "fastapi" not in sys.modules:
     class _FastAPI:
         def __init__(self, *args, **kwargs):
             self.mounted = []
+            self.middlewares = []
 
         def mount(self, *args, **kwargs):
             self.mounted.append((args, kwargs))
+
+        def middleware(self, _kind):
+            def decorator(func):
+                self.middlewares.append(func)
+                return func
+
+            return decorator
 
         def get(self, *_args, **_kwargs):
             def decorator(func):
@@ -160,6 +168,72 @@ class MobileBridgeServiceTests(unittest.TestCase):
         with patch.dict("os.environ", {"VIDEOSEEK_MOBILE_BRIDGE_HOST": "0.0.0.0"}):
             self.assertEqual(resolve_mobile_bridge_host(None), "0.0.0.0")
 
+    def test_search_rejects_too_many_upload_files(self):
+        import asyncio
+
+        from src.web.mobile_bridge import MAX_MOBILE_UPLOAD_FILES, MobileBridgeService
+
+        class _FakeUpload:
+            filename = "a.jpg"
+            content_type = "image/jpeg"
+
+            async def read(self, size=-1):
+                return b""
+
+        with patch(
+            "src.web.mobile_bridge.get_data_storage_paths",
+            return_value={"mobile_upload_dir": "D:/tmp/uploads"},
+        ), patch("src.web.mobile_bridge.get_app_data_dir", return_value="D:/VideoSeek"), patch(
+            "src.web.mobile_bridge.os.path.isdir", return_value=False
+        ), patch(
+            "src.web.mobile_bridge.get_resource_path",
+            side_effect=lambda relative: f"D:/bundle/{relative}",
+        ):
+            service = MobileBridgeService(on_search_requested=lambda *_a: None)
+
+        class _Req:
+            client = None
+
+        too_many = [_FakeUpload() for _ in range(MAX_MOBILE_UPLOAD_FILES + 1)]
+        with self.assertRaises(Exception) as ctx:
+            asyncio.run(
+                service._search(
+                    _Req(),
+                    search_kind="compose",
+                    query="x",
+                    files=too_many,
+                )
+            )
+        exc = ctx.exception
+        status = getattr(exc, "status_code", None)
+        detail = str(getattr(exc, "detail", "") or exc)
+        self.assertTrue(status == 400 or "too many" in detail.lower())
+
+    def test_get_access_url_uses_bind_host_not_vpn_route(self):
+        from src.web.mobile_bridge import MobileBridgeService
+
+        with patch(
+            "src.web.mobile_bridge.get_data_storage_paths",
+            return_value={"mobile_upload_dir": "D:/tmp/uploads"},
+        ), patch("src.web.mobile_bridge.get_app_data_dir", return_value="D:/VideoSeek"), patch(
+            "src.web.mobile_bridge.os.path.isdir", return_value=False
+        ), patch(
+            "src.web.mobile_bridge.get_resource_path",
+            side_effect=lambda relative: f"D:/bundle/{relative}",
+        ), patch(
+            "src.web.mobile_bridge.resolve_mobile_bridge_host",
+            return_value="192.168.0.236",
+        ), patch(
+            "src.web.mobile_bridge.get_local_ip",
+            return_value="198.18.0.1",
+        ):
+            service = MobileBridgeService(on_search_requested=lambda *_a: None, host="192.168.0.236")
+
+        url = service.get_access_url()
+        self.assertIn("192.168.0.236", url)
+        self.assertNotIn("198.18.0.1", url)
+        self.assertIn(f"token={service.token}", url)
+
     def test_read_upload_limited_rejects_oversized_payload(self):
         import asyncio
 
@@ -220,6 +294,131 @@ class MobileBridgeServiceTests(unittest.TestCase):
                 service._validate_access_token("wrong-token")
             compare.assert_called()
             service._validate_access_token(service.token)
+
+    def test_can_bind_and_pick_port(self):
+        from src.web.mobile_bridge import _pick_bindable_port, can_bind_mobile_bridge_port
+
+        chosen = _pick_bindable_port("127.0.0.1", 39100, attempts=10)
+        self.assertGreaterEqual(chosen, 39100)
+        self.assertLess(chosen, 39110)
+        self.assertTrue(can_bind_mobile_bridge_port("127.0.0.1", chosen))
+
+    def test_search_returns_409_when_ui_rejects(self):
+        import asyncio
+        import tempfile
+        import types
+        from pathlib import Path
+
+        from src.web.mobile_bridge import MobileBridgeService
+
+        class _FakeUpload:
+            filename = "shot.jpg"
+            content_type = "image/jpeg"
+
+            async def read(self, size=-1):
+                return b"\xff\xd8\xff" + b"\x00" * 64
+
+        class _Req:
+            client = None
+
+        fake_image_io = types.ModuleType("src.core.image_io")
+        fake_image_io.normalize_image_upload = lambda path: path
+
+        def _reject(_payload):
+            raise RuntimeError("search_not_ready")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_dir = Path(tmp) / "uploads"
+            upload_dir.mkdir()
+
+            async def _fake_save(_self, _file):
+                path = upload_dir / "saved.jpg"
+                path.write_bytes(b"x")
+                return str(path)
+
+            with patch(
+                "src.web.mobile_bridge.get_data_storage_paths",
+                return_value={"mobile_upload_dir": str(upload_dir)},
+            ), patch("src.web.mobile_bridge.get_app_data_dir", return_value=tmp), patch(
+                "src.web.mobile_bridge.os.path.isdir", return_value=False
+            ), patch(
+                "src.web.mobile_bridge.get_resource_path",
+                side_effect=lambda relative: f"D:/bundle/{relative}",
+            ), patch.dict(sys.modules, {"src.core.image_io": fake_image_io}), patch.object(
+                MobileBridgeService, "_save_upload_file", _fake_save
+            ):
+                service = MobileBridgeService(on_search_requested=_reject)
+                with self.assertRaises(Exception) as ctx:
+                    asyncio.run(
+                        service._search(
+                            _Req(),
+                            search_kind="image",
+                            file=_FakeUpload(),
+                        )
+                    )
+            exc = ctx.exception
+            self.assertEqual(getattr(exc, "status_code", None), 409)
+            self.assertEqual(list(upload_dir.glob("*")), [])
+
+    def test_search_cleans_uploads_when_fusion_weight_invalid(self):
+        import asyncio
+        import tempfile
+        import types
+        from pathlib import Path
+
+        from src.web.mobile_bridge import MobileBridgeService
+
+        class _FakeUpload:
+            filename = "shot.jpg"
+            content_type = "image/jpeg"
+
+            async def read(self, size=-1):
+                return b"\xff\xd8\xff" + b"\x00" * 64
+
+        class _Req:
+            client = None
+
+        fake_image_io = types.ModuleType("src.core.image_io")
+        fake_image_io.normalize_image_upload = lambda path: path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_dir = Path(tmp) / "uploads"
+            upload_dir.mkdir()
+
+            async def _fake_save(_self, _file):
+                path = upload_dir / "saved.jpg"
+                path.write_bytes(b"x")
+                return str(path)
+
+            with patch(
+                "src.web.mobile_bridge.get_data_storage_paths",
+                return_value={"mobile_upload_dir": str(upload_dir)},
+            ), patch("src.web.mobile_bridge.get_app_data_dir", return_value=tmp), patch(
+                "src.web.mobile_bridge.os.path.isdir", return_value=False
+            ), patch(
+                "src.web.mobile_bridge.get_resource_path",
+                side_effect=lambda relative: f"D:/bundle/{relative}",
+            ), patch.dict(sys.modules, {"src.core.image_io": fake_image_io}), patch.object(
+                MobileBridgeService, "_save_upload_file", _fake_save
+            ):
+                service = MobileBridgeService(on_search_requested=lambda *_a: None)
+                with self.assertRaises(Exception) as ctx:
+                    asyncio.run(
+                        service._search(
+                            _Req(),
+                            search_kind="compose",
+                            query="hello",
+                            text_weight="not-a-number",
+                            file=_FakeUpload(),
+                        )
+                    )
+            exc = ctx.exception
+            status = getattr(exc, "status_code", None)
+            detail = str(getattr(exc, "detail", "") or exc)
+            self.assertEqual(status, 400)
+            self.assertIn("text_weight", detail.lower())
+            leftovers = list(upload_dir.glob("*"))
+            self.assertEqual(leftovers, [])
 
 
 if __name__ == "__main__":

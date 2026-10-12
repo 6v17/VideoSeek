@@ -155,7 +155,7 @@ def show_team_server_share_dialog(
         str(
             texts.get(
                 "setting_team_share_note",
-                "用户机团队模式选「用户机」后粘贴 API 地址。需同一局域网，并放行防火墙端口。",
+                "用户机团队模式选「用户机」后粘贴完整 API 地址（含 ?token=）。需同一局域网，并放行防火墙端口。",
             )
         )
     )

@@ -477,6 +477,7 @@ class DialogueIndexWorker(QThread):
         sample_strategy: str | None = None,
         ocr_batch_size: int | None = None,
         persist: bool = True,
+        force_overwrite: bool = False,
     ):
         super().__init__()
         self.targets = list(targets or [])
@@ -485,6 +486,7 @@ class DialogueIndexWorker(QThread):
         self.sample_strategy = None if sample_strategy is None else str(sample_strategy)
         self.ocr_batch_size = None if ocr_batch_size is None else int(ocr_batch_size)
         self.persist = bool(persist)
+        self.force_overwrite = bool(force_overwrite)
         self._stop_requested = False
 
     def stop(self):
@@ -538,15 +540,16 @@ class DialogueIndexWorker(QThread):
                 )
                 if result.get("ok") and not self.persist:
                     from src.app.config import load_config
-                    from src.services.understanding_dialogue import save_working_copy
+                    from src.services.understanding_dialogue import replace_working_copy_from_extraction
 
-                    save_working_copy(
+                    replace_working_copy_from_extraction(
                         video_id,
                         list(result.get("segments") or []),
                         origin="ocr",
                         video_path=video_path,
                         library_path=library_path,
                         asr_source=str(result.get("asr_source") or ""),
+                        force_overwrite=bool(getattr(self, "force_overwrite", False)),
                         config=load_config(),
                     )
                 if result.get("ok"):
@@ -693,6 +696,31 @@ class RemoveSelectedVideosWorker(QThread):
         finally:
             self._result = dict(result or {})
             self.finished_signal.emit(ok, dict(self._result))
+
+
+class TeamLibraryFetchWorker(QThread):
+    """Fetch shared visual+subtitle trees from the team server off the UI thread."""
+
+    finished_signal = Signal(object)
+    error_signal = Signal(str)
+
+    def __init__(self, server_url: str, *, api_port_default: int = 8765, parent=None):
+        super().__init__(parent)
+        self.server_url = str(server_url or "").strip()
+        self.api_port_default = int(api_port_default or 8765)
+
+    def run(self):
+        try:
+            from src.services.team_client_search import prepare_team_client_session
+
+            payload = prepare_team_client_session(
+                self.server_url,
+                api_port_default=self.api_port_default,
+            )
+            self.finished_signal.emit(dict(payload or {}))
+        except Exception as exc:
+            logger.exception("Team library fetch failed")
+            self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
 class LibraryRegisterWorker(QThread):
@@ -1452,6 +1480,7 @@ class AsrTranscriptWorker(QThread):
         force: bool = True,
         language: str = "",
         persist: bool = True,
+        force_overwrite: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -1461,6 +1490,7 @@ class AsrTranscriptWorker(QThread):
         self.force = bool(force)
         self.language = str(language or "").strip()
         self.persist = bool(persist)
+        self.force_overwrite = bool(force_overwrite)
         self._stop_requested = False
 
     def stop(self):
@@ -1511,15 +1541,16 @@ class AsrTranscriptWorker(QThread):
             if not dict(result or {}).get("ok"):
                 raise RuntimeError(str(dict(result or {}).get("error") or "ASR failed"))
             if not self.persist:
-                from src.services.understanding_dialogue import save_working_copy
+                from src.services.understanding_dialogue import replace_working_copy_from_extraction
 
-                save_working_copy(
+                replace_working_copy_from_extraction(
                     self.video_id,
                     list(dict(result or {}).get("segments") or []),
                     origin="asr",
                     video_path=self.video_path,
                     library_path=self.library_path,
                     asr_source=str(dict(result or {}).get("asr_source") or ""),
+                    force_overwrite=self.force_overwrite,
                     config=config,
                 )
             self.progress_signal.emit(100, texts.get("understanding_summary_generation_done", "Done."))

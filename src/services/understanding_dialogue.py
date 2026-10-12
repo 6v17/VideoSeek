@@ -44,6 +44,15 @@ def load_working_copy(video_id: str, *, config=None) -> dict[str, Any] | None:
     return payload
 
 
+def working_copy_is_user_protected(payload: Mapping[str, Any] | None) -> bool:
+    """True when the page copy was hand-edited and ASR/OCR must not clobber it."""
+    if not isinstance(payload, Mapping):
+        return False
+    if bool(payload.get("edited_by_user")):
+        return True
+    return str(payload.get("origin") or "").strip().lower() == "local"
+
+
 def save_working_copy(
     video_id: str,
     cues: list[Mapping[str, Any]] | None,
@@ -52,6 +61,7 @@ def save_working_copy(
     video_path: str = "",
     library_path: str = "",
     asr_source: str = "",
+    edited_by_user: bool = False,
     config=None,
 ) -> dict[str, Any]:
     vid = str(video_id or "").strip()
@@ -71,6 +81,8 @@ def save_working_copy(
         "library_path": str(library_path or "").strip(),
         "cues": rows,
     }
+    if edited_by_user:
+        payload["edited_by_user"] = True
     path = working_copy_path(vid, config=config)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     temp = path + ".tmp"
@@ -79,6 +91,33 @@ def save_working_copy(
         handle.write("\n")
     os.replace(temp, path)
     return payload
+
+
+def replace_working_copy_from_extraction(
+    video_id: str,
+    cues: list[Mapping[str, Any]] | None,
+    *,
+    origin: str,
+    video_path: str = "",
+    library_path: str = "",
+    asr_source: str = "",
+    force_overwrite: bool = False,
+    config=None,
+) -> dict[str, Any]:
+    """ASR/OCR write path. Skips when the page copy is user-protected unless forced."""
+    existing = load_working_copy(video_id, config=config)
+    if working_copy_is_user_protected(existing) and not force_overwrite:
+        return {**(existing or {}), "skipped_protected": True, "present": True}
+    return save_working_copy(
+        video_id,
+        cues,
+        origin=origin,
+        video_path=video_path,
+        library_path=library_path,
+        asr_source=asr_source,
+        edited_by_user=False,
+        config=config,
+    )
 
 
 def ensure_working_copy(
@@ -156,6 +195,7 @@ def update_working_cue(
         video_path=str(payload.get("video_path") or ""),
         library_path=str(payload.get("library_path") or ""),
         asr_source=str(payload.get("asr_source") or ""),
+        edited_by_user=True,
         config=config,
     )
     return True
@@ -179,6 +219,7 @@ def delete_working_cue(video_id: str, seg_index: int, *, config=None) -> bool:
         video_path=str(payload.get("video_path") or ""),
         library_path=str(payload.get("library_path") or ""),
         asr_source=str(payload.get("asr_source") or ""),
+        edited_by_user=True,
         config=config,
     )
     return True
@@ -217,6 +258,7 @@ def update_working_speaker(
         video_path=str(payload.get("video_path") or ""),
         library_path=str(payload.get("library_path") or ""),
         asr_source=str(payload.get("asr_source") or ""),
+        edited_by_user=True,
         config=config,
     )
     return True
@@ -251,6 +293,7 @@ def apply_speaker_assignments(
             video_path=str(payload.get("video_path") or ""),
             library_path=str(payload.get("library_path") or ""),
             asr_source=str(payload.get("asr_source") or ""),
+            edited_by_user=True,
             config=config,
         )
     return changed
@@ -286,6 +329,7 @@ def rename_working_speakers(
             video_path=str(payload.get("video_path") or ""),
             library_path=str(payload.get("library_path") or ""),
             asr_source=str(payload.get("asr_source") or ""),
+            edited_by_user=True,
             config=config,
         )
     return changed
@@ -311,6 +355,7 @@ def clear_working_speakers(video_id: str, *, config=None) -> int:
             video_path=str(payload.get("video_path") or ""),
             library_path=str(payload.get("library_path") or ""),
             asr_source=str(payload.get("asr_source") or ""),
+            edited_by_user=True,
             config=config,
         )
     return changed
@@ -335,9 +380,8 @@ def list_understanding_dialogue_cues(
 def _normalize_cue(item: Mapping[str, Any] | None, index: int, default_source: str) -> dict[str, Any] | None:
     if not isinstance(item, Mapping):
         return None
+    # Keep empty text: clearing a line must not delete the cue (use delete_working_cue).
     text = str(item.get("text") or "").strip()
-    if not text:
-        return None
     try:
         start = float(item.get("start") or 0.0)
     except (TypeError, ValueError):
@@ -363,3 +407,50 @@ def _normalize_cue(item: Mapping[str, Any] | None, index: int, default_source: s
         "asr_source": str(item.get("asr_source") or default_source or "").strip(),
         "speaker": normalize_dialogue_speaker(item.get("speaker")),
     }
+
+
+def rekey_working_copy_video_id(
+    old_video_id: str,
+    new_video_id: str,
+    *,
+    config=None,
+) -> bool:
+    """Move the understanding working-copy JSON when vector video_id changes.
+
+    Returns True when a file was relocated. No-op when source missing, ids
+    equal/blank, or the destination path already exists.
+    """
+    old_id = str(old_video_id or "").strip()
+    new_id = str(new_video_id or "").strip()
+    if not old_id or not new_id or old_id == new_id:
+        return False
+    src = working_copy_path(old_id, config=config)
+    dst = working_copy_path(new_id, config=config)
+    if not os.path.isfile(src):
+        return False
+    if os.path.isfile(dst):
+        return False
+    try:
+        payload = json.loads(open(src, encoding="utf-8").read())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    cues = payload.get("cues")
+    if not isinstance(cues, list):
+        cues = []
+    save_working_copy(
+        new_id,
+        cues,
+        origin=str(payload.get("origin") or "local"),
+        video_path=str(payload.get("video_path") or ""),
+        library_path=str(payload.get("library_path") or ""),
+        asr_source=str(payload.get("asr_source") or ""),
+        edited_by_user=bool(payload.get("edited_by_user")),
+        config=config,
+    )
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+    return True

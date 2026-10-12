@@ -493,7 +493,16 @@ def _index_chunk_payloads(chunks: list[Any] | None) -> dict[int, dict[str, Any]]
     return indexed
 
 
-def _chunk_meta_matches_payload(chunk_meta: Mapping[str, Any], payload: Mapping[str, Any], chunk_index: int) -> bool:
+def chunk_meta_matches_payload(
+    chunk_meta: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    chunk_index: int,
+) -> bool:
+    """True when evidence row still lines up with the current index chunk times.
+
+    Chunk index alone is not a stable key after re-chunking; UI and tag projection
+    must use the same timing check as resume.
+    """
     if int(payload.get("chunk_index", -1)) != int(chunk_index):
         return False
     try:
@@ -507,6 +516,10 @@ def _chunk_meta_matches_payload(chunk_meta: Mapping[str, Any], payload: Mapping[
         return False
 
 
+# Backward-compatible private alias.
+_chunk_meta_matches_payload = chunk_meta_matches_payload
+
+
 def _load_resumable_chunk_payloads(
     existing_bundle: Mapping[str, Any] | None,
     chunks: list[Mapping[str, Any]],
@@ -517,7 +530,7 @@ def _load_resumable_chunk_payloads(
         payload = indexed.get(chunk_index)
         if payload is None:
             continue
-        if not _chunk_meta_matches_payload(chunk_meta, payload, chunk_index):
+        if not chunk_meta_matches_payload(chunk_meta, payload, chunk_index):
             logger.warning(
                 "Skipping stale evidence chunk %s for video; index chunk timing changed",
                 chunk_index,
@@ -987,7 +1000,25 @@ def _run_video_evidence_generation(
         saved_count = len(completed)
         if only_indices is not None:
             missing_requested = [index for index in sorted(only_indices) if index not in completed]
-            if saved_count > 0 and not output_path:
+            stopped = bool(missing_requested) or bool(should_stop_callback and should_stop_callback())
+            # Partial refill must not demote a full bundle; mark completed when every chunk is present.
+            all_done = (not stopped) and total > 0 and all(index in completed for index in range(total))
+            if all_done:
+                chunk_payloads = [completed[index] for index in range(total)]
+                final_payload = _assemble_evidence_payload(
+                    video_context=video_context,
+                    profile_id=profile_id,
+                    pipeline=pipeline,
+                    chunk_payloads=chunk_payloads,
+                    config=cfg,
+                    generation_status="completed",
+                    chunk_total=total,
+                    generated_at=generated_at,
+                )
+                output_path = write_evidence_bundle(
+                    video_id, final_payload, config=cfg, mode=output_mode
+                )
+            elif saved_count > 0 and not output_path:
                 output_path = _checkpoint_evidence_bundle(
                     video_id,
                     video_context=video_context,
@@ -1007,9 +1038,9 @@ def _run_video_evidence_generation(
                 "chunk_total": len(only_indices),
                 "understanding_profile_id": profile_id,
                 "understanding_mode": output_mode,
-                "stopped": bool(missing_requested) or bool(should_stop_callback and should_stop_callback()),
+                "stopped": stopped,
                 "resumed_from": resumed_count,
-                "partial": True,
+                "partial": not all_done,
             }
         stopped = bool(should_stop_callback and should_stop_callback()) or saved_count < total
         if stopped:
@@ -1599,6 +1630,7 @@ def clear_all_evidence(*, config=None) -> dict[str, Any]:
     folders = [
         os.path.normpath(get_evidence_tags_dir(config=cfg)),
         os.path.normpath(get_evidence_summaries_dir(config=cfg)),
+        os.path.normpath(get_evidence_motion_dir(config=cfg)),
         os.path.normpath(get_evidence_videos_dir(config=cfg)),
         evidence_root,
     ]

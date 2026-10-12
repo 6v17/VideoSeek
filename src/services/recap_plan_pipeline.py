@@ -230,19 +230,28 @@ def _try_story_plan_llm(
     should_stop_callback: Callable[[], bool] | None,
     temperature: float,
     max_tokens: int,
+    retries: int = 1,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]] | None:
-    try:
-        text = _rs().call_remote_llm(
-            system=system,
-            user=user,
-            config=config,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            should_stop_callback=should_stop_callback,
-        )
-        return parse_story_plan(text)
-    except RuntimeError:
-        return None
+    """Call plan LLM; retry once on transport/runtime failure so one glitch ≠ silent act loss."""
+    attempts = max(1, int(retries) + 1)
+    for attempt in range(attempts):
+        if should_stop_callback and should_stop_callback():
+            raise UnderstandingStoppedError("stopped")
+        try:
+            text = _rs().call_remote_llm(
+                system=system,
+                user=user,
+                config=config,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                should_stop_callback=should_stop_callback,
+            )
+            return parse_story_plan(text)
+        except RuntimeError:
+            if attempt + 1 >= attempts:
+                return None
+            continue
+    return None
 
 def scrub_unevidenced_beats(
     beats: Sequence[Mapping[str, Any]],

@@ -12,7 +12,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_video_scope(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["url"] = url
             captured["payload"] = payload
             return {
@@ -43,7 +43,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_library_scope_when_no_videos(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 
@@ -60,7 +60,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_video_discovery_enabled(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 
@@ -84,7 +84,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_preview_anchor_sec_for_deep_locate(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 
@@ -116,7 +116,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_query_vector_for_compose(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 
@@ -141,7 +141,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_dialogue_match_mode(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 
@@ -162,7 +162,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_sends_text_enhance_for_visual_text(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 
@@ -182,7 +182,7 @@ class TeamClientScopeTests(unittest.TestCase):
     def test_search_omits_text_enhance_for_dialogue(self):
         captured = {}
 
-        def fake_post(url, payload, timeout=120.0):
+        def fake_post(url, payload, timeout=120.0, token="", **_kwargs):
             captured["payload"] = payload
             return {"ok": True, "hits": []}
 

@@ -65,6 +65,15 @@ class _ViewportWidthScrollArea(QScrollArea):
 class SettingsPage(QWidget, SettingsFormMixin):
     def __init__(self, parent=None):
         super().__init__(parent)
+        content_layout, shell_layout = self._init_settings_shell()
+        self._init_settings_status_headers()
+        self._init_settings_input_widgets()
+        self._init_settings_labels_and_hints()
+        self._init_settings_control_layout()
+        self._init_settings_section_forms()
+        self._assemble_settings_page(content_layout, shell_layout)
+
+    def _init_settings_shell(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -88,7 +97,9 @@ class SettingsPage(QWidget, SettingsFormMixin):
         # Small gutter between card edge and the always-on scrollbar track.
         content_layout.setContentsMargins(0, 0, 10, 0)
         content_layout.setSpacing(10)
+        return content_layout, shell_layout
 
+    def _init_settings_status_headers(self):
         self.general_title = QLabel()
         self.general_title.setObjectName("CardTitle")
 
@@ -162,6 +173,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self._search_telemetry_expanded = False
         self._set_search_telemetry_expanded(False)
 
+    def _init_settings_input_widgets(self):
         self.input_fps = NoWheelDoubleSpinBox()
         self.input_fps.setRange(0.01, 24.0)
         self.input_fps.setDecimals(2)
@@ -328,6 +340,8 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_migrate_legacy_index = QPushButton()
         self.lbl_legacy_migration_status = QLabel()
         self.hint_legacy_migration = QLabel()
+
+    def _init_settings_labels_and_hints(self):
         self.section_search_title = QLabel()
         self.section_fast_image_search_title = QLabel()
         self.section_precise_search_title = QLabel()
@@ -422,6 +436,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.detail_popup = SettingDetailPopup(is_dark=True)
         QApplication.instance().installEventFilter(self.detail_popup)
 
+    def _init_settings_control_layout(self):
         self._configure_setting_input(self.input_fps, width=94)
         self._configure_setting_input(self.input_sampling_fps_mode, width=136)
         self._configure_setting_input(self.input_lance_ann_enabled, width=COMPONENT_SIZES["settings_input_width"] + 36)
@@ -589,6 +604,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
         chunk_policy_bundle_layout.addWidget(self.input_chunk_policy, 1)
         chunk_policy_bundle_layout.addWidget(self.btn_toggle_chunk_advanced, 0, Qt.AlignRight | Qt.AlignVCenter)
 
+    def _init_settings_section_forms(self):
         self.section_search_card, self.section_search_form = self._create_settings_section(self.section_search_title)
         self.section_fast_image_search_card, self.section_fast_image_search_form = self._create_settings_section(
             self.section_fast_image_search_title
@@ -833,6 +849,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.hint_legacy_migration,
         )
 
+    def _assemble_settings_page(self, content_layout, shell_layout):
         self.card_general = VSCard()
         self.card_general.content_layout.addWidget(self.general_title)
         self.card_general.content_layout.addWidget(self.section_general_form_host)

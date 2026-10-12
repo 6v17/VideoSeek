@@ -346,22 +346,27 @@ class UnderstandingServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             tags_dir = os.path.join(temp_dir, "data", "evidence", "tags")
             summaries_dir = os.path.join(temp_dir, "data", "evidence", "summaries")
+            motion_dir = os.path.join(temp_dir, "data", "evidence", "motion")
             videos_dir = os.path.join(temp_dir, "data", "evidence", "videos")
             os.makedirs(tags_dir, exist_ok=True)
             os.makedirs(summaries_dir, exist_ok=True)
+            os.makedirs(motion_dir, exist_ok=True)
             os.makedirs(videos_dir, exist_ok=True)
             first_path = os.path.join(tags_dir, "vid001.json")
             first_tmp = f"{first_path}.tmp"
             second_path = os.path.join(summaries_dir, "vid002.json")
+            motion_path = os.path.join(motion_dir, "vid003.json")
             Path(first_path).write_text("{}", encoding="utf-8")
             Path(first_tmp).write_text("{}", encoding="utf-8")
             Path(second_path).write_text("{}", encoding="utf-8")
+            Path(motion_path).write_text("{}", encoding="utf-8")
             config = {"data_root": temp_dir}
             with patch(
                 "src.services.understanding_service.iter_evidence_candidate_paths",
                 side_effect=lambda video_id, config=None, mode=None: [
                     os.path.join(tags_dir, f"{video_id}.json"),
                     os.path.join(summaries_dir, f"{video_id}.json"),
+                    os.path.join(motion_dir, f"{video_id}.json"),
                     os.path.join(videos_dir, f"{video_id}.json"),
                 ],
             ), patch(
@@ -370,6 +375,9 @@ class UnderstandingServiceTests(unittest.TestCase):
             ), patch(
                 "src.services.understanding_service.get_evidence_summaries_dir",
                 return_value=summaries_dir,
+            ), patch(
+                "src.services.understanding_service.get_evidence_motion_dir",
+                return_value=motion_dir,
             ), patch(
                 "src.services.understanding_service.get_evidence_videos_dir",
                 return_value=videos_dir,
@@ -381,8 +389,9 @@ class UnderstandingServiceTests(unittest.TestCase):
                 self.assertFalse(os.path.isfile(first_path))
                 self.assertFalse(os.path.isfile(first_tmp))
                 cleared = clear_all_evidence(config=config)
-            self.assertEqual(cleared["deleted_count"], 1)
+            self.assertEqual(cleared["deleted_count"], 2)
             self.assertFalse(os.path.isfile(second_path))
+            self.assertFalse(os.path.isfile(motion_path))
 
     def test_generate_evidence_for_video_checkpoints_and_resumes(self):
         video_context = {

@@ -206,6 +206,48 @@ class EvidenceTagsStoreTests(unittest.TestCase):
                 self.assertEqual(len(hits), 1)
                 self.assertEqual(hits[0]["video_id"], "vid_motion")
 
+    def test_rebuild_skips_incomplete_and_keeps_prior_until_swap(self):
+        from src.storage import evidence_tags_store as store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            tags_dir = os.path.join(data_dir, "evidence", "tags")
+            os.makedirs(tags_dir, exist_ok=True)
+            good = _sample_bundle(video_id="vid_good")
+            good["provenance"]["generation_status"] = "completed"
+            good["provenance"]["chunk_total"] = 2
+            good["provenance"]["chunks_completed"] = 2
+            bad = _sample_bundle(video_id="vid_bad", tags0=["poison_tag"])
+            bad["provenance"]["generation_status"] = "in_progress"
+            bad["provenance"]["chunk_total"] = 2
+            bad["provenance"]["chunks_completed"] = 1
+            with open(os.path.join(tags_dir, "vid_good.json"), "w", encoding="utf-8") as fh:
+                json.dump(good, fh, ensure_ascii=False)
+            with open(os.path.join(tags_dir, "vid_bad.json"), "w", encoding="utf-8") as fh:
+                json.dump(bad, fh, ensure_ascii=False)
+
+            cfg = {"data_root": tmp}
+            with (
+                mock.patch(
+                    "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                    return_value={"data_dir": data_dir},
+                ),
+                mock.patch(
+                    "src.services.understanding_paths.get_data_storage_paths",
+                    return_value={"data_dir": data_dir},
+                ),
+            ):
+                store._SCHEMA_READY.clear()
+                result = store.rebuild_all_from_json(config=cfg)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["videos_projected"], 1)
+                self.assertEqual(result["videos_skipped_incomplete"], 1)
+                hits = store.search_tags("poison_tag", match_mode="exact")
+                self.assertEqual(hits, [])
+                hits = store.search_tags("table", match_mode="exact")
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0]["video_id"], "vid_good")
+
     def test_schema_is_recreated_after_the_db_file_is_replaced(self):
         from src.storage import evidence_tags_store as store
 

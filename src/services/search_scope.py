@@ -13,7 +13,9 @@ _SUBTITLE_PATH_INDEX_CACHE: dict[str, tuple[Any, "SearchablePathIndex"]] = {}
 
 
 def _canonical_file_path(path: str) -> str:
-    return os.path.normpath(os.path.abspath(os.path.expanduser(str(path or "").strip())))
+    """Absolute normalized path without normcase (for filesystem calls)."""
+    text = str(path or "").strip()
+    return os.path.normpath(os.path.abspath(os.path.expanduser(text)))
 
 
 def _path_is_file(path: str) -> bool:
@@ -27,7 +29,10 @@ def _path_is_file(path: str) -> bool:
 
 
 def normalize_scope_path(path: str) -> str:
-    return os.path.normcase(_canonical_file_path(path))
+    """Case-folded absolute path — same key as ``canonicalize_library_path``."""
+    from src.storage.video_identity import canonicalize_library_path
+
+    return canonicalize_library_path(path)
 
 
 def iter_indexed_video_entries(meta) -> Iterable[Tuple[str, str, dict]]:

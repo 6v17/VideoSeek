@@ -4,8 +4,33 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ._fastapi import BaseModel, Field
+from ._fastapi import BaseModel, Field, _IMPORT_ERROR
 from .constants import DEFAULT_FRAME_PAD_AFTER_SEC, DEFAULT_FRAME_PAD_BEFORE_SEC
+
+# Bounds so pad_* cannot invent negative durations and base64/vectors stay bounded.
+_MAX_PAD_SEC = 300.0
+_MAX_QUERY_VECTOR_DIM = 4096
+# ~20MB decoded JPEG/PNG (base64 expands ~4/3).
+_MAX_IMAGE_BASE64_CHARS = (20 * 1024 * 1024 * 4) // 3 + 64
+
+
+def _pad_field(default: float):
+    """Use Pydantic bounds when available; plain default under the import stub."""
+    if _IMPORT_ERROR is not None:
+        return default
+    return Field(default=default, ge=0.0, le=_MAX_PAD_SEC)
+
+
+def _optional_str_field(*, max_length: int):
+    if _IMPORT_ERROR is not None:
+        return None
+    return Field(default=None, max_length=max_length)
+
+
+def _optional_vector_field(*, max_length: int):
+    if _IMPORT_ERROR is not None:
+        return None
+    return Field(default=None, max_length=max_length)
 
 
 class AgentSearchScope(BaseModel):
@@ -21,7 +46,7 @@ class AgentSearchRequest(BaseModel):
     # Alias for image search: same as query + query_type=image_path
     image_path: Optional[str] = None
     # Team client upload: decode to a temp file on the server
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = _optional_str_field(max_length=_MAX_IMAGE_BASE64_CHARS)
     image_mime: Optional[str] = None
     # visual (default) | dialogue | tags — orthogonal to mode frame/chunk
     search_kind: Optional[str] = None
@@ -33,7 +58,7 @@ class AgentSearchRequest(BaseModel):
     # Image search: keep best hit per video (desktop 「视频择优」).
     video_discovery_enabled: Optional[bool] = None
     # Precomputed CLIP vector (compose / presets). When set, server skips re-encoding.
-    query_vector: Optional[List[float]] = None
+    query_vector: Optional[List[float]] = _optional_vector_field(max_length=_MAX_QUERY_VECTOR_DIM)
     # Dialogue/tags: exact | fuzzy | auto (team clients may also send via search_mode).
     match_mode: Optional[str] = None
     # Visual text search: multi-route CLIP + RRF. null = use server text_search_enhance_enabled.
@@ -41,8 +66,8 @@ class AgentSearchRequest(BaseModel):
     client_request_id: Optional[str] = None
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
-    pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
-    pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+    pad_before_sec: float = _pad_field(DEFAULT_FRAME_PAD_BEFORE_SEC)
+    pad_after_sec: float = _pad_field(DEFAULT_FRAME_PAD_AFTER_SEC)
     preview_anchor_sec: Optional[float] = None
     # Coarse-hit score and top1-top2 gap for in-video locate. Desktop keeps these
     # locally; the team client must send them or the server locate window stays wide.
@@ -77,8 +102,8 @@ class AgentBatchSearchRequest(BaseModel):
     continue_on_error: bool = True
     scope: Optional[AgentSearchScope] = None
     expand_frame_hits: bool = True
-    pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
-    pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+    pad_before_sec: float = _pad_field(DEFAULT_FRAME_PAD_BEFORE_SEC)
+    pad_after_sec: float = _pad_field(DEFAULT_FRAME_PAD_AFTER_SEC)
     export: Optional[AgentBatchSearchExportOptions] = None
 
 
@@ -102,8 +127,8 @@ class AgentManifestRequest(BaseModel):
     dedupe: bool = True
     write_path: Optional[str] = None
     expand_frame_hits: bool = True
-    pad_before_sec: float = DEFAULT_FRAME_PAD_BEFORE_SEC
-    pad_after_sec: float = DEFAULT_FRAME_PAD_AFTER_SEC
+    pad_before_sec: float = _pad_field(DEFAULT_FRAME_PAD_BEFORE_SEC)
+    pad_after_sec: float = _pad_field(DEFAULT_FRAME_PAD_AFTER_SEC)
     mode: Optional[str] = None
 
 

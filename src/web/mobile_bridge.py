@@ -39,7 +39,57 @@ logger = get_logger("mobile_bridge")
 
 # Cap phone→PC image uploads (M12): avoid unbounded memory from ``file.read()``.
 MAX_MOBILE_UPLOAD_BYTES = 20 * 1024 * 1024
+# Cap images per /search request (compose multi-image); reject before writing temp files.
+MAX_MOBILE_UPLOAD_FILES = 8
 _MOBILE_UPLOAD_READ_CHUNK = 1024 * 1024
+
+
+def _bind_host_for_check(host: str) -> str:
+    text = str(host or "").strip() or "0.0.0.0"
+    if text in {"0.0.0.0", "::"}:
+        return "0.0.0.0"
+    return text
+
+
+def can_bind_mobile_bridge_port(host: str, port: int) -> bool:
+    """True when ``host:port`` can be bound (preflight before uvicorn start)."""
+    try:
+        port_i = int(port)
+    except (TypeError, ValueError):
+        return False
+    if port_i <= 0 or port_i > 65535:
+        return False
+    bind_host = _bind_host_for_check(host)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((bind_host, port_i))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _pick_bindable_port(host: str, preferred: int, *, attempts: int = 20) -> int:
+    """Return preferred port, or the next free one. Raises if none found."""
+    try:
+        start = int(preferred)
+    except (TypeError, ValueError):
+        start = 8918
+    start = max(1, min(65535, start))
+    for offset in range(max(1, int(attempts))):
+        candidate = start + offset
+        if candidate > 65535:
+            break
+        if can_bind_mobile_bridge_port(host, candidate):
+            if candidate != start:
+                logger.info("Mobile bridge port %s busy; using %s instead.", start, candidate)
+            return candidate
+    raise RuntimeError(f"No free port for mobile bridge near {start} (tried {attempts}).")
 
 
 def resolve_mobile_bridge_host(preferred: str | None = None) -> str:
@@ -233,7 +283,7 @@ def cleanup_stale_mobile_uploads(
 class MobileBridgeService:
     def __init__(
         self,
-        on_search_requested: Callable[[dict], None],
+        on_search_requested: Callable[[dict], object | None],
         host: str | None = None,
         port: int = 8918,
     ):
@@ -255,6 +305,7 @@ class MobileBridgeService:
         self._template_path = get_resource_path(os.path.join("static", "index.html"))
 
         self.app = FastAPI(title="VideoSeek Mobile Bridge")
+        self.app.middleware("http")(self._auth_middleware)
         self.app.get("/static/mobile_upload.js")(self._mobile_upload_js)
         if os.path.isdir(self._static_dir):
             self.app.mount("/static", StaticFiles(directory=self._static_dir), name="static")
@@ -278,6 +329,8 @@ class MobileBridgeService:
             removed = cleanup_stale_mobile_uploads(self.upload_dir)
             if removed:
                 logger.info("Removed %s stale mobile upload file(s).", removed)
+            # Preflight bind + fallback so a stuck port does not fail after a 3s wait.
+            self.port = _pick_bindable_port(self.host, self.port)
             config = uvicorn.Config(
                 self.app,
                 host=self.host,
@@ -289,17 +342,23 @@ class MobileBridgeService:
             self._thread = threading.Thread(target=self._run_server, name="MobileBridgeServer", daemon=True)
             self._thread.start()
 
-        started = False
-        for _ in range(30):
-            if self._server is not None and getattr(self._server, "started", False):
-                started = True
-                break
-            if self._thread is None or not self._thread.is_alive():
-                break
-            time.sleep(0.1)
-        if not started:
-            raise RuntimeError("Mobile bridge server failed to start within 3 seconds.")
+        # Callers that must stay responsive should invoke start() off the UI thread
+        # (see MobileBridgeController). Port preflight above keeps this wait short.
+        if not self._wait_until_uvicorn_started(timeout_sec=3.0):
+            raise RuntimeError(
+                f"Mobile bridge server failed to start on {self.host}:{self.port} within 3 seconds."
+            )
         self._started.set()
+
+    def _wait_until_uvicorn_started(self, *, timeout_sec: float = 3.0) -> bool:
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        while time.monotonic() < deadline:
+            if self._server is not None and getattr(self._server, "started", False):
+                return True
+            if self._thread is None or not self._thread.is_alive():
+                return False
+            time.sleep(0.05)
+        return False
 
     def stop(self, *, wait: bool | None = None):
         with self._lock:
@@ -319,7 +378,12 @@ class MobileBridgeService:
         return self._thread is not None and self._thread.is_alive() and self._started.is_set()
 
     def get_access_url(self):
-        return f"http://{get_local_ip()}:{self.port}/?token={self.token}"
+        # Must match the bind host (resolve_mobile_bridge_host / detect_lan_ip), not
+        # get_local_ip() — VPN fake-ip routes make QR codes unreachable.
+        host = self.host if self.host not in {"0.0.0.0", "::"} else resolve_mobile_bridge_host()
+        if host in {"0.0.0.0", "::"}:
+            host = get_local_ip()
+        return f"http://{host}:{self.port}/?token={self.token}"
 
     def _run_server(self):
         try:
@@ -335,14 +399,34 @@ class MobileBridgeService:
         if not expected or not hmac.compare_digest(provided, expected):
             raise HTTPException(status_code=403, detail="Invalid access token.")
 
-    async def _index(self, request: Request):
-        self._validate_access_token(str(request.query_params.get("token", "") or ""))
+    def _extract_access_token(self, request: Request) -> str:
+        """Token from query/header only — never from multipart body (parsed after auth)."""
+        query = str(request.query_params.get("token", "") or "").strip()
+        if query:
+            return query
+        header = str(request.headers.get("x-videoseek-token", "") or "").strip()
+        if header:
+            return header
+        auth = str(request.headers.get("authorization", "") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        return ""
 
+    async def _auth_middleware(self, request: Request, call_next):
+        """Reject unauthenticated uploads before FastAPI parses multipart bodies."""
+        path = str(request.url.path or "")
+        if path in {"/preview", "/search", "/", "/config"}:
+            try:
+                self._validate_access_token(self._extract_access_token(request))
+            except HTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return await call_next(request)
+
+    async def _index(self, request: Request):
         html = self._load_index_html()
         return html.replace("__UPLOAD_TOKEN__", self.token)
 
     async def _config(self, request: Request):
-        self._validate_access_token(str(request.query_params.get("token", "") or ""))
         return JSONResponse(get_mobile_search_defaults())
 
     async def _mobile_upload_js(self):
@@ -396,10 +480,11 @@ class MobileBridgeService:
 
     async def _preview(
         self,
-        token: str = Form(""),
+        request: Request,
         file: UploadFile = File(...),
     ):
-        self._validate_access_token(token)
+        # Auth already enforced in _auth_middleware (query/header, before body parse).
+        del request
         target_path = await self._save_upload_file(file)
         try:
             from src.core.image_io import encode_preview_jpeg
@@ -417,7 +502,6 @@ class MobileBridgeService:
     async def _search(
         self,
         request: Request,
-        token: str = Form(""),
         search_kind: str = Form("image"),
         query: str = Form(""),
         text_weight: str = Form(""),
@@ -427,8 +511,11 @@ class MobileBridgeService:
         file: UploadFile = File(None),
         files: list[UploadFile] = File(None),
     ):
-        self._validate_access_token(token)
-        kind = normalize_mobile_search_kind(search_kind)
+        # Auth already enforced in _auth_middleware (query/header, before body parse).
+        try:
+            kind = normalize_mobile_search_kind(search_kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         cleaned_query = str(query or "").strip()
         saved_paths: list[str] = []
 
@@ -437,34 +524,43 @@ class MobileBridgeService:
             uploads.extend(files)
         if file is not None and str(getattr(file, "filename", "") or "").strip():
             uploads.append(file)
+        named_uploads = [
+            upload
+            for upload in uploads
+            if upload is not None and str(getattr(upload, "filename", "") or "").strip()
+        ]
+        if len(named_uploads) > MAX_MOBILE_UPLOAD_FILES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many images (max {MAX_MOBILE_UPLOAD_FILES} per request).",
+            )
 
-        for upload in uploads:
-            if upload is None or not str(getattr(upload, "filename", "") or "").strip():
-                continue
+        def _cleanup_saved_paths(*extra: str) -> None:
+            for path in list(saved_paths) + list(extra):
+                if not path:
+                    continue
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+        for upload in named_uploads:
             target_path = await self._save_upload_file(upload)
             from src.core.image_io import normalize_image_upload
 
             try:
                 target_path = normalize_image_upload(target_path)
             except ValueError as exc:
-                for path in saved_paths:
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
-                try:
-                    os.remove(target_path)
-                except OSError:
-                    pass
+                _cleanup_saved_paths(target_path)
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             saved_paths.append(target_path)
 
-        fusion = parse_mobile_fusion(
-            text_weight,
-            has_text=bool(cleaned_query),
-            has_image=bool(saved_paths),
-        )
         try:
+            fusion = parse_mobile_fusion(
+                text_weight,
+                has_text=bool(cleaned_query),
+                has_image=bool(saved_paths),
+            )
             payload = build_mobile_search_payload(
                 search_kind=kind,
                 query=cleaned_query,
@@ -476,18 +572,25 @@ class MobileBridgeService:
                 dialogue_search_mode=dialogue_search_mode,
             )
         except ValueError as exc:
-            for path in saved_paths:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+            _cleanup_saved_paths()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         try:
-            self._on_search_requested(payload)
+            handed = self._on_search_requested(payload)
+        except RuntimeError as exc:
+            _cleanup_saved_paths()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
+            _cleanup_saved_paths()
             logger.exception("Failed to hand off mobile search request to UI.")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        if isinstance(handed, dict) and handed.get("ok") is False:
+            _cleanup_saved_paths()
+            raise HTTPException(
+                status_code=409,
+                detail=str(handed.get("error") or "search_not_started"),
+            )
 
         logger.info("Accepted mobile search request: kind=%s", kind)
         labels = {

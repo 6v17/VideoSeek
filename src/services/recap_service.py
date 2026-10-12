@@ -237,8 +237,10 @@ from src.services.recap_cut_build import (  # facade: normalize / refine / durat
 )
 
 from src.services.recap_io import (  # facade: sidecar load / write
+    RecapSidecarCorruptError as RecapSidecarCorruptError,
     _load_recap_sidecar as _load_recap_sidecar,
     _read_recap_sidecar as _read_recap_sidecar,
+    recap_beats_edited_by_user as recap_beats_edited_by_user,
     recap_clip_records as recap_clip_records,
     _recap_sidecar_path as _recap_sidecar_path,
     load_recap_beats as load_recap_beats,
@@ -600,6 +602,7 @@ def generate_recap_timeline(
             beats = list(saved.get("beats") or [])
             people = normalize_story_people(saved)
             pack["people"] = people
+            user_edited_plan = recap_beats_edited_by_user(saved)
             allocated = allocate_beat_budgets(
                 beats,
                 chunks=list(pack.get("chunks") or []),
@@ -622,57 +625,91 @@ def generate_recap_timeline(
                 video_id=video_id,
                 allocated=allocated,
                 people=people,
+                edited_by_user=user_edited_plan,
             )
         else:
-            _progress(12, "planning")
-            plan_title, beats, people, act_warns = plan_story_beats_by_acts(
-                pack,
-                video_id=video_id,
-                config=cfg,
-                language=caption_language,
-                system_prompt=None,
-                should_stop_callback=should_stop_callback,
-                progress_callback=progress_callback,
-            )
-            warnings.extend(act_warns)
-            if not beats:
-                # Fallback: single-shot plan if every act call failed.
-                plan_text = call_remote_llm(
-                    system=plan_system,
-                    user=recap_plan_user_prompt(pack),
-                    config=cfg,
-                    temperature=0.25,
-                    max_tokens=4096,
-                    should_stop_callback=should_stop_callback,
+            existing_plan = load_recap_beats(video_path, video_id=video_id)
+            if existing_plan and recap_beats_edited_by_user(existing_plan):
+                # Manual editor wins: do not silently regenerate over user beats.
+                warnings.append("recap_warn_kept_user_plan")
+                plan_title = str(existing_plan.get("title") or "").strip() or plan_title
+                beats = list(existing_plan.get("beats") or [])
+                people = normalize_story_people(existing_plan)
+                pack["people"] = people
+                allocated = allocate_beat_budgets(
+                    beats,
+                    chunks=list(pack.get("chunks") or []),
+                    target_sec=float(existing_plan.get("target_sec") or target_sec),
+                    duration_sec=duration,
                 )
-                plan_title, beats, people = parse_story_plan(plan_text)
-            # One-shot act plan + free deterministic spine/land/bookends — no head/gap/tail LLM stack.
-            beats = finalize_recap_plan_beats(beats, pack, duration_sec=duration)
-            people = merge_story_people(pack.get("people"), people)
-            pack["people"] = people
-            allocated = allocate_beat_budgets(
-                beats,
-                chunks=list(pack.get("chunks") or []),
-                target_sec=target_sec,
-                duration_sec=duration,
-            )
-            _raise_if_stopped()
-            _progress(48, "vo_draft")
-            allocated = draft_recap_vo_for_beats(
-                pack,
-                allocated,
-                config=cfg,
-                language=caption_language,
-                should_stop_callback=should_stop_callback,
-                progress_callback=progress_callback,
-            )
-            beats_path = write_recap_beats_file(
-                beats_path,
-                title=plan_title,
-                video_id=video_id,
-                allocated=allocated,
-                people=people,
-            )
+                _raise_if_stopped()
+                _progress(48, "vo_draft")
+                allocated = draft_recap_vo_for_beats(
+                    pack,
+                    allocated,
+                    config=cfg,
+                    language=caption_language,
+                    should_stop_callback=should_stop_callback,
+                    progress_callback=progress_callback,
+                )
+                beats_path = write_recap_beats_file(
+                    recap_beats_path_for_video(video_path),
+                    title=plan_title,
+                    video_id=video_id,
+                    allocated=allocated,
+                    people=people,
+                    edited_by_user=True,
+                )
+            else:
+                _progress(12, "planning")
+                plan_title, beats, people, act_warns = plan_story_beats_by_acts(
+                    pack,
+                    video_id=video_id,
+                    config=cfg,
+                    language=caption_language,
+                    system_prompt=None,
+                    should_stop_callback=should_stop_callback,
+                    progress_callback=progress_callback,
+                )
+                warnings.extend(act_warns)
+                if not beats:
+                    # Fallback: single-shot plan if every act call failed.
+                    plan_text = call_remote_llm(
+                        system=plan_system,
+                        user=recap_plan_user_prompt(pack),
+                        config=cfg,
+                        temperature=0.25,
+                        max_tokens=4096,
+                        should_stop_callback=should_stop_callback,
+                    )
+                    plan_title, beats, people = parse_story_plan(plan_text)
+                # One-shot act plan + free deterministic spine/land/bookends — no head/gap/tail LLM stack.
+                beats = finalize_recap_plan_beats(beats, pack, duration_sec=duration)
+                people = merge_story_people(pack.get("people"), people)
+                pack["people"] = people
+                allocated = allocate_beat_budgets(
+                    beats,
+                    chunks=list(pack.get("chunks") or []),
+                    target_sec=target_sec,
+                    duration_sec=duration,
+                )
+                _raise_if_stopped()
+                _progress(48, "vo_draft")
+                allocated = draft_recap_vo_for_beats(
+                    pack,
+                    allocated,
+                    config=cfg,
+                    language=caption_language,
+                    should_stop_callback=should_stop_callback,
+                    progress_callback=progress_callback,
+                )
+                beats_path = write_recap_beats_file(
+                    beats_path,
+                    title=plan_title,
+                    video_id=video_id,
+                    allocated=allocated,
+                    people=people,
+                )
             if stage == RECAP_START_PLAN_ONLY:
                 return {
                     "title": plan_title,
@@ -718,24 +755,57 @@ def generate_recap_timeline(
         cuts = []
         match_title = plan_title
         waves = split_beats_for_match(allocated)
+        info = None
         for index, wave in enumerate(waves):
             _raise_if_stopped()
             _progress(48 + min(24, index * 14), "matching")
             wave_pack = pack_for_beats(pack, wave)
             used_src = collect_used_source_spans(cuts)
-            match_text = call_remote_llm(
-                system=match_system,
-                user=recap_user_prompt(wave_pack, wave, used_src=used_src),
-                config=cfg,
-                temperature=0.25,
-                max_tokens=4096,
-                should_stop_callback=should_stop_callback,
-            )
+            match_text = None
+            for attempt in range(2):
+                _raise_if_stopped()
+                try:
+                    match_text = call_remote_llm(
+                        system=match_system,
+                        user=recap_user_prompt(wave_pack, wave, used_src=used_src),
+                        config=cfg,
+                        temperature=0.25,
+                        max_tokens=4096,
+                        should_stop_callback=should_stop_callback,
+                    )
+                    break
+                except RuntimeError:
+                    if attempt == 0:
+                        continue
+                    warnings.append("recap_warn_match_wave")
+                    match_text = None
+            if match_text is None:
+                # Keep earlier waves; do not discard completed match work.
+                break
             wave_title, wave_cuts = parse_cut_list(match_text, pack)
             if wave_title and wave_title != "解说剪辑":
                 match_title = wave_title
             cuts.extend(wave_cuts)
             cuts = drop_reused_source_cuts(cuts)
+            # Checkpoint after each successful wave so a later failure cannot erase them.
+            try:
+                if info is None:
+                    info = probe_recap_media(video_path)
+                laid_checkpoint = layout_clips_on_timeline(
+                    cuts, fps=float(info.get("fps") or 24.0)
+                )
+                write_recap_cuts_file(
+                    cuts_path,
+                    title=str(match_title or plan_title or "解说剪辑"),
+                    video_path=video_path,
+                    video_id=video_id,
+                    info=info,
+                    laid_out=laid_checkpoint,
+                    beats_path=beats_path,
+                    stage=RECAP_START_MATCH,
+                )
+            except OSError:
+                pass
         leftover = missing_match_beats(allocated, cuts)
         if leftover:
             # No second match bill — first waves must cover; leftover stays for manual rematch.

@@ -421,8 +421,58 @@ class LibraryIndexingGuiMixin:
         tree = self.library_page.visual_video_tree
         btn.setEnabled(bool(tree.collect_checked_video_ids()))
 
+    def _refresh_team_library_tables_async(self) -> bool:
+        """Fetch shared library trees off the UI thread. Returns True when scheduled."""
+        from src.app.config import load_config
+        from src.services.team_mode_service import is_team_client_mode
+        from ui.workers import TeamLibraryFetchWorker
+
+        if not is_team_client_mode():
+            return False
+        worker = getattr(self, "_team_library_fetch_worker", None)
+        if worker is not None and worker.isRunning():
+            return True
+        try:
+            self._ensure_library_tree_hooks()
+            self.library_page.visual_video_tree.refresh_from_entries([], library_paths=[])
+            self.library_page.subtitle_video_tree.refresh_from_entries([], library_paths=[])
+            self._refresh_team_client_library_chrome()
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_library_indexing.py:team_clear")
+        cfg = load_config()
+        worker = TeamLibraryFetchWorker(
+            str(cfg.get("team_server_url") or ""),
+            api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
+            parent=self,
+        )
+        worker.finished_signal.connect(self._on_team_library_fetch_finished)
+        worker.error_signal.connect(self._on_team_library_fetch_failed)
+        self._team_library_fetch_worker = worker
+        worker.start()
+        return True
+
+    def _on_team_library_fetch_finished(self, payload):
+        self._team_library_fetch_worker = None
+        try:
+            self.apply_team_client_library_payload(payload)
+        except Exception as exc:
+            self.show_error_dialog(self.texts.get("library_load_failed", "Library load failed"), exc)
+
+    def _on_team_library_fetch_failed(self, message: str):
+        self._team_library_fetch_worker = None
+        self.show_error_dialog(
+            self.texts.get("library_load_failed", "Library load failed"),
+            RuntimeError(str(message or "team library fetch failed")),
+        )
+
     def refresh_library_table(self):
         from src.services.team_mode_service import is_team_client_mode
+
+        if is_team_client_mode():
+            self._refresh_team_library_tables_async()
+            return
 
         tree = None
         try:
@@ -447,9 +497,6 @@ class LibraryIndexingGuiMixin:
                 header_action=self.texts.get("library_col_action", "Action"),
                 **list_find_text_kwargs(self.texts),
             )
-            # Drop stale local rows before remote fetch when switching to 用户机.
-            if is_team_client_mode():
-                tree.refresh_from_entries([], library_paths=[])
             entries, library_paths = self._build_visual_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
             self._refresh_library_action_hints()
@@ -1511,18 +1558,21 @@ class LibraryIndexingGuiMixin:
     def refresh_dialogue_library_table(self):
         from src.services.team_mode_service import is_team_client_mode
 
+        if is_team_client_mode():
+            self._refresh_team_library_tables_async()
+            return
+
         try:
-            if not is_team_client_mode():
-                from src.services.subtitle_library_service import prune_missing_subtitle_sources
+            from src.services.subtitle_library_service import prune_missing_subtitle_sources
 
-                try:
-                    # Never auto-delete OCR here. Offline/removable drives must not wipe transcripts.
-                    prune_missing_subtitle_sources(clear_orphan_transcripts=False)
-                except Exception as exc:
-                    from src.app.logging_utils import note_swallowed
+            try:
+                # Never auto-delete OCR here. Offline/removable drives must not wipe transcripts.
+                prune_missing_subtitle_sources(clear_orphan_transcripts=False)
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
 
-                    note_swallowed(exc, "ui/windows/gui_library_indexing.py:1474")
-                    pass
+                note_swallowed(exc, "ui/windows/gui_library_indexing.py:1474")
+                pass
             self._ensure_library_tree_hooks()
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
             empty_text = self.texts.get(
@@ -1547,8 +1597,6 @@ class LibraryIndexingGuiMixin:
                 header_action=self.texts.get("library_col_action", "Action"),
                 **list_find_text_kwargs(self.texts),
             )
-            if is_team_client_mode():
-                tree.refresh_from_entries([], library_paths=[])
             entries, library_paths = self._build_subtitle_tree_entries(register=False)
             tree.refresh_from_entries(entries, library_paths=library_paths)
             self._refresh_team_client_library_chrome()

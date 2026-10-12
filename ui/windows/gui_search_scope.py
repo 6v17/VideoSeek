@@ -111,7 +111,10 @@ class SearchScopeGuiMixin:
                         api_port_default=int(cfg.get("team_api_port", 8765) or 8765),
                     )
                     self._dialogue_search_scope_entries_dirty = False
-                except Exception:
+                except Exception as exc:
+                    from src.app.logging_utils import note_swallowed
+
+                    note_swallowed(exc, "ui/windows/gui_search_scope.py:team_dialogue_scope")
                     self._dialogue_search_scope_entries_cache = []
                     self._dialogue_search_scope_entries_dirty = True
                 return
@@ -124,7 +127,10 @@ class SearchScopeGuiMixin:
             try:
                 self._dialogue_search_scope_entries_cache = list_subtitle_search_scope_entries()
                 self._dialogue_search_scope_entries_dirty = False
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_search_scope.py:local_dialogue_scope")
                 self._dialogue_search_scope_entries_cache = []
                 self._dialogue_search_scope_entries_dirty = True
             return
@@ -141,7 +147,10 @@ class SearchScopeGuiMixin:
 
                 self._tag_search_scope_entries_cache = list_tag_search_scope_entries()
                 self._tag_search_scope_entries_dirty = False
-            except Exception:
+            except Exception as exc:
+                from src.app.logging_utils import note_swallowed
+
+                note_swallowed(exc, "ui/windows/gui_search_scope.py:tag_scope")
                 self._tag_search_scope_entries_cache = []
                 self._tag_search_scope_entries_dirty = True
             return
@@ -162,7 +171,10 @@ class SearchScopeGuiMixin:
                 detail = list_local_vector_details(validate_contents=False, include_storage_stats=False)
                 self._search_scope_entries_cache = list(detail.get("entries", []))
             self._search_scope_entries_dirty = False
-        except Exception:
+        except Exception as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_search_scope.py:visual_scope")
             self._search_scope_entries_cache = []
             self._search_scope_entries_dirty = True
 

@@ -423,7 +423,12 @@ def _relocate_evidence_files(old_vid: str, new_vid: str, *, config=None) -> int:
 
 def _relocate_understanding_side_assets(old_vid: str, new_vid: str, *, config=None) -> dict:
     """Keep evidence JSON + dialogue/tags aligned when vector video_id changes."""
-    stats = {"evidence_files": 0, "dialogue_rekeyed": False, "tag_rows": 0}
+    stats = {
+        "evidence_files": 0,
+        "dialogue_rekeyed": False,
+        "working_copy_rekeyed": False,
+        "tag_rows": 0,
+    }
     try:
         stats["evidence_files"] = _relocate_evidence_files(old_vid, new_vid, config=config)
     except Exception:
@@ -436,6 +441,14 @@ def _relocate_understanding_side_assets(old_vid: str, new_vid: str, *, config=No
         )
     except Exception:
         logger.exception("Dialogue rekey failed for %s -> %s", old_vid, new_vid)
+    try:
+        from src.services.understanding_dialogue import rekey_working_copy_video_id
+
+        stats["working_copy_rekeyed"] = bool(
+            rekey_working_copy_video_id(old_vid, new_vid, config=config)
+        )
+    except Exception:
+        logger.exception("Working-copy rekey failed for %s -> %s", old_vid, new_vid)
     try:
         from src.storage.evidence_tags_store import rekey_video_tags
 

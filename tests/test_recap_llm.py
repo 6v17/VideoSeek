@@ -52,6 +52,7 @@ from src.services.recap_service import (
     fit_recap_captions_to_tts,
     load_recap_cuts,
     load_recap_beats,
+    recap_beats_edited_by_user,
     write_recap_beats_file,
     generate_recap_timeline,
     recap_cuts_path_for_video,
@@ -3575,6 +3576,37 @@ class RecapPackTests(unittest.TestCase):
         self.assertAlmostEqual(parse_recap_clock("02:05"), 125.0)
         self.assertAlmostEqual(parse_recap_clock("90"), 90.0)
 
+    def test_save_recap_plan_edits_marks_user_edited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "clip.mp4"
+            video.write_bytes(b"x")
+            written = save_recap_plan_edits(
+                str(video),
+                video_id="vid1",
+                title="手改",
+                beats=[{"id": 1, "event": "开场", "importance": 0.8, "t": [0, 10]}],
+                people=[],
+                duration_sec=100.0,
+                target_sec=60.0,
+            )
+            payload = json.loads(written.read_text(encoding="utf-8"))
+            self.assertTrue(payload.get("edited_by_user"))
+            self.assertTrue(recap_beats_edited_by_user(payload))
+            # Auto overwrite without the flag should leave a .bak of the user plan.
+            write_recap_beats_file(
+                written,
+                title="自动",
+                video_id="vid1",
+                allocated=[{"id": 1, "event": "覆盖", "budget_sec": 8}],
+                people=[],
+                edited_by_user=False,
+            )
+            bak = written.with_name(written.name + ".bak")
+            self.assertTrue(bak.is_file())
+            bak_payload = json.loads(bak.read_text(encoding="utf-8"))
+            self.assertEqual(bak_payload.get("title"), "手改")
+            self.assertTrue(bak_payload.get("edited_by_user"))
+
     def test_save_recap_plan_edits_reallocates(self):
         with tempfile.TemporaryDirectory() as tmp:
             video = Path(tmp) / "ep.mp4"
@@ -3652,6 +3684,33 @@ class RecapPackTests(unittest.TestCase):
             loaded = load_recap_beats(str(new_video), video_id="vid-1")
             self.assertIsNotNone(loaded)
             self.assertEqual(loaded["title"], "旧名规划")
+            # Heal onto the living primary path so later writes do not fork.
+            primary = recap_beats_path_for_video(str(new_video))
+            self.assertTrue(primary.is_file())
+            healed = json.loads(primary.read_text(encoding="utf-8"))
+            self.assertEqual(healed["title"], "旧名规划")
+
+    def test_load_recap_beats_raises_on_corrupt_primary(self):
+        from src.services.recap_io import RecapSidecarCorruptError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "clip.mp4"
+            video.write_bytes(b"x")
+            primary = recap_beats_path_for_video(str(video))
+            primary.write_text("{not-json", encoding="utf-8")
+            with self.assertRaises(RecapSidecarCorruptError):
+                load_recap_beats(str(video), video_id="vid-1")
+            # Corrupt primary must not be overwritten by a sibling fallback.
+            sibling = Path(tmp) / "other_recap_beats.json"
+            write_recap_beats_file(
+                sibling,
+                title="sibling",
+                video_id="vid-1",
+                allocated=[{"id": 1, "event": "开场", "budget_sec": 12.0, "t": [0.0, 8.0]}],
+            )
+            with self.assertRaises(RecapSidecarCorruptError):
+                load_recap_beats(str(video), video_id="vid-1")
+            self.assertEqual(primary.read_text(encoding="utf-8"), "{not-json")
 
     def test_build_recap_pack_uses_living_path_after_rename(self):
         with tempfile.TemporaryDirectory() as tmp:

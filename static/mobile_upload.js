@@ -58,9 +58,11 @@ async function previewViaServer(file, silent=false) {
         setStatus("正在由电脑生成预览...");
     }
     const formData = new FormData();
-    formData.append("token", uploadToken);
     formData.append("file", file);
-    const response = await fetch("/preview", { method: "POST", body: formData });
+    const response = await fetch(
+        `/preview?token=${encodeURIComponent(uploadToken)}`,
+        { method: "POST", body: formData }
+    );
     if (!response.ok) {
         if (!silent) {
             setStatus("预览失败，但仍可发送。");
@@ -419,7 +421,6 @@ async function submitSearch() {
     setStatus("正在发送到电脑端...");
 
     const formData = new FormData();
-    formData.append("token", uploadToken);
     formData.append("search_kind", currentMode);
     formData.append("query", currentQuery());
     if (currentMode === "image") {
@@ -442,7 +443,10 @@ async function submitSearch() {
     }
 
     try {
-        const response = await fetch("/search", { method: "POST", body: formData });
+        const response = await fetch(
+            `/search?token=${encodeURIComponent(uploadToken)}`,
+            { method: "POST", body: formData }
+        );
         let payload = {};
         try {
             payload = await response.json();

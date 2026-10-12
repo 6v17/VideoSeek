@@ -74,6 +74,12 @@ class ObjectDetectionEvidence:
 class ImageCaptionEvidence:
     source: str
     text: str
+    raw_text: str = ""
+    visible: str = ""
+    change: str = ""
+    inferred: str = ""
+    inferred_weight: float = 0.0
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -178,9 +184,24 @@ def _parse_image_caption(raw_value: object, field_name: str) -> ImageCaptionEvid
     if not text:
         # Empty model output is "missing caption", not a poison object for the bundle.
         return None
+    tags_raw = payload.get("tags") or ()
+    if isinstance(tags_raw, (list, tuple)):
+        tags = tuple(str(item).strip() for item in tags_raw if str(item or "").strip())
+    else:
+        tags = ()
+    try:
+        weight = float(payload.get("inferred_weight") or 0.0)
+    except (TypeError, ValueError):
+        weight = 0.0
     return ImageCaptionEvidence(
         source=_require_text(payload.get("source"), f"{field_name}.source"),
         text=text,
+        raw_text=str(payload.get("raw_text") or "").strip(),
+        visible=str(payload.get("visible") or "").strip(),
+        change=str(payload.get("change") or "").strip(),
+        inferred=str(payload.get("inferred") or "").strip(),
+        inferred_weight=max(0.0, min(1.0, weight)),
+        tags=tags,
     )
 
 
@@ -357,10 +378,31 @@ def evidence_bundle_to_dict(bundle: EvidenceBundle) -> dict[str, Any]:
             }
         if chunk.evidence.vision.image_caption is not None:
             caption = chunk.evidence.vision.image_caption
-            vision_payload["image_caption"] = {
+            caption_payload: dict[str, Any] = {
                 "source": caption.source,
                 "text": caption.text,
             }
+            if caption.raw_text:
+                caption_payload["raw_text"] = caption.raw_text
+            if caption.visible:
+                caption_payload["visible"] = caption.visible
+            if caption.change:
+                caption_payload["change"] = caption.change
+            if caption.inferred:
+                caption_payload["inferred"] = caption.inferred
+            if caption.tags:
+                caption_payload["tags"] = list(caption.tags)
+            # Persist weight whenever structured motion fields are present (0.0 is valid).
+            if (
+                caption.visible
+                or caption.change
+                or caption.inferred
+                or caption.tags
+                or caption.raw_text
+                or caption.inferred_weight
+            ):
+                caption_payload["inferred_weight"] = float(caption.inferred_weight or 0.0)
+            vision_payload["image_caption"] = caption_payload
         chunks.append(
             {
                 "chunk_index": chunk.chunk_index,

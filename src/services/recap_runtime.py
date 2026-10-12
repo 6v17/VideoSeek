@@ -50,15 +50,19 @@ def parse_cut_list(text: str, pack: Mapping[str, Any]) -> tuple[str, list[dict[s
     return title, normalize_cut_list(payload, pack)
 
 def _probe_media(video_path: str) -> dict[str, Any]:
-    from src.media.probe import probe_video_stream_with_opencv as _probe_video_stream_with_opencv
+    """Probe media via the shared NLE helper — never invent fps/size on failure."""
+    from src.app.logging_utils import get_logger
+    from src.services.fcpxml_export_service import _probe_media as _nle_probe_media
 
-    info = _probe_video_stream_with_opencv(video_path)
-    if not info.get("fps"):
-        info["fps"] = 24.0
-    if not info.get("width"):
-        info["width"] = 1920
-    if not info.get("height"):
-        info["height"] = 1080
+    info = dict(_nle_probe_media(video_path) or {})
+    if not info.get("fps") or not info.get("width") or not info.get("height"):
+        get_logger("recap_runtime").warning(
+            "Incomplete media probe for %s (fps=%s width=%s height=%s)",
+            video_path,
+            info.get("fps"),
+            info.get("width"),
+            info.get("height"),
+        )
     return info
 
 def resolve_recap_prompt(text: str | None, default: str) -> str:
@@ -173,6 +177,7 @@ def save_recap_plan_edits(
         video_id=str(video_id or "").strip(),
         allocated=allocated,
         people=normalize_story_people({"people": list(people or [])}),
+        edited_by_user=True,
     )
 
 probe_recap_media = _probe_media

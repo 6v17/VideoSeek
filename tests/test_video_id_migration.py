@@ -171,10 +171,32 @@ class VideoIdMigrationTests(unittest.TestCase):
                 )
                 replace_video_tags_from_bundle(old_vid, payload, config=config)
 
+                from src.services.understanding_dialogue import (
+                    load_working_copy,
+                    save_working_copy,
+                    working_copy_path,
+                )
+
+                save_working_copy(
+                    old_vid,
+                    [{"start": 0.0, "end": 1.0, "text": "工作副本", "speaker": "甲"}],
+                    origin="local",
+                    video_path=os.path.join(tmp, "clip.mp4"),
+                    library_path=tmp,
+                    asr_source="whisper",
+                    config=config,
+                )
+                old_working = working_copy_path(old_vid, config=config)
+
                 stats = _relocate_understanding_side_assets(old_vid, new_vid, config=config)
                 self.assertEqual(stats["evidence_files"], 1)
                 self.assertTrue(stats["dialogue_rekeyed"])
+                self.assertTrue(stats["working_copy_rekeyed"])
                 self.assertGreater(stats["tag_rows"], 0)
+                self.assertFalse(os.path.isfile(old_working))
+                moved_copy = load_working_copy(new_vid, config=config)
+                self.assertIsNotNone(moved_copy)
+                self.assertEqual(moved_copy["cues"][0]["text"], "工作副本")
 
                 new_evidence = get_evidence_path(new_vid, config=config, mode="tags")
                 self.assertTrue(os.path.isfile(new_evidence))
