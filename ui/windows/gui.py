@@ -50,7 +50,6 @@ from ui.widgets.components import (
 )
 from ui.widgets.understanding_page import UnderstandingEvidencePage
 from ui.widgets.settings import SettingsPage
-from ui.widgets.button_roles import set_button_role
 from ui.widgets.scaffold import make_runtime_inline_tip
 from ui.dialogs import AboutDialog, AppMessageDialog, DonateDialog, MobileBridgeDialog, NoticeDialog, SkipEdgesDialog
 from ui.dialogs.html_links import open_html_link
@@ -63,7 +62,6 @@ from ui.widgets.sidebar_icons import (
 from ui.controllers.indexing_controller import IndexingController
 from ui.controllers.understanding_controller import UnderstandingController
 from ui.widgets.layout import WINDOW_SIZES, apply_window_size
-from ui.widgets.list_find_bar import list_find_text_kwargs
 from ui.widgets.preview_panel import scroll_ancestor_vertically as _scroll_ancestor_vertically
 from ui.controllers.agent_api_controller import AgentApiController
 from ui.controllers.team_mode_controller import TeamModeController
