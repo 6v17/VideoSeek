@@ -3,23 +3,50 @@
 from __future__ import annotations
 
 import base64
+import os
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import numpy as np
 
+from src.services.search_scope import SearchablePathIndex, normalize_scope_path
 from src.web.agent_api.frames import (
     DEFAULT_FRAME_MAX_EDGE,
     execute_agent_frame_extract,
 )
 from src.web.agent_api.schemas import AgentFrameExtractRequest
 
+_EMPTY_INDEX = SearchablePathIndex(by_video_id={}, by_normalized_path={})
+
+
+def _index_for(*paths: str) -> SearchablePathIndex:
+    by_path: dict[str, str] = {}
+    for raw in paths:
+        path = str(raw)
+        abs_path = os.path.abspath(os.path.expanduser(path))
+        by_path[normalize_scope_path(abs_path)] = path
+        by_path[normalize_scope_path(path)] = path
+    return SearchablePathIndex(by_video_id={}, by_normalized_path=by_path)
+
+
+@contextmanager
+def _indexed(*paths: str):
+    """Allow frame extract for synthetic indexed paths that are not on disk."""
+    index = _index_for(*paths)
+    with patch(
+        "src.services.search_scope.load_searchable_path_index",
+        return_value=index,
+    ), patch(
+        "src.services.search_scope.load_subtitle_searchable_path_index",
+        return_value=_EMPTY_INDEX,
+    ), patch("src.web.agent_api.frames.os.path.isfile", return_value=True):
+        yield
+
 
 class AgentFrameExtractTests(unittest.TestCase):
     @patch("src.media.thumbnail.get_single_thumbnail")
-    @patch("src.web.agent_api.frames.os.path.isfile", return_value=True)
-    def test_extract_returns_jpeg_base64(self, _mock_isfile, mock_thumb):
-        # 100x50 BGR solid frame
+    def test_extract_returns_jpeg_base64(self, mock_thumb):
         frame = np.zeros((50, 100, 3), dtype=np.uint8)
         frame[:, :] = (0, 128, 255)
         mock_thumb.return_value = frame
@@ -28,7 +55,8 @@ class AgentFrameExtractTests(unittest.TestCase):
             time_sec=12.5,
             client_request_id="hit-1",
         )
-        payload = execute_agent_frame_extract(body)
+        with _indexed("D:/lib/clip.mp4"):
+            payload = execute_agent_frame_extract(body)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["mime"], "image/jpeg")
         self.assertEqual(payload["client_request_id"], "hit-1")
@@ -42,8 +70,7 @@ class AgentFrameExtractTests(unittest.TestCase):
         self.assertEqual(mock_thumb.call_args.args[1], 12.5)
 
     @patch("src.media.thumbnail.get_single_thumbnail")
-    @patch("src.web.agent_api.frames.os.path.isfile", return_value=True)
-    def test_max_edge_downscales(self, _mock_isfile, mock_thumb):
+    def test_max_edge_downscales(self, mock_thumb):
         frame = np.zeros((2000, 1000, 3), dtype=np.uint8)
         mock_thumb.return_value = frame
         body = AgentFrameExtractRequest(
@@ -51,31 +78,37 @@ class AgentFrameExtractTests(unittest.TestCase):
             time_sec=1.0,
             max_edge=640,
         )
-        payload = execute_agent_frame_extract(body)
+        with _indexed("D:/lib/clip.mp4"):
+            payload = execute_agent_frame_extract(body)
         self.assertEqual(payload["meta"]["max_edge"], 640)
         self.assertEqual(payload["height"], 640)
         self.assertEqual(payload["width"], 320)
 
-    @patch("src.web.agent_api.frames.os.path.isfile", return_value=False)
-    def test_missing_path_raises(self, _mock_isfile):
+    def test_missing_path_raises(self):
         body = AgentFrameExtractRequest(video_path="D:/missing.mp4", time_sec=0.0)
-        with self.assertRaises(FileNotFoundError):
-            execute_agent_frame_extract(body)
+        with patch(
+            "src.services.search_scope.load_searchable_path_index",
+            return_value=_EMPTY_INDEX,
+        ), patch(
+            "src.services.search_scope.load_subtitle_searchable_path_index",
+            return_value=_EMPTY_INDEX,
+        ):
+            with self.assertRaises(FileNotFoundError):
+                execute_agent_frame_extract(body)
 
     @patch("src.media.thumbnail.get_single_thumbnail", return_value=None)
-    @patch("src.web.agent_api.frames.os.path.isfile", return_value=True)
-    def test_thumbnail_failure_raises(self, _mock_isfile, _mock_thumb):
+    def test_thumbnail_failure_raises(self, _mock_thumb):
         body = AgentFrameExtractRequest(video_path="D:/lib/clip.mp4", time_sec=3.0)
-        with self.assertRaises(RuntimeError):
-            execute_agent_frame_extract(body)
+        with _indexed("D:/lib/clip.mp4"):
+            with self.assertRaises(RuntimeError):
+                execute_agent_frame_extract(body)
 
     def test_negative_time_clamped_via_execute(self):
-        with patch("src.web.agent_api.frames.os.path.isfile", return_value=True), patch(
-            "src.media.thumbnail.get_single_thumbnail"
-        ) as mock_thumb:
+        with patch("src.media.thumbnail.get_single_thumbnail") as mock_thumb:
             mock_thumb.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
             body = AgentFrameExtractRequest(video_path="D:/lib/clip.mp4", time_sec=-5.0)
-            payload = execute_agent_frame_extract(body)
+            with _indexed("D:/lib/clip.mp4"):
+                payload = execute_agent_frame_extract(body)
             self.assertEqual(payload["time_sec"], 0.0)
             self.assertEqual(mock_thumb.call_args.args[1], 0.0)
 
@@ -128,8 +161,7 @@ class AgentFrameExtractHealthTests(unittest.TestCase):
 
 class AgentBatchFrameExtractTests(unittest.TestCase):
     @patch("src.media.thumbnail.get_single_thumbnail")
-    @patch("src.web.agent_api.frames.os.path.isfile", return_value=True)
-    def test_batch_success_and_inherits_max_edge(self, _isfile, mock_thumb):
+    def test_batch_success_and_inherits_max_edge(self, mock_thumb):
         from src.web.agent_api.frames import execute_agent_batch_frame_extract
         from src.web.agent_api.schemas import AgentBatchFrameExtractRequest, AgentFrameExtractRequest
 
@@ -141,7 +173,8 @@ class AgentBatchFrameExtractTests(unittest.TestCase):
                 AgentFrameExtractRequest(video_path="D:/b.mp4", time_sec=2.0, client_request_id="2"),
             ],
         )
-        payload = execute_agent_batch_frame_extract(body)
+        with _indexed("D:/a.mp4", "D:/b.mp4"):
+            payload = execute_agent_batch_frame_extract(body)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["meta"]["succeeded"], 2)
         self.assertEqual(payload["meta"]["failed"], 0)
@@ -149,9 +182,8 @@ class AgentBatchFrameExtractTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["meta"]["max_edge"], 200)
         self.assertLessEqual(payload["results"][0]["height"], 200)
 
-    @patch("src.web.agent_api.frames.os.path.isfile", side_effect=[False, True])
     @patch("src.media.thumbnail.get_single_thumbnail")
-    def test_batch_continue_on_error(self, mock_thumb, _isfile):
+    def test_batch_continue_on_error(self, mock_thumb):
         from src.web.agent_api.frames import execute_agent_batch_frame_extract
         from src.web.agent_api.schemas import AgentBatchFrameExtractRequest, AgentFrameExtractRequest
 
@@ -163,7 +195,9 @@ class AgentBatchFrameExtractTests(unittest.TestCase):
                 AgentFrameExtractRequest(video_path="D:/ok.mp4", time_sec=2.0),
             ],
         )
-        payload = execute_agent_batch_frame_extract(body)
+        # Only the second path is indexed; first fails as "not found".
+        with _indexed("D:/ok.mp4"):
+            payload = execute_agent_batch_frame_extract(body)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["meta"]["succeeded"], 1)
         self.assertEqual(payload["meta"]["failed"], 1)
