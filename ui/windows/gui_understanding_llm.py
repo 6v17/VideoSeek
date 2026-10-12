@@ -540,6 +540,25 @@ class UnderstandingLlmGuiMixin:
 
     def _finish_recap_export(self, ok: bool, stopped: bool, payload: object):
         if stopped or not ok:
+            page = getattr(self, "understanding_page", None)
+            if page is not None and hasattr(page, "lbl_status"):
+                if stopped:
+                    page.lbl_status.setText(
+                        self.texts.get(
+                            "understanding_export_recap_stopped",
+                            "Recap stopped. Partial shot lists stay marked incomplete until match finishes.",
+                        )
+                    )
+                else:
+                    page.lbl_status.setText(
+                        self.texts.get(
+                            "understanding_export_recap_failed_short",
+                            "Recap failed.",
+                        )
+                    )
+            self._sync_recap_export_button(running=False)
+            if hasattr(self, "_refresh_recap_review_panel"):
+                self._refresh_recap_review_panel()
             return
         result = dict(payload or {})
         stage = str(result.get("stage") or "")
@@ -610,17 +629,54 @@ class UnderstandingLlmGuiMixin:
         else:
             self._refresh_recap_review_panel()
 
-    def _count_saved_recap_beats(self) -> int:
-        from src.services.recap_service import load_recap_beats
+    def _load_recap_beats_for_ui(self, video_path: str, *, video_id: str = ""):
+        """Load beats sidecar; surface corrupt files instead of treating them as missing."""
+        from src.services.recap_service import RecapSidecarCorruptError, load_recap_beats
 
+        try:
+            return load_recap_beats(video_path, video_id=video_id)
+        except RecapSidecarCorruptError as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_understanding_llm.py:load_recap_beats")
+            self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_sidecar_corrupt",
+                    "Story plan file is damaged. Restore a backup or delete it before regenerating.",
+                ),
+                exc,
+            )
+            return None
+
+    def _load_recap_cuts_for_ui(self, video_path: str, *, video_id: str = ""):
+        from src.services.recap_service import RecapSidecarCorruptError, load_recap_cuts
+
+        try:
+            return load_recap_cuts(video_path, video_id=video_id)
+        except RecapSidecarCorruptError as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_understanding_llm.py:load_recap_cuts")
+            self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_cuts_sidecar_corrupt",
+                    "Shot list file is damaged. Restore a backup or delete it before regenerating.",
+                ),
+                exc,
+            )
+            return None
+
+    def _count_saved_recap_beats(self) -> int:
         video_path = self._current_recap_video_path()
         if not video_path:
             return 0
-        saved = load_recap_beats(video_path, video_id=self._selected_understanding_video_id()) or {}
+        saved = self._load_recap_beats_for_ui(
+            video_path, video_id=self._selected_understanding_video_id()
+        ) or {}
         return len(list(saved.get("beats") or []))
 
     def edit_current_recap_beats(self):
-        from src.services.recap_service import load_recap_beats, recap_target_sec, save_recap_plan_edits
+        from src.services.recap_service import recap_target_sec, save_recap_plan_edits
         from src.services.understanding_resource_service import UNDERSTANDING_MODE_MOTION
         from src.services.understanding_service import load_evidence_bundle
         from ui.dialogs.recap_beats import RecapBeatsDialog
@@ -634,7 +690,22 @@ class UnderstandingLlmGuiMixin:
                 kind="warning",
             )
             return
-        saved = load_recap_beats(video_path, video_id=video_id)
+        try:
+            from src.services.recap_service import RecapSidecarCorruptError, load_recap_beats
+
+            saved = load_recap_beats(video_path, video_id=video_id)
+        except RecapSidecarCorruptError as exc:
+            from src.app.logging_utils import note_swallowed
+
+            note_swallowed(exc, "ui/windows/gui_understanding_llm.py:edit_recap_beats")
+            self.show_error_dialog(
+                self.texts.get(
+                    "understanding_recap_sidecar_corrupt",
+                    "Story plan file is damaged. Restore a backup or delete it before regenerating.",
+                ),
+                exc,
+            )
+            return
         if not saved:
             self.show_info_dialog(
                 self.texts.get("warning_title", "Warning"),
@@ -697,12 +768,12 @@ class UnderstandingLlmGuiMixin:
         return resolve_current_media_path(video_id, stored=stored, config=load_config())
 
     def _load_current_recap_cuts(self):
-        from src.services.recap_service import load_recap_cuts
-
         video_path = self._current_recap_video_path()
         if not video_path:
             return None
-        return load_recap_cuts(video_path, video_id=self._selected_understanding_video_id())
+        return self._load_recap_cuts_for_ui(
+            video_path, video_id=self._selected_understanding_video_id()
+        )
 
     def _recap_review_scroll_bars(self):
         tree = self._recap_review_tree()
@@ -745,7 +816,6 @@ class UnderstandingLlmGuiMixin:
         from src.services.recap_service import (
             format_recap_clock_range,
             group_recap_vo_units,
-            load_recap_beats,
         )
 
         page = getattr(self, "understanding_page", None)
@@ -790,7 +860,10 @@ class UnderstandingLlmGuiMixin:
 
         video_path = self._current_recap_video_path()
         beats_payload = (
-            load_recap_beats(video_path, video_id=self._selected_understanding_video_id()) or {}
+            self._load_recap_beats_for_ui(
+                video_path, video_id=self._selected_understanding_video_id()
+            )
+            or {}
         )
         beats = list(beats_payload.get("beats") or [])
         units = group_recap_vo_units(clips, beats=beats)

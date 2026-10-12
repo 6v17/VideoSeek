@@ -54,6 +54,7 @@ from src.services.recap_service import (
     load_recap_beats,
     recap_beats_edited_by_user,
     write_recap_beats_file,
+    write_recap_cuts_file,
     generate_recap_timeline,
     recap_cuts_path_for_video,
     recap_beats_path_for_video,
@@ -3606,6 +3607,78 @@ class RecapPackTests(unittest.TestCase):
             bak_payload = json.loads(bak.read_text(encoding="utf-8"))
             self.assertEqual(bak_payload.get("title"), "手改")
             self.assertTrue(bak_payload.get("edited_by_user"))
+
+    def test_save_recap_plan_edits_preserves_vo_and_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "clip.mp4"
+            video.write_bytes(b"x")
+            write_recap_beats_file(
+                recap_beats_path_for_video(str(video)),
+                title="原规划",
+                video_id="vid1",
+                allocated=[
+                    {
+                        "id": 1,
+                        "event": "开场",
+                        "importance": 0.5,
+                        "needed_visual": "门口",
+                        "t": [0.0, 10.0],
+                        "vo": "保留旁白",
+                        "spine_forced": True,
+                        "budget_sec": 10.0,
+                    }
+                ],
+                people=[],
+            )
+            written = save_recap_plan_edits(
+                str(video),
+                video_id="vid1",
+                title="手改",
+                beats=[
+                    {
+                        "id": 1,
+                        "event": "开场改",
+                        "importance": 0.8,
+                        "needed_visual": "门口",
+                        "t": [0.0, 12.0],
+                    }
+                ],
+                people=[],
+                duration_sec=100.0,
+                target_sec=60.0,
+            )
+            payload = json.loads(written.read_text(encoding="utf-8"))
+            beat = payload["beats"][0]
+            self.assertEqual(beat.get("event"), "开场改")
+            self.assertEqual(beat.get("vo"), "保留旁白")
+            self.assertTrue(beat.get("spine_forced"))
+
+    def test_write_recap_cuts_marks_incomplete_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "clip_recap_cuts.json"
+            written = write_recap_cuts_file(
+                dest,
+                title="t",
+                video_path=str(Path(tmp) / "clip.mp4"),
+                video_id="v1",
+                info={"fps": 24},
+                laid_out=[
+                    {
+                        "name": "c1",
+                        "beat_id": 1,
+                        "src_in": 0.0,
+                        "src_out": 1.0,
+                        "tl_in": 0.0,
+                        "tl_out": 1.0,
+                        "duration": 1.0,
+                    }
+                ],
+                beats_path=Path(tmp) / "beats.json",
+                stage="match",
+                incomplete=True,
+            )
+            payload = json.loads(written.read_text(encoding="utf-8"))
+            self.assertTrue(payload.get("incomplete"))
 
     def test_save_recap_plan_edits_reallocates(self):
         with tempfile.TemporaryDirectory() as tmp:

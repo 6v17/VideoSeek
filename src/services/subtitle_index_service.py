@@ -297,6 +297,41 @@ def _build_probe_times_vad(
     )
 
 
+def _reject_empty_subtitle_persist(
+    *,
+    video_id: str,
+    profile_base_dir: str,
+    config,
+    error: str,
+) -> dict[str, Any]:
+    """Do not wipe prior cues or stamp READY when OCR/VAD produced nothing."""
+    existing = list_shared_transcript_segments(video_id, config=config)
+    prior_rows = len(existing)
+    try:
+        set_dialogue_index_state(
+            profile_base_dir,
+            video_id,
+            DIALOGUE_INDEX_STATE_FAILED,
+            extras={
+                "dialogue_error": error,
+                "dialogue_segment_rows": prior_rows,
+            },
+        )
+    except Exception as state_exc:
+        logger.warning(
+            "Empty-subtitle reject state update failed for %s: %s",
+            video_id,
+            state_exc,
+        )
+    return {
+        "ok": False,
+        "error": error,
+        "segment_rows": prior_rows,
+        "mode": "ocr",
+        "kept_previous": prior_rows > 0,
+    }
+
+
 def index_video_subtitles(
     video_id: str,
     video_path: str,
@@ -397,49 +432,34 @@ def index_video_subtitles(
         if _stopped(stop_callback):
             return {"ok": False, "error": "stopped", "segment_rows": 0}
 
-        duration = float(get_video_duration_seconds(media_path) or 0.0)
-        if duration <= 1e-3:
+        # Fail closed when duration cannot be probed — do not mark READY with an
+        # empty transcript (same class of silent wrong-success as fake FPS defaults).
+        duration_raw = get_video_duration_seconds(media_path)
+        try:
+            duration = float(duration_raw) if duration_raw is not None else 0.0
+        except (TypeError, ValueError):
+            duration = 0.0
+        if duration_raw is None or duration <= 1e-3:
+            error = "could not probe video duration"
             if persist:
-                save_dialogue_transcript(
-                    video_id,
-                    [],
-                    library_path=lib_path,
-                    video_path=media_path,
-                    asr_source=OCR_SOURCE_ID,
-                    config=config,
-                )
                 try:
                     set_dialogue_index_state(
                         profile_base_dir,
                         video_id,
-                        DIALOGUE_INDEX_STATE_READY,
-                        extras={
-                            "dialogue_segment_rows": 0,
-                            "dialogue_asr_source": OCR_SOURCE_ID,
-                            "dialogue_error": "",
-                        },
+                        DIALOGUE_INDEX_STATE_FAILED,
+                        extras={"dialogue_error": error},
                     )
                 except Exception as state_exc:
                     logger.warning(
-                        "Empty-subtitle state update failed for %s: %s",
+                        "Duration-probe failure state update failed for %s: %s",
                         video_id,
                         state_exc,
                     )
-            if progress_callback:
-                progress_callback(1.0, "subtitle_done")
             return {
-                "ok": True,
-                "video_id": video_id,
+                "ok": False,
+                "error": error,
                 "segment_rows": 0,
-                "segments": [],
                 "mode": "ocr",
-                "sample_strategy": strategy,
-                "sample_frames": 0,
-                "speech_segments": 0,
-                "probed": 0,
-                "ocr_calls": 0,
-                "blank_skips": 0,
-                "unchanged_skips": 0,
             }
 
         speech_segments = 0
@@ -455,46 +475,20 @@ def index_video_subtitles(
             )
             if not times:
                 if persist:
-                    save_dialogue_transcript(
-                        video_id,
-                        [],
-                        library_path=lib_path,
-                        video_path=media_path,
-                        asr_source=OCR_SOURCE_ID,
+                    return _reject_empty_subtitle_persist(
+                        video_id=video_id,
+                        profile_base_dir=profile_base_dir,
                         config=config,
+                        error="no VAD/energy probe times; kept previous transcript"
+                        if list_shared_transcript_segments(video_id, config=config)
+                        else "no VAD/energy probe times",
                     )
-                    try:
-                        set_dialogue_index_state(
-                            profile_base_dir,
-                            video_id,
-                            DIALOGUE_INDEX_STATE_READY,
-                            extras={
-                                "dialogue_segment_rows": 0,
-                                "dialogue_asr_source": OCR_SOURCE_ID,
-                                "dialogue_error": "",
-                            },
-                        )
-                    except Exception as state_exc:
-                        logger.warning(
-                            "Empty-subtitle state update failed for %s: %s",
-                            video_id,
-                            state_exc,
-                        )
-                if progress_callback:
-                    progress_callback(1.0, "subtitle_done")
                 return {
-                    "ok": True,
-                    "video_id": video_id,
+                    "ok": False,
+                    "error": "no VAD/energy probe times",
                     "segment_rows": 0,
-                    "segments": [],
                     "mode": "ocr",
                     "sample_strategy": strategy,
-                    "sample_frames": 0,
-                    "speech_segments": 0,
-                    "probed": 0,
-                    "ocr_calls": 0,
-                    "blank_skips": 0,
-                    "unchanged_skips": 0,
                 }
         else:
             if progress_callback:
@@ -541,6 +535,15 @@ def index_video_subtitles(
         if progress_callback:
             progress_callback(0.92, "subtitle_merge")
         cues = merge_ocr_observations(observations)
+        if persist and not cues:
+            return _reject_empty_subtitle_persist(
+                video_id=video_id,
+                profile_base_dir=profile_base_dir,
+                config=config,
+                error="empty OCR result; kept previous transcript"
+                if list_shared_transcript_segments(video_id, config=config)
+                else "empty OCR result",
+            )
         if persist:
             save = save_dialogue_transcript(
                 video_id,
@@ -561,6 +564,7 @@ def index_video_subtitles(
             )
             return {"ok": False, "error": save.get("error") or "save failed", "segment_rows": 0, "mode": "ocr"}
 
+        state_synced = True
         if persist:
             try:
                 set_dialogue_index_state(
@@ -574,11 +578,19 @@ def index_video_subtitles(
                     },
                 )
             except Exception as state_exc:
+                state_synced = False
                 logger.warning(
                     "Subtitle transcript saved but dialogue index state update failed for %s: %s",
                     video_id,
                     state_exc,
                 )
+                return {
+                    "ok": False,
+                    "error": f"transcript saved but index state sync failed: {state_exc}",
+                    "segment_rows": int(save.get("segment_count") or len(cues)),
+                    "mode": "ocr",
+                    "state_synced": False,
+                }
         if progress_callback:
             progress_callback(1.0, "subtitle_done")
         return {
@@ -596,6 +608,7 @@ def index_video_subtitles(
             "reused_transcripts": False,
             "asr_source": OCR_SOURCE_ID,
             "segments": list(cues),
+            "state_synced": state_synced,
         }
     except InterruptedError:
         return {"ok": False, "error": "stopped", "segment_rows": 0}

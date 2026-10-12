@@ -738,6 +738,7 @@ def _run_search_impl(
             and library_indexes_ready(config, scope_library_paths)
         ):
             merged_hits: List[SearchHit] = []
+            merged_seeds: List[float] = []
             library_fetch_k = resolve_frame_fetch_top_k(top_k, True, is_text, config, precise_image=precise_image)
             if use_video_discovery and not precise_image:
                 library_fetch_k = max(int(library_fetch_k), int(resolve_fetch_top_k(top_k, True)))
@@ -780,6 +781,11 @@ def _run_search_impl(
                             is_text=is_text,
                             precise_image=False,
                         )
+                # Keep CLIP seeds aligned 1:1 with refined hits (same as per-video path).
+                if len(clip_seeds) == len(matched_results):
+                    merged_seeds.extend(clip_seeds)
+                else:
+                    merged_seeds.extend(float(hit.start_sec) for hit in matched_results)
                 merged_hits.extend(matched_results)
             with profile_phase("scope_filter"):
                 # Keep expanded pool until after video-discovery / intro-outro filtering.
@@ -791,7 +797,16 @@ def _run_search_impl(
                     config,
                     force_expand=use_video_discovery,
                 )
-                scoped_hits = merge_search_hits(merged_hits, merge_keep_k)
+                if precise_image and merged_seeds and len(merged_seeds) == len(merged_hits):
+                    scoped_hits, scoped_seeds = scope_filter_hits_with_seeds(
+                        merged_hits,
+                        merged_seeds,
+                        library_paths=scope_library_paths,
+                        top_k=merge_keep_k,
+                    )
+                else:
+                    scoped_hits = merge_search_hits(merged_hits, merge_keep_k)
+                    scoped_seeds = None
             results = finalize_frame_hits(
                 query_data,
                 is_text,
@@ -800,6 +815,7 @@ def _run_search_impl(
                 config,
                 precise_image=precise_image,
                 pixel_query_data=pixel_query_data,
+                seed_times=scoped_seeds if precise_image else None,
             )
             results = apply_video_discovery_presentation(
                 results,

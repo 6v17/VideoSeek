@@ -44,6 +44,20 @@ MAX_MOBILE_UPLOAD_FILES = 8
 _MOBILE_UPLOAD_READ_CHUNK = 1024 * 1024
 
 
+def _coerce_form_str(value, fallback: str = "") -> str:
+    """Resolve FastAPI ``Form(...)`` defaults when endpoints are called directly."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return fallback
+    default = getattr(value, "default", None)
+    if isinstance(default, str):
+        return default
+    if default is None:
+        return fallback
+    return fallback
+
+
 def _bind_host_for_check(host: str) -> str:
     text = str(host or "").strip() or "0.0.0.0"
     if text in {"0.0.0.0", "::"}:
@@ -512,6 +526,12 @@ class MobileBridgeService:
         files: list[UploadFile] = File(None),
     ):
         # Auth already enforced in _auth_middleware (query/header, before body parse).
+        search_kind = _coerce_form_str(search_kind, "image")
+        query = _coerce_form_str(query, "")
+        text_weight = _coerce_form_str(text_weight, "")
+        image_search_mode = _coerce_form_str(image_search_mode, "")
+        search_mode = _coerce_form_str(search_mode, "")
+        dialogue_search_mode = _coerce_form_str(dialogue_search_mode, "")
         try:
             kind = normalize_mobile_search_kind(search_kind)
         except ValueError as exc:
@@ -519,11 +539,15 @@ class MobileBridgeService:
         cleaned_query = str(query or "").strip()
         saved_paths: list[str] = []
 
+        # FastAPI injects None/list; direct calls may still see File(...) defaults.
         uploads: list[UploadFile] = []
-        if files:
+        if isinstance(files, (list, tuple)):
             uploads.extend(files)
-        if file is not None and str(getattr(file, "filename", "") or "").strip():
-            uploads.append(file)
+        elif files is not None and hasattr(files, "read") and hasattr(files, "filename"):
+            uploads.append(files)
+        if file is not None and hasattr(file, "read") and hasattr(file, "filename"):
+            if str(getattr(file, "filename", "") or "").strip():
+                uploads.append(file)
         named_uploads = [
             upload
             for upload in uploads

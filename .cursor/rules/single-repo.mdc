@@ -1,0 +1,11 @@
+---
+description: VideoSeek is a single repo — no Pro dual-repo workflow
+alwaysApply: true
+---
+
+# Single-repo VideoSeek
+
+- Canonical product code lives only in `D:\PycharmProjects\VideoSeek` (github.com/6v17/VideoSeek).
+- There is **no** VideoSeek-Pro / dual-repo / OSS-first merge workflow anymore. Do not suggest Pro merges, Pro-only clone edits, or keeping changes out of this repo for a Pro fork.
+- Clone / video-clone and all product features are developed in this repo when the user asks for them.
+- Ignore any stale personal rule that mentions `VideoSeek-Pro`, “OSS-first dual-repo”, or porting shared fixes into a Pro tree.

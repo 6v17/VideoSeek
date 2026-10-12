@@ -803,6 +803,7 @@ def generate_recap_timeline(
                     laid_out=laid_checkpoint,
                     beats_path=beats_path,
                     stage=RECAP_START_MATCH,
+                    incomplete=True,
                 )
             except OSError:
                 pass

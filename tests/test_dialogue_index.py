@@ -239,7 +239,7 @@ class DialogueIndexServiceTests(unittest.TestCase):
             self.assertEqual(result["segment_rows"], 1)
             self.assertEqual(index_mock.call_args.kwargs.get("mode"), "ocr")
 
-    def test_reembed_maps_to_reuse_mode(self):
+    def test_reembed_maps_to_ocr_mode(self):
         from src.services import dialogue_index_service as service
 
         with mock.patch(
@@ -248,8 +248,8 @@ class DialogueIndexServiceTests(unittest.TestCase):
                 "ok": True,
                 "video_id": "vid9",
                 "segment_rows": 1,
-                "mode": "reuse",
-                "reused_transcripts": True,
+                "mode": "ocr",
+                "reused_transcripts": False,
             },
         ) as index_mock:
             result = service.index_video_dialogue(
@@ -260,8 +260,8 @@ class DialogueIndexServiceTests(unittest.TestCase):
             )
 
         self.assertTrue(result["ok"])
-        self.assertTrue(result["reused_transcripts"])
-        self.assertEqual(index_mock.call_args.kwargs.get("mode"), "reuse")
+        self.assertFalse(result.get("reused_transcripts"))
+        self.assertEqual(index_mock.call_args.kwargs.get("mode"), "ocr")
 
     def test_auto_passes_through_to_subtitle_index(self):
         from src.services import dialogue_index_service as service

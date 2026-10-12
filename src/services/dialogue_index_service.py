@@ -99,10 +99,9 @@ def index_video_dialogue(
     from src.services.subtitle_index_service import index_video_subtitles
 
     mode_value = str(mode or "auto").strip().lower()
-    if mode_value in {"asr", "ocr"}:
+    # reembed historically meant "force rebuild"; map to OCR overwrite, not reuse.
+    if mode_value in {"asr", "ocr", "reembed"}:
         subtitle_mode = "ocr"
-    elif mode_value == "reembed":
-        subtitle_mode = "reuse"
     else:
         subtitle_mode = "auto"
     kwargs = {

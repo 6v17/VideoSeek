@@ -9,7 +9,31 @@ from unittest.mock import patch
 sys.modules.setdefault("cv2", types.SimpleNamespace())
 sys.modules.setdefault("numpy", types.SimpleNamespace())
 
-if "fastapi" not in sys.modules:
+# Prefer real FastAPI/uvicorn when installed. A non-package stub in sys.modules
+# breaks later tests that import fastapi.testclient (e.g. test_agent_api).
+def _ensure_real_or_stub_package(name: str, install_stub):
+    """Use site-packages when available; only stub if import truly fails."""
+    mod = sys.modules.get(name)
+    if mod is not None and getattr(mod, "__path__", None) is None:
+        for key in list(sys.modules):
+            if key == name or key.startswith(name + "."):
+                del sys.modules[key]
+    try:
+        __import__(name)
+        return
+    except Exception:
+        pass
+    for key in list(sys.modules):
+        if key == name or key.startswith(name + "."):
+            del sys.modules[key]
+    try:
+        __import__(name)
+        return
+    except Exception:
+        install_stub()
+
+
+def _install_fastapi_stub():
     fastapi_module = types.ModuleType("fastapi")
     responses_module = types.ModuleType("fastapi.responses")
     staticfiles_module = types.ModuleType("fastapi.staticfiles")
@@ -72,7 +96,8 @@ if "fastapi" not in sys.modules:
     sys.modules["fastapi.responses"] = responses_module
     sys.modules["fastapi.staticfiles"] = staticfiles_module
 
-if "uvicorn" not in sys.modules:
+
+def _install_uvicorn_stub():
     uvicorn_module = types.ModuleType("uvicorn")
 
     class _Config:
@@ -93,6 +118,10 @@ if "uvicorn" not in sys.modules:
     uvicorn_module.Server = _Server
     sys.modules["uvicorn"] = uvicorn_module
 
+
+_ensure_real_or_stub_package("fastapi", _install_fastapi_stub)
+_ensure_real_or_stub_package("uvicorn", _install_uvicorn_stub)
+
 from src.web import mobile_bridge
 from src.web.mobile_bridge import MobileBridgeService, cleanup_stale_mobile_uploads, read_mobile_upload_js
 
@@ -100,6 +129,16 @@ from src.web.mobile_bridge import MobileBridgeService, cleanup_stale_mobile_uplo
 class MobileBridgeServiceTests(unittest.TestCase):
     def setUp(self):
         mobile_bridge._MOBILE_UPLOAD_JS_CACHE = None
+
+    def test_coerce_form_str_resolves_fastapi_form_defaults(self):
+        from fastapi import Form
+
+        from src.web.mobile_bridge import _coerce_form_str
+
+        self.assertEqual(_coerce_form_str("image", "text"), "image")
+        self.assertEqual(_coerce_form_str(Form("image"), "text"), "image")
+        self.assertEqual(_coerce_form_str(Form(""), "fallback"), "")
+        self.assertEqual(_coerce_form_str(None, "fallback"), "fallback")
 
     @patch("src.web.mobile_bridge.os.path.isfile", return_value=False)
     @patch("src.web.mobile_bridge.os.path.isdir", return_value=False)

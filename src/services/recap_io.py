@@ -235,6 +235,7 @@ def write_recap_cuts_file(
     laid_out: Sequence[Mapping[str, Any]],
     beats_path: str | Path,
     stage: str,
+    incomplete: bool = False,
 ) -> Path:
     clips = list(laid_out or [])
     return write_cuts_json(
@@ -243,6 +244,9 @@ def write_recap_cuts_file(
             "video": video_path,
             "video_id": video_id,
             "stage": stage,
+            # Wave checkpoints / cancelled matches stay incomplete so export UI
+            # does not treat a partial cut list as finished.
+            "incomplete": bool(incomplete),
             "fps": info.get("fps"),
             "duration_sec": clips[-1]["tl_out"] if clips else 0,
             "tts_speed": TTS_SPEED,

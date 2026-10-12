@@ -22,6 +22,7 @@ from src.services.recap_constants import (
 )
 from src.services.recap_cut_build import normalize_cut_list
 from src.services.recap_io import (
+    load_recap_beats,
     load_recap_cuts,
     recap_beats_path_for_video,
     recap_clip_records,
@@ -165,8 +166,30 @@ def save_recap_plan_edits(
 ) -> Path:
     duration = float(duration_sec or 0.0)
     target = float(target_sec) if target_sec is not None else recap_target_sec(duration)
+    # Plan editor only edits a subset of columns; merge onto prior beats so vo /
+    # spine_forced / evidence metadata are not silently dropped.
+    previous = load_recap_beats(video_path, video_id=video_id) or {}
+    prev_by_id: dict[int, dict[str, Any]] = {}
+    for item in list(previous.get("beats") or []):
+        try:
+            prev_by_id[int(item.get("id"))] = dict(item)
+        except (TypeError, ValueError):
+            continue
+    merged_beats: list[dict[str, Any]] = []
+    for beat in list(beats or []):
+        row = dict(beat)
+        try:
+            beat_id = int(row.get("id"))
+        except (TypeError, ValueError):
+            beat_id = 0
+        if beat_id and beat_id in prev_by_id:
+            base = dict(prev_by_id[beat_id])
+            base.update(row)
+            merged_beats.append(base)
+        else:
+            merged_beats.append(row)
     allocated = allocate_beat_budgets(
-        list(beats),
+        merged_beats,
         chunks=list(chunks or []),
         target_sec=target,
         duration_sec=duration,

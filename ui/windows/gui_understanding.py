@@ -2354,7 +2354,11 @@ class UnderstandingGuiMixin:
         video_path = self._current_recap_video_path()
         if not video_id or not video_path:
             return False
-        return load_recap_cuts(video_path, video_id=video_id) is not None
+        payload = load_recap_cuts(video_path, video_id=video_id)
+        if payload is None:
+            return False
+        # Wave checkpoints / cancelled matches must not unlock captions/export.
+        return not bool(payload.get("incomplete"))
 
     def _dialogue_source_label(self, source: str) -> str:
         text = str(source or "").strip().lower()
