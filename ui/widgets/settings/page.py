@@ -340,6 +340,10 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_migrate_legacy_index = QPushButton()
         self.lbl_legacy_migration_status = QLabel()
         self.hint_legacy_migration = QLabel()
+        self.label_pc_migrate = ClickableLabel()
+        self.btn_export_pc_migrate = QPushButton()
+        self.btn_import_pc_migrate = QPushButton()
+        self.hint_pc_migrate = QLabel()
 
     def _init_settings_labels_and_hints(self):
         self.section_search_title = QLabel()
@@ -515,6 +519,12 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.btn_migrate_legacy_index.setMinimumHeight(34)
         self.lbl_legacy_migration_status.setObjectName("StatusHint")
         self.lbl_legacy_migration_status.setWordWrap(True)
+        self.btn_export_pc_migrate.setObjectName("AccentGhostButton")
+        self.btn_export_pc_migrate.setMinimumHeight(34)
+        self.btn_import_pc_migrate.setObjectName("AccentGhostButton")
+        self.btn_import_pc_migrate.setMinimumHeight(34)
+        self.hint_pc_migrate.setObjectName("StatusHint")
+        self.hint_pc_migrate.setWordWrap(True)
 
         self.input_data_root_bundle = QWidget()
         self.input_data_root_bundle.setSizePolicy(
@@ -561,6 +571,17 @@ class SettingsPage(QWidget, SettingsFormMixin):
         legacy_migration_bundle_layout.setSpacing(8)
         legacy_migration_bundle_layout.addWidget(self.btn_migrate_legacy_index, 0)
         legacy_migration_bundle_layout.addWidget(self.lbl_legacy_migration_status, 1)
+
+        self.input_pc_migrate_bundle = QWidget()
+        self.input_pc_migrate_bundle.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        pc_migrate_bundle_layout = QHBoxLayout(self.input_pc_migrate_bundle)
+        pc_migrate_bundle_layout.setContentsMargins(0, 0, 0, 0)
+        pc_migrate_bundle_layout.setSpacing(8)
+        pc_migrate_bundle_layout.addWidget(self.btn_export_pc_migrate, 0)
+        pc_migrate_bundle_layout.addWidget(self.btn_import_pc_migrate, 0)
+        pc_migrate_bundle_layout.addStretch(1)
 
         self.input_active_model_profile_bundle = QWidget()
         self.input_active_model_profile_bundle.setSizePolicy(
@@ -847,6 +868,13 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_legacy_migration,
             self.input_legacy_migration_bundle,
             self.hint_legacy_migration,
+        )
+        self._add_setting_row(
+            self.section_paths_form,
+            4,
+            self.label_pc_migrate,
+            self.input_pc_migrate_bundle,
+            self.hint_pc_migrate,
         )
 
     def _assemble_settings_page(self, content_layout, shell_layout):
@@ -1287,6 +1315,21 @@ class SettingsPage(QWidget, SettingsFormMixin):
         self.lbl_legacy_migration_status.setText(
             texts.get("legacy_migration_status_ready", "当前已是最新结构。")
         )
+        self.label_pc_migrate.setText(
+            texts.get("setting_pc_migrate", "换机迁移")
+        )
+        self.btn_export_pc_migrate.setText(
+            texts.get("pc_migrate_export", "导出迁移包")
+        )
+        self.btn_import_pc_migrate.setText(
+            texts.get("pc_migrate_import", "导入迁移包")
+        )
+        self.hint_pc_migrate.setText(
+            texts.get(
+                "setting_pc_migrate_hint",
+                "把应用数据目录导出到U盘/网盘，再到新电脑导入。不含模型；导入后可重绑视频库路径。",
+            )
+        )
         self.btn_download_runtime_resources.setText(texts.get("import_runtime_resources", texts["download_models"]))
         self.btn_rediscover_models.setText(
             texts.get("model_rediscover", texts.get("model_scan_model_dir", "重新探测模型"))
@@ -1409,6 +1452,7 @@ class SettingsPage(QWidget, SettingsFormMixin):
             self.label_ffmpeg_path,
             self.label_model_dir,
             self.label_legacy_migration,
+            self.label_pc_migrate,
         ]:
             self._configure_setting_label(label)
             label.setProperty("detailActive", False)

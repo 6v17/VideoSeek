@@ -569,6 +569,8 @@ class MainWindow(
         self.settings_page.btn_browse_model_dir.clicked.connect(self._browse_model_dir)
         self.settings_page.btn_migrate_model_dir.clicked.connect(self._migrate_model_root)
         self.settings_page.btn_migrate_legacy_index.clicked.connect(self._migrate_legacy_index)
+        self.settings_page.btn_export_pc_migrate.clicked.connect(self._export_pc_migrate_bundle)
+        self.settings_page.btn_import_pc_migrate.clicked.connect(self._import_pc_migrate_bundle)
         self.settings_page.btn_rediscover_models.clicked.connect(self.rediscover_model_profiles)
         self.settings_page.btn_download_runtime_resources.clicked.connect(self.open_runtime_resource_dialog)
         self.settings_page.btn_remove_model_profile.clicked.connect(self.remove_current_model_profile)

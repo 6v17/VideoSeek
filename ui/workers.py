@@ -102,6 +102,51 @@ class StorageRootMigrateWorker(QThread):
             self.error_signal.emit(str(exc).strip() or repr(exc))
 
 
+class PcMigrateWorker(QThread):
+    """Export or import a cross-PC migrate bundle off the UI thread."""
+
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(
+        self,
+        kind: str,
+        path: str,
+        *,
+        target_data_root: str = "",
+    ):
+        super().__init__()
+        self.kind = str(kind or "").strip().lower()
+        self.path = str(path or "").strip()
+        self.target_data_root = str(target_data_root or "").strip()
+
+    def run(self):
+        from src.services.pc_migrate_service import (
+            export_pc_migrate_bundle,
+            import_pc_migrate_bundle,
+        )
+
+        try:
+            def callback(value, text):
+                self.progress_signal.emit(int(value), str(text))
+
+            if self.kind == "export":
+                result = export_pc_migrate_bundle(self.path, progress_callback=callback)
+            elif self.kind == "import":
+                result = import_pc_migrate_bundle(
+                    self.path,
+                    target_data_root=self.target_data_root or None,
+                    progress_callback=callback,
+                )
+            else:
+                raise ValueError(f"unsupported pc migrate kind: {self.kind}")
+            self.finished_signal.emit(dict(result or {}))
+        except Exception as exc:
+            logger.exception("PC migrate failed (%s)", self.kind)
+            self.error_signal.emit(str(exc).strip() or repr(exc))
+
+
 class TeamConnectWorker(QThread):
     """Probe team server and preload shared visual/subtitle libraries off the UI thread."""
 

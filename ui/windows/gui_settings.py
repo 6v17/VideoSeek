@@ -35,7 +35,12 @@ from src.utils import (
 from ui.dialogs import SamplingRulesDialog
 from ui.dialogs.busy_progress import AppBusyDialog
 from ui.threading_utils import shutdown_thread
-from ui.workers import StorageRootMigrateWorker, TeamConnectWorker, TeamServerLifecycleWorker
+from ui.workers import (
+    PcMigrateWorker,
+    StorageRootMigrateWorker,
+    TeamConnectWorker,
+    TeamServerLifecycleWorker,
+)
 
 
 class SettingsGuiMixin:
@@ -1755,6 +1760,201 @@ class SettingsGuiMixin:
         if not self.show_confirm_dialog(t.get("confirm_title", "Confirm"), confirm):
             return
         self.start_manual_legacy_migration()
+
+    def _run_pc_migrate_worker(self, kind: str, path: str, *, target_data_root: str = ""):
+        kind_key = str(kind or "").strip().lower()
+        if kind_key == "export":
+            title = self.texts.get("pc_migrate_export_progress_title", "导出迁移包")
+            label = self.texts.get("pc_migrate_export_progress_label", "正在导出应用数据…")
+        else:
+            title = self.texts.get("pc_migrate_import_progress_title", "导入迁移包")
+            label = self.texts.get("pc_migrate_import_progress_label", "正在导入应用数据…")
+
+        dialog = AppBusyDialog(
+            self,
+            title=title,
+            label=label,
+            maximum=100,
+            minimum_width=460,
+        )
+        dialog.setValue(0)
+        dialog.show()
+        QApplication.processEvents()
+
+        worker = PcMigrateWorker(kind_key, path, target_data_root=target_data_root)
+        loop = QEventLoop()
+        box = {"result": None, "error": None}
+
+        def _on_progress(value, text):
+            dialog.setValue(max(0, min(100, int(value))))
+            message = str(text or "").strip()
+            if message:
+                dialog.setLabelText(message)
+
+        def _on_finished(payload):
+            box["result"] = dict(payload or {})
+            dialog.setValue(100)
+            loop.quit()
+
+        def _on_error(message):
+            box["error"] = str(message or "").strip() or "pc migrate failed"
+            loop.quit()
+
+        worker.progress_signal.connect(_on_progress)
+        worker.finished_signal.connect(_on_finished)
+        worker.error_signal.connect(_on_error)
+        worker.start()
+        loop.exec()
+        shutdown_thread(worker)
+        dialog.close()
+        if box["error"]:
+            raise RuntimeError(box["error"])
+        return box["result"] or {}
+
+    def _export_pc_migrate_bundle(self):
+        from src.services.pc_migrate_service import suggest_export_dir_name
+
+        t = self.texts
+        parent = QFileDialog.getExistingDirectory(
+            self,
+            t.get("pc_migrate_export_pick_parent", "选择导出位置（将在其中新建文件夹）"),
+            "",
+        )
+        if not parent:
+            return
+        dest = os.path.normpath(os.path.join(parent, suggest_export_dir_name()))
+        if os.path.exists(dest) and os.listdir(dest):
+            self.show_info_dialog(
+                t.get("warning_title", "注意"),
+                t.get("pc_migrate_export_dest_busy", "目标文件夹已存在且非空：{path}").format(path=dest),
+                kind="warning",
+            )
+            return
+        if not self.show_confirm_dialog(
+            t.get("confirm_title", "确认"),
+            t.get(
+                "pc_migrate_export_confirm",
+                "导出应用数据到：\n{path}\n\n不含模型与 API 密钥。请将整个文件夹拷到新电脑后再导入。",
+            ).format(path=dest),
+        ):
+            return
+        try:
+            os.makedirs(dest, exist_ok=True)
+            result = self._run_pc_migrate_worker("export", dest)
+        except Exception as exc:
+            self.show_error_dialog(t.get("pc_migrate_export_failed", "导出迁移包失败"), exc)
+            return
+        msg = t.get(
+            "pc_migrate_export_done",
+            "已导出迁移包：\n{path}\n\n文件数：{files}，视频库：{libraries}",
+        ).format(
+            path=result.get("dest_dir") or dest,
+            files=result.get("file_count", 0),
+            libraries=result.get("library_count", 0),
+        )
+        self.settings_page.lbl_status.setText(msg)
+        self.show_info_dialog(t.get("success_title", "完成"), msg, kind="success")
+
+    def _prompt_library_remaps(self, missing_paths: list[str]) -> dict[str, str]:
+        if not missing_paths:
+            return {}
+        from ui.dialogs.pc_migrate_remap import PcMigrateRemapDialog
+
+        dialog = PcMigrateRemapDialog(
+            self,
+            texts=self.texts,
+            missing_paths=list(missing_paths),
+            is_dark=bool(getattr(self, "is_dark", True)),
+        )
+        if dialog.exec() != dialog.Accepted:
+            return {}
+        return dialog.remaps()
+
+    def _import_pc_migrate_bundle(self):
+        from src.services.pc_migrate_service import apply_library_path_remaps, load_pc_migrate_manifest
+
+        t = self.texts
+        bundle = QFileDialog.getExistingDirectory(
+            self,
+            t.get("pc_migrate_import_pick_bundle", "选择迁移包文件夹（含 manifest.json）"),
+            "",
+        )
+        if not bundle:
+            return
+        try:
+            manifest = load_pc_migrate_manifest(bundle)
+        except Exception as exc:
+            self.show_error_dialog(t.get("pc_migrate_import_invalid", "不是有效的迁移包"), exc)
+            return
+
+        current_root = get_configured_data_root(load_config())
+        target = QFileDialog.getExistingDirectory(
+            self,
+            t.get(
+                "pc_migrate_import_pick_target",
+                "选择本机数据根目录（将写入 data/；须为空或新建）",
+            ),
+            current_root or "",
+        )
+        if not target:
+            return
+        target = os.path.normpath(os.path.abspath(os.path.expanduser(target)))
+        exported_at = str((manifest or {}).get("exported_at") or "")
+        if not self.show_confirm_dialog(
+            t.get("confirm_title", "确认"),
+            t.get(
+                "pc_migrate_import_confirm",
+                "从迁移包导入到：\n{path}\n\n导出时间：{exported_at}\n文件约：{files}\n\n"
+                "目标 data/ 必须为空。导入后需重启应用；模型请在新电脑另行准备。",
+            ).format(
+                path=target,
+                exported_at=exported_at or "-",
+                files=(manifest or {}).get("file_count", "?"),
+            ),
+        ):
+            return
+        try:
+            result = self._run_pc_migrate_worker("import", bundle, target_data_root=target)
+        except Exception as exc:
+            self.show_error_dialog(t.get("pc_migrate_import_failed", "导入迁移包失败"), exc)
+            return
+
+        missing = list(result.get("missing_libraries") or [])
+        remapped = 0
+        if missing:
+            remaps = self._prompt_library_remaps(missing)
+            if remaps:
+                try:
+                    remap_result = apply_library_path_remaps(remaps)
+                    remapped = int(remap_result.get("remapped") or 0)
+                except Exception as exc:
+                    self.show_error_dialog(
+                        t.get("pc_migrate_remap_failed", "库路径重绑失败"),
+                        exc,
+                    )
+
+        self.load_settings_values()
+        if hasattr(self, "refresh_library_table"):
+            try:
+                self.refresh_library_table()
+            except Exception:
+                pass
+        if hasattr(self, "refresh_dialogue_library_table"):
+            try:
+                self.refresh_dialogue_library_table()
+            except Exception:
+                pass
+        msg = t.get(
+            "pc_migrate_import_done",
+            "导入完成。数据目录：{path}\n文件数：{files}\n缺失库路径：{missing}\n已重绑：{remapped}\n\n请重启 VideoSeek 后再搜索。",
+        ).format(
+            path=result.get("target_data_root") or target,
+            files=result.get("file_count", 0),
+            missing=len(missing),
+            remapped=remapped,
+        )
+        self.settings_page.lbl_status.setText(msg)
+        self.show_info_dialog(t.get("success_title", "完成"), msg, kind="success")
 
     def _migrate_model_root(self):
         t = self.texts
