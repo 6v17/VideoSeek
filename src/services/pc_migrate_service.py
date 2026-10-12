@@ -213,6 +213,15 @@ def load_pc_migrate_manifest(bundle_dir: str) -> dict[str, Any]:
         payload = json.load(handle)
     if not isinstance(payload, dict) or payload.get("format") != PC_MIGRATE_FORMAT:
         raise ValueError("not a VideoSeek PC migrate bundle")
+    try:
+        format_version = int(payload.get("format_version") or 0)
+    except (TypeError, ValueError):
+        format_version = 0
+    if format_version < 1 or format_version > PC_MIGRATE_VERSION:
+        raise ValueError(
+            f"unsupported migrate format_version: {payload.get('format_version')!r} "
+            f"(this app supports 1..{PC_MIGRATE_VERSION})"
+        )
     data_dir = os.path.join(root, DATA_DIR_NAME)
     if not os.path.isdir(data_dir):
         raise FileNotFoundError(f"missing {DATA_DIR_NAME}/ in bundle")
@@ -471,6 +480,9 @@ def apply_library_path_remaps(
     remapped = 0
     library_total = 0
     stores = 0
+    lance_videos = 0
+    transcript_rows = 0
+    tag_rows = 0
     for base in _iter_library_meta_bases(cfg):
         try:
             if not os.path.isdir(base) and not os.path.isfile(os.path.join(base, "library.db")):
@@ -485,6 +497,31 @@ def apply_library_path_remaps(
             stores += 1
         except Exception as exc:
             logger.warning("Failed remapping libraries under %s: %s", base, exc)
+
+        # Lance rows keep their own library_path; meta remap alone leaves indexes "missing".
+        try:
+            from src.storage.lance_store import remap_lance_library_roots
+
+            lance_result = remap_lance_library_roots(base, normalized)
+            lance_videos += int((lance_result or {}).get("videos") or 0)
+        except Exception as exc:
+            logger.warning("Failed remapping Lance library paths under %s: %s", base, exc)
+
+    try:
+        from src.storage.dialogue_transcript_store import remap_transcript_library_roots
+
+        transcript_rows = int(
+            (remap_transcript_library_roots(normalized, config=cfg) or {}).get("rows") or 0
+        )
+    except Exception as exc:
+        logger.warning("Failed remapping dialogue transcript library paths: %s", exc)
+
+    try:
+        from src.storage.evidence_tags_store import remap_tag_library_roots
+
+        tag_rows = int((remap_tag_library_roots(normalized, config=cfg) or {}).get("rows") or 0)
+    except Exception as exc:
+        logger.warning("Failed remapping evidence tag library paths: %s", exc)
 
     def _remap_path_list(values: list[Any]) -> list[str]:
         out: list[str] = []
@@ -527,6 +564,9 @@ def apply_library_path_remaps(
         "libraries": library_total,
         "stores": stores,
         "remap_count": len(normalized),
+        "lance_videos": lance_videos,
+        "transcript_rows": transcript_rows,
+        "tag_rows": tag_rows,
     }
 
 

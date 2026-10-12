@@ -244,6 +244,58 @@ def delete_video_tags(video_id: str, *, config=None) -> int:
     return deleted
 
 
+def remap_tag_library_roots(
+    remaps: dict[str, str],
+    *,
+    config=None,
+) -> dict:
+    """Rewrite projected tag ``library_path`` / ``video_path`` for PC-migrate remaps."""
+    from src.storage.video_identity import (
+        canonicalize_library_path,
+        rewrite_path_under_library_root,
+    )
+
+    if not remaps:
+        return {"ok": True, "rows": 0}
+    updated = 0
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            rows = conn.execute(
+                """
+                SELECT rowid, video_path, library_path
+                FROM tag_rows
+                WHERE library_path IS NOT NULL AND TRIM(library_path) != ''
+                """
+            ).fetchall()
+            for row in rows:
+                stored_lib = str(row["library_path"] or "").strip()
+                if not stored_lib:
+                    continue
+                old_canon = canonicalize_library_path(stored_lib)
+                new_root = remaps.get(old_canon)
+                if not new_root:
+                    continue
+                new_abs = os.path.normpath(os.path.abspath(os.path.expanduser(str(new_root))))
+                new_stored = canonicalize_library_path(new_abs)
+                old_media = str(row["video_path"] or "").strip()
+                new_media = rewrite_path_under_library_root(old_media, old_canon, new_abs)
+                if new_media is None:
+                    new_media = old_media
+                conn.execute(
+                    """
+                    UPDATE tag_rows
+                    SET video_path = ?, library_path = ?
+                    WHERE rowid = ?
+                    """,
+                    (os.path.normpath(new_media) if new_media else "", new_stored, int(row["rowid"])),
+                )
+                updated += 1
+            conn.commit()
+    if updated:
+        _invalidate_suggest_cache()
+    return {"ok": True, "rows": updated}
+
+
 def rekey_video_tags(
     old_video_id: str,
     new_video_id: str,

@@ -175,6 +175,18 @@ class PcMigrateServiceTests(unittest.TestCase):
                     return_value=[str(profile_base)],
                 ),
                 patch(
+                    "src.storage.lance_store.remap_lance_library_roots",
+                    return_value={"ok": True, "videos": 2, "updates": 2, "tables": 2},
+                ) as lance_remap,
+                patch(
+                    "src.storage.dialogue_transcript_store.remap_transcript_library_roots",
+                    return_value={"ok": True, "rows": 3},
+                ),
+                patch(
+                    "src.storage.evidence_tags_store.remap_tag_library_roots",
+                    return_value={"ok": True, "rows": 4},
+                ),
+                patch(
                     "src.services.search_scope.invalidate_searchable_path_index_cache",
                     return_value=None,
                 ),
@@ -183,6 +195,10 @@ class PcMigrateServiceTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["remapped"], 1)
+            self.assertEqual(result["lance_videos"], 2)
+            self.assertEqual(result["transcript_rows"], 3)
+            self.assertEqual(result["tag_rows"], 4)
+            self.assertTrue(lance_remap.called)
             from src.storage.profile_library_store import load_profile_meta
 
             meta = load_profile_meta(str(profile_base))
@@ -198,6 +214,122 @@ class PcMigrateServiceTests(unittest.TestCase):
             self.assertEqual(
                 os.path.normcase(saved[0]["download_target_library"]),
                 os.path.normcase(str(new_lib.resolve())),
+            )
+
+
+    def test_load_manifest_rejects_future_format_version(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "data").mkdir()
+            (root / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "format": svc.PC_MIGRATE_FORMAT,
+                        "format_version": svc.PC_MIGRATE_VERSION + 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                svc.load_pc_migrate_manifest(str(root))
+
+    def test_rewrite_path_under_library_root(self):
+        from src.storage.video_identity import rewrite_path_under_library_root
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old = root / "old"
+            new = root / "new"
+            old.mkdir()
+            new.mkdir()
+            media = old / "clip.mp4"
+            media.write_bytes(b"x")
+            rewritten = rewrite_path_under_library_root(str(media), str(old), str(new))
+            self.assertEqual(
+                os.path.normcase(rewritten),
+                os.path.normcase(str((new / "clip.mp4").resolve())),
+            )
+            self.assertIsNone(
+                rewrite_path_under_library_root(str(root / "other" / "a.mp4"), str(old), str(new))
+            )
+
+
+class LanceLibraryRemapTests(unittest.TestCase):
+    def test_remap_lance_library_roots_updates_stored_paths(self):
+        import importlib.util
+
+        if importlib.util.find_spec("lancedb") is None:
+            self.skipTest("lancedb not installed")
+        import numpy as np
+        from src.storage.asset_store import save_metadata
+        from src.storage.lance_search_index import get_lance_video_library_path, get_lance_video_location
+        from src.storage.lance_store import remap_lance_library_roots, upsert_profile_video_vectors
+        from src.storage.video_identity import canonicalize_library_path
+
+        vectors = np.random.randn(2, 8).astype(np.float32)
+        timestamps = np.asarray([0.0, 1.0], dtype=np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            old_lib = Path(tmp) / "videos_old"
+            new_lib = Path(tmp) / "videos_new"
+            old_lib.mkdir()
+            new_lib.mkdir()
+            media = old_lib / "clip.mp4"
+            media.write_bytes(b"video")
+
+            data_dir = Path(tmp) / "data"
+            profile_dir = data_dir / "model_assets" / "openai-clip" / "vit-base-patch32"
+            vector_dir = profile_dir / "vector"
+            vector_dir.mkdir(parents=True)
+            save_metadata({"libraries": {}}, str(profile_dir / "meta.json"))
+            config = {
+                "schema_version": 2,
+                "vector_search_backend": "lance",
+                "data_root": tmp,
+                "meta_file": str(data_dir / "meta.json"),
+                "models": {
+                    "active_profile": "clip_test",
+                    "profiles": [
+                        {
+                            "id": "clip_test",
+                            "provider": "clip_onnx",
+                            "runtime": {
+                                "model_dir": str(Path(tmp) / "models"),
+                                "model_variant": "vit-base-patch32",
+                            },
+                        }
+                    ],
+                },
+            }
+            data_dir.mkdir(exist_ok=True)
+            from src.core.faiss_index import save_vectors
+
+            save_vectors(vectors, timestamps, str(vector_dir / "vid_remap_vectors.npy"))
+            result = upsert_profile_video_vectors(
+                "vid_remap",
+                config=config,
+                library_path=str(old_lib),
+                video_path=str(media),
+            )
+            self.assertFalse(result.get("error"))
+            self.assertEqual(
+                get_lance_video_library_path(str(profile_dir), "vid_remap"),
+                canonicalize_library_path(str(old_lib)),
+            )
+
+            remap = remap_lance_library_roots(
+                str(profile_dir),
+                {canonicalize_library_path(str(old_lib)): str(new_lib)},
+            )
+            self.assertTrue(remap["ok"])
+            self.assertGreaterEqual(remap["videos"], 1)
+            self.assertEqual(
+                get_lance_video_library_path(str(profile_dir), "vid_remap"),
+                canonicalize_library_path(str(new_lib)),
+            )
+            _lib, stored_path = get_lance_video_location(str(profile_dir), "vid_remap")
+            self.assertEqual(
+                os.path.normcase(stored_path),
+                os.path.normcase(str((new_lib / "clip.mp4").resolve())),
             )
 
 

@@ -796,6 +796,66 @@ def list_transcript_library_paths(*, config=None) -> list[str]:
     return paths
 
 
+def remap_transcript_library_roots(
+    remaps: dict[str, str],
+    *,
+    config=None,
+) -> dict:
+    """Rewrite transcript ``library_path`` / ``video_path`` for PC-migrate remaps.
+
+    ``remaps`` keys should be ``canonicalize_library_path`` results.
+    """
+    from src.storage.video_identity import rewrite_path_under_library_root
+
+    if not remaps:
+        return {"ok": True, "rows": 0}
+    normalized = {
+        canonicalize_library_path(old): os.path.normpath(
+            os.path.abspath(os.path.expanduser(str(new or "").strip()))
+        )
+        for old, new in dict(remaps).items()
+        if str(old or "").strip() and str(new or "").strip()
+    }
+    if not normalized:
+        return {"ok": True, "rows": 0}
+    updated = 0
+    with _WRITE_LOCK:
+        with _db(config=config) as conn:
+            rows = conn.execute(
+                """
+                SELECT video_id, video_path, library_path
+                FROM transcripts
+                WHERE library_path IS NOT NULL AND TRIM(library_path) != ''
+                """
+            ).fetchall()
+            now = time.time()
+            for row in rows:
+                stored_lib = str(row["library_path"] or "").strip()
+                if not stored_lib:
+                    continue
+                old_canon = canonicalize_library_path(stored_lib)
+                new_abs = normalized.get(old_canon)
+                if not new_abs:
+                    continue
+                new_stored = canonicalize_library_path(new_abs)
+                video_id = str(row["video_id"] or "").strip()
+                old_media = str(row["video_path"] or "").strip()
+                new_media = rewrite_path_under_library_root(old_media, old_canon, new_abs)
+                if new_media is None:
+                    new_media = old_media
+                conn.execute(
+                    """
+                    UPDATE transcripts
+                    SET video_path = ?, library_path = ?, updated_at = ?
+                    WHERE video_id = ?
+                    """,
+                    (os.path.normpath(new_media) if new_media else "", new_stored, now, video_id),
+                )
+                updated += 1
+            conn.commit()
+    return {"ok": True, "rows": updated}
+
+
 def canonical_library_paths(library_path: str = "", library_paths=None) -> list[str]:
     """Canonical library roots from a single path and/or a list. Order kept."""
     ordered: list[str] = []

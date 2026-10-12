@@ -14,7 +14,10 @@ if TYPE_CHECKING:
 
 from src.app.logging_utils import get_logger
 from src.storage.asset_store import load_metadata
-from src.storage.video_identity import canonicalize_library_path
+from src.storage.video_identity import (
+    canonicalize_library_path,
+    rewrite_path_under_library_root,
+)
 
 logger = get_logger("lance_store")
 _BATCH_STATE_LOCK = threading.Lock()
@@ -1583,6 +1586,144 @@ def _invalidate_lance_search_caches(profile_base_dir: str = "") -> None:
         from src.app.logging_utils import note_swallowed
 
         note_swallowed(exc, "src/storage/lance_store.py:invalidate_lance_search_caches")
+
+
+def _sql_string_literal(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def remap_lance_library_roots(
+    profile_base_dir: str,
+    remaps: dict[str, str],
+) -> dict:
+    """Rewrite ``library_path`` / ``video_path`` after a PC-migrate library remap.
+
+    ``remaps`` keys should already be ``canonicalize_library_path`` results.
+    Values are absolute destination roots (casing preserved).
+    """
+    profile_base_dir = os.path.normpath(str(profile_base_dir or ""))
+    if not profile_base_dir or not remaps:
+        return {"ok": True, "tables": 0, "updates": 0, "videos": 0}
+    lance_dir = get_lance_dir(profile_base_dir)
+    if not os.path.isdir(lance_dir):
+        return {"ok": True, "tables": 0, "updates": 0, "videos": 0, "skipped": "no_lance"}
+
+    _assert_user_data_mutation_allowed(profile_base_dir, action="remap Lance library roots")
+
+    table_names = (FRAMES_TABLE_NAME, CHUNKS_TABLE_NAME, DIALOGUE_SEGMENTS_TABLE_NAME)
+    updates = 0
+    tables_touched = 0
+    videos_touched = 0
+
+    with _profile_mutation_lock(profile_base_dir):
+        db = _connect_lance(profile_base_dir)
+        existing = set(_list_table_names(db))
+        for old_key, new_root in dict(remaps).items():
+            old_canon = canonicalize_library_path(old_key) if old_key else ""
+            new_abs = os.path.normpath(os.path.abspath(os.path.expanduser(str(new_root or "").strip())))
+            if not old_canon or not new_abs:
+                continue
+            # Upserts store canonicalize(); also match a few historical forms.
+            old_candidates = {
+                old_canon,
+                os.path.normpath(os.path.abspath(os.path.expanduser(str(old_key)))),
+                str(old_key),
+            }
+            old_candidates = {c for c in old_candidates if str(c or "").strip()}
+            new_stored = canonicalize_library_path(new_abs)
+            lib_where = " OR ".join(
+                f"library_path = {_sql_string_literal(candidate)}"
+                for candidate in sorted(old_candidates)
+            )
+
+            # Distinct video_id -> rewritten video_path under the old root.
+            video_updates: dict[str, str] = {}
+            if FRAMES_TABLE_NAME in existing:
+                try:
+                    table = db.open_table(FRAMES_TABLE_NAME)
+                    builder = table.search().select(["video_id", "video_path"])
+                    if lib_where:
+                        builder = builder.where(lib_where)
+                    arrow = builder.to_arrow()
+                    if arrow.num_rows > 0 and "video_id" in arrow.column_names:
+                        for index in range(arrow.num_rows):
+                            vid = str(arrow["video_id"][index].as_py() or "").strip()
+                            if not vid or vid in video_updates:
+                                continue
+                            raw_path = ""
+                            if "video_path" in arrow.column_names:
+                                raw_path = str(arrow["video_path"][index].as_py() or "").strip()
+                            rewritten = rewrite_path_under_library_root(raw_path, old_canon, new_abs)
+                            if rewritten is None:
+                                for candidate in old_candidates:
+                                    rewritten = rewrite_path_under_library_root(
+                                        raw_path, candidate, new_abs
+                                    )
+                                    if rewritten is not None:
+                                        break
+                            video_updates[vid] = rewritten or raw_path
+                except Exception as exc:
+                    logger.warning(
+                        "Failed scanning Lance frames for library remap under %s: %s",
+                        profile_base_dir,
+                        exc,
+                    )
+
+            if video_updates:
+                for video_id, new_video_path in video_updates.items():
+                    where = f"video_id = {_sql_string_literal(video_id)}"
+                    values = {"library_path": new_stored}
+                    if new_video_path:
+                        values["video_path"] = os.path.normpath(new_video_path)
+                    touched_this_video = False
+                    for table_name in table_names:
+                        if table_name not in existing:
+                            continue
+                        try:
+                            table = db.open_table(table_name)
+                            if not hasattr(table, "update"):
+                                raise RuntimeError("lancedb Table.update unavailable")
+                            table.update(where=where, values=values)
+                            tables_touched += 1
+                            updates += 1
+                            touched_this_video = True
+                        except Exception as exc:
+                            logger.warning(
+                                "Lance remap failed for %s in %s/%s: %s",
+                                video_id,
+                                profile_base_dir,
+                                table_name,
+                                exc,
+                            )
+                    if touched_this_video:
+                        videos_touched += 1
+            else:
+                # No row scan (empty / missing frames) — still rewrite library_path.
+                for table_name in table_names:
+                    if table_name not in existing:
+                        continue
+                    try:
+                        table = db.open_table(table_name)
+                        if not hasattr(table, "update"):
+                            raise RuntimeError("lancedb Table.update unavailable")
+                        table.update(where=lib_where, values={"library_path": new_stored})
+                        tables_touched += 1
+                        updates += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Lance bulk library_path remap failed (%s / %s): %s",
+                            profile_base_dir,
+                            table_name,
+                            exc,
+                        )
+
+    _invalidate_lance_search_caches(profile_base_dir)
+    return {
+        "ok": True,
+        "tables": tables_touched,
+        "updates": updates,
+        "videos": videos_touched,
+    }
 
 
 def video_has_lance_vectors(video_id: str, config=None) -> bool:

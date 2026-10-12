@@ -16,6 +16,34 @@ def canonicalize_library_path(path):
     return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(text))))
 
 
+def rewrite_path_under_library_root(path: str, old_root: str, new_root: str) -> str | None:
+    """If ``path`` is under ``old_root``, return the same relative path under ``new_root``.
+
+    Returns ``None`` when ``path`` is empty or not under ``old_root``.
+    """
+    raw = str(path or "").strip()
+    old = str(old_root or "").strip()
+    new = str(new_root or "").strip()
+    if not raw or not old or not new:
+        return None
+    path_abs = os.path.normpath(os.path.abspath(os.path.expanduser(raw)))
+    old_abs = os.path.normpath(os.path.abspath(os.path.expanduser(old)))
+    new_abs = os.path.normpath(os.path.abspath(os.path.expanduser(new)))
+    path_key = os.path.normcase(path_abs)
+    old_key = os.path.normcase(old_abs)
+    if path_key == old_key:
+        return new_abs
+    try:
+        rel = os.path.relpath(path_abs, start=old_abs)
+    except ValueError:
+        return None
+    if not rel or rel == ".":
+        return new_abs
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return None
+    return os.path.normpath(os.path.join(new_abs, rel))
+
+
 def canonicalize_library_rel_path(rel_path) -> str:
     """Normalize in-library relative paths to forward slashes.
 
