@@ -18,6 +18,26 @@ class DialogueExportServiceTests(unittest.TestCase):
         self.assertIn("00:00:01,500 --> 00:00:03,000", srt)
         self.assertIn("店长：hello world", srt)
 
+        plain = render_dialogue_srt(
+            [
+                {
+                    "start": 1.5,
+                    "end": 3.0,
+                    "text": "hello world",
+                    "speaker": "店长",
+                    "language": "zh",
+                    "asr_source": "ocr",
+                    "seg_index": 9,
+                }
+            ],
+            include_speaker=False,
+        )
+        self.assertIn("hello world", plain)
+        self.assertNotIn("店长", plain)
+        self.assertNotIn("asr_source", plain)
+        self.assertNotIn("language", plain)
+        self.assertNotIn("seg_index", plain)
+
         txt = render_dialogue_txt(
             [{"start": 1.5, "end": 3.0, "text": "hello world"}]
         )

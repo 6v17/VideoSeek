@@ -1206,7 +1206,8 @@ class UnderstandingAsrGuiMixin:
         try:
             os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
             with open(path, "w", encoding="utf-8") as handle:
-                handle.write(render_dialogue_srt(cues))
+                # Subtitle-library import wants pure lines — no speaker / meta prefixes.
+                handle.write(render_dialogue_srt(cues, include_speaker=False))
         except Exception as exc:
             from src.app.logging_utils import note_swallowed
             note_swallowed(exc, "ui/windows/gui_understanding_asr.py:export_srt")

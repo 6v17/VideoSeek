@@ -32,16 +32,27 @@ def _format_srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def render_dialogue_srt(segments: list[dict[str, Any]]) -> str:
+def render_dialogue_srt(
+    segments: list[dict[str, Any]],
+    *,
+    include_speaker: bool = True,
+) -> str:
+    """Render cues as standard SRT.
+
+    Only ``start`` / ``end`` / ``text`` (and optionally ``speaker`` as a text
+    prefix) are written. Cue metadata such as ``language`` / ``asr_source`` /
+    ``seg_index`` is never exported.
+    """
     blocks: list[str] = []
     index = 1
     for item in segments or []:
         text = str((item or {}).get("text", "") or "").strip()
         if not text:
             continue
-        speaker = str((item or {}).get("speaker") or "").strip()
-        if speaker:
-            text = f"{speaker}：{text}"
+        if include_speaker:
+            speaker = str((item or {}).get("speaker") or "").strip()
+            if speaker:
+                text = f"{speaker}：{text}"
         start = float((item or {}).get("start", 0.0) or 0.0)
         end = float((item or {}).get("end", start) or start)
         if end < start:

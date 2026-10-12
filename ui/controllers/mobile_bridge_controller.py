@@ -1,6 +1,16 @@
+import os
 import threading
 
 from PySide6.QtCore import QEventLoop, QObject, Qt, QThread, QTimer, Signal, Slot
+
+
+def _test_mode() -> bool:
+    return str(os.environ.get("VIDEOSEEK_TEST_MODE", "") or "").strip() in {
+        "1",
+        "true",
+        "True",
+        "yes",
+    }
 
 
 class MobileBridgeController(QObject):
@@ -21,6 +31,14 @@ class MobileBridgeController(QObject):
 
             self._service = MobileBridgeService(on_search_requested=self._handle_search_requested)
         if self.is_running():
+            return self.get_access_url()
+        # Pytest/Windows: nested QEventLoop + MagicMock parents has crashed runners
+        # (0xc0000374). Keep production async; tests call start() synchronously.
+        if _test_mode():
+            self._service.start()
+            if not self.is_running():
+                raise RuntimeError("Mobile bridge server failed to start.")
+            self.status_changed.emit("running")
             return self.get_access_url()
         # Run the blocking bind/wait off the UI thread; pump Qt events meanwhile.
         box: dict = {"error": None}
