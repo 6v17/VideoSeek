@@ -26,8 +26,9 @@ from ui.widgets.thumb_cell import fit_thumb_pixmap, make_thumb_label
 
 _OVERLAY_HIDE_DELAY_MS = 120
 
-# Preferred card. Narrower panes shrink toward _CARD_MIN so three columns still fit.
-_CARD_WIDTH = 300
+# Preferred card. Narrower panes shrink toward _CARD_MIN, and the column
+# count steps through 2 before it jumps to 3.
+_CARD_WIDTH = 240
 _CARD_MIN = 232
 _CARD_SPACING = 12
 _GRID_BOTTOM_PAD = 20
@@ -39,6 +40,9 @@ def grid_column_plan(viewport_width: int) -> tuple[int, int, int]:
     usable = max(1, int(viewport_width) - 16)
     natural = max(1, (usable + _CARD_SPACING) // (_CARD_WIDTH + _CARD_SPACING))
     cols = natural
+    # Preferred width alone skips 2 columns (476–611px used to stay at 1).
+    if usable >= _CARD_MIN * 2 + _CARD_SPACING:
+        cols = max(cols, 2)
     if usable >= _CARD_MIN * 3 + _CARD_SPACING * 2:
         cols = max(cols, 3)
     max_cols = max(1, (usable + _CARD_SPACING) // (_CARD_MIN + _CARD_SPACING))

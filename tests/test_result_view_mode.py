@@ -124,8 +124,8 @@ class ResultViewModeTests(unittest.TestCase):
 
         usable = 1100 - 16
         cols = max(1, (usable + _CARD_SPACING) // (_CARD_WIDTH + _CARD_SPACING))
-        self.assertGreaterEqual(cols, 3)
-        self.assertLessEqual(cols, 4)
+        self.assertGreaterEqual(cols, 4)
+        self.assertLessEqual(cols, 5)
         self.assertGreaterEqual(_THUMB_HEIGHT, 160)
 
         grid = ResultGrid()
@@ -147,6 +147,13 @@ class ResultViewModeTests(unittest.TestCase):
         self.assertGreaterEqual(wide_cols, 3)
         self.assertGreaterEqual(wide_card, 232)
         self.assertLessEqual(wide_card, _CARD_WIDTH)
+        # 476–611px of usable width fits two minimum cards. Preferred width used to leave one.
+        pair_cols, pair_card, _pair_thumb = grid_column_plan(476 + 16)
+        self.assertEqual(pair_cols, 2)
+        self.assertGreaterEqual(pair_card, 232)
+        self.assertLessEqual(pair_card, _CARD_WIDTH)
+        narrow_cols, _narrow_card, _narrow_thumb = grid_column_plan(400 + 16)
+        self.assertEqual(narrow_cols, 1)
         self.assertFalse(hasattr(grid._cards[0], "actions_host"))
         self.assertGreater(grid._host.minimumHeight(), _GRID_BOTTOM_PAD)
 

@@ -52,6 +52,9 @@ def _fallback_text(texts, key, zh_text, en_text):
 
 fallback_text = _fallback_text
 
+# Transport row (play, range, export) needs about this much. Narrower clips the buttons.
+_DOCKED_PREVIEW_WIDTH = 470
+
 
 class SamplingRuleRow(QWidget):
     def __init__(self, on_change, on_remove, parent=None):
@@ -650,7 +653,7 @@ class SearchPage(QWidget):
             panel.apply_viewport_budget(vh)
         splitter = getattr(self, "compare_splitter", None)
         if splitter is not None and not getattr(self, "_compare_sizes_set", False) and splitter.width() > 200:
-            preview_w = 640
+            preview_w = _DOCKED_PREVIEW_WIDTH
             splitter.setSizes([max(0, splitter.width() - preview_w), preview_w])
             self._compare_sizes_set = True
         view = getattr(self, "result_view", None)
@@ -658,7 +661,7 @@ class SearchPage(QWidget):
             view.set_viewport_min_height(result_table_min_height(viewport_height=vh))
 
     def adopt_preview_width(self) -> None:
-        """After the page grows, bring a squeezed preview back up to 640px."""
+        """After the page grows, bring a squeezed preview back up to the docked width."""
         splitter = getattr(self, "compare_splitter", None)
         if splitter is None or splitter.width() <= 200:
             return
@@ -666,13 +669,13 @@ class SearchPage(QWidget):
         if len(sizes) != 2:
             return
         preview_w = int(sizes[1])
-        target = 640
+        target = _DOCKED_PREVIEW_WIDTH
         if preview_w >= target:
             return
-        results_min = 776
+        results_min = 360
         column = getattr(self, "_original_column", None)
         if column is not None:
-            results_min = max(results_min, int(column.minimumWidth()))
+            results_min = int(column.minimumWidth())
         spare = int(sizes[0]) - results_min
         if spare <= 0:
             return
