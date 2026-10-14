@@ -295,7 +295,9 @@ class PreviewController:
             except Exception as exc:
                 logger.debug("Preview surface stack switch skipped: %s", exc)
                 return
-            park = getattr(window, "_park_qt_video_surface", None)
+            park = getattr(window, "_sync_docked_native_surfaces", None) or getattr(
+                window, "_park_qt_video_surface", None
+            )
             if callable(park):
                 park()
             if idle:

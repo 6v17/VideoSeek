@@ -207,7 +207,7 @@ class MainWindow(
         self.audio_output.setVolume(1.0)
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
-        self._park_qt_video_surface()
+        self._sync_docked_native_surfaces()
         self._update_preview_action_button_styles()
         self._init_system_tray()
         self.apply_texts()
@@ -361,7 +361,8 @@ class MainWindow(
         self.preview_surface_stack.addWidget(self.preview_video_host)
         self.search_page.preview_host_layout.addWidget(self.preview_surface_stack, 1)
         self.preview_surface_stack.setCurrentWidget(self.search_page.preview_placeholder)
-        self.preview_surface_stack.currentChanged.connect(lambda _index: self._park_qt_video_surface())
+        self.preview_surface_stack.currentChanged.connect(lambda _index: self._sync_docked_native_surfaces())
+        self._sync_docked_native_surfaces()
 
         self.result_table = self.search_page.result_table
         self.result_table.cellDoubleClicked.connect(self._open_result_table_preview)
@@ -686,6 +687,40 @@ class MainWindow(
         adopt = getattr(page, "adopt_preview_width", None)
         if callable(adopt):
             adopt()
+
+    def _sync_docked_native_surfaces(self) -> None:
+        """Hide native preview windows that are not the picture being shown.
+
+        A hidden native host stays on top of the placeholder and keeps the first
+        paint of the transport, so startup shows a second control bar in the picture.
+        """
+        self._park_qt_video_surface()
+        host = getattr(self, "preview_video_host", None)
+        stack = getattr(self, "preview_surface_stack", None)
+        if host is None:
+            return
+        showing = stack is not None and stack.currentWidget() is host
+        if showing:
+            host.setMinimumSize(0, 0)
+            host.setMaximumSize(16777215, 16777215)
+            host.show()
+            return
+        host.hide()
+        host.setFixedSize(1, 1)
+        try:
+            hwnd = int(host.internalWinId() or 0)
+        except Exception:
+            hwnd = 0
+        if not hwnd:
+            return
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(hwnd, 0)
+            user32.SetWindowPos(hwnd, 0, -32000, -32000, 1, 1, 0x0004 | 0x0010 | 0x0080)
+        except Exception:
+            return
 
     def _attach_qt_video_surface(self) -> None:
         """Put the Qt video widget back on the preview stack for the fallback player."""

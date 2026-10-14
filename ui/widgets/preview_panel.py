@@ -35,11 +35,15 @@ scroll_ancestor_vertically = _scroll_ancestor_vertically
 
 
 class PreviewHostFrame(QFrame):
-    """Picture well. Native so the VLC window stays inside it and cannot cover the controls."""
+    """Picture well. The VLC host inside is the native window; this frame stays a normal widget.
+
+    A native frame keeps the first paint of the transport when it grows over that row,
+    so startup shows a second 暂停 bar inside the picture.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
     def hasHeightForWidth(self) -> bool:  # noqa: N802
         return False
@@ -187,7 +191,9 @@ class PreviewPanel(VSCard):
         self._host_aspect_height = height
         self.preview_host.setMinimumHeight(height)
         self.preview_host.setMaximumHeight(height)
+        self.preview_host.update()
         self.expanded_chrome.raise_()
+        self.expanded_chrome.update()
         player = getattr(getattr(self.window(), "preview_controller", None), "vlc_player", None)
         rebind = getattr(player, "rebind_output_window", None)
         if callable(rebind):
