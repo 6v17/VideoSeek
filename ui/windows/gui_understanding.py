@@ -1773,6 +1773,8 @@ class UnderstandingGuiMixin:
             page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_reset_speakers"):
             page.btn_reset_speakers.setEnabled(False)
+        if hasattr(page, "btn_delete_selected_dialogue"):
+            page.btn_delete_selected_dialogue.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -1964,6 +1966,8 @@ class UnderstandingGuiMixin:
             page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_reset_speakers"):
             page.btn_reset_speakers.setEnabled(False)
+        if hasattr(page, "btn_delete_selected_dialogue"):
+            page.btn_delete_selected_dialogue.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         page.scope_combo.setEnabled(False)
@@ -2438,6 +2442,8 @@ class UnderstandingGuiMixin:
     def _populate_understanding_dialogue_table(self, cues: list) -> None:
         from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QTableWidgetItem, QWidget
 
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
         page = getattr(self, "understanding_page", None)
         table = getattr(page, "dialogue_table", None) if page is not None else None
         if table is None:
@@ -2455,6 +2461,13 @@ class UnderstandingGuiMixin:
                 seg_index = int(cue.get("seg_index", index))
             except (TypeError, ValueError):
                 seg_index = index
+            check_item = QTableWidgetItem()
+            check_item.setFlags(
+                (Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
+                & ~Qt.ItemFlag.ItemIsEditable
+            )
+            check_item.setCheckState(Qt.CheckState.Unchecked)
+            check_item.setData(Qt.ItemDataRole.UserRole + 1, seg_index)
             time_item = QTableWidgetItem(format_timecode_range(start, end))
             time_item.setData(Qt.ItemDataRole.UserRole, start)
             time_item.setData(Qt.ItemDataRole.UserRole + 1, seg_index)
@@ -2466,9 +2479,10 @@ class UnderstandingGuiMixin:
             text_item = QTableWidgetItem(str(cue.get("text") or "").strip())
             text_item.setFlags(text_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             text_item.setToolTip(text_item.text())
-            table.setItem(index, 0, time_item)
-            table.setItem(index, 1, speaker_item)
-            table.setItem(index, 2, text_item)
+            table.setItem(index, Col.CHECK, check_item)
+            table.setItem(index, Col.RANGE, time_item)
+            table.setItem(index, Col.SPEAKER, speaker_item)
+            table.setItem(index, Col.TEXT, text_item)
             edit_button = QPushButton(edit_label)
             edit_button.setObjectName("GhostButton")
             edit_button.setProperty("class", "TableBtn")
@@ -2495,18 +2509,19 @@ class UnderstandingGuiMixin:
             row_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             row_layout.addWidget(edit_button)
             row_layout.addWidget(delete_button)
-            table.setCellWidget(index, 3, host)
+            table.setCellWidget(index, Col.ACTIONS, host)
         table.blockSignals(False)
 
     def _edit_understanding_dialogue_cue(self, row: int) -> None:
         from ui.dialogs.dialogue_cue import DialogueCueDialog
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
 
         page = getattr(self, "understanding_page", None)
         table = getattr(page, "dialogue_table", None) if page is not None else None
         video_id = self._selected_understanding_video_id()
         if table is None or not video_id:
             return
-        item = table.item(int(row), 0)
+        item = table.item(int(row), Col.RANGE)
         if item is None:
             return
         try:
@@ -2518,8 +2533,8 @@ class UnderstandingGuiMixin:
             end = float(item.data(Qt.ItemDataRole.UserRole + 2))
         except (TypeError, ValueError):
             end = start
-        speaker_item = table.item(int(row), 1)
-        text_item = table.item(int(row), 2)
+        speaker_item = table.item(int(row), Col.SPEAKER)
+        text_item = table.item(int(row), Col.TEXT)
         dialog = DialogueCueDialog(
             self,
             texts=self.texts,
@@ -2551,8 +2566,10 @@ class UnderstandingGuiMixin:
         self._refresh_understanding_dialogue_step()
         table = getattr(page, "dialogue_table", None)
         if table is not None:
+            from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
             for index in range(table.rowCount()):
-                time_item = table.item(index, 0)
+                time_item = table.item(index, Col.RANGE)
                 if time_item is None:
                     continue
                 try:
@@ -2565,19 +2582,21 @@ class UnderstandingGuiMixin:
             self._sync_asr_extract_button()
 
     def _delete_understanding_dialogue_cue(self, row: int) -> None:
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
         page = getattr(self, "understanding_page", None)
         table = getattr(page, "dialogue_table", None) if page is not None else None
         video_id = self._selected_understanding_video_id()
         if table is None or not video_id:
             return
-        item = table.item(int(row), 0)
+        item = table.item(int(row), Col.RANGE)
         if item is None:
             return
         try:
             seg_index = int(item.data(Qt.ItemDataRole.UserRole + 1))
         except (TypeError, ValueError):
             return
-        text_item = table.item(int(row), 2)
+        text_item = table.item(int(row), Col.TEXT)
         line = str(text_item.text() if text_item is not None else "").strip()
         preview = line if len(line) <= 48 else line[:48] + "…"
         if not self.show_confirm_dialog(
@@ -2602,10 +2621,84 @@ class UnderstandingGuiMixin:
         if hasattr(self, "_sync_asr_extract_button"):
             self._sync_asr_extract_button()
 
+    def _selected_understanding_dialogue_seg_indices(self) -> list[int]:
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return []
+        indices: list[int] = []
+        seen: set[int] = set()
+        for row in range(table.rowCount()):
+            check = table.item(row, Col.CHECK)
+            if check is None or check.checkState() != Qt.CheckState.Checked:
+                continue
+            time_item = table.item(row, Col.RANGE)
+            if time_item is None:
+                continue
+            try:
+                seg_index = int(time_item.data(Qt.ItemDataRole.UserRole + 1))
+            except (TypeError, ValueError):
+                continue
+            if seg_index in seen:
+                continue
+            seen.add(seg_index)
+            indices.append(seg_index)
+        return indices
+
+    def _delete_selected_understanding_dialogue_cues(self) -> None:
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        seg_indices = self._selected_understanding_dialogue_seg_indices()
+        if not seg_indices:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_dialogue_delete_selected_empty",
+                    "Check one or more lines first.",
+                ),
+                kind="warning",
+            )
+            return
+        if not self.show_confirm_dialog(
+            self.texts.get("confirm_title", "Confirm"),
+            self.texts.get(
+                "understanding_dialogue_delete_selected_confirm",
+                "Delete {count} checked lines?",
+            ).format(count=len(seg_indices)),
+            kind="warning",
+        ):
+            return
+        from src.services.understanding_dialogue import delete_working_cues
+
+        removed = delete_working_cues(video_id, seg_indices, config=load_config())
+        if removed <= 0:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_dialogue_delete_selected_failed",
+                    "Could not delete the checked lines.",
+                ),
+                kind="warning",
+            )
+            return
+        self._refresh_understanding_dialogue_step()
+        if hasattr(self, "_sync_asr_extract_button"):
+            self._sync_asr_extract_button()
+
     def _on_understanding_dialogue_speaker_changed(self, item) -> None:
         from PySide6.QtCore import Qt
 
-        if item is None or int(item.column()) != 1:
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
+        if item is None or int(item.column()) != int(Col.SPEAKER):
             return
         video_id = self._selected_understanding_video_id()
         if not video_id:
@@ -2633,15 +2726,42 @@ class UnderstandingGuiMixin:
         # Keep row selection only — do not jump to the VLM chunk timeline.
         _ = (row, column)
 
+    def _on_understanding_dialogue_selection_changed(self, *_args) -> None:
+        """Drag / Shift multi-select should check those rows for「删除选中」."""
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return
+        model = table.selectionModel()
+        if model is None:
+            return
+        selected_rows = [index.row() for index in model.selectedRows()]
+        if len(selected_rows) < 2:
+            return
+        table.blockSignals(True)
+        try:
+            for row in selected_rows:
+                check = table.item(int(row), Col.CHECK)
+                if check is None:
+                    continue
+                if check.checkState() != Qt.CheckState.Checked:
+                    check.setCheckState(Qt.CheckState.Checked)
+        finally:
+            table.blockSignals(False)
+
     def _on_understanding_dialogue_cell_double_clicked(self, row: int, column: int) -> None:
         """Play this ASR cue's video span (not the overlapping VLM chunk)."""
-        if int(column) == 3:
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
+        if int(column) in (int(Col.CHECK), int(Col.ACTIONS)):
             return
         page = getattr(self, "understanding_page", None)
         table = getattr(page, "dialogue_table", None) if page is not None else None
         if table is None:
             return
-        item = table.item(int(row), 0)
+        item = table.item(int(row), Col.RANGE)
         if item is None:
             return
         try:

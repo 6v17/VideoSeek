@@ -16,6 +16,7 @@ from src.services.recap_constants import (
     ENDING_COVER_RATIO,
     MAX_STORY_BEATS,
     PLAN_ACT_ASR_LIMIT,
+    PLAN_ACT_PACK_PAD_SEC,
     PLAN_ACT_TARGET_SEC,
 )
 from src.services.recap_focus import (
@@ -175,7 +176,9 @@ def plan_story_beats_by_acts(
             raise UnderstandingStoppedError("stopped")
         pct = 12 + int(round(20.0 * float(index) / float(max(len(acts), 1))))
         _progress(min(32, pct), "planning", {"act": index + 1, "acts": len(acts)})
-        act_pack = filter_pack_to_span(pack, window[0], window[1], pad_sec=4.0)
+        act_pack = filter_pack_to_span(
+            pack, window[0], window[1], pad_sec=PLAN_ACT_PACK_PAD_SEC
+        )
         if pack.get("recap_focus"):
             act_pack["recap_focus"] = pack.get("recap_focus")
         dense = _rs().compact_ocr_cues_in_span(
@@ -230,9 +233,9 @@ def _try_story_plan_llm(
     should_stop_callback: Callable[[], bool] | None,
     temperature: float,
     max_tokens: int,
-    retries: int = 1,
+    retries: int = 0,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]] | None:
-    """Call plan LLM; retry once on transport/runtime failure so one glitch ≠ silent act loss."""
+    """Call plan LLM. Transport retry is in ``call_remote_llm``; ``retries`` adds outer passes."""
     attempts = max(1, int(retries) + 1)
     for attempt in range(attempts):
         if should_stop_callback and should_stop_callback():

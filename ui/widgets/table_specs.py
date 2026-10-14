@@ -62,11 +62,20 @@ LOCAL_SEARCH_TABLE_SPEC = TableSpec(
     ),
 )
 
+class UnderstandingDialogueCol(IntEnum):
+    CHECK = 0
+    RANGE = 1
+    SPEAKER = 2
+    TEXT = 3
+    ACTIONS = 4
+
+
 UNDERSTANDING_DIALOGUE_TABLE_SPEC = TableSpec(
     texts_header_key="understanding_dialogue_headers",
     row_height=44,
     object_name="DataTable",
     columns=(
+        TableColumnSpec("check", width=36),
         TableColumnSpec("range", width=148),
         TableColumnSpec("speaker", width=108),
         TableColumnSpec("text", resize="stretch"),

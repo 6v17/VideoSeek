@@ -92,6 +92,7 @@ from src.services.recap_constants import (  # facade: knobs live in recap_consta
     MIN_STANDALONE_CLIP_SEC as MIN_STANDALONE_CLIP_SEC,
     MIN_VO_FILL as MIN_VO_FILL,
     PLAN_ACT_ASR_LIMIT as PLAN_ACT_ASR_LIMIT,
+    PLAN_ACT_PACK_PAD_SEC as PLAN_ACT_PACK_PAD_SEC,
     PLAN_ACT_TARGET_SEC as PLAN_ACT_TARGET_SEC,
     RECAP_CLIMAX_IMPORTANCE as RECAP_CLIMAX_IMPORTANCE,
     RECAP_FOCUS_BOND as RECAP_FOCUS_BOND,
@@ -762,23 +763,20 @@ def generate_recap_timeline(
             wave_pack = pack_for_beats(pack, wave)
             used_src = collect_used_source_spans(cuts)
             match_text = None
-            for attempt in range(2):
-                _raise_if_stopped()
-                try:
-                    match_text = call_remote_llm(
-                        system=match_system,
-                        user=recap_user_prompt(wave_pack, wave, used_src=used_src),
-                        config=cfg,
-                        temperature=0.25,
-                        max_tokens=4096,
-                        should_stop_callback=should_stop_callback,
-                    )
-                    break
-                except RuntimeError:
-                    if attempt == 0:
-                        continue
-                    warnings.append("recap_warn_match_wave")
-                    match_text = None
+            _raise_if_stopped()
+            try:
+                # Transport retry lives in call_remote_llm; keep earlier waves on hard fail.
+                match_text = call_remote_llm(
+                    system=match_system,
+                    user=recap_user_prompt(wave_pack, wave, used_src=used_src),
+                    config=cfg,
+                    temperature=0.25,
+                    max_tokens=4096,
+                    should_stop_callback=should_stop_callback,
+                )
+            except RuntimeError:
+                warnings.append("recap_warn_match_wave")
+                match_text = None
             if match_text is None:
                 # Keep earlier waves; do not discard completed match work.
                 break

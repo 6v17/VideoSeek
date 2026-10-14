@@ -202,16 +202,26 @@ def update_working_cue(
 
 
 def delete_working_cue(video_id: str, seg_index: int, *, config=None) -> bool:
+    return delete_working_cues(video_id, [seg_index], config=config) > 0
+
+
+def delete_working_cues(video_id: str, seg_indices, *, config=None) -> int:
+    """Remove one or more working cues in a single save. Returns how many were dropped."""
     payload = load_working_copy(video_id, config=config)
     if payload is None:
-        return False
-    target = _seg_index(seg_index)
-    if target < 0:
-        return False
+        return 0
+    targets = {
+        index
+        for index in (_seg_index(raw) for raw in (seg_indices or []))
+        if index >= 0
+    }
+    if not targets:
+        return 0
     cues = list(payload.get("cues") or [])
-    kept = [row for row in cues if _seg_index(row.get("seg_index")) != target]
-    if len(kept) == len(cues):
-        return False
+    kept = [row for row in cues if _seg_index(row.get("seg_index")) not in targets]
+    removed = len(cues) - len(kept)
+    if removed <= 0:
+        return 0
     save_working_copy(
         video_id,
         kept,
@@ -222,7 +232,7 @@ def delete_working_cue(video_id: str, seg_index: int, *, config=None) -> bool:
         edited_by_user=True,
         config=config,
     )
-    return True
+    return removed
 
 
 def update_working_speaker(
@@ -304,22 +314,53 @@ def rename_working_speakers(
     old_speaker: str,
     new_speaker: str,
     *,
+    seg_index: int | None = None,
     config=None,
 ) -> int:
-    from src.storage.dialogue_transcript_store import normalize_dialogue_speaker
+    """Rename speaker labels on the understanding working copy.
+
+    - Auto labels (声线N / Voice N): rename every matching cue (batch).
+    - Manual names: correction mode — only ``seg_index`` is changed, so fixing one
+      mislabeled line does not rewrite every other cue that shares the name.
+    """
+    from src.storage.dialogue_transcript_store import (
+        is_auto_speaker_label,
+        normalize_dialogue_speaker,
+    )
 
     source = normalize_dialogue_speaker(old_speaker)
     target = normalize_dialogue_speaker(new_speaker)
     payload = load_working_copy(video_id, config=config)
-    if payload is None or not source or source == target:
+    if payload is None or not source or not target or source == target:
         return 0
+    cue_only = not is_auto_speaker_label(source)
+    if cue_only:
+        try:
+            only_index = int(seg_index) if seg_index is not None else -1
+        except (TypeError, ValueError):
+            only_index = -1
+        if only_index < 0:
+            return 0
+    else:
+        only_index = -1
     changed = 0
     updated: list[dict[str, Any]] = []
     for row in payload.get("cues") or []:
         item = dict(row)
-        if str(item.get("speaker") or "") == source:
-            item["speaker"] = target
-            changed += 1
+        speaker = str(item.get("speaker") or "")
+        if speaker != source:
+            updated.append(item)
+            continue
+        if cue_only:
+            try:
+                row_index = int(item.get("seg_index"))
+            except (TypeError, ValueError):
+                row_index = -1
+            if row_index != only_index:
+                updated.append(item)
+                continue
+        item["speaker"] = target
+        changed += 1
         updated.append(item)
     if changed:
         save_working_copy(

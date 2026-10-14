@@ -10,8 +10,10 @@ from unittest import mock
 from src.services.dialogue_export_service import render_dialogue_srt
 from src.services.understanding_dialogue import (
     delete_working_cue,
+    delete_working_cues,
     ensure_working_copy,
     load_working_copy,
+    rename_working_speakers,
     replace_working_copy_from_extraction,
     save_working_copy,
     update_working_cue,
@@ -147,6 +149,57 @@ class UnderstandingDialogueCopyTests(unittest.TestCase):
                 )
                 self.assertFalse(replaced.get("skipped_protected"))
                 self.assertEqual(load_working_copy("vid-protect")["cues"][0]["text"], "新 ASR")
+
+    def test_delete_working_cues_removes_many_in_one_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": tmp},
+            ):
+                save_working_copy(
+                    "vid-batch-del",
+                    [
+                        {"seg_index": 0, "start": 0.0, "end": 1.0, "text": "留着"},
+                        {"seg_index": 1, "start": 1.0, "end": 2.0, "text": "删1"},
+                        {"seg_index": 2, "start": 2.0, "end": 3.0, "text": "删2"},
+                        {"seg_index": 3, "start": 3.0, "end": 4.0, "text": "也留"},
+                    ],
+                    origin="local",
+                )
+                removed = delete_working_cues("vid-batch-del", [1, 2, 99])
+                self.assertEqual(removed, 2)
+                cues = load_working_copy("vid-batch-del")["cues"]
+                self.assertEqual([row["text"] for row in cues], ["留着", "也留"])
+                self.assertEqual([row["seg_index"] for row in cues], [0, 3])
+
+    def test_rename_auto_is_batch_manual_is_one_cue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": tmp},
+            ):
+                save_working_copy(
+                    "vid-rename",
+                    [
+                        {"seg_index": 0, "start": 0.0, "end": 1.0, "text": "a", "speaker": "声线1"},
+                        {"seg_index": 1, "start": 1.0, "end": 2.0, "text": "b", "speaker": "声线1"},
+                        {"seg_index": 2, "start": 2.0, "end": 3.0, "text": "c", "speaker": "店长"},
+                        {"seg_index": 3, "start": 3.0, "end": 4.0, "text": "d", "speaker": "店长"},
+                    ],
+                    origin="local",
+                )
+                self.assertEqual(
+                    rename_working_speakers("vid-rename", "声线1", "男主"),
+                    2,
+                )
+                cues = load_working_copy("vid-rename")["cues"]
+                self.assertEqual([row["speaker"] for row in cues], ["男主", "男主", "店长", "店长"])
+                self.assertEqual(
+                    rename_working_speakers("vid-rename", "店长", "老板", seg_index=2),
+                    1,
+                )
+                cues = load_working_copy("vid-rename")["cues"]
+                self.assertEqual([row["speaker"] for row in cues], ["男主", "男主", "老板", "店长"])
 
 
 if __name__ == "__main__":

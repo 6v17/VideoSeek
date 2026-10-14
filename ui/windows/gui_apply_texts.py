@@ -380,6 +380,16 @@ class ApplyTextsGuiMixin:
                     "Clear every speaker label on this video (including manual names) so you can cluster again.",
                 )
             )
+        if hasattr(self.understanding_page, "btn_delete_selected_dialogue"):
+            self.understanding_page.btn_delete_selected_dialogue.setText(
+                t.get("understanding_step_dialogue_delete_selected", "Delete selected")
+            )
+            self.understanding_page.btn_delete_selected_dialogue.setToolTip(
+                t.get(
+                    "understanding_step_dialogue_delete_selected_tip",
+                    "Delete the checked lines. Edits stay on this page.",
+                )
+            )
         if hasattr(self.understanding_page, "btn_export_dialogue_json"):
             self.understanding_page.btn_export_dialogue_json.setText(
                 t.get("understanding_step_dialogue_export_json", "Export JSON")

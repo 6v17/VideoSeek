@@ -9,9 +9,9 @@ import json
 from typing import Any, Mapping, Sequence
 
 from src.services.recap_clock import recap_target_sec
-from src.services.recap_constants import MATCH_BEATS_PER_WAVE, MAX_PLAN_BEATS
+from src.services.recap_constants import MATCH_BEATS_PER_WAVE, MAX_PLAN_BEATS, TEXTURE_BEAT_RE
 from src.services.recap_match import overlap_sec, recap_story_window, time_span
-from src.services.recap_constants import TEXTURE_BEAT_RE
+from src.services.recap_plan_merge import pack_for_beats
 
 
 def split_beats_for_match(
@@ -236,6 +236,8 @@ def recap_user_prompt(
 ) -> str:
     duration = float(pack.get("duration_sec") or 0.0)
     planned = list(beats or [])
+    # Defense in depth: slice evidence to this wave's beat windows (+ MATCH_PACK_PAD_SEC).
+    evidence = pack_for_beats(pack, planned) if planned else dict(pack)
     target = recap_target_sec(duration)
     used = list(used_src or [])
     used_line = (
@@ -268,12 +270,13 @@ def recap_user_prompt(
         "asr[].speaker 非空=谁在说，当事实。\n\n"
         + json.dumps(
             {
+                # Stable / large fields first for prefix-cache friendly providers.
                 "duration_sec": round(duration, 2),
-                "people": pack.get("people") or [],
+                "people": evidence.get("people") or pack.get("people") or [],
+                "chunks": evidence.get("chunks") or [],
+                "asr": evidence.get("ocr") or [],
                 "beats": planned,
                 "used_src": used,
-                "chunks": pack.get("chunks") or [],
-                "asr": pack.get("ocr") or [],
             },
             ensure_ascii=False,
         )

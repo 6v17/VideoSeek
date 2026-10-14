@@ -9,7 +9,12 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
-from src.services.recap_constants import DIALOGUE_OUTCOME_RE, PLAN_ACT_TARGET_SEC, RECAP_FOCUS_MODES
+from src.services.recap_constants import (
+    DIALOGUE_OUTCOME_RE,
+    PLAN_ACT_PACK_PAD_SEC,
+    PLAN_ACT_TARGET_SEC,
+    RECAP_FOCUS_MODES,
+)
 from src.services.recap_focus import (
     infer_recap_focus,
     normalize_recap_focus,
@@ -18,6 +23,7 @@ from src.services.recap_focus import (
 )
 from src.services.recap_llm_json import extract_json
 from src.services.recap_match import time_span, recap_story_window
+from src.services.recap_plan_merge import filter_pack_to_span
 from src.services.recap_spine import (
     build_asr_vlm_spine,
     sample_timeline_items,
@@ -313,12 +319,20 @@ def recap_plan_act_user_prompt(
         else:
             window = (0.0, duration)
     lo, hi = float(window[0]), float(window[1])
-    seeded = list(pack.get("people") or [])
+    # Defense in depth: callers usually pre-filter, but never dump whole-film evidence here.
+    evidence = filter_pack_to_span(pack, lo, hi, pad_sec=PLAN_ACT_PACK_PAD_SEC)
+    seeded = list(pack.get("people") or evidence.get("people") or [])
     prior = [dict(item) for item in (already or [])][-6:]
-    spine = build_asr_vlm_spine(pack)
+    spine = build_asr_vlm_spine(evidence)
     silent = [
         row
-        for row in story_silent_spans(pack)
+        for row in story_silent_spans(evidence)
+        if (time_span(row.get("t")) or (0.0, 0.0))[1] >= lo
+        and (time_span(row.get("t")) or (0.0, 0.0))[0] <= hi
+    ]
+    must_land = [
+        row
+        for row in _must_land_cues(evidence)
         if (time_span(row.get("t")) or (0.0, 0.0))[1] >= lo
         and (time_span(row.get("t")) or (0.0, 0.0))[0] <= hi
     ]
@@ -335,16 +349,17 @@ def recap_plan_act_user_prompt(
         "importance 只调口播配额。\n\n"
         + json.dumps(
             {
+                # Stable / large fields first so providers with prefix cache can reuse them.
                 "duration_sec": round(duration, 2),
+                "people": seeded,
+                "soft_focus": focus,
+                "chunks": evidence.get("chunks") or [],
+                "asr": evidence.get("ocr") or [],
+                "spine": spine,
+                "must_land": must_land,
                 "act": {"index": act_index + 1, "count": act_count, "t": [round(lo, 2), round(hi, 2)]},
                 "already": prior,
-                "people": seeded,
-                "spine": spine,
                 "silent_spans": silent,
-                "soft_focus": focus,
-                "must_land": _must_land_cues(pack),
-                "chunks": pack.get("chunks") or [],
-                "asr": pack.get("ocr") or [],
             },
             ensure_ascii=False,
         )

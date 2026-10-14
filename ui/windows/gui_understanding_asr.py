@@ -451,6 +451,8 @@ class UnderstandingAsrGuiMixin:
             page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_reset_speakers"):
             page.btn_reset_speakers.setEnabled(False)
+        if hasattr(page, "btn_delete_selected_dialogue"):
+            page.btn_delete_selected_dialogue.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -667,6 +669,8 @@ class UnderstandingAsrGuiMixin:
             page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_reset_speakers"):
             page.btn_reset_speakers.setEnabled(False)
+        if hasattr(page, "btn_delete_selected_dialogue"):
+            page.btn_delete_selected_dialogue.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -785,6 +789,10 @@ class UnderstandingAsrGuiMixin:
             page.btn_reset_speakers.setEnabled(
                 (not running) and bool(self._current_video_speaker_labels())
             )
+        if hasattr(page, "btn_delete_selected_dialogue"):
+            page.btn_delete_selected_dialogue.setEnabled(
+                (not running) and self._current_video_has_recap_dialogue()
+            )
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled((not running) and self._current_video_has_recap_dialogue())
 
@@ -877,6 +885,8 @@ class UnderstandingAsrGuiMixin:
             page.btn_rename_speakers.setEnabled(False)
         if hasattr(page, "btn_reset_speakers"):
             page.btn_reset_speakers.setEnabled(False)
+        if hasattr(page, "btn_delete_selected_dialogue"):
+            page.btn_delete_selected_dialogue.setEnabled(False)
         if hasattr(page, "btn_export_dialogue_json"):
             page.btn_export_dialogue_json.setEnabled(False)
         self._sync_recap_export_button(running=True)
@@ -986,8 +996,10 @@ class UnderstandingAsrGuiMixin:
         counts: dict[str, int] = {}
         if table is None:
             return []
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
         for row in range(table.rowCount()):
-            item = table.item(row, 1)
+            item = table.item(row, Col.SPEAKER)
             name = normalize_dialogue_speaker(item.text() if item is not None else "")
             if not name:
                 continue
@@ -996,6 +1008,7 @@ class UnderstandingAsrGuiMixin:
 
     def _selected_dialogue_speaker(self) -> str:
         from src.storage.dialogue_transcript_store import normalize_dialogue_speaker
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
 
         page = getattr(self, "understanding_page", None)
         table = getattr(page, "dialogue_table", None) if page is not None else None
@@ -1004,11 +1017,32 @@ class UnderstandingAsrGuiMixin:
         row = table.currentRow()
         if row < 0:
             return ""
-        item = table.item(row, 1)
+        item = table.item(row, Col.SPEAKER)
         return normalize_dialogue_speaker(item.text() if item is not None else "")
+
+    def _selected_dialogue_seg_index(self) -> int | None:
+        from PySide6.QtCore import Qt
+
+        from ui.widgets.table_specs import UnderstandingDialogueCol as Col
+
+        page = getattr(self, "understanding_page", None)
+        table = getattr(page, "dialogue_table", None) if page is not None else None
+        if table is None:
+            return None
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, Col.RANGE)
+        if item is None:
+            return None
+        try:
+            return int(item.data(Qt.ItemDataRole.UserRole + 1))
+        except (TypeError, ValueError):
+            return None
 
     def rename_current_video_speakers(self):
         from src.services.understanding_dialogue import rename_working_speakers
+        from src.storage.dialogue_transcript_store import is_auto_speaker_label
         from ui.dialogs.rename_speakers import prompt_rename_speakers
 
         if self._asr_job_running():
@@ -1034,20 +1068,36 @@ class UnderstandingAsrGuiMixin:
                 kind="warning",
             )
             return
+        current_speaker = self._selected_dialogue_speaker()
+        current_seg = self._selected_dialogue_seg_index()
         picked = prompt_rename_speakers(
             self,
             self.texts,
             labels=labels,
-            current=self._selected_dialogue_speaker(),
+            current=current_speaker,
         )
         if not picked:
             return
         old_speaker, new_speaker = picked
+        # 声线N = batch rename; already-named = correct this row only.
+        seg_index = None if is_auto_speaker_label(old_speaker) else current_seg
+        if not is_auto_speaker_label(old_speaker):
+            if current_seg is None or current_speaker != old_speaker:
+                self.show_info_dialog(
+                    self.texts.get("warning_title", "Warning"),
+                    self.texts.get(
+                        "understanding_speaker_rename_select_row",
+                        "Select the line you want to correct first. Renaming a character name only changes that one line.",
+                    ),
+                    kind="warning",
+                )
+                return
         try:
             updated = rename_working_speakers(
                 video_id,
                 old_speaker,
                 new_speaker,
+                seg_index=seg_index,
                 config=load_config(),
             )
         except Exception as exc:
@@ -1066,10 +1116,16 @@ class UnderstandingAsrGuiMixin:
             )
             self.show_info_dialog(self.texts.get("warning_title", "Warning"), message, kind="warning")
             return
-        message = self.texts.get(
-            "understanding_speaker_rename_done",
-            'Renamed "{old}" to "{new}" ({count} lines).',
-        ).format(old=old_speaker, new=new_speaker, count=updated)
+        if is_auto_speaker_label(old_speaker):
+            message = self.texts.get(
+                "understanding_speaker_rename_done",
+                'Renamed "{old}" to "{new}" ({count} lines).',
+            ).format(old=old_speaker, new=new_speaker, count=updated)
+        else:
+            message = self.texts.get(
+                "understanding_speaker_rename_done_one",
+                'Corrected this line: "{old}" → "{new}".',
+            ).format(old=old_speaker, new=new_speaker)
         page = getattr(self, "understanding_page", None)
         if page is not None:
             page.lbl_status.setText(message)

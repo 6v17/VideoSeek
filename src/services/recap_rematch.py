@@ -287,7 +287,7 @@ def rematch_recap_beat(
     _raise_if_stopped()
     _progress(45, "matching")
     match_system = resolve_recap_system_prompt(system_prompt, resolve_recap_caption_language(cfg))
-    wave_pack = pack_for_beats(pack, context_beats, pad_sec=36.0)
+    wave_pack = pack_for_beats(pack, context_beats)
     match_text = _rs().call_remote_llm(
         system=match_system,
         user=rematch_recap_user_prompt(

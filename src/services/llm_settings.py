@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Mapping
@@ -357,11 +358,53 @@ def call_remote_llm(
     max_tokens: int | None = None,
     temperature: float = 0.4,
     should_stop_callback=None,
+    attempts: int = 2,
+) -> str:
+    """Chat completion against the configured OpenAI-compatible endpoint.
+
+    Transient transport failures (HTTP/URL/timeout/empty choices) retry up to
+    ``attempts`` times so callers do not each reinvent a one-off loop. User stop
+    is never retried. Pass ``attempts=1`` to disable retry.
+    """
+    from src.core.understanding.base import UnderstandingStoppedError
+
+    tries = max(1, int(attempts or 1))
+    last_error: Exception | None = None
+    for attempt in range(tries):
+        if should_stop_callback and should_stop_callback():
+            raise UnderstandingStoppedError("LLM call stopped by user")
+        try:
+            return _call_remote_llm_once(
+                system=system,
+                user=user,
+                config=config,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                should_stop_callback=should_stop_callback,
+            )
+        except UnderstandingStoppedError:
+            raise
+        except RuntimeError as exc:
+            last_error = exc
+            if attempt + 1 >= tries:
+                raise
+            # Brief backoff so a blip 5xx / timeout is not instantly re-hit.
+            time.sleep(0.6)
+    assert last_error is not None
+    raise last_error
+
+
+def _call_remote_llm_once(
+    *,
+    system: str,
+    user: str,
+    config=None,
+    max_tokens: int | None = None,
+    temperature: float = 0.4,
+    should_stop_callback=None,
 ) -> str:
     from src.core.understanding.base import UnderstandingStoppedError
 
-    if should_stop_callback and should_stop_callback():
-        raise UnderstandingStoppedError("LLM call stopped by user")
     settings = get_remote_llm_settings(load_config() if config is None else config)
     base_url = _normalize_base_url(str(settings.get("base_url", "") or ""))
     model = str(settings.get("model", "") or "").strip()

@@ -255,6 +255,42 @@ class LlmSettingsTests(unittest.TestCase):
             arm.join(timeout=2.0)
         self.assertLess(time.monotonic() - started, 5.0)
 
+    def test_call_remote_llm_retries_transient_runtime_error(self):
+        from src.services.llm_settings import call_remote_llm
+
+        config = {
+            "understanding": {
+                "remote_llm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "custom",
+                    "base_url": "http://127.0.0.1:9/v1",
+                    "model": "test-model",
+                    "timeout_sec": 30,
+                    "max_tokens": 256,
+                }
+            }
+        }
+        calls = {"n": 0}
+
+        def _once(**_kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("remote LLM HTTP 503: blip")
+            return "ok"
+
+        with (
+            patch("src.services.llm_settings.load_config", return_value=config),
+            patch(
+                "src.services.llm_settings.get_remote_llm_settings",
+                return_value=config["understanding"]["remote_llm"],
+            ),
+            patch("src.services.llm_settings._call_remote_llm_once", side_effect=_once),
+            patch("src.services.llm_settings.time.sleep"),
+        ):
+            text = call_remote_llm(system="", user="hello", config=config, attempts=2)
+        self.assertEqual(text, "ok")
+        self.assertEqual(calls["n"], 2)
+
 
 class RecapPackTests(unittest.TestCase):
     def test_compact_motion_strips_json_tags(self):
@@ -659,6 +695,60 @@ class RecapPackTests(unittest.TestCase):
         self.assertIn("beat.vo", prompt)
         self.assertNotIn("不要写 vo，正式口播由铺字幕阶段完成", prompt)
         self.assertIn("店长拒收。", prompt)
+
+    def test_recap_user_prompt_filters_chunks_to_beat_window(self):
+        pack = {
+            "duration_sec": 900.0,
+            "people": [{"id": "s1", "label": "店长"}],
+            "chunks": [
+                {"i": 0, "t": [10.0, 20.0], "cap": "近处柜台"},
+                {"i": 1, "t": [400.0, 420.0], "cap": "远处仓库"},
+            ],
+            "ocr": [
+                {"start": 12.0, "end": 14.0, "text": "不行", "speaker": "店长"},
+                {"start": 405.0, "end": 407.0, "text": "走吧", "speaker": "店长"},
+            ],
+        }
+        prompt = recap_user_prompt(
+            pack,
+            [{"id": 1, "event": "拒收", "vo": "店长拒收。", "budget_sec": 10.0, "t": [10.0, 25.0]}],
+        )
+        self.assertIn("近处柜台", prompt)
+        self.assertIn("不行", prompt)
+        self.assertNotIn("远处仓库", prompt)
+        self.assertNotIn("走吧", prompt)
+        # Prefix-cache friendly ordering: large evidence before per-wave beats.
+        chunks_at = prompt.find('"chunks"')
+        beats_at = prompt.find('"beats"')
+        self.assertGreater(chunks_at, 0)
+        self.assertGreater(beats_at, chunks_at)
+
+    def test_recap_plan_act_user_prompt_filters_chunks_to_act_window(self):
+        from src.services.recap_service import recap_plan_act_user_prompt
+
+        pack = {
+            "duration_sec": 900.0,
+            "people": [{"id": "s1", "label": "店长"}],
+            "chunks": [
+                {"i": 0, "t": [100.0, 120.0], "cap": "本幕进门"},
+                {"i": 1, "t": [700.0, 720.0], "cap": "别幕收场"},
+            ],
+            "ocr": [
+                {"start": 105.0, "end": 107.0, "text": "跟我来", "speaker": "店长"},
+                {"start": 705.0, "end": 707.0, "text": "结束了", "speaker": "店长"},
+            ],
+        }
+        prompt = recap_plan_act_user_prompt(
+            pack,
+            act_index=0,
+            act_count=2,
+            window=(90.0, 200.0),
+        )
+        self.assertIn("本幕进门", prompt)
+        self.assertIn("跟我来", prompt)
+        self.assertNotIn("别幕收场", prompt)
+        self.assertNotIn("结束了", prompt)
+        self.assertLess(prompt.find('"chunks"'), prompt.find('"act"'))
 
     def test_vo_draft_prompt_binds_asr_speakers(self):
         from src.services.recap_service import recap_vo_draft_user_prompt

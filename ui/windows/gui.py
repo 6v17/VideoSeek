@@ -480,6 +480,10 @@ class MainWindow(
             self.understanding_page.btn_rename_speakers.clicked.connect(self.rename_current_video_speakers)
         if hasattr(self.understanding_page, "btn_reset_speakers"):
             self.understanding_page.btn_reset_speakers.clicked.connect(self.reset_current_video_speakers)
+        if hasattr(self.understanding_page, "btn_delete_selected_dialogue"):
+            self.understanding_page.btn_delete_selected_dialogue.clicked.connect(
+                self._delete_selected_understanding_dialogue_cues
+            )
         if hasattr(self.understanding_page, "btn_export_dialogue_json"):
             self.understanding_page.btn_export_dialogue_json.clicked.connect(
                 self.export_current_video_dialogue_json
@@ -496,6 +500,11 @@ class MainWindow(
             self.understanding_page.dialogue_table.itemChanged.connect(
                 self._on_understanding_dialogue_speaker_changed
             )
+            selection_model = self.understanding_page.dialogue_table.selectionModel()
+            if selection_model is not None:
+                selection_model.selectionChanged.connect(
+                    self._on_understanding_dialogue_selection_changed
+                )
         if hasattr(self.understanding_page, "recap_review_tree"):
             self.understanding_page.recap_review_tree.itemClicked.connect(
                 self._on_recap_review_item_clicked

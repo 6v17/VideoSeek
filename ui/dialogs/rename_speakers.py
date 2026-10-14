@@ -26,14 +26,13 @@ def prompt_rename_speakers(
     dialog = VSDialogShell(
         parent,
         title=str(texts.get("understanding_speaker_rename_title", "Rename speakers")),
-        body=str(
-            texts.get(
-                "understanding_speaker_rename_hint",
-                "Every line with this speaker on the current video is renamed.",
-            )
-        ),
+        body="",
         minimum_width=420,
     )
+    hint = QLabel()
+    hint.setObjectName("DialogBody")
+    hint.setWordWrap(True)
+    dialog.content_layout.addWidget(hint)
 
     form_host = QWidget()
     form = QFormLayout(form_host)
@@ -78,9 +77,30 @@ def prompt_rename_speakers(
 
     result: dict[str, str] = {}
 
+    def _sync_hint(source: str) -> None:
+        if is_auto_speaker_label(source):
+            hint.setText(
+                str(
+                    texts.get(
+                        "understanding_speaker_rename_hint_auto",
+                        "Auto labels (声线N): every matching line on this video is renamed.",
+                    )
+                )
+            )
+        else:
+            hint.setText(
+                str(
+                    texts.get(
+                        "understanding_speaker_rename_hint_manual",
+                        "Character names: only the currently selected line is corrected. Other lines with the same name stay unchanged.",
+                    )
+                )
+            )
+
     def _sync_target(_index: int = -1) -> None:
         source = normalize_dialogue_speaker(combo.currentData())
         typed = normalize_dialogue_speaker(edit.text())
+        _sync_hint(source)
         if is_auto_speaker_label(source):
             if not typed or is_auto_speaker_label(typed):
                 edit.clear()
@@ -98,6 +118,7 @@ def prompt_rename_speakers(
         dialog.accept()
 
     combo.currentIndexChanged.connect(_sync_target)
+    _sync_target()
     dialog.add_footer_button(
         str(texts.get("cancel", "Cancel")),
         object_name="GhostButton",

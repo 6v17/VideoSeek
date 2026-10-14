@@ -858,6 +858,7 @@ class UnderstandingEvidencePage(QWidget):
         self.btn_cluster_speakers = _action_button("AccentGhostButton")
         self.btn_rename_speakers = _action_button("GhostButton")
         self.btn_reset_speakers = _action_button("DangerGhostButton")
+        self.btn_delete_selected_dialogue = _action_button("DangerGhostButton")
         self.btn_export_dialogue_json = _action_button("GhostButton")
         self.btn_stop_asr = _action_button("DangerGhostButton")
         self.btn_stop_asr.setEnabled(False)
@@ -867,6 +868,7 @@ class UnderstandingEvidencePage(QWidget):
         row.addWidget(self.btn_cluster_speakers, 0)
         row.addWidget(self.btn_rename_speakers, 0)
         row.addWidget(self.btn_reset_speakers, 0)
+        row.addWidget(self.btn_delete_selected_dialogue, 0)
         row.addWidget(self.btn_open_subtitle_library, 0)
         row.addStretch(1)
         row.addWidget(self.btn_export_dialogue_json, 0)
@@ -882,7 +884,8 @@ class UnderstandingEvidencePage(QWidget):
         self.dialogue_table = DataTable(spec=UNDERSTANDING_DIALOGUE_TABLE_SPEC)
         self.dialogue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dialogue_table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.dialogue_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Shift/Ctrl multi-select for toolbar「删除选中」; per-row 删除 still works.
+        self.dialogue_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         add_filling_widget(layout, self.dialogue_table, min_height=180)
         self._dialogue_table_stretch = None
 
