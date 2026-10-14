@@ -6,10 +6,26 @@ import os
 import time
 
 from PySide6.QtCore import QThread, Signal
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QFileDialog
 
 from src.app.path_display import video_display_name
 from src.services.clip_export_service import export_save_dialog_start, remember_export_path
+
+
+def copy_still_to_clipboard(image_path: str) -> bool:
+    """Put a saved still on the system clipboard. Must run on the GUI thread."""
+    path = str(image_path or "").strip()
+    if not path or not os.path.isfile(path):
+        return False
+    image = QImage(path)
+    if image.isNull():
+        return False
+    clipboard = QGuiApplication.clipboard()
+    if clipboard is None:
+        return False
+    clipboard.setImage(image)
+    return True
 
 
 class FrameExportThread(QThread):

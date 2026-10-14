@@ -2727,7 +2727,7 @@ class UnderstandingGuiMixin:
         _ = (row, column)
 
     def _on_understanding_dialogue_selection_changed(self, *_args) -> None:
-        """Drag / Shift multi-select should check those rows for「删除选中」."""
+        """Multi-select range becomes the exact checkbox set (add and remove)."""
         from ui.widgets.table_specs import UnderstandingDialogueCol as Col
 
         page = getattr(self, "understanding_page", None)
@@ -2737,17 +2737,19 @@ class UnderstandingGuiMixin:
         model = table.selectionModel()
         if model is None:
             return
-        selected_rows = [index.row() for index in model.selectedRows()]
-        if len(selected_rows) < 2:
+        selected = {int(index.row()) for index in model.selectedRows()}
+        # Single-click must not wipe hand-checked boxes; drag / Shift range replaces them.
+        if len(selected) < 2:
             return
         table.blockSignals(True)
         try:
-            for row in selected_rows:
-                check = table.item(int(row), Col.CHECK)
+            for row in range(table.rowCount()):
+                check = table.item(row, Col.CHECK)
                 if check is None:
                     continue
-                if check.checkState() != Qt.CheckState.Checked:
-                    check.setCheckState(Qt.CheckState.Checked)
+                want = Qt.CheckState.Checked if row in selected else Qt.CheckState.Unchecked
+                if check.checkState() != want:
+                    check.setCheckState(want)
         finally:
             table.blockSignals(False)
 

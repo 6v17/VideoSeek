@@ -2046,6 +2046,48 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     background: transparent;
     border: none;
 }
+#ResultGridActionOverlay {
+    background: transparent;
+    border: none;
+    border-radius: __RADIUS_MD__;
+}
+#ResultGridActionBackdrop {
+    background: transparent;
+    border: none;
+    border-radius: __RADIUS_MD__;
+}
+/* Grid hover actions: same roles as result-table TableBtn / TableLocateBtn. */
+#GhostButton[chrome="gridOverlay"][class="TableBtn"],
+#SuccessGhostButton[chrome="gridOverlay"][class="TableLocateBtn"],
+#SuccessGhostButton[chrome="gridOverlay"][class="TableBtn"] {
+    min-width: 68px;
+    max-width: 84px;
+    min-height: 26px;
+    max-height: 28px;
+    padding: 0 6px;
+    font-size: __FS_XS__;
+    font-weight: 650;
+    background: __PANEL__;
+    border: 1px solid __LINE__;
+}
+#GhostButton[chrome="gridOverlay"][class="TableBtn"] {
+    color: __ACCENT__;
+}
+#GhostButton[chrome="gridOverlay"][class="TableBtn"]:hover {
+    background: __ACCENT_SOFT__;
+    border-color: __ACCENT__;
+    color: __ACCENT__;
+}
+#SuccessGhostButton[chrome="gridOverlay"][class="TableLocateBtn"],
+#SuccessGhostButton[chrome="gridOverlay"][class="TableBtn"] {
+    color: __SUCCESS__;
+}
+#SuccessGhostButton[chrome="gridOverlay"][class="TableLocateBtn"]:hover,
+#SuccessGhostButton[chrome="gridOverlay"][class="TableBtn"]:hover {
+    background: __SUCCESS_SOFT__;
+    border-color: __SUCCESS__;
+    color: __SUCCESS__;
+}
 #DownloadListTable {
     background: __FIELD__;
     border: 1px solid __LINE__;

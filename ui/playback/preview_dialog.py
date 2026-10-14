@@ -303,6 +303,9 @@ class PreviewDialog(QDialog):
         self.export_button.setEnabled(False)
         self.frame_export_button = QPushButton(self.texts.get("preview_frame_export", "存帧"))
         self.frame_export_button.setObjectName("GhostButton")
+        self.frame_export_button.setToolTip(
+            self.texts.get("preview_frame_export_tip", "保存当前画面，并复制到剪贴板")
+        )
         self.frame_export_button.setEnabled(False)
         self.add_to_shot_list_button = QPushButton()
         self.add_to_shot_list_button.setObjectName("AccentGhostButton")
@@ -911,10 +914,18 @@ class PreviewDialog(QDialog):
         self._frame_export_thread = worker
         worker.start()
 
-    def _on_frame_export_done(self, _save_path: str):
+    def _on_frame_export_done(self, save_path: str):
         if self._closing:
             return
-        self._segment_line_override = self.texts.get("preview_frame_export_done", "已存帧")
+        from ui.playback.frame_export import copy_still_to_clipboard
+
+        copied = copy_still_to_clipboard(save_path)
+        if copied:
+            self._segment_line_override = self.texts.get(
+                "preview_frame_export_done_copied", "已存帧并复制"
+            )
+        else:
+            self._segment_line_override = self.texts.get("preview_frame_export_done", "已存帧")
         self._refresh_segment_queue_hint()
         self._apply_detail_label()
         self.frame_export_button.setEnabled(bool(self.video_path))

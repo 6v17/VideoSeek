@@ -50,3 +50,20 @@ class DisplayedFramePublishTests(unittest.TestCase):
             self.assertTrue(published.endswith("shot.jpg"))
             self.assertTrue(os.path.isfile(dest))
             self.assertFalse(os.path.isfile(source))
+
+    def test_copy_still_to_clipboard_loads_saved_image(self):
+        from unittest.mock import MagicMock, patch
+
+        from ui.playback.frame_export import copy_still_to_clipboard
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "frame.png")
+            Image.new("RGB", (3, 2), (1, 2, 3)).save(path)
+            clipboard = MagicMock()
+            with patch("ui.playback.frame_export.QGuiApplication.clipboard", return_value=clipboard):
+                self.assertTrue(copy_still_to_clipboard(path))
+            clipboard.setImage.assert_called_once()
+            image = clipboard.setImage.call_args.args[0]
+            self.assertFalse(image.isNull())
+            self.assertEqual(image.width(), 3)
+            self.assertEqual(image.height(), 2)
