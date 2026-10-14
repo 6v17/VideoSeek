@@ -53,7 +53,9 @@ The former monolith `src/web/agent_api.py` is split into `src/web/agent_api/` (`
 ## Lint / CI
 
 - Ruff config lives in `pyproject.toml` (`F` + `E4`/`E7`/`E9`; `E402` ignored for lazy imports).
-- CI runs `ruff check` then `pytest`.
+- CI runs `scripts/check_no_bom.py`, then `ruff check`, then `pytest`.
+- **No UTF-8 BOM** on tracked files — BOM in `pyproject.toml` breaks tomllib / pip / pytest while Ruff may still pass. Local check: `python scripts/check_no_bom.py`.
+- Text encoding / line endings: `.editorconfig` (`charset = utf-8`) and `.gitattributes` (`text=auto eol=lf`). Do not save sources as “UTF-8 with BOM”.
 - Expand Ruff rules gradually; do not dump a repo-wide style rewrite in one PR.
 - Former megafile `tests/test_services.py` is split into `tests/test_services_*.py` (+ `services_test_support.py`).
 

@@ -24,24 +24,7 @@ jobs:
           python-version: "3.10"
 
       - name: No BOM
-        run: |
-          python -c "
-          import pathlib, sys, subprocess
-          files = subprocess.run(['git', 'ls-files'], capture_output=True, text=True, check=True).stdout.splitlines()
-          bad = []
-          for name in files:
-              path = pathlib.Path(name)
-              if not path.is_file():
-                  continue
-              try:
-                  raw = path.read_bytes()
-              except OSError:
-                  continue
-              if raw.startswith(b'\xef\xbb\xbf'):
-                  bad.append(name)
-          print('BOM files:', bad)
-          sys.exit(1 if bad else 0)
-          "
+        run: python scripts/check_no_bom.py
 
       - name: Ruff
         run: python -m ruff check src ui tests scripts main.py

@@ -1,0 +1,44 @@
+# Normalize text files; keep working tree LF (see .editorconfig).
+* text=auto eol=lf
+
+*.py text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.qss text eol=lf
+*.ini text eol=lf
+*.sh text eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.onnx binary
+*.onnx.data binary
+*.dll binary
+*.exe binary
+*.pyd binary
+*.so binary
+*.dylib binary
+*.zip binary
+*.7z binary
+*.gz binary
+*.whl binary
+*.mp4 binary
+*.mkv binary
+*.mov binary
+*.wav binary
+*.mp3 binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
