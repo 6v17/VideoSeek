@@ -68,7 +68,7 @@ class SpeakerClusterLogicTests(unittest.TestCase):
         bridge = np.array([0.72, 0.72], dtype=np.float32)
         bridge = bridge / np.linalg.norm(bridge)
         embs = np.stack([a, a, a, bridge, c, c, c])
-        labels = cluster_embeddings(embs, absorb_tiny=False, consolidate=False)
+        labels = cluster_embeddings(embs, absorb_tiny=False)
         self.assertEqual(labels[0], labels[1])
         self.assertEqual(labels[-1], labels[-2])
         self.assertNotEqual(labels[0], labels[-1])
@@ -155,7 +155,6 @@ class SpeakerClusterLogicTests(unittest.TestCase):
                     waveform=audio,
                     sample_rate=sr,
                     embed_fn=embed_fn,
-                    speech_intervals=[],
                 )
                 self.assertTrue(result["ok"])
                 self.assertEqual(result["speakers"], 2)
@@ -212,7 +211,6 @@ class SpeakerClusterLogicTests(unittest.TestCase):
                     waveform=audio,
                     sample_rate=sr,
                     embed_fn=embed_fn,
-                    speech_intervals=[],  # skip Silero in unit tests
                 )
                 self.assertTrue(result["ok"])
                 self.assertEqual(result["skipped"], 1)
@@ -220,66 +218,10 @@ class SpeakerClusterLogicTests(unittest.TestCase):
                 self.assertEqual(result["speakers"], 2)
                 payload = load_dialogue_transcript("vid")
                 speakers = [row["speaker"] for row in payload["segments"]]
-                # Same voice as the manual cue → inherit 柜台职员; other voice stays auto.
                 self.assertEqual(speakers[1], "柜台职员")
-                self.assertEqual(speakers[0], "柜台职员")
+                self.assertTrue(is_auto_speaker_label(speakers[0]))
                 self.assertTrue(is_auto_speaker_label(speakers[2]))
                 self.assertNotEqual(speakers[0], speakers[2])
-
-    def test_intersect_span_keeps_only_speech(self):
-        from src.services.speaker_cluster_service import intersect_span_with_speech
-
-        parts = intersect_span_with_speech(
-            1.0,
-            5.0,
-            [(0.0, 0.5), (1.2, 2.0), (3.5, 6.0), (10.0, 11.0)],
-            min_sec=0.4,
-        )
-        self.assertEqual(parts, [(1.2, 2.0), (3.5, 5.0)])
-
-    def test_fragmented_near_duplicates_collapse_under_budget(self):
-        from src.services.speaker_cluster_service import auto_speaker_budget, cluster_embeddings
-
-        rng = np.random.default_rng(1)
-        centers = [
-            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
-            np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32),
-            np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32),
-        ]
-        rows = []
-        for center in centers:
-            for _ in range(25):
-                vec = center + rng.normal(0.0, 0.12, size=center.shape).astype(np.float32)
-                rows.append(vec / np.linalg.norm(vec))
-        # Extra near-duplicates that used to become their own 声线N.
-        for _ in range(20):
-            vec = centers[0] + rng.normal(0.0, 0.18, size=centers[0].shape).astype(np.float32)
-            rows.append(vec / np.linalg.norm(vec))
-        labels = cluster_embeddings(np.stack(rows), max_clusters=auto_speaker_budget(len(rows)))
-        self.assertLessEqual(len(set(labels)), 12)
-        self.assertGreaterEqual(len(set(labels)), 2)
-
-    def test_vad_trim_skips_silent_middle_of_cue(self):
-        from src.services.speaker_cluster_service import embed_windows_for_span
-
-        sr = 16000
-        audio = np.zeros(sr * 6, dtype=np.float32)
-        audio[: sr] = 0.8
-        audio[4 * sr : 5 * sr] = 0.7
-        windows = embed_windows_for_span(
-            audio,
-            start_sec=0.0,
-            end_sec=6.0,
-            sample_rate=sr,
-            max_windows=4,
-            speech_intervals=[(0.0, 1.0), (4.0, 5.0)],
-        )
-        self.assertGreaterEqual(len(windows), 2)
-        # Windows must come from the two speech parts, not the silent middle.
-        starts = []
-        for clip, _energy in windows:
-            # locate clip inside audio by matching first sample index roughly via energy peak
-            self.assertGreater(float(np.max(np.abs(clip))), 0.5)
 
     def test_uses_current_library_path_when_stored_file_is_gone(self):
         from src.services.speaker_cluster_service import cluster_video_speakers
@@ -331,7 +273,6 @@ class SpeakerClusterLogicTests(unittest.TestCase):
                         video_path=stale,
                         sample_rate=sr,
                         embed_fn=embed_fn,
-                        speech_intervals=[],
                     )
                 self.assertTrue(result["ok"])
                 extract.assert_called()
@@ -360,7 +301,6 @@ class SpeakerClusterLogicTests(unittest.TestCase):
             sample_rate=sr,
             embed_fn=embed_fn,
             persist=False,
-            speech_intervals=[],
             segments=[
                 {
                     "seg_index": 0,
