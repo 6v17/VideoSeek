@@ -58,6 +58,13 @@ The former monolith `src/web/agent_api.py` is split into `src/web/agent_api/` (`
 - Text encoding / line endings: `.editorconfig` (`charset = utf-8`) and `.gitattributes` (`text=auto eol=lf`). Do not save sources as “UTF-8 with BOM”.
 - Expand Ruff rules gradually; do not dump a repo-wide style rewrite in one PR.
 - Former megafile `tests/test_services.py` is split into `tests/test_services_*.py` (+ `services_test_support.py`).
+- **MainWindow mixin attrs** — `tests/test_gui_mixin_attr_ratchet.py` freezes how many `self._` names are touched from 2+ files under `ui/windows/gui*.py`. Most multi-file names are intentional `_sync_*` / `_refresh_*` hooks or a few shared queues/flags; do not “decouple” single-file (A-class) attrs for cosmetics. Whole-repo `self._` scans overcount and are not a refactor brief.
+
+## MainWindow mixins
+
+- Prefer feature-local state. New cross-mixin `self._` fields need a reason (quit, busy flag, shared refresh entry).
+- Sibling splits (`gui_understanding` / `_asr` / `_llm`, search panel / presets / scope) will share hooks — that is expected, not a crisis.
+- Do not start a “move all shared attrs onto page objects” project; the ratchet is there so coupling does not quietly grow.
 
 ## What not to do
 
