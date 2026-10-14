@@ -13,9 +13,14 @@ if __name__ == "__main__":
 
         sys.exit(gpu_probe_cli_main())
 
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     from src.app.single_instance import SingleInstanceServer, try_activate_existing_instance
 
+    # The picture host is a native window for VLC. Without this, Qt also turns
+    # the transport beside it into a native window that keeps the first frame:
+    # seeks still land, but the slider and times never move on screen.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
     app = QApplication(sys.argv)
     from ui.widgets.tooltip_utils import install_wrapped_tooltips
 

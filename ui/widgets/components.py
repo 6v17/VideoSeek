@@ -1,5 +1,5 @@
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, QSize, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -28,7 +29,6 @@ from ui.widgets.layout import (
 from ui.widgets.preview_panel import PreviewPanel
 from ui.widgets.search_results_pager import SearchResultsPager
 from ui.widgets.result_view import ResultView
-from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.scaffold import (
     PageScaffold,
     VSCard,
@@ -254,6 +254,8 @@ def _make_sidebar_icon_button() -> QToolButton:
 
 
 class NavigationSidebar(QWidget):
+    collapse_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("NavSidebar")
@@ -264,12 +266,25 @@ class NavigationSidebar(QWidget):
         layout.setContentsMargins(12, 16, 12, 12)
         layout.setSpacing(8)
 
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(6)
         self.title = QLabel("VideoSeek")
         self.title.setObjectName("BrandTitle")
+        self.btn_collapse = QToolButton()
+        self.btn_collapse.setObjectName("SidebarIconButton")
+        self.btn_collapse.setText("«")
+        self.btn_collapse.setToolTip("隐藏侧边栏 (Ctrl+B)")
+        self.btn_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_collapse.setFixedSize(28, 28)
+        self.btn_collapse.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.btn_collapse.clicked.connect(self.collapse_requested.emit)
+        title_row.addWidget(self.title, 1)
+        title_row.addWidget(self.btn_collapse, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(title_row)
         self.subtitle = QLabel("Local video search workspace")
         self.subtitle.setObjectName("BrandSubtitle")
         self.subtitle.setWordWrap(True)
-        layout.addWidget(self.title)
         layout.addWidget(self.subtitle)
 
         self.hero_card = QFrame()
@@ -421,7 +436,6 @@ class SearchPage(QWidget):
 
         self.indexing_notice, self.indexing_notice_text = make_runtime_banner()
         self.indexing_notice.hide()
-        page_body.addWidget(self.indexing_notice)
 
         self.lbl_status = QLabel()
         self.lbl_status.setObjectName("StatusLabel")
@@ -470,12 +484,12 @@ class SearchPage(QWidget):
         self.mobile_row = self.search_panel.mobile_row
         self.compose_form = self.search_panel.compose_form
         self.btn_save_preset = self.search_panel.btn_save_preset
+        self.search_presets_bar = self.search_panel.search_presets_bar
+        self.btn_manage_presets = self.search_panel.btn_manage_presets
 
-        # Host stays alive for the shared VLC widget, but it is not part of the page.
-        # Playback opens in PreviewDialog so results can use the full width.
+        # Search spans the page. Results and the preview column split the space under it.
         self.preview_panel = PreviewPanel(self)
-        self.preview_panel.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-        self.preview_panel.hide()
+        self.preview_panel.set_docked(True)
         self.preview_card = self.preview_panel
         self.preview_title = self.preview_panel.preview_title
         self.preview_host = self.preview_panel.preview_host
@@ -483,9 +497,13 @@ class SearchPage(QWidget):
         self.preview_placeholder = self.preview_panel.preview_placeholder
         self.expanded_chrome = self.preview_panel.expanded_chrome
 
-        self.compare_splitter = None
-        self._compare_splitter = None
-        self._compare_row = None
+        self.compare_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.compare_splitter.setObjectName("SearchCompareSplitter")
+        self.compare_splitter.setChildrenCollapsible(False)
+        self.compare_splitter.setHandleWidth(10)
+        self._compare_splitter = self.compare_splitter
+        self._compare_row = self.compare_splitter
+        self._compare_sizes_set = False
         self._page_body = page_body
         self._preview_layout_maximized = False
         self._workspace_sizes_before_preview_max = None
@@ -507,9 +525,6 @@ class SearchPage(QWidget):
         results_toolbar.setContentsMargins(0, 0, 0, 0)
         results_toolbar.setSpacing(10)
         results_toolbar.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.search_presets_bar = SearchPresetsBar()
-        self.btn_manage_presets = QPushButton()
-        set_button_role(self.btn_manage_presets, "GhostButton", chrome="presetManage")
         self.btn_export_tasks = QPushButton()
         self.btn_export_tasks.setObjectName("GhostButton")
         self.btn_shot_list = QPushButton()
@@ -546,12 +561,10 @@ class SearchPage(QWidget):
         self._results_view_group.addButton(self.btn_results_view_grid, 1)
 
         actions_layout.addWidget(self.results_view_segment)
-        actions_layout.addWidget(self.btn_manage_presets)
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
         results_toolbar.addWidget(self.lbl_status, 1)
-        results_toolbar.addWidget(self.search_presets_bar, 2)
         results_toolbar.addWidget(self.results_actions, 0)
 
         self.results_pager = SearchResultsPager()
@@ -567,6 +580,7 @@ class SearchPage(QWidget):
 
         self.browse_stack = QStackedWidget()
         self.browse_stack.setObjectName("SearchBrowseStack")
+        self.browse_stack.setMinimumWidth(280)
         self.browse_stack.addWidget(self.results_slot)
 
         from ui.widgets.embedded_preview import EmbeddedPreviewLayer
@@ -590,8 +604,24 @@ class SearchPage(QWidget):
         self.preview_strip_host = self.preview_layer.preview_strip_host
         self.preview_strip_row = self.preview_layer.preview_strip_row
         self.browse_stack.addWidget(self.preview_layer)
+
+        # Results stay in the left column. Search sits above both columns.
+        self._original_column = QWidget()
+        self._original_column.setObjectName("SearchOriginalColumn")
+        self._original_column.setMinimumWidth(360)
+        self._original_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        original_layout = QVBoxLayout(self._original_column)
+        original_layout.setContentsMargins(0, 0, 0, 0)
+        original_layout.setSpacing(0)
+        original_layout.addWidget(self.browse_stack, 1)
+
+        self.compare_splitter.addWidget(self._original_column)
+        self.compare_splitter.addWidget(self.preview_panel)
+        self.compare_splitter.setStretchFactor(0, 1)
+        self.compare_splitter.setStretchFactor(1, 0)
+        page_body.addWidget(self.indexing_notice)
         page_body.addWidget(self.search_panel, 0)
-        page_body.addWidget(self.browse_stack, 1)
+        page_body.addWidget(self.compare_splitter, 1)
         self.workspace_splitter = None
         self._workspace_splitter = None
 
@@ -615,9 +645,39 @@ class SearchPage(QWidget):
         panel = getattr(self, "search_panel", None)
         if panel is not None and hasattr(panel, "apply_viewport_budget"):
             panel.apply_viewport_budget(vh)
+        panel = getattr(self, "preview_panel", None)
+        if panel is not None and hasattr(panel, "apply_viewport_budget"):
+            panel.apply_viewport_budget(vh)
+        splitter = getattr(self, "compare_splitter", None)
+        if splitter is not None and not getattr(self, "_compare_sizes_set", False) and splitter.width() > 200:
+            preview_w = 640
+            splitter.setSizes([max(0, splitter.width() - preview_w), preview_w])
+            self._compare_sizes_set = True
         view = getattr(self, "result_view", None)
         if view is not None and hasattr(view, "set_viewport_min_height"):
             view.set_viewport_min_height(result_table_min_height(viewport_height=vh))
+
+    def adopt_preview_width(self) -> None:
+        """After the page grows, bring a squeezed preview back up to 640px."""
+        splitter = getattr(self, "compare_splitter", None)
+        if splitter is None or splitter.width() <= 200:
+            return
+        sizes = splitter.sizes()
+        if len(sizes) != 2:
+            return
+        preview_w = int(sizes[1])
+        target = 640
+        if preview_w >= target:
+            return
+        results_min = 776
+        column = getattr(self, "_original_column", None)
+        if column is not None:
+            results_min = max(results_min, int(column.minimumWidth()))
+        spare = int(sizes[0]) - results_min
+        if spare <= 0:
+            return
+        give = min(target - preview_w, spare)
+        splitter.setSizes([int(sizes[0]) - give, preview_w + give])
 
     def set_preview_maximized(self, maximized: bool) -> None:
         """Preview is a dialog now; do not hide the browse layout."""

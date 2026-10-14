@@ -4,9 +4,9 @@ from PySide6.QtGui import QGuiApplication
 
 WINDOW_SIZES = {
     "main": {
-        "preferred": QSize(1400, 850),
-        # Soft floor; apply_window_size further clamps against available geometry.
-        "minimum": QSize(1024, 600),
+        # 1400 was search-over-results. The preview is an added right column.
+        "preferred": QSize(2040, 850),
+        "minimum": QSize(1664, 600),
         "screen_margin": 72,
     },
     "about_dialog": {

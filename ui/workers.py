@@ -1084,10 +1084,12 @@ def _iter_thumb_jobs(results):
 class ThumbLoader(QThread):
     thumb_ready = Signal(int, object)
 
-    def __init__(self, results, priority_rows=None):
+    def __init__(self, results, priority_rows=None, thumb_width=None, thumb_height=None):
         super().__init__()
         self.results = results
         self.priority_rows = set(priority_rows or [])
+        self._thumb_width = thumb_width
+        self._thumb_height = thumb_height
         self._running = True
 
     def stop(self):
@@ -1099,8 +1101,8 @@ class ThumbLoader(QThread):
         from ui.thumb_cache import get_thumb_cache, result_thumb_key
 
         config = load_config()
-        thumb_width = config.get("thumb_width", 130)
-        thumb_height = config.get("thumb_height", 75)
+        thumb_width = int(self._thumb_width or config.get("thumb_width", 130) or 130)
+        thumb_height = int(self._thumb_height or config.get("thumb_height", 75) or 75)
         cache = get_thumb_cache()
 
         jobs = list(_iter_thumb_jobs(self.results))

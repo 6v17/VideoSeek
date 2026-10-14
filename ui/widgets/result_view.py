@@ -10,7 +10,7 @@ from ui.views.table_views import append_result_table_rows, populate_result_table
 from ui.widgets.result_grid import ResultGrid
 from ui.widgets.result_table import ResultTable
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
-from ui.widgets.thumb_cell import make_thumb_label
+from ui.widgets.thumb_cell import fit_thumb_pixmap, make_thumb_label
 
 THUMB_COLUMN = int(LOCAL_SEARCH_TABLE_SPEC.thumb_column or 1)
 
@@ -214,4 +214,13 @@ class ResultView(QWidget):
         if pixmap is None or (isinstance(pixmap, QPixmap) and pixmap.isNull()):
             self.table.setCellWidget(row, column, make_thumb_label(text="—"))
         else:
-            self.table.setCellWidget(row, column, make_thumb_label(pixmap=pixmap))
+            spec = getattr(self.table, "spec", None)
+            logical_w = 220
+            logical_h = 120
+            if spec is not None:
+                preview = next((col for col in spec.columns if col.key == "preview"), None)
+                if preview is not None and preview.width:
+                    logical_w = int(preview.width) - 8
+                logical_h = max(72, int(spec.row_height) - 16)
+            fitted = fit_thumb_pixmap(pixmap, logical_w, logical_h)
+            self.table.setCellWidget(row, column, make_thumb_label(pixmap=fitted))

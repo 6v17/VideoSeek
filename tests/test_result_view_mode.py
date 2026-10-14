@@ -119,12 +119,14 @@ class ResultViewModeTests(unittest.TestCase):
         self.assertEqual(len(opened), 1)
         self.assertEqual(opened[0][0], hit.video_path)
 
-    def test_compact_grid_fits_five_columns_on_browse_width(self):
-        from ui.widgets.result_grid import ResultGrid, _CARD_SPACING, _CARD_WIDTH, _GRID_BOTTOM_PAD
+    def test_grid_cards_stay_large_enough_to_recognize(self):
+        from ui.widgets.result_grid import ResultGrid, _CARD_SPACING, _CARD_WIDTH, _GRID_BOTTOM_PAD, _THUMB_HEIGHT
 
         usable = 1100 - 16
         cols = max(1, (usable + _CARD_SPACING) // (_CARD_WIDTH + _CARD_SPACING))
-        self.assertGreaterEqual(cols, 5)
+        self.assertGreaterEqual(cols, 3)
+        self.assertLessEqual(cols, 4)
+        self.assertGreaterEqual(_THUMB_HEIGHT, 160)
 
         grid = ResultGrid()
         texts = {"thumb_loading": "...", "result_mode_frame": "Frame"}
@@ -139,8 +141,32 @@ class ResultViewModeTests(unittest.TestCase):
         grid.populate(hits, _noop, _noop, _noop, texts)
         grid._sync_host_height()
         self.assertEqual(grid._cards[0].width(), _CARD_WIDTH)
+        from ui.widgets.result_grid import grid_column_plan
+
+        wide_cols, wide_card, _thumb_h = grid_column_plan(980)
+        self.assertGreaterEqual(wide_cols, 3)
+        self.assertGreaterEqual(wide_card, 232)
+        self.assertLessEqual(wide_card, _CARD_WIDTH)
         self.assertFalse(hasattr(grid._cards[0], "actions_host"))
         self.assertGreater(grid._host.minimumHeight(), _GRID_BOTTOM_PAD)
+
+    def test_select_match_marks_the_playing_card(self):
+        from ui.widgets.result_grid import ResultGrid
+
+        grid = ResultGrid()
+        texts = {"thumb_loading": "...", "result_mode_frame": "Frame"}
+        hits = [
+            SearchHit(1.0, 2.0, 0.9, r"D:\videos\a.mp4", match_kind="frame"),
+            SearchHit(8.0, 9.0, 0.8, r"D:\videos\b.mp4", match_kind="frame"),
+        ]
+
+        def _noop(*_a, **_k):
+            return None
+
+        grid.populate(hits, _noop, _noop, _noop, texts)
+        self.assertTrue(grid.select_match(r"D:\videos\b.mp4", 8.0))
+        self.assertTrue(grid._cards[1].property("selected"))
+        self.assertFalse(grid._cards[0].property("selected"))
 
 
 if __name__ == "__main__":

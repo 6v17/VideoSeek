@@ -1,4 +1,4 @@
-"""Search preset chips shown above local search results."""
+"""Saved compose-search chips. Shown on the Compose tab."""
 
 from __future__ import annotations
 

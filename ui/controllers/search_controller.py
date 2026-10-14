@@ -940,8 +940,27 @@ class SearchController(QObject):
         from ui.thumb_cache import get_thumb_cache, result_thumb_key
 
         config = load_config()
-        thumb_width = int(config.get("thumb_width", 130) or 130)
-        thumb_height = int(config.get("thumb_height", 75) or 75)
+        cfg_w = int(config.get("thumb_width", 130) or 130)
+        cfg_h = int(config.get("thumb_height", 75) or 75)
+        view = self._result_view()
+        from ui.widgets.thumb_cell import screen_thumb_scale
+
+        scale = screen_thumb_scale()
+        if view.view_mode == "grid":
+            from ui.widgets.result_grid import grid_thumb_pixel_size
+
+            disp_w, disp_h = grid_thumb_pixel_size()
+        else:
+            from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
+
+            preview_col = next(
+                (col for col in LOCAL_SEARCH_TABLE_SPEC.columns if col.key == "preview"),
+                None,
+            )
+            disp_w = int(round((int(preview_col.width or 220) if preview_col is not None else 220) * scale))
+            disp_h = int(round(int(LOCAL_SEARCH_TABLE_SPEC.row_height) * scale))
+        thumb_width = max(cfg_w, disp_w)
+        thumb_height = max(cfg_h, disp_h)
         cache = get_thumb_cache()
         misses = []
         for index, raw in enumerate(rows):
@@ -974,7 +993,12 @@ class SearchController(QObject):
             return
         self.stop_thumbnail_loading()
         self._thumb_loading_indices = miss_indices
-        self.thumb_thread = ThumbLoader(misses, priority_rows=miss_indices)
+        self.thumb_thread = ThumbLoader(
+            misses,
+            priority_rows=miss_indices,
+            thumb_width=thumb_width,
+            thumb_height=thumb_height,
+        )
         self.thumb_thread.thumb_ready.connect(self._on_thumb_ready)
         self.thumb_thread.start()
 

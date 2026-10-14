@@ -35,6 +35,11 @@ class PreviewController:
             skip_duration_probe=is_http_media_url(video_path),
         )
 
+    def _vlc_embed_host(self):
+        """Plain native host, same kind the large preview uses. QVideoWidget covers the controls."""
+        window = self.parent_window
+        return getattr(window, "preview_video_host", None) or window.video_widget
+
     def play(self, video_path, start_sec, end_sec=None):
         media_player = self.parent_window.media_player
         media_player.stop()
@@ -67,9 +72,10 @@ class PreviewController:
             logger.debug("Playback telemetry session start skipped: %s", exc)
 
         vlc_player = self._ensure_vlc_player()
+        host = self._vlc_embed_host()
         # Keep main preview on the search-page surface (floating dialog uses another MediaPlayer).
         try:
-            vlc_player.set_host_widget(self.parent_window.video_widget, force=True)
+            vlc_player.set_host_widget(host, force=True)
         except Exception as exc:
             logger.debug("Assert main preview host skipped: %s", exc)
         if vlc_player.play(playback_path, clip_start, stop_sec=clip_end):
@@ -130,15 +136,16 @@ class PreviewController:
         return self._vlc_instance
 
     def _ensure_vlc_player(self):
+        host = self._vlc_embed_host()
         if self.vlc_player is None:
             instance = self.ensure_vlc_instance()
             if instance is not None:
                 self.vlc_player = VlcPreviewPlayer(
-                    self.parent_window.video_widget,
+                    host,
                     shared_instance=instance,
                 )
             else:
-                self.vlc_player = VlcPreviewPlayer(self.parent_window.video_widget)
+                self.vlc_player = VlcPreviewPlayer(host)
         return self.vlc_player
 
     def suspend_for_dialog(self, *, skip_telemetry: bool = True):
@@ -270,14 +277,27 @@ class PreviewController:
         window = self.parent_window
         stack = getattr(window, "preview_surface_stack", None)
         video = getattr(window, "video_widget", None)
+        vlc_host = getattr(window, "preview_video_host", None)
         page = getattr(window, "search_page", None)
         placeholder = getattr(page, "preview_placeholder", None) if page is not None else None
-        if stack is not None and video is not None and placeholder is not None:
+        playing = vlc_host if vlc_host is not None and not self.current_preview_path else video
+        if (
+            not idle
+            and playing is video
+            and video is not None
+        ):
+            attach = getattr(window, "_attach_qt_video_surface", None)
+            if callable(attach):
+                attach()
+        if stack is not None and playing is not None and placeholder is not None:
             try:
-                stack.setCurrentWidget(placeholder if idle else video)
+                stack.setCurrentWidget(placeholder if idle else playing)
             except Exception as exc:
                 logger.debug("Preview surface stack switch skipped: %s", exc)
                 return
+            park = getattr(window, "_park_qt_video_surface", None)
+            if callable(park):
+                park()
             if idle:
                 return
             player = self.vlc_player

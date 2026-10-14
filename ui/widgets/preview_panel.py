@@ -35,13 +35,27 @@ scroll_ancestor_vertically = _scroll_ancestor_vertically
 
 
 class PreviewHostFrame(QFrame):
-    """Preview surface that forwards vertical wheel to the page scroll area."""
+    """Picture well. Native so the VLC window stays inside it and cannot cover the controls."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return False
 
     def wheelEvent(self, event):  # noqa: N802
         if _scroll_ancestor_vertically(self, event):
             event.accept()
             return
         event.ignore()
+
+
+class _DetailFrame(QFrame):
+    """Detail block. Its wrapped text must not change the column's height budget."""
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return False
 
 
 class PreviewPanel(VSCard):
@@ -63,11 +77,13 @@ class PreviewPanel(VSCard):
         preview_header.addWidget(self.preview_title, 1)
 
         self.preview_host = PreviewHostFrame()
-        self.preview_host.setObjectName("VideoContainer")
+        # Flat well. The video window fills it; a second bordered frame reads as a nested player.
+        self.preview_host.setObjectName("PreviewHost")
         self.preview_host.setMinimumHeight(preview_host_min_height(viewport_height=self._layout_viewport()))
         self.preview_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.preview_host_layout = QVBoxLayout(self.preview_host)
-        self.preview_host_layout.setContentsMargins(4, 4, 4, 4)
+        self.preview_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_host_layout.setSpacing(0)
         self.preview_placeholder = QLabel()
         self.preview_placeholder.setObjectName("PreviewPlaceholder")
         self.preview_placeholder.setAlignment(Qt.AlignCenter)
@@ -77,17 +93,116 @@ class PreviewPanel(VSCard):
         self.expanded_chrome = ExpandedPreviewChrome(self)
         self.expanded_chrome.collapse_button.hide()
 
+        self.detail_wrap = _DetailFrame()
+        self.detail_wrap.setObjectName("PreviewDetail")
+        self.detail_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        detail_layout = QVBoxLayout(self.detail_wrap)
+        detail_layout.setContentsMargins(0, 4, 0, 0)
+        detail_layout.setSpacing(4)
+        detail_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)
+        self.detail_title = QLabel("当前视频")
+        self.detail_title.setObjectName("SectionTitle")
+        self.detail_name = QLabel()
+        self.detail_name.setObjectName("DialogMetaLabel")
+        self.detail_name.setWordWrap(True)
+        self.detail_body = QLabel()
+        self.detail_body.setObjectName("Hint")
+        self.detail_body.setWordWrap(True)
+        self.detail_body.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.detail_body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # The detail text can be several lines. Its size hint must not be a
+        # minimum, or a short column paints this block on top of the transport.
+        for widget in (self.detail_wrap, self.detail_title, self.detail_name, self.detail_body):
+            widget.setMinimumHeight(0)
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        detail_layout.addWidget(self.detail_title)
+        detail_layout.addWidget(self.detail_name)
+        detail_layout.addWidget(self.detail_body, 1)
+        self.detail_wrap.hide()
+
         layout.addLayout(preview_header)
-        layout.addWidget(self.preview_host, 1)
+        layout.addWidget(self.preview_host, 0)
         layout.addWidget(self.expanded_chrome, 0)
+        layout.addWidget(self.detail_wrap, 1)
         self.expanded_chrome.show_chrome()
+        self._docked = False
+        self._host_aspect_height = 0
         self._apply_normal_geometry()
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        if self._docked:
+            self._fit_host_aspect()
+
+    def set_docked(self, docked: bool = True) -> None:
+        """Sit beside the results. The search bar stays full width above them."""
+        self._docked = bool(docked)
+        if self._docked:
+            self._apply_docked_geometry()
+        else:
+            self._apply_normal_geometry()
+
+    def _apply_docked_geometry(self, viewport_height: int | None = None) -> None:
+        del viewport_height
+        self.setMinimumWidth(320)
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.detail_wrap.show()
+        self.expanded_chrome.show_chrome()
+        self.expanded_chrome.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.expanded_chrome.raise_()
+        self._host_aspect_height = -1
+        self._fit_host_aspect()
+
+    def _fit_host_aspect(self) -> None:
+        """Keep the transport under the picture. Never let the detail cover it."""
+        control_h = max(148, self.expanded_chrome.sizeHint().height())
+        self.expanded_chrome.setMinimumHeight(control_h)
+        self.expanded_chrome.setMaximumHeight(control_h)
+        width = self.preview_host.width()
+        if width < 80:
+            width = max(160, self.width() - 28)
+        aspect = max(1, int(round(width * 9 / 16)))
+        layout = self.content_layout
+        margins = layout.contentsMargins()
+        gaps = max(0, layout.spacing()) * 3
+        title_h = self.preview_title.sizeHint().height()
+        fixed = margins.top() + margins.bottom() + gaps + title_h + control_h
+        picture_budget = max(1, self.height() - fixed)
+        if picture_budget > aspect + 72:
+            height = aspect
+        elif picture_budget > 136:
+            height = picture_budget - 72
+        else:
+            height = picture_budget
+        height = max(1, min(aspect, height, picture_budget))
+        if (
+            height == self._host_aspect_height
+            and self.preview_host.maximumHeight() == height
+            and self.preview_host.minimumHeight() == height
+        ):
+            self.expanded_chrome.raise_()
+            return
+        self._host_aspect_height = height
+        self.preview_host.setMinimumHeight(height)
+        self.preview_host.setMaximumHeight(height)
+        self.expanded_chrome.raise_()
+        player = getattr(getattr(self.window(), "preview_controller", None), "vlc_player", None)
+        rebind = getattr(player, "rebind_output_window", None)
+        if callable(rebind):
+            rebind()
 
     def is_maximized(self) -> bool:
         return self._maximized
 
     def set_maximized(self, maximized: bool):
         """Optionally fill the search page; same video host / player."""
+        if self._docked:
+            self._maximized = False
+            self.expanded_chrome.set_maximized_state(False)
+            self._apply_docked_geometry()
+            return
         maximized = bool(maximized)
         self._maximized = maximized
         self.expanded_chrome.set_maximized_state(maximized)
@@ -107,7 +222,9 @@ class PreviewPanel(VSCard):
             vh = None
         if vh is not None and vh < 240:
             vh = None
-        if self._maximized:
+        if self._docked:
+            self._apply_docked_geometry(vh)
+        elif self._maximized:
             self._apply_maximized_geometry(vh)
         else:
             self._apply_normal_geometry(vh)
@@ -116,6 +233,9 @@ class PreviewPanel(VSCard):
         vh = self._layout_viewport() if viewport_height is None else viewport_height
         self._panel_height = compare_row_card_height()
         self.preview_host.setMinimumHeight(preview_host_min_height(viewport_height=vh))
+        self.preview_host.setMaximumHeight(16777215)
+        self._host_aspect_height = 0
+        self.detail_wrap.hide()
         # Min shrinks on short windows; sizeHint still prefers _panel_height via parent splitter.
         self.setMinimumHeight(compare_row_min_height(viewport_height=vh))
         self.setMaximumHeight(16777215)
@@ -125,6 +245,9 @@ class PreviewPanel(VSCard):
         vh = self._layout_viewport() if viewport_height is None else viewport_height
         host_min = max(280, preview_host_min_height(viewport_height=vh))
         self.preview_host.setMinimumHeight(host_min)
+        self.preview_host.setMaximumHeight(16777215)
+        self._host_aspect_height = 0
+        self.detail_wrap.hide()
         self.setMinimumHeight(
             min(self.MAXIMIZED_MIN_HEIGHT, max(compare_row_min_height(viewport_height=vh), host_min + 120))
         )

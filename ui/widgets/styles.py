@@ -728,6 +728,31 @@ QPushButton:disabled {
     background: __BUTTON_SOFT_PRESSED__;
     padding: __SPACE_1__ __SPACE_3__;
 }
+#PreviewTransportSlider {
+    min-height: 22px;
+    background: transparent;
+}
+#PreviewTransportSlider::groove:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: __LINE_STRONG__;
+}
+#PreviewTransportSlider::sub-page:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: __ACCENT__;
+}
+#PreviewTransportSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+    background: __ACCENT__;
+    border: 2px solid __WINDOW__;
+}
+#PreviewTransportSlider::handle:horizontal:hover {
+    background: __ACCENT_HOVER__;
+}
 #SearchScoreSlider {
     min-height: 22px;
 }
@@ -1880,6 +1905,10 @@ QTableView#LibraryGroupedLibTree::item:selected:!active {
     /* Fill the preview host; do not force a tall min (starves the results splitter). */
     min-height: 0px;
 }
+#PreviewDetail {
+    border-top: 1px solid __LINE__;
+    background: transparent;
+}
 #ThumbPreview {
     background: __FIELD__;
     border: 1px solid __LINE__;
@@ -1916,6 +1945,11 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     background: __VIDEO_BG__;
     border: 1px solid __LINE__;
     border-radius: __RADIUS_MD__;
+}
+#PreviewHost, #PreviewVideoSurface {
+    background: __VIDEO_BG__;
+    border: none;
+    border-radius: 0;
 }
 #PreviewTimeLabel {
     color: __HEADLINE__;
@@ -2047,11 +2081,6 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     border: none;
 }
 #ResultGridActionOverlay {
-    background: transparent;
-    border: none;
-    border-radius: __RADIUS_MD__;
-}
-#ResultGridActionBackdrop {
     background: transparent;
     border: none;
     border-radius: __RADIUS_MD__;

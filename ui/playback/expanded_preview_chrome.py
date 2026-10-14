@@ -114,6 +114,7 @@ class ExpandedPreviewChrome(QWidget):
         root.addLayout(transport)
 
         self.slider = QSlider(Qt.Horizontal)
+        self.slider.setObjectName("PreviewTransportSlider")
         self.slider.setRange(0, 1000)
         self.slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         root.addWidget(self.slider)
@@ -283,10 +284,30 @@ class ExpandedPreviewChrome(QWidget):
             player.pause()
             self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
             return
+        if self._replay_finished_clip(player):
+            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
+            return
         if player.has_locked_window():
             self._unlock_full_playback()
         if player.resume():
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
+
+    def _replay_finished_clip(self, player) -> bool:
+        """After the fixed player stops at the clip end, Play starts that clip again."""
+        if not player.has_locked_window():
+            return False
+        end_ms = int(max(0.0, float(self.end_sec or 0.0)) * 1000)
+        current = player.get_time()
+        if current >= 0 and end_ms > 0 and current < end_ms - 400:
+            return False
+        path = str(
+            getattr(player, "_loaded_video_path", "")
+            or getattr(player, "_current_video_path", "")
+            or ""
+        )
+        if not path:
+            return False
+        return bool(player.play(path, self.start_sec, stop_sec=self.end_sec if end_ms else None))
 
     def _nudge_seek(self, delta_ms: int) -> None:
         player = self.player
@@ -368,6 +389,7 @@ class ExpandedPreviewChrome(QWidget):
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         else:
             self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+        self.update()
 
     def _effective_total_ms(self, player):
         total_ms = max(0, player.get_length())
@@ -564,6 +586,7 @@ class ExpandedPreviewChrome(QWidget):
         self.frame_export_button.setEnabled(bool(self.video_path) and not busy)
         self._refresh_segment_bounds_labels()
         self._refresh_segment_queue_hint()
+        self.update()
 
     def _normalized_segment(self):
         if self.segment_start_sec is None or self.segment_end_sec is None:

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QSize, QTimer
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from shiboken6 import isValid
-from PySide6.QtGui import QColor, QCursor, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
-    QGraphicsOpacityEffect,
     QGridLayout,
     QLabel,
     QPushButton,
@@ -23,61 +22,49 @@ from src.app.path_display import video_display_name
 from src.domain.search_hit import coerce_search_hit
 from src.services.search_locate import format_clip_score_percent, resolve_clip_confidence_label
 from ui.views.table_views import format_time_range as _format_time_range
-from ui.widgets.thumb_cell import make_thumb_label
+from ui.widgets.thumb_cell import fit_thumb_pixmap, make_thumb_label
 
-_OVERLAY_FADE_MS = 140
 _OVERLAY_HIDE_DELAY_MS = 120
 
-# Thumbnail-first card. ~200px lets five columns fit the content area beside the sidebar.
-_CARD_WIDTH = 196
+# Preferred card. Narrower panes shrink toward _CARD_MIN so three columns still fit.
+_CARD_WIDTH = 300
+_CARD_MIN = 232
 _CARD_SPACING = 12
 _GRID_BOTTOM_PAD = 20
-_THUMB_HEIGHT = 110
+_THUMB_HEIGHT = 168
+
+
+def grid_column_plan(viewport_width: int) -> tuple[int, int, int]:
+    """Return column count, card width, and thumb height for the results pane."""
+    usable = max(1, int(viewport_width) - 16)
+    natural = max(1, (usable + _CARD_SPACING) // (_CARD_WIDTH + _CARD_SPACING))
+    cols = natural
+    if usable >= _CARD_MIN * 3 + _CARD_SPACING * 2:
+        cols = max(cols, 3)
+    max_cols = max(1, (usable + _CARD_SPACING) // (_CARD_MIN + _CARD_SPACING))
+    cols = min(cols, max_cols)
+    gaps = max(0, cols - 1) * _CARD_SPACING
+    card_w = min(_CARD_WIDTH, max(_CARD_MIN, (usable - gaps) // cols))
+    while cols > 1 and card_w * cols + gaps > usable:
+        cols -= 1
+        gaps = max(0, cols - 1) * _CARD_SPACING
+        card_w = min(_CARD_WIDTH, max(_CARD_MIN, (usable - gaps) // max(1, cols)))
+    thumb_h = max(120, int(round(card_w * 9 / 16)))
+    return cols, card_w, thumb_h
+
+
+def grid_thumb_pixel_size() -> tuple[int, int]:
+    """Decode size for a grid card, in physical pixels so 150% scaling stays sharp."""
+    from ui.widgets.thumb_cell import screen_thumb_scale
+
+    scale = screen_thumb_scale()
+    return int(round((_CARD_WIDTH - 16) * scale)), int(round(_THUMB_HEIGHT * scale))
 
 
 def _fallback_text(texts: dict, key: str, zh_text: str, en_text: str) -> str:
     if key in texts:
         return str(texts[key])
     return en_text if str(texts.get("delete", "")).lower() == "delete" else zh_text
-
-
-def _frosted_thumb_pixmap(source: QPixmap, size: QSize, *, wash: QColor | None = None) -> QPixmap:
-    """Theme-aware frost: downscale → upscale, then wash with panel/accent soft."""
-    target_w = max(1, int(size.width()))
-    target_h = max(1, int(size.height()))
-    wash_color = QColor(wash) if wash is not None else QColor(40, 44, 52, 150)
-    if source is None or source.isNull():
-        blank = QPixmap(target_w, target_h)
-        blank.fill(wash_color)
-        return blank
-    scaled = source.scaled(
-        target_w,
-        target_h,
-        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-        Qt.TransformationMode.SmoothTransformation,
-    )
-    x = max(0, (scaled.width() - target_w) // 2)
-    y = max(0, (scaled.height() - target_h) // 2)
-    cropped = scaled.copy(x, y, target_w, target_h)
-    tiny = cropped.scaled(
-        max(8, target_w // 10),
-        max(6, target_h // 10),
-        Qt.AspectRatioMode.IgnoreAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
-    )
-    frosted = tiny.scaled(
-        target_w,
-        target_h,
-        Qt.AspectRatioMode.IgnoreAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
-    )
-    out = QPixmap(target_w, target_h)
-    out.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(out)
-    painter.drawPixmap(0, 0, frosted)
-    painter.fillRect(out.rect(), wash_color)
-    painter.end()
-    return out
 
 
 def _overlay_action_button(text: str, *, role: str, table_class: str) -> QPushButton:
@@ -94,7 +81,7 @@ def _overlay_action_button(text: str, *, role: str, table_class: str) -> QPushBu
 
 
 class ResultGridCard(QFrame):
-    """One hit: thumbnail, name, time, score. Hover → frosted table-aligned actions."""
+    """One hit: thumbnail, name, time, score. Hover shows the action buttons."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -114,11 +101,10 @@ class ResultGridCard(QFrame):
         self._on_export = None
         self._on_deep_locate = None
         self._on_add_to_shot_list = None
+        self._source_pixmap = None
         self._on_select = None
         self._title_full = ""
-        self._source_pixmap = QPixmap()
         self._overlay_wanted = False
-        self._backdrop_dirty = True
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -156,18 +142,6 @@ class ResultGridCard(QFrame):
         overlay_root.setContentsMargins(0, 0, 0, 0)
         overlay_root.setSpacing(0)
 
-        self.action_backdrop = QLabel()
-        self.action_backdrop.setObjectName("ResultGridActionBackdrop")
-        self.action_backdrop.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.action_backdrop.setScaledContents(True)
-        self.action_backdrop.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._backdrop_effect = QGraphicsOpacityEffect(self.action_backdrop)
-        self._backdrop_effect.setOpacity(0.0)
-        self.action_backdrop.setGraphicsEffect(self._backdrop_effect)
-        self._backdrop_fade = QPropertyAnimation(self._backdrop_effect, b"opacity", self)
-        self._backdrop_fade.setDuration(_OVERLAY_FADE_MS)
-        self._backdrop_fade.finished.connect(self._on_backdrop_fade_finished)
-
         self.action_buttons = QWidget()
         self.action_buttons.setObjectName("ResultGridActions")
         self._actions_layout = QGridLayout(self.action_buttons)
@@ -176,7 +150,6 @@ class ResultGridCard(QFrame):
         self._actions_layout.setVerticalSpacing(6)
         self._actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        overlay_root.addWidget(self.action_backdrop, 0, 0)
         overlay_root.addWidget(self.action_buttons, 0, 0, Qt.AlignmentFlag.AlignCenter)
 
         self._hide_timer = QTimer(self)
@@ -207,10 +180,7 @@ class ResultGridCard(QFrame):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._refresh_title_elide()
-        self._backdrop_dirty = True
         self._layout_thumb_chrome()
-        if self.action_overlay.isVisible():
-            self._refresh_overlay_backdrop()
 
     def eventFilter(self, watched, event):
         if watched is self.thumb_wrap:
@@ -271,65 +241,30 @@ class ResultGridCard(QFrame):
         self._hide_timer.start(_OVERLAY_HIDE_DELAY_MS)
 
     def _show_overlay_now(self) -> None:
-        already_up = self._overlay_wanted and self.action_overlay.isVisible()
         self._overlay_wanted = True
         self._layout_thumb_chrome()
-        if self._backdrop_dirty or self.action_backdrop.pixmap() is None or self.action_backdrop.pixmap().isNull():
-            self._refresh_overlay_backdrop()
-        if already_up:
-            self._backdrop_fade.stop()
-            self._backdrop_effect.setOpacity(1.0)
-            return
         self.action_overlay.show()
         self.action_overlay.raise_()
         self.action_buttons.raise_()
         self.rank_label.raise_()
-        self._backdrop_fade.stop()
-        self._backdrop_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._backdrop_fade.setStartValue(float(self._backdrop_effect.opacity()))
-        self._backdrop_fade.setEndValue(1.0)
-        self._backdrop_fade.start()
 
     def _hide_overlay_now(self) -> None:
         if self._thumb_contains_cursor():
             self._overlay_wanted = True
             return
         self._overlay_wanted = False
-        self._backdrop_fade.stop()
-        self._backdrop_fade.setEasingCurve(QEasingCurve.Type.InCubic)
-        self._backdrop_fade.setStartValue(float(self._backdrop_effect.opacity()))
-        self._backdrop_fade.setEndValue(0.0)
-        self._backdrop_fade.start()
-
-    def _on_backdrop_fade_finished(self) -> None:
-        if self._overlay_wanted:
-            return
-        if float(self._backdrop_effect.opacity()) <= 0.02:
-            self.action_overlay.hide()
-            self._backdrop_effect.setOpacity(0.0)
-
-    def _overlay_wash_color(self) -> QColor:
-        # Soft panel wash so frost follows light/dark theme instead of flat black.
-        base = self.palette().color(QPalette.ColorRole.Base)
-        if not base.isValid() or base.alpha() <= 0:
-            base = self.palette().color(QPalette.ColorRole.Window)
-        wash = QColor(base)
-        wash.setAlpha(168)
-        return wash
-
-    def _refresh_overlay_backdrop(self) -> None:
-        size = self.thumb_wrap.size()
-        if size.width() <= 1 or size.height() <= 1:
-            size = QSize(_CARD_WIDTH - 16, _THUMB_HEIGHT)
-        self.action_backdrop.setPixmap(
-            _frosted_thumb_pixmap(self._source_pixmap, size, wash=self._overlay_wash_color())
-        )
-        self._backdrop_dirty = False
+        self.action_overlay.hide()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._on_select is not None:
             self._on_select(self)
         super().mousePressEvent(event)
+
+    def _emit_preview(self) -> None:
+        if self._on_select is not None:
+            self._on_select(self)
+        if self._video_path and self._on_preview:
+            self._on_preview(self._video_path, self._start_sec, self._end_sec)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._video_path and self._on_preview:
@@ -338,27 +273,31 @@ class ResultGridCard(QFrame):
             self._on_preview(self._video_path, self._start_sec, self._end_sec)
         super().mouseDoubleClickEvent(event)
 
+    def apply_slot(self, width: int, thumb_h: int) -> None:
+        self.setFixedWidth(int(width))
+        self.thumb_wrap.setFixedHeight(int(thumb_h))
+        self.thumb_label.setMinimumHeight(int(thumb_h))
+        self.thumb_label.setMaximumHeight(int(thumb_h))
+        self._layout_thumb_chrome()
+        self._refresh_title_elide()
+        if self._source_pixmap is not None:
+            self._paint_thumbnail(self._source_pixmap)
+
     def set_thumbnail(self, pixmap) -> None:
         if pixmap is None or (isinstance(pixmap, QPixmap) and pixmap.isNull()):
-            self._source_pixmap = QPixmap()
+            self._source_pixmap = None
             self.thumb_label.setPixmap(QPixmap())
             self.thumb_label.setText("—")
-            self._backdrop_dirty = True
-            if self.action_overlay.isVisible():
-                self._refresh_overlay_backdrop()
             return
-        self._source_pixmap = QPixmap(pixmap)
-        scaled = pixmap.scaled(
-            max(160, self.thumb_label.width()),
-            max(90, self.thumb_label.height()),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        self._source_pixmap = pixmap
+        self._paint_thumbnail(pixmap)
+
+    def _paint_thumbnail(self, pixmap) -> None:
+        logical_w = max(160, self.thumb_label.width(), self.width() - 16)
+        logical_h = max(90, self.thumb_label.height())
+        scaled = fit_thumb_pixmap(pixmap, logical_w, logical_h)
         self.thumb_label.setText("")
         self.thumb_label.setPixmap(scaled)
-        self._backdrop_dirty = True
-        if self.action_overlay.isVisible():
-            self._refresh_overlay_backdrop()
 
     def _clear_action_buttons(self) -> None:
         while self._actions_layout.count():
@@ -382,10 +321,7 @@ class ResultGridCard(QFrame):
             table_class="TableBtn",
         )
         preview.setToolTip(_fallback_text(texts, "preview_tip", "", ""))
-        preview.clicked.connect(
-            lambda: self._on_preview
-            and self._on_preview(self._video_path, self._start_sec, self._end_sec)
-        )
+        preview.clicked.connect(self._emit_preview)
         buttons.append(preview)
 
         if str(self._match_kind or "") == "video" and self._on_deep_locate is not None:
@@ -481,7 +417,6 @@ class ResultGridCard(QFrame):
         self._on_add_to_shot_list = on_add_to_shot_list
 
         self.rank_label.setText(str(rank))
-        self._source_pixmap = QPixmap()
         self.thumb_label.setPixmap(QPixmap())
         self.thumb_label.setText(loading_text)
 
@@ -511,10 +446,7 @@ class ResultGridCard(QFrame):
 
         self._rebuild_action_buttons(texts or {})
         self._hide_timer.stop()
-        self._backdrop_fade.stop()
         self._overlay_wanted = False
-        self._backdrop_dirty = True
-        self._backdrop_effect.setOpacity(0.0)
         self.action_overlay.hide()
         self.set_selected(False)
         self.updateGeometry()
@@ -669,6 +601,25 @@ class ResultGrid(QScrollArea):
         for other in self._cards:
             other.set_selected(other is card)
 
+    def select_match(self, video_path: str, start_sec: float) -> bool:
+        """Mark the hit that is playing and scroll it into the grid."""
+        target = str(video_path or "").strip().replace("/", "\\").lower()
+        best = None
+        best_delta = 0.51
+        for card in self._cards:
+            card_path = str(card._video_path or "").strip().replace("/", "\\").lower()
+            if card_path != target:
+                continue
+            delta = abs(float(card._start_sec) - float(start_sec or 0.0))
+            if delta < best_delta:
+                best = card
+                best_delta = delta
+        if best is None:
+            return False
+        self._select_card(best)
+        self.ensureWidgetVisible(best, 24, 24)
+        return True
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._reflow()
@@ -676,9 +627,9 @@ class ResultGrid(QScrollArea):
     def _reflow(self, *, force: bool = False) -> None:
         width = max(1, self.viewport().width())
         # Keep a little breathing room; leftover space is split as side padding so the block is centered.
-        card_w = self._card_slot_width()
-        usable = max(1, width - 16)
-        cols = max(1, (usable + _CARD_SPACING) // (card_w + _CARD_SPACING))
+        cols, card_w, thumb_h = grid_column_plan(width)
+        for card in self._cards:
+            card.apply_slot(card_w, thumb_h)
         used = cols * card_w + max(0, cols - 1) * _CARD_SPACING
         side = max(8, (width - used) // 2)
         if (

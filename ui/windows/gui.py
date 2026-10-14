@@ -1,7 +1,7 @@
 from collections import deque
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QKeySequence, QShortcut, QWheelEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -206,6 +207,7 @@ class MainWindow(
         self.audio_output.setVolume(1.0)
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
+        self._park_qt_video_surface()
         self._update_preview_action_button_styles()
         self._init_system_tray()
         self.apply_texts()
@@ -236,13 +238,29 @@ class MainWindow(
         central = QWidget()
         central.setObjectName("AppRoot")
         self.setCentralWidget(central)
+        self._app_root = central
+        central.installEventFilter(self)
 
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(12)
 
         self.sidebar = NavigationSidebar()
+        self.sidebar.collapse_requested.connect(lambda: self._set_sidebar_hidden(True))
         main_layout.addWidget(self.sidebar)
+        self._sidebar_hidden = False
+        self.btn_sidebar_restore = QToolButton(central)
+        self.btn_sidebar_restore.setObjectName("SidebarIconButton")
+        self.btn_sidebar_restore.setText("»")
+        self.btn_sidebar_restore.setToolTip("显示侧边栏 (Ctrl+B)")
+        self.btn_sidebar_restore.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sidebar_restore.setFixedSize(28, 48)
+        self.btn_sidebar_restore.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.btn_sidebar_restore.clicked.connect(lambda: self._set_sidebar_hidden(False))
+        self.btn_sidebar_restore.hide()
+        self._sidebar_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
+        self._sidebar_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._sidebar_shortcut.activated.connect(self._toggle_sidebar)
 
         self.content = QWidget()
         self.content.setObjectName("ContentArea")
@@ -281,7 +299,7 @@ class MainWindow(
         self.refresh_plugin_nav_visibility()
 
         builtin_widgets = {
-            "search": lambda: self._build_scroll_page(self.search_page),
+            "search": lambda: self._build_scroll_page(self.search_page, pin_to_viewport=True),
             "library": lambda: self._build_scroll_page(self.library_page),
             "understanding": lambda: self._build_scroll_page(self.understanding_page),
             "link": lambda: self._build_scroll_page(self.link_page),
@@ -306,7 +324,13 @@ class MainWindow(
         self.search_page.preview_placeholder.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.video_widget = QVideoWidget()
+        # Kept off the preview tree. A native QVideoWidget parented to the top-level
+        # window paints a stale second copy of the transport over the VLC picture.
+        self._qt_video_parking = QWidget(self)
+        self._qt_video_parking.setFixedSize(1, 1)
+        self._qt_video_parking.move(-40, -40)
+        self._qt_video_parking.hide()
+        self.video_widget = QVideoWidget(self._qt_video_parking)
         self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_widget.setAttribute(Qt.WA_NativeWindow, True)
         # QVideoWidget is nested under QScrollArea / #PanelCard; without this, Qt may
@@ -316,15 +340,28 @@ class MainWindow(
         )
         if dont_native_ancestors is not None:
             self.video_widget.setAttribute(dont_native_ancestors, True)
+        dont_show = getattr(Qt.WidgetAttribute, "WA_DontShowOnScreen", None)
+        if dont_show is not None:
+            self.video_widget.setAttribute(dont_show, True)
         self.video_widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.video_widget.installEventFilter(self)
+        from ui.playback.preview_dialog import _PreviewVideoHost
+
+        # Same host as the large preview. QVideoWidget's native window covers the
+        # transport buttons that sit under the picture.
+        self.preview_video_host = _PreviewVideoHost(self.search_page.preview_host)
+        self.preview_video_host.setObjectName("PreviewVideoSurface")
+        self.preview_video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.preview_video_host.installEventFilter(self)
         self.search_page.btn_manage_presets.installEventFilter(self)
         self.preview_surface_stack = QStackedWidget(self.search_page.preview_host)
+        self.preview_surface_stack.setFrameShape(QFrame.Shape.NoFrame)
         self.search_page.preview_host_layout.removeWidget(self.search_page.preview_placeholder)
         self.preview_surface_stack.addWidget(self.search_page.preview_placeholder)
-        self.preview_surface_stack.addWidget(self.video_widget)
+        self.preview_surface_stack.addWidget(self.preview_video_host)
         self.search_page.preview_host_layout.addWidget(self.preview_surface_stack, 1)
         self.preview_surface_stack.setCurrentWidget(self.search_page.preview_placeholder)
+        self.preview_surface_stack.currentChanged.connect(lambda _index: self._park_qt_video_surface())
 
         self.result_table = self.search_page.result_table
         self.result_table.cellDoubleClicked.connect(self._open_result_table_preview)
@@ -601,7 +638,7 @@ class MainWindow(
             app.installEventFilter(self)
         self.runtime_banner_action.clicked.connect(self._on_runtime_banner_action)
 
-    def _build_scroll_page(self, page_widget):
+    def _build_scroll_page(self, page_widget, *, pin_to_viewport: bool = False):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -612,16 +649,132 @@ class MainWindow(
         # Focused children (buttons/tables) must not yank the viewport.
         scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll.setWidget(page_widget)
+        if pin_to_viewport:
+            # Player + results share this viewport. The page must not grow a
+            # second scrollbar that scrolls the player off the results.
+            self._pinned_scroll_viewport = scroll.viewport()
+            self._pinned_scroll_page = page_widget
+            scroll.viewport().installEventFilter(self)
         return scroll
 
+    def _toggle_sidebar(self) -> None:
+        self._set_sidebar_hidden(not getattr(self, "_sidebar_hidden", False))
+
+    def _set_sidebar_hidden(self, hidden: bool) -> None:
+        """Hide the nav column the way VS Code hides the primary side bar."""
+        hidden = bool(hidden)
+        self._sidebar_hidden = hidden
+        sidebar = getattr(self, "sidebar", None)
+        if sidebar is not None:
+            sidebar.setVisible(not hidden)
+        restore = getattr(self, "btn_sidebar_restore", None)
+        if restore is not None:
+            restore.setVisible(hidden)
+            if hidden:
+                self._place_sidebar_restore()
+        QTimer.singleShot(0, self._give_search_preview_room)
+
+    def _place_sidebar_restore(self) -> None:
+        button = getattr(self, "btn_sidebar_restore", None)
+        if button is None or not button.isVisible():
+            return
+        button.move(0, 8)
+        button.raise_()
+
+    def _give_search_preview_room(self) -> None:
+        page = getattr(self, "search_page", None)
+        adopt = getattr(page, "adopt_preview_width", None)
+        if callable(adopt):
+            adopt()
+
+    def _attach_qt_video_surface(self) -> None:
+        """Put the Qt video widget back on the preview stack for the fallback player."""
+        video = getattr(self, "video_widget", None)
+        stack = getattr(self, "preview_surface_stack", None)
+        if video is None or stack is None:
+            return
+        dont_show = getattr(Qt.WidgetAttribute, "WA_DontShowOnScreen", None)
+        if dont_show is not None:
+            video.setAttribute(dont_show, False)
+        video.setMinimumSize(0, 0)
+        video.setMaximumSize(16777215, 16777215)
+        if stack.indexOf(video) < 0:
+            stack.addWidget(video)
+
+    def _park_qt_video_surface(self) -> None:
+        """Keep the unused Qt video window off the picture and the transport.
+
+        Its native window is parented to the top-level window. Left inside the
+        preview stack, a hidden surface still paints a faded copy of the controls.
+        """
+        if getattr(self, "_qt_video_parking_guard", False):
+            return
+        video = getattr(self, "video_widget", None)
+        if video is None:
+            return
+        stack = getattr(self, "preview_surface_stack", None)
+        showing = stack is not None and stack.currentWidget() is video
+        if showing:
+            self._attach_qt_video_surface()
+            return
+        self._qt_video_parking_guard = True
+        try:
+            if stack is not None and stack.indexOf(video) >= 0:
+                stack.removeWidget(video)
+            parking = getattr(self, "_qt_video_parking", None)
+            if parking is not None and video.parentWidget() is not parking:
+                video.setParent(parking)
+            dont_show = getattr(Qt.WidgetAttribute, "WA_DontShowOnScreen", None)
+            if dont_show is not None:
+                video.setAttribute(dont_show, True)
+            video.hide()
+            video.setFixedSize(1, 1)
+            try:
+                import ctypes
+
+                hwnd = int(video.winId() or 0)
+                if hwnd:
+                    user32 = ctypes.windll.user32
+                    user32.ShowWindow(hwnd, 0)
+                    user32.SetWindowPos(hwnd, 0, -32000, -32000, 1, 1, 0x0004 | 0x0010 | 0x0080)
+            except Exception:
+                pass
+        finally:
+            self._qt_video_parking_guard = False
+        panel = getattr(getattr(self, "search_page", None), "preview_panel", None)
+        if panel is not None:
+            panel.update()
+
     def eventFilter(self, watched, event):  # noqa: N802
+        if event.type() == QEvent.Type.Resize and watched is getattr(self, "_app_root", None):
+            self._place_sidebar_restore()
+        if watched is getattr(self, "video_widget", None) and event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+            QEvent.Type.Move,
+        ):
+            stack = getattr(self, "preview_surface_stack", None)
+            if stack is None or stack.currentWidget() is not watched:
+                if event.type() != QEvent.Type.Resize or watched.width() > 2 or watched.height() > 2:
+                    self._park_qt_video_surface()
+        if (
+            event.type() == QEvent.Type.Resize
+            and watched is getattr(self, "_pinned_scroll_viewport", None)
+        ):
+            page = getattr(self, "_pinned_scroll_page", None)
+            height = int(watched.height())
+            if page is not None and height > 80 and page.height() != height:
+                page.setFixedHeight(height)
         if event.type() == QEvent.Type.KeyPress:
             from PySide6.QtGui import QKeySequence
 
             if event.matches(QKeySequence.StandardKey.Paste) and self._try_paste_clipboard_image():
                 return True
         if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
-            if watched is getattr(self, "video_widget", None) or watched is getattr(
+            if watched in (
+                getattr(self, "video_widget", None),
+                getattr(self, "preview_video_host", None),
+            ) or watched is getattr(
                 getattr(self, "search_page", None), "btn_manage_presets", None
             ):
                 # Native video surface / focused buttons would otherwise swallow page scrolling.

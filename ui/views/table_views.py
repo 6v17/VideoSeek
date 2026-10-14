@@ -4,6 +4,7 @@ import webbrowser
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -541,9 +542,10 @@ def _build_result_actions(
     anchor_score=None,
 ):
     container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(10, 0, 10, 0)
-    layout.setSpacing(12)
+    layout = QGridLayout(container)
+    layout.setContentsMargins(6, 4, 6, 4)
+    layout.setHorizontalSpacing(8)
+    layout.setVerticalSpacing(6)
     layout.setAlignment(Qt.AlignCenter)
 
     preview_button = _configure_table_action_button(QPushButton(texts["preview"]))
@@ -564,7 +566,7 @@ def _build_result_actions(
     locate_button.setToolTip(texts["locate_tip"])
     locate_button.clicked.connect(lambda _, path=video_path: on_locate(path))
 
-    layout.addWidget(preview_button)
+    layout.addWidget(preview_button, 0, 0)
 
     if str(match_kind or "") == "video" and on_deep_locate is not None:
         deep_button = _configure_table_action_button(
@@ -580,9 +582,9 @@ def _build_result_actions(
                 path, anchor, hit_score
             )
         )
-        layout.addWidget(deep_button)
+        layout.addWidget(deep_button, 2, 0, 1, 2)
 
-    layout.addWidget(locate_button)
+    layout.addWidget(locate_button, 0, 1)
 
     export_button = _configure_table_action_button(
         QPushButton(_fallback_text(texts, "export_clip", "导出", "Export"))
@@ -595,7 +597,7 @@ def _build_result_actions(
     export_button.clicked.connect(
         lambda _, path=video_path, clip_start=start_sec, clip_end=end_sec: on_export(path, clip_start, clip_end)
     )
-    layout.addWidget(export_button)
+    layout.addWidget(export_button, 1, 0)
 
     if on_add_to_shot_list is not None:
         add_button = _configure_table_action_button(
@@ -611,7 +613,7 @@ def _build_result_actions(
                 path, clip_start, clip_end, clip_score, kind
             )
         )
-        layout.addWidget(add_button)
+        layout.addWidget(add_button, 1, 1)
     return container
 
 def _format_time_range(start_sec, end_sec, texts=None, match_kind="frame"):

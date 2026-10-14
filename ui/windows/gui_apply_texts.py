@@ -23,6 +23,10 @@ class ApplyTextsGuiMixin:
         self.sidebar.btn_page_library.setText(t["nav_library"])
         self.sidebar.btn_page_understanding.setText(t["nav_understanding"])
         self.sidebar.btn_page_settings.setText(t["nav_settings"])
+        self.sidebar.btn_collapse.setToolTip(t.get("nav_sidebar_hide", "隐藏侧边栏 (Ctrl+B)"))
+        restore = getattr(self, "btn_sidebar_restore", None)
+        if restore is not None:
+            restore.setToolTip(t.get("nav_sidebar_show", "显示侧边栏 (Ctrl+B)"))
         for page_id, spec in self._plugin_page_specs.items():
             button = self.sidebar.nav_button(page_id)
             if button is not None:
@@ -57,9 +61,13 @@ class ApplyTextsGuiMixin:
         self.search_page.indexing_notice_text.setText(t.get("search_during_indexing_hint", ""))
         self._refresh_search_panel_state()
         self.search_page.preview_title.setText(t["preview_panel"])
+        detail_title = getattr(getattr(self.search_page, "preview_panel", None), "detail_title", None)
+        if detail_title is not None:
+            detail_title.setText(t.get("search_preview_detail", "当前视频"))
         if hasattr(self.search_page, "expanded_chrome"):
             self._ensure_preview_chrome()
             self.search_page.expanded_chrome.apply_texts(t)
+            self._sync_docked_preview_button()
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_results_view_table.setText(t.get("results_view_table", "列表"))
         self.search_page.btn_results_view_grid.setText(t.get("results_view_grid", "网格"))

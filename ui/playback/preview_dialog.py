@@ -286,6 +286,7 @@ class PreviewDialog(QDialog):
         layout.addLayout(transport)
 
         self.slider = QSlider(Qt.Horizontal)
+        self.slider.setObjectName("PreviewTransportSlider")
         self.slider.setRange(0, 1000)
         self.slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.slider)

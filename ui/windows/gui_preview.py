@@ -8,6 +8,7 @@ import time
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFileDialog,
     QLabel,
@@ -223,7 +224,7 @@ class PreviewGuiMixin:
     """Preview playback and clip export tasks; mixed into `MainWindow`."""
 
     def handle_play(self, path, sec, end_sec=None):
-        """Open the on-demand preview. Search results and the shot list both use this."""
+        """Open the on-demand preview. Search results play in the fixed player."""
         start = float(sec or 0.0)
         end = float(end_sec) if end_sec is not None else start
 
@@ -231,16 +232,7 @@ class PreviewGuiMixin:
             self.search_page.lbl_status.setText(message)
 
         if self._search_preview_layer_available():
-            self._preview_strip_kind = ""
-            self._preview_return_page = ""
-            self._preview_surface = self.search_page
-            self._enter_search_preview_layer(
-                path,
-                start,
-                end,
-                suggested_sec=start,
-                on_status=set_status,
-            )
+            self._play_fixed_search_preview(path, start, end, set_status)
             return
         self.open_floating_preview_dialog(
             path,
@@ -249,6 +241,92 @@ class PreviewGuiMixin:
             suggested_sec=start,
             on_status=set_status,
         )
+
+    def _play_fixed_search_preview(self, path, start, end, set_status) -> bool:
+        """Play in the side column on the fixed player. The embedded preview stays separate."""
+        if getattr(self, "_search_preview_embedded", False):
+            self._leave_search_preview_layer()
+        self._set_docked_preview_visible(True)
+        try:
+            played = bool(self.preview_controller.play(path, start, end))
+        except Exception as exc:
+            logger.exception("Fixed preview failed: %s", exc)
+            set_status(self.texts.get("preview_failed", "Preview failed"))
+            return False
+        if not played:
+            set_status(self.texts.get("preview_failed", "Preview failed"))
+            return False
+        ctx = self.preview_controller.get_current_preview_context() or {}
+        self._sync_preview_chrome(
+            path,
+            float(ctx.get("start_sec", start)),
+            float(ctx.get("end_sec", end)),
+            float(ctx.get("suggested_sec", start)),
+        )
+        self._fill_search_preview_detail(path, float(ctx.get("suggested_sec", start)))
+        self._reveal_playing_result(path, start)
+        return True
+
+    def _reveal_current_playing_result(self) -> None:
+        ctx = {}
+        controller = getattr(self, "preview_controller", None)
+        if controller is not None and hasattr(controller, "get_current_preview_context"):
+            ctx = controller.get_current_preview_context() or {}
+        path = str(ctx.get("video_path") or "").strip()
+        if not path:
+            return
+        suggested = ctx.get("suggested_sec")
+        start = float(suggested if suggested is not None else ctx.get("start_sec") or 0.0)
+        self._reveal_playing_result(path, start)
+
+    def _set_docked_preview_visible(self, visible: bool) -> None:
+        panel = getattr(getattr(self, "search_page", None), "preview_panel", None)
+        if panel is None:
+            return
+        panel.setVisible(bool(visible))
+
+    def _reveal_playing_result(self, path, start) -> None:
+        page = getattr(self, "search_page", None)
+        view = getattr(page, "result_view", None)
+        if view is None:
+            return
+        if getattr(view, "view_mode", "") == "grid":
+            grid = getattr(view, "grid", None)
+            if grid is not None and hasattr(grid, "select_match"):
+                grid.select_match(path, start)
+            return
+        table = getattr(view, "table", None)
+        if table is None:
+            return
+        target = str(path or "").strip().replace("/", "\\").lower()
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            payload = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if not isinstance(payload, dict):
+                continue
+            row_path = str(payload.get("video_path") or "").strip().replace("/", "\\").lower()
+            if row_path != target:
+                continue
+            try:
+                delta = abs(float(payload.get("start_sec") or 0.0) - float(start or 0.0))
+            except (TypeError, ValueError):
+                continue
+            if delta > 0.5:
+                continue
+            table.selectRow(row)
+            table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+            return
+
+    def _sync_docked_preview_button(self) -> None:
+        chrome = getattr(getattr(self, "search_page", None), "expanded_chrome", None)
+        panel = getattr(getattr(self, "search_page", None), "preview_panel", None)
+        if chrome is None or panel is None or not getattr(panel, "_docked", False):
+            return
+        if getattr(chrome, "_maximized", False):
+            return
+        label = self.texts.get("preview_expand", "放大预览")
+        chrome.maximize_button.setText(label)
+        chrome.maximize_button.setToolTip(label)
 
     def _open_result_table_preview(self, row: int, _column: int) -> None:
         table = getattr(self, "result_table", None)
@@ -476,6 +554,7 @@ class PreviewGuiMixin:
         stack = getattr(page, "browse_stack", None)
         if stack is not None:
             stack.setCurrentIndex(0)
+        self._set_docked_preview_visible(True)
 
     def _detach_understanding_preview_host(self, dialog) -> None:
         page = getattr(self, "understanding_page", None)
@@ -505,7 +584,8 @@ class PreviewGuiMixin:
         stack = getattr(page, "browse_stack", None)
         if stack is not None:
             stack.setCurrentIndex(0)
-        dialog = getattr(self, "_preview_dialog", None)
+        self._set_docked_preview_visible(True)
+        self._reveal_current_playing_result()
         if dialog is not None:
             player = getattr(dialog, "player", None)
             try:
@@ -576,6 +656,7 @@ class PreviewGuiMixin:
             dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             if hasattr(dialog, "video_host"):
                 dialog.video_host.setMinimumHeight(0)
+                dialog.video_host.setMaximumHeight(16777215)
                 dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             if layout.indexOf(dialog) < 0:
                 layout.addWidget(dialog, 1)
@@ -587,6 +668,7 @@ class PreviewGuiMixin:
         dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         if hasattr(dialog, "video_host"):
             dialog.video_host.setMinimumHeight(0)
+            dialog.video_host.setMaximumHeight(16777215)
             dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self._set_preview_fullscreen_button(dialog, visible=False)
         if on_understanding:
@@ -604,6 +686,7 @@ class PreviewGuiMixin:
             self._search_preview_embedded = True
             self._understanding_preview_embedded = False
             search.browse_stack.setCurrentWidget(search.preview_layer)
+            self._set_docked_preview_visible(False)
 
     def _present_understanding_preview(self, dialog) -> None:
         page = getattr(self, "understanding_page", None)
@@ -694,6 +777,7 @@ class PreviewGuiMixin:
         stack = getattr(page, "browse_stack", None)
         if stack is not None:
             stack.setCurrentIndex(0)
+        self._set_docked_preview_visible(True)
         self._set_preview_fullscreen_button(dialog, visible=True)
         self._attach_preview_dialog_host(dialog)
         # setParent/setWindowFlags recreates the native window at (0, 0).
@@ -715,6 +799,7 @@ class PreviewGuiMixin:
             dialog.resize(*_FLOATING_PREVIEW_SIZE)
         if hasattr(dialog, "video_host"):
             dialog.video_host.setMinimumHeight(480)
+            dialog.video_host.setMaximumHeight(16777215)
             dialog.video_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _center_floating_preview(self, dialog) -> None:
@@ -763,6 +848,8 @@ class PreviewGuiMixin:
         stack = getattr(page, "browse_stack", None)
         if stack is not None:
             stack.setCurrentIndex(0)
+        self._set_docked_preview_visible(True)
+        self._reveal_current_playing_result()
 
     def _preview_strip_signature_matches(self, page, signature) -> bool:
         if getattr(page, "_strip_signature", None) != signature:
@@ -1168,8 +1255,6 @@ class PreviewGuiMixin:
         texts.setdefault("result_mode_video", "视频")
         texts.setdefault("result_mode_dialogue", "字幕")
         texts.setdefault("result_mode_tags", "标签")
-        page.preview_detail_name.setText(video_display_name(path) if path else "")
-        page.preview_detail_name.setToolTip(path)
         lines = [path] if path else []
         lines.append(f"{texts.get('search_preview_detail_hit', '命中')}  {format_timecode_range(start, end)}")
         lines.append(f"{texts.get('search_preview_detail_score', '相似度')}  {int(score * 100)}%")
@@ -1184,12 +1269,28 @@ class PreviewGuiMixin:
             lines.append(f"{texts.get('search_preview_detail_duration', '时长')}  {duration_text}")
         if matched:
             lines.append(f"{texts.get('search_preview_detail_match', '匹配')}  {matched}")
-        page.preview_detail_body.setText("\n".join(lines))
+        body = "\n".join(lines)
+        name = video_display_name(path) if path else ""
+        self._write_preview_detail(name, path, body)
         token = (path, round(float(start), 3))
         self._preview_detail_token = token
         if duration_text:
             return
         QTimer.singleShot(700, lambda marker=token: self._refresh_preview_detail_duration(marker, 1))
+
+    def _write_preview_detail(self, name: str, path: str, body: str) -> None:
+        page = getattr(self, "search_page", None)
+        panel = getattr(page, "preview_panel", None) if page is not None else None
+        pairs = (
+            (getattr(page, "preview_detail_name", None), getattr(page, "preview_detail_body", None)),
+            (getattr(panel, "detail_name", None), getattr(panel, "detail_body", None)),
+        )
+        for name_label, body_label in pairs:
+            if name_label is None or body_label is None:
+                continue
+            name_label.setText(name)
+            name_label.setToolTip(path)
+            body_label.setText(body)
 
     def _refresh_preview_detail_duration(self, token, attempt: int) -> None:
         if token != getattr(self, "_preview_detail_token", None):
@@ -1635,6 +1736,7 @@ class PreviewGuiMixin:
         chrome = self.search_page.expanded_chrome
         if getattr(self, "_expanded_chrome_wired", False):
             chrome.apply_texts(self.texts)
+            self._sync_docked_preview_button()
             return
         chrome.apply_texts(self.texts)
         chrome.export_requested.connect(self._queue_preview_export)
@@ -1642,6 +1744,7 @@ class PreviewGuiMixin:
         chrome.add_to_shot_list_requested.connect(self._add_preview_clip_to_shot_list)
         chrome.maximize_toggled.connect(self._on_preview_maximize_toggled)
         self._expanded_chrome_wired = True
+        self._sync_docked_preview_button()
 
     def _add_preview_clip_to_shot_list(self, video_path, start_sec, end_sec, match_kind="clip"):
         if not hasattr(self, "add_hit_to_shot_list"):
@@ -1673,6 +1776,28 @@ class PreviewGuiMixin:
         chrome.reset()
 
     def _on_preview_maximize_toggled(self, maximized: bool):
+        """Docked player: this button opens the full-page layer instead of covering the list."""
+        panel = getattr(self.search_page, "preview_panel", None)
+        if panel is not None and getattr(panel, "_docked", False):
+            chrome = self.search_page.expanded_chrome
+            chrome.set_maximized_state(False)
+            self._sync_docked_preview_button()
+            if not maximized:
+                return
+            ctx = self.preview_controller.get_current_preview_context() or {}
+            video_path = str(ctx.get("video_path") or "").strip()
+            if not video_path:
+                return
+            self._preview_strip_kind = ""
+            self._preview_return_page = ""
+            self._preview_surface = self.search_page
+            self._enter_search_preview_layer(
+                video_path,
+                float(ctx.get("start_sec") or 0.0),
+                float(ctx.get("end_sec") or 0.0),
+                suggested_sec=ctx.get("suggested_sec"),
+            )
+            return
         self.search_page.set_preview_maximized(bool(maximized))
         player = getattr(self.preview_controller, "vlc_player", None)
         if player is not None and player.is_available():

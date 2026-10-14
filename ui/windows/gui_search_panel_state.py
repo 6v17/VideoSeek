@@ -360,6 +360,9 @@ class SearchPanelStateMixin:
         if btn_save_preset is not None:
             btn_save_preset.setText(texts.get("search_compose_save_preset", "Save preset"))
             btn_save_preset.setVisible(active_tab == self.SEARCH_TAB_COMPOSE)
+        sync_presets = getattr(page.search_panel, "_sync_compose_preset_row", None)
+        if callable(sync_presets):
+            sync_presets()
         if hasattr(page.search_panel, "show_score_kind"):
             page.search_panel.show_score_kind(self._active_search_score_kind())
 

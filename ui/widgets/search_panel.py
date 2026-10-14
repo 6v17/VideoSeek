@@ -25,8 +25,39 @@ from ui.widgets.layout import (
 )
 from ui.widgets.scaffold import VSCard
 from ui.widgets.search_compose_form import SearchComposeFormWidget
+from ui.widgets.search_presets_bar import SearchPresetsBar
 from ui.widgets.styles import repolish_widget
 from ui.widgets.tag_search_form import TagSearchForm, _StripHint
+
+
+class _ElidedHint(QLabel):
+    """Single-line status. Shrinks with the card and ellipsizes instead of sticking out."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("StatusHint")
+        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(20)
+        self.setMinimumWidth(0)
+        self._full = ""
+
+    def minimumSizeHint(self):  # noqa: N802 — Qt API
+        hint = super().minimumSizeHint()
+        return hint.__class__(0, hint.height())
+
+    def setText(self, text: str) -> None:  # noqa: N802 — Qt API
+        self._full = str(text or "")
+        self.setToolTip(self._full)
+        self._elide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(0, self.width() - 4)
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, width))
 
 
 class _ElidedPathLabel(QLabel):
@@ -370,11 +401,7 @@ class SearchPanel(VSCard):
         self.text_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.text_search.setAcceptRichText(False)
 
-        self.lbl_active_model = QLabel()
-        self.lbl_active_model.setObjectName("StatusHint")
-        # Single-line, reserved height — avoids panel jump when tab text changes.
-        self.lbl_active_model.setWordWrap(False)
-        self.lbl_active_model.setFixedHeight(20)
+        self.lbl_active_model = _ElidedHint()
 
         self.lbl_text_model_hint = _StripHint(self, self.text_search)
         self.lbl_text_model_hint.setObjectName("StatusHint")
@@ -658,7 +685,6 @@ class SearchPanel(VSCard):
         self.lbl_filter_summary.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.lbl_filter_summary.hide()
         self._filter_summary = ""
-        options_row_layout.addWidget(self.btn_save_preset, 0)
         options_row_layout.addStretch(1)
         self.filters_panel.hide()
         self.btn_filters.toggled.connect(self._on_filters_toggled)
@@ -667,8 +693,7 @@ class SearchPanel(VSCard):
         tab_row.setContentsMargins(0, 0, 0, 0)
         tab_row.setSpacing(8)
         tab_row.addWidget(self.search_query_tabs, 0)
-        tab_row.addStretch(1)
-        tab_row.addWidget(self.lbl_active_model, 0)
+        tab_row.addWidget(self.lbl_active_model, 1)
 
         query_row = QHBoxLayout()
         query_row.setContentsMargins(0, 0, 0, 0)
@@ -683,8 +708,27 @@ class SearchPanel(VSCard):
         query_row.addStretch(0)
         self.search_query_tabs.currentChanged.connect(self._sync_query_anchor)
 
+        self.compose_presets_row = QWidget()
+        self.compose_presets_row.setObjectName("ComposePresetRow")
+        preset_row = QHBoxLayout(self.compose_presets_row)
+        preset_row.setContentsMargins(0, 0, 0, 0)
+        preset_row.setSpacing(8)
+        self.search_presets_bar = SearchPresetsBar()
+        self.btn_manage_presets = QPushButton()
+        set_button_role(self.btn_manage_presets, "GhostButton", chrome="presetManage")
+        self.btn_manage_presets.setFixedHeight(32)
+        self.btn_manage_presets.setCursor(Qt.CursorShape.PointingHandCursor)
+        preset_row.addWidget(self.search_presets_bar, 1)
+        preset_row.addWidget(self.btn_save_preset, 0)
+        preset_row.addWidget(self.btn_manage_presets, 0)
+        self.compose_presets_row.setFixedHeight(32)
+        self._compose_presets_open = False
+        self.compose_presets_row.hide()
+        self.search_query_tabs.currentChanged.connect(self._sync_compose_preset_row)
+
         layout.addLayout(tab_row, 0)
         layout.addLayout(query_row, 0)
+        layout.addWidget(self.compose_presets_row, 0)
         layout.addWidget(self.filters_panel, 0)
 
         default_width = compute_search_panel_width()
@@ -757,11 +801,33 @@ class SearchPanel(VSCard):
             percent = int(self._score_values.get(normalized, self._score_defaults.get(normalized, 0)))
         return max(0.0, min(1.0, percent / 100.0))
 
+    def _compose_tab_active(self) -> bool:
+        stack = getattr(self, "query_stack", None)
+        form = getattr(self, "compose_form", None)
+        return stack is not None and form is not None and stack.currentWidget() is form
+
+    def _sync_compose_preset_row(self, *_args) -> None:
+        row = getattr(self, "compose_presets_row", None)
+        if row is None:
+            return
+        visible = self._compose_tab_active()
+        self._compose_presets_open = visible
+        row.setVisible(visible)
+        save = getattr(self, "btn_save_preset", None)
+        if save is not None:
+            save.setVisible(visible)
+        self._sync_card_height()
+
     def _sync_card_height(self) -> None:
-        """Collapsed bar stays 116. Open advanced adds the existing filter line."""
+        """Collapsed bar stays 116. Compose presets and advanced filters add their own lines."""
         extra = 0
+        spacing = int(self.content_layout.spacing())
+        if getattr(self, "_compose_presets_open", False):
+            row = getattr(self, "compose_presets_row", None)
+            row_h = 32 if row is None else int(row.height() or row.sizeHint().height() or 32)
+            extra += row_h + spacing
         if self.btn_filters.isChecked():
-            extra = int(self._filter_row_height) + int(self.content_layout.spacing())
+            extra += int(self._filter_row_height) + spacing
         self.setFixedHeight(int(self._default_height or 116) + extra)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
@@ -772,11 +838,11 @@ class SearchPanel(VSCard):
         """Every query field takes about 55% of the bar so the actions sit against it."""
         margins = self.content_layout.contentsMargins()
         inner = max(0, self.width() - margins.left() - margins.right())
-        if inner < 480:
-            inner = 480
+        if inner < 160:
+            inner = 160
         target = int(inner * 0.55)
-        floor = 280
-        ceiling = max(floor, inner - 320)
+        floor = 160
+        ceiling = max(floor, inner - 240)
         return max(floor, min(target, ceiling))
 
     def _sync_query_anchor(self) -> None:
@@ -788,10 +854,21 @@ class SearchPanel(VSCard):
         tail = lay.count() - 1
         if stack_index < 0 or tail <= stack_index:
             return
-        width = self._query_field_width()
-        self.query_stack.setMinimumWidth(width)
-        self.query_stack.setMaximumWidth(width)
-        lay.setStretch(stack_index, 0)
+        preferred = self._query_field_width()
+        reserved = lay.spacing() * max(0, lay.count() - 1)
+        for index in range(lay.count()):
+            item = lay.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if widget is None or widget is self.query_stack or not widget.isVisible():
+                continue
+            reserved += max(widget.sizeHint().width(), widget.minimumSizeHint().width())
+        margins = self.content_layout.contentsMargins()
+        inner = max(0, self.width() - margins.left() - margins.right())
+        room = max(120, inner - reserved) if inner else preferred
+        width = min(preferred, room)
+        self.query_stack.setMinimumWidth(0)
+        self.query_stack.setMaximumWidth(max(120, width))
+        lay.setStretch(stack_index, 10)
         lay.setStretch(tail, 1)
 
     def set_filter_summary(self, text: str) -> None:
@@ -929,7 +1006,8 @@ class SearchPanel(VSCard):
         ceiling = int(getattr(self, "_width_ceiling", fitted) or fitted)
         # A little wider than the tight fit, and never narrower than the original panel.
         self._default_width = max(fitted + 36, ceiling)
-        self.setMinimumWidth(int(self._default_width))
+        # Preferred width only. A hard minimum pushes the card past the window edge.
+        self.setMinimumWidth(0)
 
     def _fit_combo_width(self, combo, *, floor: int, cap: int) -> int:
         if combo is None:

@@ -50,15 +50,15 @@ class TableSpec:
 
 LOCAL_SEARCH_TABLE_SPEC = TableSpec(
     texts_header_key="result_headers",
-    row_height=88,
+    row_height=128,
     columns=(
         TableColumnSpec("order", width=46),
-        TableColumnSpec("preview", width=164),
+        TableColumnSpec("preview", width=220),
         TableColumnSpec("video", resize="stretch"),
-        TableColumnSpec("range", width=108),
+        TableColumnSpec("range", width=176),
         TableColumnSpec("mode", width=74),
         TableColumnSpec("score", width=74),
-        TableColumnSpec("actions", width=360),
+        TableColumnSpec("actions", width=188),
     ),
 )
 
