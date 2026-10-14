@@ -1,4 +1,4 @@
-﻿import contextlib
+import contextlib
 import os
 import shutil
 import sys
