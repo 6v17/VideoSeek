@@ -286,6 +286,8 @@ class PreviewDialog(QDialog):
         self.chrome.add_to_shot_list_requested.connect(self.add_to_shot_list_requested)
         self.chrome.maximize_button.clicked.disconnect(self.chrome._toggle_maximize)
         self.chrome.maximize_button.clicked.connect(self._toggle_fullscreen)
+        self.chrome.show_chrome()
+        self.chrome.setMinimumHeight(max(72, self.chrome.sizeHint().height()))
         layout.addWidget(self.chrome)
 
         self.play_button = self.chrome.play_button
@@ -315,6 +317,13 @@ class PreviewDialog(QDialog):
             suggested_sec=suggested_sec,
             caption_text=caption_text,
         )
+
+    def apply_texts(self, texts):
+        """Refresh the shared transport when the app language changes."""
+        self.texts = texts or {}
+        self.setWindowTitle(self.texts.get("preview_dialog_title", "Large Preview"))
+        self.chrome.apply_texts(self.texts)
+        self._sync_add_to_shot_list_button()
 
     def reject(self) -> None:  # noqa: N802 — Qt API
         """Embedded preview uses Esc to return to the result list, not to hide the player in place."""

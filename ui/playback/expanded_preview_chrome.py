@@ -203,13 +203,25 @@ class ExpandedPreviewChrome(QWidget):
 
     def apply_texts(self, texts: dict):
         self.texts = texts or {}
-        self.play_button.setText(self.texts.get("preview_dialog_pause", "暂停"))
         self._pin_toggle_width(
             self.play_button,
             self.texts.get("preview_dialog_play", "播放"),
             self.texts.get("preview_dialog_pause", "暂停"),
         )
         self._apply_maximize_button()
+        playing = False
+        player = self.player
+        if player is not None:
+            try:
+                playing = bool(player.is_playing())
+            except Exception:
+                playing = False
+        self.play_button.setText(
+            self.texts.get(
+                "preview_dialog_pause" if playing else "preview_dialog_play",
+                "暂停" if playing else "播放",
+            )
+        )
         self.collapse_button.setText(self.texts.get("preview_collapse", "收起"))
         self.collapse_button.setToolTip(self.texts.get("preview_card_collapse", "收起预览"))
         self.set_start_button.setText(self.texts.get("preview_dialog_set_start", "起点"))

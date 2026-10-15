@@ -66,6 +66,10 @@ class ApplyTextsGuiMixin:
             detail_title.setText(t.get("search_preview_detail", "当前视频"))
         if hasattr(self.search_page, "expanded_chrome"):
             self._ensure_preview_chrome()
+        preview_dialog = getattr(self, "_preview_dialog", None)
+        apply_preview = getattr(preview_dialog, "apply_texts", None)
+        if callable(apply_preview):
+            apply_preview(t)
         self.search_page.results_title.setText(t["results_panel"])
         self.search_page.btn_results_view_table.setText(t.get("results_view_table", "列表"))
         self.search_page.btn_results_view_grid.setText(t.get("results_view_grid", "网格"))
