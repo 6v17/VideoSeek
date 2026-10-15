@@ -69,10 +69,12 @@ class EmbeddedPreviewLayer(QWidget):
 
         stage = QWidget()
         stage.setObjectName("SearchPreviewStage")
+        stage.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         stage_row = QHBoxLayout(stage)
         stage_row.setContentsMargins(0, 0, 0, 0)
         stage_row.setSpacing(10)
         self.preview_layer_host = QWidget()
+        self.preview_layer_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.preview_layer_host_layout = QVBoxLayout(self.preview_layer_host)
         self.preview_layer_host_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_layer_host_layout.setSpacing(0)

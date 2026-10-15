@@ -828,6 +828,47 @@ class SearchPage(QWidget):
         if emit:
             self.preview_collapsed_changed.emit(collapsed)
 
+    def yield_preview_column(self, yielded: bool) -> None:
+        """Give the docked column to the large preview. The info card width stays fixed."""
+        yielded = bool(yielded)
+        splitter = self.compare_splitter
+        column = self.preview_column
+        if yielded:
+            if getattr(self, "_preview_column_yielded", False):
+                self.preview_panel.hide()
+                self.btn_preview_restore.hide()
+                return
+            sizes = splitter.sizes()
+            self._preview_column_yielded = True
+            self._preview_column_width_before_yield = int(sizes[1]) if len(sizes) == 2 else 0
+            self._preview_column_collapsed_before_yield = bool(self._preview_collapsed)
+            self.preview_panel.hide()
+            self.btn_preview_restore.hide()
+            column.setMinimumWidth(0)
+            column.setMaximumWidth(0)
+            total = max(int(splitter.width()), sum(int(part) for part in sizes))
+            splitter.setSizes([max(total, 1), 0])
+            self._schedule_video_follow()
+            return
+        if not getattr(self, "_preview_column_yielded", False):
+            if not self._preview_collapsed:
+                self.preview_panel.show()
+            return
+        self._preview_column_yielded = False
+        if self._preview_column_collapsed_before_yield:
+            self.set_preview_collapsed(True, emit=False)
+            return
+        column.setMinimumWidth(320)
+        column.setMaximumWidth(16777215)
+        self.preview_panel.show()
+        self.btn_preview_restore.hide()
+        width = int(getattr(self, "_preview_column_width_before_yield", 0) or 0)
+        if width < 320:
+            width = _DOCKED_PREVIEW_WIDTH
+        total = max(int(splitter.width()), width + int(self._original_column.minimumWidth()))
+        splitter.setSizes([max(0, total - width), width])
+        self._schedule_video_follow()
+
     def set_results_display_scale(self, percent: int, *, emit: bool = True, snap: bool = False) -> None:
         from ui.widgets.result_grid import clamp_result_scale_percent
 

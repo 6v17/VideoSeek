@@ -280,10 +280,13 @@ class PreviewGuiMixin:
         self._reveal_playing_result(path, start)
 
     def _set_docked_preview_visible(self, visible: bool) -> None:
-        panel = getattr(getattr(self, "search_page", None), "preview_panel", None)
-        if panel is None:
+        page = getattr(self, "search_page", None)
+        if page is None or not hasattr(page, "yield_preview_column"):
+            panel = getattr(page, "preview_panel", None)
+            if panel is not None:
+                panel.setVisible(bool(visible))
             return
-        panel.setVisible(bool(visible))
+        page.yield_preview_column(not bool(visible))
 
     def _reveal_playing_result(self, path, start) -> None:
         page = getattr(self, "search_page", None)

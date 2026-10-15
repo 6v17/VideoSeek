@@ -84,6 +84,19 @@ class SearchWorkspaceChromeTests(unittest.TestCase):
         self.assertTrue(page.preview_panel.isVisible())
         self.assertFalse(page.btn_preview_restore.isVisible())
         self.assertGreaterEqual(page.preview_column.maximumWidth(), 320)
+
+        page.compare_splitter.setSizes([900, 470])
+        self.app.processEvents()
+        page.yield_preview_column(True)
+        self.app.processEvents()
+        self.assertFalse(page.preview_panel.isVisible())
+        self.assertLessEqual(page.compare_splitter.sizes()[1], 16)
+        self.assertEqual(page.preview_detail.minimumWidth(), 280)
+        self.assertEqual(page.preview_detail.maximumWidth(), 280)
+        page.yield_preview_column(False)
+        self.app.processEvents()
+        self.assertTrue(page.preview_panel.isVisible())
+        self.assertGreaterEqual(page.compare_splitter.sizes()[1], 320)
         page.hide()
 
     def test_result_size_scales_grid_cards_and_table_rows(self):
