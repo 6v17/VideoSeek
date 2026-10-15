@@ -7,7 +7,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QSizePolicy, QStackedWidget, QTableWidget, QVBoxLayout, QWidget
 
 from ui.views.table_views import append_result_table_rows, populate_result_table
-from ui.widgets.result_grid import ResultGrid
+from ui.widgets.result_grid import RESULT_SCALE_DEFAULT, ResultGrid, clamp_result_scale_percent
 from ui.widgets.result_table import ResultTable
 from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
 from ui.widgets.thumb_cell import fit_thumb_pixmap, make_thumb_label
@@ -16,6 +16,15 @@ THUMB_COLUMN = int(LOCAL_SEARCH_TABLE_SPEC.thumb_column or 1)
 
 VIEW_TABLE = "table"
 VIEW_GRID = "grid"
+
+
+def table_display_metrics(scale_percent: int = RESULT_SCALE_DEFAULT) -> tuple[int, int]:
+    """Row height and preview-column width for the list view at this size."""
+    factor = clamp_result_scale_percent(scale_percent) / 100.0
+    preview = next((col for col in LOCAL_SEARCH_TABLE_SPEC.columns if col.key == "preview"), None)
+    row_h = max(72, int(round(int(LOCAL_SEARCH_TABLE_SPEC.row_height) * factor)))
+    preview_w = max(140, int(round(int(getattr(preview, "width", None) or 220) * factor)))
+    return row_h, preview_w
 
 
 class ResultView(QWidget):
@@ -36,6 +45,8 @@ class ResultView(QWidget):
         self._busy = False
         self._empty_message = ""
         self._mode = VIEW_GRID if str(view_mode or "").strip().lower() == VIEW_GRID else VIEW_TABLE
+        self._scale_percent = RESULT_SCALE_DEFAULT
+        self._table_thumbs: dict[int, QPixmap] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -78,6 +89,18 @@ class ResultView(QWidget):
     @property
     def view_mode(self) -> str:
         return self._mode
+
+    @property
+    def display_scale_percent(self) -> int:
+        return int(self._scale_percent)
+
+    def set_display_scale(self, scale_percent: int) -> None:
+        """Resize grid cards and table rows. Cached frames are drawn again at the new size."""
+        self._scale_percent = clamp_result_scale_percent(scale_percent)
+        self.grid.set_display_scale(self._scale_percent)
+        self._apply_table_scale()
+        for row in list(self._table_thumbs):
+            self._paint_table_thumb(row)
 
     def set_view_mode(self, mode: str, *, emit: bool = True) -> None:
         next_mode = VIEW_GRID if str(mode or "").strip().lower() == VIEW_GRID else VIEW_TABLE
@@ -123,9 +146,37 @@ class ResultView(QWidget):
             self.stack.setCurrentWidget(self.empty_panel)
 
     def clear(self) -> None:
+        self._table_thumbs.clear()
         self.table.setRowCount(0)
         self.grid.clear()
         self._sync_empty_overlay()
+
+    def _apply_table_scale(self) -> None:
+        row_h, preview_w = table_display_metrics(self._scale_percent)
+        header = self.table.verticalHeader()
+        header.setDefaultSectionSize(row_h)
+        self.table._display_row_height = row_h
+        bar = self.table.verticalScrollBar()
+        if bar is not None:
+            bar.setSingleStep(row_h)
+        column = int(LOCAL_SEARCH_TABLE_SPEC.thumb_column if LOCAL_SEARCH_TABLE_SPEC.thumb_column is not None else THUMB_COLUMN)
+        self.table.setColumnWidth(column, preview_w)
+        for row in range(self.table.rowCount()):
+            self.table.setRowHeight(row, row_h)
+
+    def _paint_table_thumb(self, row: int) -> None:
+        column = int(LOCAL_SEARCH_TABLE_SPEC.thumb_column if LOCAL_SEARCH_TABLE_SPEC.thumb_column is not None else THUMB_COLUMN)
+        if row < 0 or row >= self.table.rowCount():
+            return
+        pixmap = self._table_thumbs.get(row)
+        if pixmap is None or pixmap.isNull():
+            self.table.setCellWidget(row, column, make_thumb_label(text="—"))
+            return
+        _row_h, preview_w = table_display_metrics(self._scale_percent)
+        logical_w = max(120, preview_w - 8)
+        logical_h = max(56, _row_h - 16)
+        fitted = fit_thumb_pixmap(pixmap, logical_w, logical_h)
+        self.table.setCellWidget(row, column, make_thumb_label(pixmap=fitted))
 
     def populate_local(
         self,
@@ -157,12 +208,14 @@ class ResultView(QWidget):
             highlight_query=highlight_query,
             dialogue_match_mode=dialogue_match_mode,
         )
+        self._table_thumbs.clear()
         if self._mode == VIEW_GRID:
             self.table.setRowCount(0)
             self.grid.populate(**kwargs)
         else:
             self.grid.clear()
             populate_result_table(self.table, **kwargs)
+            self._apply_table_scale()
         self._sync_empty_overlay()
 
     def append_local(
@@ -199,28 +252,16 @@ class ResultView(QWidget):
             self.grid.append(**kwargs)
         else:
             append_result_table_rows(self.table, **kwargs)
+            self._apply_table_scale()
         self._sync_empty_overlay()
 
     def set_thumbnail(self, row: int, pixmap, column: int | None = None) -> None:
+        del column
+        if pixmap is None or (isinstance(pixmap, QPixmap) and pixmap.isNull()):
+            self._table_thumbs.pop(int(row), None)
+        else:
+            self._table_thumbs[int(row)] = pixmap
         if self._mode == VIEW_GRID:
             self.grid.set_thumbnail(row, pixmap)
             return
-        if row < 0 or row >= self.table.rowCount():
-            return
-        if column is None:
-            spec = getattr(self.table, "spec", None)
-            thumb = getattr(spec, "thumb_column", None) if spec is not None else None
-            column = int(thumb if thumb is not None else THUMB_COLUMN)
-        if pixmap is None or (isinstance(pixmap, QPixmap) and pixmap.isNull()):
-            self.table.setCellWidget(row, column, make_thumb_label(text="—"))
-        else:
-            spec = getattr(self.table, "spec", None)
-            logical_w = 220
-            logical_h = 120
-            if spec is not None:
-                preview = next((col for col in spec.columns if col.key == "preview"), None)
-                if preview is not None and preview.width:
-                    logical_w = int(preview.width) - 8
-                logical_h = max(72, int(spec.row_height) - 16)
-            fitted = fit_thumb_pixmap(pixmap, logical_w, logical_h)
-            self.table.setCellWidget(row, column, make_thumb_label(pixmap=fitted))
+        self._paint_table_thumb(row)

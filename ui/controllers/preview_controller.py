@@ -41,6 +41,9 @@ class PreviewController:
         return getattr(window, "preview_video_host", None) or window.video_widget
 
     def play(self, video_path, start_sec, end_sec=None):
+        page = getattr(self.parent_window, "search_page", None)
+        if page is not None and getattr(page, "preview_collapsed", False) is True:
+            page.set_preview_collapsed(False)
         media_player = self.parent_window.media_player
         media_player.stop()
         media_player.setSource(QUrl())

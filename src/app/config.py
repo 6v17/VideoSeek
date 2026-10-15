@@ -138,6 +138,9 @@ DEFAULT_CONFIG = {
     "thumb_width": 130,
     "thumb_height": 75,
     "search_results_view_mode": "grid",
+    "search_results_display_scale": 100,
+    "search_query_collapsed": False,
+    "search_preview_collapsed": False,
     "prefer_gpu": True,
     "inference_ep": "auto",
     "experimental_hw_decode": False,
@@ -241,6 +244,7 @@ CONFIG_BOUNDS = {
     "export_encode_crf": (0, 51),
     "thumb_width": (80, 480),
     "thumb_height": (45, 320),
+    "search_results_display_scale": (70, 160),
     "embedding_batch_size": (1, 64),
     "indexing_video_workers": (1, 2),
     "lance_ann_min_rows": (500, 100000),
@@ -269,6 +273,7 @@ CONFIG_INT_KEYS = {
     "export_encode_crf",
     "thumb_width",
     "thumb_height",
+    "search_results_display_scale",
     "embedding_batch_size",
     "indexing_video_workers",
     "lance_ann_min_rows",
@@ -680,6 +685,14 @@ def _sanitize_general_settings(config):
     sanitized["free_notice_seen"] = _coerce_bool(
         sanitized.get("free_notice_seen", DEFAULT_CONFIG["free_notice_seen"]),
         DEFAULT_CONFIG["free_notice_seen"],
+    )
+    sanitized["search_query_collapsed"] = _coerce_bool(
+        sanitized.get("search_query_collapsed", DEFAULT_CONFIG["search_query_collapsed"]),
+        DEFAULT_CONFIG["search_query_collapsed"],
+    )
+    sanitized["search_preview_collapsed"] = _coerce_bool(
+        sanitized.get("search_preview_collapsed", DEFAULT_CONFIG["search_preview_collapsed"]),
+        DEFAULT_CONFIG["search_preview_collapsed"],
     )
     sanitized["team_server_url"] = str(sanitized.get("team_server_url", "") or "").strip()
     sanitized["export_last_dir"] = str(sanitized.get("export_last_dir", "") or "").strip()

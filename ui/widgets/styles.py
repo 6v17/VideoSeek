@@ -729,44 +729,56 @@ QPushButton:disabled {
     padding: __SPACE_1__ __SPACE_3__;
 }
 #PreviewTransportSlider {
-    min-height: 22px;
+    height: 16px;
+    min-height: 16px;
+    max-height: 16px;
+    margin: 0;
+    padding: 0;
     background: transparent;
 }
 #PreviewTransportSlider::groove:horizontal {
     height: 4px;
+    margin: 6px 0;
+    border: none;
     border-radius: 2px;
     background: __LINE_STRONG__;
 }
 #PreviewTransportSlider::sub-page:horizontal {
     height: 4px;
+    margin: 6px 0;
+    border: none;
     border-radius: 2px;
     background: __ACCENT__;
 }
 #PreviewTransportSlider::handle:horizontal {
-    width: 14px;
-    height: 14px;
-    margin: -6px 0;
-    border-radius: 7px;
+    width: 12px;
+    height: 12px;
+    margin: -4px 0;
+    border-radius: 6px;
     background: __ACCENT__;
     border: 2px solid __WINDOW__;
 }
 #PreviewTransportSlider::handle:horizontal:hover {
     background: __ACCENT_HOVER__;
 }
-#SearchScoreSlider {
+#SearchScoreSlider,
+#ResultSizeSlider {
     min-height: 22px;
 }
-#SearchScoreSlider::groove:horizontal {
+#SearchScoreSlider::groove:horizontal,
+#ResultSizeSlider::groove:horizontal {
     height: 4px;
     border-radius: 2px;
     background: __LINE_STRONG__;
 }
-#SearchScoreSlider::sub-page:horizontal {
+#SearchScoreSlider::sub-page:horizontal,
+#ResultSizeSlider::sub-page:horizontal {
     height: 4px;
     border-radius: 2px;
     background: __ACCENT__;
 }
-#SearchScoreSlider::handle:horizontal {
+#SearchScoreSlider::handle:horizontal,
+#ResultSizeSlider::handle:horizontal {
     width: 14px;
     height: 14px;
     margin: -6px 0;
@@ -774,7 +786,8 @@ QPushButton:disabled {
     background: __ACCENT__;
     border: 2px solid __WINDOW__;
 }
-#SearchScoreSlider::handle:horizontal:hover {
+#SearchScoreSlider::handle:horizontal:hover,
+#ResultSizeSlider::handle:horizontal:hover {
     background: __ACCENT_HOVER__;
 }
 #SearchScoreValue {
@@ -1952,18 +1965,20 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     border-radius: 0;
 }
 #PreviewTimeLabel {
-    color: __HEADLINE__;
+    color: __MUTED__;
     font-family: Consolas, "Microsoft YaHei UI", monospace;
-    font-size: __FS_SM__;
-    font-weight: 700;
-    padding: __SPACE_1__ __SPACE_2__;
-    background: __TRACK__;
-    border: 1px solid __LINE__;
-    border-radius: __RADIUS_MD__;
-    min-width: 102px;
+    font-size: __FS_XS__;
+    font-weight: 600;
+    padding: 0 2px;
+    background: transparent;
+    border: none;
+    min-width: 0;
 }
+#PreviewTransport QPushButton,
 #PreviewDialog QPushButton {
-    padding: __SPACE_1__ __SPACE_3__;
+    padding: 2px 8px;
+    min-height: 22px;
+    max-height: 26px;
 }
 #PreviewSegmentQueueHint {
     color: #38bdf8;
@@ -2098,6 +2113,14 @@ QSplitter#SearchWorkspaceSplitter::handle:pressed {
     font-weight: 650;
     background: __PANEL__;
     border: 1px solid __LINE__;
+}
+#GhostButton[chrome="gridOverlay"][compact="true"],
+#SuccessGhostButton[chrome="gridOverlay"][compact="true"] {
+    min-width: 0;
+    max-width: 84px;
+    min-height: 20px;
+    max-height: 22px;
+    padding: 0 4px;
 }
 #GhostButton[chrome="gridOverlay"][class="TableBtn"] {
     color: __ACCENT__;

@@ -318,15 +318,11 @@ class PreviewGuiMixin:
             return
 
     def _sync_docked_preview_button(self) -> None:
+        """Docked and large preview share one label set. Do not invent a second caption."""
         chrome = getattr(getattr(self, "search_page", None), "expanded_chrome", None)
-        panel = getattr(getattr(self, "search_page", None), "preview_panel", None)
-        if chrome is None or panel is None or not getattr(panel, "_docked", False):
-            return
-        if getattr(chrome, "_maximized", False):
-            return
-        label = self.texts.get("preview_expand", "放大预览")
-        chrome.maximize_button.setText(label)
-        chrome.maximize_button.setToolTip(label)
+        apply = getattr(chrome, "_apply_maximize_button", None)
+        if callable(apply):
+            apply()
 
     def _open_result_table_preview(self, row: int, _column: int) -> None:
         table = getattr(self, "result_table", None)

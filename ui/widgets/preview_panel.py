@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout
 
 from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
 from ui.widgets.layout import (
@@ -78,7 +78,16 @@ class PreviewPanel(VSCard):
         preview_header.setSpacing(8)
         self.preview_title = QLabel()
         self.preview_title.setObjectName("CardTitle")
+        self.btn_collapse = QToolButton()
+        self.btn_collapse.setObjectName("SidebarIconButton")
+        self.btn_collapse.setText("»")
+        self.btn_collapse.setToolTip("收起预览")
+        self.btn_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_collapse.setFixedSize(28, 28)
+        self.btn_collapse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_collapse.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         preview_header.addWidget(self.preview_title, 1)
+        preview_header.addWidget(self.btn_collapse, 0, Qt.AlignmentFlag.AlignTop)
 
         self.preview_host = PreviewHostFrame()
         # Flat well. The video window fills it; a second bordered frame reads as a nested player.
@@ -135,8 +144,20 @@ class PreviewPanel(VSCard):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        if self._docked:
+        if self._docked and self.isVisible():
             self._fit_host_aspect()
+        self._follow_video_frame()
+
+    def moveEvent(self, event):  # noqa: N802
+        super().moveEvent(event)
+        self._follow_video_frame()
+
+    def _follow_video_frame(self) -> None:
+        """The VLC window is a native child. Move it when this card moves."""
+        window = self.window()
+        schedule = getattr(window, "_schedule_preview_video_frame", None)
+        if callable(schedule):
+            schedule()
 
     def set_docked(self, docked: bool = True) -> None:
         """Sit beside the results. The search bar stays full width above them."""
@@ -161,7 +182,7 @@ class PreviewPanel(VSCard):
 
     def _fit_host_aspect(self) -> None:
         """Keep the transport under the picture. Never let the detail cover it."""
-        control_h = max(148, self.expanded_chrome.sizeHint().height())
+        control_h = max(88, self.expanded_chrome.sizeHint().height())
         self.expanded_chrome.setMinimumHeight(control_h)
         self.expanded_chrome.setMaximumHeight(control_h)
         width = self.preview_host.width()
@@ -229,6 +250,8 @@ class PreviewPanel(VSCard):
         if vh is not None and vh < 240:
             vh = None
         if self._docked:
+            if not self.isVisible():
+                return
             self._apply_docked_geometry(vh)
         elif self._maximized:
             self._apply_maximized_geometry(vh)

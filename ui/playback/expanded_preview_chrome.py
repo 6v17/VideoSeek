@@ -42,6 +42,7 @@ class ExpandedPreviewChrome(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("PreviewTransport")
         self.texts = {}
         self.player = None
         self.video_path = ""
@@ -59,8 +60,8 @@ class ExpandedPreviewChrome(QWidget):
         self._maximized = False
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 2, 0, 0)
-        root.setSpacing(4)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(6)
 
         transport = QHBoxLayout()
         transport.setSpacing(6)
@@ -90,18 +91,18 @@ class ExpandedPreviewChrome(QWidget):
         self.label_segment_start = QLabel("—")
         self.label_segment_start.setObjectName("DialogMetaLabel")
         self.label_segment_start.setAlignment(Qt.AlignCenter)
-        self.label_segment_start.setMinimumWidth(92)
+        self.label_segment_start.setMinimumWidth(0)
         self.label_segment_end = QLabel("—")
         self.label_segment_end.setObjectName("DialogMetaLabel")
         self.label_segment_end.setAlignment(Qt.AlignCenter)
-        self.label_segment_end.setMinimumWidth(92)
+        self.label_segment_end.setMinimumWidth(0)
         seg_layout.addWidget(self.label_segment_start)
         seg_layout.addWidget(dash, 0, Qt.AlignVCenter)
         seg_layout.addWidget(self.label_segment_end)
         seg_outer.addWidget(self.segment_queue_hint)
         seg_outer.addLayout(seg_layout)
 
-        self.time_label = QLabel("00:00 / 00:00")
+        self.time_label = QLabel("00:00/00:00")
         self.time_label.setObjectName("PreviewTimeLabel")
         self.time_label.setAlignment(Qt.AlignCenter)
         transport.addWidget(self.play_button, 0)
@@ -116,11 +117,13 @@ class ExpandedPreviewChrome(QWidget):
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setObjectName("PreviewTransportSlider")
         self.slider.setRange(0, 1000)
+        self.slider.setFixedHeight(16)
         self.slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         root.addWidget(self.slider)
 
         segment_row = QHBoxLayout()
         segment_row.setSpacing(6)
+        segment_row.setContentsMargins(0, 0, 0, 0)
         self.set_start_button = QPushButton()
         self.set_start_button.setObjectName("GhostButton")
         self.set_end_button = QPushButton()
@@ -184,6 +187,11 @@ class ExpandedPreviewChrome(QWidget):
         app.installEventFilter(self._transport_key_filter)
 
     def _keyboard_transport_active(self) -> bool:
+        host = self.parentWidget()
+        if host is not None and (
+            getattr(host, "_closing", False) or getattr(host, "_close_requested", False)
+        ):
+            return False
         if not self.isVisible() or not str(self.video_path or "").strip():
             return False
         player = self.player
@@ -195,27 +203,36 @@ class ExpandedPreviewChrome(QWidget):
 
     def apply_texts(self, texts: dict):
         self.texts = texts or {}
-        self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-        self.maximize_button.setText(
-            self.texts.get("preview_dialog_exit_fullscreen", "Exit Fullscreen")
-            if self._maximized
-            else self.texts.get("preview_dialog_fullscreen", "Fullscreen")
+        self.play_button.setText(self.texts.get("preview_dialog_pause", "暂停"))
+        self._pin_toggle_width(
+            self.play_button,
+            self.texts.get("preview_dialog_play", "播放"),
+            self.texts.get("preview_dialog_pause", "暂停"),
         )
-        self.collapse_button.setText(self.texts.get("preview_collapse", "收起预览"))
-        self.set_start_button.setText(self.texts.get("preview_dialog_set_start", "Set Start"))
-        self.set_end_button.setText(self.texts.get("preview_dialog_set_end", "Set End"))
-        self.clear_segment_button.setText(self.texts.get("preview_dialog_clear_segment", "Clear Segment"))
+        self._apply_maximize_button()
+        self.collapse_button.setText(self.texts.get("preview_collapse", "收起"))
+        self.collapse_button.setToolTip(self.texts.get("preview_card_collapse", "收起预览"))
+        self.set_start_button.setText(self.texts.get("preview_dialog_set_start", "起点"))
+        self.set_start_button.setToolTip(self.texts.get("preview_dialog_set_start_tip", "设为起点"))
+        self.set_end_button.setText(self.texts.get("preview_dialog_set_end", "终点"))
+        self.set_end_button.setToolTip(self.texts.get("preview_dialog_set_end_tip", "设为终点"))
+        self.clear_segment_button.setText(self.texts.get("preview_dialog_clear_segment", "清除"))
+        self.clear_segment_button.setToolTip(self.texts.get("preview_dialog_clear_segment_tip", "清除选区"))
         self.add_to_shot_list_button.setText(
             self.texts.get(
                 "preview_dialog_add_to_shot_list",
-                self.texts.get("shot_list_add", "加入素材篮"),
+                self.texts.get("shot_list_add", "加入"),
             )
         )
         self.add_to_shot_list_button.setToolTip(
             self.texts.get("shot_list_add_tip", "加入素材篮，稍后统一查看或导出")
         )
-        self.export_button.setText(self.texts.get("preview_dialog_export", "Export Segment"))
+        self.export_button.setText(self.texts.get("preview_dialog_export", "导出"))
+        self.export_button.setToolTip(self.texts.get("preview_dialog_export_tip", "导出选区"))
         self.frame_export_button.setText(self.texts.get("preview_frame_export", "存帧"))
+        self.frame_export_button.setToolTip(
+            self.texts.get("preview_frame_export_tip", "保存当前画面，并复制到剪贴板")
+        )
 
     def bind_player(self, player):
         self.player = player
@@ -261,15 +278,32 @@ class ExpandedPreviewChrome(QWidget):
         if self._maximized:
             self._maximized = False
             self.maximize_toggled.emit(False)
-            self.maximize_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
+            self._apply_maximize_button()
 
     def set_maximized_state(self, maximized: bool):
         self._maximized = bool(maximized)
-        self.maximize_button.setText(
-            self.texts.get("preview_dialog_exit_fullscreen", "Exit Fullscreen")
-            if self._maximized
-            else self.texts.get("preview_dialog_fullscreen", "Fullscreen")
+        self._apply_maximize_button()
+
+    def _apply_maximize_button(self) -> None:
+        self._pin_toggle_width(
+            self.maximize_button,
+            self.texts.get("preview_dialog_fullscreen", "全屏"),
+            self.texts.get("preview_dialog_exit_fullscreen", "退出"),
         )
+        if self._maximized:
+            self.maximize_button.setText(self.texts.get("preview_dialog_exit_fullscreen", "退出"))
+            self.maximize_button.setToolTip(
+                self.texts.get("preview_dialog_exit_fullscreen_tip", "退出全屏")
+            )
+            return
+        self.maximize_button.setText(self.texts.get("preview_dialog_fullscreen", "全屏"))
+        self.maximize_button.setToolTip(self.texts.get("preview_dialog_fullscreen_tip", "全屏"))
+
+    def _pin_toggle_width(self, button, *labels: str) -> None:
+        """Keep a two-state button from jumping width when the label changes."""
+        metrics = button.fontMetrics()
+        text_width = max(metrics.horizontalAdvance(str(label)) for label in labels)
+        button.setMinimumWidth(text_width + 20)
 
     def _toggle_maximize(self):
         self._maximized = not self._maximized
@@ -384,7 +418,7 @@ class ExpandedPreviewChrome(QWidget):
             self.slider.setValue(int((current_ms / total_ms) * 1000))
             self.slider.blockSignals(False)
 
-        self.time_label.setText(f"{_format_ms(current_ms)} / {_format_ms(total_ms)}")
+        self.time_label.setText(f"{_format_ms(current_ms)}/{_format_ms(total_ms)}")
         if player.is_playing():
             self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
         else:
@@ -421,7 +455,7 @@ class ExpandedPreviewChrome(QWidget):
         self._slider_dragging = False
         self._known_total_ms = 0
         self.slider.setValue(0)
-        self.time_label.setText("00:00 / 00:00")
+        self.time_label.setText("00:00/00:00")
         self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
         self.play_button.setEnabled(False)
         self.slider.setEnabled(False)
@@ -500,8 +534,10 @@ class ExpandedPreviewChrome(QWidget):
         start_sec, end_sec = segment
         segment_duration = max(0.1, float(end_sec) - float(start_sec))
         encode_mode = None
-        parent = self.window()
-        if parent is not None and hasattr(parent, "_prompt_export_encode_mode"):
+        parent = self
+        while parent is not None and not hasattr(parent, "_prompt_export_encode_mode"):
+            parent = parent.parentWidget()
+        if parent is not None:
             encode_mode = parent._prompt_export_encode_mode(segment_duration_sec=segment_duration)
         else:
             from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
@@ -556,8 +592,10 @@ class ExpandedPreviewChrome(QWidget):
         if not save_path:
             return
         self.frame_export_button.setEnabled(False)
-        self._segment_line_override = self.texts.get("preview_frame_exporting", "存帧…")
-        self._refresh_segment_queue_hint()
+        self.export_status_changed.emit(
+            "running",
+            self.texts.get("preview_frame_exporting", "存帧…"),
+        )
         snapshot_path = begin_displayed_frame_capture(self.player, save_path)
         worker = FrameExportThread(path, time_sec, save_path, self, snapshot_path=snapshot_path)
         worker.succeeded.connect(self._on_frame_export_done)
@@ -565,14 +603,20 @@ class ExpandedPreviewChrome(QWidget):
         self._frame_export_thread = worker
         worker.start()
 
-    def _on_frame_export_done(self, _save_path: str):
-        self._segment_line_override = self.texts.get("preview_frame_export_done", "已存帧")
-        self._refresh_segment_queue_hint()
+    def _on_frame_export_done(self, save_path: str):
+        from ui.playback.frame_export import copy_still_to_clipboard
+
+        copied = copy_still_to_clipboard(save_path)
+        text_key = "preview_frame_export_done_copied" if copied else "preview_frame_export_done"
+        fallback = "已存帧并复制" if copied else "已存帧"
+        self.export_status_changed.emit("succeeded", self.texts.get(text_key, fallback))
         self.frame_export_button.setEnabled(bool(self.video_path))
 
     def _on_frame_export_failed(self):
-        self._segment_line_override = self.texts.get("preview_frame_export_failed", "存帧失败")
-        self._refresh_segment_queue_hint()
+        self.export_status_changed.emit(
+            "failed",
+            self.texts.get("preview_frame_export_failed", "存帧失败"),
+        )
         self.frame_export_button.setEnabled(bool(self.video_path))
 
     def _update_segment_ui(self):

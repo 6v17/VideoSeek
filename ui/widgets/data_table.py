@@ -48,16 +48,17 @@ class DataTable(QTableWidget):
         if bar is None or bar.maximum() <= 0:
             super().wheelEvent(event)
             return
+        row_height = int(getattr(self, "_display_row_height", None) or self.spec.row_height or 24)
         delta = table_wheel_pixel_delta(
             int(event.pixelDelta().y()),
             int(event.angleDelta().y()),
-            row_height=int(self.spec.row_height or 24),
+            row_height=row_height,
         )
         if delta == 0:
             super().wheelEvent(event)
             return
         if self.verticalScrollMode() != QAbstractItemView.ScrollMode.ScrollPerPixel:
-            row = max(12, int(self.spec.row_height or 24))
+            row = max(12, row_height)
             steps = int(round(delta / row)) or (1 if delta > 0 else -1)
             delta = steps
         old = int(bar.value())

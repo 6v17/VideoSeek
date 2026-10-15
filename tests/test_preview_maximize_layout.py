@@ -46,7 +46,7 @@ class SearchBrowseLayoutTests(unittest.TestCase):
         host = panel.preview_host.geometry()
         chrome = panel.expanded_chrome.geometry()
         detail = panel.detail_wrap.geometry()
-        self.assertGreaterEqual(chrome.height(), 140)
+        self.assertGreaterEqual(chrome.height(), 80)
         self.assertLessEqual(host.y() + host.height(), chrome.y())
         self.assertLessEqual(chrome.y() + chrome.height(), detail.y())
         clear = panel.expanded_chrome.clear_segment_button

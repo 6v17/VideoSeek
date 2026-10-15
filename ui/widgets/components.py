@@ -422,6 +422,10 @@ class NavigationSidebar(QWidget):
 
 
 class SearchPage(QWidget):
+    search_collapsed_changed = Signal(bool)
+    preview_collapsed_changed = Signal(bool)
+    results_scale_settled = Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -510,6 +514,9 @@ class SearchPage(QWidget):
         self._page_body = page_body
         self._preview_layout_maximized = False
         self._workspace_sizes_before_preview_max = None
+        self._search_collapsed = False
+        self._preview_collapsed = False
+        self._preview_width_before_collapse = _DOCKED_PREVIEW_WIDTH
 
         self.results_slot = QWidget()
         self.results_slot.setObjectName("SearchResultsSlot")
@@ -567,7 +574,32 @@ class SearchPage(QWidget):
         actions_layout.addWidget(self.btn_shot_list)
         actions_layout.addWidget(self.btn_export_tasks)
 
+        self.results_size_cluster = QWidget()
+        self.results_size_cluster.setObjectName("SearchResultsSize")
+        size_row = QHBoxLayout(self.results_size_cluster)
+        size_row.setContentsMargins(0, 0, 0, 0)
+        size_row.setSpacing(6)
+        self.results_size_label = QLabel("大小")
+        self.results_size_label.setObjectName("InlineFieldLabel")
+        self.results_size_slider = NoWheelSlider(Qt.Orientation.Horizontal)
+        self.results_size_slider.setObjectName("ResultSizeSlider")
+        self.results_size_slider.setRange(70, 160)
+        self.results_size_slider.setSingleStep(10)
+        self.results_size_slider.setPageStep(10)
+        self.results_size_slider.setValue(100)
+        self.results_size_slider.setFixedWidth(112)
+        self.results_size_slider.setFixedHeight(28)
+        self.results_size_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.results_size_value = QLabel("100%")
+        self.results_size_value.setObjectName("SearchScoreValue")
+        self.results_size_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.results_size_value.setFixedWidth(40)
+        size_row.addWidget(self.results_size_label, 0)
+        size_row.addWidget(self.results_size_slider, 0)
+        size_row.addWidget(self.results_size_value, 0)
+
         results_toolbar.addWidget(self.lbl_status, 1)
+        results_toolbar.addWidget(self.results_size_cluster, 0)
         results_toolbar.addWidget(self.results_actions, 0)
 
         self.results_pager = SearchResultsPager()
@@ -618,13 +650,33 @@ class SearchPage(QWidget):
         original_layout.setSpacing(0)
         original_layout.addWidget(self.browse_stack, 1)
 
+        self.preview_column = QWidget()
+        self.preview_column.setObjectName("SearchPreviewColumn")
+        self.preview_column.setMinimumWidth(320)
+        self.preview_column.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        preview_column_layout = QVBoxLayout(self.preview_column)
+        preview_column_layout.setContentsMargins(0, 0, 0, 0)
+        preview_column_layout.setSpacing(0)
+        self.btn_preview_restore = QToolButton()
+        self.btn_preview_restore.setObjectName("SidebarIconButton")
+        self.btn_preview_restore.setText("«")
+        self.btn_preview_restore.setToolTip("展开预览")
+        self.btn_preview_restore.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_preview_restore.setFixedSize(28, 48)
+        self.btn_preview_restore.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_preview_restore.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.btn_preview_restore.hide()
+        preview_column_layout.addWidget(self.preview_panel, 1)
+        preview_column_layout.addWidget(self.btn_preview_restore, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+
         self.compare_splitter.addWidget(self._original_column)
-        self.compare_splitter.addWidget(self.preview_panel)
+        self.compare_splitter.addWidget(self.preview_column)
         self.compare_splitter.setStretchFactor(0, 1)
         self.compare_splitter.setStretchFactor(1, 0)
         page_body.addWidget(self.indexing_notice)
         page_body.addWidget(self.search_panel, 0)
         page_body.addWidget(self.compare_splitter, 1)
+        self._wire_workspace_chrome()
         self.workspace_splitter = None
         self._workspace_splitter = None
 
@@ -653,7 +705,10 @@ class SearchPage(QWidget):
             panel.apply_viewport_budget(vh)
         splitter = getattr(self, "compare_splitter", None)
         if splitter is not None and not getattr(self, "_compare_sizes_set", False) and splitter.width() > 200:
-            preview_w = _DOCKED_PREVIEW_WIDTH
+            if getattr(self, "_preview_collapsed", False):
+                preview_w = 36
+            else:
+                preview_w = _DOCKED_PREVIEW_WIDTH
             splitter.setSizes([max(0, splitter.width() - preview_w), preview_w])
             self._compare_sizes_set = True
         view = getattr(self, "result_view", None)
@@ -662,6 +717,8 @@ class SearchPage(QWidget):
 
     def adopt_preview_width(self) -> None:
         """After the page grows, bring a squeezed preview back up to the docked width."""
+        if getattr(self, "_preview_collapsed", False):
+            return
         splitter = getattr(self, "compare_splitter", None)
         if splitter is None or splitter.width() <= 200:
             return
@@ -689,6 +746,108 @@ class SearchPage(QWidget):
 
     def is_preview_maximized(self) -> bool:
         return False
+
+    @property
+    def search_collapsed(self) -> bool:
+        return bool(self._search_collapsed)
+
+    @property
+    def preview_collapsed(self) -> bool:
+        return bool(self._preview_collapsed)
+
+    def _wire_workspace_chrome(self) -> None:
+        self.search_panel.btn_collapse.clicked.connect(
+            lambda: self.set_search_collapsed(not self._search_collapsed)
+        )
+        self.preview_panel.btn_collapse.clicked.connect(
+            lambda: self.set_preview_collapsed(not self._preview_collapsed)
+        )
+        self.btn_preview_restore.clicked.connect(lambda: self.set_preview_collapsed(False))
+        self.results_size_slider.valueChanged.connect(self._on_results_size_slider)
+        self.results_size_slider.sliderReleased.connect(self._on_results_size_released)
+        self.compare_splitter.splitterMoved.connect(lambda *_args: self._schedule_video_follow())
+
+    def _schedule_video_follow(self) -> None:
+        window = self.window()
+        schedule = getattr(window, "_schedule_preview_video_frame", None)
+        if callable(schedule):
+            schedule()
+
+    def _apply_search_collapse_label(self) -> None:
+        button = self.search_panel.btn_collapse
+        window = self.window()
+        texts = getattr(window, "texts", None) or {}
+        if self._search_collapsed:
+            button.setText("«")
+            button.setToolTip(str(texts.get("search_card_expand", "展开搜索栏")))
+        else:
+            button.setText("»")
+            button.setToolTip(str(texts.get("search_card_collapse", "收起搜索栏")))
+
+    def set_search_collapsed(self, collapsed: bool, *, emit: bool = True) -> None:
+        """Fold the query body. The same button stays on the left of the card."""
+        collapsed = bool(collapsed)
+        self._search_collapsed = collapsed
+        self.search_panel.set_query_collapsed(collapsed)
+        self._apply_search_collapse_label()
+        self._schedule_video_follow()
+        if emit:
+            self.search_collapsed_changed.emit(collapsed)
+
+    def set_preview_collapsed(self, collapsed: bool, *, emit: bool = True) -> None:
+        """Hide the player card and keep a restore tab on the right edge."""
+        collapsed = bool(collapsed)
+        self._preview_collapsed = collapsed
+        splitter = self.compare_splitter
+        column = self.preview_column
+        if collapsed:
+            sizes = splitter.sizes()
+            if len(sizes) == 2 and int(sizes[1]) > 80:
+                self._preview_width_before_collapse = int(sizes[1])
+            self.preview_panel.hide()
+            self.btn_preview_restore.show()
+            column.setMinimumWidth(36)
+            column.setMaximumWidth(36)
+            total = max(int(splitter.width()), sum(int(part) for part in sizes))
+            if total > 80:
+                splitter.setSizes([max(0, total - 36), 36])
+        else:
+            self.btn_preview_restore.hide()
+            column.setMinimumWidth(320)
+            column.setMaximumWidth(16777215)
+            self.preview_panel.show()
+            sizes = splitter.sizes()
+            total = max(int(splitter.width()), sum(int(part) for part in sizes))
+            target = max(320, int(self._preview_width_before_collapse or _DOCKED_PREVIEW_WIDTH))
+            if total > target + 80:
+                splitter.setSizes([max(0, total - target), target])
+            fit = getattr(self.preview_panel, "_fit_host_aspect", None)
+            if callable(fit):
+                QTimer.singleShot(0, fit)
+        self._schedule_video_follow()
+        if emit:
+            self.preview_collapsed_changed.emit(collapsed)
+
+    def set_results_display_scale(self, percent: int, *, emit: bool = True, snap: bool = False) -> None:
+        from ui.widgets.result_grid import clamp_result_scale_percent
+
+        percent = clamp_result_scale_percent(percent, snap=snap)
+        slider = self.results_size_slider
+        slider.blockSignals(True)
+        slider.setValue(percent)
+        slider.blockSignals(False)
+        self.results_size_value.setText(f"{percent}%")
+        self.result_view.set_display_scale(percent)
+        if emit:
+            self.results_scale_settled.emit(percent)
+
+    def _on_results_size_slider(self, value: int) -> None:
+        # Dragging only resizes the cards. Saving and sharper thumbnails wait for release.
+        dragging = self.results_size_slider.isSliderDown()
+        self.set_results_display_scale(value, emit=not dragging, snap=not dragging)
+
+    def _on_results_size_released(self) -> None:
+        self.set_results_display_scale(self.results_size_slider.value(), emit=True, snap=True)
 
 
 class DialogueLibraryRow(QFrame):

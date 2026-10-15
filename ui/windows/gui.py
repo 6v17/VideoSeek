@@ -1,6 +1,6 @@
 from collections import deque
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut, QWheelEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -187,7 +187,11 @@ class MainWindow(
         self.preview_controller = PreviewController(self)
         self.search_controller = SearchController(self)
         self.search_page.results_pager.page_changed.connect(self.search_controller.go_to_results_page)
+        self.search_page.search_collapsed_changed.connect(self._on_search_card_collapsed)
+        self.search_page.preview_collapsed_changed.connect(self._on_preview_card_collapsed)
+        self.search_page.results_scale_settled.connect(self._on_results_display_scale_settled)
         self._apply_results_view_mode_from_config()
+        self._apply_search_chrome_from_config()
         self.video_download_controller = VideoDownloadController(self)
         self.video_download_controller.refresh_default_dir_label()
         self.video_download_controller.load_settings_from_config()
@@ -699,7 +703,9 @@ class MainWindow(
         stack = getattr(self, "preview_surface_stack", None)
         if host is None:
             return
-        showing = stack is not None and stack.currentWidget() is host
+        page = getattr(self, "search_page", None)
+        collapsed = bool(getattr(page, "preview_collapsed", False))
+        showing = stack is not None and stack.currentWidget() is host and not collapsed
         if showing:
             host.setMinimumSize(0, 0)
             host.setMaximumSize(16777215, 16777215)
@@ -721,6 +727,71 @@ class MainWindow(
             user32.SetWindowPos(hwnd, 0, -32000, -32000, 1, 1, 0x0004 | 0x0010 | 0x0080)
         except Exception:
             return
+
+    def _schedule_preview_video_frame(self) -> None:
+        """Coalesce layout shifts so the VLC picture follows the preview well."""
+        timer = getattr(self, "_preview_frame_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(0)
+            timer.timeout.connect(self._sync_preview_video_frame)
+            self._preview_frame_timer = timer
+        timer.start()
+
+    def _sync_preview_video_frame(self) -> None:
+        """Place the native video window on the preview well.
+
+        VLC's child is parented to the top-level window. A layout change that
+        only moves the card does not resize that window, so the picture stays
+        where it was on screen.
+        """
+        host = getattr(self, "preview_video_host", None)
+        stack = getattr(self, "preview_surface_stack", None)
+        page = getattr(self, "search_page", None)
+        if host is None or stack is None or stack.currentWidget() is not host:
+            return
+        if page is not None and getattr(page, "preview_collapsed", False):
+            return
+        if not host.isVisible() or host.width() < 2 or host.height() < 2:
+            return
+        if getattr(self, "_preview_frame_syncing", False):
+            return
+        try:
+            hwnd = int(host.internalWinId() or 0)
+        except Exception:
+            return
+        if not hwnd:
+            return
+        ratio = float(host.devicePixelRatioF() or 1.0)
+        origin = host.mapTo(self, QPoint(0, 0))
+        x = int(round(origin.x() * ratio))
+        y = int(round(origin.y() * ratio))
+        width = max(1, int(round(host.width() * ratio)))
+        height = max(1, int(round(host.height() * ratio)))
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            rect = wintypes.RECT()
+            if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                parent = user32.GetParent(hwnd) or hwnd
+                user32.MapWindowPoints(None, parent, ctypes.byref(rect), 2)
+                if (
+                    rect.left == x
+                    and rect.top == y
+                    and rect.right - rect.left == width
+                    and rect.bottom - rect.top == height
+                ):
+                    return
+            flags = 0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOACTIVATE
+            self._preview_frame_syncing = True
+            user32.SetWindowPos(hwnd, 0, x, y, width, height, flags)
+        except Exception:
+            return
+        finally:
+            self._preview_frame_syncing = False
 
     def _attach_qt_video_surface(self) -> None:
         """Put the Qt video widget back on the preview stack for the fallback player."""
@@ -1197,6 +1268,50 @@ class MainWindow(
                 save_config(config)
         if rerender and getattr(self.search_controller, "_all_results", None):
             self.search_controller._render_current_page()
+
+    def _save_config_field(self, key: str, value) -> None:
+        from src.app.config import load_config, save_config
+
+        config = load_config()
+        if config.get(key) == value:
+            return
+        config[key] = value
+        save_config(config)
+
+    def _apply_search_chrome_from_config(self) -> None:
+        from src.app.config import load_config
+
+        config = load_config()
+        page = self.search_page
+        page.set_search_collapsed(bool(config.get("search_query_collapsed")), emit=False)
+        page.set_preview_collapsed(bool(config.get("search_preview_collapsed")), emit=False)
+        page.set_results_display_scale(
+            config.get("search_results_display_scale", 100),
+            emit=False,
+            snap=True,
+        )
+        if page.preview_collapsed:
+            QTimer.singleShot(0, self._sync_docked_native_surfaces)
+
+    def _on_search_card_collapsed(self, collapsed: bool) -> None:
+        self._save_config_field("search_query_collapsed", bool(collapsed))
+
+    def _on_preview_card_collapsed(self, collapsed: bool) -> None:
+        self._save_config_field("search_preview_collapsed", bool(collapsed))
+        self._sync_docked_native_surfaces()
+        if not collapsed:
+            self._give_search_preview_room()
+
+    def _on_results_display_scale_settled(self, percent: int) -> None:
+        from ui.widgets.result_grid import clamp_result_scale_percent
+
+        percent = clamp_result_scale_percent(percent, snap=True)
+        self.search_page.set_results_display_scale(percent, emit=False, snap=True)
+        self._save_config_field("search_results_display_scale", percent)
+        controller = getattr(self, "search_controller", None)
+        ensure = getattr(controller, "_ensure_visible_thumbnails", None)
+        if callable(ensure):
+            ensure()
 
     def show_about(self):
         AboutDialog(

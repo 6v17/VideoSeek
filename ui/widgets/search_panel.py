@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -692,8 +693,20 @@ class SearchPanel(VSCard):
         tab_row = QHBoxLayout()
         tab_row.setContentsMargins(0, 0, 0, 0)
         tab_row.setSpacing(8)
+        self.btn_collapse = QToolButton()
+        self.btn_collapse.setObjectName("SidebarIconButton")
+        self.btn_collapse.setText("»")
+        self.btn_collapse.setToolTip("收起搜索栏")
+        self.btn_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_collapse.setFixedSize(28, 28)
+        self.btn_collapse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_collapse.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._header_pad = QWidget()
+        self._header_pad.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tab_row.addWidget(self.search_query_tabs, 0)
-        tab_row.addWidget(self.lbl_active_model, 1)
+        tab_row.addWidget(self.lbl_active_model, 0)
+        tab_row.addWidget(self._header_pad, 1)
+        tab_row.addWidget(self.btn_collapse, 0, Qt.AlignmentFlag.AlignVCenter)
 
         query_row = QHBoxLayout()
         query_row.setContentsMargins(0, 0, 0, 0)
@@ -726,10 +739,18 @@ class SearchPanel(VSCard):
         self.compose_presets_row.hide()
         self.search_query_tabs.currentChanged.connect(self._sync_compose_preset_row)
 
+        self.search_body = QWidget()
+        self.search_body.setObjectName("SearchPanelBody")
+        body_layout = QVBoxLayout(self.search_body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(self.content_layout.spacing())
+        body_layout.addLayout(query_row, 0)
+        body_layout.addWidget(self.compose_presets_row, 0)
+        body_layout.addWidget(self.filters_panel, 0)
+        self._query_collapsed = False
+
         layout.addLayout(tab_row, 0)
-        layout.addLayout(query_row, 0)
-        layout.addWidget(self.compose_presets_row, 0)
-        layout.addWidget(self.filters_panel, 0)
+        layout.addWidget(self.search_body, 0)
 
         default_width = compute_search_panel_width()
         self._width_ceiling = default_width
@@ -818,8 +839,27 @@ class SearchPanel(VSCard):
             save.setVisible(visible)
         self._sync_card_height()
 
+    def set_query_collapsed(self, collapsed: bool) -> None:
+        """Keep the same收起 button on the left. Only the query body folds away."""
+        collapsed = bool(collapsed)
+        self._query_collapsed = collapsed
+        body = getattr(self, "search_body", None)
+        if body is not None:
+            body.setVisible(not collapsed)
+        tabs = getattr(self, "search_query_tabs", None)
+        if tabs is not None:
+            tabs.setVisible(not collapsed)
+        hint = getattr(self, "lbl_active_model", None)
+        if hint is not None:
+            hint.setVisible(not collapsed)
+        self._sync_card_height()
+
     def _sync_card_height(self) -> None:
-        """Collapsed bar stays 116. Compose presets and advanced filters add their own lines."""
+        """Open bar stays 116. A folded card is only the header button."""
+        if getattr(self, "_query_collapsed", False):
+            margins = self.content_layout.contentsMargins()
+            self.setFixedHeight(margins.top() + margins.bottom() + 28)
+            return
         extra = 0
         spacing = int(self.content_layout.spacing())
         if getattr(self, "_compose_presets_open", False):

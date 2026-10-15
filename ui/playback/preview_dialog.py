@@ -3,29 +3,16 @@ import time
 from types import SimpleNamespace
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication,
     QDialog,
-    QFileDialog,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
-    QSlider,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from src.app.logging_utils import get_logger
-from src.app.path_display import video_display_name
-from src.utils import format_timecode_seconds
-from ui.playback.preview_keyboard import (
-    PreviewTransportKeyFilter,
-    clamp_seek_ms,
-    resolve_display_time_ms,
-    resolve_seek_base_ms,
-)
+from ui.playback.expanded_preview_chrome import ExpandedPreviewChrome
 from ui.playback.vlc_player import VlcPreviewPlayer
 
 logger = get_logger("preview_dialog")
@@ -83,6 +70,19 @@ class _PreviewVideoHost(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._follow_embed(rebind=True)
+
+    def moveEvent(self, event):  # noqa: N802
+        super().moveEvent(event)
+        self._follow_embed(rebind=False)
+
+    def _follow_embed(self, *, rebind: bool) -> None:
+        window = self.window()
+        schedule = getattr(window, "_schedule_preview_video_frame", None)
+        if callable(schedule):
+            schedule()
+        if not rebind:
+            return
         player = self._player
         if player is not None and getattr(player, "is_available", lambda: False)():
             QTimer.singleShot(0, player.rebind_output_window)
@@ -161,12 +161,51 @@ class ExportClipWorker(QThread):
             pass
 
 
+def _chrome_field(name, default):
+    """Read/write a transport field on the embedded chrome once it exists."""
+    stash = f"_stash_{name}"
+
+    def getter(self):
+        chrome = getattr(self, "chrome", None)
+        if chrome is not None:
+            return getattr(chrome, name)
+        return getattr(self, stash, default)
+
+    def setter(self, value):
+        chrome = getattr(self, "chrome", None)
+        if chrome is not None:
+            setattr(chrome, name, value)
+            return
+        setattr(self, stash, value)
+
+    return property(getter, setter)
+
+
 class PreviewDialog(QDialog):
     export_requested = Signal(str, float, float, str, str)
     export_status_changed = Signal(str, str)
     add_to_shot_list_requested = Signal(str, float, float, str)
     # Emitted when the user dismisses the floating preview (close hides; event is ignored).
     dismissed = Signal()
+
+    _known_total_ms = _chrome_field("_known_total_ms", 0)
+    _pending_ui_seek_ms = _chrome_field("_pending_ui_seek_ms", None)
+    _slider_dragging = _chrome_field("_slider_dragging", False)
+    segment_start_sec = _chrome_field("segment_start_sec", None)
+    segment_end_sec = _chrome_field("segment_end_sec", None)
+    _segment_line_override = _chrome_field("_segment_line_override", None)
+
+    @property
+    def update_timer(self):
+        return self.chrome.update_timer
+
+    @property
+    def _frame_export_thread(self):
+        return self.chrome._frame_export_thread
+
+    @_frame_export_thread.setter
+    def _frame_export_thread(self, value):
+        self.chrome._frame_export_thread = value
 
     def __init__(
         self,
@@ -220,7 +259,7 @@ class PreviewDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 6)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
 
         self.video_host = _PreviewVideoHost()
         self.video_host.setMinimumHeight(480)
@@ -239,117 +278,35 @@ class PreviewDialog(QDialog):
         self.detail_label.setVisible(False)
         layout.addWidget(self.detail_label)
 
-        transport = QHBoxLayout()
-        transport.setSpacing(6)
-        self.play_button = QPushButton(self.texts.get("preview_dialog_pause", "Pause"))
-        self.play_button.setObjectName("GhostButton")
-        self.fullscreen_button = QPushButton(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
-        self.fullscreen_button.setObjectName("GhostButton")
-        segment_fields = QWidget()
-        segment_fields.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        seg_outer = QVBoxLayout(segment_fields)
-        seg_outer.setContentsMargins(0, 0, 0, 0)
-        seg_outer.setSpacing(3)
-        self.segment_queue_hint = QLabel("")
-        self.segment_queue_hint.setObjectName("PreviewSegmentQueueHint")
-        self.segment_queue_hint.setAlignment(Qt.AlignHCenter | Qt.AlignBottom)
-        self.segment_queue_hint.setWordWrap(False)
-        self.segment_queue_hint.setVisible(False)
-        self.segment_queue_hint.setMaximumWidth(280)
-        seg_layout = QHBoxLayout()
-        seg_layout.setContentsMargins(0, 0, 0, 0)
-        seg_layout.setSpacing(6)
-        dash = QLabel("—")
-        dash.setObjectName("Hint")
-        self.label_segment_start = QLabel("—")
-        self.label_segment_start.setObjectName("DialogMetaLabel")
-        self.label_segment_start.setAlignment(Qt.AlignCenter)
-        self.label_segment_start.setMinimumWidth(92)
-        self.label_segment_end = QLabel("—")
-        self.label_segment_end.setObjectName("DialogMetaLabel")
-        self.label_segment_end.setAlignment(Qt.AlignCenter)
-        self.label_segment_end.setMinimumWidth(92)
-        seg_layout.addWidget(self.label_segment_start)
-        seg_layout.addWidget(dash, 0, Qt.AlignVCenter)
-        seg_layout.addWidget(self.label_segment_end)
-        seg_outer.addWidget(self.segment_queue_hint)
-        seg_outer.addLayout(seg_layout)
-        self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.setObjectName("PreviewTimeLabel")
-        self.time_label.setAlignment(Qt.AlignCenter)
-        transport.addWidget(self.play_button, 0)
-        transport.addWidget(self.fullscreen_button, 0)
-        transport.addStretch(1)
-        transport.addWidget(segment_fields, 0, Qt.AlignVCenter)
-        transport.addStretch(1)
-        transport.addWidget(self.time_label, 0)
-        layout.addLayout(transport)
+        self.chrome = ExpandedPreviewChrome(self)
+        self.chrome.apply_texts(self.texts or {})
+        self.chrome.collapse_button.hide()
+        self.chrome.export_requested.connect(self.export_requested)
+        self.chrome.export_status_changed.connect(self.export_status_changed)
+        self.chrome.add_to_shot_list_requested.connect(self.add_to_shot_list_requested)
+        self.chrome.maximize_button.clicked.disconnect(self.chrome._toggle_maximize)
+        self.chrome.maximize_button.clicked.connect(self._toggle_fullscreen)
+        layout.addWidget(self.chrome)
 
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setObjectName("PreviewTransportSlider")
-        self.slider.setRange(0, 1000)
-        self.slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self.slider)
-
-        segment_row = QHBoxLayout()
-        segment_row.setSpacing(6)
-        self.set_start_button = QPushButton(self.texts.get("preview_dialog_set_start", "Set Start"))
-        self.set_start_button.setObjectName("GhostButton")
-        self.set_end_button = QPushButton(self.texts.get("preview_dialog_set_end", "Set End"))
-        self.set_end_button.setObjectName("GhostButton")
-        self.clear_segment_button = QPushButton(self.texts.get("preview_dialog_clear_segment", "Clear Segment"))
-        self.clear_segment_button.setObjectName("GhostButton")
-        self.export_button = QPushButton(self.texts.get("preview_dialog_export", "Export Segment"))
-        self.export_button.setObjectName("PrimaryButton")
-        self.export_button.setEnabled(False)
-        self.frame_export_button = QPushButton(self.texts.get("preview_frame_export", "存帧"))
-        self.frame_export_button.setObjectName("GhostButton")
-        self.frame_export_button.setToolTip(
-            self.texts.get("preview_frame_export_tip", "保存当前画面，并复制到剪贴板")
-        )
-        self.frame_export_button.setEnabled(False)
-        self.add_to_shot_list_button = QPushButton()
-        self.add_to_shot_list_button.setObjectName("AccentGhostButton")
-        self.add_to_shot_list_button.setEnabled(False)
-        self._frame_export_thread = None
-        segment_row.addWidget(self.set_start_button)
-        segment_row.addWidget(self.set_end_button)
-        segment_row.addStretch(1)
-        segment_row.addWidget(self.clear_segment_button)
-        segment_row.addWidget(self.add_to_shot_list_button)
-        segment_row.addWidget(self.frame_export_button)
-        segment_row.addWidget(self.export_button)
-        layout.addLayout(segment_row)
+        self.play_button = self.chrome.play_button
+        self.fullscreen_button = self.chrome.maximize_button
+        self.slider = self.chrome.slider
+        self.set_start_button = self.chrome.set_start_button
+        self.set_end_button = self.chrome.set_end_button
+        self.clear_segment_button = self.chrome.clear_segment_button
+        self.export_button = self.chrome.export_button
+        self.frame_export_button = self.chrome.frame_export_button
+        self.add_to_shot_list_button = self.chrome.add_to_shot_list_button
+        self.time_label = self.chrome.time_label
+        self.segment_queue_hint = self.chrome.segment_queue_hint
+        self.label_segment_start = self.chrome.label_segment_start
+        self.label_segment_end = self.chrome.label_segment_end
 
         self.player = self._shared_player
         if self.player is not None and hasattr(self.video_host, "set_player"):
             self.video_host.set_player(self.player)
-        self.update_timer = QTimer(self)
-        self.update_timer.setInterval(120)
-        self.update_timer.timeout.connect(self._sync_ui)
-
-        self.play_button.clicked.connect(self._toggle_play)
-        self.fullscreen_button.clicked.connect(self._toggle_fullscreen)
-        self.set_start_button.clicked.connect(self._mark_start)
-        self.set_end_button.clicked.connect(self._mark_end)
-        self.clear_segment_button.clicked.connect(self._clear_segment)
-        self.export_button.clicked.connect(self._export_segment)
-        self.frame_export_button.clicked.connect(self._export_current_frame)
-        self.add_to_shot_list_button.clicked.connect(self._add_to_shot_list)
-        self._sync_add_to_shot_list_button(enabled=False)
-        self.slider.sliderPressed.connect(self._on_slider_pressed)
-        self.slider.sliderReleased.connect(self._on_slider_released)
-
-        self._transport_key_filter = PreviewTransportKeyFilter(
-            self,
-            is_active=self._keyboard_transport_active,
-            on_toggle=self._toggle_play,
-            on_seek=self._nudge_seek,
-            parent=self,
-        )
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self._transport_key_filter)
+        if self.player is not None:
+            self.chrome.bind_player(self.player)
 
         self.load_preview(
             video_path,
@@ -409,11 +366,15 @@ class PreviewDialog(QDialog):
             player.suspend()
         if self.isFullScreen():
             self._exit_fullscreen()
-        self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
+        self.chrome.set_maximized_state(False)
         self.video_path = str(video_path)
+        self.chrome.video_path = self.video_path
         self.start_sec = float(start_sec)
         self.end_sec = float(end_sec)
         self.suggested_sec = float(suggested_sec if suggested_sec is not None else start_sec)
+        self.chrome.start_sec = self.start_sec
+        self.chrome.end_sec = self.end_sec
+        self.chrome.suggested_sec = self.suggested_sec
         # Avoid ffprobe/OpenCV on the UI thread (can block for seconds → "Python 未响应").
         self._known_total_ms = int(self._duration_cache.get(self.video_path, 0) or 0)
         self._pending_ui_seek_ms = None
@@ -501,7 +462,7 @@ class PreviewDialog(QDialog):
         # Disposing/detaching hwnd here is what triggers the second-open D3D popup.
         if self.isFullScreen():
             self.showNormal()
-        self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
+        self.chrome.set_maximized_state(False)
         self._detail_notice = None
         self.hide()
         if self.player is not None:
@@ -516,8 +477,7 @@ class PreviewDialog(QDialog):
                     self.player.set_host_widget(self.video_host, force=True)
                 elif hasattr(self.video_host, "set_player"):
                     self.video_host.set_player(self.player)
-            return self.player
-        if self.player is None:
+        elif self.player is None:
             if self._shared_instance is not None:
                 self.player = VlcPreviewPlayer(
                     self.video_host,
@@ -530,6 +490,8 @@ class PreviewDialog(QDialog):
         elif getattr(self.player, "host_widget", None) is not self.video_host:
             if hasattr(self.player, "set_host_widget"):
                 self.player.set_host_widget(self.video_host, force=True)
+        if self.player is not None:
+            self.chrome.bind_player(self.player)
         return self.player
 
     def _release_shared_player_host(self) -> None:
@@ -561,16 +523,6 @@ class PreviewDialog(QDialog):
             return
         QTimer.singleShot(0, player.rebind_output_window)
         QTimer.singleShot(50, player.rebind_output_window)
-
-    def _keyboard_transport_active(self) -> bool:
-        return (
-            not self._closing
-            and not self._close_requested
-            and self.isVisible()
-            and bool(str(self.video_path or "").strip())
-            and self.player is not None
-            and self.player.is_available()
-        )
 
     def _start_playback_if(self, token):
         if token != self._play_token or self._closing or self._close_requested:
@@ -604,124 +556,29 @@ class PreviewDialog(QDialog):
         self._update_segment_ui()
         self._sync_ui()
 
-    def _toggle_play(self):
-        if self._closing:
-            return
-        player = self._ensure_player()
-        if player.is_playing():
-            player.pause()
-            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
-            return
-
-        if player.has_locked_window():
-            self._unlock_full_playback()
-        if player.resume():
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-
-    def _nudge_seek(self, delta_ms: int) -> None:
-        if self._closing:
-            return
-        player = self._ensure_player()
-        if player is None or not player.is_available():
-            return
-        try:
-            from src.services.search_telemetry import mark_playback_user_adjusted
-
-            mark_playback_user_adjusted()
-        except Exception as exc:
-            logger.debug("Preview dialog seek-nudge telemetry skipped: %s", exc)
-        total_ms = self._effective_total_ms(player)
-        current_ms = resolve_seek_base_ms(player.get_time(), self._pending_ui_seek_ms)
-        new_time = clamp_seek_ms(current_ms, delta_ms, total_ms)
-        if player.has_locked_window():
-            player.unlock_full_playback()
-            self._apply_detail_label()
-        self._pending_ui_seek_ms = new_time
-        # Seek in place — never resume()/media_new here (that reopened early clips at 0).
-        player.set_time(new_time, unlock=True)
-        self._extend_close_guard(1.0)
-        self._sync_ui()
-
-    def _unlock_full_playback(self):
-        if self._closing:
-            return
-        try:
-            from src.services.search_telemetry import mark_playback_user_adjusted
-
-            mark_playback_user_adjusted()
-        except Exception as exc:
-            logger.debug("Preview dialog playback user-adjust telemetry skipped: %s", exc)
-        player = self._ensure_player()
-        player.unlock_full_playback()
-        self._apply_detail_label()
-        player.resume()
-        self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-
-    def _on_slider_pressed(self):
-        if self._closing:
-            return
-        self._slider_dragging = True
-        self._extend_close_guard(0.8)
-        player = self._ensure_player()
-        if player.has_locked_window():
-            player.unlock_full_playback()
-            self._apply_detail_label()
-
     def _on_slider_released(self):
         if self._closing:
             return
-        try:
-            from src.services.search_telemetry import mark_playback_user_adjusted
-
-            mark_playback_user_adjusted()
-        except Exception as exc:
-            logger.debug("Preview dialog slider telemetry skipped: %s", exc)
-        player = self._ensure_player()
-        length = self._effective_total_ms(player)
-        if length > 0:
-            new_time = int((self.slider.value() / 1000.0) * length)
-            self._pending_ui_seek_ms = new_time
-            player.set_time(new_time, unlock=True)
-            self._extend_close_guard(1.0)
-            player.resume()
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-        self._slider_dragging = False
-        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.chrome._on_slider_released()
+        self._extend_close_guard(1.0)
 
     def _sync_ui(self):
         if self._closing:
             return
-        player = self.player
-        if player is None:
-            return
-        current_ms = max(0, player.get_time())
-        total_ms = self._effective_total_ms(player)
-        current_ms = self._resolve_display_time_ms(current_ms)
+        self.chrome._sync_ui()
 
-        if not self._slider_dragging and total_ms > 0:
-            self.slider.blockSignals(True)
-            self.slider.setValue(int((current_ms / total_ms) * 1000))
-            self.slider.blockSignals(False)
+    def _update_segment_ui(self):
+        self.chrome._update_segment_ui()
 
-        self.time_label.setText(f"{_format_ms(current_ms)} / {_format_ms(total_ms)}")
-        if player.is_playing():
-            self.play_button.setText(self.texts.get("preview_dialog_pause", "Pause"))
-        else:
-            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
+    def _normalized_segment(self):
+        return self.chrome._normalized_segment()
 
-    def _effective_total_ms(self, player):
-        total_ms = max(0, player.get_length())
-        if total_ms > 0:
-            self._known_total_ms = total_ms
-            if self.video_path:
-                self._duration_cache[self.video_path] = total_ms
-            return total_ms
-        return self._known_total_ms
+    def current_segment_range(self):
+        """Public: marked export/review segment, or None."""
+        return self.chrome._normalized_segment()
 
-    def _resolve_display_time_ms(self, current_ms):
-        display_ms, pending = resolve_display_time_ms(current_ms, self._pending_ui_seek_ms)
-        self._pending_ui_seek_ms = pending
-        return display_ms
+    def _current_time_seconds(self):
+        return self.chrome._current_time_seconds()
 
     def _capture_window_geometry(self):
         if self.isFullScreen():
@@ -753,11 +610,11 @@ class PreviewDialog(QDialog):
             return
         if self.isFullScreen():
             self._exit_fullscreen()
-            self.fullscreen_button.setText(self.texts.get("preview_dialog_fullscreen", "Fullscreen"))
+            self.chrome.set_maximized_state(False)
             return
         self._capture_window_geometry()
         self.showFullScreen()
-        self.fullscreen_button.setText(self.texts.get("preview_dialog_exit_fullscreen", "Exit Fullscreen"))
+        self.chrome.set_maximized_state(True)
         self._schedule_rebind()
 
     def _set_caption_text(self, caption_text=None):
@@ -778,218 +635,11 @@ class PreviewDialog(QDialog):
         self.detail_label.clear()
         self.detail_label.setVisible(False)
 
-    def _refresh_segment_queue_hint(self):
-        text = (self._segment_line_override or "").strip()
-        if not text:
-            self.segment_queue_hint.clear()
-            self.segment_queue_hint.setToolTip("")
-            self.segment_queue_hint.setVisible(False)
-            return
-        hint = self.segment_queue_hint
-        max_w = hint.maximumWidth()
-        fm = QFontMetrics(hint.font())
-        elided = fm.elidedText(text, Qt.TextElideMode.ElideRight, max_w)
-        hint.setText(elided)
-        hint.setToolTip(text if elided != text else "")
-        hint.setVisible(True)
-
-    def _refresh_segment_bounds_labels(self):
-        self.label_segment_start.setText(_format_segment_display_sec(self.segment_start_sec))
-        self.label_segment_end.setText(_format_segment_display_sec(self.segment_end_sec))
-
-    def _mark_start(self):
-        if self._closing:
-            return
-        self._segment_line_override = None
-        t = self._current_time_seconds()
-        if self.segment_end_sec is not None and t > float(self.segment_end_sec):
-            self.segment_end_sec = None
-        self.segment_start_sec = t
-        self._update_segment_ui()
-
-    def _mark_end(self):
-        if self._closing:
-            return
-        self._segment_line_override = None
-        t = self._current_time_seconds()
-        if self.segment_start_sec is not None and t < float(self.segment_start_sec):
-            self.segment_start_sec = None
-        self.segment_end_sec = t
-        self._update_segment_ui()
-
-    def _clear_segment(self):
-        if self._closing:
-            return
-        self._segment_line_override = None
-        self.segment_start_sec = None
-        self.segment_end_sec = None
-        self._update_segment_ui()
-
-    def _export_segment(self):
-        if self._closing:
-            return
-        segment = self._normalized_segment()
-        if segment is None:
-            return
-
-        start_sec, end_sec = segment
-        segment_duration = max(0.1, float(end_sec) - float(start_sec))
-        encode_mode = None
-        parent = self.parent()
-        if parent is not None and hasattr(parent, "_prompt_export_encode_mode"):
-            encode_mode = parent._prompt_export_encode_mode(segment_duration_sec=segment_duration)
-        else:
-            from ui.dialogs.export_clip_mode_dialog import prompt_export_encode_mode
-
-            encode_mode = prompt_export_encode_mode(
-                self.texts,
-                parent=self,
-                segment_duration_sec=segment_duration,
-            )
-        if encode_mode is None:
-            return
-        base_name = os.path.splitext(video_display_name(self.video_path))[0] or "clip"
-        suggested_name = f"{base_name}_segment_{int(start_sec):06d}.mp4"
-        from src.services.clip_export_service import export_save_dialog_start, remember_export_path
-
-        save_path, _ = QFileDialog.getSaveFileName(
-            self,
-            self.texts.get("export_clip_title", "Export Preview Clip"),
-            export_save_dialog_start(suggested_name),
-            self.texts.get("export_clip_filter", "Video Files (*.mp4 *.mkv *.mov)"),
-        )
-        if not save_path:
-            return
-        remember_export_path(save_path)
-
-        self._set_export_busy(True)
-        queued_text = self.texts.get(
-            "preview_dialog_export_queued",
-            "Export added to queue.",
-        )
-        self._segment_line_override = queued_text
-        self._refresh_segment_queue_hint()
-        self._apply_detail_label()
-        self.export_status_changed.emit("queued", queued_text)
-        self.export_requested.emit(
-            self.video_path,
-            start_sec,
-            end_sec,
-            save_path,
-            encode_mode,
-        )
-        self._set_export_busy(False)
-
-    def _export_current_frame(self):
-        if self._closing:
-            return
-        path = str(self.video_path or "").strip()
-        if not path:
-            return
-        thread = self._frame_export_thread
-        if thread is not None and thread.isRunning():
-            return
-        from ui.playback.frame_export import (
-            FrameExportThread,
-            begin_displayed_frame_capture,
-            prompt_frame_save_path,
-        )
-
-        time_sec = self._freeze_playhead_seconds()
-        save_path = prompt_frame_save_path(
-            self,
-            video_path=path,
-            time_sec=time_sec,
-            texts=self.texts,
-        )
-        if not save_path or self._closing:
-            return
-        self.frame_export_button.setEnabled(False)
-        self._segment_line_override = self.texts.get("preview_frame_exporting", "存帧…")
-        self._refresh_segment_queue_hint()
-        self._apply_detail_label()
-        snapshot_path = begin_displayed_frame_capture(self.player, save_path)
-        worker = FrameExportThread(path, time_sec, save_path, self, snapshot_path=snapshot_path)
-        worker.succeeded.connect(self._on_frame_export_done)
-        worker.failed.connect(self._on_frame_export_failed)
-        self._frame_export_thread = worker
-        worker.start()
-
-    def _on_frame_export_done(self, save_path: str):
-        if self._closing:
-            return
-        from ui.playback.frame_export import copy_still_to_clipboard
-
-        copied = copy_still_to_clipboard(save_path)
-        if copied:
-            self._segment_line_override = self.texts.get(
-                "preview_frame_export_done_copied", "已存帧并复制"
-            )
-        else:
-            self._segment_line_override = self.texts.get("preview_frame_export_done", "已存帧")
-        self._refresh_segment_queue_hint()
-        self._apply_detail_label()
-        self.frame_export_button.setEnabled(bool(self.video_path))
-
-    def _on_frame_export_failed(self):
-        if self._closing:
-            return
-        self._segment_line_override = self.texts.get("preview_frame_export_failed", "存帧失败")
-        self._refresh_segment_queue_hint()
-        self._apply_detail_label()
-        self.frame_export_button.setEnabled(bool(self.video_path))
-
-    def _update_segment_ui(self):
-        if self.segment_start_sec is not None and self.segment_end_sec is not None:
-            if float(self.segment_end_sec) < float(self.segment_start_sec):
-                self.segment_start_sec, self.segment_end_sec = self.segment_end_sec, self.segment_start_sec
-        segment = self._normalized_segment()
-        self.export_button.setEnabled(segment is not None)
-        self.export_button.setToolTip("")
-        frame_busy = self._frame_export_thread is not None and self._frame_export_thread.isRunning()
-        self.frame_export_button.setEnabled(bool(self.video_path) and not self._closing and not frame_busy)
-        self._sync_add_to_shot_list_button(enabled=bool(self.video_path) and not self._closing)
-        self._refresh_segment_bounds_labels()
-        self._apply_detail_label()
-        self._refresh_segment_queue_hint()
-
-    def current_segment_range(self) -> tuple[float, float] | None:
-        """Public: marked export/review segment, or None."""
-        return self._normalized_segment()
-
-    def _normalized_segment(self):
-        if self.segment_start_sec is None or self.segment_end_sec is None:
-            return None
-        start_sec = float(self.segment_start_sec)
-        end_sec = float(self.segment_end_sec)
-        if end_sec < start_sec:
-            start_sec, end_sec = end_sec, start_sec
-        if end_sec - start_sec <= 0.1:
-            return None
-        return start_sec, end_sec
-
-    def _current_time_seconds(self):
-        player = self.player
-        if player is None:
-            return 0.0
-        return max(0.0, player.get_time() / 1000.0)
-
-    def _freeze_playhead_seconds(self) -> float:
-        """Pause on the frame the user is looking at, then return that time."""
-        player = self.player
-        if player is not None and player.is_available() and player.is_playing():
-            player.pause()
-            self.play_button.setText(self.texts.get("preview_dialog_play", "Play"))
-        current_ms = 0
-        if player is not None:
-            current_ms = max(0, int(player.get_time()))
-        return self._resolve_display_time_ms(current_ms) / 1000.0
-
     def _handle_export_finished(self, result, save_path):
         state, status_text = self._resolve_export_status(result, save_path)
         if not self._closing:
             self._segment_line_override = status_text
-            self._refresh_segment_queue_hint()
+            self.chrome._refresh_segment_queue_hint()
             self._apply_detail_label()
         self.export_status_changed.emit(state, status_text)
 
@@ -1044,32 +694,3 @@ class PreviewDialog(QDialog):
         if enabled is None:
             enabled = bool(self.video_path) and not self._closing
         button.setEnabled(bool(enabled))
-
-    def _add_to_shot_list(self) -> None:
-        path = str(self.video_path or "").strip()
-        if not path:
-            return
-        segment = self._normalized_segment()
-        if segment is not None:
-            start_sec, end_sec = segment
-            match_kind = "clip"
-        else:
-            start_sec = float(self.start_sec or 0.0)
-            end_sec = float(self.end_sec if self.end_sec is not None else start_sec)
-            if end_sec < start_sec:
-                start_sec, end_sec = end_sec, start_sec
-            match_kind = "clip" if abs(end_sec - start_sec) > 0.05 else "frame"
-        self.add_to_shot_list_requested.emit(path, start_sec, end_sec, match_kind)
-
-
-def _format_segment_display_sec(value):
-    if value is None:
-        return "—"
-    return format_timecode_seconds(value)
-
-
-def _format_ms(ms):
-    total_seconds = max(0, int(ms / 1000))
-    minutes = total_seconds // 60
-    seconds = total_seconds % 60
-    return f"{minutes:02d}:{seconds:02d}"

@@ -26,43 +26,74 @@ from ui.widgets.thumb_cell import fit_thumb_pixmap, make_thumb_label
 
 _OVERLAY_HIDE_DELAY_MS = 120
 
-# Preferred card. Narrower panes shrink toward _CARD_MIN, and the column
-# count steps through 2 before it jumps to 3.
+# Preferred card at 100%. Narrower panes shrink toward the scaled minimum, and
+# the column count steps through 2 before it jumps to 3.
 _CARD_WIDTH = 240
 _CARD_MIN = 232
 _CARD_SPACING = 12
 _GRID_BOTTOM_PAD = 20
 _THUMB_HEIGHT = 168
+RESULT_SCALE_MIN = 70
+RESULT_SCALE_MAX = 160
+RESULT_SCALE_DEFAULT = 100
 
 
-def grid_column_plan(viewport_width: int) -> tuple[int, int, int]:
+def clamp_result_scale_percent(value, *, snap: bool = False) -> int:
+    """Keep a result-card size inside 70–160%. Persisted values snap to 10% steps."""
+    try:
+        number = int(round(float(value)))
+    except (TypeError, ValueError):
+        number = RESULT_SCALE_DEFAULT
+    number = max(RESULT_SCALE_MIN, min(RESULT_SCALE_MAX, number))
+    if snap:
+        number = int(round(number / 10.0) * 10)
+        number = max(RESULT_SCALE_MIN, min(RESULT_SCALE_MAX, number))
+    return number
+
+
+def grid_metrics(scale_percent: int = RESULT_SCALE_DEFAULT) -> tuple[int, int, int]:
+    """Preferred card width, minimum card width, and thumb height at this size."""
+    factor = clamp_result_scale_percent(scale_percent) / 100.0
+    card_w = max(160, int(round(_CARD_WIDTH * factor)))
+    card_min = max(148, int(round(_CARD_MIN * factor)))
+    thumb_h = max(int(round(120 * factor)), int(round(card_w * 9 / 16)))
+    return card_w, card_min, thumb_h
+
+
+def grid_column_plan(viewport_width: int, scale_percent: int = RESULT_SCALE_DEFAULT) -> tuple[int, int, int]:
     """Return column count, card width, and thumb height for the results pane."""
+    card_pref, card_min, _preferred_thumb = grid_metrics(scale_percent)
+    factor = clamp_result_scale_percent(scale_percent) / 100.0
     usable = max(1, int(viewport_width) - 16)
-    natural = max(1, (usable + _CARD_SPACING) // (_CARD_WIDTH + _CARD_SPACING))
+    natural = max(1, (usable + _CARD_SPACING) // (card_pref + _CARD_SPACING))
     cols = natural
     # Preferred width alone skips 2 columns (476–611px used to stay at 1).
-    if usable >= _CARD_MIN * 2 + _CARD_SPACING:
+    if usable >= card_min * 2 + _CARD_SPACING:
         cols = max(cols, 2)
-    if usable >= _CARD_MIN * 3 + _CARD_SPACING * 2:
+    if usable >= card_min * 3 + _CARD_SPACING * 2:
         cols = max(cols, 3)
-    max_cols = max(1, (usable + _CARD_SPACING) // (_CARD_MIN + _CARD_SPACING))
+    max_cols = max(1, (usable + _CARD_SPACING) // (card_min + _CARD_SPACING))
     cols = min(cols, max_cols)
     gaps = max(0, cols - 1) * _CARD_SPACING
-    card_w = min(_CARD_WIDTH, max(_CARD_MIN, (usable - gaps) // cols))
+    card_w = min(card_pref, max(card_min, (usable - gaps) // cols))
     while cols > 1 and card_w * cols + gaps > usable:
         cols -= 1
         gaps = max(0, cols - 1) * _CARD_SPACING
-        card_w = min(_CARD_WIDTH, max(_CARD_MIN, (usable - gaps) // max(1, cols)))
-    thumb_h = max(120, int(round(card_w * 9 / 16)))
+        card_w = min(card_pref, max(card_min, (usable - gaps) // max(1, cols)))
+    thumb_h = max(int(round(120 * factor)), int(round(card_w * 9 / 16)))
     return cols, card_w, thumb_h
 
 
-def grid_thumb_pixel_size() -> tuple[int, int]:
+def grid_thumb_pixel_size(scale_percent: int = RESULT_SCALE_DEFAULT) -> tuple[int, int]:
     """Decode size for a grid card, in physical pixels so 150% scaling stays sharp."""
     from ui.widgets.thumb_cell import screen_thumb_scale
 
+    factor = clamp_result_scale_percent(scale_percent) / 100.0
     scale = screen_thumb_scale()
-    return int(round((_CARD_WIDTH - 16) * scale)), int(round(_THUMB_HEIGHT * scale))
+    return (
+        int(round((_CARD_WIDTH - 16) * factor * scale)),
+        int(round(_THUMB_HEIGHT * factor * scale)),
+    )
 
 
 def _fallback_text(texts: dict, key: str, zh_text: str, en_text: str) -> str:
@@ -149,12 +180,14 @@ class ResultGridCard(QFrame):
         self.action_buttons = QWidget()
         self.action_buttons.setObjectName("ResultGridActions")
         self._actions_layout = QGridLayout(self.action_buttons)
-        self._actions_layout.setContentsMargins(8, 10, 8, 10)
+        self._actions_layout.setContentsMargins(6, 6, 6, 6)
         self._actions_layout.setHorizontalSpacing(6)
         self._actions_layout.setVerticalSpacing(6)
         self._actions_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         overlay_root.addWidget(self.action_buttons, 0, 0, Qt.AlignmentFlag.AlignCenter)
+        self.action_buttons.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+        self._overlay_buttons: list[QPushButton] = []
 
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
@@ -219,7 +252,7 @@ class ResultGridCard(QFrame):
             return
         width = max(48, self.title_label.width() - 2)
         if self.title_label.width() <= 0:
-            width = max(48, _CARD_WIDTH - 20)
+            width = max(48, self.width() - 20, _CARD_WIDTH - 20)
         elided = self.title_label.fontMetrics().elidedText(
             full, Qt.TextElideMode.ElideMiddle, width
         )
@@ -283,9 +316,24 @@ class ResultGridCard(QFrame):
         self.thumb_label.setMinimumHeight(int(thumb_h))
         self.thumb_label.setMaximumHeight(int(thumb_h))
         self._layout_thumb_chrome()
+        self._fit_overlay_actions(int(width))
         self._refresh_title_elide()
+        self._refresh_meta_elide()
         if self._source_pixmap is not None:
             self._paint_thumbnail(self._source_pixmap)
+
+    def _refresh_meta_elide(self) -> None:
+        full = str(getattr(self, "_meta_full", "") or self.meta_label.toolTip() or "")
+        if not full:
+            return
+        width = self.meta_label.width()
+        if width <= 0:
+            width = max(48, self.width() - 20)
+        else:
+            width = max(48, width - 2)
+        self.meta_label.setText(
+            self.meta_label.fontMetrics().elidedText(full, Qt.TextElideMode.ElideRight, width)
+        )
 
     def set_thumbnail(self, pixmap) -> None:
         if pixmap is None or (isinstance(pixmap, QPixmap) and pixmap.isNull()):
@@ -311,8 +359,36 @@ class ResultGridCard(QFrame):
                 widget.deleteLater()
 
     def _place_action_button(self, button: QPushButton, index: int) -> None:
-        row, col = divmod(index, 2)
-        self._actions_layout.addWidget(button, row, col, Qt.AlignmentFlag.AlignCenter)
+        del index
+        self._overlay_buttons.append(button)
+
+    def _fit_overlay_actions(self, card_width: int | None = None) -> None:
+        """Keep hover actions in two columns. Small cards use shorter buttons, not a stacked wall."""
+        buttons = [button for button in self._overlay_buttons if isValid(button)]
+        self._overlay_buttons = buttons
+        while self._actions_layout.count():
+            self._actions_layout.takeAt(0)
+        if card_width is None:
+            card_width = self.width()
+        width = max(0, int(card_width) - 16)
+        narrow = width < 240
+        columns = 2
+        gap = 4 if narrow else 6
+        self._actions_layout.setHorizontalSpacing(gap)
+        self._actions_layout.setVerticalSpacing(gap)
+        self._actions_layout.setContentsMargins(4, 4, 4, 4)
+        usable = max(96, width - 8 - gap)
+        each = max(52, min(84, usable // columns))
+        for button in buttons:
+            button.setProperty("compact", narrow)
+            button.setMinimumWidth(0)
+            button.setFixedWidth(each)
+            button.setFixedHeight(22 if narrow else 27)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            repolish_widget(button)
+        for index, button in enumerate(buttons):
+            row, col = divmod(index, columns)
+            self._actions_layout.addWidget(button, row, col, Qt.AlignmentFlag.AlignCenter)
 
     def _rebuild_action_buttons(self, texts: dict) -> None:
         self._clear_action_buttons()
@@ -387,9 +463,10 @@ class ResultGridCard(QFrame):
             )
             buttons.append(add)
 
+        self._overlay_buttons = []
         for index, button in enumerate(buttons):
             self._place_action_button(button, index)
-            repolish_widget(button)
+        self._fit_overlay_actions()
 
     def bind(
         self,
@@ -442,11 +519,9 @@ class ResultGridCard(QFrame):
         if low_confidence:
             score_text = f"{score_text} ⚠"
         meta = f"{time_text} · {score_text}"
+        self._meta_full = meta
         self.meta_label.setToolTip(meta)
-        meta_width = max(48, self.meta_label.width() - 2) if self.meta_label.width() > 0 else (_CARD_WIDTH - 20)
-        self.meta_label.setText(
-            self.meta_label.fontMetrics().elidedText(meta, Qt.TextElideMode.ElideRight, meta_width)
-        )
+        self._refresh_meta_elide()
 
         self._rebuild_action_buttons(texts or {})
         self._hide_timer.stop()
@@ -483,9 +558,16 @@ class ResultGrid(QScrollArea):
         self._selected: ResultGridCard | None = None
         self._cols = 1
         self._side_pad = -1
+        self._scale_percent = RESULT_SCALE_DEFAULT
+
+    def set_display_scale(self, scale_percent: int) -> None:
+        """Resize every card. Existing thumbnails are refit from the source frame."""
+        self._scale_percent = clamp_result_scale_percent(scale_percent)
+        self._reflow(force=True)
 
     def _card_slot_width(self) -> int:
-        return _CARD_WIDTH
+        card_w, _card_min, _thumb_h = grid_metrics(self._scale_percent)
+        return card_w
 
     def count(self) -> int:
         return len(self._cards)
@@ -631,7 +713,7 @@ class ResultGrid(QScrollArea):
     def _reflow(self, *, force: bool = False) -> None:
         width = max(1, self.viewport().width())
         # Keep a little breathing room; leftover space is split as side padding so the block is centered.
-        cols, card_w, thumb_h = grid_column_plan(width)
+        cols, card_w, thumb_h = grid_column_plan(width, self._scale_percent)
         for card in self._cards:
             card.apply_slot(card_w, thumb_h)
         used = cols * card_w + max(0, cols - 1) * _CARD_SPACING

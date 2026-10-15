@@ -946,19 +946,17 @@ class SearchController(QObject):
         from ui.widgets.thumb_cell import screen_thumb_scale
 
         scale = screen_thumb_scale()
+        percent = int(getattr(view, "display_scale_percent", 100) or 100)
         if view.view_mode == "grid":
             from ui.widgets.result_grid import grid_thumb_pixel_size
 
-            disp_w, disp_h = grid_thumb_pixel_size()
+            disp_w, disp_h = grid_thumb_pixel_size(percent)
         else:
-            from ui.widgets.table_specs import LOCAL_SEARCH_TABLE_SPEC
+            from ui.widgets.result_view import table_display_metrics
 
-            preview_col = next(
-                (col for col in LOCAL_SEARCH_TABLE_SPEC.columns if col.key == "preview"),
-                None,
-            )
-            disp_w = int(round((int(preview_col.width or 220) if preview_col is not None else 220) * scale))
-            disp_h = int(round(int(LOCAL_SEARCH_TABLE_SPEC.row_height) * scale))
+            row_h, preview_w = table_display_metrics(percent)
+            disp_w = int(round(preview_w * scale))
+            disp_h = int(round(row_h * scale))
         thumb_width = max(cfg_w, disp_w)
         thumb_height = max(cfg_h, disp_h)
         cache = get_thumb_cache()
@@ -989,6 +987,8 @@ class SearchController(QObject):
             and active.isRunning()
             and miss_indices
             and miss_indices.issubset(self._thumb_loading_indices)
+            and int(getattr(active, "_thumb_width", 0) or 0) == int(thumb_width)
+            and int(getattr(active, "_thumb_height", 0) or 0) == int(thumb_height)
         ):
             return
         self.stop_thumbnail_loading()
