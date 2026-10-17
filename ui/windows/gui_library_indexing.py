@@ -1439,7 +1439,7 @@ class LibraryIndexingGuiMixin:
 
     def load_subtitle_sample_strategy(self):
         from src.app.config import DEFAULT_CONFIG, load_config
-        from src.services.subtitle_index_service import (
+        from src.services.subtitle_sample_strategy import (
             SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
             SUBTITLE_SAMPLE_STRATEGY_VAD,
             normalize_subtitle_sample_strategy,
@@ -1472,7 +1472,7 @@ class LibraryIndexingGuiMixin:
 
     def _read_subtitle_sample_strategy(self) -> str:
         from src.app.config import load_config, save_config
-        from src.services.subtitle_index_service import (
+        from src.services.subtitle_sample_strategy import (
             SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
             normalize_subtitle_sample_strategy,
         )
@@ -1496,7 +1496,7 @@ class LibraryIndexingGuiMixin:
         self._read_subtitle_sample_strategy()
 
     def _subtitle_strategy_label(self, strategy: str | None = None) -> str:
-        from src.services.subtitle_index_service import (
+        from src.services.subtitle_sample_strategy import (
             SUBTITLE_SAMPLE_STRATEGY_VAD,
             normalize_subtitle_sample_strategy,
         )

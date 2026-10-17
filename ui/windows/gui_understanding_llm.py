@@ -631,7 +631,7 @@ class UnderstandingLlmGuiMixin:
 
     def _load_recap_beats_for_ui(self, video_path: str, *, video_id: str = ""):
         """Load beats sidecar; surface corrupt files instead of treating them as missing."""
-        from src.services.recap_service import RecapSidecarCorruptError, load_recap_beats
+        from src.services.recap_io import RecapSidecarCorruptError, load_recap_beats
 
         try:
             return load_recap_beats(video_path, video_id=video_id)
@@ -649,7 +649,7 @@ class UnderstandingLlmGuiMixin:
             return None
 
     def _load_recap_cuts_for_ui(self, video_path: str, *, video_id: str = ""):
-        from src.services.recap_service import RecapSidecarCorruptError, load_recap_cuts
+        from src.services.recap_io import RecapSidecarCorruptError, load_recap_cuts
 
         try:
             return load_recap_cuts(video_path, video_id=video_id)
@@ -813,10 +813,8 @@ class UnderstandingLlmGuiMixin:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QTreeWidgetItem
 
-        from src.services.recap_service import (
-            format_recap_clock_range,
-            group_recap_vo_units,
-        )
+        from src.services.recap_clock import format_recap_clock_range
+        from src.services.recap_vo_units import group_recap_vo_units
 
         page = getattr(self, "understanding_page", None)
         tree = getattr(page, "recap_review_tree", None) if page is not None else None
@@ -2270,7 +2268,7 @@ class UnderstandingLlmGuiMixin:
         )
 
     def reset_recap_prompt(self):
-        from src.services.recap_service import (
+        from src.services.recap_prompts import (
             default_recap_caption_prompt,
             default_recap_match_prompt,
             default_recap_plan_prompt,
@@ -2297,7 +2295,7 @@ class UnderstandingLlmGuiMixin:
             editor.setPlainText(default)
 
     def _recap_prompt_getter_pairs(self):
-        from src.services.recap_service import (
+        from src.services.recap_prompts import (
             default_recap_caption_prompt,
             default_recap_match_prompt,
             default_recap_plan_prompt,
@@ -2325,7 +2323,7 @@ class UnderstandingLlmGuiMixin:
                 editor.setPlainText(getter(language))
 
     def _ensure_recap_prompt_default(self):
-        from src.services.recap_service import (
+        from src.services.recap_prompts import (
             RECAP_GAP_SYSTEM,
             RECAP_GAP_SYSTEM_EN,
         )

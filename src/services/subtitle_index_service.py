@@ -54,18 +54,22 @@ from src.storage.lance_store import (
     set_dialogue_index_state,
 )
 from src.storage.video_identity import canonicalize_library_path
+from src.services.subtitle_sample_strategy import (
+    DEFAULT_SUBTITLE_SAMPLE_STRATEGY,
+    SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
+    SUBTITLE_SAMPLE_STRATEGY_VAD,
+    SubtitleSampleStrategy,
+    normalize_subtitle_sample_strategy,
+    resolve_subtitle_sample_strategy,
+)
 
 logger = get_logger("subtitle_index")
 
 ProgressCallback = Callable[[float, str], None]
 StopCallback = Callable[[], bool]
 SubtitleIndexMode = Literal["auto", "ocr", "reuse"]
-SubtitleSampleStrategy = Literal["timeline", "vad"]
 
 OCR_SOURCE_ID = OCR_COMPONENT_ID
-SUBTITLE_SAMPLE_STRATEGY_TIMELINE = "timeline"
-SUBTITLE_SAMPLE_STRATEGY_VAD = "vad"
-DEFAULT_SUBTITLE_SAMPLE_STRATEGY = SUBTITLE_SAMPLE_STRATEGY_TIMELINE
 
 # Absolute safety valve for probe timestamps (decode cost). OCR is gated separately.
 _SUBTITLE_FRAME_BUDGET_SAFETY_MAX = 9000
@@ -73,32 +77,6 @@ _SUBTITLE_FRAME_BUDGET_SAFETY_MAX = 9000
 
 def _stopped(stop_callback: StopCallback | None) -> bool:
     return bool(stop_callback and stop_callback())
-
-
-def normalize_subtitle_sample_strategy(value: str | None) -> SubtitleSampleStrategy:
-    text = str(value or "").strip().lower()
-    if text in {"vad", "speech", "fast"}:
-        return SUBTITLE_SAMPLE_STRATEGY_VAD
-    if text in {"timeline", "full", "probe", "pv"}:
-        return SUBTITLE_SAMPLE_STRATEGY_TIMELINE
-    return DEFAULT_SUBTITLE_SAMPLE_STRATEGY
-
-
-def resolve_subtitle_sample_strategy(*, config=None, explicit: str | None = None) -> SubtitleSampleStrategy:
-    if explicit is not None and str(explicit).strip():
-        return normalize_subtitle_sample_strategy(explicit)
-    try:
-        from src.app.config import DEFAULT_CONFIG, load_config
-
-        cfg = dict(config or load_config())
-        return normalize_subtitle_sample_strategy(
-            cfg.get(
-                "subtitle_sample_strategy",
-                DEFAULT_CONFIG.get("subtitle_sample_strategy", DEFAULT_SUBTITLE_SAMPLE_STRATEGY),
-            )
-        )
-    except Exception:
-        return DEFAULT_SUBTITLE_SAMPLE_STRATEGY
 
 
 def resolve_subtitle_frame_budget(

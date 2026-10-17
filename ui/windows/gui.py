@@ -1,3 +1,4 @@
+import time
 from collections import deque
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
@@ -27,6 +28,7 @@ from src.app.config import (
     save_config,
 )
 from src.app.i18n import get_texts
+from src.app.logging_utils import get_logger
 from src.app.plugins import get_registry, resolve_nav_page_order
 from src.services.about_service import get_local_about_payload
 from src.services.donate_service import get_donate_payload
@@ -89,6 +91,8 @@ from ui.windows.gui_search_presets import SearchPresetsGuiMixin
 from ui.windows.gui_search_panel_state import SearchPanelStateMixin
 from ui.windows.gui_shot_list import ShotListGuiMixin
 from ui.windows.gui_apply_texts import ApplyTextsGuiMixin
+
+_startup_logger = get_logger("gui.startup")
 
 
 class MainWindow(
@@ -1072,6 +1076,7 @@ class MainWindow(
         self._apply_texts_settings_and_finish(t, config)
 
     def _finish_startup_sequence(self):
+        t0 = time.perf_counter()
         synced_model_dir = sync_model_dir_to_config()
         synced_path = sync_ffmpeg_path_to_config()
         if synced_model_dir:
@@ -1081,7 +1086,9 @@ class MainWindow(
         self._startup_complete = True
         # CLIP + VLC warmup is deferred until first visual search / library sync.
         # Show UI first; heavy orphan/index cleanup can wait until the event loop is idle.
+        t_lib = time.perf_counter()
         self.refresh_library_table()
+        _startup_logger.info("refresh_library_table %.2fs", time.perf_counter() - t_lib)
         self.refresh_search_presets_ui()
         self._prompt_resume_partial_indexing()
         self.app_meta_controller.refresh(self.language)
@@ -1091,6 +1098,7 @@ class MainWindow(
         QTimer.singleShot(0, self._bootstrap_understanding_resources)
         QTimer.singleShot(1500, self._idle_maintain_library_metadata)
         QTimer.singleShot(700, self._maybe_auto_show_startup_notices)
+        _startup_logger.info("_finish_startup_sequence total %.2fs", time.perf_counter() - t0)
 
     def _idle_maintain_library_metadata(self) -> None:
         try:

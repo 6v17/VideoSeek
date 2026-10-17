@@ -23,9 +23,38 @@ class AppUiStateMixin:
 
     def push_inference_status(self, status: dict | None = None) -> None:
         if status is None:
-            from src.core.clip_embedding import get_engine_runtime_status
+            import sys
 
-            status = get_engine_runtime_status()
+            # Avoid pulling onnxruntime/tokenizer/ftfy during cold start just to
+            # paint settings hints. Real status is used once clip_embedding is loaded.
+            if "src.core.clip_embedding" not in sys.modules:
+                from src.app.config import load_config
+                from src.storage.config_store import get_effective_prefer_gpu
+
+                config = load_config()
+                prefer_gpu = get_effective_prefer_gpu(config=config)
+                if prefer_gpu:
+                    status = {
+                        "initialized": False,
+                        "prefer_gpu": prefer_gpu,
+                        "backend": "",
+                        "warning": "",
+                        "issue": "",
+                        "diagnostics": {},
+                    }
+                else:
+                    status = {
+                        "initialized": True,
+                        "prefer_gpu": prefer_gpu,
+                        "backend": "CPU",
+                        "warning": "",
+                        "issue": "",
+                        "diagnostics": {},
+                    }
+            else:
+                from src.core.clip_embedding import get_engine_runtime_status
+
+                status = get_engine_runtime_status()
         self.ui_state.set_inference_status(status)
 
     def _on_ui_state_indexing_changed(self, _running: bool) -> None:

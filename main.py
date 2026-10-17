@@ -1,10 +1,12 @@
 # main.py
 import sys
+import time
 from src.app.logging_utils import get_logger, setup_logging
 
 if __name__ == "__main__":
     setup_logging()
     logger = get_logger("main")
+    t_app = time.perf_counter()
     logger.info("Application starting")
 
     if "--gpu-probe" in sys.argv:
@@ -13,7 +15,7 @@ if __name__ == "__main__":
 
         sys.exit(gpu_probe_cli_main())
 
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QEvent, QObject, Qt
     from PySide6.QtWidgets import QApplication
     from src.app.single_instance import SingleInstanceServer, try_activate_existing_instance
 
@@ -42,6 +44,7 @@ if __name__ == "__main__":
 
     ensure_config_schema_v2_bootstrap()
     logger.info("Loading plugins")
+    t_plugins = time.perf_counter()
     from src.app.plugins import load_plugins
 
     try:
@@ -51,17 +54,61 @@ if __name__ == "__main__":
     except Exception:
         logger.exception("Failed to load plugins")
         raise
+    logger.info("Loading plugins done in %.2fs", time.perf_counter() - t_plugins)
+
     logger.info("Loading main window")
+    t_import = time.perf_counter()
     from ui.windows.gui import MainWindow
 
+    logger.info("import MainWindow done in %.2fs", time.perf_counter() - t_import)
+
+    t_ctor = time.perf_counter()
     window = MainWindow()
+    logger.info("MainWindow() done in %.2fs", time.perf_counter() - t_ctor)
+
     single_instance_server.set_activate_handler(window._show_main_window_from_tray)
     if getattr(window, "startup_cancelled", False):
         logger.info("Startup cancelled before main window was shown")
         single_instance_server.close()
         sys.exit(0)
+
+    class _FirstPaintProbe(QObject):
+        def __init__(self, started_at: float):
+            super().__init__()
+            self._started_at = started_at
+            self._done = False
+
+        def eventFilter(self, obj, event):
+            if not self._done and event.type() == QEvent.Type.Paint:
+                self._done = True
+                logger.info(
+                    "first paint done (%.2fs since show, %.2fs since app start)",
+                    time.perf_counter() - self._started_at,
+                    time.perf_counter() - t_app,
+                )
+                obj.removeEventFilter(self)
+            return False
+
+    t_show = time.perf_counter()
     window.show()
+    logger.info("window.show() returned in %.2fs", time.perf_counter() - t_show)
+    paint_probe = _FirstPaintProbe(t_show)
+    window.installEventFilter(paint_probe)
+    # Keep a reference so the probe is not GC'd before first paint.
+    window._startup_first_paint_probe = paint_probe
+
+    t_migrate = time.perf_counter()
     window.begin_startup_migration()
+    logger.info(
+        "begin_startup_migration returned in %.2fs (%.2fs since show)",
+        time.perf_counter() - t_migrate,
+        time.perf_counter() - t_show,
+    )
+    logger.info(
+        "entering app.exec() (%.2fs since app start, %.2fs since show)",
+        time.perf_counter() - t_app,
+        time.perf_counter() - t_show,
+    )
 
     exit_code = app.exec()
     try:

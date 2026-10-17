@@ -6,6 +6,7 @@ quick check; if work is needed, a dismissible tip points users to Settings.
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from src.app.config import set_startup_migration_summary
@@ -15,6 +16,28 @@ from ui.widgets.styles import set_runtime_banner_warn
 from ui.workers import StartupMigrationWorker
 
 logger = get_logger("gui.startup_migration")
+
+
+class _FinishAfterFirstPaint(QObject):
+    """Run cold-start finish once the main window has painted once."""
+
+    def __init__(self, host):
+        super().__init__(host)
+        self._host = host
+        self._armed = True
+
+    def eventFilter(self, obj, event):
+        if (
+            self._armed
+            and obj is self._host
+            and event.type() == QEvent.Type.Paint
+            and not getattr(self._host, "_startup_complete", False)
+        ):
+            self._armed = False
+            self._host.removeEventFilter(self)
+            logger.info("first paint observed; scheduling deferred startup finish")
+            QTimer.singleShot(0, self._host._run_scheduled_finish_startup_sequence)
+        return False
 
 
 class StartupMigrationGuiMixin:
@@ -30,8 +53,11 @@ class StartupMigrationGuiMixin:
         """Post-show bootstrap: quick check only; never auto-start heavy migrate."""
         if getattr(self, "startup_cancelled", False):
             return
+        import time
+
         from src.storage.migration_runner import run_startup_migration_quick
 
+        t0 = time.perf_counter()
         try:
             summary = run_startup_migration_quick()
         except Exception as exc:
@@ -43,6 +69,7 @@ class StartupMigrationGuiMixin:
             )
             self.close()
             return
+        logger.info("run_startup_migration_quick %.2fs", time.perf_counter() - t0)
 
         set_startup_migration_summary(summary)
         if summary.get("needs_background"):
@@ -50,12 +77,38 @@ class StartupMigrationGuiMixin:
             self._legacy_migration_tip_visible = True
             self._refresh_legacy_migration_settings_ui()
             if not getattr(self, "_startup_complete", False):
-                self._finish_startup_sequence()
+                self._schedule_finish_startup_sequence()
             self._show_legacy_migration_tip_banner()
             return
 
         self._legacy_migration_tip_visible = False
         self._on_startup_migration_finished(summary)
+
+    def _schedule_finish_startup_sequence(self) -> None:
+        """Let the first frame paint before refresh_library_table / notices block the UI."""
+        if getattr(self, "_startup_complete", False):
+            return
+        if getattr(self, "_startup_migration_finish_scheduled", False):
+            return
+        self._startup_migration_finish_scheduled = True
+        probe = _FinishAfterFirstPaint(self)
+        self._startup_finish_paint_probe = probe
+        self.installEventFilter(probe)
+        # Safety: headless / no paint still needs library bootstrap.
+        QTimer.singleShot(300, self._run_scheduled_finish_startup_sequence)
+        logger.info("deferred _finish_startup_sequence until first paint (fallback 300ms)")
+
+    def _run_scheduled_finish_startup_sequence(self) -> None:
+        if getattr(self, "_startup_complete", False):
+            return
+        probe = getattr(self, "_startup_finish_paint_probe", None)
+        if probe is not None:
+            try:
+                self.removeEventFilter(probe)
+            except Exception:
+                pass
+            self._startup_finish_paint_probe = None
+        self._finish_startup_sequence()
 
     def start_manual_legacy_migration(self) -> bool:
         """User-triggered migrate from Settings. Returns False if already busy."""
@@ -109,7 +162,8 @@ class StartupMigrationGuiMixin:
         self._refresh_legacy_migration_settings_ui()
         self._show_startup_migration_notice()
         if not getattr(self, "_startup_complete", False):
-            self._finish_startup_sequence()
+            # Cold start: paint the empty window first, then load library chrome.
+            self._schedule_finish_startup_sequence()
         else:
             self.refresh_library_table()
             if hasattr(self, "push_resources_status"):

@@ -36,11 +36,26 @@ class RuntimeGuiMixin:
         return True
 
     def _update_inference_backend_hint(self, status=None):
-        from src.core.clip_embedding import get_engine_runtime_status
-
         config = load_config()
         if status is None:
-            status = get_engine_runtime_status()
+            import sys
+
+            if "src.core.clip_embedding" in sys.modules:
+                from src.core.clip_embedding import get_engine_runtime_status
+
+                status = get_engine_runtime_status()
+            else:
+                from src.storage.config_store import get_effective_prefer_gpu
+
+                prefer_gpu = get_effective_prefer_gpu(config=config)
+                status = {
+                    "initialized": not prefer_gpu,
+                    "prefer_gpu": prefer_gpu,
+                    "backend": "" if prefer_gpu else "CPU",
+                    "warning": "",
+                    "issue": "",
+                    "diagnostics": {},
+                }
         else:
             status = dict(status)
         backend_text = ""

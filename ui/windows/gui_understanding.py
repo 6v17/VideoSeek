@@ -2343,7 +2343,7 @@ class UnderstandingGuiMixin:
         return self._current_video_has_recap_dialogue()
 
     def _current_video_has_recap_beats(self) -> bool:
-        from src.services.recap_service import load_recap_beats
+        from src.services.recap_io import load_recap_beats
 
         video_id = self._selected_understanding_video_id()
         video_path = self._current_recap_video_path()
@@ -2352,7 +2352,7 @@ class UnderstandingGuiMixin:
         return load_recap_beats(video_path, video_id=video_id) is not None
 
     def _current_video_has_recap_cuts(self) -> bool:
-        from src.services.recap_service import load_recap_cuts
+        from src.services.recap_io import load_recap_cuts
 
         video_id = self._selected_understanding_video_id()
         video_path = self._current_recap_video_path()
