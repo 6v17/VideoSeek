@@ -55,11 +55,11 @@ from src.storage.lance_store import (
 )
 from src.storage.video_identity import canonicalize_library_path
 from src.services.subtitle_sample_strategy import (
-    DEFAULT_SUBTITLE_SAMPLE_STRATEGY,
+    DEFAULT_SUBTITLE_SAMPLE_STRATEGY as DEFAULT_SUBTITLE_SAMPLE_STRATEGY,
     SUBTITLE_SAMPLE_STRATEGY_TIMELINE,
     SUBTITLE_SAMPLE_STRATEGY_VAD,
-    SubtitleSampleStrategy,
-    normalize_subtitle_sample_strategy,
+    SubtitleSampleStrategy as SubtitleSampleStrategy,
+    normalize_subtitle_sample_strategy as normalize_subtitle_sample_strategy,
     resolve_subtitle_sample_strategy,
 )
 
