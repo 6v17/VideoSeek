@@ -176,6 +176,14 @@ class ApplyTextsGuiMixin:
                 "重新扫描勾选库文件夹，把新拖入的视频登记到列表（不会立刻建索；登记后请再点同步）。",
             )
         )
+        shared_status = t.get("library_team_shared_status", "Shared · {ready}/{total}")
+        try:
+            from src.services.team_mode_service import is_team_client_mode
+
+            libraries_remote = bool(is_team_client_mode())
+        except Exception:
+            libraries_remote = False
+        self.library_page.visual_video_tree.set_libraries_remote(libraries_remote)
         self.library_page.visual_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
             empty_text=t.get("library_list_empty", ""),
@@ -184,12 +192,14 @@ class ApplyTextsGuiMixin:
                 "library_path_missing_status",
                 "Path missing (check then Remove)",
             ),
+            shared_status_template=shared_status,
             header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
             header_count=t.get("library_col_count", "Count"),
             header_status=t.get("library_col_status", "Status"),
             header_action=t.get("library_col_action", "Action"),
             **list_find_text_kwargs(t),
         )
+        self.library_page.subtitle_video_tree.set_libraries_remote(libraries_remote)
         self.library_page.subtitle_video_tree.set_action_texts(
             open_text=t.get("open_folder", "Open"),
             empty_text=t.get("dialogue_library_empty", ""),
@@ -198,6 +208,7 @@ class ApplyTextsGuiMixin:
                 "library_path_missing_status",
                 "Path missing (check then Remove)",
             ),
+            shared_status_template=shared_status,
             header_video=t.get("library_col_video", t.get("search_scope_video_col", "Video")),
             header_count=t.get("library_col_count", "Count"),
             header_status=t.get("library_col_status", "Status"),

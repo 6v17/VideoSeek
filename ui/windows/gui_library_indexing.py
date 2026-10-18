@@ -209,7 +209,11 @@ class LibraryIndexingGuiMixin:
             open_text = self.texts.get("open_folder", self.texts.get("open", "Open"))
             empty_text = self.texts.get("library_list_empty", "No library folders yet.")
             status_template = self.texts.get("library_sync_status", "{ready}/{total} synced")
+            shared_status = self.texts.get(
+                "library_team_shared_status", "Shared · {ready}/{total}"
+            )
             tree = self.library_page.visual_video_tree
+            tree.set_libraries_remote(True)
             tree.set_action_texts(
                 open_text=open_text,
                 empty_text=empty_text,
@@ -218,6 +222,7 @@ class LibraryIndexingGuiMixin:
                     "library_path_missing_status",
                     "Path missing",
                 ),
+                shared_status_template=shared_status,
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
                 ),
@@ -234,6 +239,7 @@ class LibraryIndexingGuiMixin:
                 rows.append(
                     {
                         **item,
+                        "team_shared": True,
                         "status_text": self._visual_row_status_text({**item, "asset_state": state}),
                         "status_tone": self._visual_asset_status_tone(state),
                     }
@@ -255,6 +261,7 @@ class LibraryIndexingGuiMixin:
             )
             status_sub = self.texts.get("library_extract_status", "{ready}/{total} extracted")
             sub_tree = self.library_page.subtitle_video_tree
+            sub_tree.set_libraries_remote(True)
             sub_tree.set_action_texts(
                 open_text=open_text,
                 empty_text=empty_sub,
@@ -263,6 +270,7 @@ class LibraryIndexingGuiMixin:
                     "library_path_missing_status",
                     "Path missing",
                 ),
+                shared_status_template=shared_status,
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
                 ),
@@ -285,6 +293,7 @@ class LibraryIndexingGuiMixin:
                 sub_rows.append(
                     {
                         **item,
+                        "team_shared": True,
                         "source_exists": True,
                         "has_transcript": has_transcript,
                         "segment_count": segment_count,
@@ -481,6 +490,7 @@ class LibraryIndexingGuiMixin:
             empty_text = self.texts.get("library_list_empty", "No library folders yet.")
             status_template = self.texts.get("library_sync_status", "{ready}/{total} synced")
             tree = self.library_page.visual_video_tree
+            tree.set_libraries_remote(False)
             tree.set_action_texts(
                 open_text=open_text,
                 empty_text=empty_text,
@@ -488,6 +498,9 @@ class LibraryIndexingGuiMixin:
                 offline_status_text=self.texts.get(
                     "library_path_missing_status",
                     "Path missing",
+                ),
+                shared_status_template=self.texts.get(
+                    "library_team_shared_status", "Shared · {ready}/{total}"
                 ),
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")
@@ -1581,6 +1594,7 @@ class LibraryIndexingGuiMixin:
             )
             status_template = self.texts.get("library_extract_status", "{ready}/{total} extracted")
             tree = self.library_page.subtitle_video_tree
+            tree.set_libraries_remote(False)
             tree.set_action_texts(
                 open_text=open_text,
                 empty_text=empty_text,
@@ -1588,6 +1602,9 @@ class LibraryIndexingGuiMixin:
                 offline_status_text=self.texts.get(
                     "library_path_missing_status",
                     "Path missing",
+                ),
+                shared_status_template=self.texts.get(
+                    "library_team_shared_status", "Shared · {ready}/{total}"
                 ),
                 header_video=self.texts.get(
                     "library_col_video", self.texts.get("search_scope_video_col", "Video")

@@ -1713,6 +1713,9 @@ QSpinBox[settingField="true"]::up-button, QDoubleSpinBox[settingField="true"]::u
 #LibraryLibSyncStatus[libSync="offline"] {
     color: __MUTED__;
 }
+#LibraryLibSyncStatus[libSync="shared"] {
+    color: __MUTED__;
+}
 #LibraryLibBody {
     background: transparent;
     border: none;

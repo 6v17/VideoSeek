@@ -356,6 +356,9 @@ class LibraryGroupedVideoTree(QWidget):
         self._open_text = "Open"
         self._status_template = "{ready}/{total}"
         self._offline_status_text = ""
+        # Team-client shared libraries use server paths that are not on this PC.
+        self._libraries_remote = False
+        self._shared_status_template = ""
         self._header_video = ""
         self._header_count = ""
         self._header_status = ""
@@ -453,6 +456,7 @@ class LibraryGroupedVideoTree(QWidget):
         empty_text: str = "",
         status_template: str = "",
         offline_status_text: str = "",
+        shared_status_template: str = "",
         header_video: str = "",
         header_count: str = "",
         header_status: str = "",
@@ -477,6 +481,10 @@ class LibraryGroupedVideoTree(QWidget):
                 self._refresh_block_status_label(block)
         if offline_status_text:
             self._offline_status_text = offline_status_text
+            for block in self._blocks:
+                self._refresh_block_status_label(block)
+        if shared_status_template:
+            self._shared_status_template = shared_status_template
             for block in self._blocks:
                 self._refresh_block_status_label(block)
         if any(
@@ -520,6 +528,16 @@ class LibraryGroupedVideoTree(QWidget):
             self._empty_label.setText(empty_text)
         self._sync_column_widths()
 
+    def set_libraries_remote(self, enabled: bool) -> None:
+        """Mark libraries as server-shared (team client): do not treat missing local paths as offline."""
+        enabled = bool(enabled)
+        if self._libraries_remote == enabled:
+            return
+        self._libraries_remote = enabled
+        for block in self._blocks:
+            self._refresh_block_status_label(block)
+        self._sync_column_widths()
+
     def showEvent(self, event):
         super().showEvent(event)
         self._sync_column_widths()
@@ -531,6 +549,13 @@ class LibraryGroupedVideoTree(QWidget):
             status_sample = template.format(ready=999, total=999)
         except Exception:
             status_sample = "999/999"
+        shared_sample = ""
+        shared_tpl = self._shared_status_template or ""
+        if shared_tpl:
+            try:
+                shared_sample = shared_tpl.format(ready=999, total=999)
+            except Exception:
+                shared_sample = shared_tpl
         self._count_col_w = max(
             _COUNT_COL_MIN,
             self._header_count_label.fontMetrics().horizontalAdvance(self._header_count or "Count") + 16,
@@ -540,6 +565,7 @@ class LibraryGroupedVideoTree(QWidget):
             _STATUS_COL_MIN,
             status_fm.horizontalAdvance(self._header_status or "Status") + 12,
             status_fm.horizontalAdvance(status_sample) + 12,
+            status_fm.horizontalAdvance(shared_sample) + 12 if shared_sample else 0,
         )
         action_fm = self._header_action_label.fontMetrics()
         self._action_col_w = max(
@@ -627,12 +653,18 @@ class LibraryGroupedVideoTree(QWidget):
             return True
         return str(ent.get("asset_state") or "").strip().lower() == "ready"
 
+    def _block_is_remote_shared(self, block: _LibBlock) -> bool:
+        if self._libraries_remote:
+            return True
+        return any(bool(ent.get("team_shared")) for ent in block.entries)
+
     def _refresh_block_status_label(self, block: _LibBlock) -> None:
         label = block.status_label
         if label is None:
             return
         lib_path = str(block.lib_path or "").strip()
-        if lib_path and not os.path.isdir(lib_path):
+        remote = self._block_is_remote_shared(block)
+        if lib_path and not os.path.isdir(lib_path) and not remote:
             self._set_status_label_text(label, self._offline_status_text or "Path missing")
             label.setProperty("libSync", "offline")
             style = label.style()
@@ -643,6 +675,18 @@ class LibraryGroupedVideoTree(QWidget):
         total = len(block.entries)
         ready = sum(1 for ent in block.entries if self._entry_is_ready(ent))
         needs_fix = any(self._entry_needs_fix(ent) for ent in block.entries)
+        if remote:
+            template = self._shared_status_template or self._status_template or "{ready}/{total}"
+            try:
+                self._set_status_label_text(label, template.format(ready=ready, total=total))
+            except Exception:
+                self._set_status_label_text(label, self._shared_status_template or "Shared library")
+            label.setProperty("libSync", "shared")
+            style = label.style()
+            if style is not None:
+                style.unpolish(label)
+                style.polish(label)
+            return
         template = self._status_template or "{ready}/{total}"
         try:
             self._set_status_label_text(label, template.format(ready=ready, total=total))
