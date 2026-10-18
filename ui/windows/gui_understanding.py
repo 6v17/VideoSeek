@@ -1767,6 +1767,8 @@ class UnderstandingGuiMixin:
         self._sync_recap_export_button(running=True)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_reload_dialogue_from_library"):
+            page.btn_reload_dialogue_from_library.setEnabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
@@ -1960,6 +1962,8 @@ class UnderstandingGuiMixin:
         self._sync_recap_export_button(running=True)
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
+        if hasattr(page, "btn_reload_dialogue_from_library"):
+            page.btn_reload_dialogue_from_library.setEnabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):

@@ -377,11 +377,21 @@ class ApplyTextsGuiMixin:
             self._sync_dialogue_extract_label()
         elif hasattr(self.understanding_page, "btn_extract_asr"):
             self.understanding_page.btn_extract_asr.setText(
-                t.get("understanding_step_dialogue_extract_asr", "Extract speech")
+                t.get("understanding_step_dialogue_extract_asr", "Extract")
+            )
+        if hasattr(self.understanding_page, "btn_reload_dialogue_from_library"):
+            self.understanding_page.btn_reload_dialogue_from_library.setText(
+                t.get("understanding_step_dialogue_from_library", "From library")
+            )
+            self.understanding_page.btn_reload_dialogue_from_library.setToolTip(
+                t.get(
+                    "understanding_step_dialogue_from_library_tip",
+                    "Replace this page’s dialogue with cues from the subtitle library (e.g. after importing a cleaned SRT).",
+                )
             )
         if hasattr(self.understanding_page, "btn_cluster_speakers"):
             self.understanding_page.btn_cluster_speakers.setText(
-                t.get("understanding_step_dialogue_cluster", "Cluster speakers")
+                t.get("understanding_step_dialogue_cluster", "Cluster")
             )
             self.understanding_page.btn_cluster_speakers.setToolTip(
                 t.get(
@@ -411,7 +421,7 @@ class ApplyTextsGuiMixin:
             )
         if hasattr(self.understanding_page, "btn_delete_selected_dialogue"):
             self.understanding_page.btn_delete_selected_dialogue.setText(
-                t.get("understanding_step_dialogue_delete_selected", "Delete selected")
+                t.get("understanding_step_dialogue_delete_selected", "Delete")
             )
             self.understanding_page.btn_delete_selected_dialogue.setToolTip(
                 t.get(

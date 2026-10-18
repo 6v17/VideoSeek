@@ -15,6 +15,7 @@ from src.services.understanding_dialogue import (
     load_working_copy,
     rename_working_speakers,
     replace_working_copy_from_extraction,
+    replace_working_copy_from_library,
     save_working_copy,
     update_working_cue,
 )
@@ -200,6 +201,43 @@ class UnderstandingDialogueCopyTests(unittest.TestCase):
                 )
                 cues = load_working_copy("vid-rename")["cues"]
                 self.assertEqual([row["speaker"] for row in cues], ["男主", "男主", "老板", "店长"])
+
+    def test_replace_working_copy_from_library_overwrites_local_ocr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "src.storage.dialogue_transcript_store.get_data_storage_paths",
+                return_value={"data_dir": tmp},
+            ):
+                save_working_copy(
+                    "vid-reload",
+                    [{"start": 0.0, "end": 1.0, "text": "旧 OCR"}],
+                    origin="ocr",
+                    asr_source="vision/ocr/rapidocr-zh",
+                )
+                save_dialogue_transcript(
+                    "vid-reload",
+                    [{"start": 1.0, "end": 2.0, "text": "清洗后的 SRT", "speaker": "甲"}],
+                    library_path=tmp,
+                    video_path=os.path.join(tmp, "clip.mp4"),
+                    asr_source="srt",
+                )
+                # ensure_working_copy must keep the old page copy.
+                again = ensure_working_copy("vid-reload")
+                self.assertEqual(again["cues"][0]["text"], "旧 OCR")
+
+                replaced = replace_working_copy_from_library("vid-reload")
+                self.assertFalse(replaced.get("library_empty"))
+                self.assertEqual(replaced["origin"], "library")
+                self.assertEqual(replaced["cues"][0]["text"], "清洗后的 SRT")
+                self.assertEqual(load_working_copy("vid-reload")["cues"][0]["text"], "清洗后的 SRT")
+                # Library row unchanged.
+                self.assertEqual(
+                    load_dialogue_transcript("vid-reload")["segments"][0]["text"],
+                    "清洗后的 SRT",
+                )
+
+                empty = replace_working_copy_from_library("vid-missing-lib")
+                self.assertTrue(empty.get("library_empty"))
 
 
 if __name__ == "__main__":

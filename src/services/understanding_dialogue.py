@@ -120,6 +120,42 @@ def replace_working_copy_from_extraction(
     )
 
 
+def replace_working_copy_from_library(
+    video_id: str,
+    *,
+    video_path: str = "",
+    library_path: str = "",
+    config=None,
+) -> dict[str, Any]:
+    """Overwrite the page copy from the subtitle library (SRT import / OCR index)."""
+    vid = str(video_id or "").strip()
+    if not vid:
+        return {"present": False, "cues": [], "origin": "", "video_id": "", "library_empty": True}
+    from src.storage.dialogue_transcript_store import load_dialogue_transcript
+
+    record = load_dialogue_transcript(vid, config=config) or {}
+    segments = list(record.get("segments") or [])
+    if not segments:
+        return {
+            "present": False,
+            "cues": [],
+            "origin": "",
+            "video_id": vid,
+            "library_empty": True,
+        }
+    saved = save_working_copy(
+        vid,
+        segments,
+        origin="library",
+        video_path=str(record.get("video_path") or video_path or ""),
+        library_path=str(record.get("library_path") or library_path or ""),
+        asr_source=str(record.get("asr_source") or ""),
+        edited_by_user=False,
+        config=config,
+    )
+    return {**saved, "present": True, "library_empty": False}
+
+
 def ensure_working_copy(
     video_id: str,
     *,

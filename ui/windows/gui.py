@@ -516,6 +516,10 @@ class MainWindow(
             )
         if hasattr(self.understanding_page, "btn_extract_asr"):
             self.understanding_page.btn_extract_asr.clicked.connect(self.extract_current_video_asr)
+        if hasattr(self.understanding_page, "btn_reload_dialogue_from_library"):
+            self.understanding_page.btn_reload_dialogue_from_library.clicked.connect(
+                self.reload_understanding_dialogue_from_library
+            )
         if hasattr(self.understanding_page, "btn_dialogue_mode_ocr"):
             self.understanding_page.btn_dialogue_mode_ocr.toggled.connect(self._sync_dialogue_extract_label)
         if hasattr(self.understanding_page, "btn_dialogue_mode_asr"):

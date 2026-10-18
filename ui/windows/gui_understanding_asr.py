@@ -373,6 +373,67 @@ class UnderstandingAsrGuiMixin:
             ),
         )
 
+    def reload_understanding_dialogue_from_library(self) -> None:
+        """Replace this page's dialogue copy with cues from the subtitle library."""
+        page = getattr(self, "understanding_page", None)
+        video_id = self._selected_understanding_video_id()
+        if not video_id:
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get("understanding_video_select_hint", "Select an indexed video."),
+                kind="warning",
+            )
+            return
+        if self._asr_job_running() or (
+            getattr(self, "understanding_controller", None)
+            and self.understanding_controller.is_running()
+        ):
+            return
+        from src.services.understanding_dialogue import load_working_copy
+
+        existing = load_working_copy(video_id, config=load_config()) if video_id else None
+        if list((existing or {}).get("cues") or []):
+            if not self.show_confirm_dialog(
+                self.texts.get("confirm_title", "Confirm"),
+                self.texts.get(
+                    "understanding_dialogue_reload_from_library_confirm",
+                    "Replace this page’s dialogue with the subtitle library? Edits here will be lost; the library stays unchanged.",
+                ),
+            ):
+                return
+        from src.services.understanding_dialogue import replace_working_copy_from_library
+
+        context = getattr(self, "_understanding_video_context", None) or {}
+        result = replace_working_copy_from_library(
+            video_id,
+            video_path=str(context.get("video_path") or ""),
+            library_path=str(context.get("library_path") or ""),
+            config=load_config(),
+        )
+        if result.get("library_empty"):
+            self.show_info_dialog(
+                self.texts.get("warning_title", "Warning"),
+                self.texts.get(
+                    "understanding_dialogue_library_empty",
+                    "No subtitles for this video in the subtitle library yet.",
+                ),
+                kind="warning",
+            )
+            return
+        count = len(list(result.get("cues") or []))
+        message = self.texts.get(
+            "understanding_dialogue_reload_from_library_done",
+            "Loaded {count} cues from the subtitle library.",
+        ).format(count=count)
+        if page is not None:
+            page.lbl_status.setText(message)
+            if hasattr(page, "dialogue_status"):
+                page.dialogue_status.setText(message)
+        if hasattr(self, "_refresh_understanding_dialogue_step"):
+            self._refresh_understanding_dialogue_step()
+        if hasattr(self, "_sync_asr_extract_button"):
+            self._sync_asr_extract_button()
+
     def _extract_current_video_ocr(self):
         from src.services.subtitle_index_service import ensure_subtitle_ocr_ready
         from src.utils import has_ffmpeg
@@ -445,6 +506,8 @@ class UnderstandingAsrGuiMixin:
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
         self._set_dialogue_mode_enabled(False)
+        if hasattr(page, "btn_reload_dialogue_from_library"):
+            page.btn_reload_dialogue_from_library.setEnabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
@@ -663,6 +726,8 @@ class UnderstandingAsrGuiMixin:
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
         self._set_dialogue_mode_enabled(False)
+        if hasattr(page, "btn_reload_dialogue_from_library"):
+            page.btn_reload_dialogue_from_library.setEnabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
@@ -779,6 +844,8 @@ class UnderstandingAsrGuiMixin:
         )
         page.btn_extract_asr.setEnabled(can)
         self._set_dialogue_mode_enabled(not running)
+        if hasattr(page, "btn_reload_dialogue_from_library"):
+            page.btn_reload_dialogue_from_library.setEnabled(can)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(can and self._current_video_has_recap_dialogue())
         if hasattr(page, "btn_rename_speakers"):
@@ -879,6 +946,8 @@ class UnderstandingAsrGuiMixin:
         if hasattr(page, "btn_extract_asr"):
             page.btn_extract_asr.setEnabled(False)
         self._set_dialogue_mode_enabled(False)
+        if hasattr(page, "btn_reload_dialogue_from_library"):
+            page.btn_reload_dialogue_from_library.setEnabled(False)
         if hasattr(page, "btn_cluster_speakers"):
             page.btn_cluster_speakers.setEnabled(False)
         if hasattr(page, "btn_rename_speakers"):
