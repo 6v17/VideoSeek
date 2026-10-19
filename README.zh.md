@@ -19,7 +19,7 @@
 
 ---
 
-## Features
+## 功能
 
 - **文字与图片搜索** — 自然语言或参考图找相似镜头时间段  
 - **硬字幕 OCR** — 按画面字幕关键词定位台词  
@@ -29,7 +29,7 @@
 
 > 可选：视频理解、标签搜索、多种 CLIP 系模型、实验性解说剪辑等。**主路径：同步 → 搜索 → 导出。**
 
-## Use cases
+## 适用场景
 
 | 你的情况 | 你想… |
 |----------|--------|
@@ -37,14 +37,14 @@
 | 记得台词或硬字幕 | OCR 后按关键词跳到时间点 |
 | 剪辑工作流 | 粗定位后进剪映 / PR / 达芬奇 |
 
-## Quick start（安装包）
+## 快速开始（安装包）
 
 1. 从 **[lv17.top](https://www.lv17.top/)** 或 [Releases](https://github.com/6v17/VideoSeek/releases) 下载  
 2. 首次启动按提示 **导入运行资源**（模型、FFmpeg；需要字幕时再导入 OCR）  
 3. 侧边栏 **视频库** → 添加文件夹 → 勾选视频 → **同步选中视频**  
 4. **搜索** → 输入查询 → 预览 → 导出  
 
-## Quick start（源码）
+## 快速开始（源码）
 
 推荐 **Windows 10/11**。其它系统见 [`docs/quickstart.md`](docs/quickstart.md)。
 
@@ -69,23 +69,23 @@ conda activate VideoSeek
 python import_runtime_resources.py openai-clip.zip ffmpeg.exe
 ```
 
-## Documentation
+## 文档
 
 - [使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) — 安装包图文上手  
 - [`docs/quickstart.md`](docs/quickstart.md) — 源码安装与排障  
 - [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API  
 - [`docs/architecture.md`](docs/architecture.md) — 架构（开发者）  
 
-## Community
+## 交流
 
 - QQ 群：**1033551438**  
 - [GitHub Issues](https://github.com/6v17/VideoSeek/issues) — Bug、源码构建、Agent API  
 
-## License
+## 许可证
 
 [AGPL-3.0](LICENSE) © 2026 [6v17](https://github.com/6v17)
 
-## Support
+## 支持
 
 <p align="center">
   <img src="docs/assets/支持我.png" alt="支持我" width="360">
