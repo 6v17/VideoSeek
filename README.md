@@ -1,110 +1,92 @@
 # VideoSeek
 
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-brightgreen)](https://www.lv17.top/)
+[![Release](https://img.shields.io/github/v/release/6v17/VideoSeek?include_prereleases)](https://github.com/6v17/VideoSeek/releases)
+
 [中文说明](./README.zh.md) | **English**
 
-**Search a local video library by a sentence, tags, a screenshot, or a line of dialogue. Preview the hit, then export.**  
-Indexing and retrieval run on your machine (ONNX + Lance + FFmpeg); your media files are not uploaded.
+Search a local video library by **text or screenshot**, with **hard-subtitle OCR**; preview hits and export MP4, Jianying, or NLE timelines.  
+Indexing runs on your machine (ONNX · Lance · FFmpeg); **your media is not uploaded**.
 
-> Personal open-source utility. **Windows-first**; installer and from-source builds share the same UI.  
-> **Free forever.** Don’t pay for resale or “paid install” copies — get it from [GitHub](https://github.com/6v17/VideoSeek) / [the site](https://www.lv17.top/).
+> **Free forever.** Do not pay for resale or “paid install” copies — get it from [GitHub](https://github.com/6v17/VideoSeek) / [the site](https://www.lv17.top/).
+
+[Download](https://www.lv17.top/) · [Releases](https://github.com/6v17/VideoSeek/releases) · [User guide (ZH)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) · QQ `1033551438`
+
+<p align="center">
+  <img src="docs/assets/图搜视频.png" alt="VideoSeek search UI" width="800">
+</p>
+
+---
 
 ## Features
 
-### Core (available after you **sync a library**)
+- **Text & image search** — Natural language or a reference image to find similar shot time ranges  
+- **Hard-subtitle OCR** — Keyword search over on-screen dialogue  
+- **Libraries & scope** — Multiple libraries, selected videos, search presets  
+- **Preview & export** — Timeline preview; MP4; Jianying draft / Premiere XML / DaVinci FCPXML  
+- **Local-first** — Data stays on disk; optional LAN search and localhost Agent API  
 
-| Feature | Description |
-|---------|-------------|
-| **Local libraries** | Add folders, sync to extract frames and build embeddings |
-| **Text search** | Describe a scene; get time ranges in indexed videos, per frame or aggregated into chunks |
-| **Image / screenshot search** | Find similar shots from a reference or cropped frame. One of: frame (default), best per video, deep search, chunk |
-| **Hard-subtitle search** | OCR on-screen subtitles, then keyword search by time; exact match, or fuzzy (**complete query spans first, then scatter hit-rate**, with highlighting) |
-| **Scope & presets** | All libraries, selected libraries/videos; Compose search can save text plus reference images as a preset |
-| **Preview & export** | Timeline preview and mp4 clips. A shot basket can also export a Jianying draft, Premiere XML, or DaVinci FCPXML. The installer includes the Jianying export dependency |
+> Optional: video understanding, tag search, multiple CLIP-family models, experimental recap cuts, and more. **Main path: sync → search → export.**
 
-### Optional
+## Use cases
 
-| Feature | Description |
-|---------|-------------|
-| **Video understanding** | Desktop-only optional: per-chunk captions + whole-video summary; **recap cuts** (plan → match shots → captions); local **CAM++** speaker clustering (`resources/asr/campplus.*`) |
-| **Tag search** | After understanding has tagged shots, filter by combinations such as “blue hair” or “red-and-white outfit” |
-| **Vision models** | openai-clip, chinese-clip, or siglip2, each in a base and a large pack; switching models means re-syncing that library |
-| **LAN sharing** | One machine indexes as the server; other machines search as clients. Media stays on the server |
-| **Localhost Agent API** | HTTP on `127.0.0.1`: semantic, subtitle, and tag search; list libraries/videos; export clips or a timeline (see `docs/for-agents.md`; no understanding endpoints) |
-| **Video download** | Resolve page links, download into a local folder, then sync like a normal library |
-| **Optional plugins** | Load extension pages before startup via `VIDEOSEEK_PLUGINS` or `profile/plugins.json` (nav / package kinds / i18n). The open-source tree ships no third-party plugin code. |
+| You have… | You want… |
+|-----------|-----------|
+| Large local or NAS libraries | Find shots by semantics, not filenames |
+| Dialogue or hard subs you remember | Jump to timestamps after OCR keyword search |
+| An editing workflow | Rough-locate clips, then open Jianying / PR / DaVinci |
 
-## Who is it for?
+## Quick start (installer)
 
-- Large local or NAS media folders — find **semantically similar shots**, not filenames
-- **Rough-cut prep** before editing in a NLE
-- **Local models** plus optional HTTP access for Cursor / other agents
+1. Download from **[lv17.top](https://www.lv17.top/)** or [Releases](https://github.com/6v17/VideoSeek/releases)  
+2. On first launch, **import runtime assets** when prompted (models, FFmpeg; OCR pack if you need subtitles)  
+3. Sidebar **Local Library** → add a folder → select videos → **Sync selected**  
+4. **Search** → query → preview → export  
 
-## Screenshots
+## Quick start (from source)
 
-![搜索界面](docs/assets/图搜视频.png)
-
-## Download
-
-Prefer not to manage Python? Get the **installer** from **[lv17.top](https://www.lv17.top/)**. On first launch, import **runtime assets** (models, FFmpeg) as prompted.
-
-## Minimal workflow
-
-1. **Runtime assets** — First-launch prompts, or **Settings** → import models and FFmpeg.
-2. **Add a library** — Sidebar **Local Library** → **Videos** tab → add a folder.
-3. **Sync selected** — Check videos → **Sync selected**; wait for indexing.
-4. **Search** — Sidebar **Search** → text or image query.
-
-Video understanding, subtitle extraction, and the Agent API are optional — **sync a library first** (subtitle search also needs the OCR pack and extraction under the **Subtitles** tab).
-
-Illustrated walkthrough (Chinese): **[User guide (Feishu)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)**.
-
-## Community
-
-- **User guide (ZH)**: [Feishu doc](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)
-- **QQ group**: 1033551438
-- **GitHub Issues** — especially for source builds and the Agent API
-
-## From source
-
-**Windows 10/11 recommended.** Linux / macOS: adjust ONNX runtime (see `docs/quickstart.md`).
+**Windows 10/11** recommended. Other OS: see [`docs/quickstart.md`](docs/quickstart.md).
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-Or Conda: `conda env create -f environment.yml` → `conda activate VideoSeek`.
+```bash
+conda env create -f environment.yml
+conda activate VideoSeek
+```
 
-Missing runtime assets (import in-app for both installer and source):
+| Missing | Action |
+|---------|--------|
+| Models / FFmpeg | In-app import, [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA), or [models release](https://github.com/6v17/VideoSeek/releases/tag/models) |
+| VLC (Windows source only) | [vlc_lib release](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) → extract at repo root |
 
-| Missing | Fix |
-|---------|-----|
-| Models, FFmpeg | In-app prompts, or [123 cloud zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **Import and Parse**; or download model zips and `ffmpeg.exe` from [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models), then import |
-| VLC (Windows source only) | Download `vlc_lib.zip` from [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) and extract at project root |
-
-Fallback: if the model zip and `ffmpeg.exe` are already on disk, an agent can close VideoSeek, download [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py), and run this. No git checkout is required; it writes the installed app's `%LOCALAPPDATA%\VideoSeek`:
+Fallback: if the model zip and `ffmpeg.exe` are already on disk, close VideoSeek, download [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py), and run (no git checkout; writes `%LOCALAPPDATA%\VideoSeek`):
 
 ```bat
 python import_runtime_resources.py openai-clip.zip ffmpeg.exe
 ```
 
-See **`docs/quickstart.md`** for troubleshooting and tests.
+## Documentation
 
-## Docs
+- [User guide (ZH)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) — illustrated installer walkthrough  
+- [`docs/quickstart.md`](docs/quickstart.md) — from-source setup and troubleshooting  
+- [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API  
+- [`docs/architecture.md`](docs/architecture.md) — architecture (developers)  
 
-| Doc | Topic |
-|-----|--------|
-| [User guide (Feishu, ZH)](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) | Illustrated setup for installer users |
-| `docs/quickstart.md` | From-source setup, troubleshooting, tests |
-| `docs/for-agents.md` | Localhost Agent API |
-| `docs/architecture.md` | Architecture (developers) |
+## Community
+
+- QQ group: **1033551438**  
+- [GitHub Issues](https://github.com/6v17/VideoSeek/issues) — bugs, source builds, Agent API  
 
 ## License
 
-Copyright (c) 2026 [6v17](https://github.com/6v17)
+[AGPL-3.0](LICENSE) © 2026 [6v17](https://github.com/6v17)
 
-Licensed under [AGPL-3.0](LICENSE) (GNU Affero General Public License v3.0).
+## Support
 
-## Thanks for your support
-
-![Support](docs/assets/支持我.png)
+<p align="center">
+  <img src="docs/assets/支持我.png" alt="Support" width="360">
+</p>

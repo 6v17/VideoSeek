@@ -1,110 +1,92 @@
 # VideoSeek
 
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-brightgreen)](https://www.lv17.top/)
+[![Release](https://img.shields.io/github/v/release/6v17/VideoSeek?include_prereleases)](https://github.com/6v17/VideoSeek/releases)
+
 **中文** | [English](./README.md)
 
-**本地视频素材库：用一句话、一组标签、一张截图或一句台词找片段时间，预览后导出。**  
-索引与检索在本机完成（ONNX + Lance + FFmpeg），不上传你的视频文件。
+本地视频语义检索：用**文字或截图**定位镜头，支持**硬字幕 OCR**，预览后导出 MP4 / 剪映 / NLE。  
+本机索引（ONNX · Lance · FFmpeg），**不上传**素材。
 
-> 个人开源小工具，Windows 为主；安装包用户与源码用户共用同一套 UI。  
 > **永久免费。** 勿信收费倒卖或付费代装；请从 [GitHub](https://github.com/6v17/VideoSeek) / [官网](https://www.lv17.top/) 获取。
 
-## 功能一览
+[官网下载](https://www.lv17.top/) · [Releases](https://github.com/6v17/VideoSeek/releases) · [使用教程](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) · QQ `1033551438`
 
-### 核心（做完「同步视频库」即可用）
+<p align="center">
+  <img src="docs/assets/图搜视频.png" alt="VideoSeek 搜索界面" width="800">
+</p>
 
-| 功能 | 说明 |
-|------|------|
-| **本地视频库** | 添加文件夹为库，同步后抽帧并向量化 |
-| **文字搜索** | 输入描述，在已索引视频里找相似画面的时间范围；可按帧或按片段聚合 |
-| **图片 / 截图搜索** | 用参考图或裁剪截图找相似镜头。四选一：帧级（默认）、视频择优、深入搜索、片段 |
-| **硬字幕搜索** | 对库内视频提取画面字幕（OCR）后，按关键词检索台词时间点；精确匹配，或模糊匹配（**优先完整子集命中，再比散落命中**，结果高亮） |
-| **搜索范围** | 全库、指定库、指定视频；组合搜可把文字和参考图存成搜索预设 |
-| **预览与导出** | 时间轴预览，导出 mp4。镜头篮可再导出剪映草稿、Premiere XML 或达芬奇 FCPXML；安装包已带剪映导出依赖 |
+---
 
-### 可选扩展
+## Features
 
-| 功能 | 说明 |
-|------|------|
-| **视频理解** | 桌面端可选：按语义 chunk 生成画面描述与整片总结；可做**影视解说剪辑**（规划 → 选镜 → 铺字幕），并对白用本地 **CAM++** 聚声线（权重在 `resources/asr/campplus.*`） |
-| **标签搜索** | 理解页打过标签之后，用「蓝发」「红白服饰」这类标签组合筛镜头 |
-| **画面模型** | openai-clip / chinese-clip / siglip2，各有 base 与 large；换模型后需对该库重新同步 |
-| **局域网协作** | 一台电脑做服务机建索引，其它机器作为用户机搜索，素材不用拷到每台电脑 |
-| **本机 Agent API** | `127.0.0.1` HTTP：语义/字幕/标签搜索、列库与视频、导出片段或时间线（见 `docs/for-agents.md`；不含视频理解） |
-| **视频下载** | 从网页链接解析并下载到本地文件夹，再按普通视频库同步索引 |
-| **可选插件** | 启动前可通过 `VIDEOSEEK_PLUGINS` / `profile/plugins.json`，或同级私有插件目录 / `pip install` 加载扩展页。开源本体不含第三方插件代码 |
+- **文字与图片搜索** — 自然语言或参考图找相似镜头时间段  
+- **硬字幕 OCR** — 按画面字幕关键词定位台词  
+- **库与范围** — 多库、指定视频、搜索预设  
+- **预览与导出** — 时间轴预览；MP4；剪映草稿 / Premiere XML / 达芬奇 FCPXML  
+- **本地优先** — 数据在本机；可选局域网检索、localhost Agent API  
 
-## 适合谁
+> 可选：视频理解、标签搜索、多种 CLIP 系模型、实验性解说剪辑等。**主路径：同步 → 搜索 → 导出。**
 
-- 硬盘 / NAS 里堆了大量素材，想**按画面语义找片段**，而不是逐个文件翻
-- 剪辑前做**粗定位**，再进 NLE 精剪
-- 希望**本地跑模型**，并可选让 Cursor / 其它 Agent 通过 HTTP 调搜索
+## Use cases
 
-## 界面预览
+| 你的情况 | 你想… |
+|----------|--------|
+| 大量本地 / NAS 视频 | 按画面语义找片段，而不是翻文件名 |
+| 记得台词或硬字幕 | OCR 后按关键词跳到时间点 |
+| 剪辑工作流 | 粗定位后进剪映 / PR / 达芬奇 |
 
-![搜索界面](docs/assets/图搜视频.png)
+## Quick start（安装包）
 
-## 下载
+1. 从 **[lv17.top](https://www.lv17.top/)** 或 [Releases](https://github.com/6v17/VideoSeek/releases) 下载  
+2. 首次启动按提示 **导入运行资源**（模型、FFmpeg；需要字幕时再导入 OCR）  
+3. 侧边栏 **视频库** → 添加文件夹 → 勾选视频 → **同步选中视频**  
+4. **搜索** → 输入查询 → 预览 → 导出  
 
-不想自己配 Python / 依赖？去 **[lv17.top](https://www.lv17.top/)** 下载安装包。首次启动按应用内提示下载并 **导入运行资源**（模型、FFmpeg 等）。
+## Quick start（源码）
 
-## 最小使用步骤
-
-1. **配置运行资源** — 首次启动按提示操作，或在 **设置** 中下载并 **导入** 模型、FFmpeg 等。
-2. **添加视频库** — 侧边栏 **视频库** → **视频库** Tab → 添加本地文件夹。
-3. **同步选中视频** — 勾选要处理的视频 → **同步选中视频**，等待抽帧与向量化完成。
-4. **搜索** — 侧边栏 **搜索** → 文字或图片检索。
-
-视频理解、硬字幕提取、Agent API 等为可选功能，**需先完成视频库同步**（字幕搜索还需导入 OCR，并在「字幕库」Tab 中提取字幕）。
-
-图文步骤见 **[使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)**。
-
-## 交流
-
-- **使用教程**：[飞书文档](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad)（导入资源、建库同步、文搜/图搜/字幕）
-- **QQ 群**：1033551438（安装、使用问题与反馈）
-- **GitHub Issues**：也欢迎在此提问（尤其源码 / Agent API）
-
-## 源码运行
-
-推荐 **Windows 10/11**。Linux / macOS 需自行调整 ONNX 运行时（见 `docs/quickstart.md`）。
+推荐 **Windows 10/11**。其它系统见 [`docs/quickstart.md`](docs/quickstart.md)。
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-也可用 Conda：`conda env create -f environment.yml` → `conda activate VideoSeek`。
-
-首次启动会提示缺运行资源（安装包与源码用户均需在应用内导入）：
+```bash
+conda env create -f environment.yml
+conda activate VideoSeek
+```
 
 | 缺什么 | 怎么办 |
 |--------|--------|
-| 模型、FFmpeg | 按应用内提示下载，或 [123 云盘 zip](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA) → **导入并解析**；也可从 [GitHub Releases — models](https://github.com/6v17/VideoSeek/releases/tag/models) 下载各模型 zip 与 `ffmpeg.exe` 后导入 |
-| VLC（仅 Windows 源码） | 从 [GitHub Releases — vlc_lib](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) 下载 `vlc_lib.zip`，解压到项目根目录 |
+| 模型 / FFmpeg | 应用内导入、[123 云盘](https://1858268090.share.123pan.cn/123pan/VFA7vd-vhJXA)，或 [models release](https://github.com/6v17/VideoSeek/releases/tag/models) |
+| VLC（仅 Windows 源码） | [vlc_lib release](https://github.com/6v17/VideoSeek/releases/tag/vlc_lib) → 解压到项目根目录 |
 
-备选：模型 zip 和 `ffmpeg.exe` 已经在本机、不想点导入弹窗时，agent 可关掉 VideoSeek，下载 [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py) 后执行。不需要克隆仓库，写入本机已安装的 `%LOCALAPPDATA%\VideoSeek`：
+备选：模型 zip 与 `ffmpeg.exe` 已在磁盘、且不想点导入弹窗时，先关闭 VideoSeek，下载 [import_runtime_resources.py](https://raw.githubusercontent.com/6v17/VideoSeek/master/scripts/import_runtime_resources.py) 后执行（无需克隆仓库，写入 `%LOCALAPPDATA%\VideoSeek`）：
 
 ```bat
 python import_runtime_resources.py openai-clip.zip ffmpeg.exe
 ```
 
-排障、手动摆模型、测试命令见 **`docs/quickstart.md`**。
+## Documentation
 
-## 文档
+- [使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) — 安装包图文上手  
+- [`docs/quickstart.md`](docs/quickstart.md) — 源码安装与排障  
+- [`docs/for-agents.md`](docs/for-agents.md) — localhost Agent API  
+- [`docs/architecture.md`](docs/architecture.md) — 架构（开发者）  
 
-| 文档 | 内容 |
-|------|------|
-| [使用教程（飞书）](https://ycnwd8tcjgtu.feishu.cn/docx/ZWkrdSqA6oJTOrxQ2XscxYtmnad) | 安装包用户图文上手（资源导入、视频库、字幕库、搜索） |
-| `docs/quickstart.md` | 源码安装细节、排障、测试 |
-| `docs/for-agents.md` | 本机 Agent API 字段与示例 |
-| `docs/architecture.md` | 模块与数据流（开发者向） |
+## Community
 
-## 许可证
+- QQ 群：**1033551438**  
+- [GitHub Issues](https://github.com/6v17/VideoSeek/issues) — Bug、源码构建、Agent API  
 
-Copyright (c) 2026 [6v17](https://github.com/6v17)
+## License
 
-采用 [AGPL-3.0](LICENSE)（GNU Affero General Public License v3.0）。
+[AGPL-3.0](LICENSE) © 2026 [6v17](https://github.com/6v17)
 
-## 感谢捐赠
+## Support
 
-![支持我](docs/assets/支持我.png)
+<p align="center">
+  <img src="docs/assets/支持我.png" alt="支持我" width="360">
+</p>
