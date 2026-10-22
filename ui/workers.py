@@ -1195,7 +1195,7 @@ class BundledRuntimeBootstrapWorker(QThread):
                 self.finished_signal.emit(dict(result))
                 return
             error = str(result.get("error") or result.get("skipped") or "bundled runtime import failed")
-            if result.get("skipped") in {"already_ready", "no_manifest"}:
+            if result.get("skipped") in {"nothing_to_import", "no_manifest"}:
                 self.finished_signal.emit(dict(result))
                 return
             self.error_signal.emit(error)

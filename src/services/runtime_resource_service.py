@@ -216,12 +216,16 @@ def import_selected_runtime_packages(model_root, selected_files, progress_callba
     return aggregate
 
 
-def import_runtime_resources(paths, config=None):
+def import_runtime_resources(paths, config=None, progress_callback=None):
     """Install local model zips and/or ``ffmpeg.exe`` into the app data layout.
 
     Uses the configured ``model_dir`` and ``ffmpeg_path`` when the user has
     changed them. Does not download files.
     """
+
+    def _report(percent: int, message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(int(percent), str(message or ""))
     from src.app.config import CONFIG_FILE, load_config
     from src.infra.ffmpeg_paths import install_ffmpeg_executable
 
@@ -255,14 +259,29 @@ def import_runtime_resources(paths, config=None):
     if not model_root:
         raise RuntimeError("model_dir is empty in config.json.")
 
+    zip_only = [path for path in package_files if path.lower().endswith(".zip")]
+    step_count = (1 if ffmpeg_files else 0) + len(zip_only)
+    step_index = 0
+
     ffmpeg_result = None
     if ffmpeg_files:
+        _report(max(5, int((step_index / max(1, step_count)) * 90)), "Copying ffmpeg.exe…")
         target_path = install_ffmpeg_executable(ffmpeg_files[0], config=current)
         ffmpeg_result = {"source": ffmpeg_files[0], "target_path": target_path}
+        step_index += 1
 
     packages = None
-    if any(path.lower().endswith(".zip") for path in package_files):
-        packages = import_selected_runtime_packages(model_root, package_files)
+    if zip_only:
+
+        def _zip_progress(percent: int, message: str) -> None:
+            base = max(5, int((step_index / max(1, step_count)) * 90))
+            span = max(1, int(90 / max(1, step_count)))
+            mapped = min(98, base + int(max(0, min(100, percent)) * span / 100))
+            _report(mapped, message)
+
+        packages = import_selected_runtime_packages(model_root, package_files, progress_callback=_zip_progress)
+        step_index += len(zip_only)
+    _report(100, "Runtime import finished")
 
     return {
         "config_file": CONFIG_FILE,

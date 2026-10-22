@@ -101,11 +101,37 @@ class RuntimeResourceController(QObject):
         worker = BundledRuntimeBootstrapWorker()
         self.worker = worker
 
+        def _localize_bundled_progress(text: str) -> str:
+            raw = str(text or "").strip()
+            if not raw:
+                return ""
+            exact = {
+                "Importing bundled runtime resources": "runtime_bundled_bootstrap_progress",
+                "Copying ffmpeg.exe…": "runtime_bundled_progress_ffmpeg",
+                "Runtime import finished": "runtime_bundled_bootstrap_done",
+                "Bundled runtime import finished": "runtime_bundled_bootstrap_done",
+            }
+            for en, key in exact.items():
+                if raw == en:
+                    return texts.get(key, raw)
+            if raw.startswith("Importing ") and raw.endswith(".zip"):
+                name = raw[len("Importing ") : -len(".zip")]
+                return texts.get("runtime_bundled_progress_zip", "Importing {name}…").format(name=name)
+            return raw
+
         def _emit_import_status(*, progress: int, text: str) -> None:
             snapshot = dict(get_runtime_resource_status())
             snapshot["bundled_import_in_progress"] = True
-            snapshot["bundled_import_progress"] = int(progress)
-            snapshot["bundled_import_text"] = str(text or "").strip() or texts.get(
+            snapshot["bundled_import_failed"] = False
+            progress_value = max(0, min(100, int(progress)))
+            snapshot["bundled_import_progress"] = progress_value
+            detail = _localize_bundled_progress(text)
+            if progress_value > 0:
+                detail = texts.get(
+                    "runtime_bundled_bootstrap_progress_with_pct",
+                    "{detail} ({progress}%)",
+                ).format(detail=detail or texts.get("runtime_bundled_bootstrap_progress", ""), progress=progress_value)
+            snapshot["bundled_import_text"] = detail or texts.get(
                 "runtime_bundled_bootstrap_progress",
                 "Importing bundled resources…",
             )
@@ -117,24 +143,39 @@ class RuntimeResourceController(QObject):
             payload = dict(result or {})
             release_finished_thread(self, "worker", worker)
             self._refresh_after_runtime_import()
-            final = get_runtime_resource_status()
+            final = dict(get_runtime_resource_status())
+            final["bundled_import_in_progress"] = False
+            final["bundled_import_failed"] = False
+            if payload.get("supplemental") and payload.get("ok"):
+                final["bundled_import_toast"] = texts.get(
+                    "runtime_bundled_supplemental_ok",
+                    "Missing bundled resources were added. Your active search model was not changed.",
+                )
             self.status_changed.emit(final)
-            if final.get("resources_ready"):
+            if final.get("resources_ready") or payload.get("ok"):
                 self.resources_ready.emit(payload)
+            toast = str(final.get("bundled_import_toast") or "").strip()
+            if toast and hasattr(self.parent_window, "show_info_dialog"):
+                self.parent_window.show_info_dialog(
+                    texts.get("runtime_bundled_supplemental_title", texts.get("success_title", "Done")),
+                    toast,
+                    kind="success",
+                )
 
         def _fail(message: str) -> None:
             from ui.threading_utils import release_finished_thread
+            from src.services.bundled_runtime_errors import format_bundled_import_error
 
             release_finished_thread(self, "worker", worker)
-            self.status_changed.emit(get_runtime_resource_status())
             texts_local = get_texts(self.parent_window.language)
+            formatted = format_bundled_import_error(str(message or ""), texts_local)
+            snapshot = dict(get_runtime_resource_status())
+            snapshot["bundled_import_in_progress"] = False
+            snapshot["bundled_import_failed"] = True
+            snapshot["bundled_import_error"] = formatted
+            self.status_changed.emit(snapshot)
             if hasattr(self.parent_window, "show_error_dialog"):
-                self.parent_window.show_error_dialog(
-                    texts_local.get(
-                        "runtime_bundled_bootstrap_failed",
-                        "Bundled resource import failed: {error}",
-                    ).format(error=str(message or "unknown error"))
-                )
+                self.parent_window.show_error_dialog(formatted)
 
         _emit_import_status(
             progress=0,

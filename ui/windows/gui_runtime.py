@@ -685,9 +685,19 @@ class RuntimeGuiMixin:
         banner_text = self.texts.get("runtime_banner_missing", "Missing runtime resources")
         action_text = self.texts.get("runtime_banner_open_import", "Go to import")
         importing = bool(status.get("bundled_import_in_progress"))
-        show_warn = importing or not bool(status.get("resources_ready"))
+        import_failed = bool(status.get("bundled_import_failed"))
+        show_warn = importing or import_failed or not bool(status.get("resources_ready"))
         banner_btn.setText(action_text)
-        if importing:
+        if import_failed:
+            banner_label.setText(
+                str(status.get("bundled_import_error") or "").strip()
+                or self.texts.get(
+                    "runtime_bundled_error_generic",
+                    "Bundled resource import failed.",
+                )
+            )
+            banner_btn.show()
+        elif importing:
             banner_label.setText(
                 str(status.get("bundled_import_text") or "").strip()
                 or self.texts.get(

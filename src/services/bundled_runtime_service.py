@@ -168,11 +168,42 @@ def bootstrap_bundled_runtime(
         save_config(config)
     ensure_runtime_resource_dirs()
 
-    _progress(5, "Importing bundled runtime resources")
+    from src.services.bundled_runtime_errors import check_disk_space_for_import
+
+    model_root = str(config.get("model_dir") or os.path.join(get_app_data_dir(), "models"))
+    space_error = check_disk_space_for_import(paths, target_dir=model_root)
+    if space_error:
+        return {
+            "ok": False,
+            "error": space_error,
+            "error_code": "disk_full",
+            "status": get_runtime_resource_status(),
+            "supplemental": bool(plan.get("supplemental")),
+        }
+
+    _progress(2, "Importing bundled runtime resources")
     try:
-        payload = import_runtime_resources(paths)
+        payload = import_runtime_resources(paths, progress_callback=_progress)
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "status": get_runtime_resource_status()}
+        return {
+            "ok": False,
+            "error": str(exc),
+            "status": get_runtime_resource_status(),
+            "supplemental": bool(plan.get("supplemental")),
+        }
+
+    package_errors = []
+    packages = payload.get("packages") if isinstance(payload.get("packages"), dict) else {}
+    if isinstance(packages, dict):
+        package_errors = [str(item) for item in (packages.get("errors") or []) if str(item).strip()]
+    if package_errors:
+        return {
+            "ok": False,
+            "error": "; ".join(package_errors[:4]),
+            "status": get_runtime_resource_status(),
+            "supplemental": bool(plan.get("supplemental")),
+            "partial": True,
+        }
 
     if plan.get("switch_active_profile") and str(plan.get("prefer_active_profile_id") or "").strip():
         _apply_prefer_active_profile(str(plan["prefer_active_profile_id"]))
