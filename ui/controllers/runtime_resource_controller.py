@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QEventLoop, QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from src.app.i18n import get_texts
@@ -32,7 +32,7 @@ class RuntimeResourceController(QObject):
             app.processEvents()
         dialog.exec()
 
-    def check_resources(self, show_dialog=True):
+    def check_resources(self, show_dialog=True, bootstrap_bundled=False):
         status = get_runtime_resource_status()
         # Config can lose profiles while ONNX packs remain on disk — rescan once.
         if not status.get("model_ready"):
@@ -78,8 +78,82 @@ class RuntimeResourceController(QObject):
         self.status_changed.emit(status)
         if status["resources_ready"]:
             return True
+        if bootstrap_bundled and self._bootstrap_bundled_blocking():
+            status = get_runtime_resource_status()
+            self.status_changed.emit(status)
+            if status["resources_ready"]:
+                self._refresh_after_runtime_import()
+                return True
         if show_dialog:
             self.show_missing_dialog(status)
+        return False
+
+    def _refresh_after_runtime_import(self):
+        parent = self.parent_window
+        if hasattr(parent, "_populate_model_profile_options"):
+            from src.app.config import load_config
+
+            parent._populate_model_profile_options(load_config())
+        if hasattr(parent, "_refresh_search_model_display"):
+            parent._refresh_search_model_display()
+        if hasattr(parent, "refresh_runtime_resource_ui"):
+            parent.refresh_runtime_resource_ui(sync_dialog=False)
+
+    def _bootstrap_bundled_blocking(self) -> bool:
+        from src.services.bundled_runtime_service import bundled_runtime_available
+
+        if not bundled_runtime_available():
+            return False
+        if self.worker and self.worker.isRunning():
+            return False
+
+        from ui.workers import BundledRuntimeBootstrapWorker
+
+        texts = get_texts(self.parent_window.language)
+        dialog = self._ensure_dialog()
+        dialog.set_progress_state(
+            0,
+            texts.get("runtime_bundled_bootstrap_starting", "Importing bundled resources…"),
+        )
+        dialog.show()
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+
+        loop = QEventLoop()
+        outcome: dict = {"ok": False}
+
+        def _finish(result=None):
+            payload = dict(result or {})
+            outcome["ok"] = bool(payload.get("ok"))
+            loop.quit()
+
+        worker = BundledRuntimeBootstrapWorker()
+        self.worker = worker
+        worker.progress_signal.connect(
+            lambda value, text: dialog.set_progress_state(
+                int(value),
+                str(text or texts.get("runtime_bundled_bootstrap_progress", "Importing bundled resources…")),
+            )
+        )
+        worker.finished_signal.connect(_finish)
+        worker.error_signal.connect(lambda message: _finish({"ok": False, "error": message}))
+        from ui.threading_utils import bind_thread_release, release_finished_thread
+
+        bind_thread_release(self, "worker", worker)
+        worker.start()
+        loop.exec()
+        worker.wait(5000)
+        release_finished_thread(self, "worker", worker)
+
+        status = get_runtime_resource_status()
+        if outcome.get("ok") and status.get("resources_ready"):
+            dialog.set_success_state(
+                get_runtime_resource_location_text(status=status, include_ffmpeg=True)
+            )
+            return True
+        if dialog.isVisible():
+            dialog.close()
         return False
 
     def get_status_snapshot(self):

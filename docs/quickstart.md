@@ -46,7 +46,8 @@ python import_runtime_resources.py --status
 - **群测：** `1.0.93-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.93-beta.1.zip`；**不要**写入公开 `version.json`。
 - **正式：** `1.0.93`（以 `app_meta.py` 为准）；打 tag `v1.0.93`；再更新 OSS `version.json`。
 - 比较规则：同基线时 `beta` **小于** 正式版（`1.0.93-beta.1` < `1.0.93`）。
-- 打包：本地 `.\scripts\build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选）。OSS 默认包；带克隆页用 `-WithClonePlugin`（读同级 `videoseek-plugin-clone`）。剪映导出依赖已打进包，无需再靠用户 `pip install`。
+- 打包：本地 `.\scripts\build_release.ps1`（先改好 `app_meta` 再打；`-Zip` 可选）。**Lite** 仅程序；**Full** 加 `-FullEdition`（把 `scripts/release/runtime/` 里的 `manifest.json` + 官方小档 `chinese-clip.zip` + `ffmpeg.exe` 打进 `runtime\`，首启自动导入到 `%LOCALAPPDATA%\VideoSeek`，默认 Chinese CLIP vit-base-patch16）。带克隆页用 `-WithClonePlugin`。字幕 OCR（RapidOCR）已在程序包内，Full 不必再塞 OCR 大 zip。
+- Agent 无界面导入：`VideoSeek.exe --bootstrap-runtime`（Full 安装目录旁有完整 `runtime\` 种子时）。
 - **CAM++：** 仓库已带 `resources/asr/campplus.onnx` + `.onnx.data`（解说对白声线聚类）；也可从桌面资源包 `cam++.zip` 导入。
 
 ---

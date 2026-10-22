@@ -556,8 +556,11 @@ class RuntimeGuiMixin:
             except Exception:
                 logger.exception("Runtime warmup ready callback failed")
 
-    def check_runtime_resources(self, show_dialog=True):
-        return self.runtime_resource_controller.check_resources(show_dialog=show_dialog)
+    def check_runtime_resources(self, show_dialog=True, bootstrap_bundled=False):
+        return self.runtime_resource_controller.check_resources(
+            show_dialog=show_dialog,
+            bootstrap_bundled=bootstrap_bundled,
+        )
 
     def refresh_runtime_resource_ui(self, *, sync_dialog=True):
         """Re-read disk/config status, refresh page banners, and optionally sync the import dialog."""

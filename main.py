@@ -15,6 +15,21 @@ if __name__ == "__main__":
 
         sys.exit(gpu_probe_cli_main())
 
+    if "--bootstrap-runtime" in sys.argv:
+        from src.storage.migration_runner import ensure_config_schema_v2_bootstrap
+
+        ensure_config_schema_v2_bootstrap()
+        from src.services.bundled_runtime_service import bootstrap_bundled_runtime
+
+        result = bootstrap_bundled_runtime()
+        if result.get("ok"):
+            sys.exit(0)
+        skipped = str(result.get("skipped") or "")
+        if skipped in {"already_ready", "no_manifest"}:
+            sys.exit(0 if skipped == "already_ready" else 2)
+        logger.error("Bundled runtime bootstrap failed: %s", result.get("error") or result)
+        sys.exit(1)
+
     from PySide6.QtCore import QEvent, QObject, Qt
     from PySide6.QtWidgets import QApplication
     from src.app.single_instance import SingleInstanceServer, try_activate_existing_instance

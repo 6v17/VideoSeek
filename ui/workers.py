@@ -1179,6 +1179,30 @@ class AboutFetchWorker(FetchWorkerBase):
         return get_about_payload(self.language)
 
 
+class BundledRuntimeBootstrapWorker(QThread):
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def run(self):
+        try:
+            from src.services.bundled_runtime_service import bootstrap_bundled_runtime
+
+            result = bootstrap_bundled_runtime(
+                progress_callback=lambda value, text: self.progress_signal.emit(int(value), str(text)),
+            )
+            if result.get("ok"):
+                self.finished_signal.emit(dict(result))
+                return
+            error = str(result.get("error") or result.get("skipped") or "bundled runtime import failed")
+            if result.get("skipped") in {"already_ready", "no_manifest"}:
+                self.finished_signal.emit(dict(result))
+                return
+            self.error_signal.emit(error)
+        except Exception as exc:
+            self.error_signal.emit(str(exc))
+
+
 class ResourceDownloadWorker(QThread):
     progress_signal = Signal(int, str)
     finished_signal = Signal(dict)

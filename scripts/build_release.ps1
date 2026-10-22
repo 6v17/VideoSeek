@@ -5,6 +5,7 @@
 #   .\scripts\build_release.ps1 -Clean
 #   .\scripts\build_release.ps1 -Zip
 #   .\scripts\build_release.ps1 -WithClonePlugin -Zip   # Pro: embed clone plugin
+#   .\scripts\build_release.ps1 -FullEdition -Zip       # Full: runtime\ manifest + seed zips
 #
 # Version source of truth: src\app\app_meta.py → "version"
 #   QQ soft-release: set "1.0.88-beta.1" before building; promote to "1.0.88" for stable.
@@ -22,6 +23,7 @@ param(
     [switch]$Clean,
     [switch]$Zip,
     [switch]$WithClonePlugin,
+    [switch]$FullEdition,
     [string]$Python = "",
     [string]$OutputDir = "dist",
     [string]$OutputFilename = "VideoSeek",
@@ -339,6 +341,25 @@ if (-not $PyarrowDll) {
     throw "Could not find pyarrow DLLs under $BundleDir. Lance search would fail at runtime."
 }
 
+if ($FullEdition) {
+    Write-Step "Embedding full-edition runtime seed (small-tier Chinese CLIP + FFmpeg)"
+    $RuntimeSeedSrc = Join-Path $RepoRoot "scripts\release\runtime"
+    $RuntimeDst = Join-Path $BundleDir "runtime"
+    Test-RequiredPath (Join-Path $RuntimeSeedSrc "manifest.json") "full edition manifest"
+    New-Item -ItemType Directory -Force -Path $RuntimeDst | Out-Null
+    Copy-Item -LiteralPath (Join-Path $RuntimeSeedSrc "manifest.json") -Destination (Join-Path $RuntimeDst "manifest.json") -Force
+    $RuntimeSeedNames = @("ffmpeg.exe", "chinese-clip.zip")
+    foreach ($seedName in $RuntimeSeedNames) {
+        $seedSrc = Join-Path $RuntimeSeedSrc $seedName
+        if (Test-Path -LiteralPath $seedSrc) {
+            Copy-Item -LiteralPath $seedSrc -Destination (Join-Path $RuntimeDst $seedName) -Force
+            Write-Host "  runtime\$seedName" -ForegroundColor Green
+        } else {
+            Write-Warning "Full edition seed missing: $seedSrc — copy official small-tier zip + ffmpeg.exe before shipping."
+        }
+    }
+}
+
 Write-Step "Build complete"
 $VersionStampPath = Join-Path $BundleDir "VERSION.txt"
 Set-Content -LiteralPath $VersionStampPath -Value $AppVersion -Encoding ASCII -NoNewline
@@ -348,10 +369,13 @@ Write-Host "Version:$AppVersion (also $VersionStampPath)" -ForegroundColor Green
 if ($WithClonePlugin) {
     Write-Host "Clone:  embedded (videoseek_plugin_clone)" -ForegroundColor Green
 }
+if ($FullEdition) {
+    Write-Host "Edition: full (runtime\ auto-import on first launch)" -ForegroundColor Green
+}
 
 if ($Zip) {
     Write-Step "Packaging zip"
-    $ZipSuffix = if ($WithClonePlugin) { "-clone" } else { "" }
+    $ZipSuffix = if ($WithClonePlugin) { "-clone" } elseif ($FullEdition) { "-full" } else { "" }
     $ZipName = "VideoSeek-$AppVersion$ZipSuffix.zip"
     $ZipPath = Join-Path $DistRoot $ZipName
     if (Test-Path -LiteralPath $ZipPath) {

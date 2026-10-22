@@ -90,6 +90,11 @@ def _is_standalone_app() -> bool:
 is_standalone_app = _is_standalone_app
 
 
+def get_bundled_runtime_dir() -> str:
+    """Optional full-edition seed folder beside the install root (``runtime\\``)."""
+    return resolve_windows_long_path(os.path.join(get_app_install_dir(), "runtime"))
+
+
 def get_app_install_dir() -> str:
     """Directory containing the app entrypoint (repo root in dev, exe dir when packaged)."""
     if _is_standalone_app():
