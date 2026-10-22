@@ -16,9 +16,9 @@ from ui.dialogs.html_links import ExternalLinkTextBrowser
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
 
-# Quiet easter egg: click the version line this many times within the window below.
-_EASTER_EGG_CLICKS = 7
-_EASTER_EGG_WINDOW_MS = 4000
+# Version label multi-tap opens the developer thank-you note.
+_VERSION_TAP_COUNT = 7
+_VERSION_TAP_WINDOW_MS = 4000
 
 
 class _ClickableVersionLabel(QLabel):
@@ -42,8 +42,8 @@ class AboutDialog(QDialog):
         self._texts = texts
         self._is_dark = bool(is_dark)
         self._language = language
-        self._egg_clicks = 0
-        self._egg_first_ms = 0
+        self._version_taps = 0
+        self._version_tap_first_ms = 0
 
         self.setWindowTitle(texts["about_title"])
         apply_dialog_size(
@@ -113,22 +113,22 @@ class AboutDialog(QDialog):
         from PySide6.QtCore import QDateTime
 
         now = int(QDateTime.currentMSecsSinceEpoch())
-        if self._egg_clicks == 0 or (now - self._egg_first_ms) > _EASTER_EGG_WINDOW_MS:
-            self._egg_clicks = 1
-            self._egg_first_ms = now
+        if self._version_taps == 0 or (now - self._version_tap_first_ms) > _VERSION_TAP_WINDOW_MS:
+            self._version_taps = 1
+            self._version_tap_first_ms = now
         else:
-            self._egg_clicks += 1
-        if self._egg_clicks < _EASTER_EGG_CLICKS:
+            self._version_taps += 1
+        if self._version_taps < _VERSION_TAP_COUNT:
             return
-        self._egg_clicks = 0
-        self._egg_first_ms = 0
-        title = self._texts.get("about_easter_egg_title", "Easter egg")
+        self._version_taps = 0
+        self._version_tap_first_ms = 0
+        title = self._texts.get("about_thanks_note_title", "A note for you")
         body = self._texts.get(
-            "about_easter_egg_body",
+            "about_thanks_note_body",
             "Thanks for finding this. VideoSeek was built with limited spare time, "
             "hoping to help people who dig through footage every day. It stays free forever.",
         )
-        self._version_status.setText(self._texts.get("about_easter_egg_hint", "🥚"))
+        self._version_status.setText(self._texts.get("about_thanks_note_hint", ""))
         AppMessageDialog(
             title,
             body,
