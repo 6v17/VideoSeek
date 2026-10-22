@@ -37,13 +37,28 @@ jobs:
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "ffmpeg-ci"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $tag = "autobuild-2026-10-22-13-06"
+          $name = "ffmpeg-N-127941-g303510f9d1-win64-gpl.zip"
+          $base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag"
           $zip = Join-Path $dest "ffmpeg.zip"
-          $uri = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-22-13-06/ffmpeg-N-127941-g303510f9d1-win64-gpl.zip"
-          curl.exe -L --retry 3 --retry-delay 2 -o $zip $uri
+          $sums = Join-Path $dest "checksums.sha256"
+
+          curl.exe -fL --retry 3 --retry-delay 2 -o $zip "$base/$name"
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg download failed (curl exit $LASTEXITCODE)" }
           if (-not (Test-Path -LiteralPath $zip)) { throw "ffmpeg zip download missing" }
           $sizeMb = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
           if ($sizeMb -lt 50) { throw "ffmpeg zip too small (${sizeMb} MB) — download likely incomplete" }
           Write-Host "Downloaded ffmpeg zip: ${sizeMb} MB"
+
+          curl.exe -fsL --retry 3 --retry-delay 2 -o $sums "$base/checksums.sha256"
+          if ($LASTEXITCODE -ne 0) { throw "checksum list download failed (curl exit $LASTEXITCODE)" }
+          $match = Select-String -Path $sums -Pattern ([regex]::Escape($name)) | Select-Object -First 1
+          if (-not $match) { throw "checksum entry missing for $name" }
+          $expected = (($match.Line -split '\s+')[0]).Trim().ToUpperInvariant()
+          $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) { throw "ffmpeg sha256 mismatch: got $actual want $expected" }
+          Write-Host "ffmpeg sha256 ok: $actual"
+
           Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
           $bin = Get-ChildItem -Path $dest -Recurse -Directory -Filter bin |
             Where-Object { Test-Path (Join-Path $_.FullName "ffmpeg.exe") } |
