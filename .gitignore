@@ -34,6 +34,9 @@ vlc_lib/
 scripts/release/runtime/*
 !scripts/release/runtime/manifest.json
 
+# Private release packaging (Nuitka/Inno one-shot). Keep a local copy; do not publish.
+scripts/build_release.ps1
+
 # Build / packaging
 dist/
 build/

@@ -46,14 +46,8 @@ python import_runtime_resources.py --status
 - **群测：** `1.0.93-beta.1`（同一基线可 `.2`…）；包名 `VideoSeek-1.0.93-beta.1.zip`；**不要**写入公开 `version.json`。
 - **正式：** `1.0.93`（以 `app_meta.py` 为准）；打 tag `v1.0.93`；再更新 OSS `version.json`。
 - 比较规则：同基线时 `beta` **小于** 正式版（`1.0.93-beta.1` < `1.0.93`）。
-- 打包（**Nuitka 一次 → 两个 Inno 安装包**）：先改好 `app_meta`，种子放齐 `scripts/release/runtime/`（`manifest.json`、小档 `chinese-clip.zip`、`ffmpeg.exe`、`rapidocr-zh-understanding.zip`），再：
-  ```powershell
-  .\scripts\build_release.ps1 -Zip -Inno -Python "…\envs\VideoSeek\python.exe"
-  ```
-  - **纯安装包**：`dist\VideoSeek-{ver}-Setup.exe`（无 `runtime\`，装完需自行导入资源）
-  - **完整包安装包**：`dist\VideoSeek-{ver}-Full-Setup.exe`（带 `runtime\`，首启自动导入）
-  - 中间目录：`dist\package-pure\`、`dist\package-full\`；可选 zip 镜像。`-Inno` 会在 `dist\inno\` **临时生成** `.iss`（不进 git）。已编过可用 `-SkipNuitka` 只重打安装包。带克隆页加 `-WithClonePlugin`。
-- 完整包首启：主窗口先显示，再在后台导入 `runtime\`（顶栏进度，不挡界面）。**老用户**只补缺包，**不改当前检索模型**。Agent：`VideoSeek.exe --bootstrap-runtime`。
+- **安装包**：请从 [GitHub Releases](https://github.com/6v17/VideoSeek/releases) 下载官方包。完整打包脚本（Nuitka / Inno）**不公开**，由维护者本地使用。
+- 完整版安装后首启：主窗口先显示，再在后台导入自带 `runtime\`（顶栏进度，不挡界面）。**老用户**只补缺包，**不改当前检索模型**。Agent：`VideoSeek.exe --bootstrap-runtime`。
 - **CAM++：** 仓库已带 `resources/asr/campplus.onnx` + `.onnx.data`（解说对白声线聚类）；也可从桌面资源包 `cam++.zip` 导入。
 
 ---
