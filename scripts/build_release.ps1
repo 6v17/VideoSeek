@@ -342,13 +342,13 @@ if (-not $PyarrowDll) {
 }
 
 if ($FullEdition) {
-    Write-Step "Embedding full-edition runtime seed (small-tier Chinese CLIP + FFmpeg)"
+    Write-Step "Embedding full-edition runtime seed (Chinese CLIP small + FFmpeg + RapidOCR)"
     $RuntimeSeedSrc = Join-Path $RepoRoot "scripts\release\runtime"
     $RuntimeDst = Join-Path $BundleDir "runtime"
     Test-RequiredPath (Join-Path $RuntimeSeedSrc "manifest.json") "full edition manifest"
     New-Item -ItemType Directory -Force -Path $RuntimeDst | Out-Null
     Copy-Item -LiteralPath (Join-Path $RuntimeSeedSrc "manifest.json") -Destination (Join-Path $RuntimeDst "manifest.json") -Force
-    $RuntimeSeedNames = @("ffmpeg.exe", "chinese-clip.zip")
+    $RuntimeSeedNames = @("ffmpeg.exe", "chinese-clip.zip", "rapidocr-zh-understanding.zip")
     foreach ($seedName in $RuntimeSeedNames) {
         $seedSrc = Join-Path $RuntimeSeedSrc $seedName
         if (Test-Path -LiteralPath $seedSrc) {
