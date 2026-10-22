@@ -2,8 +2,6 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-
 from src.core.understanding.components.remote_vl_caption import probe_remote_vl_vision
 
 

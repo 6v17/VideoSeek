@@ -129,28 +129,6 @@ class BundledRuntimeServiceTests(unittest.TestCase):
             os.makedirs(os.path.dirname(ffmpeg_target), exist_ok=True)
             Path(ffmpeg_target).write_bytes(b"ffmpeg")
 
-            config = {
-                "schema_version": 2,
-                "model_dir": model_root,
-                "ffmpeg_path": ffmpeg_target,
-                "models": {
-                    "active_profile": "clip_onnx_vit-base-patch32",
-                    "profiles": [
-                        {
-                            "id": "clip_onnx_vit-base-patch32",
-                            "provider": "clip_onnx",
-                            "enabled": True,
-                            "runtime": {"model_dir": model_root, "model_variant": "vit-base-patch32"},
-                            "files": {
-                                "visual_model": "clip_visual.onnx",
-                                "text_model": "clip_text.onnx",
-                                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
-                            },
-                        }
-                    ],
-                },
-            }
-
             ready_status = {
                 "resources_ready": True,
                 "model_ready": True,

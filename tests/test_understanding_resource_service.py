@@ -4,7 +4,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.app.config import DEFAULT_UNDERSTANDING_CONFIG
 from src.services import understanding_import_service, understanding_resource_service
