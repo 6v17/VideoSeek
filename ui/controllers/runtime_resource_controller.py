@@ -87,12 +87,9 @@ class RuntimeResourceController(QObject):
         """Import Full-edition ``runtime\\`` seed in the background (does not block the main window)."""
         if self._bundled_bootstrap_started:
             return bool(self.worker and self.worker.isRunning())
-        status = get_runtime_resource_status()
-        if status.get("resources_ready"):
-            return False
-        from src.services.bundled_runtime_service import bundled_runtime_available
+        from src.services.bundled_runtime_service import has_pending_bundled_import
 
-        if not bundled_runtime_available():
+        if not has_pending_bundled_import():
             return False
         if self.worker and self.worker.isRunning():
             return True

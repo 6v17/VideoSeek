@@ -100,6 +100,80 @@ class BundledRuntimeServiceTests(unittest.TestCase):
             model_manifest = Path(app_data, "models", "chinese-clip", "vit-base-patch16", "model_manifest.json")
             self.assertTrue(model_manifest.is_file())
 
+    def test_plan_supplemental_imports_missing_chinese_clip_without_switching_profile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_dir = os.path.join(temp_dir, "runtime")
+            app_data = os.path.join(temp_dir, "VideoSeek")
+            model_root = os.path.join(app_data, "models")
+            os.makedirs(runtime_dir)
+            Path(runtime_dir, "ffmpeg.exe").write_bytes(b"ffmpeg")
+            Path(runtime_dir, "chinese-clip.zip").write_bytes(b"zip")
+            Path(runtime_dir, "rapidocr-zh-understanding.zip").write_bytes(b"ocr")
+            with open(os.path.join(runtime_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "files": ["ffmpeg.exe", "chinese-clip.zip", "rapidocr-zh-understanding.zip"],
+                        "prefer_active_profile_id": "chinese_clip_onnx_vit-base-patch16",
+                    },
+                    handle,
+                )
+            openai_dir = Path(model_root) / "openai-clip" / "vit-base-patch32"
+            openai_dir.mkdir(parents=True)
+            for name in ("clip_visual.onnx", "clip_text.onnx", "bpe_simple_vocab_16e6.txt.gz"):
+                (openai_dir / name).write_bytes(b"x")
+            (openai_dir / "model_manifest.json").write_text(
+                json.dumps({"provider": "clip_onnx", "variant": "vit-base-patch32"}),
+                encoding="utf-8",
+            )
+            ffmpeg_target = os.path.join(app_data, "bin", "ffmpeg.exe")
+            os.makedirs(os.path.dirname(ffmpeg_target), exist_ok=True)
+            Path(ffmpeg_target).write_bytes(b"ffmpeg")
+
+            config = {
+                "schema_version": 2,
+                "model_dir": model_root,
+                "ffmpeg_path": ffmpeg_target,
+                "models": {
+                    "active_profile": "clip_onnx_vit-base-patch32",
+                    "profiles": [
+                        {
+                            "id": "clip_onnx_vit-base-patch32",
+                            "provider": "clip_onnx",
+                            "enabled": True,
+                            "runtime": {"model_dir": model_root, "model_variant": "vit-base-patch32"},
+                            "files": {
+                                "visual_model": "clip_visual.onnx",
+                                "text_model": "clip_text.onnx",
+                                "tokenizer_vocab": "bpe_simple_vocab_16e6.txt.gz",
+                            },
+                        }
+                    ],
+                },
+            }
+
+            ready_status = {
+                "resources_ready": True,
+                "model_ready": True,
+                "ffmpeg_ready": True,
+                "model_root_dir": model_root,
+                "model_dir": model_root,
+            }
+
+            with (
+                patch("src.services.bundled_runtime_service.get_bundled_runtime_dir", return_value=runtime_dir),
+                patch("src.services.runtime_resource_service.get_runtime_resource_status", return_value=ready_status),
+                patch("src.services.bundled_runtime_service.is_bundled_rapidocr_installed", return_value=True),
+                patch("src.utils.has_ffmpeg", return_value=True),
+            ):
+                plan = bundled_runtime_service.plan_bundled_import(runtime_dir=runtime_dir)
+
+            self.assertTrue(plan.get("supplemental"))
+            self.assertFalse(plan.get("switch_active_profile"))
+            names = {os.path.basename(path).lower() for path in plan.get("paths") or []}
+            self.assertIn("chinese-clip.zip", names)
+            self.assertNotIn("ffmpeg.exe", names)
+            self.assertNotIn("rapidocr-zh-understanding.zip", names)
+
 
 if __name__ == "__main__":
     unittest.main()

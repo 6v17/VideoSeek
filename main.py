@@ -25,8 +25,8 @@ if __name__ == "__main__":
         if result.get("ok"):
             sys.exit(0)
         skipped = str(result.get("skipped") or "")
-        if skipped in {"already_ready", "no_manifest"}:
-            sys.exit(0 if skipped == "already_ready" else 2)
+        if skipped in {"nothing_to_import", "no_manifest"}:
+            sys.exit(0 if skipped == "nothing_to_import" else 2)
         logger.error("Bundled runtime bootstrap failed: %s", result.get("error") or result)
         sys.exit(1)
 

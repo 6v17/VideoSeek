@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from src.infra.paths import get_bundled_runtime_dir
 
 BUNDLED_RUNTIME_MANIFEST_NAME = "manifest.json"
+BUNDLED_CHINESE_CLIP_VARIANT = "vit-base-patch16"
 
 
 def load_bundled_runtime_manifest(*, runtime_dir: str | None = None) -> dict[str, Any] | None:
@@ -52,6 +53,83 @@ def resolve_bundled_runtime_paths(*, runtime_dir: str | None = None) -> list[str
     return paths
 
 
+def is_chinese_clip_bundled_variant_installed(*, model_root: str | None = None) -> bool:
+    from src.services.model_package_service import PROVIDER_REQUIRED_MODEL_FILES
+    from src.services.runtime_resource_service import get_runtime_resource_status
+
+    status = get_runtime_resource_status()
+    root = str(model_root or status.get("model_root_dir") or status.get("model_dir") or "").strip()
+    if not root:
+        from src.utils import get_app_data_dir
+
+        root = os.path.join(get_app_data_dir(), "models")
+    variant_dir = os.path.join(root, "chinese-clip", BUNDLED_CHINESE_CLIP_VARIANT)
+    manifest_path = os.path.join(variant_dir, "model_manifest.json")
+    if not os.path.isfile(manifest_path):
+        return False
+    required = list(PROVIDER_REQUIRED_MODEL_FILES.get("chinese_clip_onnx") or [])
+    return all(os.path.isfile(os.path.join(variant_dir, name)) for name in required)
+
+
+def is_bundled_rapidocr_installed() -> bool:
+    from src.core.subtitle_ocr.rapidocr_engine import resolve_rapidocr_model_dir
+
+    return bool(resolve_rapidocr_model_dir())
+
+
+def plan_bundled_import(*, runtime_dir: str | None = None) -> dict[str, Any]:
+    """Decide which seed files to import. Existing users get supplements only; active profile stays."""
+    from src.services.runtime_resource_service import get_runtime_resource_status
+    from src.utils import has_ffmpeg
+
+    empty = {
+        "paths": [],
+        "switch_active_profile": False,
+        "prefer_active_profile_id": "",
+        "supplemental": False,
+        "first_install": False,
+    }
+    if not bundled_runtime_available(runtime_dir=runtime_dir):
+        return dict(empty)
+
+    manifest = load_bundled_runtime_manifest(runtime_dir=runtime_dir)
+    if not manifest:
+        return dict(empty)
+
+    status = get_runtime_resource_status()
+    first_install = not bool(status.get("resources_ready"))
+    all_paths = resolve_bundled_runtime_paths(runtime_dir=runtime_dir)
+    selected: list[str] = []
+
+    if first_install:
+        selected = list(all_paths)
+    else:
+        for path in all_paths:
+            name = os.path.basename(path).lower()
+            if name == "ffmpeg.exe":
+                if not has_ffmpeg():
+                    selected.append(path)
+            elif "chinese-clip" in name:
+                if not is_chinese_clip_bundled_variant_installed():
+                    selected.append(path)
+            elif "rapidocr" in name:
+                if not is_bundled_rapidocr_installed():
+                    selected.append(path)
+
+    prefer_id = str(manifest.get("prefer_active_profile_id") or "").strip()
+    return {
+        "paths": selected,
+        "switch_active_profile": first_install and bool(prefer_id),
+        "prefer_active_profile_id": prefer_id if first_install else "",
+        "supplemental": not first_install and bool(selected),
+        "first_install": first_install,
+    }
+
+
+def has_pending_bundled_import(*, runtime_dir: str | None = None) -> bool:
+    return bool(plan_bundled_import(runtime_dir=runtime_dir).get("paths"))
+
+
 def bootstrap_bundled_runtime(
     *,
     progress_callback: Callable[[int, str], None] | None = None,
@@ -70,25 +148,19 @@ def bootstrap_bundled_runtime(
             progress_callback(int(value), str(text or ""))
 
     status = get_runtime_resource_status()
-    if status.get("resources_ready"):
-        return {"ok": True, "skipped": "already_ready", "status": status}
+    plan = plan_bundled_import(runtime_dir=runtime_dir)
+    paths = list(plan.get("paths") or [])
+    if not paths:
+        return {
+            "ok": True,
+            "skipped": "nothing_to_import",
+            "status": status,
+            "supplemental": bool(plan.get("supplemental")),
+        }
 
     manifest = load_bundled_runtime_manifest(runtime_dir=runtime_dir)
     if not manifest:
         return {"ok": False, "skipped": "no_manifest", "status": status}
-
-    root = str(runtime_dir or get_bundled_runtime_dir()).strip()
-    expected = _manifest_file_names(manifest)
-    paths = resolve_bundled_runtime_paths(runtime_dir=root)
-    missing = [name for name in expected if not os.path.isfile(os.path.join(root, name))]
-    if missing:
-        return {
-            "ok": False,
-            "error": "missing bundled files: " + ", ".join(missing),
-            "status": status,
-        }
-    if not paths:
-        return {"ok": False, "error": "no bundled runtime files found", "status": status}
 
     config = load_config()
     if not str(config.get("model_dir") or "").strip():
@@ -102,17 +174,19 @@ def bootstrap_bundled_runtime(
     except Exception as exc:
         return {"ok": False, "error": str(exc), "status": get_runtime_resource_status()}
 
-    profile_id = str(manifest.get("prefer_active_profile_id") or "").strip()
-    if profile_id:
-        _apply_prefer_active_profile(profile_id)
+    if plan.get("switch_active_profile") and str(plan.get("prefer_active_profile_id") or "").strip():
+        _apply_prefer_active_profile(str(plan["prefer_active_profile_id"]))
 
     _progress(100, "Bundled runtime import finished")
     final = get_runtime_resource_status()
+    ok = bool(final.get("resources_ready")) or bool(plan.get("supplemental"))
     return {
-        "ok": bool(final.get("resources_ready")),
+        "ok": ok,
         "payload": payload,
         "status": final,
         "edition": str(manifest.get("edition") or "full"),
+        "supplemental": bool(plan.get("supplemental")),
+        "imported_paths": [os.path.basename(path) for path in paths],
     }
 
 
