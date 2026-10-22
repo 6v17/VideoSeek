@@ -629,6 +629,19 @@ class CaptionConcurrencyControllerTests(unittest.TestCase):
         controller.note_failure()
         self.assertEqual(controller.active_limit(), 2)
 
+    def test_cloud_mode_does_not_penalize_slow_success(self):
+        controller = CaptionConcurrencyController(
+            4,
+            timeout_sec=100.0,
+            penalize_slow_success=False,
+            start_concurrency=3,
+        )
+        self.assertEqual(controller.active_limit(), 3)
+        controller.note_success(85.0)
+        self.assertEqual(controller.active_limit(), 3)
+        controller.note_empty_result()
+        self.assertEqual(controller.active_limit(), 2)
+
 
 class EmptyChunkRetryTests(unittest.TestCase):
     def test_empty_chunk_is_retried_and_not_checkpointed_until_evidence(self):

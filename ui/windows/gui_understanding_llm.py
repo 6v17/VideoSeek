@@ -253,7 +253,7 @@ class UnderstandingLlmGuiMixin:
             self.texts.get("understanding_test_llm_testing", "Testing language model…"),
             state="neutral",
         )
-        worker = RemoteLlmConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
+        worker = RemoteLlmConnectionTestWorker(draft, timeout_sec=22.0, parent=self)
         self._llm_connection_test_worker = worker
         page.btn_test_vlm_connection.setEnabled(False)
 
@@ -315,10 +315,12 @@ class UnderstandingLlmGuiMixin:
             if live:
                 form.input_remote_llm_model.setText(live)
                 self._sync_llm_provider_ui()
+            unlisted = bool(probe.get("model_unlisted")) or str(probe.get("error_code") or "") == "model_unlisted"
+            chat_ok = bool(probe.get("chat_probed"))
             self.show_info_dialog(
                 self.texts.get("understanding_test_vlm_title", "Connection test"),
                 message,
-                kind="success",
+                kind="warning" if unlisted else "success" if chat_ok else "success",
             )
         elif probe.get("error_code") != "cloud_api_key_required":
             self.show_error_dialog(message)

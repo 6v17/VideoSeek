@@ -6,7 +6,11 @@ import cv2
 import numpy as np
 
 from src.core.understanding.base import UnderstandingStoppedError
-from src.core.understanding.components.remote_vl_caption import RemoteVlCaptionComponent
+from src.core.understanding.components.remote_vl_caption import (
+    RemoteVlCaptionComponent,
+    limit_image_long_edge,
+    resolve_vlm_upload_limits,
+)
 
 
 REMOTE_MANIFEST = {
@@ -23,6 +27,59 @@ REMOTE_MANIFEST = {
 
 
 class RemoteVlCaptionTests(unittest.TestCase):
+    def test_limit_image_long_edge_scales_wide_composite(self):
+        image = np.zeros((1080, 3840, 3), dtype=np.uint8)
+        scaled = limit_image_long_edge(image, 1280)
+        self.assertEqual(max(scaled.shape[0], scaled.shape[1]), 1280)
+        self.assertLess(scaled.shape[1], image.shape[1])
+
+    def test_resolve_vlm_upload_limits_cloud_defaults(self):
+        edge, quality = resolve_vlm_upload_limits(
+            {"provider_mode": "cloud"},
+            {"jpeg_quality": 85},
+        )
+        self.assertEqual(edge, 1280)
+        self.assertEqual(quality, 80)
+
+    def test_infer_cloud_upload_scales_before_jpeg(self):
+        image = np.zeros((1080, 3840, 3), dtype=np.uint8)
+        response_body = {
+            "choices": [{"message": {"content": "ok"}}],
+        }
+        fake_response = MagicMock()
+        fake_response.read.return_value = json.dumps(response_body).encode("utf-8")
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        config = {
+            "understanding": {
+                "remote_vlm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "dashscope",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model": "qwen3-vl-plus",
+                    "api_keys": {"dashscope": "sk-test"},
+                    "timeout_sec": 30,
+                }
+            }
+        }
+        component = RemoteVlCaptionComponent(REMOTE_MANIFEST, "/tmp/qwen3-vl-remote", config=config)
+        encoded_sizes: list[tuple[int, int]] = []
+
+        def _capture_encode(img, *, jpeg_quality):
+            encoded_sizes.append((int(img.shape[1]), int(img.shape[0])))
+            ok, encoded = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)])
+            self.assertTrue(ok)
+            return __import__("base64").b64encode(encoded.tobytes()).decode("ascii")
+
+        with patch("urllib.request.urlopen", return_value=fake_response):
+            with patch(
+                "src.core.understanding.components.remote_vl_caption._encode_image_jpeg_base64",
+                side_effect=_capture_encode,
+            ):
+                component.infer(image)
+        self.assertEqual(len(encoded_sizes), 1)
+        self.assertEqual(max(encoded_sizes[0]), 1280)
+
     def test_infer_returns_caption_text(self):
         image = np.zeros((64, 64, 3), dtype=np.uint8)
         cv2.rectangle(image, (10, 10), (50, 50), (255, 255, 255), -1)

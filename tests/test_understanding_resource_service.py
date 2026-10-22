@@ -577,10 +577,6 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
 
     def test_probe_remote_vlm_model_not_found_lists_samples(self):
         response_body = json.dumps({"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4.1"}]}).encode("utf-8")
-        fake_response = MagicMock()
-        fake_response.read.return_value = response_body
-        fake_response.__enter__ = MagicMock(return_value=fake_response)
-        fake_response.__exit__ = MagicMock(return_value=False)
         config = {
             "understanding": {
                 "remote_vlm": {
@@ -592,11 +588,19 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                 }
             }
         }
-        with patch("urllib.request.urlopen", return_value=fake_response):
-            probe = understanding_resource_service.probe_remote_vlm(config, timeout_sec=3.0)
+        with patch(
+            "src.services.cancellable_http.urlopen_read_with_deadline",
+            return_value=(200, response_body),
+        ):
+            probe = understanding_resource_service.probe_remote_vlm(
+                config,
+                timeout_sec=3.0,
+                vision_probe=False,
+            )
         self.assertTrue(probe.get("reachable"))
-        self.assertFalse(probe.get("model_available"))
-        self.assertEqual(probe.get("error_code"), "model_not_found")
+        self.assertTrue(probe.get("model_available"))
+        self.assertTrue(probe.get("model_unlisted"))
+        self.assertEqual(probe.get("error_code"), "model_unlisted")
         self.assertIn("gpt-4o-mini", probe.get("available_models") or [])
 
     def test_finalize_rewrites_retired_dashscope_vision_id(self):
@@ -635,10 +639,6 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
 
     def test_probe_dashscope_missing_catalog_row_stays_usable(self):
         response_body = json.dumps({"data": [{"id": "qwen-plus"}]}).encode("utf-8")
-        fake_response = MagicMock()
-        fake_response.read.return_value = response_body
-        fake_response.__enter__ = MagicMock(return_value=fake_response)
-        fake_response.__exit__ = MagicMock(return_value=False)
         config = {
             "understanding": {
                 "remote_vlm": {
@@ -650,13 +650,67 @@ class UnderstandingCaptionLanguageTests(unittest.TestCase):
                 }
             }
         }
-        with patch("urllib.request.urlopen", return_value=fake_response):
+        with patch(
+            "src.services.cancellable_http.urlopen_read_with_deadline",
+            return_value=(200, response_body),
+        ) as mock_read:
             probe = understanding_resource_service.probe_remote_vlm(config, timeout_sec=3.0)
+        mock_read.assert_called_once()
+        self.assertLessEqual(mock_read.call_args.kwargs.get("max_bytes", 99999), 8192)
         self.assertTrue(probe.get("reachable"))
         self.assertTrue(probe.get("model_available"))
         self.assertTrue(probe.get("model_unlisted"))
         self.assertEqual(probe.get("error_code"), "model_unlisted")
         self.assertEqual(probe.get("configured_model"), "qwen3-vl-plus")
+
+    def test_probe_siliconflow_unlisted_passes_with_vision_probe(self):
+        config = {
+            "understanding": {
+                "remote_vlm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "siliconflow",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "model": "Qwen/Qwen2.5-VL-32B-Instruct",
+                    "api_keys": {"siliconflow": "sk-test"},
+                }
+            }
+        }
+        catalog_body = json.dumps({"data": [{"id": "BAAI/bge-m3"}]}).encode("utf-8")
+        with patch(
+            "src.services.cancellable_http.urlopen_read_with_deadline",
+            return_value=(200, catalog_body),
+        ), patch(
+            "src.core.understanding.components.remote_vl_caption.probe_remote_vl_vision",
+            return_value={"ok": True, "detail": "OK"},
+        ):
+            probe = understanding_resource_service.probe_remote_vlm(
+                config,
+                timeout_sec=3.0,
+                vision_probe=True,
+            )
+        self.assertTrue(probe.get("vision_probed"))
+        self.assertTrue(probe.get("model_available"))
+        self.assertTrue(probe.get("model_unlisted"))
+
+    def test_probe_dashscope_fast_auth_failure(self):
+        config = {
+            "understanding": {
+                "remote_vlm": {
+                    "provider_mode": "cloud",
+                    "provider_preset": "dashscope",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model": "qwen3-vl-plus",
+                    "api_keys": {"dashscope": "bad-key"},
+                }
+            }
+        }
+        with patch(
+            "src.services.cancellable_http.urlopen_read_with_deadline",
+            return_value=(401, b'{"error":"invalid"}'),
+        ):
+            probe = understanding_resource_service.probe_remote_vlm(config, timeout_sec=5.0)
+        self.assertEqual(probe.get("error_code"), "auth_failed")
+        self.assertFalse(probe.get("reachable"))
 
 
 if __name__ == "__main__":

@@ -311,6 +311,52 @@ def format_asr_error(exc: BaseException | str) -> str:
     return detail[:_MAX_ERROR_CHARS]
 
 
+def minimal_probe_wav_bytes(*, duration_sec: float = 0.3, sample_rate: int = 16000) -> bytes:
+    """Tiny mono PCM WAV for connection probes (silence is enough to validate auth/model)."""
+    import struct
+
+    samples = max(1, int(float(sample_rate) * float(duration_sec)))
+    data_size = samples * 2
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + data_size,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        int(sample_rate),
+        int(sample_rate) * 2,
+        2,
+        16,
+        b"data",
+        data_size,
+    )
+    return header + (b"\x00\x00" * samples)
+
+
+def probe_remote_asr_transcription(settings: Mapping[str, Any], *, timeout_sec: float = 15.0) -> dict[str, Any]:
+    try:
+        payload = transcribe_wav_bytes(
+            minimal_probe_wav_bytes(),
+            settings=settings,
+            filename="probe.wav",
+            content_type="audio/wav",
+            timeout_sec=max(8.0, float(timeout_sec)),
+            attempts=1,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": format_asr_error(exc), "http_status": 0}
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        output = payload.get("output")
+        if isinstance(output, Mapping):
+            text = str(output.get("text") or "").strip()
+    detail = text[:80] if text else "silent clip accepted"
+    return {"ok": True, "error": "", "http_status": 200, "detail": detail}
+
+
 def transcribe_wav_bytes(
     wav_bytes: bytes,
     *,

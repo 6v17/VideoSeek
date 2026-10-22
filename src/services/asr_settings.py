@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from typing import Any, Mapping
 
 REMOTE_ASR_MODE_LOCAL = "local"
@@ -235,15 +232,33 @@ def get_remote_asr_settings(config: Mapping[str, Any] | None = None) -> dict[str
     return dict(normalized["understanding"].get("remote_asr") or DEFAULT_REMOTE_ASR_CONFIG)
 
 
-def probe_remote_asr_draft(remote_asr: Mapping[str, Any], *, timeout_sec: float = 8.0) -> dict[str, Any]:
+def probe_remote_asr_draft(
+    remote_asr: Mapping[str, Any],
+    *,
+    timeout_sec: float = 25.0,
+    asr_probe: bool = True,
+) -> dict[str, Any]:
     settings = finalize_remote_asr_settings(remote_asr)
-    return _probe_openai_compatible(settings, timeout_sec=timeout_sec)
+    return _probe_openai_compatible(settings, timeout_sec=timeout_sec, asr_probe=asr_probe)
 
 
-def _probe_openai_compatible(settings: Mapping[str, Any], *, timeout_sec: float = 8.0) -> dict[str, Any]:
+def _probe_openai_compatible(
+    settings: Mapping[str, Any],
+    *,
+    timeout_sec: float = 8.0,
+    asr_probe: bool = True,
+) -> dict[str, Any]:
+    from src.services.openai_compat_probe import (
+        fetch_models_catalog,
+        finalize_openai_compat_probe,
+        uses_light_models_catalog,
+    )
+
     provider_mode = normalize_remote_asr_provider_mode(settings.get("provider_mode", REMOTE_ASR_MODE_CLOUD))
+    preset = str(settings.get("provider_preset") or "").strip().lower()
     api_key = get_active_remote_asr_api_key(settings)
     model = str(settings.get("model", "") or "").strip()
+    cloud = provider_mode == REMOTE_ASR_MODE_CLOUD
     empty = {
         "reachable": False,
         "model_available": False,
@@ -263,45 +278,37 @@ def _probe_openai_compatible(settings: Mapping[str, Any], *, timeout_sec: float 
     if not model:
         empty.update({"error_code": "model_missing", "error": "model is not configured"})
         return empty
-    if provider_mode == REMOTE_ASR_MODE_CLOUD and not api_key:
+    if cloud and not api_key:
         empty.update({"error_code": "cloud_api_key_required", "error": "API Key is required for cloud providers"})
         return empty
-    request = urllib.request.Request(
-        f"{base_url}/models",
-        headers={"Accept": "application/json", **build_remote_asr_auth_headers(settings)},
-        method="GET",
+
+    headers = build_remote_asr_auth_headers(settings)
+    catalog_timeout = min(8.0, max(2.0, float(timeout_sec) * 0.3))
+    light = uses_light_models_catalog(base_url, preset)
+    catalog = fetch_models_catalog(
+        base_url=base_url,
+        headers=headers,
+        timeout_sec=catalog_timeout,
+        light=light,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=max(1.0, float(timeout_sec))) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace").strip()
-        if exc.code in {401, 403}:
-            empty.update({"error_code": "auth_failed", "error": detail[:300] or f"HTTP {exc.code}"})
-            return empty
-        empty.update({"error_code": "http_error", "error": detail[:300] or f"HTTP {exc.code}"})
-        return empty
-    except TimeoutError:
-        empty.update({"error_code": "timeout", "error": "timeout"})
-        return empty
-    except Exception as exc:
-        empty.update({"error_code": "unreachable", "error": str(exc)})
-        return empty
-    models = []
-    for item in payload.get("data") or []:
-        if isinstance(item, dict) and item.get("id"):
-            models.append(str(item["id"]))
-        elif isinstance(item, str):
-            models.append(item)
-    # Dedicated Whisper servers often omit /v1/models or don't list the ASR id.
-    model_available = (not models) or (model in models)
-    return {
-        "reachable": True,
-        "model_available": model_available,
-        "auth_ok": True,
-        "error_code": "" if model_available else "model_not_found",
-        "error": "" if model_available else f"model {model} not in /v1/models",
-        "configured_model": model,
-        "available_models": models,
-        "base_url": base_url,
-    }
+    asr_timeout = max(8.0, float(timeout_sec) - catalog_timeout)
+
+    def _run_asr_probe() -> dict[str, Any]:
+        from src.core.asr.transcribe_remote import probe_remote_asr_transcription
+
+        return probe_remote_asr_transcription(settings, timeout_sec=asr_timeout)
+
+    finalized = finalize_openai_compat_probe(
+        catalog=catalog,
+        model=model,
+        cloud=cloud,
+        chat_probe=asr_probe,
+        chat_probe_fn=_run_asr_probe if asr_probe else None,
+        probe_label="speech",
+        capability_key="asr_probed",
+        capability_failed_code="asr_probe_failed",
+        capability_detail_key="asr_probe_detail",
+    )
+    finalized["configured_model"] = model
+    finalized["base_url"] = base_url
+    return finalized

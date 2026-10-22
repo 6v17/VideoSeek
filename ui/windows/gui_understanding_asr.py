@@ -250,7 +250,7 @@ class UnderstandingAsrGuiMixin:
             self.texts.get("understanding_test_asr_testing", "Testing speech model…"),
             state="neutral",
         )
-        worker = RemoteAsrConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
+        worker = RemoteAsrConnectionTestWorker(draft, timeout_sec=25.0, parent=self)
         self._asr_connection_test_worker = worker
         page.btn_test_vlm_connection.setEnabled(False)
 
@@ -312,10 +312,11 @@ class UnderstandingAsrGuiMixin:
             if live:
                 form.input_remote_asr_model.setText(live)
                 self._sync_asr_provider_ui()
+            unlisted = bool(probe.get("model_unlisted")) or str(probe.get("error_code") or "") == "model_unlisted"
             self.show_info_dialog(
                 self.texts.get("understanding_test_vlm_title", "Connection test"),
                 message,
-                kind="success",
+                kind="warning" if unlisted else "success",
             )
         elif probe.get("error_code") != "cloud_api_key_required":
             self.show_error_dialog(message)

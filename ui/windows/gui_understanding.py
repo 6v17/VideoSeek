@@ -569,6 +569,66 @@ class UnderstandingGuiMixin:
         model = str(probe.get("configured_model", "") or "").strip()
         base_url = str(probe.get("base_url", "") or "").strip()
         error_code = str(probe.get("error_code", "") or "").strip()
+        if probe.get("chat_probed") and probe.get("reachable") and probe.get("model_available"):
+            if probe.get("model_unlisted") or error_code == "model_unlisted":
+                return self.texts.get(
+                    "understanding_test_llm_chat_unlisted_ok",
+                    "Connected. {model} is not in the account catalog, but a chat probe succeeded.",
+                ).format(model=model or "?")
+            return self.texts.get(
+                "understanding_test_llm_chat_ok",
+                "Connected. Chat probe succeeded for {model}.",
+            ).format(model=model or "?")
+        if error_code == "chat_probe_failed":
+            hint = str(probe.get("catalog_hint", "") or "").strip()
+            extra = f" Catalog sample: {hint}" if hint else ""
+            return self.texts.get(
+                "understanding_test_llm_chat_failed",
+                "API reachable, but this model failed a chat probe. {detail}{extra}",
+            ).format(
+                detail=str(probe.get("error", "") or probe.get("chat_probe_detail", "") or ""),
+                extra=extra,
+            )
+        if probe.get("asr_probed") and probe.get("reachable") and probe.get("model_available"):
+            if probe.get("model_unlisted") or error_code == "model_unlisted":
+                return self.texts.get(
+                    "understanding_test_asr_probe_unlisted_ok",
+                    "Connected. {model} is not in the account catalog, but a speech probe succeeded.",
+                ).format(model=model or "?")
+            return self.texts.get(
+                "understanding_test_asr_probe_ok",
+                "Connected. Speech probe succeeded for {model}.",
+            ).format(model=model or "?")
+        if error_code == "asr_probe_failed":
+            hint = str(probe.get("catalog_hint", "") or "").strip()
+            extra = f" Catalog sample: {hint}" if hint else ""
+            return self.texts.get(
+                "understanding_test_asr_probe_failed",
+                "API reachable, but this model failed a speech probe. {detail}{extra}",
+            ).format(
+                detail=str(probe.get("error", "") or probe.get("asr_probe_detail", "") or ""),
+                extra=extra,
+            )
+        if probe.get("vision_probed") and probe.get("reachable") and probe.get("model_available"):
+            if probe.get("model_unlisted") or error_code == "model_unlisted":
+                return self.texts.get(
+                    "understanding_test_vlm_vision_unlisted_ok",
+                    "Connected. {model} is not in the account catalog, but a vision probe succeeded.",
+                ).format(model=model or "?")
+            return self.texts.get(
+                "understanding_test_vlm_vision_ok",
+                "Connected. Vision probe succeeded for {model}.",
+            ).format(model=model or "?")
+        if error_code == "vision_probe_failed":
+            hint = str(probe.get("catalog_hint", "") or "").strip()
+            extra = f" Catalog sample: {hint}" if hint else ""
+            return self.texts.get(
+                "understanding_test_vlm_vision_failed",
+                "API reachable, but this model failed a vision probe (may be text-only or not enabled). {detail}{extra}",
+            ).format(
+                detail=str(probe.get("error", "") or probe.get("vision_probe_detail", "") or ""),
+                extra=extra,
+            )
         if probe.get("model_unlisted") or error_code == "model_unlisted":
             available = [str(item) for item in (probe.get("available_models") or []) if str(item).strip()]
             sample = ", ".join(available[:8])
@@ -622,12 +682,21 @@ class UnderstandingGuiMixin:
 
     def _probe_status_state(self, probe: dict) -> str:
         probe = dict(probe or {})
+        for capability in ("chat_probed", "asr_probed", "vision_probed"):
+            if probe.get(capability) and probe.get("reachable") and probe.get("model_available"):
+                return "ok" if not probe.get("model_unlisted") else "warn"
         if probe.get("model_unlisted") or str(probe.get("error_code", "") or "").strip() == "model_unlisted":
             return "warn"
         if probe.get("reachable") and probe.get("model_available"):
             return "ok"
         error_code = str(probe.get("error_code", "") or "").strip()
-        if error_code in {"cloud_api_key_required", "model_not_found"}:
+        if error_code in {
+            "cloud_api_key_required",
+            "model_not_found",
+            "vision_probe_failed",
+            "chat_probe_failed",
+            "asr_probe_failed",
+        }:
             return "warn"
         return "error"
 
@@ -672,7 +741,7 @@ class UnderstandingGuiMixin:
             state="neutral",
         )
 
-        worker = RemoteVlmConnectionTestWorker(draft, timeout_sec=8.0, parent=self)
+        worker = RemoteVlmConnectionTestWorker(draft, timeout_sec=22.0, parent=self)
         self._vlm_connection_test_worker = worker
         page.btn_test_vlm_connection.setEnabled(False)
 
@@ -745,11 +814,12 @@ class UnderstandingGuiMixin:
             self._sync_vlm_provider_ui()
         self._refresh_understanding_settings_status()
         unlisted = bool(probe.get("model_unlisted")) or str(probe.get("error_code") or "") == "model_unlisted"
-        if probe.get("reachable") and probe.get("model_available") and not unlisted:
+        vision_ok = bool(probe.get("vision_probed")) and probe.get("reachable") and probe.get("model_available")
+        if vision_ok or (probe.get("reachable") and probe.get("model_available") and not unlisted):
             self.show_info_dialog(
                 self.texts.get("understanding_test_vlm_title", "Connection test"),
                 message,
-                kind="success",
+                kind="success" if vision_ok and not unlisted else "warning" if unlisted else "success",
             )
         elif unlisted:
             self.show_info_dialog(

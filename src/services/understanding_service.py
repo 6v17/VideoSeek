@@ -73,12 +73,23 @@ class CaptionConcurrencyController:
     _SLOW_RATIO = 0.65
     _SUCCESS_STREAK_TO_INCREASE = 2
 
-    def __init__(self, max_concurrency: int, *, timeout_sec: float = 120.0):
+    def __init__(
+        self,
+        max_concurrency: int,
+        *,
+        timeout_sec: float = 120.0,
+        penalize_slow_success: bool = True,
+        start_concurrency: int | None = None,
+    ):
         max_value = max(1, min(4, int(max_concurrency)))
         self.max_concurrency = max_value
         self.min_concurrency = 1
-        self.current_concurrency = min(2, max_value) if max_value > 1 else 1
+        default_start = min(2, max_value) if max_value > 1 else 1
+        if start_concurrency is not None:
+            default_start = max(1, min(max_value, int(start_concurrency)))
+        self.current_concurrency = default_start
         self._timeout_sec = max(5.0, float(timeout_sec))
+        self._penalize_slow_success = bool(penalize_slow_success)
         self._success_streak = 0
         self._lock = threading.Lock()
 
@@ -98,7 +109,7 @@ class CaptionConcurrencyController:
         with self._lock:
             previous = self.current_concurrency
             elapsed = max(0.0, float(elapsed_sec))
-            if elapsed >= self.slow_threshold_sec:
+            if self._penalize_slow_success and elapsed >= self.slow_threshold_sec:
                 self._success_streak = 0
                 self._decrease_locked()
             elif elapsed <= self.fast_threshold_sec:
@@ -347,9 +358,18 @@ def _run_pending_chunks(
         _run_sequential()
         return output_path
 
+    from src.services.understanding_resource_service import (
+        REMOTE_VLM_MODE_CLOUD,
+        normalize_remote_vlm_provider_mode,
+    )
+
+    cloud_vlm = normalize_remote_vlm_provider_mode(remote_vlm.get("provider_mode")) == REMOTE_VLM_MODE_CLOUD
+    cloud_start = min(max_concurrency, 3) if cloud_vlm and max_concurrency > 1 else None
     controller = CaptionConcurrencyController(
         max_concurrency,
         timeout_sec=float(remote_vlm.get("timeout_sec", 120) or 120),
+        penalize_slow_success=not cloud_vlm,
+        start_concurrency=cloud_start,
     )
     logger.info(
         "Running understanding evidence for %s with adaptive caption concurrency (max=%s, start=%s, pending=%s)",

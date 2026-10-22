@@ -511,6 +511,16 @@ def _uses_dashscope_endpoint(base_url: str, preset: str = "") -> bool:
     return "dashscope.aliyuncs.com" in str(base_url or "").lower()
 
 
+def _uses_siliconflow_endpoint(base_url: str, preset: str = "") -> bool:
+    if str(preset or "").strip().lower() == "siliconflow":
+        return True
+    return "siliconflow.cn" in str(base_url or "").lower()
+
+
+def _uses_light_vlm_models_catalog(base_url: str, preset: str = "") -> bool:
+    return _uses_dashscope_endpoint(base_url, preset) or _uses_siliconflow_endpoint(base_url, preset)
+
+
 def pick_available_vlm_model(configured: str, available: list[str] | None) -> str:
     """Pick a vision id from the server catalog. Never falls back to a text model."""
     configured_id = str(configured or "").strip()
@@ -582,6 +592,9 @@ def finalize_remote_vlm_settings(raw_remote_vlm: Mapping[str, Any] | None) -> di
     mode, preset = resolve_remote_vlm_provider_settings(raw_remote_vlm)
     remote_vlm["provider_mode"] = mode
     remote_vlm["provider_preset"] = preset
+    if mode == REMOTE_VLM_MODE_CLOUD and "concurrency" not in raw_remote_vlm:
+        remote_vlm["concurrency"] = max(int(remote_vlm.get("concurrency", 2) or 2), 3)
+        remote_vlm["concurrency"] = min(4, int(remote_vlm["concurrency"]))
     if preset != REMOTE_VLM_PRESET_CUSTOM:
         defaults = get_remote_vlm_preset_defaults(preset)
         if defaults.get("base_url"):
@@ -949,7 +962,201 @@ def get_remote_vlm_concurrency(config: Mapping[str, Any] | None = None) -> int:
         return int(DEFAULT_REMOTE_VLM_CONFIG["concurrency"])
 
 
-def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: float = 3.0) -> dict[str, Any]:
+def _parse_models_catalog_body(body: bytes) -> list[str]:
+    if not body.strip().startswith(b"{"):
+        return []
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return []
+    model_ids = {
+        str(item.get("id", "") or "").strip()
+        for item in (payload.get("data") or [])
+        if isinstance(item, dict)
+    }
+    return sorted(model_ids)
+
+
+def _probe_remote_vlm_light_catalog(
+    settings: Mapping[str, Any],
+    *,
+    base_url: str,
+    timeout_sec: float,
+) -> dict[str, Any]:
+    """Auth check without downloading huge /models JSON (DashScope, SiliconFlow)."""
+    import urllib.error
+    import urllib.request
+
+    from src.services.cancellable_http import urlopen_read_with_deadline
+
+    request = urllib.request.Request(
+        f"{base_url}/models",
+        headers={"Accept": "application/json", **build_remote_vlm_auth_headers(settings)},
+        method="GET",
+    )
+    try:
+        status, body = urlopen_read_with_deadline(
+            request,
+            timeout_sec=max(1.0, float(timeout_sec)),
+            max_bytes=8192,
+        )
+    except urllib.error.URLError as exc:
+        return {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "unreachable",
+            "error": str(getattr(exc, "reason", exc) or exc),
+            "available_models": [],
+            "http_status": 0,
+        }
+    except TimeoutError:
+        return {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "timeout",
+            "error": f"timed out after {timeout_sec:.0f}s",
+            "available_models": [],
+            "http_status": 0,
+        }
+
+    if status in {401, 403}:
+        detail = body.decode("utf-8", errors="replace").strip()
+        return {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "auth_failed",
+            "error": f"HTTP {status}: API Key invalid or unauthorized",
+            "available_models": [],
+            "http_status": int(status),
+            "http_detail": detail[:240],
+        }
+    if status < 200 or status >= 300:
+        detail = body.decode("utf-8", errors="replace").strip()
+        return {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "http_error",
+            "error": f"HTTP {status}: {detail[:240] or 'request failed'}",
+            "available_models": [],
+            "http_status": int(status),
+            "http_detail": detail[:240],
+        }
+
+    available_models = _parse_models_catalog_body(body)
+    return {
+        "auth_ok": True,
+        "reachable": True,
+        "error_code": "",
+        "error": "",
+        "available_models": available_models,
+        "http_status": int(status),
+        "catalog_partial": True,
+    }
+
+
+def _finalize_vlm_probe_with_vision(
+    settings: Mapping[str, Any],
+    *,
+    model: str,
+    provider_mode: str,
+    catalog: Mapping[str, Any],
+    _result,
+    vision_probe: bool,
+    vision_timeout_sec: float,
+) -> dict[str, Any]:
+    if not catalog.get("auth_ok"):
+        return _result(
+            reachable=bool(catalog.get("reachable")),
+            model_available=False,
+            auth_ok=False,
+            error_code=str(catalog.get("error_code", "") or "http_error"),
+            error=str(catalog.get("error", "") or "catalog probe failed"),
+            http_status=catalog.get("http_status"),
+            http_detail=catalog.get("http_detail", ""),
+            available_models=list(catalog.get("available_models") or []),
+        )
+
+    available_models = list(catalog.get("available_models") or [])
+    model_in_catalog = bool(model and model in available_models)
+    cloud = normalize_remote_vlm_provider_mode(provider_mode) == REMOTE_VLM_MODE_CLOUD
+
+    if not vision_probe:
+        if model_in_catalog or not cloud:
+            if model_in_catalog:
+                return _result(
+                    reachable=True,
+                    model_available=True,
+                    auth_ok=True,
+                    error_code="",
+                    error="",
+                    available_models=available_models,
+                )
+            sample = ", ".join(available_models[:8])
+            suffix = f" (+{len(available_models) - 8} more)" if len(available_models) > 8 else ""
+            return _result(
+                reachable=True,
+                model_available=False,
+                auth_ok=True,
+                error_code="model_not_found",
+                error=f"model {model!r} not listed by server. Available: {sample}{suffix}".strip(),
+                available_models=available_models,
+            )
+        return _result(
+            reachable=True,
+            model_available=True,
+            model_unlisted=True,
+            auth_ok=True,
+            error_code="model_unlisted",
+            error=f"model {model!r} is not in the server catalog; requests still use this name.",
+            available_models=available_models,
+        )
+
+    from src.core.understanding.components.remote_vl_caption import probe_remote_vl_vision
+
+    vision = probe_remote_vl_vision(settings, timeout_sec=vision_timeout_sec)
+    if vision.get("ok"):
+        unlisted = not model_in_catalog
+        return _result(
+            reachable=True,
+            model_available=True,
+            auth_ok=True,
+            vision_probed=True,
+            model_unlisted=unlisted,
+            error_code="model_unlisted" if unlisted else "",
+            error=(
+                f"model {model!r} is not in the account catalog preview, "
+                "but a vision probe succeeded; requests will use this name."
+            )
+            if unlisted
+            else "",
+            available_models=available_models,
+            vision_probe_detail=str(vision.get("detail", "") or ""),
+        )
+
+    sample = ", ".join(available_models[:8])
+    if len(available_models) > 8:
+        sample = f"{sample} (+{len(available_models) - 8})"
+    detail = str(vision.get("error", "") or "vision probe failed")
+    return _result(
+        reachable=True,
+        model_available=False,
+        auth_ok=True,
+        vision_probed=True,
+        error_code="vision_probe_failed",
+        error=detail,
+        available_models=available_models,
+        vision_probe_detail=detail,
+        catalog_hint=sample,
+    )
+
+
+def probe_remote_vlm(
+    config: Mapping[str, Any] | None = None,
+    *,
+    timeout_sec: float = 3.0,
+    vision_probe: bool = False,
+    vision_timeout_sec: float | None = None,
+) -> dict[str, Any]:
     import urllib.error
     import urllib.request
 
@@ -958,6 +1165,7 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     model = str(settings.get("model", "") or "").strip()
     provider_mode = normalize_remote_vlm_provider_mode(settings.get("provider_mode", REMOTE_VLM_MODE_LOCAL))
     api_key = get_active_remote_vlm_api_key(settings)
+    provider_preset = str(settings.get("provider_preset") or "")
 
     def _result(**payload: Any) -> dict[str, Any]:
         out = dict(payload)
@@ -994,99 +1202,139 @@ def probe_remote_vlm(config: Mapping[str, Any] | None = None, *, timeout_sec: fl
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1" if not base_url.endswith("/v1/") else base_url.rstrip("/")
 
+    vision_wait = float(vision_timeout_sec if vision_timeout_sec is not None else max(12.0, timeout_sec))
+
+    if _uses_light_vlm_models_catalog(base_url, provider_preset):
+        catalog = _probe_remote_vlm_light_catalog(
+            settings,
+            base_url=base_url,
+            timeout_sec=timeout_sec,
+        )
+        return _finalize_vlm_probe_with_vision(
+            settings,
+            model=model,
+            provider_mode=provider_mode,
+            catalog=catalog,
+            _result=_result,
+            vision_probe=vision_probe,
+            vision_timeout_sec=vision_wait,
+        )
+
     request = urllib.request.Request(
         f"{base_url}/models",
         headers={"Accept": "application/json", **build_remote_vlm_auth_headers(settings)},
         method="GET",
     )
+    catalog: dict[str, Any]
     try:
-        with urllib.request.urlopen(request, timeout=max(1.0, float(timeout_sec))) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        if provider_mode == REMOTE_VLM_MODE_CLOUD:
+            from src.services.cancellable_http import urlopen_read_with_deadline
+
+            status, body = urlopen_read_with_deadline(
+                request,
+                timeout_sec=max(1.0, float(timeout_sec)),
+                max_bytes=16384,
+            )
+            if status in {401, 403}:
+                detail = body.decode("utf-8", errors="replace").strip()
+                catalog = {
+                    "auth_ok": False,
+                    "reachable": False,
+                    "error_code": "auth_failed",
+                    "error": f"HTTP {status}: API Key invalid or unauthorized",
+                    "available_models": [],
+                    "http_status": int(status),
+                    "http_detail": detail[:240],
+                }
+            elif status < 200 or status >= 300:
+                detail = body.decode("utf-8", errors="replace").strip()
+                catalog = {
+                    "auth_ok": False,
+                    "reachable": False,
+                    "error_code": "http_error",
+                    "error": f"HTTP {status}: {detail[:240] or 'request failed'}",
+                    "available_models": [],
+                    "http_status": int(status),
+                }
+            else:
+                catalog = {
+                    "auth_ok": True,
+                    "reachable": True,
+                    "error_code": "",
+                    "error": "",
+                    "available_models": _parse_models_catalog_body(body),
+                    "http_status": int(status),
+                    "catalog_partial": True,
+                }
+        else:
+            with urllib.request.urlopen(request, timeout=max(1.0, float(timeout_sec))) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            model_ids = {
+                str(item.get("id", "") or "").strip()
+                for item in (payload.get("data") or [])
+                if isinstance(item, dict)
+            }
+            catalog = {
+                "auth_ok": True,
+                "reachable": True,
+                "error_code": "",
+                "error": "",
+                "available_models": sorted(model_ids),
+            }
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
         if exc.code in {401, 403}:
-            return _result(
-                reachable=False,
-                model_available=False,
-                auth_ok=False,
-                error_code="auth_failed",
-                error=f"HTTP {exc.code}: API Key invalid or unauthorized",
-                http_status=int(exc.code),
-                http_detail=detail[:240],
-            )
-        return _result(
-            reachable=False,
-            model_available=False,
-            auth_ok=False,
-            error_code="http_error",
-            error=f"HTTP {exc.code}: {detail[:240] or exc.reason}",
-            http_status=int(exc.code),
-            http_detail=detail[:240],
-        )
+            catalog = {
+                "auth_ok": False,
+                "reachable": False,
+                "error_code": "auth_failed",
+                "error": f"HTTP {exc.code}: API Key invalid or unauthorized",
+                "available_models": [],
+                "http_status": int(exc.code),
+                "http_detail": detail[:240],
+            }
+        else:
+            catalog = {
+                "auth_ok": False,
+                "reachable": False,
+                "error_code": "http_error",
+                "error": f"HTTP {exc.code}: {detail[:240] or exc.reason}",
+                "available_models": [],
+                "http_status": int(exc.code),
+            }
     except urllib.error.URLError as exc:
-        return _result(
-            reachable=False,
-            model_available=False,
-            auth_ok=False,
-            error_code="unreachable",
-            error=str(getattr(exc, "reason", exc) or exc),
-        )
+        catalog = {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "unreachable",
+            "error": str(getattr(exc, "reason", exc) or exc),
+            "available_models": [],
+        }
     except TimeoutError:
-        return _result(
-            reachable=False,
-            model_available=False,
-            auth_ok=False,
-            error_code="timeout",
-            error=f"timed out after {timeout_sec:.0f}s",
-        )
+        catalog = {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "timeout",
+            "error": f"timed out after {timeout_sec:.0f}s",
+            "available_models": [],
+        }
     except json.JSONDecodeError as exc:
-        return _result(
-            reachable=False,
-            model_available=False,
-            auth_ok=False,
-            error_code="invalid_json",
-            error=f"invalid JSON from /models: {exc}",
-        )
+        catalog = {
+            "auth_ok": False,
+            "reachable": False,
+            "error_code": "invalid_json",
+            "error": f"invalid JSON from /models: {exc}",
+            "available_models": [],
+        }
 
-    model_ids = {
-        str(item.get("id", "") or "").strip()
-        for item in (payload.get("data") or [])
-        if isinstance(item, dict)
-    }
-    available_models = sorted(model_ids)
-    model_available = model in model_ids
-    sample_models = ", ".join(available_models[:8])
-    if not model_available and _uses_dashscope_endpoint(base_url, str(settings.get("provider_preset") or "")):
-        # DashScope's catalog omits many live vision ids, so a missing row is not
-        # proof the model is gone. Keep the typed id and let the chat call decide.
-        return _result(
-            reachable=True,
-            model_available=True,
-            model_unlisted=True,
-            auth_ok=True,
-            error_code="model_unlisted",
-            error=f"model {model!r} is not in the server catalog; the request will still use this name.",
-            available_models=available_models,
-        )
-    if not model_available:
-        suffix = f" Available: {sample_models}" if sample_models else ""
-        if len(available_models) > 8:
-            suffix += f" (+{len(available_models) - 8} more)"
-        return _result(
-            reachable=True,
-            model_available=False,
-            auth_ok=True,
-            error_code="model_not_found",
-            error=f"model {model!r} not listed by server.{suffix}",
-            available_models=available_models,
-        )
-    return _result(
-        reachable=True,
-        model_available=True,
-        auth_ok=True,
-        error_code="",
-        error="",
-        available_models=available_models,
+    return _finalize_vlm_probe_with_vision(
+        settings,
+        model=model,
+        provider_mode=provider_mode,
+        catalog=catalog,
+        _result=_result,
+        vision_probe=vision_probe,
+        vision_timeout_sec=vision_wait,
     )
 
 
@@ -1094,8 +1342,13 @@ def build_remote_vlm_probe_config(remote_vlm: Mapping[str, Any]) -> dict[str, An
     return {"understanding": {"remote_vlm": dict(remote_vlm or {})}}
 
 
-def probe_remote_vlm_draft(remote_vlm: Mapping[str, Any], *, timeout_sec: float = 8.0) -> dict[str, Any]:
-    return probe_remote_vlm(build_remote_vlm_probe_config(remote_vlm), timeout_sec=timeout_sec)
+def probe_remote_vlm_draft(remote_vlm: Mapping[str, Any], *, timeout_sec: float = 20.0) -> dict[str, Any]:
+    return probe_remote_vlm(
+        build_remote_vlm_probe_config(remote_vlm),
+        timeout_sec=min(8.0, float(timeout_sec)),
+        vision_probe=True,
+        vision_timeout_sec=max(12.0, float(timeout_sec)),
+    )
 
 
 def load_profile_manifest(profile_id: str, model_dir: str | None = None) -> dict[str, Any]:
