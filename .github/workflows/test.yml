@@ -31,14 +31,19 @@ jobs:
 
       # Do NOT conda-install ffmpeg: its shared DLLs collide with PySide6 on Windows
       # runners (QtCore/QtGui "procedure could not be found" at collection).
+      # Pin a BtbN autobuild (not /latest/) so CI does not drift with master rolls.
       - name: FFmpeg (CI)
         shell: pwsh
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "ffmpeg-ci"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           $zip = Join-Path $dest "ffmpeg.zip"
-          $uri = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-          Invoke-WebRequest -Uri $uri -OutFile $zip
+          $uri = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-22-13-06/ffmpeg-N-127941-g303510f9d1-win64-gpl.zip"
+          curl.exe -L --retry 3 --retry-delay 2 -o $zip $uri
+          if (-not (Test-Path -LiteralPath $zip)) { throw "ffmpeg zip download missing" }
+          $sizeMb = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
+          if ($sizeMb -lt 50) { throw "ffmpeg zip too small (${sizeMb} MB) — download likely incomplete" }
+          Write-Host "Downloaded ffmpeg zip: ${sizeMb} MB"
           Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
           $bin = Get-ChildItem -Path $dest -Recurse -Directory -Filter bin |
             Where-Object { Test-Path (Join-Path $_.FullName "ffmpeg.exe") } |
