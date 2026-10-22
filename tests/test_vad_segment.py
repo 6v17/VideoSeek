@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 import wave
@@ -26,6 +27,26 @@ def _write_silent_wav(path: str, *, seconds: float = 0.5, sample_rate: int = 160
         handle.setsampwidth(2)
         handle.setframerate(sample_rate)
         handle.writeframes(frames.tobytes())
+
+
+def _ffmpeg_usable() -> bool:
+    from src.infra.ffmpeg_paths import get_ffmpeg_path, has_ffmpeg
+
+    if not has_ffmpeg():
+        return False
+    ffmpeg = str(get_ffmpeg_path() or "").strip()
+    if not ffmpeg:
+        return False
+    try:
+        completed = subprocess.run(
+            [ffmpeg, "-version"],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
 
 
 def _resolve_vad_model() -> str | None:
@@ -131,10 +152,8 @@ class AudioExtractTests(unittest.TestCase):
             extract_audio_wav("Z:/missing/no-such-file.mp4")
 
     def test_extract_wav_passthrough_shape(self):
-        from src.infra.ffmpeg_paths import has_ffmpeg
-
-        if not has_ffmpeg():
-            self.skipTest("ffmpeg unavailable")
+        if not _ffmpeg_usable():
+            self.skipTest("ffmpeg unavailable or not runnable")
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "source.wav")
             _write_silent_wav(source, seconds=0.25)
@@ -149,10 +168,9 @@ class AudioExtractTests(unittest.TestCase):
 
     def test_extract_mono_f32_pipe(self):
         from src.core.asr.audio_extract import extract_audio_mono_f32
-        from src.infra.ffmpeg_paths import has_ffmpeg
 
-        if not has_ffmpeg():
-            self.skipTest("ffmpeg unavailable")
+        if not _ffmpeg_usable():
+            self.skipTest("ffmpeg unavailable or not runnable")
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "source.wav")
             _write_silent_wav(source, seconds=0.25)

@@ -29,6 +29,9 @@ jobs:
       - name: Ruff
         run: python -m ruff check src ui tests scripts main.py
 
+      - name: FFmpeg (CI)
+        run: conda install -y -c conda-forge ffmpeg
+
       - name: Run tests
         timeout-minutes: 30
         run: python -m pytest tests/ -q --tb=line
