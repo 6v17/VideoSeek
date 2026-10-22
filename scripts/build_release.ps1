@@ -1,17 +1,22 @@
 # VideoSeek — Nuitka standalone release build (Windows)
 #
 # Usage (from repo root, in conda env VideoSeek):
-#   .\scripts\build_release.ps1
-#   .\scripts\build_release.ps1 -Clean
-#   .\scripts\build_release.ps1 -Zip
-#   .\scripts\build_release.ps1 -WithClonePlugin -Zip   # Pro: embed clone plugin
-#   .\scripts\build_release.ps1 -FullEdition -Zip       # Full: runtime\ manifest + seed zips
+#   .\scripts\build_release.ps1 -Zip -Inno
+#   .\scripts\build_release.ps1 -Clean -Zip -Inno
+#   .\scripts\build_release.ps1 -SkipNuitka -Zip -Inno   # reuse dist\main.dist, only restage + package
+#   .\scripts\build_release.ps1 -WithClonePlugin -Zip    # Pro: embed clone plugin
+#
+# Release model (one Nuitka, two Inno installers — same exe):
+#   dist\package-pure\  → VideoSeek-{ver}-Setup.exe       纯安装包（无 runtime\）
+#   dist\package-full\  → VideoSeek-{ver}-Full-Setup.exe  完整包安装包（带 runtime\ 种子）
+#   Optional zip mirrors of those trees when -Zip is set.
+#
+# Seeds for full: scripts\release\runtime\{manifest.json, ffmpeg.exe, chinese-clip.zip, rapidocr-zh-understanding.zip}
+# Inno scripts:   scripts\release\inno\VideoSeek-Pure.iss / VideoSeek-Full.iss
 #
 # Version source of truth: src\app\app_meta.py → "version"
 #   QQ soft-release: set "1.0.88-beta.1" before building; promote to "1.0.88" for stable.
 #   Do not write beta builds into the public version.json.
-#
-# Output: dist\main.dist\VideoSeek.exe (+ bundled deps)
 #
 # Boundaries:
 #   - OSS build: host only (search / understanding / Jianying export helpers).
@@ -22,12 +27,15 @@
 param(
     [switch]$Clean,
     [switch]$Zip,
+    [switch]$Inno,
+    [switch]$SkipNuitka,
     [switch]$WithClonePlugin,
-    [switch]$FullEdition,
+    [switch]$FullEdition,  # kept for compatibility; full package is always staged when seeds exist
     [string]$Python = "",
     [string]$OutputDir = "dist",
     [string]$OutputFilename = "VideoSeek",
-    [string]$ClonePluginPath = ""
+    [string]$ClonePluginPath = "",
+    [string]$InnoCompiler = ""
 )
 
 Set-StrictMode -Version Latest
@@ -52,6 +60,41 @@ function Copy-TreeForce([string]$Source, [string]$Destination) {
         Remove-Item -LiteralPath $Destination -Recurse -Force
     }
     Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+}
+
+function Copy-PackageContents([string]$Source, [string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Source)) {
+        throw "Package source not found: $Source"
+    }
+    if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force
+}
+
+function Resolve-InnoCompiler([string]$ExplicitPath) {
+    if ($ExplicitPath) {
+        $resolved = (Resolve-Path -LiteralPath $ExplicitPath).Path
+        if (-not (Test-Path -LiteralPath $resolved)) {
+            throw "Inno compiler not found: $resolved"
+        }
+        return $resolved
+    }
+    $cmd = Get-Command iscc -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+    foreach ($candidate in @(
+        "${env:LocalAppData}\Programs\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+    return ""
 }
 
 function Resolve-ClonePluginRoot([string]$RepoRoot, [string]$ExplicitPath) {
@@ -143,66 +186,78 @@ if ($WithClonePlugin) {
 $DistRoot = Join-Path $RepoRoot $OutputDir
 $BundleDir = Join-Path $DistRoot "main.dist"
 
+if ($SkipNuitka -and $Clean) {
+    throw "Do not combine -Clean and -SkipNuitka (Clean deletes main.dist)."
+}
+
 if ($Clean -and (Test-Path -LiteralPath $DistRoot)) {
     Write-Step "Cleaning $DistRoot"
     Remove-Item -LiteralPath $DistRoot -Recurse -Force
 }
 
-Write-Step "Running Nuitka (this may take a while)"
-$NuitkaArgs = @(
-    "-m", "nuitka",
-    "--standalone",
-    "--plugin-enable=pyside6",
-    "--include-qt-plugins=multimedia",
-    "--windows-console-mode=disable",
-    "--output-dir=$OutputDir",
-    "--output-filename=$OutputFilename",
-    "--windows-icon-from-ico=icon.ico",
-    "--include-data-file=config.json=config.json",
-    "--include-package=yt_dlp",
-    "--include-package=lancedb",
-    "--include-package=pyarrow",
-    "--include-package=fastapi",
-    "--include-package=uvicorn",
-    "--include-package=starlette",
-    "--include-package=multipart",
-    "--include-package=rookiepy",
-    "--include-package=pillow_heif",
-    "--include-package=qrcode",
-    "--include-package=certifi",
-    # Lazy-imported at runtime — force-include so Nuitka does not drop them.
-    "--include-package=vlc",
-    "--include-package=rapidocr_onnxruntime",
-    "--include-package=pyJianYingDraft",
-    # Non-.py package data: --include-package alone often omits these.
-    "--include-package-data=rapidocr_onnxruntime",
-    "--include-package-data=certifi",
-    "--include-package-data=yt_dlp",
-    "--include-package-data=pyJianYingDraft",
-    "--include-data-dir=resources/rapidocr_onnxruntime=rapidocr_onnxruntime",
-    "--include-package=onnxruntime",
-    "--include-package=cv2",
-    "--include-package=faiss",
-    "--nofollow-import-to=yt_dlp.extractor.lazy_extractors",
-    "--nofollow-import-to=transformers",
-    "--nofollow-import-to=pytest,unittest",
-    "--show-progress"
-)
-if ($WithClonePlugin) {
-    $NuitkaArgs += @(
-        "--include-package=videoseek_plugin_clone",
-        "--include-package-data=videoseek_plugin_clone"
+$ExePath = Join-Path $BundleDir "$OutputFilename.exe"
+
+if ($SkipNuitka) {
+    Write-Step "Skipping Nuitka (reusing existing bundle)"
+    Test-RequiredPath $BundleDir "dist\\main.dist (run without -SkipNuitka first)"
+    Test-RequiredPath $ExePath "VideoSeek.exe in main.dist"
+} else {
+    Write-Step "Running Nuitka (this may take a while)"
+    $NuitkaArgs = @(
+        "-m", "nuitka",
+        "--standalone",
+        "--plugin-enable=pyside6",
+        "--include-qt-plugins=multimedia",
+        "--windows-console-mode=disable",
+        "--output-dir=$OutputDir",
+        "--output-filename=$OutputFilename",
+        "--windows-icon-from-ico=icon.ico",
+        "--include-data-file=config.json=config.json",
+        "--include-package=yt_dlp",
+        "--include-package=lancedb",
+        "--include-package=pyarrow",
+        "--include-package=fastapi",
+        "--include-package=uvicorn",
+        "--include-package=starlette",
+        "--include-package=multipart",
+        "--include-package=rookiepy",
+        "--include-package=pillow_heif",
+        "--include-package=qrcode",
+        "--include-package=certifi",
+        # Lazy-imported at runtime — force-include so Nuitka does not drop them.
+        "--include-package=vlc",
+        "--include-package=rapidocr_onnxruntime",
+        "--include-package=pyJianYingDraft",
+        # Non-.py package data: --include-package alone often omits these.
+        "--include-package-data=rapidocr_onnxruntime",
+        "--include-package-data=certifi",
+        "--include-package-data=yt_dlp",
+        "--include-package-data=pyJianYingDraft",
+        "--include-data-dir=resources/rapidocr_onnxruntime=rapidocr_onnxruntime",
+        "--include-package=onnxruntime",
+        "--include-package=cv2",
+        "--include-package=faiss",
+        "--nofollow-import-to=yt_dlp.extractor.lazy_extractors",
+        "--nofollow-import-to=transformers",
+        "--nofollow-import-to=pytest,unittest",
+        "--show-progress"
     )
-}
-$NuitkaArgs += @("main.py")
+    if ($WithClonePlugin) {
+        $NuitkaArgs += @(
+            "--include-package=videoseek_plugin_clone",
+            "--include-package-data=videoseek_plugin_clone"
+        )
+    }
+    $NuitkaArgs += @("main.py")
 
-& $PythonExe @NuitkaArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "Nuitka failed with exit code $LASTEXITCODE"
-}
+    & $PythonExe @NuitkaArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Nuitka failed with exit code $LASTEXITCODE"
+    }
 
-if (-not (Test-Path -LiteralPath $BundleDir)) {
-    throw "Expected bundle directory not found: $BundleDir"
+    if (-not (Test-Path -LiteralPath $BundleDir)) {
+        throw "Expected bundle directory not found: $BundleDir"
+    }
 }
 
 Write-Step "Copying runtime assets into $BundleDir"
@@ -341,66 +396,119 @@ if (-not $PyarrowDll) {
     throw "Could not find pyarrow DLLs under $BundleDir. Lance search would fail at runtime."
 }
 
-if ($FullEdition) {
-    Write-Step "Embedding full-edition runtime seed (Chinese CLIP small + FFmpeg + RapidOCR)"
-    $RuntimeSeedSrc = Join-Path $RepoRoot "scripts\release\runtime"
-    $RuntimeDst = Join-Path $BundleDir "runtime"
-    Test-RequiredPath (Join-Path $RuntimeSeedSrc "manifest.json") "full edition manifest"
+# Keep compile output pure: never leave runtime\ seeds on main.dist itself.
+$RuntimeInBundle = Join-Path $BundleDir "runtime"
+if (Test-Path -LiteralPath $RuntimeInBundle) {
+    Remove-Item -LiteralPath $RuntimeInBundle -Recurse -Force
+}
+
+Write-Step "Stamp version on compile output"
+$VersionStampPath = Join-Path $BundleDir "VERSION.txt"
+Set-Content -LiteralPath $VersionStampPath -Value $AppVersion -Encoding ASCII -NoNewline
+
+$PureDir = Join-Path $DistRoot "package-pure"
+$FullDir = Join-Path $DistRoot "package-full"
+$RuntimeSeedSrc = Join-Path $RepoRoot "scripts\release\runtime"
+$RuntimeSeedNames = @("ffmpeg.exe", "chinese-clip.zip", "rapidocr-zh-understanding.zip")
+$ManifestPath = Join-Path $RuntimeSeedSrc "manifest.json"
+
+Write-Step "Staging package-pure (纯安装包 tree)"
+Copy-PackageContents -Source $BundleDir -Destination $PureDir
+
+$FullReady = $false
+$MissingSeeds = @()
+if (-not (Test-Path -LiteralPath $ManifestPath)) {
+    $MissingSeeds += "manifest.json"
+}
+foreach ($seedName in $RuntimeSeedNames) {
+    if (-not (Test-Path -LiteralPath (Join-Path $RuntimeSeedSrc $seedName))) {
+        $MissingSeeds += $seedName
+    }
+}
+if ($MissingSeeds.Count -eq 0) {
+    Write-Step "Staging package-full (完整包安装包 tree)"
+    Copy-PackageContents -Source $BundleDir -Destination $FullDir
+    $RuntimeDst = Join-Path $FullDir "runtime"
     New-Item -ItemType Directory -Force -Path $RuntimeDst | Out-Null
-    Copy-Item -LiteralPath (Join-Path $RuntimeSeedSrc "manifest.json") -Destination (Join-Path $RuntimeDst "manifest.json") -Force
-    $RuntimeSeedNames = @("ffmpeg.exe", "chinese-clip.zip", "rapidocr-zh-understanding.zip")
+    Copy-Item -LiteralPath $ManifestPath -Destination (Join-Path $RuntimeDst "manifest.json") -Force
     foreach ($seedName in $RuntimeSeedNames) {
-        $seedSrc = Join-Path $RuntimeSeedSrc $seedName
-        if (Test-Path -LiteralPath $seedSrc) {
-            Copy-Item -LiteralPath $seedSrc -Destination (Join-Path $RuntimeDst $seedName) -Force
-            Write-Host "  runtime\$seedName" -ForegroundColor Green
-        } else {
-            Write-Warning "Full edition seed missing: $seedSrc — copy official small-tier zip + ffmpeg.exe before shipping."
-        }
+        Copy-Item -LiteralPath (Join-Path $RuntimeSeedSrc $seedName) -Destination (Join-Path $RuntimeDst $seedName) -Force
+        Write-Host "  runtime\$seedName" -ForegroundColor Green
+    }
+    $FullReady = $true
+} else {
+    $msg = "Full package seeds incomplete under scripts\release\runtime\: $($MissingSeeds -join ', ')"
+    if ($FullEdition) {
+        throw $msg
+    }
+    Write-Warning $msg
+    if (Test-Path -LiteralPath $FullDir) {
+        Remove-Item -LiteralPath $FullDir -Recurse -Force
     }
 }
 
 Write-Step "Build complete"
-$VersionStampPath = Join-Path $BundleDir "VERSION.txt"
-Set-Content -LiteralPath $VersionStampPath -Value $AppVersion -Encoding ASCII -NoNewline
-Write-Host "Bundle: $BundleDir" -ForegroundColor Green
-Write-Host "Exe:    $ExePath" -ForegroundColor Green
-Write-Host "Version:$AppVersion (also $VersionStampPath)" -ForegroundColor Green
-if ($WithClonePlugin) {
-    Write-Host "Clone:  embedded (videoseek_plugin_clone)" -ForegroundColor Green
+Write-Host "Compile: $BundleDir" -ForegroundColor Green
+Write-Host "Exe:     $ExePath" -ForegroundColor Green
+Write-Host "Version: $AppVersion" -ForegroundColor Green
+Write-Host "Pure:    $PureDir" -ForegroundColor Green
+if ($FullReady) {
+    Write-Host "Full:    $FullDir" -ForegroundColor Green
 }
-if ($FullEdition) {
-    Write-Host "Edition: full (runtime\ auto-import on first launch)" -ForegroundColor Green
+if ($WithClonePlugin) {
+    Write-Host "Clone:   embedded (videoseek_plugin_clone)" -ForegroundColor Green
 }
 
 if ($Zip) {
-    Write-Step "Packaging zip"
-    $ZipSuffix = if ($WithClonePlugin) { "-clone" } elseif ($FullEdition) { "-full" } else { "" }
-    $ZipName = "VideoSeek-$AppVersion$ZipSuffix.zip"
-    $ZipPath = Join-Path $DistRoot $ZipName
-    if (Test-Path -LiteralPath $ZipPath) {
-        Remove-Item -LiteralPath $ZipPath -Force
+    Write-Step "Packaging zip mirrors of installer trees"
+    $PureZip = Join-Path $DistRoot "VideoSeek-$AppVersion.zip"
+    if (Test-Path -LiteralPath $PureZip) { Remove-Item -LiteralPath $PureZip -Force }
+    Compress-Archive -Path (Join-Path $PureDir "*") -DestinationPath $PureZip -CompressionLevel Optimal
+    Write-Host "Zip pure: $PureZip" -ForegroundColor Green
+    if ($FullReady) {
+        $FullZip = Join-Path $DistRoot "VideoSeek-$AppVersion-full.zip"
+        if (Test-Path -LiteralPath $FullZip) { Remove-Item -LiteralPath $FullZip -Force }
+        Compress-Archive -Path (Join-Path $FullDir "*") -DestinationPath $FullZip -CompressionLevel Optimal
+        Write-Host "Zip full: $FullZip" -ForegroundColor Green
     }
-    Compress-Archive -Path (Join-Path $BundleDir "*") -DestinationPath $ZipPath -CompressionLevel Optimal
-    Write-Host "Zip:    $ZipPath" -ForegroundColor Green
+}
+
+if ($Inno) {
+    Write-Step "Compiling Inno installers"
+    $Iscc = Resolve-InnoCompiler -ExplicitPath $InnoCompiler
+    if (-not $Iscc) {
+        throw "ISCC.exe not found. Install Inno Setup 6 or pass -InnoCompiler <path-to-ISCC.exe>"
+    }
+    Write-Host "ISCC: $Iscc"
+    $PureIss = Join-Path $RepoRoot "scripts\release\inno\VideoSeek-Pure.iss"
+    $FullIss = Join-Path $RepoRoot "scripts\release\inno\VideoSeek-Full.iss"
+    Test-RequiredPath $PureIss "VideoSeek-Pure.iss"
+    & $Iscc "/DMyAppVersion=$AppVersion" $PureIss
+    if ($LASTEXITCODE -ne 0) { throw "Inno Pure build failed with exit code $LASTEXITCODE" }
+    Write-Host "Setup pure: $(Join-Path $DistRoot "VideoSeek-$AppVersion-Setup.exe")" -ForegroundColor Green
+    if ($FullReady) {
+        Test-RequiredPath $FullIss "VideoSeek-Full.iss"
+        & $Iscc "/DMyAppVersion=$AppVersion" $FullIss
+        if ($LASTEXITCODE -ne 0) { throw "Inno Full build failed with exit code $LASTEXITCODE" }
+        Write-Host "Setup full: $(Join-Path $DistRoot "VideoSeek-$AppVersion-Full-Setup.exe")" -ForegroundColor Green
+    } else {
+        Write-Warning "Skipped Full Setup (runtime seeds missing)."
+    }
 }
 
 Write-Host ""
-Write-Host "Release notes:" -ForegroundColor Yellow
+Write-Host "Release layout:" -ForegroundColor Yellow
+Write-Host "  - Nuitka once → dist\main.dist\ (always pure; no runtime\ on compile output)"
+Write-Host "  - 纯安装包:  dist\package-pure\  → VideoSeek-$AppVersion-Setup.exe      (-Inno)"
+Write-Host "  - 完整包安装包: dist\package-full\ → VideoSeek-$AppVersion-Full-Setup.exe (-Inno)"
+Write-Host "  - Optional zip mirrors with -Zip; reuse compile with -SkipNuitka"
 Write-Host "  - Source of truth: src/app/app_meta.py version=$AppVersion"
-Write-Host "  - QQ beta: use 1.0.x-beta.N in app_meta; do not publish to public version.json"
-Write-Host "  - Stable: drop -beta.N, tag v$AppVersion, update OSS version.json"
-Write-Host "  - OSS zip: omit -WithClonePlugin. Pro/clone zip: pass -WithClonePlugin"
 Write-Host ""
 Write-Host "Smoke test checklist:" -ForegroundColor Yellow
-Write-Host "  1. Start VideoSeek.exe and import runtime resources (models + FFmpeg)"
-Write-Host "  2. Sync a library -> confirm lance/ appears under user data"
-Write-Host "  3. Text/image search returns hits"
-Write-Host "  4. Subtitle library -> extract subtitles (RapidOCR config.yaml must load)"
-Write-Host "  5. Download / HTTPS model fetch (certifi cacert.pem)"
-Write-Host "  6. Enable Agent API -> GET http://127.0.0.1:8765/api/v1/health"
-Write-Host "  7. Team server mode -> media nginx starts (bundle has server\nginx\nginx.exe)"
-Write-Host "  8. Shot list / recap -> Export Jianying draft (needs pyJianYingDraft assets)"
+Write-Host "  1. Pure Setup: first launch asks to import models + FFmpeg"
+Write-Host "  2. Full Setup: banner imports runtime\ automatically (progress, then ready)"
+Write-Host "  3. Sync a library -> lance/ under user data; text/image search hits"
+Write-Host "  4. Subtitle OCR / Agent health / team nginx as usual"
 if ($WithClonePlugin) {
-    Write-Host "  9. Clone page appears in nav; match + Export Jianying draft lays V1/V2/V3"
+    Write-Host "  5. Clone page appears in nav; match + Export Jianying draft lays V1/V2/V3"
 }
