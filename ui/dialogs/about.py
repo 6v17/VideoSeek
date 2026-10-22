@@ -1,3 +1,5 @@
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -9,9 +11,26 @@ from PySide6.QtWidgets import (
 
 from src.app.config import get_app_version
 from src.app.i18n import get_texts
+from ui.dialogs.app_message import AppMessageDialog
 from ui.dialogs.html_links import ExternalLinkTextBrowser
 from ui.widgets.layout import WINDOW_SIZES, apply_dialog_size
 from ui.widgets.scaffold import VSCard
+
+# Quiet easter egg: click the version line this many times within the window below.
+_EASTER_EGG_CLICKS = 7
+_EASTER_EGG_WINDOW_MS = 4000
+
+
+class _ClickableVersionLabel(QLabel):
+    def __init__(self, text: str, on_click, parent=None):
+        super().__init__(text, parent)
+        self._on_click = on_click
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt API
+        if event.button() == Qt.MouseButton.LeftButton and callable(self._on_click):
+            self._on_click()
+        super().mousePressEvent(event)
 
 
 class AboutDialog(QDialog):
@@ -20,6 +39,11 @@ class AboutDialog(QDialog):
         texts = get_texts(language)
         version_info = version_info or {}
         about = about or {}
+        self._texts = texts
+        self._is_dark = bool(is_dark)
+        self._language = language
+        self._egg_clicks = 0
+        self._egg_first_ms = 0
 
         self.setWindowTitle(texts["about_title"])
         apply_dialog_size(
@@ -43,15 +67,17 @@ class AboutDialog(QDialog):
         subtitle = QLabel(subtitle_text)
         subtitle.setObjectName("Hint")
         subtitle.setWordWrap(True)
-        version = QLabel(
+        version = _ClickableVersionLabel(
             texts["version_label"].format(
                 version=str(version_info.get("current_version") or get_app_version())
-            )
+            ),
+            on_click=self._on_version_clicked,
         )
         version.setObjectName("DialogMetaLabel")
         version_status = QLabel(version_info.get("status_text", texts["version_check_unavailable"]))
         version_status.setObjectName("DialogMetaLabel")
         version_status.setWordWrap(True)
+        self._version_status = version_status
 
         divider = QFrame()
         divider.setFrameShape(QFrame.HLine)
@@ -82,3 +108,32 @@ class AboutDialog(QDialog):
 
         inner.addLayout(button_row)
         layout.addWidget(shell)
+
+    def _on_version_clicked(self) -> None:
+        from PySide6.QtCore import QDateTime
+
+        now = int(QDateTime.currentMSecsSinceEpoch())
+        if self._egg_clicks == 0 or (now - self._egg_first_ms) > _EASTER_EGG_WINDOW_MS:
+            self._egg_clicks = 1
+            self._egg_first_ms = now
+        else:
+            self._egg_clicks += 1
+        if self._egg_clicks < _EASTER_EGG_CLICKS:
+            return
+        self._egg_clicks = 0
+        self._egg_first_ms = 0
+        title = self._texts.get("about_easter_egg_title", "Easter egg")
+        body = self._texts.get(
+            "about_easter_egg_body",
+            "Thanks for finding this. VideoSeek was built with limited spare time, "
+            "hoping to help people who dig through footage every day. It stays free forever.",
+        )
+        self._version_status.setText(self._texts.get("about_easter_egg_hint", "🥚"))
+        AppMessageDialog(
+            title,
+            body,
+            kind="success",
+            parent=self,
+            is_dark=self._is_dark,
+            language=self._language,
+        ).exec()
