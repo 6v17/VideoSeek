@@ -52,7 +52,7 @@ python import_runtime_resources.py --status
   ```
   - **纯安装包**：`dist\VideoSeek-{ver}-Setup.exe`（无 `runtime\`，装完需自行导入资源）
   - **完整包安装包**：`dist\VideoSeek-{ver}-Full-Setup.exe`（带 `runtime\`，首启自动导入）
-  - 中间目录：`dist\package-pure\`、`dist\package-full\`；可选 zip 镜像。已编过可用 `-SkipNuitka` 只重打安装包。带克隆页加 `-WithClonePlugin`。
+  - 中间目录：`dist\package-pure\`、`dist\package-full\`；可选 zip 镜像。`-Inno` 会在 `dist\inno\` **临时生成** `.iss`（不进 git）。已编过可用 `-SkipNuitka` 只重打安装包。带克隆页加 `-WithClonePlugin`。
 - 完整包首启：主窗口先显示，再在后台导入 `runtime\`（顶栏进度，不挡界面）。**老用户**只补缺包，**不改当前检索模型**。Agent：`VideoSeek.exe --bootstrap-runtime`。
 - **CAM++：** 仓库已带 `resources/asr/campplus.onnx` + `.onnx.data`（解说对白声线聚类）；也可从桌面资源包 `cam++.zip` 导入。
 
