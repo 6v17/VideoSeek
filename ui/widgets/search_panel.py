@@ -2,7 +2,7 @@
 
 import os
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -32,24 +32,35 @@ from ui.widgets.tag_search_form import TagSearchForm, _StripHint
 
 
 class _ElidedHint(QLabel):
-    """Single-line status. Shrinks with the card and ellipsizes instead of sticking out."""
+    """Single-line status next to the search tabs.
+
+    Asks the layout for the full-text width first (Preferred). If the row is tight,
+    minimum width can shrink to 0 and the text is ellipsized. Do not elide against a
+    zero width before the first layout pass — that collapses sizeHint to empty and
+    the model label disappears forever beside ``_header_pad``.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("StatusHint")
-        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(20)
         self.setMinimumWidth(0)
         self._full = ""
 
+    def sizeHint(self):  # noqa: N802 — Qt API
+        fm = self.fontMetrics()
+        text = self._full or " "
+        return QSize(fm.horizontalAdvance(text) + 8, self.height() or 20)
+
     def minimumSizeHint(self):  # noqa: N802 — Qt API
-        hint = super().minimumSizeHint()
-        return hint.__class__(0, hint.height())
+        return QSize(0, self.height() or 20)
 
     def setText(self, text: str) -> None:  # noqa: N802 — Qt API
         self._full = str(text or "")
         self.setToolTip(self._full)
+        self.updateGeometry()
         self._elide()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
@@ -57,7 +68,11 @@ class _ElidedHint(QLabel):
         self._elide()
 
     def _elide(self) -> None:
-        width = max(0, self.width() - 4)
+        width = max(0, int(self.width()) - 4)
+        if width <= 1:
+            # Not laid out yet — keep full text so sizeHint stays meaningful.
+            super().setText(self._full)
+            return
         super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, width))
 
 
