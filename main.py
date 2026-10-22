@@ -107,6 +107,8 @@ if __name__ == "__main__":
     t_show = time.perf_counter()
     window.show()
     logger.info("window.show() returned in %.2fs", time.perf_counter() - t_show)
+    if hasattr(window, "start_bundled_runtime_bootstrap"):
+        window.start_bundled_runtime_bootstrap()
     paint_probe = _FirstPaintProbe(t_show)
     window.installEventFilter(paint_probe)
     # Keep a reference so the probe is not GC'd before first paint.

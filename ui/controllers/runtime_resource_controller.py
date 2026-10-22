@@ -1,4 +1,4 @@
-from PySide6.QtCore import QEventLoop, QObject, Signal
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from src.app.i18n import get_texts
@@ -24,6 +24,7 @@ class RuntimeResourceController(QObject):
         self.worker = None
         self._dialog_theme = None
         self._dialog_language = None
+        self._bundled_bootstrap_started = False
 
     def _exec_runtime_resource_dialog(self, dialog):
         # Flush pending resize/move on the main window so the first modal placement matches later opens.
@@ -32,7 +33,7 @@ class RuntimeResourceController(QObject):
             app.processEvents()
         dialog.exec()
 
-    def check_resources(self, show_dialog=True, bootstrap_bundled=False):
+    def check_resources(self, show_dialog=True):
         status = get_runtime_resource_status()
         # Config can lose profiles while ONNX packs remain on disk — rescan once.
         if not status.get("model_ready"):
@@ -78,15 +79,78 @@ class RuntimeResourceController(QObject):
         self.status_changed.emit(status)
         if status["resources_ready"]:
             return True
-        if bootstrap_bundled and self._bootstrap_bundled_blocking():
-            status = get_runtime_resource_status()
-            self.status_changed.emit(status)
-            if status["resources_ready"]:
-                self._refresh_after_runtime_import()
-                return True
         if show_dialog:
             self.show_missing_dialog(status)
         return False
+
+    def start_bundled_bootstrap_if_needed(self) -> bool:
+        """Import Full-edition ``runtime\\`` seed in the background (does not block the main window)."""
+        if self._bundled_bootstrap_started:
+            return bool(self.worker and self.worker.isRunning())
+        status = get_runtime_resource_status()
+        if status.get("resources_ready"):
+            return False
+        from src.services.bundled_runtime_service import bundled_runtime_available
+
+        if not bundled_runtime_available():
+            return False
+        if self.worker and self.worker.isRunning():
+            return True
+
+        from ui.workers import BundledRuntimeBootstrapWorker
+
+        texts = get_texts(self.parent_window.language)
+        self._bundled_bootstrap_started = True
+        worker = BundledRuntimeBootstrapWorker()
+        self.worker = worker
+
+        def _emit_import_status(*, progress: int, text: str) -> None:
+            snapshot = dict(get_runtime_resource_status())
+            snapshot["bundled_import_in_progress"] = True
+            snapshot["bundled_import_progress"] = int(progress)
+            snapshot["bundled_import_text"] = str(text or "").strip() or texts.get(
+                "runtime_bundled_bootstrap_progress",
+                "Importing bundled resources…",
+            )
+            self.status_changed.emit(snapshot)
+
+        def _finish(result=None):
+            from ui.threading_utils import release_finished_thread
+
+            payload = dict(result or {})
+            release_finished_thread(self, "worker", worker)
+            self._refresh_after_runtime_import()
+            final = get_runtime_resource_status()
+            self.status_changed.emit(final)
+            if final.get("resources_ready"):
+                self.resources_ready.emit(payload)
+
+        def _fail(message: str) -> None:
+            from ui.threading_utils import release_finished_thread
+
+            release_finished_thread(self, "worker", worker)
+            self.status_changed.emit(get_runtime_resource_status())
+            texts_local = get_texts(self.parent_window.language)
+            if hasattr(self.parent_window, "show_error_dialog"):
+                self.parent_window.show_error_dialog(
+                    texts_local.get(
+                        "runtime_bundled_bootstrap_failed",
+                        "Bundled resource import failed: {error}",
+                    ).format(error=str(message or "unknown error"))
+                )
+
+        _emit_import_status(
+            progress=0,
+            text=texts.get("runtime_bundled_bootstrap_starting", "Importing bundled resources…"),
+        )
+        worker.progress_signal.connect(lambda value, text: _emit_import_status(progress=int(value), text=str(text)))
+        worker.finished_signal.connect(_finish)
+        worker.error_signal.connect(_fail)
+        from ui.threading_utils import bind_thread_release
+
+        bind_thread_release(self, "worker", worker)
+        worker.start()
+        return True
 
     def _refresh_after_runtime_import(self):
         parent = self.parent_window
@@ -98,63 +162,6 @@ class RuntimeResourceController(QObject):
             parent._refresh_search_model_display()
         if hasattr(parent, "refresh_runtime_resource_ui"):
             parent.refresh_runtime_resource_ui(sync_dialog=False)
-
-    def _bootstrap_bundled_blocking(self) -> bool:
-        from src.services.bundled_runtime_service import bundled_runtime_available
-
-        if not bundled_runtime_available():
-            return False
-        if self.worker and self.worker.isRunning():
-            return False
-
-        from ui.workers import BundledRuntimeBootstrapWorker
-
-        texts = get_texts(self.parent_window.language)
-        dialog = self._ensure_dialog()
-        dialog.set_progress_state(
-            0,
-            texts.get("runtime_bundled_bootstrap_starting", "Importing bundled resources…"),
-        )
-        dialog.show()
-        app = QApplication.instance()
-        if app is not None:
-            app.processEvents()
-
-        loop = QEventLoop()
-        outcome: dict = {"ok": False}
-
-        def _finish(result=None):
-            payload = dict(result or {})
-            outcome["ok"] = bool(payload.get("ok"))
-            loop.quit()
-
-        worker = BundledRuntimeBootstrapWorker()
-        self.worker = worker
-        worker.progress_signal.connect(
-            lambda value, text: dialog.set_progress_state(
-                int(value),
-                str(text or texts.get("runtime_bundled_bootstrap_progress", "Importing bundled resources…")),
-            )
-        )
-        worker.finished_signal.connect(_finish)
-        worker.error_signal.connect(lambda message: _finish({"ok": False, "error": message}))
-        from ui.threading_utils import bind_thread_release, release_finished_thread
-
-        bind_thread_release(self, "worker", worker)
-        worker.start()
-        loop.exec()
-        worker.wait(5000)
-        release_finished_thread(self, "worker", worker)
-
-        status = get_runtime_resource_status()
-        if outcome.get("ok") and status.get("resources_ready"):
-            dialog.set_success_state(
-                get_runtime_resource_location_text(status=status, include_ffmpeg=True)
-            )
-            return True
-        if dialog.isVisible():
-            dialog.close()
-        return False
 
     def get_status_snapshot(self):
         return get_runtime_resource_status()

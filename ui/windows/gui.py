@@ -226,7 +226,7 @@ class MainWindow(
         if hasattr(self, "_refresh_search_panel_state"):
             self._refresh_search_panel_state()
         self._set_settings_dirty(False)
-        self.check_runtime_resources(show_dialog=False, bootstrap_bundled=True)
+        self.check_runtime_resources(show_dialog=False)
         if self.startup_cancelled:
             self.search_controller.shutdown()
             self.preview_controller.shutdown()

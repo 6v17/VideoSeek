@@ -556,11 +556,11 @@ class RuntimeGuiMixin:
             except Exception:
                 logger.exception("Runtime warmup ready callback failed")
 
-    def check_runtime_resources(self, show_dialog=True, bootstrap_bundled=False):
-        return self.runtime_resource_controller.check_resources(
-            show_dialog=show_dialog,
-            bootstrap_bundled=bootstrap_bundled,
-        )
+    def check_runtime_resources(self, show_dialog=True):
+        return self.runtime_resource_controller.check_resources(show_dialog=show_dialog)
+
+    def start_bundled_runtime_bootstrap(self):
+        return self.runtime_resource_controller.start_bundled_bootstrap_if_needed()
 
     def refresh_runtime_resource_ui(self, *, sync_dialog=True):
         """Re-read disk/config status, refresh page banners, and optionally sync the import dialog."""
@@ -684,13 +684,26 @@ class RuntimeGuiMixin:
             return
         banner_text = self.texts.get("runtime_banner_missing", "Missing runtime resources")
         action_text = self.texts.get("runtime_banner_open_import", "Go to import")
-        show_warn = not bool(status.get("resources_ready"))
+        importing = bool(status.get("bundled_import_in_progress"))
+        show_warn = importing or not bool(status.get("resources_ready"))
         banner_btn.setText(action_text)
-        if show_warn:
+        if importing:
+            banner_label.setText(
+                str(status.get("bundled_import_text") or "").strip()
+                or self.texts.get(
+                    "runtime_bundled_bootstrap_progress",
+                    "Importing bundled resources…",
+                )
+            )
+            banner_btn.hide()
+        elif show_warn:
             banner_label.setText(banner_text)
+            banner_btn.show()
+        if show_warn:
             banner.setProperty("tipKind", "resources_missing")
             set_runtime_banner_warn(banner, True)
-            banner_btn.show()
+            if not importing:
+                banner_btn.show()
             banner.show()
         else:
             banner.setProperty("tipKind", "")
