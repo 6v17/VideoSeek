@@ -30,6 +30,11 @@ def _write_silent_wav(path: str, *, seconds: float = 0.5, sample_rate: int = 160
 
 
 def _ffmpeg_usable() -> bool:
+    """True when ffmpeg is missing (caller should skip) or present and runnable.
+
+    If a path is resolved but cannot be executed (e.g. a 6-byte stub left in AppData
+    by a mis-patched test), raise — that is environment pollution, not "no ffmpeg".
+    """
     from src.infra.ffmpeg_paths import get_ffmpeg_path, has_ffmpeg
 
     if not has_ffmpeg():
@@ -44,8 +49,8 @@ def _ffmpeg_usable() -> bool:
             timeout=20,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
-        return False
+    except OSError as exc:
+        raise AssertionError(f"ffmpeg exists but cannot run: {ffmpeg} ({exc})") from exc
     return completed.returncode == 0
 
 
@@ -153,7 +158,7 @@ class AudioExtractTests(unittest.TestCase):
 
     def test_extract_wav_passthrough_shape(self):
         if not _ffmpeg_usable():
-            self.skipTest("ffmpeg unavailable or not runnable")
+            self.skipTest("ffmpeg unavailable")
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "source.wav")
             _write_silent_wav(source, seconds=0.25)
@@ -170,7 +175,7 @@ class AudioExtractTests(unittest.TestCase):
         from src.core.asr.audio_extract import extract_audio_mono_f32
 
         if not _ffmpeg_usable():
-            self.skipTest("ffmpeg unavailable or not runnable")
+            self.skipTest("ffmpeg unavailable")
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "source.wav")
             _write_silent_wav(source, seconds=0.25)

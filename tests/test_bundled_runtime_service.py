@@ -74,6 +74,7 @@ class BundledRuntimeServiceTests(unittest.TestCase):
             config = {
                 "schema_version": 2,
                 "model_dir": os.path.join(app_data, "models"),
+                "ffmpeg_path": os.path.join(app_data, "bin", "ffmpeg.exe"),
                 "models": {"active_profile": "", "profiles": []},
             }
 
@@ -82,6 +83,9 @@ class BundledRuntimeServiceTests(unittest.TestCase):
 
             with (
                 patch("src.services.bundled_runtime_service.get_bundled_runtime_dir", return_value=runtime_dir),
+                # Bound imports: patch where each module looks up get_app_data_dir.
+                patch("src.services.runtime_resource_service.get_app_data_dir", return_value=app_data),
+                patch("src.infra.ffmpeg_paths.get_app_data_dir", return_value=app_data),
                 patch("src.utils.get_app_data_dir", return_value=app_data),
                 patch("src.app.config.load_config", side_effect=_load_config),
                 patch("src.app.config.save_config") as save_config,
@@ -97,6 +101,7 @@ class BundledRuntimeServiceTests(unittest.TestCase):
             status = result.get("status") or {}
             self.assertTrue(status.get("ffmpeg_ready"))
             self.assertTrue(status.get("model_ready"))
+            self.assertTrue(Path(app_data, "bin", "ffmpeg.exe").is_file())
             model_manifest = Path(app_data, "models", "chinese-clip", "vit-base-patch16", "model_manifest.json")
             self.assertTrue(model_manifest.is_file())
 
