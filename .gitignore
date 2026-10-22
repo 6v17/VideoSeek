@@ -30,6 +30,10 @@ vlc_lib/
 
 # Local CAM++ weights live under resources/asr (campplus.onnx + .onnx.data)
 
+# Full-edition runtime seeds (copy from release media before -FullEdition; keep manifest.json)
+scripts/release/runtime/*
+!scripts/release/runtime/manifest.json
+
 # Build / packaging
 dist/
 build/
