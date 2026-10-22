@@ -37,14 +37,14 @@ class ExportEncodeModeTests(unittest.TestCase):
 
 class ResolveFfmpegPathInfoTests(unittest.TestCase):
     @patch("src.infra.ffmpeg_paths.shutil.which", return_value=None)
-    @patch("src.infra.ffmpeg_paths.os.path.exists", return_value=False)
+    @patch("src.infra.ffmpeg_paths.is_ffmpeg_binary_usable", return_value=False)
     @patch("src.infra.ffmpeg_paths.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
     @patch("src.app.config.load_config", return_value={})
     def test_resolve_ffmpeg_path_info_missing(
         self,
         _mock_load_config,
         _mock_configured_path,
-        _mock_exists,
+        _mock_usable,
         _mock_which,
     ):
         path, source = utils.resolve_ffmpeg_path_info()
@@ -53,31 +53,33 @@ class ResolveFfmpegPathInfoTests(unittest.TestCase):
         self.assertEqual(source, "missing")
 
     @patch("src.infra.ffmpeg_paths.shutil.which", return_value="/usr/bin/ffmpeg")
-    @patch("src.infra.ffmpeg_paths.os.path.exists", return_value=False)
+    @patch("src.infra.ffmpeg_paths.is_ffmpeg_binary_usable")
     @patch("src.infra.ffmpeg_paths.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
     @patch("src.app.config.load_config", return_value={})
     def test_resolve_ffmpeg_path_info_falls_back_to_system_path(
         self,
         _mock_load_config,
         _mock_configured_path,
-        _mock_exists,
+        mock_usable,
         _mock_which,
     ):
+        mock_usable.side_effect = lambda path: os.path.normcase(str(path)) == os.path.normcase("/usr/bin/ffmpeg")
+
         path, source = utils.resolve_ffmpeg_path_info()
 
         self.assertEqual(path, "/usr/bin/ffmpeg")
         self.assertEqual(source, "system")
 
-    @patch("src.infra.ffmpeg_paths.os.path.exists")
+    @patch("src.infra.ffmpeg_paths.is_ffmpeg_binary_usable")
     @patch("src.infra.ffmpeg_paths.get_configured_ffmpeg_target_path", return_value="D:/cfg/ffmpeg.exe")
     @patch("src.app.config.load_config", return_value={"ffmpeg_path": "D:/cfg/ffmpeg.exe"})
     def test_resolve_ffmpeg_path_info_prefers_configured_path(
         self,
         _mock_load_config,
         _mock_configured_path,
-        mock_exists,
+        mock_usable,
     ):
-        mock_exists.side_effect = lambda path: os.path.normcase(path) == os.path.normcase("D:/cfg/ffmpeg.exe")
+        mock_usable.side_effect = lambda path: os.path.normcase(str(path)) == os.path.normcase("D:/cfg/ffmpeg.exe")
 
         path, source = utils.resolve_ffmpeg_path_info()
 

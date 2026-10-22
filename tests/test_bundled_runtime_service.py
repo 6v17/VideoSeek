@@ -61,7 +61,8 @@ class BundledRuntimeServiceTests(unittest.TestCase):
                 for file_path in package_dir.rglob("*"):
                     if file_path.is_file():
                         archive.write(file_path, file_path.relative_to(package_dir.parent).as_posix())
-            Path(runtime_dir, "ffmpeg.exe").write_bytes(b"ffmpeg")
+            # Large enough + PE magic so has_ffmpeg() accepts the copied binary.
+            Path(runtime_dir, "ffmpeg.exe").write_bytes(b"MZ" + (b"\0" * (256 * 1024)))
 
             manifest = {
                 "manifest_version": 1,

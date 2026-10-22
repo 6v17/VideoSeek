@@ -7,6 +7,10 @@ import shutil
 
 from src.infra.paths import get_app_data_dir, get_app_install_dir
 
+# Real ffmpeg builds are tens of MB; a few-byte stub from a failed copy must not
+# count as installed (otherwise Full-edition auto-import never retries).
+_MIN_FFMPEG_BYTES = 256 * 1024
+
 
 def get_default_ffmpeg_path():
     return os.path.join(get_app_data_dir(), "bin", "ffmpeg.exe")
@@ -24,14 +28,39 @@ def get_configured_ffmpeg_target_path(config=None):
     return os.path.normpath(get_default_ffmpeg_path())
 
 
+def is_ffmpeg_binary_usable(path: str) -> bool:
+    """True when ``path`` looks like a real ffmpeg binary (not a truncated stub).
+
+    Cheap checks only (size + PE/ELF magic) — no subprocess. Used by resolution and
+    ``has_ffmpeg`` so a 6-byte AppData leftover does not block re-import.
+    """
+    text = os.path.normpath(str(path or "").strip())
+    if not text or not os.path.isfile(text):
+        return False
+    try:
+        size = int(os.path.getsize(text))
+    except OSError:
+        return False
+    if size < _MIN_FFMPEG_BYTES:
+        return False
+    try:
+        with open(text, "rb") as handle:
+            magic = handle.read(4)
+    except OSError:
+        return False
+    if os.name == "nt":
+        return magic[:2] == b"MZ"
+    return magic[:4] == b"\x7fELF" or magic[:2] == b"MZ"
+
+
 def get_ffmpeg_path():
     resolved_path, _ = resolve_ffmpeg_path_info()
     return resolved_path or "ffmpeg"
 
 
 def has_ffmpeg():
-    ffmpeg_path = get_ffmpeg_path()
-    return os.path.exists(ffmpeg_path) or shutil.which(ffmpeg_path) is not None
+    resolved_path, source = resolve_ffmpeg_path_info()
+    return bool(resolved_path) and source != "missing"
 
 
 def get_ffmpeg_status_text():
@@ -46,21 +75,21 @@ def resolve_ffmpeg_path_info():
 
     config = load_config()
     configured_path = get_configured_ffmpeg_target_path(config)
-    if configured_path and os.path.exists(configured_path):
+    if configured_path and is_ffmpeg_binary_usable(configured_path):
         return configured_path, "configured"
 
     default_path = get_default_ffmpeg_path()
-    if os.path.exists(default_path):
+    if is_ffmpeg_binary_usable(default_path):
         return default_path, "managed"
 
     # Prefer install dir (exe folder when packaged). Never use process cwd — shortcuts
     # and Nuitka launches often have cwd != install root.
     bundled_path = os.path.join(get_app_install_dir(), "ffmpeg.exe")
-    if os.path.exists(bundled_path):
+    if is_ffmpeg_binary_usable(bundled_path):
         return bundled_path, "bundled"
 
     system_path = shutil.which("ffmpeg")
-    if system_path:
+    if system_path and is_ffmpeg_binary_usable(system_path):
         return system_path, "system"
 
     return "", "missing"
