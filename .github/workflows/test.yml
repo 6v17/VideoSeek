@@ -15,12 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pin Miniforge. "latest" (26.9.4) makes `conda init` rewrite conda.exe,
+      # which needs admin on the Windows runner and fails before pytest.
+      # 26.7.2-1 is the installer from the last green master run (2026-10-23).
       - uses: conda-incubator/setup-miniconda@v3
         with:
-          miniforge-version: latest
+          miniforge-version: "26.7.2-1"
           activate-environment: VideoSeek
           environment-file: environment.yml
-          auto-update-conda: true
+          auto-update-conda: false
           python-version: "3.10"
 
       - name: No BOM
