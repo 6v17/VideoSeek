@@ -549,9 +549,14 @@ class ResultGrid(QScrollArea):
     """Wrapping card grid for local search hits (viewport card pool / recycle)."""
 
     _ROW_BUFFER = 2
+    # First search used to build the pool on the hot path (~300ms). Warm a
+    # handful of hidden cards after the first paint instead.
+    _POOL_PREWARM = 10
 
     def __init__(self, parent=None, *, min_height: int | None = None):
         super().__init__(parent)
+        # setWidget() installs this object as an event filter before the rest of init.
+        self._pool_prewarm_done = False
         self.setObjectName("ResultGrid")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -785,6 +790,29 @@ class ResultGrid(QScrollArea):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._reflow()
+
+    def eventFilter(self, watched, event):  # noqa: N802
+        # QScrollArea already filters its viewport. Hook that path; do not remove the filter.
+        if not self._pool_prewarm_done and event.type() == QEvent.Type.Paint:
+            viewport = self.viewport()
+            if viewport is not None and viewport.width() >= 40 and viewport.height() >= 40:
+                self._pool_prewarm_done = True
+                # After this paint returns, so the first frame is not waiting on the pool.
+                QTimer.singleShot(0, self._prewarm_pool)
+        return super().eventFilter(watched, event)
+
+    def _prewarm_pool(self) -> None:
+        """Build a few hidden cards so the first populate does not construct them."""
+        if not isValid(self) or not isValid(self._host):
+            return
+        self._ensure_pool(self._POOL_PREWARM)
+        for card in self._cards:
+            if not isValid(card):
+                continue
+            card.ensurePolished()
+            for child in card.findChildren(QWidget):
+                if isValid(child):
+                    child.ensurePolished()
 
     def _on_scroll(self, _value: int = 0) -> None:
         if self._syncing:

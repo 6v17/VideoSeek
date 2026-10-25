@@ -60,6 +60,20 @@ class ResultGridVirtualizeTests(unittest.TestCase):
         self.app.processEvents()
         return grid
 
+    def test_prewarm_pool_is_reused_by_first_populate(self):
+        grid = ResultGrid()
+        grid.resize(900, 420)
+        grid.show()
+        self.app.processEvents()
+        self.app.processEvents()
+        self.assertGreaterEqual(len(grid._cards), ResultGrid._POOL_PREWARM)
+        warmed = {id(card) for card in grid._cards}
+        grid.populate(_hits(12), _noop, _noop, _noop, _texts())
+        self.app.processEvents()
+        self.assertTrue(warmed.issubset({id(card) for card in grid._cards}))
+        self.assertLess(len(grid._cards), 30)
+        grid.hide()
+
     def test_populate_many_creates_pool_not_n_cards(self):
         grid = self._show_grid(200)
         self.assertEqual(grid.count(), 200)
